@@ -32,10 +32,12 @@ import {
   rollupEventFunnel,
   foldEvent,
   docHasSquarePayment,
+  isMonetized,
   type EventFunnelUserInput,
   type EventFunnelPayload,
   type UserEventFlags,
 } from './eventFunnel.helpers';
+import { rollupAttribution, type AttributionRollup } from './attributionRollup.helpers';
 import { foundingOfferStatus } from './foundingOffer';
 
 const db = () => admin.firestore();
@@ -75,6 +77,22 @@ async function fetchAllSubscriptions(): Promise<Map<string, any>> {
   const map = new Map<string, any>();
   for (const d of snap.docs) {
     if (d.id !== 'subscription') continue;
+    const uid = d.ref.parent.parent?.id;
+    if (!uid) continue;
+    map.set(uid, d.data());
+  }
+  return map;
+}
+
+// First-touch ad attribution lives at users/{uid}/profile/attribution (written
+// once by the web app — attributionService in the app repo). Same
+// collectionGroup('profile') scan shape as fetchAllSubscriptions; kept separate
+// because that function's Map<uid, sub> signature has ~14 call sites.
+async function fetchAllAttribution(): Promise<Map<string, any>> {
+  const snap = await db().collectionGroup('profile').get();
+  const map = new Map<string, any>();
+  for (const d of snap.docs) {
+    if (d.id !== 'attribution') continue;
     const uid = d.ref.parent.parent?.id;
     if (!uid) continue;
     map.set(uid, d.data());
@@ -1867,18 +1885,19 @@ const EVENT_WINDOW_DAYS = 30;
 // plus the two Path-B signals (squareConnection doc, real square payments) and
 // the event-derived paywall/checkout flags.
 export async function computeEventFunnelPayload(): Promise<
-  EventFunnelPayload & { foundingTaken: number }
+  EventFunnelPayload & { foundingTaken: number; attribution: AttributionRollup }
 > {
   const firestore = db();
   const now = Date.now();
   const cutoff = admin.firestore.Timestamp.fromMillis(now - EVENT_WINDOW_DAYS * 24 * 60 * 60 * 1000);
 
-  const [authUsers, subs, userSettings, docsSnap, eventsSnap] = await Promise.all([
+  const [authUsers, subs, userSettings, docsSnap, eventsSnap, attributionMap] = await Promise.all([
     listAllAuthUsers(),
     fetchAllSubscriptions(),
     fetchAllUserSettings(),
     firestore.collectionGroup('documents').get(),
     firestore.collectionGroup('events').where('ts', '>=', cutoff).get(),
+    fetchAllAttribution(),
   ]);
 
   // One pass over every document: draft / activated / square-paid per uid.
@@ -1923,7 +1942,19 @@ export async function computeEventFunnelPayload(): Promise<
     if (isBilledSub(sub)) foundingTaken++;
   }
 
-  return { ...rollupEventFunnel(inputs, now, EVENT_WINDOW_DAYS), foundingTaken };
+  // Per-ad acquisition scoreboard (users/{uid}/profile/attribution is written
+  // once, first-touch, by the web app). Organic users are the baseline count.
+  const attribution = rollupAttribution(
+    inputs.map((input) => ({
+      uid: input.uid,
+      attribution: attributionMap.get(input.uid) ?? null,
+      hasQuoteDraft: input.hasQuoteDraft,
+      hasSentDoc: input.hasSentDoc,
+      monetized: isMonetized(input),
+    })),
+  );
+
+  return { ...rollupEventFunnel(inputs, now, EVENT_WINDOW_DAYS), foundingTaken, attribution };
 }
 
 // Every 6h (offset from the 15-min lazy funnel cache — this one is heavier

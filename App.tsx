@@ -50,6 +50,7 @@ import { auth } from './src/config/firebase';
 import { shouldClearLocalData } from './src/utils/localDataReset';
 import { initWebAnalytics } from './src/utils/webAnalytics';
 import { fetchReclaimedOldUid } from './src/services/accountReclaimService';
+import { captureAttributionFromUrl, persistAttributionIfNew } from './src/services/attributionService';
 import { stripeService } from './src/services/stripeService';
 import { firestoreService } from './src/services/firestoreService';
 import { documentService } from './src/services/documentService';
@@ -217,6 +218,9 @@ function App() {
       loadDocuments,
       listenToDocuments,
     } = useStore.getState();
+    // Stash ad-attribution params (utm_*/fbclid) from the launch URL before
+    // anything can navigate away from them. No-op on native and organic loads.
+    captureAttributionFromUrl();
     // Listen to authentication state changes
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       // Firebase's React Native AsyncStorage persistence sometimes refires
@@ -289,6 +293,12 @@ function App() {
           return;
         }
         initialisedForUidRef.current = newUid;
+
+        // Ad attribution (web only, fire-and-forget): write-once first-touch
+        // params captured at launch to users/{uid}/profile/attribution.
+        if (newUid) {
+          void persistAttributionIfNew(newUid);
+        }
 
         setUserDataLoaded(false); // Reset when new user signs in
 

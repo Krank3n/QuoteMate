@@ -50,6 +50,7 @@ export { dailyTrackingCheck } from './trackingAlarm';
 export { sentryAutofix } from './sentryAutofix';
 export { storeFunnelDaily } from './storeFunnel';
 export { websiteContact, websiteSubscribe } from './websiteForms';
+export { metaCapiTrack } from './metaCapi';
 export { supportChat, adminSupportChats } from './supportChat';
 export {
   adminLeadDiscovery,
