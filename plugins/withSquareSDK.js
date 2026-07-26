@@ -20,9 +20,10 @@
  *   • android/build.gradle — Square maven repo + squareSdkVersion ext prop
  *   • android/app/build.gradle — Square SDK dependency + disable Proguard
  *     for release (per Square's docs)
- *   • MainApplication.kt — initialize MobilePaymentsSdk at first main-thread
- *     idle after onCreate (init is main-thread-mandatory but blocking it
- *     inline caused cold-start ANRs — Sentry REACT-NATIVE-1)
+ *   • MainApplication.kt — initialize MobilePaymentsSdk in
+ *     onActivityPreCreated (API 29+): before the first Activity so Square's
+ *     ActivityListener sees it (issue #66), but off the blocking
+ *     process-start path (ANR — Sentry REACT-NATIVE-1); inline on API 28
  *   • AndroidManifest.xml — NFC + location permissions
  *
  * iOS Tap to Pay entitlement (proximity-reader.payment.acceptance) is added
@@ -255,18 +256,45 @@ function injectSquareMainApplication(src, applicationId) {
     );
   }
 
+  // Migrate the 1.46+155-era idle-handler deferral (issue #66): idle fires
+  // after MainActivity is created, so Square's ActivityListener missed the
+  // activity and createdActivity stayed null. Strip it so the block below
+  // re-injects the correct timing.
+  src = src.replace(
+    /\n\s*android\.os\.Looper\.myQueue\(\)\.addIdleHandler \{\n\s*MobilePaymentsSdk\.initialize\([^)]*\)\n\s*false\n\s*\}/,
+    ''
+  );
+
   if (!src.includes('MobilePaymentsSdk.initialize')) {
-    // Square's initialize() must run on the main thread (it throws
-    // otherwise) and blocks for the whole SDK bootstrap. Inline in
-    // onCreate() that stall sat inside the process-start ANR window
-    // (Sentry REACT-NATIVE-1); at first main-thread idle it runs after
-    // startup settles, still long before the user-triggered payment flow.
+    // Square's initialize() must (a) run on the main thread — it throws
+    // off-main, (b) finish before the first Activity is created — its
+    // ActivityListener only tracks activities created after init, and a
+    // missed first activity is a fatal IllegalStateException in the payment
+    // flow (issue #66) — and (c) stay off the blocking process-start path
+    // (ANR, Sentry REACT-NATIVE-1). onActivityPreCreated runs synchronously
+    // just before the first Activity's onCreate, after process start, and
+    // never for background broadcast/service starts — the only hook that
+    // satisfies all three. It requires API 29; on API 28 (minSdk) init runs
+    // inline as the lesser risk.
     src = src.replace(
       /super\.onCreate\(\)/,
       `super.onCreate()\n` +
-        `    android.os.Looper.myQueue().addIdleHandler {\n` +
+        `    if (android.os.Build.VERSION.SDK_INT >= 29) {\n` +
+        `      registerActivityLifecycleCallbacks(object : android.app.Application.ActivityLifecycleCallbacks {\n` +
+        `        override fun onActivityPreCreated(activity: android.app.Activity, savedInstanceState: android.os.Bundle?) {\n` +
+        `          unregisterActivityLifecycleCallbacks(this)\n` +
+        `          MobilePaymentsSdk.initialize("${applicationId}", this@MainApplication)\n` +
+        `        }\n` +
+        `        override fun onActivityCreated(activity: android.app.Activity, savedInstanceState: android.os.Bundle?) {}\n` +
+        `        override fun onActivityStarted(activity: android.app.Activity) {}\n` +
+        `        override fun onActivityResumed(activity: android.app.Activity) {}\n` +
+        `        override fun onActivityPaused(activity: android.app.Activity) {}\n` +
+        `        override fun onActivityStopped(activity: android.app.Activity) {}\n` +
+        `        override fun onActivitySaveInstanceState(activity: android.app.Activity, outState: android.os.Bundle) {}\n` +
+        `        override fun onActivityDestroyed(activity: android.app.Activity) {}\n` +
+        `      })\n` +
+        `    } else {\n` +
         `      MobilePaymentsSdk.initialize("${applicationId}", this)\n` +
-        `      false\n` +
         `    }`
     );
   }
