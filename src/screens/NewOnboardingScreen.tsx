@@ -50,6 +50,13 @@ import { TRADE_CATEGORIES } from '../constants/tradeCategories';
 import { auth } from '../config/firebase';
 import * as squareService from '../services/squareService';
 import { trackEvent } from '../services/analyticsService';
+import { firestoreService } from '../services/firestoreService';
+import { trackWebEvent } from '../utils/webAnalytics';
+import {
+    completionProps,
+    progressFor,
+    stepPropsFor,
+} from '../utils/onboardingTelemetry';
 import { runReeceConnectFlow } from '../services/reeceConnect';
 import { getReeceConnectionStatus } from '../services/reeceApi';
 import { uploadBusinessLogo } from '../services/photoService';
@@ -153,6 +160,20 @@ export function NewOnboardingScreen() {
     // "Why we ask" tooltips
     const [activeTooltip, setActiveTooltip] = useState<'abn' | 'brand' | null>(null);
 
+    // Telemetry. `hydrated` is state (not just the ref) because the step-view
+    // tracker has to wait for the draft to load — otherwise every resumed
+    // session would report a phantom step-1 view before jumping to the real
+    // step. `startedAt` rides in the draft so the duration survives a resume.
+    const [hydrated, setHydrated] = useState(false);
+    const [startedAt, setStartedAt] = useState<number | null>(null);
+    const [skippedStepKeys, setSkippedStepKeys] = useState<string[]>([]);
+    const resumedRef = useRef(false);
+    const startedEventRef = useRef(false);
+    // Mirrors skippedStepKeys. Skipping the LAST step completes the flow in the
+    // same tick, so handleComplete would still see the pre-update state array —
+    // it reads this instead.
+    const skippedKeysRef = useRef<string[]>([]);
+
     // Animations
     const fadeAnim = useRef(new Animated.Value(0)).current;
     const slideAnim = useRef(new Animated.Value(50)).current;
@@ -173,7 +194,17 @@ export function NewOnboardingScreen() {
                 const raw = await AsyncStorage.getItem(STORAGE_KEY);
                 if (raw) {
                     const d = JSON.parse(raw);
-                    if (typeof d.currentStep === 'number') setCurrentStep(d.currentStep);
+                    if (typeof d.currentStep === 'number') {
+                        setCurrentStep(d.currentStep);
+                        // Anything past step 1 means they'd already started and
+                        // came back — tracked so resume rate is measurable.
+                        resumedRef.current = d.currentStep > 1;
+                    }
+                    if (typeof d.startedAt === 'number') setStartedAt(d.startedAt);
+                    if (Array.isArray(d.skippedStepKeys)) {
+                        skippedKeysRef.current = d.skippedStepKeys;
+                        setSkippedStepKeys(d.skippedStepKeys);
+                    }
                     if (typeof d.businessName === 'string') setBusinessName(d.businessName);
                     if (Array.isArray(d.selectedCategories)) setSelectedCategories(d.selectedCategories);
                     if (typeof d.phone === 'string') setPhone(d.phone);
@@ -189,6 +220,7 @@ export function NewOnboardingScreen() {
                 // Ignore; start fresh.
             } finally {
                 hydratedRef.current = true;
+                setHydrated(true);
             }
         })();
     }, []);
@@ -209,9 +241,46 @@ export function NewOnboardingScreen() {
                 laborRate,
                 markup,
                 addedSuppliers,
+                startedAt,
+                skippedStepKeys,
             }),
         ).catch(() => { /* ignore storage errors */ });
-    }, [currentStep, businessName, selectedCategories, phone, email, abn, brandColor, laborRate, markup, addedSuppliers]);
+    }, [currentStep, businessName, selectedCategories, phone, email, abn, brandColor, laborRate, markup, addedSuppliers, startedAt, skippedStepKeys]);
+
+    // Step-level telemetry — one impression per step entry, plus a durable
+    // mirror of the position to Firestore. The mirror is the only trace an
+    // ABANDONED onboarding leaves: the draft above never leaves the device and
+    // a user who quits never reaches the completion event.
+    const lastViewedRef = useRef<string | null>(null);
+    useEffect(() => {
+        if (!hydrated) return;
+        const props = stepPropsFor(ONBOARDING_STEPS, currentStep);
+        if (!props) return;
+
+        if (!startedEventRef.current) {
+            startedEventRef.current = true;
+            const startProps = { ...props, resumed: resumedRef.current };
+            trackEvent('onboarding_started', startProps);
+            trackWebEvent('onboarding_started', startProps);
+            if (startedAt === null) setStartedAt(Date.now());
+        }
+
+        // Picking plumbing on the trade step splices in the Reece step, which
+        // re-runs this effect with the same step. Suppress the duplicate —
+        // only a genuine move fires an impression.
+        const signature = `${props.step_key}:${props.step_index}`;
+        if (lastViewedRef.current === signature) return;
+        lastViewedRef.current = signature;
+
+        trackEvent('onboarding_step_viewed', props);
+        // Web is the worst-converting surface (52% completion vs 89% on
+        // Android), so the step funnel also goes to GA, where it sits beside
+        // sign_up and inherits the channel/campaign attribution.
+        trackWebEvent('onboarding_step_viewed', props);
+
+        const progress = progressFor(ONBOARDING_STEPS, currentStep);
+        if (progress) void firestoreService.saveOnboardingProgress(progress);
+    }, [hydrated, currentStep, currentStepKey, TOTAL_STEPS]);
 
     // Animate step transitions, reset scroll, haptic tick, auto-focus first input
     useEffect(() => {
@@ -295,6 +364,20 @@ export function NewOnboardingScreen() {
         }
     };
 
+    // Record a skip once, for the completion event's skipped_keys.
+    const noteSkip = (stepKey: string | undefined) => {
+        if (!stepKey) return;
+        const props = stepPropsFor(ONBOARDING_STEPS, currentStep);
+        if (props) {
+            trackEvent('onboarding_step_skipped', props);
+            trackWebEvent('onboarding_step_skipped', props);
+        }
+        if (!skippedKeysRef.current.includes(stepKey)) {
+            skippedKeysRef.current = [...skippedKeysRef.current, stepKey];
+            setSkippedStepKeys(skippedKeysRef.current);
+        }
+    };
+
     // Handle skip — allowed on any step >= 3. Moves to the next step,
     // except on the final step which completes onboarding.
     const handleSkip = () => {
@@ -304,6 +387,7 @@ export function NewOnboardingScreen() {
             setSquareSkipModalVisible(true);
             return;
         }
+        noteSkip(currentStepKey);
         lightTap();
         advance();
     };
@@ -311,6 +395,7 @@ export function NewOnboardingScreen() {
     // User confirmed skipping the Square step from the modal.
     const confirmSquareSkip = () => {
         setSquareSkipModalVisible(false);
+        noteSkip(currentStepKey);
         lightTap();
         advance();
     };
@@ -453,6 +538,28 @@ export function NewOnboardingScreen() {
 
             await setBusinessSettings(settings);
             setIsLoading(false);
+
+            // What actually got filled in. optional_fields_filled is the headline:
+            // the Jul 2026 audit put users who filled four of them at a 38% send
+            // rate against 10% for those who filled none.
+            const finishedProps = completionProps({
+                stepsTotal: TOTAL_STEPS,
+                skippedStepKeys: skippedKeysRef.current,
+                hasLogo: !!savedLogoUri,
+                hasBrandColor: !!brandColor,
+                hasAbn: !!abn.trim(),
+                hasPhone: !!phone.trim(),
+                squareConnected,
+                reeceConnected,
+                suppliersAdded: addedSuppliers.length,
+                tradeCategoryCount: selectedCategories.length,
+                laborRate: settings.defaultLaborRate,
+                markup: settings.defaultMarkup,
+                startedAt,
+                now: Date.now(),
+            });
+            trackEvent('onboarding_completed', finishedProps);
+            trackWebEvent('onboarding_completed', finishedProps);
 
             // Clear the draft now that the user is fully onboarded.
             AsyncStorage.removeItem(STORAGE_KEY).catch(() => {});

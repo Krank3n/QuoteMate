@@ -18,6 +18,7 @@ import {
   runTransaction,
   increment,
   Timestamp,
+  serverTimestamp,
 } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
 import { Quote, BusinessSettings, SubscriptionStatus, Invoice, ReferralInfo, Contact } from '../types';
@@ -336,12 +337,59 @@ class FirestoreService {
 
     try {
       const profileRef = doc(db, 'users', userId, 'profile', 'onboarding');
-      await setDoc(profileRef, {
-        isOnboarded,
-        syncedAt: new Date().toISOString(),
-      });
+      // Merge, not replace: the doc also carries the onboarding progress
+      // fields written by saveOnboardingProgress. Completing the flow must not
+      // wipe the record of which step the user reached to get here.
+      await setDoc(
+        profileRef,
+        {
+          isOnboarded,
+          syncedAt: new Date().toISOString(),
+        },
+        { merge: true },
+      );
     } catch (error) {
       throw error;
+    }
+  }
+
+  /**
+   * Mirror the user's position in the onboarding flow to Firestore.
+   *
+   * This is the only server-side trace an ABANDONED onboarding leaves: the
+   * resume draft lives in AsyncStorage and dies with the app, and a user who
+   * quits mid-flow never fires a completion event. A doc with
+   * `isOnboarded != true` plus a `lastStepKey` is a user who walked away at
+   * that step — which is how we find out what's losing the ~20% of signups
+   * (52% on web) who never make it through.
+   *
+   * Fire-and-forget by design: telemetry must never block or break the flow it
+   * is measuring, so failures are swallowed rather than thrown.
+   */
+  async saveOnboardingProgress(progress: {
+    lastStepKey: string;
+    lastStepIndex: number;
+    stepsTotal: number;
+  }): Promise<void> {
+    const userId = this.getUserId();
+    if (!userId) {
+      return;
+    }
+
+    try {
+      const profileRef = doc(db, 'users', userId, 'profile', 'onboarding');
+      await setDoc(
+        profileRef,
+        {
+          ...progress,
+          // Server clock — device clocks are unreliable and this timestamp is
+          // what tells a live drop-off from a stale one.
+          progressUpdatedAt: serverTimestamp(),
+        },
+        { merge: true },
+      );
+    } catch (error) {
+      // Swallowed on purpose — see doc comment.
     }
   }
 

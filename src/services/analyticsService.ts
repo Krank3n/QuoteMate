@@ -25,6 +25,19 @@ import { Platform } from 'react-native';
 import { auth, db } from '../config/firebase';
 
 export type AnalyticsEvent =
+  // — Onboarding (the setup flow that gates the whole app) —
+  // Entering the flow. `resumed` distinguishes a fresh start from a draft
+  // picked back up, so resume rate is measurable.
+  | 'onboarding_started'
+  // One impression per step entry, carrying step_key + step_index +
+  // steps_total. Back-navigation re-fires deliberately; the durable
+  // last-seen step lives on profile/onboarding, not here.
+  | 'onboarding_step_viewed'
+  // The Skip button on an optional step (3+). Names the step skipped.
+  | 'onboarding_step_skipped'
+  // Flow finished. Carries what actually got filled in — above all
+  // optional_fields_filled, the 2026-07 audit's strongest activation signal.
+  | 'onboarding_completed'
   // First touch of the core value proposition — fires the moment a draft
   // starts. Tells us whether the app's onboarding actually hooks them.
   | 'quote_started'

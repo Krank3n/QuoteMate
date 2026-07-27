@@ -12,6 +12,7 @@
     "web": "expo start --web",
     "export:staging": "expo export --platform web --output-dir dist-staging",
     "deploy:staging": "npm run export:staging && firebase deploy --only hosting --config firebase.staging.json --project hansendev",
+    "funnel:onboarding": "node scripts/onboarding-dropoff.js",
     "test": "vitest run",
     "test:rules": "export PATH=\"/opt/homebrew/opt/openjdk/bin:$PATH\" && firebase emulators:exec --only firestore --project demo-quotemate-rules \"vitest run --config vitest.rules.config.ts\"",
     "test:watch": "vitest",
