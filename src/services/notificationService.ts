@@ -199,15 +199,28 @@ class NotificationService {
       return;
     }
 
-    await Notifications.scheduleNotificationAsync({
-      content: {
-        title,
-        body,
-        data,
-        sound: true,
-      },
-      trigger: null, // Immediate
-    });
+    try {
+      // Skip if the OS hasn't granted notification permission — scheduling
+      // without permission makes iOS reject with UNErrorDomain Code=1.
+      const { status } = await Notifications.getPermissionsAsync();
+      if (status !== 'granted') {
+        return;
+      }
+
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title,
+          body,
+          data,
+          sound: true,
+        },
+        trigger: null, // Immediate
+      });
+    } catch (error) {
+      // Never let a native rejection (e.g. permission revoked between the
+      // check and the call) surface as an unhandled promise rejection.
+      console.warn('Failed to schedule local notification:', error);
+    }
   }
 }
 
