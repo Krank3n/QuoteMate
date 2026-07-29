@@ -2,15 +2,23 @@
  * SendDocumentDialog — purely controlled version of the send-flow UI.
  *
  * Extracted from SendDocumentButton so non-button surfaces (e.g. the
- * StickyJobActionBar on ViewJob) can drive the exact same UX: Action
- * Sheet with Email / SMS / Share / Export PDF, plus the AI email
- * preview modal once they pick Email.
+ * StickyJobActionBar on ViewJob) can drive the exact same UX, plus the
+ * email preview modal.
  *
- * SendDocumentButton itself now wraps this dialog — nothing changes
- * visually for existing callers.
+ * Jul 2026 send audit — sending is the activation event, and the tap-to-send
+ * path was where finished quotes died. Two shape changes came out of it:
+ *   1. A doc we already have an email address for goes STRAIGHT to the email
+ *      preview. The sheet (SMS / Share / Export PDF) stays one tap away
+ *      behind "More ways to send", and is still the entry point when there's
+ *      no address on file.
+ *   2. The Path B pay-link opt-in no longer sits above Email in the sheet —
+ *      tapping it without Square connected abandoned the send entirely. It
+ *      now asks AFTER the doc is out the door, aimed at the next one.
+ *
+ * SendDocumentButton itself wraps this dialog — nothing changes for callers.
  */
 
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useRef, useState, useEffect } from 'react';
 import { Alert, Share, Linking, Platform } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { format } from 'date-fns';
@@ -28,15 +36,12 @@ import {
   shouldOfferTrialPayLink,
 } from '../utils/quoteDeliveryGuard';
 import { ActionSheet, ActionSheetOption } from './ActionSheet';
+import { AlertModal } from './AlertModal';
 import { DocumentEmailPreviewModal } from './DocumentEmailPreviewModal';
 import { SendGateModal } from './SendGateModal';
 import { trackEvent } from '../services/analyticsService';
-import {
-  generateQuoteEmail,
-  getDefaultEmailBody,
-  generateInvoiceEmail,
-  getDefaultInvoiceEmailBody,
-} from '../services/llmService';
+import { buildEmailBodySource } from '../utils/emailDraft';
+import { hasCustomerEmail } from '../utils/sendFlow';
 
 interface SendDocumentDialogProps {
   visible: boolean;
@@ -78,10 +83,16 @@ export function SendDocumentDialog({
   const [isGeneratingEmail, setIsGeneratingEmail] = useState(false);
   const [payLinkAttached, setPayLinkAttached] = useState(false);
   const [isAttachingPayLink, setIsAttachingPayLink] = useState(false);
+  const [payLinkOfferVisible, setPayLinkOfferVisible] = useState(false);
+  // Set by the preview modal on a successful send; gates the post-send
+  // pay-link ask so we only pitch payments to someone who just delivered.
+  const emailSentRef = useRef(false);
 
-  // Path B opt-in: offer trial users a Pay Now link at the moment they're
-  // sending real work — connection happens while they're engaged, not at the
-  // post-trial gate. Free users are gated instead; Pro/linked docs need nothing.
+  const docType = isInvoice ? 'invoice' : 'quote';
+
+  // Path B opt-in: offer trial users a Pay Now link once this doc has gone
+  // out, so the next one can carry a card button. Free users are gated
+  // instead; Pro/linked docs need nothing.
   const offerPayLink =
     shouldOfferTrialPayLink(getEffectivePlan(), doc) && !payLinkAttached;
 
@@ -93,26 +104,6 @@ export function SendDocumentDialog({
       : `Quotation from ${businessName} - ${jobName}`;
   })();
 
-  // Mirror external `visible` → internal ActionSheet open. Tapping a
-  // row in the sheet (Email) may swap us over to the email preview,
-  // which is why we keep two sub-states instead of trusting `visible`
-  // alone.
-  useEffect(() => {
-    if (visible) setActionSheetVisible(true);
-    else {
-      setActionSheetVisible(false);
-      setEmailPreviewVisible(false);
-    }
-  }, [visible]);
-
-  // One impression per sheet open — the attach-rate denominator.
-  useEffect(() => {
-    if (actionSheetVisible && offerPayLink) {
-      trackEvent('pay_link_optin_shown', { doc_type: isInvoice ? 'invoice' : 'quote' });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [actionSheetVisible]);
-
   type EmailHandler = {
     draftBody: string | undefined;
     draftSubject: string | undefined;
@@ -122,53 +113,22 @@ export function SendDocumentDialog({
     persistSubject: (subject: string) => void;
   };
 
+  // generate/fallback come from the shared source so a body warmed on
+  // JobPreview is exactly what this flow would have produced on tap.
+  const bodySource = buildEmailBodySource(doc, businessSettings);
+
   const emailHandler: EmailHandler = isInvoice
     ? {
         draftBody: invoice.draftEmailBody,
         draftSubject: invoice.draftEmailSubject,
-        generate: () => generateInvoiceEmail({
-          jobName: invoice.job.name,
-          jobDescription: invoice.job.description || '',
-          materials: invoice.materials.map((m) => ({ name: m.name, quantity: m.quantity, unit: m.unit })),
-          laborHours: invoice.laborHours,
-          total: invoice.total,
-          businessName: businessSettings?.businessName || '',
-          customerName: invoice.customerName,
-          dueDate: new Date(invoice.dueDate).toISOString(),
-          invoiceNumber: invoice.invoiceNumber,
-          gstRegistered: invoice.gstRegistered,
-        }),
-        fallback: () => getDefaultInvoiceEmailBody(
-          invoice.customerName,
-          invoice.job.name,
-          invoice.total,
-          businessSettings?.businessName || 'Your Business',
-          new Date(invoice.dueDate).toISOString(),
-          invoice.gstRegistered,
-        ),
+        ...bodySource,
         persistBody: (body) => { saveInvoice({ ...invoice, draftEmailBody: body }); },
         persistSubject: (subject) => { saveInvoice({ ...invoice, draftEmailSubject: subject }); },
       }
     : {
         draftBody: quote.draftEmailBody,
         draftSubject: quote.draftEmailSubject,
-        generate: () => generateQuoteEmail({
-          jobName: quote.job.name,
-          jobDescription: quote.job.description || '',
-          materials: quote.materials.map((m) => ({ name: m.name, quantity: m.quantity, unit: m.unit })),
-          laborHours: quote.laborHours,
-          total: quote.total,
-          businessName: businessSettings?.businessName || '',
-          customerName: quote.customerName,
-          gstRegistered: quote.gstRegistered,
-        }),
-        fallback: () => getDefaultEmailBody(
-          quote.customerName,
-          quote.job.name,
-          quote.total,
-          businessSettings?.businessName || 'Your Business',
-          quote.gstRegistered,
-        ),
+        ...bodySource,
         persistBody: (body) => { saveDraft({ ...quote, draftEmailBody: body }); },
         persistSubject: (subject) => { saveDraft({ ...quote, draftEmailSubject: subject }); },
       };
@@ -207,12 +167,17 @@ export function SendDocumentDialog({
   const handleEmailOption = async () => {
     if (!(await passesDeliveryGate())) return;
     setActionSheetVisible(false);
+    trackEvent('send_method_chosen', { method: 'email', doc_type: docType });
     setEmailSubject(emailHandler.draftSubject || defaultSubject);
+    // Warm body (pre-generated on JobPreview, or written on a previous open):
+    // straight into the preview, no wait at all.
     if (emailHandler.draftBody) {
       setEmailBody(emailHandler.draftBody);
       setEmailPreviewVisible(true);
+      trackEvent('email_preview_opened', { doc_type: docType, prefilled: true, wait_ms: 0 });
       return;
     }
+    const startedAt = Date.now();
     setIsGeneratingEmail(true);
     setEmailPreviewVisible(true);
     try {
@@ -225,8 +190,41 @@ export function SendDocumentDialog({
       emailHandler.persistBody(fallback);
     } finally {
       setIsGeneratingEmail(false);
+      // Logged once the body actually lands, so wait_ms is the wait the
+      // tradie sat through rather than a scripted animation.
+      trackEvent('email_preview_opened', {
+        doc_type: docType,
+        prefilled: false,
+        wait_ms: Date.now() - startedAt,
+      });
     }
   };
+
+  // Mirror external `visible` → the send flow. A doc with an address on file
+  // skips the sheet entirely (email is the dominant path); without one, the
+  // sheet is still the right place to start.
+  useEffect(() => {
+    if (!visible) {
+      setActionSheetVisible(false);
+      setEmailPreviewVisible(false);
+      setPayLinkOfferVisible(false);
+      emailSentRef.current = false;
+      return;
+    }
+    const plan = getEffectivePlan();
+    trackEvent('send_sheet_opened', {
+      doc_type: docType,
+      has_customer_email: hasCustomerEmail(doc),
+      plan,
+    });
+    // Free plan keeps the sheet: its delivery gate does a Square round-trip
+    // (and may mint a payment link) before anything can go out, so routing
+    // straight through would leave the tradie tapping Send and watching an
+    // unchanged screen. On the sheet, that wait happens with the UI already up.
+    if (plan !== 'free' && hasCustomerEmail(doc)) void handleEmailOption();
+    else setActionSheetVisible(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible]);
 
   const handleRegenerateEmail = async () => {
     setIsGeneratingEmail(true);
@@ -243,6 +241,25 @@ export function SendDocumentDialog({
 
   const handleEmailPreviewDismiss = () => {
     setEmailPreviewVisible(false);
+    persistEmailEdits();
+    // Ask about payments only once the doc is actually out the door — the
+    // ask used to sit in front of the send and cost us the send itself.
+    if (emailSentRef.current && offerPayLink) {
+      trackEvent('pay_link_optin_shown', { doc_type: docType });
+      setPayLinkOfferVisible(true);
+      return;
+    }
+    onDismiss();
+  };
+
+  /** Swap the email preview for the full sheet (SMS / Share / Export PDF). */
+  const handleMoreWaysToSend = () => {
+    persistEmailEdits();
+    setEmailPreviewVisible(false);
+    setActionSheetVisible(true);
+  };
+
+  const persistEmailEdits = () => {
     // Persist body + subject together so a single write covers both edits
     // and they stay in sync on reopen.
     const trimmedSubject = emailSubject.trim();
@@ -266,7 +283,6 @@ export function SendDocumentDialog({
         });
       }
     }
-    onDismiss();
   };
 
   // Record a non-email delivery (SMS / Share / Export) against the doc so its
@@ -283,12 +299,15 @@ export function SendDocumentDialog({
       // Best-effort audit; ignore.
       return;
     }
+    // No recipient on these channels, so they can never be a self-send.
+    trackEvent('quote_send_succeeded', { doc_type: docType, method, to_self: false });
     if (wasDraft) onMarkedSent?.(doc, method);
   };
 
   const handleSendSMS = async () => {
     if (!(await passesDeliveryGate())) return;
     setActionSheetVisible(false);
+    trackEvent('send_method_chosen', { method: 'sms', doc_type: docType });
     const message = isInvoice
       ? `Hi ${invoice.customerName}, your invoice from ${businessSettings?.businessName || 'us'} for ${invoice.job.name} is ready. Total: ${formatCurrency(invoice.total)}. Payment due: ${format(new Date(invoice.dueDate), 'dd MMM yyyy')}. Thank you!`
       : `Hi ${quote.customerName}, your quote from ${businessSettings?.businessName || 'us'} for ${quote.job.name} is ready. Total: ${formatCurrency(quote.total)}. Thank you for your business!`;
@@ -308,6 +327,7 @@ export function SendDocumentDialog({
   const handleShareFromDialog = async () => {
     if (!(await passesDeliveryGate())) return;
     setActionSheetVisible(false);
+    trackEvent('send_method_chosen', { method: 'share', doc_type: docType });
     try {
       const message = isInvoice
         ? `Invoice for ${invoice.customerName}\n${invoice.job.name}\nTotal: ${formatCurrency(invoice.total)}\nDue: ${format(new Date(invoice.dueDate), 'dd MMM yyyy')}`
@@ -325,6 +345,7 @@ export function SendDocumentDialog({
   const handleExportFromDialog = async () => {
     if (!(await passesDeliveryGate())) return;
     setActionSheetVisible(false);
+    trackEvent('send_method_chosen', { method: 'export_pdf', doc_type: docType });
     try {
       await exportDocumentPDF(doc, businessSettings, 'export', { isPro });
       await recordSend('export_pdf');
@@ -335,10 +356,11 @@ export function SendDocumentDialog({
   };
 
   /**
-   * Trial opt-in: attach a Pay Now link to this doc before it goes out. Not
-   * connected yet → route to SquareIntegrationScreen (square_connected fires
-   * there on OAuth success) and the tradie sends after connecting. Never
-   * blocks — the plain send options above it always work.
+   * Trial opt-in, taken AFTER the doc has gone out: wire up Square so the
+   * next one can carry a Pay Now button. Not connected yet → route to
+   * SquareIntegrationScreen (square_connected fires there on OAuth success);
+   * already connected → the link lands on this doc too, so the customer can
+   * still pay from its online page.
    */
   const handleAddPayLink = async () => {
     if (isAttachingPayLink) return;
@@ -348,40 +370,35 @@ export function SendDocumentDialog({
         isInvoice ? { kind: 'invoice', doc: invoice } : { kind: 'quote', doc: quote }
       );
       trackEvent('pay_link_optin_tapped', {
-        doc_type: isInvoice ? 'invoice' : 'quote',
+        doc_type: docType,
         outcome: result.status,
       });
+      setPayLinkOfferVisible(false);
       if (result.status === 'connect_required') {
-        setActionSheetVisible(false);
         onDismiss();
         navigation.navigate('SquareIntegration' as never);
       } else if (result.status === 'attached') {
         setPayLinkAttached(true);
         Alert.alert(
           'Pay Now button added',
-          `Your customer can pay this ${isInvoice ? 'invoice' : 'quote'} by card the moment it lands. Send it whichever way suits.`
+          `Your customer can pay this ${isInvoice ? 'invoice' : 'quote'} by card from its online page.`,
+          [{ text: 'OK', onPress: onDismiss }],
         );
       } else {
-        Alert.alert("Couldn't add the pay link", result.message);
+        Alert.alert("Couldn't add the pay link", result.message, [{ text: 'OK', onPress: onDismiss }]);
       }
     } finally {
       setIsAttachingPayLink(false);
     }
   };
 
+  const dismissPayLinkOffer = () => {
+    setPayLinkOfferVisible(false);
+    onDismiss();
+  };
+
   const sendOptions: ActionSheetOption[] = [
-    ...(offerPayLink
-      ? [{
-          icon: 'credit-card-fast-outline',
-          label: isAttachingPayLink
-            ? 'Adding your Pay Now button…'
-            : isInvoice
-              ? 'Get paid on this invoice'
-              : 'Get paid on this quote',
-          onPress: handleAddPayLink,
-        }]
-      : []),
-    { icon: 'email-outline', label: 'Email', onPress: handleEmailOption, divider: offerPayLink },
+    { icon: 'email-outline', label: 'Email', onPress: handleEmailOption },
     { icon: 'message-text', label: 'SMS', onPress: handleSendSMS },
     { icon: 'share-variant', label: 'Share', onPress: handleShareFromDialog },
     { icon: 'file-pdf-box', label: 'Export PDF', onPress: handleExportFromDialog },
@@ -407,8 +424,26 @@ export function SendDocumentDialog({
         subject={emailSubject}
         onSubjectChange={setEmailSubject}
         onRegenerate={handleRegenerateEmail}
+        onMoreWaysToSend={handleMoreWaysToSend}
+        onSent={() => { emailSentRef.current = true; }}
         isPro={isPro}
         isRegenerating={isGeneratingEmail}
+      />
+
+      {/* Post-send Path B ask. Deliberately after delivery: in front of it,
+          this row cost sends outright when Square wasn't connected. */}
+      <AlertModal
+        visible={payLinkOfferVisible}
+        onDismiss={dismissPayLinkOffer}
+        type="info"
+        icon="credit-card-fast-outline"
+        title="Want a Pay Now button?"
+        message={`Connect Square and your ${isInvoice ? 'invoices' : 'quotes'} go out with a Pay Now button — your customer can pay by card the moment it lands.`}
+        primaryButtonText="Set it up"
+        primaryButtonAction={handleAddPayLink}
+        primaryButtonLoading={isAttachingPayLink}
+        secondaryButtonText="Not now"
+        secondaryButtonAction={dismissPayLinkOffer}
       />
 
       <SendGateModal

@@ -27,6 +27,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import { useStore } from '../../store/useStore';
 import { useDocumentMode } from '../../utils/documentMode';
 import { ensureSquareConnectedForPayment } from '../../utils/quoteDeliveryGuard';
+import { warmEmailDraft } from '../../utils/emailDraft';
 import { colors } from '../../theme';
 import { previewDocumentPDF } from '../../utils/pdfGenerator';
 // until the user actually requests a PDF preview.
@@ -244,6 +245,13 @@ export function JobPreviewScreen() {
     // saveInvoice (which assigns invoiceNumbers) and quotes through
     // saveQuote (which assigns quoteNumbers). The mirror + adapter carry
     // everything into the unified documents collection either way.
+    //
+    // Each branch then warms the customer email off the saved doc. Jul 2026
+    // send audit: tapping "Send Quote" handed the tradie a writing task they
+    // never asked for, so the body is generated here instead — by the time
+    // they tap Send it's already written. Fire-and-forget by design: it never
+    // blocks this screen, never throws into the UI, no-ops when a body
+    // already exists, and only runs after the save so it can't race it.
     const autoSave = async () => {
       try {
         setIsSaving(true);
@@ -260,10 +268,13 @@ export function JobPreviewScreen() {
             updatedAt: new Date(),
           };
           await saveInvoice(updatedInvoice);
+          void warmEmailDraft(invoiceToDocument(updatedInvoice), businessSettings, { isPro: isProForPdf });
         } else if (currentQuote) {
           // Stamps draftStep 'JobPreview' — see buildPreviewQuoteSave for
           // why the marker must survive this save.
-          await saveQuote(buildPreviewQuoteSave(currentQuote, notes, refNumber));
+          const savedQuote = buildPreviewQuoteSave(currentQuote, notes, refNumber);
+          await saveQuote(savedQuote);
+          void warmEmailDraft(quoteToDocument(savedQuote), businessSettings, { isPro: isProForPdf });
         }
         savedNotesRef.current = notes;
         setIsSaving(false);

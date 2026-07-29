@@ -3,8 +3,14 @@
  *
  * Unified modal for previewing/sending the client-facing email for either a
  * quote or an invoice. Branches on `doc.type` for type-specific copy
- * (subject default, header title, AI generating step labels, send-button
- * label, sent-confirmation message) and the underlying Brevo endpoint.
+ * (subject default, header title, send-button label, sent-confirmation
+ * message) and the underlying Brevo endpoint.
+ *
+ * Jul 2026 send audit: this screen used to open as a writing task — a
+ * scripted "generating" checklist, an editable body with a markdown toolbar,
+ * and a Test Send button with the same weight as Send. The default posture
+ * is now READ-ONLY: a short preview of the email and one prominent Send.
+ * Editing is a deliberate step behind "Edit email", and Test Send is a link.
  *
  * Replaces the per-type `EmailPreviewModal` (quotes) and
  * `InvoiceEmailPreviewModal` (invoices).
@@ -20,7 +26,6 @@ import {
   Platform,
   KeyboardAvoidingView,
   Keyboard,
-  Animated,
 } from 'react-native';
 import {
   Text,
@@ -28,6 +33,7 @@ import {
   Button,
   Portal,
   Switch,
+  ActivityIndicator,
 } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useSafeAreaInsets, initialWindowMetrics } from 'react-native-safe-area-context';
@@ -42,121 +48,20 @@ import { reviewQuoteMaterials, buildPresendWarning, type PresendWarning } from '
 import { auth } from '../config/firebase';
 import { AlertModal } from './AlertModal';
 import { useStore } from '../store/useStore';
+import { trackEvent } from '../services/analyticsService';
+import { isEmailAddress, isSelfSend } from '../utils/sendFlow';
 
-const STEP_HEIGHT = 32;
-const VISIBLE_STEPS = 3;
-const STEP_INTERVAL = 1800;
-
-const QUOTE_EMAIL_STEPS = [
-  { icon: 'file-document-outline', text: 'Reading quote details...' },
-  { icon: 'head-cog-outline', text: 'Crafting email tone...' },
-  { icon: 'text-box-outline', text: 'Writing email body...' },
-  { icon: 'check-circle-outline', text: 'Finalizing...' },
-];
-
-const INVOICE_EMAIL_STEPS = [
-  { icon: 'file-document-outline', text: 'Reading invoice details...' },
-  { icon: 'head-cog-outline', text: 'Crafting email tone...' },
-  { icon: 'text-box-outline', text: 'Writing email body...' },
-  { icon: 'check-circle-outline', text: 'Finalizing...' },
-];
-
-function EmailGeneratingState({ steps }: { steps: typeof QUOTE_EMAIL_STEPS }) {
-  const [currentStep, setCurrentStep] = useState(0);
-  const scrollAnim = useRef(new Animated.Value(0)).current;
-  const stepOpacities = useRef(steps.map((_, i) => new Animated.Value(i === 0 ? 1 : 0))).current;
-  const pulseAnim = useRef(new Animated.Value(0.3)).current;
-
-  useEffect(() => {
-    const pulse = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulseAnim, { toValue: 1, duration: 1000, useNativeDriver: true }),
-        Animated.timing(pulseAnim, { toValue: 0.3, duration: 1000, useNativeDriver: true }),
-      ])
-    );
-    pulse.start();
-    return () => pulse.stop();
-  }, []);
-
-  useEffect(() => {
-    const timers: ReturnType<typeof setTimeout>[] = [];
-
-    steps.forEach((_, index) => {
-      if (index === 0) return;
-      const timer = setTimeout(() => {
-        setCurrentStep(index);
-
-        Animated.timing(stepOpacities[index], {
-          toValue: 1,
-          duration: 350,
-          useNativeDriver: true,
-        }).start();
-
-        if (index >= VISIBLE_STEPS) {
-          Animated.timing(scrollAnim, {
-            toValue: (index - VISIBLE_STEPS + 1) * STEP_HEIGHT,
-            duration: 400,
-            useNativeDriver: true,
-          }).start();
-
-          const fadeOutIndex = index - VISIBLE_STEPS;
-          if (fadeOutIndex >= 0) {
-            Animated.timing(stepOpacities[fadeOutIndex], {
-              toValue: 0,
-              duration: 300,
-              useNativeDriver: true,
-            }).start();
-          }
-        }
-      }, index * STEP_INTERVAL);
-      timers.push(timer);
-    });
-
-    return () => timers.forEach(clearTimeout);
-  }, []);
-
+/**
+ * Honest indeterminate wait. The old version ran a four-step checklist on a
+ * fixed 1.8s-per-step timer — ~5.4s of scripted progress unrelated to the
+ * actual request, which then parked on "Finalizing...". With the body warmed
+ * on JobPreview this state usually never renders at all.
+ */
+function EmailGeneratingState() {
   return (
     <View style={styles.generatingContainer}>
-      <Animated.View style={[styles.generatingIconWrapper, { opacity: pulseAnim }]}>
-        <MaterialCommunityIcons name="email-edit-outline" size={48} color={colors.primary} />
-      </Animated.View>
-
-      <Text style={styles.generatingTitle}>Generating your email...</Text>
-
-      <View style={styles.stepsWindow}>
-        <Animated.View
-          style={[
-            styles.stepsTrack,
-            { transform: [{ translateY: Animated.multiply(scrollAnim, -1) }] },
-          ]}
-        >
-          {steps.map((step, index) => (
-            <Animated.View
-              key={index}
-              style={[
-                styles.stepRow,
-                { opacity: stepOpacities[index] },
-              ]}
-            >
-              <MaterialCommunityIcons
-                name={index < currentStep ? 'check-circle' as any : step.icon as any}
-                size={16}
-                color={index < currentStep ? colors.success : index === currentStep ? colors.primary : colors.textMuted}
-              />
-              <Text
-                style={[
-                  styles.stepText,
-                  index < currentStep && styles.stepTextDone,
-                  index === currentStep && styles.stepTextActive,
-                ]}
-                numberOfLines={1}
-              >
-                {step.text}
-              </Text>
-            </Animated.View>
-          ))}
-        </Animated.View>
-      </View>
+      <ActivityIndicator size="small" color={colors.primary} />
+      <Text style={styles.generatingTitle}>Writing your email…</Text>
     </View>
   );
 }
@@ -176,6 +81,13 @@ interface Props {
   subject: string;
   onSubjectChange: (subject: string) => void;
   onRegenerate: () => void;
+  /**
+   * Fired once the email is actually away. The host uses it to decide what
+   * happens after the preview closes (e.g. the post-send pay-link ask).
+   */
+  onSent?: () => void;
+  /** Opens the full send sheet — SMS / Share / Export PDF. */
+  onMoreWaysToSend?: () => void;
   isPro: boolean;
   isRegenerating: boolean;
 }
@@ -190,6 +102,8 @@ export function DocumentEmailPreviewModal({
   subject,
   onSubjectChange,
   onRegenerate,
+  onSent,
+  onMoreWaysToSend,
   isPro,
   isRegenerating,
 }: Props) {
@@ -220,10 +134,10 @@ export function DocumentEmailPreviewModal({
       })()
     : (documentToQuote(doc).photos || []);
 
+  const docType = isInvoice ? 'invoice' : 'quote';
   const headerTitle = isInvoice ? 'Invoice Email' : 'Email Preview';
-  const sendButtonLabel = isInvoice ? 'Send Invoice' : 'Send Email';
+  const sendButtonLabel = isInvoice ? 'Send Invoice' : 'Send Quote';
   const sentTitle = isInvoice ? 'Invoice Sent!' : 'Quote Sent!';
-  const generatingSteps = isInvoice ? INVOICE_EMAIL_STEPS : QUOTE_EMAIL_STEPS;
   const sendEndpoint = isInvoice
     ? `${FIREBASE_FUNCTIONS_URL}/sendInvoiceEmail`
     : `${FIREBASE_FUNCTIONS_URL}/sendQuoteEmail`;
@@ -247,10 +161,15 @@ export function DocumentEmailPreviewModal({
 
   // Keyboard UX state
   const scrollViewRef = useRef<ScrollView>(null);
-  const [isBodyFocused, setIsBodyFocused] = useState(false);
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
-  const isEditingBody = isBodyFocused && isKeyboardVisible;
+  // Editing is an explicit mode, not the default posture. Off = read-only
+  // preview + prominent Send; on = full-height editor with the formatting
+  // toolbar, the recipient/subject cards collapsed to a single bar.
+  const [isEditingBody, setIsEditingBody] = useState(false);
+  // Did the tradie actually touch the body? Distinguishes an edited email
+  // from one that merely arrived after the preview opened.
+  const [bodyEdited, setBodyEdited] = useState(false);
 
   // Body formatting toolbar. We track the last known caret/selection in a
   // ref (cheap, no re-renders) and only set the controlled `selection`
@@ -266,6 +185,13 @@ export function DocumentEmailPreviewModal({
     return () => clearTimeout(id);
   }, [pendingBodySelection]);
 
+  // Every user-driven body change funnels through here so `edited_body` on
+  // the abandonment event stays honest.
+  const handleBodyChange = (next: string) => {
+    setBodyEdited(true);
+    onEmailBodyChange(next);
+  };
+
   const applyBold = () => {
     const { start, end } = bodySelectionRef.current;
     const safeStart = Math.min(start, emailBody.length);
@@ -274,11 +200,11 @@ export function DocumentEmailPreviewModal({
     const selected = emailBody.slice(safeStart, safeEnd);
     const after = emailBody.slice(safeEnd);
     if (selected.length > 0) {
-      onEmailBodyChange(`${before}**${selected}**${after}`);
+      handleBodyChange(`${before}**${selected}**${after}`);
       setPendingBodySelection({ start: safeStart + 2, end: safeEnd + 2 });
     } else {
       const placeholder = 'bold text';
-      onEmailBodyChange(`${before}**${placeholder}**${after}`);
+      handleBodyChange(`${before}**${placeholder}**${after}`);
       const cursor = safeStart + 2;
       setPendingBodySelection({ start: cursor, end: cursor + placeholder.length });
     }
@@ -302,7 +228,7 @@ export function DocumentEmailPreviewModal({
       })
       .join('\n');
     const next = `${emailBody.slice(0, lineStart)}${transformed}${emailBody.slice(lineEnd)}`;
-    onEmailBodyChange(next);
+    handleBodyChange(next);
     const cursor = lineStart + transformed.length;
     setPendingBodySelection({ start: cursor, end: cursor });
   };
@@ -325,19 +251,16 @@ export function DocumentEmailPreviewModal({
     return () => { showSub.remove(); hideSub.remove(); };
   }, []);
 
-  const handleBodyFocus = () => {
-    setIsBodyFocused(true);
+  const startEditingBody = () => {
+    setIsEditingBody(true);
     setTimeout(() => {
       scrollViewRef.current?.scrollTo({ y: 0, animated: true });
     }, 150);
   };
 
-  const handleBodyBlur = () => {
-    setIsBodyFocused(false);
-  };
-
-  const handleCollapsedBarPress = () => {
+  const stopEditingBody = () => {
     Keyboard.dismiss();
+    setIsEditingBody(false);
     setTimeout(() => {
       scrollViewRef.current?.scrollTo({ y: 0, animated: true });
     }, 100);
@@ -359,7 +282,7 @@ export function DocumentEmailPreviewModal({
   const validateEmail = (email: string): string => {
     const trimmed = email.trim();
     if (!trimmed) return 'Email address is required';
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) return 'Please enter a valid email address';
+    if (!isEmailAddress(trimmed)) return 'Please enter a valid email address';
     return '';
   };
 
@@ -374,8 +297,26 @@ export function DocumentEmailPreviewModal({
       setEmailTouched(false);
       setEmailError('');
       setSendCopyToSelf(false);
+      setIsEditingBody(false);
+      setBodyEdited(false);
     }
   }, [visible, doc.customerEmail]);
+
+  /**
+   * Close the preview. Anything other than a completed send is a drop-off —
+   * the exact one the Jul 2026 audit couldn't see, since 40 tradies stalled
+   * here holding a finished, priced quote.
+   */
+  const handleDismiss = () => {
+    if (!sent) {
+      trackEvent('email_preview_abandoned', {
+        doc_type: docType,
+        had_recipient: !!recipientEmail.trim(),
+        edited_body: bodyEdited,
+      });
+    }
+    onDismiss();
+  };
 
   const handleEmailChange = (text: string) => {
     setRecipientEmail(text);
@@ -468,6 +409,12 @@ export function DocumentEmailPreviewModal({
       }
 
       setSent(true);
+      trackEvent('quote_send_succeeded', {
+        doc_type: docType,
+        method: 'email',
+        to_self: isSelfSend(recipientEmail, ownerEmail),
+      });
+      onSent?.();
     } catch (error: any) {
       showAlert('error', 'Send Failed', error.message || 'Could not send the email. Please try again.');
     } finally {
@@ -475,6 +422,9 @@ export function DocumentEmailPreviewModal({
     }
   };
 
+  // Deliberately does NOT record a send: a test lands in the tradie's own
+  // inbox and the doc stays a draft. Demoted to a link for the same reason —
+  // two of the Jul 2026 audit's users test-sent and never sent for real.
   const handleTestSend = async () => {
     if (!ownerEmail) {
       showAlert('error', 'No Email', 'Could not find your account email.');
@@ -498,7 +448,11 @@ export function DocumentEmailPreviewModal({
         throw new Error(err.error || 'Failed to send test email');
       }
 
-      showAlert('success', 'Test Sent', `A test email has been sent to ${ownerEmail}`);
+      showAlert(
+        'success',
+        'Test Sent',
+        `A test email has been sent to ${ownerEmail}. Have a look, then send it to your customer.`,
+      );
     } catch (error: any) {
       showAlert('error', 'Test Failed', error.message || 'Could not send test email.');
     } finally {
@@ -522,7 +476,7 @@ export function DocumentEmailPreviewModal({
         end={{ x: 1, y: 0 }}
         style={[styles.header, { paddingTop: insets.top + 12 }]}
       >
-        <TouchableOpacity onPress={onDismiss} style={styles.headerButton}>
+        <TouchableOpacity onPress={handleDismiss} style={styles.headerButton}>
           <MaterialCommunityIcons name="chevron-left" size={26} color={colors.white} />
           <Text style={styles.backText}>Back</Text>
         </TouchableOpacity>
@@ -544,7 +498,7 @@ export function DocumentEmailPreviewModal({
           /* Collapsed Recipient + Subject bar */
           <TouchableOpacity
             style={styles.collapsedBar}
-            onPress={handleCollapsedBarPress}
+            onPress={stopEditingBody}
             activeOpacity={0.7}
           >
             <View style={styles.collapsedBarContent}>
@@ -612,7 +566,9 @@ export function DocumentEmailPreviewModal({
               <MaterialCommunityIcons name="email-edit-outline" size={18} color={colors.primary} />
             </View>
             <Text style={[styles.sectionTitle, { flex: 1 }]}>Email Body</Text>
-            {isPro && !isRegenerating && (
+            {/* Regenerate belongs to authoring, so it lives inside edit mode
+                — the default view offers one decision: send it. */}
+            {isEditingBody && isPro && !isRegenerating && (
               <TouchableOpacity
                 onPress={onRegenerate}
                 style={styles.regenerateButton}
@@ -621,12 +577,18 @@ export function DocumentEmailPreviewModal({
                 <Text style={styles.regenerateText}>Regenerate</Text>
               </TouchableOpacity>
             )}
+            {!isEditingBody && !isRegenerating && (
+              <TouchableOpacity onPress={startEditingBody} style={styles.regenerateButton}>
+                <MaterialCommunityIcons name="pencil-outline" size={16} color={colors.primary} />
+                <Text style={styles.regenerateText}>Edit email</Text>
+              </TouchableOpacity>
+            )}
           </View>
 
           {isRegenerating ? (
-            <EmailGeneratingState steps={generatingSteps} />
-          ) : (
-            <View style={[styles.bodyCard, isEditingBody && styles.bodyCardEditing]}>
+            <EmailGeneratingState />
+          ) : isEditingBody ? (
+            <View style={[styles.bodyCard, styles.bodyCardEditing]}>
               <View style={styles.formatToolbar}>
                 <TouchableOpacity onPress={applyBold} style={styles.formatButton} accessibilityLabel="Bold">
                   <Text style={styles.formatButtonBold}>B</Text>
@@ -638,21 +600,33 @@ export function DocumentEmailPreviewModal({
               </View>
               <TextInput
                 value={emailBody}
-                onChangeText={onEmailBodyChange}
-                onFocus={handleBodyFocus}
-                onBlur={handleBodyBlur}
+                onChangeText={handleBodyChange}
                 onSelectionChange={(e) => {
                   bodySelectionRef.current = e.nativeEvent.selection;
                 }}
                 selection={pendingBodySelection}
                 mode="flat"
-                style={[styles.bodyInput, isEditingBody && styles.bodyInputEditing]}
+                style={[styles.bodyInput, styles.bodyInputEditing]}
                 multiline
                 numberOfLines={12}
+                autoFocus
                 underlineColor="transparent"
                 activeUnderlineColor="transparent"
               />
             </View>
+          ) : (
+            /* Read-only preview — this is what the customer gets. Tapping it
+               is the same door as the "Edit email" link above. */
+            <TouchableOpacity
+              style={styles.bodyPreview}
+              onPress={startEditingBody}
+              activeOpacity={0.7}
+              accessibilityLabel="Edit email"
+            >
+              <Text style={styles.bodyPreviewText} numberOfLines={8}>
+                {emailBody}
+              </Text>
+            </TouchableOpacity>
           )}
         </View>
 
@@ -711,44 +685,46 @@ export function DocumentEmailPreviewModal({
         )}
       </ScrollView>
 
-      {/* Footer: Done bar when editing body, send buttons otherwise */}
+      {/* Footer: Done bar while editing, otherwise one prominent Send with
+          the secondary paths as plain links beneath it. Test Send used to be
+          a half-width button beside Send — same weight as the action that
+          actually activates the account, and a dead end (it never records a
+          send). */}
       {isEditingBody ? (
         <View style={styles.doneBar}>
-          <TouchableOpacity onPress={() => Keyboard.dismiss()} style={styles.doneButton}>
+          <TouchableOpacity onPress={stopEditingBody} style={styles.doneButton}>
             <Text style={styles.doneButtonText}>Done</Text>
           </TouchableOpacity>
         </View>
       ) : !isKeyboardVisible ? (
         <View style={[styles.footer, { paddingBottom: bottomInset }]}>
-          <View style={styles.footerButtons}>
+          <Button
+            mode="contained"
+            onPress={handleSend}
+            loading={sending}
+            disabled={sending || sendingTest || !emailBody.trim() || !!validateEmail(recipientEmail) || isRegenerating}
+            style={styles.sendButton}
+            contentStyle={styles.sendButtonContent}
+            icon="send"
+          >
+            {sending ? 'Sending...' : sendButtonLabel}
+          </Button>
+          <View style={styles.footerLinks}>
             {ownerEmail ? (
-              <View style={styles.footerButtonHalfWrapper}>
-                <Button
-                  mode="outlined"
-                  onPress={handleTestSend}
-                  loading={sendingTest}
-                  disabled={sendingTest || sending || !emailBody.trim() || isRegenerating}
-                  style={styles.footerButtonFlex}
-                  contentStyle={styles.sendButtonContent}
-                  icon="email-check-outline"
-                >
-                  {sendingTest ? 'Sending...' : 'Test Send'}
-                </Button>
-              </View>
-            ) : null}
-            <View style={styles.footerButtonHalfWrapper}>
-              <Button
-                mode="contained"
-                onPress={handleSend}
-                loading={sending}
-                disabled={sending || sendingTest || !emailBody.trim() || !!validateEmail(recipientEmail) || isRegenerating}
-                style={styles.footerButtonFlex}
-                contentStyle={styles.sendButtonContent}
-                icon="send"
+              <TouchableOpacity
+                onPress={handleTestSend}
+                disabled={sendingTest || sending || !emailBody.trim() || isRegenerating}
               >
-                {sending ? 'Sending...' : sendButtonLabel}
-              </Button>
-            </View>
+                <Text style={styles.footerLinkText}>
+                  {sendingTest ? 'Sending test…' : 'Send a test to myself'}
+                </Text>
+              </TouchableOpacity>
+            ) : null}
+            {onMoreWaysToSend ? (
+              <TouchableOpacity onPress={onMoreWaysToSend} disabled={sending || sendingTest}>
+                <Text style={styles.footerLinkText}>More ways to send</Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
         </View>
       ) : null}
@@ -786,6 +762,9 @@ export function DocumentEmailPreviewModal({
           primaryButtonAction={() => setAlertVisible(false)}
           showConfetti={alertType === 'success'}
         />
+        {/* $0-row guard. The warning stays — it catches real mistakes — but
+            retreat is no longer the default button: these tradies do not
+            come back, and an unpriced row is often deliberate. */}
         <AlertModal
           visible={presendWarning !== null}
           onDismiss={() => setPresendWarning(null)}
@@ -793,15 +772,15 @@ export function DocumentEmailPreviewModal({
           icon="currency-usd-off"
           title={presendWarning?.title || ''}
           message={presendWarning?.message || ''}
-          primaryButtonText="Go back and fix"
+          primaryButtonText="Send anyway"
           primaryButtonAction={() => {
             setPresendWarning(null);
-            onDismiss();
+            doSend();
           }}
-          secondaryButtonText="Send anyway"
+          secondaryButtonText="Go back and fix"
           secondaryButtonAction={() => {
             setPresendWarning(null);
-            doSend();
+            handleDismiss();
           }}
         />
       </Portal.Host>
@@ -954,50 +933,32 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: undefined,
   },
+  bodyPreview: {
+    backgroundColor: colors.background,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+  },
+  bodyPreviewText: {
+    fontSize: 15,
+    lineHeight: 24,
+    color: colors.text,
+  },
   generatingContainer: {
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 12,
     paddingVertical: 40,
     paddingHorizontal: 20,
     backgroundColor: colors.background,
     borderRadius: 10,
-    minHeight: 200,
-  },
-  generatingIconWrapper: {
-    marginBottom: 16,
+    minHeight: 140,
   },
   generatingTitle: {
-    fontSize: 17,
+    fontSize: 15,
     fontWeight: '600',
     color: colors.text,
-    marginBottom: 16,
     textAlign: 'center',
-  },
-  stepsWindow: {
-    height: STEP_HEIGHT * VISIBLE_STEPS,
-    overflow: 'hidden',
-    alignItems: 'center',
-  },
-  stepsTrack: {
-    alignItems: 'center',
-  },
-  stepRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    height: STEP_HEIGHT,
-    gap: 10,
-  },
-  stepText: {
-    fontSize: 14,
-    color: colors.textMuted,
-  },
-  stepTextActive: {
-    color: colors.primary,
-    fontWeight: '600',
-  },
-  stepTextDone: {
-    color: colors.success,
   },
   toggleRow: {
     flexDirection: 'row',
@@ -1052,21 +1013,25 @@ const styles = StyleSheet.create({
       android: { elevation: 8 },
     }),
   },
-  footerButtons: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    width: '100%',
-    gap: 12,
-  },
-  footerButtonHalfWrapper: {
-    flex: 1,
-  },
-  footerButtonFlex: {
+  sendButton: {
     width: '100%',
     margin: 0,
   },
   sendButtonContent: {
     paddingVertical: 8,
+  },
+  footerLinks: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexWrap: 'wrap',
+    gap: 24,
+    paddingTop: 12,
+  },
+  footerLinkText: {
+    fontSize: 13,
+    color: colors.textMuted,
+    fontWeight: '600',
   },
   collapsedBar: {
     flexDirection: 'row',

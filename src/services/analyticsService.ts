@@ -50,6 +50,26 @@ export type AnalyticsEvent =
   | 'send_gate_abandoned'
   // User picked a path. `method` distinguishes square_connected vs pro_upgrade.
   | 'send_gate_resolved'
+  // — Send flow (Jul 2026 audit: sending IS the activation event; 113 of the
+  //   138 quote-creators never sent one and none of them ever paid) —
+  // The send flow opened, whether or not the sheet itself was shown. Carries
+  // doc_type + has_customer_email + plan; has_customer_email is what decides
+  // between the sheet and going straight to the email preview.
+  | 'send_sheet_opened'
+  // A delivery channel was picked: email / sms / share / export_pdf. Fires
+  // for the auto-routed email path too, so sheet friction is measurable as
+  // the gap between send_sheet_opened and this.
+  | 'send_method_chosen'
+  // Email preview reached a usable state. `prefilled` = the body was already
+  // warm (pre-generated on JobPreview); `wait_ms` = how long the user
+  // actually waited for generation, 0 when prefilled.
+  | 'email_preview_opened'
+  // Preview closed with nothing sent — the drop-off the audit couldn't see.
+  // had_recipient / edited_body separate "no address" from "lost their nerve".
+  | 'email_preview_abandoned'
+  // A document actually went out. `to_self` flags a send to the tradie's own
+  // account email — previously indistinguishable from a real customer send.
+  | 'quote_send_succeeded'
   // Dashboard follow-up nudge banner. `nudge_type` distinguishes
   // invoice_overdue / self_sent_quote / unsent_quote / quote_follow_up —
   // measures whether nudging moves quotes to real customers (the Jul 2026

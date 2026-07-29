@@ -56,6 +56,25 @@ describe('trackEvent', () => {
     expect(addDocMock).not.toHaveBeenCalled();
   });
 
+  // The send funnel is assembled downstream from these exact names and prop
+  // shapes; a rename on either side silently breaks the join.
+  it('writes the send-flow funnel events under their agreed names', async () => {
+    trackEvent('send_sheet_opened', { doc_type: 'quote', has_customer_email: true, plan: 'trial' });
+    trackEvent('send_method_chosen', { method: 'email', doc_type: 'quote' });
+    trackEvent('email_preview_opened', { doc_type: 'quote', prefilled: true, wait_ms: 0 });
+    trackEvent('email_preview_abandoned', { doc_type: 'quote', had_recipient: true, edited_body: false });
+    trackEvent('quote_send_succeeded', { doc_type: 'quote', method: 'email', to_self: false });
+    await flush();
+
+    expect(addDocMock.mock.calls.map(([, payload]: any) => payload.event)).toEqual([
+      'send_sheet_opened',
+      'send_method_chosen',
+      'email_preview_opened',
+      'email_preview_abandoned',
+      'quote_send_succeeded',
+    ]);
+  });
+
   it('never throws (or leaves an unhandled rejection) when the write fails', async () => {
     addDocMock.mockRejectedValueOnce(new Error('client is offline'));
 
