@@ -22,6 +22,7 @@ import {
   mapGoogleSignInError,
   messageForGoogleSignInError,
 } from '../services/googleSignInCore';
+import { requestPasswordReset } from '../services/passwordResetCore';
 
 // Detect in-app browsers (Facebook Messenger, Instagram, etc.) that block popups
 function isInAppBrowser(): boolean {
@@ -270,6 +271,28 @@ export function AuthScreen() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleForgotPassword = async () => {
+    lightTap();
+    setLoading(true);
+    setError('');
+    setNotice('');
+
+    const outcome = await requestPasswordReset(email);
+
+    if (outcome.status === 'sent') {
+      // Fires for a genuine send *and* for an unknown/social-only address —
+      // the whole point is that we don't distinguish. Measures whether the
+      // link is actually catching locked-out users.
+      trackWebEvent('password_reset_requested');
+      setNotice(outcome.message);
+    } else {
+      setError(outcome.message);
+      errorTap();
+    }
+
+    setLoading(false);
   };
 
   const handleGoogleSignIn = async () => {
@@ -607,6 +630,20 @@ export function AuthScreen() {
                   />
                 )}
 
+                {!isSignUp && (
+                  <View style={styles.forgotRow}>
+                    <Button
+                      mode="text"
+                      onPress={handleForgotPassword}
+                      disabled={loading}
+                      labelStyle={styles.forgotButtonLabel}
+                      compact
+                    >
+                      Forgot password?
+                    </Button>
+                  </View>
+                )}
+
                 <Button
                   mode="contained"
                   onPress={isSignUp ? handleSignUp : handleSignIn}
@@ -819,6 +856,17 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     letterSpacing: 0.2,
+  },
+  forgotRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    width: '100%',
+    marginTop: -4,
+  },
+  forgotButtonLabel: {
+    color: colors.textMuted,
+    fontSize: 13,
+    fontWeight: '600',
   },
   switchRow: {
     flexDirection: 'row',

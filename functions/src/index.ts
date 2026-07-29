@@ -6,6 +6,8 @@ import fetch from 'node-fetch';
 import {
   getUserEmail,
   sendEmail,
+  sendPasswordResetLinkEmail,
+  sendSocialSignInReminderEmail,
   sendWelcomeEmail,
   sendQuoteAcceptedEmail,
   sendQuoteDeclinedEmail,
@@ -87,6 +89,12 @@ export { adminAssistantCosts, reportAssistantLiveUsage } from './assistantCosts'
 export { reportPriceFetchUsage } from './featureUsage';
 import { recordMaterialsRecommend } from './featureUsage';
 import { randomUUID } from 'crypto';
+import {
+  normalizeResetEmail,
+  planPasswordReset,
+  describeProviders,
+  evaluateThrottle,
+} from './passwordReset.helpers';
 import { receiptVerdict } from './receiptValidation.helpers';
 import { resolveServerPlan } from './subscription.helpers';
 import {
@@ -108,10 +116,14 @@ import {
 import {
   RecoveredQuoteRecord,
   RecoveredContactRecord,
+  assignUniqueQuoteDocIds,
   buildRecoveredQuoteDoc,
   buildRecoveredContactDoc,
+  dedupeRecoveredQuotes,
+  isReclaimSweepActive,
   shouldInjectRecoveredDocs,
   INCIDENT_DATE,
+  RECLAIM_SWEEP_EXPIRY,
 } from './accountReclaim.rebuild';
 import {
   buildXeroAuthHeaders,
@@ -7506,9 +7518,18 @@ export const restoreRecoveredDocuments = functions.pubsub
   .schedule('every 4 hours')
   .timeZone('Australia/Sydney')
   .onRun(async () => {
+    const now = Date.now();
+    // Retired: no reads, no writes. Once this fires, the function, the
+    // rebuild module's payload handling and reclaimData/ can all be deleted.
+    if (!isReclaimSweepActive(now)) {
+      console.log(
+        `restoreRecoveredDocuments: retired at ${RECLAIM_SWEEP_EXPIRY.toISOString()} — no-op, safe to delete`,
+      );
+      return null;
+    }
+
     const db = admin.firestore();
     const bucket = admin.storage().bucket();
-    const now = Date.now();
     const claims = await db.collection('accountReclaims').get();
     let injected = 0;
 
@@ -7549,11 +7570,29 @@ export const restoreRecoveredDocuments = functions.pubsub
       };
       const email = claimDoc.id;
 
+      // Collapse notification-derived duplicates first: the parse turns every
+      // email a quote generated ("sent to" / "accepted by" / reminders) into
+      // its own record, all carrying the same total.
+      const parsedQuotes = payload.quotes ?? [];
+      const uniqueQuotes = dedupeRecoveredQuotes(parsedQuotes);
+      if (uniqueQuotes.length !== parsedQuotes.length) {
+        console.log(
+          `restoreRecoveredDocuments: ${email} collapsed ${parsedQuotes.length - uniqueQuotes.length} duplicate quote record(s)`,
+        );
+      }
+
+      // Quote numbers repeat across records (revised re-sends, positional
+      // parse errors); the write below is merge:false, so colliding ids would
+      // silently overwrite and lose quotes.
+      const quoteDocs = assignUniqueQuoteDocIds(
+        uniqueQuotes
+          .map((rec, i) => buildRecoveredQuoteDoc(rec, i, email))
+          .filter((d): d is Record<string, unknown> => d !== null),
+      );
+
       let quotesWritten = 0;
-      for (const [i, rec] of (payload.quotes ?? []).entries()) {
-        const doc = buildRecoveredQuoteDoc(rec, i, email);
-        if (!doc) continue;
-        await db.doc(`users/${uid}/quotes/${doc.id}`).set(doc, { merge: false });
+      for (const doc of quoteDocs) {
+        await db.doc(`users/${uid}/quotes/${String(doc.id)}`).set(doc, { merge: false });
         quotesWritten += 1;
       }
 
@@ -7579,6 +7618,7 @@ export const restoreRecoveredDocuments = functions.pubsub
     }
 
     if (injected > 0) console.log(`restoreRecoveredDocuments: injected for ${injected} accounts`);
+    return null;
   });
 
 /**
@@ -14423,4 +14463,78 @@ export const refreshNswFuelPricesNow = functions.https.onRequest(async (req, res
   } catch (err: any) {
     res.status(500).json({ error: err?.message || 'refresh failed' });
   }
+});
+
+/**
+ * Password reset request — unauthenticated by design (the caller is locked out).
+ *
+ * Replaces the client calling Firebase's `sendPasswordResetEmail` directly.
+ * Firebase's own mailer sends from `noreply@<project>.firebaseapp.com`, which
+ * has no SPF/DKIM alignment with hansendev.com.au; a live test on 29 Jul 2026
+ * went straight to Gmail spam. We mint the link with the Admin SDK and post it
+ * through Brevo, the path every other QuoteMate email already uses.
+ *
+ * Always resolves `{ ok: true }`, whatever happened. The response must never
+ * reveal whether an address is registered — and it doesn't need to, because
+ * the *email* tells the mailbox owner what's going on, including the case
+ * where they signed up with Google/Apple and have no password at all.
+ */
+export const requestPasswordReset = functions.https.onCall(async (data) => {
+  const email = normalizeResetEmail(data?.email);
+  if (!email) return { ok: true };
+
+  try {
+    // Fixed-window limiter keyed on the address. Unauthenticated + sends real
+    // mail, so without this it relays an email bomb at anyone's inbox.
+    const throttleRef = admin.firestore()
+      .collection('passwordResetThrottle')
+      .doc(crypto.createHash('sha256').update(email).digest('hex'));
+
+    const allowed = await admin.firestore().runTransaction(async (tx) => {
+      const snap = await tx.get(throttleRef);
+      const record = snap.exists ? (snap.data() as { count: number; windowStartMs: number }) : null;
+      const result = evaluateThrottle(record, Date.now());
+      if (result.allowed) {
+        tx.set(throttleRef, { ...result.next, lastAttemptAt: admin.firestore.FieldValue.serverTimestamp() });
+      }
+      return result.allowed;
+    });
+
+    if (!allowed) {
+      console.info(`requestPasswordReset: throttled ${email}`);
+      return { ok: true };
+    }
+
+    let snapshot: { providers: string[]; disabled: boolean } | null = null;
+    let uid: string | undefined;
+    try {
+      const user = await admin.auth().getUserByEmail(email);
+      uid = user.uid;
+      snapshot = {
+        providers: user.providerData.map((p) => p.providerId),
+        disabled: user.disabled,
+      };
+    } catch {
+      snapshot = null; // no such user — fall through to the no-op plan
+    }
+
+    const plan = planPasswordReset(snapshot);
+
+    if (plan.action === 'send-reset') {
+      const link = await admin.auth().generatePasswordResetLink(email);
+      await sendPasswordResetLinkEmail(email, link, uid);
+      console.info(`requestPasswordReset: reset link sent to ${email}`);
+    } else if (plan.action === 'send-social-reminder') {
+      await sendSocialSignInReminderEmail(email, describeProviders(plan.providers), uid);
+      console.info(`requestPasswordReset: social reminder (${plan.providers.join(',')}) sent to ${email}`);
+    } else {
+      console.info(`requestPasswordReset: no email sent for ${email} (${plan.reason})`);
+    }
+  } catch (error: any) {
+    // Never surface internals to an unauthenticated caller; a failure here
+    // must look identical to a success.
+    console.error('requestPasswordReset failed:', error?.message);
+  }
+
+  return { ok: true };
 });

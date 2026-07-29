@@ -30,6 +30,13 @@ export default defineConfig({
       // @env is a react-native-dotenv babel virtual module — only exists in
       // the Metro build. Stub the keys so store-graph imports resolve.
       { find: /^@env$/, replacement: resolve(__dirname, 'src/test/stubs/env.ts') },
+      // nativeGoogleSignIn ships only platform variants (.native.ts/.web.ts),
+      // which Metro resolves but vite cannot. Tests run under react-native-web,
+      // so point at the web stub — it's native-dependency-free by design.
+      {
+        find: /^(.*\/)?services\/nativeGoogleSignIn$/,
+        replacement: resolve(__dirname, 'src/services/nativeGoogleSignIn.web.ts'),
+      },
     ],
   },
 });

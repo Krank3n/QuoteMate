@@ -3069,3 +3069,86 @@ export function sendReadyToSendNudgeEmail(
     unsubscribeUrl,
   });
 }
+
+/**
+ * Password reset link.
+ *
+ * Sent over Brevo rather than through Firebase Auth's own mailer: Firebase
+ * sends from `noreply@<project>.firebaseapp.com`, which has no SPF/DKIM
+ * alignment with hansendev.com.au, and a live test on 29 Jul 2026 landed in
+ * Gmail's spam folder. This path is the one every other QuoteMate email uses
+ * and reaches the inbox.
+ *
+ * Category is transactional so it can never be suppressed by a marketing
+ * opt-out — a locked-out user must always be able to get back in.
+ */
+export function sendPasswordResetLinkEmail(to: string, resetLink: string, userId?: string): Promise<boolean> {
+  const content = wrapEmailTemplate(`
+    <p style="color:#00c897;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;margin:0 0 10px;">Account access</p>
+    <h1 class="qm-h1" style="color:#f8fafc;font-size:26px;font-weight:700;margin:0 0 16px;line-height:1.3;">
+      Set a new password
+    </h1>
+    <p class="qm-body" style="color:#cbd5e1;font-size:15px;line-height:1.65;margin:0 0 16px;">
+      Someone asked to reset the QuoteMate password for <strong style="color:#f8fafc;">${to}</strong>. Tap the button below and you can pick a new one.
+    </p>
+    ${ctaButton('Set a new password', '#009868', resetLink)}
+    <p class="qm-body" style="color:#94a3b8;font-size:14px;line-height:1.6;margin:24px 0 0;">
+      This link is good for one hour. If it's expired by the time you get to it, just ask for another from the sign-in screen.
+    </p>
+    <p class="qm-body" style="color:#94a3b8;font-size:14px;line-height:1.6;margin:12px 0 0;">
+      If that wasn't you, you can ignore this — nothing changes and your password stays as it is.
+    </p>
+    <p class="qm-body" style="color:#cbd5e1;font-size:15px;line-height:1.65;margin:24px 0 0;">
+      Cheers,<br/>Tom
+    </p>
+  `, { preheader: 'Set a new QuoteMate password' });
+
+  return sendEmail({
+    to,
+    subject: 'Set a new QuoteMate password',
+    htmlContent: content,
+    category: 'transactional',
+    userId,
+    tags: ['password-reset'],
+  });
+}
+
+/**
+ * Sent when someone asks to reset a password on an account that has no
+ * password — i.e. they originally signed up with Google or Apple.
+ *
+ * Firebase's hosted flow sends these users nothing at all, and that silence is
+ * exactly what makes them sign up again on a second account (Coastal HVAC, Jul
+ * 2026). Mailing the address itself leaks nothing to a third party: only the
+ * mailbox owner sees it.
+ */
+export function sendSocialSignInReminderEmail(to: string, providerDescription: string, userId?: string): Promise<boolean> {
+  const content = wrapEmailTemplate(`
+    <p style="color:#00c897;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;margin:0 0 10px;">Account access</p>
+    <h1 class="qm-h1" style="color:#f8fafc;font-size:26px;font-weight:700;margin:0 0 16px;line-height:1.3;">
+      No password needed &mdash; you're a ${providerDescription} sign-in
+    </h1>
+    <p class="qm-body" style="color:#cbd5e1;font-size:15px;line-height:1.65;margin:0 0 16px;">
+      Someone asked to reset the QuoteMate password for <strong style="color:#f8fafc;">${to}</strong>. There's no password on this account to reset &mdash; it was set up with <strong style="color:#f8fafc;">${providerDescription}</strong>.
+    </p>
+    <p class="qm-body" style="color:#cbd5e1;font-size:15px;line-height:1.65;margin:0 0 8px;">
+      Head back to the sign-in screen and tap the <strong style="color:#f8fafc;">${providerDescription}</strong> button instead &mdash; you'll go straight in, and everything will be where you left it.
+    </p>
+    ${ctaButton('Open QuoteMate', '#009868')}
+    <p class="qm-body" style="color:#94a3b8;font-size:14px;line-height:1.6;margin:24px 0 0;">
+      If that wasn't you, you can safely ignore this — nothing has changed on your account.
+    </p>
+    <p class="qm-body" style="color:#cbd5e1;font-size:15px;line-height:1.65;margin:24px 0 0;">
+      Cheers,<br/>Tom
+    </p>
+  `, { preheader: `Sign in with ${providerDescription} — no password needed` });
+
+  return sendEmail({
+    to,
+    subject: `Sign in with ${providerDescription} — no password needed`,
+    htmlContent: content,
+    category: 'transactional',
+    userId,
+    tags: ['password-reset', 'social-signin-reminder'],
+  });
+}
