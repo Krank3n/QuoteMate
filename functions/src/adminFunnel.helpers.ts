@@ -86,6 +86,34 @@ export function safeRatio(numerator: number, denominator: number): number {
 }
 
 /**
+ * The established test-account pattern, lifted verbatim from the one-off
+ * analysis scripts (funnelBreakdown / selfSendAnalysis / jobPreviewStallAnalysis)
+ * so every funnel counts the same population. Matched against BOTH the auth
+ * email and the display name, because our seeded accounts are inconsistent
+ * about which field carries the giveaway.
+ */
+export const TEST_ACCOUNT_PATTERN = /example\.com$|mate\.debug|newtestuser|testuser@|^qm-marketing-demo$/i;
+
+/** True when an auth record is one of ours, not a real tradie. */
+export function isTestAccount(
+  email: string | null | undefined,
+  displayName?: string | null | undefined
+): boolean {
+  return TEST_ACCOUNT_PATTERN.test(email || '') || TEST_ACCOUNT_PATTERN.test(displayName || '');
+}
+
+/**
+ * Documents whose id starts with `recovered-` are email-derived single-line
+ * reconstructions written by the 2026-07 account-reclaim rebuild, not quotes a
+ * tradie actually authored in the app. They carry a sent-looking stage, so any
+ * funnel that counts them reads a send that never happened — exclude them
+ * everywhere (see accountReclaim.rebuild.ts for how they're minted).
+ */
+export function isRecoveredDocId(docId: string | null | undefined): boolean {
+  return typeof docId === 'string' && docId.startsWith('recovered-');
+}
+
+/**
  * True when a single document counts as "activated" (the tradie actually sent
  * something). Primary signal is stage !== 'draft'; sentAt is only a fallback
  * because ~35% of sent-stage docs never recorded a sentAt. A missing stage is

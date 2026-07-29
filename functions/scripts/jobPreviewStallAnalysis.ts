@@ -22,10 +22,10 @@
  * Needs Application Default Credentials. Makes no writes.
  */
 import * as admin from 'firebase-admin';
+import { isTestAccount } from '../src/adminFunnel.helpers';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const TRIAL_MS = 14 * DAY_MS; // mirrors src/utils/trialConfig.ts
-const TEST_ACCOUNT_RE = /example\.com$|mate\.debug|newtestuser|testuser@|^qm-marketing-demo$/i;
 
 function ts(v: any): number | null {
   if (!v) return null;
@@ -126,7 +126,7 @@ async function main() {
   for (const [uid, quotes] of quotesByUid) {
     const u = authByUid.get(uid);
     if (!u) continue;
-    if (TEST_ACCOUNT_RE.test(u.email || '') || TEST_ACCOUNT_RE.test(u.displayName || '')) continue;
+    if (isTestAccount(u.email, u.displayName)) continue;
 
     const sentAny = quotes.some(
       (q) => q.status === 'sent' || q.status === 'accepted' || q.status === 'completed',

@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest';
 import {
   computeFunnelStats,
   isActivatingDoc,
+  isRecoveredDocId,
+  isTestAccount,
   safeRatio,
   type FunnelUserInput,
 } from './adminFunnel.helpers';
@@ -46,6 +48,41 @@ describe('trial→paid rate — paying counts only real billed subs; startedTria
   });
   it('reports trialToPaid = paying / startedTrial = 1/3', () => {
     expect(out.conversion.trialToPaid).toBeCloseTo(1 / 3, 10);
+  });
+});
+
+// The two data-quality filters every funnel, audit and oracle shares. Getting
+// either wrong quietly inflates activation, so they're pinned here.
+describe('isTestAccount', () => {
+  it('catches our seeded accounts on either the email or the display name', () => {
+    expect(isTestAccount('someone@example.com')).toBe(true);
+    expect(isTestAccount('mate.debug+3@gmail.com')).toBe(true);
+    expect(isTestAccount('newtestuser99@gmail.com')).toBe(true);
+    expect(isTestAccount('testuser@quotemateapp.au')).toBe(true);
+    expect(isTestAccount(null, 'qm-marketing-demo')).toBe(true);
+  });
+
+  it('leaves real tradies alone', () => {
+    expect(isTestAccount('craig@warragulfencing.com.au', 'Warragul Fencing')).toBe(false);
+    // "example" only counts as the email domain, not anywhere in the string.
+    expect(isTestAccount('jo@example.com.au')).toBe(false);
+    expect(isTestAccount(null, null)).toBe(false);
+    expect(isTestAccount(undefined)).toBe(false);
+  });
+});
+
+describe('isRecoveredDocId', () => {
+  it('flags the 2026-07 email-derived reconstructions', () => {
+    expect(isRecoveredDocId('recovered-QU-177696')).toBe(true);
+    expect(isRecoveredDocId('recovered-idx25')).toBe(true);
+  });
+
+  it('leaves tradie-authored documents alone', () => {
+    expect(isRecoveredDocId('QU-177696')).toBe(false);
+    // Prefix only — a doc that merely mentions the word is not a rebuild.
+    expect(isRecoveredDocId('quote-recovered-1')).toBe(false);
+    expect(isRecoveredDocId(null)).toBe(false);
+    expect(isRecoveredDocId(undefined)).toBe(false);
   });
 });
 

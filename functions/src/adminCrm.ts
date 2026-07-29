@@ -25,6 +25,8 @@ import { listAllAuthUsers as drainAuthUsers } from './authUsers.helpers';
 import {
   computeFunnelStats,
   isActivatingDoc,
+  isRecoveredDocId,
+  isTestAccount,
   type FunnelUserInput,
   type FunnelPayload,
 } from './adminFunnel.helpers';
@@ -1883,9 +1885,20 @@ const EVENT_WINDOW_DAYS = 30;
 
 // The full, uncached computation. Same join style as computeFunnelPayload,
 // plus the two Path-B signals (squareConnection doc, real square payments) and
-// the event-derived paywall/checkout flags.
+// the event-derived paywall/checkout/send-flow flags.
+//
+// Two exclusions keep the numbers honest, and both report their own count in
+// `excluded` so this stays auditable rather than a silent filter:
+//   - our own test accounts (isTestAccount) never enter the population;
+//   - `recovered-` documents — the 2026-07 email-derived reconstructions — are
+//     skipped, because they carry a sent-looking stage for a send that never
+//     happened and would read as activation the tradie never performed.
 export async function computeEventFunnelPayload(): Promise<
-  EventFunnelPayload & { foundingTaken: number; attribution: AttributionRollup }
+  EventFunnelPayload & {
+    foundingTaken: number;
+    attribution: AttributionRollup;
+    excluded: { testAccounts: number; recoveredDocs: number };
+  }
 > {
   const firestore = db();
   const now = Date.now();
@@ -1901,27 +1914,38 @@ export async function computeEventFunnelPayload(): Promise<
   ]);
 
   // One pass over every document: draft / activated / square-paid per uid.
+  // Reconstructed `recovered-` docs are skipped outright — see the header.
   const draftUids = new Set<string>();
   const activatedUids = new Set<string>();
   const squarePaidUids = new Set<string>();
+  let recoveredDocs = 0;
   for (const d of docsSnap.docs) {
     const uid = d.ref.parent.parent?.id;
     if (!uid) continue;
+    if (isRecoveredDocId(d.id)) {
+      recoveredDocs++;
+      continue;
+    }
     const data = d.data() as any;
     draftUids.add(uid);
     if (isActivatingDoc(data)) activatedUids.add(uid);
     if (docHasSquarePayment(data)) squarePaidUids.add(uid);
   }
 
-  // Bucket events by parent uid into de-duped per-user flags.
+  // Bucket events by parent uid into de-duped per-user flags. `props` carries
+  // the send-flow detail (method, to_self, wait_ms) the breakdown reports on.
   const eventFlags = new Map<string, UserEventFlags>();
   for (const d of eventsSnap.docs) {
     const uid = d.ref.parent.parent?.id;
     if (!uid) continue;
-    eventFlags.set(uid, foldEvent(eventFlags.get(uid), (d.data() as any)?.event));
+    const data = d.data() as any;
+    eventFlags.set(uid, foldEvent(eventFlags.get(uid), data?.event, data?.props));
   }
 
-  const inputs: EventFunnelUserInput[] = authUsers.map((u) => {
+  const realUsers = authUsers.filter((u) => !isTestAccount(u.email, u.displayName));
+  const testAccounts = authUsers.length - realUsers.length;
+
+  const inputs: EventFunnelUserInput[] = realUsers.map((u) => {
     const flags = eventFlags.get(u.uid);
     return {
       uid: u.uid,
@@ -1932,6 +1956,8 @@ export async function computeEventFunnelPayload(): Promise<
       hasSquarePayment: squarePaidUids.has(u.uid),
       viewedPaywall: flags?.viewedPaywall ?? false,
       startedCheckout: flags?.startedCheckout ?? false,
+      // UserEventFlags is a superset of SendFlowFlags, so this passes through.
+      send: flags,
     };
   });
 
@@ -1954,7 +1980,12 @@ export async function computeEventFunnelPayload(): Promise<
     })),
   );
 
-  return { ...rollupEventFunnel(inputs, now, EVENT_WINDOW_DAYS), foundingTaken, attribution };
+  return {
+    ...rollupEventFunnel(inputs, now, EVENT_WINDOW_DAYS),
+    foundingTaken,
+    attribution,
+    excluded: { testAccounts, recoveredDocs },
+  };
 }
 
 // Every 6h (offset from the 15-min lazy funnel cache — this one is heavier
@@ -1973,11 +2004,18 @@ export const aggregateEventFunnel = functions
     const founding = foundingOfferStatus(foundingTaken);
     await db().collection('config').doc('foundingOffer').set({ ...founding, generatedAt: Date.now() });
 
+    const send = payload.sendFlow;
     console.log(
       `aggregateEventFunnel: users=${payload.shared.signups}, monetized=${payload.monetized.count} ` +
         `(pro=${payload.monetized.viaPro}, square=${payload.monetized.viaSquare}), ` +
         `trialToMonetized=${(payload.conversion.trialToMonetized * 100).toFixed(1)}%, ` +
-        `foundingSpotsLeft=${founding.spotsLeft}/${founding.cap}`
+        `foundingSpotsLeft=${founding.spotsLeft}/${founding.cap}; ` +
+        `sendFlow: sheet=${send.sheetOpened} method=${send.methodChosen} sent=${send.sent} ` +
+        `(durableOnly=${send.durableOnlySends}), preview=${send.email.previewOpened} ` +
+        `abandoned=${send.email.previewAbandoned}, waitMedian=${send.email.waitMs.median}ms ` +
+        `over ${send.email.waitMs.samples} samples; ` +
+        `excluded: ${payload.excluded.testAccounts} test accounts, ` +
+        `${payload.excluded.recoveredDocs} recovered docs`
     );
   });
 
