@@ -57,6 +57,7 @@ import {
     progressFor,
     stepPropsFor,
 } from '../utils/onboardingTelemetry';
+import { canJumpToStep } from '../utils/onboardingStepNav';
 import { runReeceConnectFlow } from '../services/reeceConnect';
 import { getReeceConnectionStatus } from '../services/reeceApi';
 import { uploadBusinessLogo } from '../services/photoService';
@@ -97,8 +98,11 @@ export function NewOnboardingScreen() {
     const { setBusinessSettings, setOnboarded } = useStore();
     const insets = useSafeAreaInsets();
 
-    // Current step
+    // Current step, plus the furthest step reached — the progress bar lets the
+    // user jump back to anywhere they've already been, but never ahead into a
+    // step they haven't seen.
     const [currentStep, setCurrentStep] = useState(1);
+    const [maxStepReached, setMaxStepReached] = useState(1);
     const [isLoading, setIsLoading] = useState(false);
     const [showSuccess, setShowSuccess] = useState(false);
 
@@ -208,9 +212,15 @@ export function NewOnboardingScreen() {
                     const d = JSON.parse(raw);
                     if (typeof d.currentStep === 'number') {
                         setCurrentStep(d.currentStep);
+                        // A resumed draft has already been at least this far,
+                        // so the bar stays navigable across a restart.
+                        setMaxStepReached(prev => Math.max(prev, d.currentStep));
                         // Anything past step 1 means they'd already started and
                         // came back — tracked so resume rate is measurable.
                         resumedRef.current = d.currentStep > 1;
+                    }
+                    if (typeof d.maxStepReached === 'number') {
+                        setMaxStepReached(prev => Math.max(prev, d.maxStepReached));
                     }
                     if (typeof d.startedAt === 'number') setStartedAt(d.startedAt);
                     if (Array.isArray(d.skippedStepKeys)) {
@@ -255,9 +265,10 @@ export function NewOnboardingScreen() {
                 addedSuppliers,
                 startedAt,
                 skippedStepKeys,
+                maxStepReached,
             }),
         ).catch(() => { /* ignore storage errors */ });
-    }, [currentStep, businessName, selectedCategories, phone, email, abn, brandColor, laborRate, markup, addedSuppliers, startedAt, skippedStepKeys]);
+    }, [currentStep, businessName, selectedCategories, phone, email, abn, brandColor, laborRate, markup, addedSuppliers, startedAt, skippedStepKeys, maxStepReached]);
 
     // Step-level telemetry — one impression per step entry, plus a durable
     // mirror of the position to Firestore. The mirror is the only trace an
@@ -266,6 +277,9 @@ export function NewOnboardingScreen() {
     const lastViewedRef = useRef<string | null>(null);
     useEffect(() => {
         if (!hydrated) return;
+        // High-water mark for the progress bar's back-navigation.
+        setMaxStepReached(prev => Math.max(prev, currentStep));
+
         const props = stepPropsFor(ONBOARDING_STEPS, currentStep);
         if (!props) return;
 
@@ -366,6 +380,25 @@ export function NewOnboardingScreen() {
         }
         lightTap();
         advance();
+    };
+
+    // Progress-bar navigation. Reachability lives in canJumpToStep — the rule
+    // that matters is that a jump can't land the user past an unsatisfied
+    // mandatory gate (empty business name, no trade picked).
+    const stepNavState = {
+        maxStepReached,
+        hasBusinessName: businessName.trim().length > 0,
+        hasTradeCategory: selectedCategories.length > 0,
+    };
+
+    const isStepReachable = (stepId: number) =>
+        canJumpToStep(ONBOARDING_STEPS, stepId, stepNavState);
+
+    const handleStepPress = (stepId: number) => {
+        if (stepId === currentStep) return;
+        if (!isStepReachable(stepId)) return;
+        lightTap();
+        setCurrentStep(stepId);
     };
 
     // Handle back
@@ -765,46 +798,51 @@ export function NewOnboardingScreen() {
                 )}
             </View>
 
-            <ScrollView style={styles.scrollableContent}>
-                <View style={styles.gridContainer}>
-                    {TRADE_CATEGORIES.map((category) => {
-                        const isSelected = selectedCategories.includes(category.id);
-                        return (
-                            <TouchableOpacity
-                                key={category.id}
-                                onPress={() => handleCategoryToggle(category.id)}
+            {/* No inner ScrollView. It carried no height constraint, so on web it
+                just expanded to its full content height inside the page
+                scroller — a second, pointless overflow container. Every other
+                step in this flow is a plain View inside the page scroller;
+                this one is now consistent with them. */}
+            <View style={styles.gridContainer}>
+                {TRADE_CATEGORIES.map((category) => {
+                    const isSelected = selectedCategories.includes(category.id);
+                    return (
+                        <TouchableOpacity
+                            key={category.id}
+                            onPress={() => handleCategoryToggle(category.id)}
+                            style={[
+                                styles.categoryCard,
+                                isSelected && styles.categoryCardSelected,
+                            ]}
+                        >
+                            <View
                                 style={[
-                                    styles.categoryCard,
-                                    isSelected && styles.categoryCardSelected,
+                                    styles.categoryIconContainer,
+                                    { backgroundColor: category.color + '20' },
                                 ]}
                             >
-                                <View
-                                    style={[
-                                        styles.categoryIconContainer,
-                                        { backgroundColor: category.color + '20' },
-                                    ]}
-                                >
-                                    <MaterialCommunityIcons
-                                        name={category.icon as any}
-                                        size={32}
-                                        color={category.color}
-                                    />
-                                </View>
-                                <Text style={styles.categoryName}>{category.name}</Text>
-                                <Text style={styles.categoryDescription}>{category.description}</Text>
-                                {isSelected && (
-                                    <MaterialCommunityIcons
-                                        name="check-circle"
-                                        size={24}
-                                        color={colors.success}
-                                        style={styles.categoryCheck}
-                                    />
-                                )}
-                            </TouchableOpacity>
-                        );
-                    })}
-                </View>
-            </ScrollView>
+                                <MaterialCommunityIcons
+                                    name={category.icon as any}
+                                    size={22}
+                                    color={category.color}
+                                />
+                            </View>
+                            <Text style={styles.categoryName}>{category.name}</Text>
+                            <Text style={styles.categoryDescription} numberOfLines={2}>
+                                {category.description}
+                            </Text>
+                            {isSelected && (
+                                <MaterialCommunityIcons
+                                    name="check-circle"
+                                    size={24}
+                                    color={colors.success}
+                                    style={styles.categoryCheck}
+                                />
+                            )}
+                        </TouchableOpacity>
+                    );
+                })}
+            </View>
         </View>
     );
 
@@ -1179,6 +1217,8 @@ export function NewOnboardingScreen() {
                     currentStep={currentStep}
                     totalSteps={TOTAL_STEPS}
                     steps={ONBOARDING_STEPS}
+                    onStepPress={handleStepPress}
+                    isStepReachable={isStepReachable}
                 />
             </WebContainer>
 
@@ -1303,9 +1343,6 @@ const styles = StyleSheet.create({
         paddingHorizontal: 20,
         marginBottom: 16,
     },
-    scrollableContent: {
-        marginBottom: 16,
-    },
     card: {
         padding: 16,
         marginBottom: 16,
@@ -1361,12 +1398,15 @@ const styles = StyleSheet.create({
         flexWrap: 'wrap',
         justifyContent: 'space-between',
     },
+    // Kept deliberately compact: 13 categories in two columns is seven rows, and
+    // this is a mandatory step — every pixel of card height costs the tradie
+    // another chunk of scrolling before they can get past it.
     categoryCard: {
         width: '48%',
         backgroundColor: colors.surface,
         borderRadius: 12,
-        padding: 16,
-        marginBottom: 16,
+        padding: 12,
+        marginBottom: 10,
         borderWidth: 2,
         borderColor: 'transparent',
         elevation: 2,
@@ -1376,12 +1416,12 @@ const styles = StyleSheet.create({
         backgroundColor: colors.primary + '10',
     },
     categoryIconContainer: {
-        width: 64,
-        height: 64,
-        borderRadius: 32,
+        width: 44,
+        height: 44,
+        borderRadius: 22,
         justifyContent: 'center',
         alignItems: 'center',
-        marginBottom: 12,
+        marginBottom: 8,
     },
     categoryName: {
         fontSize: 16,
