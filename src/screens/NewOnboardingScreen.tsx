@@ -69,6 +69,19 @@ const STORAGE_KEY = 'onboarding:draft';
 // onboarding flow doesn't stretch full-width on desktop browsers.
 const ONBOARDING_MAX_WIDTH = 600;
 
+// Logo upload hint. iOS/Android get a crop-and-zoom step from
+// ImagePicker's `allowsEditing: true`; expo-image-picker's WEB
+// implementation is a bare <input type="file"> that ignores the flag, so
+// promising a crop screen there is simply untrue.
+//
+// "Any shape" holds on both: the PDF templates render the logo into a fixed
+// square with `object-fit: contain` (shared/pdf/templates.ts), so an
+// off-square logo is letterboxed, never cropped or stretched.
+const LOGO_UPLOAD_HINT =
+    Platform.OS === 'web'
+        ? "Any shape — we'll size it to fit your quotes"
+        : 'Any shape — crop and zoom on the next screen';
+
 // The static base of the onboarding flow. The Reece step is inserted
 // dynamically inside the component when the user picks plumbing, so it isn't
 // shown to other trades.
@@ -154,7 +167,6 @@ export function NewOnboardingScreen() {
 
     // Modal state (replaces remaining Alert popups)
     const [removeLogoModalVisible, setRemoveLogoModalVisible] = useState(false);
-    const [squareSkipModalVisible, setSquareSkipModalVisible] = useState(false);
     const [completeErrorVisible, setCompleteErrorVisible] = useState(false);
 
     // "Why we ask" tooltips
@@ -382,19 +394,6 @@ export function NewOnboardingScreen() {
     // except on the final step which completes onboarding.
     const handleSkip = () => {
         if (currentStep < 3) return;
-        // Skipping Square is costly (revenue), so nudge the user once before letting them through.
-        if (currentStepKey === 'payments' && !squareConnected) {
-            setSquareSkipModalVisible(true);
-            return;
-        }
-        noteSkip(currentStepKey);
-        lightTap();
-        advance();
-    };
-
-    // User confirmed skipping the Square step from the modal.
-    const confirmSquareSkip = () => {
-        setSquareSkipModalVisible(false);
         noteSkip(currentStepKey);
         lightTap();
         advance();
@@ -930,7 +929,7 @@ export function NewOnboardingScreen() {
                             color={colors.primary}
                         />
                         <Text style={styles.logoUploadText}>Tap to Upload Logo</Text>
-                        <Text style={styles.logoUploadHint}>Any shape — crop and zoom on the next screen</Text>
+                        <Text style={styles.logoUploadHint}>{LOGO_UPLOAD_HINT}</Text>
                     </TouchableOpacity>
                 )}
                 {logoPickError && (
@@ -1252,22 +1251,6 @@ export function NewOnboardingScreen() {
                 primaryButtonAction={confirmRemoveLogo}
                 secondaryButtonText="Cancel"
                 secondaryButtonAction={() => setRemoveLogoModalVisible(false)}
-            />
-
-            {/* Nudge before skipping Square (revenue-impacting step) */}
-            <AlertModal
-                visible={squareSkipModalVisible}
-                onDismiss={() => setSquareSkipModalVisible(false)}
-                type="info"
-                title="Skip card payments?"
-                message="Without Square, customers won't be able to pay invoices by card. You can always connect it later in Settings."
-                primaryButtonText="Connect Square"
-                primaryButtonAction={() => {
-                    setSquareSkipModalVisible(false);
-                    handleConnectSquare();
-                }}
-                secondaryButtonText="Skip anyway"
-                secondaryButtonAction={confirmSquareSkip}
             />
 
             {/* Completion error */}
