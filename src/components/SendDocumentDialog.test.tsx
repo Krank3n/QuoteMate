@@ -54,15 +54,17 @@ vi.mock('./SendGateModal', () => ({ SendGateModal: () => null }));
 // Stub preview: exposes the callbacks the dialog wires into it so the tests
 // can drive "sent", "closed" and "more ways to send" without the real modal.
 vi.mock('./DocumentEmailPreviewModal', () => ({
-  DocumentEmailPreviewModal: ({ visible, onDismiss, onSent, onMoreWaysToSend, isRegenerating }: any) =>
+  DocumentEmailPreviewModal: ({ visible, onDismiss, onSent, onMoreWaysToSend, onEmailBodyChange, emailBody, isRegenerating }: any) =>
     visible
       ? React.createElement(
           'div',
           { 'data-testid': 'preview' },
           React.createElement('span', null, isRegenerating ? 'generating' : 'ready'),
+          React.createElement('span', { 'data-testid': 'preview-body' }, emailBody),
           React.createElement('button', { onClick: onSent }, 'stub-sent'),
           React.createElement('button', { onClick: onDismiss }, 'stub-close'),
           React.createElement('button', { onClick: onMoreWaysToSend }, 'stub-more'),
+          React.createElement('button', { onClick: () => onEmailBodyChange('MY HAND EDITS') }, 'stub-edit'),
         )
       : null,
 }));
@@ -108,6 +110,7 @@ vi.mock('../store/useStore', () => {
 });
 
 import { SendDocumentDialog } from './SendDocumentDialog';
+import { resetWarmedEmailDrafts, warmEmailDraft } from '../utils/emailDraft';
 import { trackEvent } from '../services/analyticsService';
 import type { Document } from '../types/document';
 
@@ -158,6 +161,7 @@ function eventProps(name: string) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  resetWarmedEmailDrafts();
   guard.ensureCanDeliver.mockResolvedValue({ ok: true } as any);
   guard.attachTrialPayLink.mockResolvedValue({ status: 'connect_required' } as any);
   store.state.getEffectivePlan = () => 'trial';
@@ -261,6 +265,43 @@ describe('the warmed email body', () => {
     );
   });
 
+  // The warm body lives in memory, not on the doc: draftEmailBody only
+  // reaches the unified Document after a Firestore round-trip through the
+  // server-side mirror, which routinely hasn't landed by the time a tradie
+  // taps Send off JobPreview.
+  it('uses a body warmed on JobPreview even though the doc has not caught up', async () => {
+    await warmEmailDraft(doc({ draftEmailBody: undefined }), { businessName: 'Hansen Decks' } as any, { isPro: true });
+    llm.generateQuoteEmail.mockClear();
+
+    renderDialog({ doc: doc({ draftEmailBody: undefined }) });
+
+    await waitFor(() => expect(screen.getByTestId('preview')).toBeTruthy());
+    expect(screen.getByTestId('preview-body').textContent).toBe('Written quote email');
+    expect(llm.generateQuoteEmail).not.toHaveBeenCalled();
+    expect(eventProps('email_preview_opened')).toEqual({ doc_type: 'quote', prefilled: true, wait_ms: 0 });
+    // Persisted on the tradie's own tap, so the next session opens warm too.
+    expect(store.state.saveDraft).toHaveBeenCalledWith(
+      expect.objectContaining({ draftEmailBody: 'Written quote email' }),
+    );
+  });
+
+  it('waits on an in-flight warm-up instead of paying for a second generation', async () => {
+    let release: (body: string) => void = () => {};
+    llm.generateQuoteEmail.mockImplementationOnce(
+      () => new Promise<string>((resolve) => { release = resolve; }),
+    );
+    const warming = warmEmailDraft(doc({ draftEmailBody: undefined }), { businessName: 'Hansen Decks' } as any, { isPro: true });
+
+    renderDialog({ doc: doc({ draftEmailBody: undefined }) });
+    await waitFor(() => expect(screen.getByText('generating')).toBeTruthy());
+    release('Written quote email');
+    await warming;
+
+    await waitFor(() => expect(screen.getByText('ready')).toBeTruthy());
+    expect(llm.generateQuoteEmail).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('preview-body').textContent).toBe('Written quote email');
+  });
+
   it('falls back to the local template for free users', async () => {
     store.state.subscriptionStatus = { trialStartedAt: null, trialExpired: true, isPro: false };
     store.state.getEffectivePlan = () => 'free';
@@ -285,6 +326,34 @@ describe('More ways to send', () => {
     expect(screen.getByTestId('sheet')).toBeTruthy();
     expect(screen.queryByTestId('preview')).toBeNull();
   });
+
+  // The host holds `doc` in state, so the prop never refreshes mid-session:
+  // reseeding the body on the way back would revert the tradie's own words —
+  // and send the pre-edit copy, since the save then sees "no change".
+  it('keeps hand edits when coming back to Email', async () => {
+    renderDialog();
+    await waitFor(() => expect(screen.getByTestId('preview')).toBeTruthy());
+    fireEvent.click(screen.getByText('stub-edit'));
+    fireEvent.click(screen.getByText('stub-more'));
+
+    fireEvent.click(screen.getByText('Email'));
+
+    await waitFor(() => expect(screen.getByTestId('preview')).toBeTruthy());
+    expect(screen.getByTestId('preview-body').textContent).toBe('MY HAND EDITS');
+  });
+
+  it('does not re-generate a cold body on the way back', async () => {
+    renderDialog({ doc: doc({ draftEmailBody: undefined }) });
+    await waitFor(() => expect(llm.generateQuoteEmail).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByText('stub-edit'));
+    fireEvent.click(screen.getByText('stub-more'));
+
+    fireEvent.click(screen.getByText('Email'));
+
+    await waitFor(() => expect(screen.getByTestId('preview')).toBeTruthy());
+    expect(llm.generateQuoteEmail).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('preview-body').textContent).toBe('MY HAND EDITS');
+  });
 });
 
 describe('the pay-link ask, now after the send', () => {
@@ -299,6 +368,20 @@ describe('the pay-link ask, now after the send', () => {
     expect(eventProps('pay_link_optin_shown')).toEqual({ doc_type: 'quote' });
     // The flow stays open for the ask instead of closing out from under it.
     expect(props.onDismiss).not.toHaveBeenCalled();
+  });
+
+  // The doc snapshot this dialog holds is stamped `draft`; re-writing the
+  // legacy quote from it after a send merges that status straight back over
+  // the server's sent stamp.
+  it('does not re-write the doc once it has gone out', async () => {
+    renderDialog();
+    await waitFor(() => expect(screen.getByTestId('preview')).toBeTruthy());
+    store.state.saveDraft.mockClear();
+
+    fireEvent.click(screen.getByText('stub-sent'));
+    fireEvent.click(screen.getByText('stub-close'));
+
+    expect(store.state.saveDraft).not.toHaveBeenCalled();
   });
 
   it('stays out of the way when the preview is abandoned', async () => {

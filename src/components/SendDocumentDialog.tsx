@@ -40,7 +40,11 @@ import { AlertModal } from './AlertModal';
 import { DocumentEmailPreviewModal } from './DocumentEmailPreviewModal';
 import { SendGateModal } from './SendGateModal';
 import { trackEvent } from '../services/analyticsService';
-import { buildEmailBodySource } from '../utils/emailDraft';
+import {
+  buildEmailBodySource,
+  getWarmedEmailBody,
+  whenEmailDraftWarm,
+} from '../utils/emailDraft';
 import { hasCustomerEmail } from '../utils/sendFlow';
 
 interface SendDocumentDialogProps {
@@ -85,8 +89,12 @@ export function SendDocumentDialog({
   const [isAttachingPayLink, setIsAttachingPayLink] = useState(false);
   const [payLinkOfferVisible, setPayLinkOfferVisible] = useState(false);
   // Set by the preview modal on a successful send; gates the post-send
-  // pay-link ask so we only pitch payments to someone who just delivered.
+  // pay-link ask so we only pitch payments to someone who just delivered,
+  // and stops us re-writing the doc once it has left.
   const emailSentRef = useRef(false);
+  // The doc whose body `emailBody` currently holds. Guards against reseeding
+  // over the tradie's own edits when the preview is reopened in one session.
+  const seededDocIdRef = useRef<string | null>(null);
 
   const docType = isInvoice ? 'invoice' : 'quote';
 
@@ -164,29 +172,60 @@ export function SendDocumentDialog({
     return false;
   };
 
+  const openPreviewWithBody = (body: string, prefilled: boolean, waitMs: number) => {
+    setEmailBody(body);
+    seededDocIdRef.current = doc.id;
+    setEmailPreviewVisible(true);
+    trackEvent('email_preview_opened', { doc_type: docType, prefilled, wait_ms: waitMs });
+  };
+
   const handleEmailOption = async () => {
     if (!(await passesDeliveryGate())) return;
     setActionSheetVisible(false);
     trackEvent('send_method_chosen', { method: 'email', doc_type: docType });
-    setEmailSubject(emailHandler.draftSubject || defaultSubject);
-    // Warm body (pre-generated on JobPreview, or written on a previous open):
-    // straight into the preview, no wait at all.
-    if (emailHandler.draftBody) {
-      setEmailBody(emailHandler.draftBody);
+
+    // Coming back from "More ways to send" — `emailBody` already holds this
+    // session's copy, hand-edits and all. Reseeding from the (frozen) doc
+    // prop here would silently throw those edits away and send the old text.
+    if (seededDocIdRef.current === doc.id) {
       setEmailPreviewVisible(true);
       trackEvent('email_preview_opened', { doc_type: docType, prefilled: true, wait_ms: 0 });
       return;
     }
+
+    setEmailSubject(emailHandler.draftSubject || defaultSubject);
+
+    // Body written on a previous open, or warmed on JobPreview: straight into
+    // the preview, no wait at all.
+    if (emailHandler.draftBody) {
+      openPreviewWithBody(emailHandler.draftBody, true, 0);
+      return;
+    }
+    const warmed = getWarmedEmailBody(doc.id);
+    if (warmed) {
+      openPreviewWithBody(warmed, true, 0);
+      emailHandler.persistBody(warmed);
+      return;
+    }
+
     const startedAt = Date.now();
     setIsGeneratingEmail(true);
     setEmailPreviewVisible(true);
     try {
-      const body = isPro ? await emailHandler.generate() : emailHandler.fallback();
+      // A warm-up already running for this doc is the common case when the
+      // tradie sends straight off JobPreview — wait on it rather than paying
+      // for a second generation of the same email.
+      const warming = whenEmailDraftWarm(doc.id);
+      if (warming) await warming;
+      const body = getWarmedEmailBody(doc.id)
+        ?? (isPro ? await emailHandler.generate() : emailHandler.fallback());
       setEmailBody(body);
+      seededDocIdRef.current = doc.id;
       emailHandler.persistBody(body);
     } catch {
       const fallback = emailHandler.fallback();
       setEmailBody(fallback);
+      seededDocIdRef.current = doc.id;
       emailHandler.persistBody(fallback);
     } finally {
       setIsGeneratingEmail(false);
@@ -209,6 +248,7 @@ export function SendDocumentDialog({
       setEmailPreviewVisible(false);
       setPayLinkOfferVisible(false);
       emailSentRef.current = false;
+      seededDocIdRef.current = null;
       return;
     }
     const plan = getEffectivePlan();
@@ -241,7 +281,11 @@ export function SendDocumentDialog({
 
   const handleEmailPreviewDismiss = () => {
     setEmailPreviewVisible(false);
-    persistEmailEdits();
+    // Only worth saving while the doc is still going out. After a send there
+    // is nothing to preserve — the sent copy is already away — and this write
+    // reconstructs the legacy quote from a doc snapshot stamped `draft`,
+    // which merges straight back over the server's sent status.
+    if (!emailSentRef.current) persistEmailEdits();
     // Ask about payments only once the doc is actually out the door — the
     // ask used to sit in front of the send and cost us the send itself.
     if (emailSentRef.current && offerPayLink) {

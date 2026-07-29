@@ -5,10 +5,19 @@
  * Jul 2026 send audit: the tradie taps "Send Quote" — an action — and the app
  * answers with a writing task they never asked for. Generation is the same
  * work either way, so JobPreview kicks it off the moment the doc is saved and
- * the send flow just reads what's already there (`draftEmailBody`).
+ * the send flow reads what's already there.
  *
- * The warm-up is strictly best-effort: it never blocks a screen, never
- * surfaces an error, and never fires for a doc that already carries a body.
+ * The warmed body is held in memory here rather than written straight to
+ * `draftEmailBody`, deliberately:
+ *   - `saveDraft` replaces `currentQuote`, the wizard's live editing buffer.
+ *     A background write landing while the tradie is in MaterialsList would
+ *     revert their unsaved line-item edits AND reset that screen's dirty
+ *     check, so nothing would even prompt on the way out.
+ *   - `draftEmailBody` only reaches the unified Document the send flow is
+ *     handed after a Firestore round-trip through the server-side mirror, so
+ *     a body written here often wouldn't be visible in time anyway.
+ * It gets persisted the moment the send flow uses it, on the tradie's own
+ * tap — the same write the on-tap path has always done.
  */
 
 import type { BusinessSettings } from '../types';
@@ -20,7 +29,6 @@ import {
   getDefaultEmailBody,
   getDefaultInvoiceEmailBody,
 } from '../services/llmService';
-import { useStore } from '../store/useStore';
 
 export interface EmailBodySource {
   /** Written body — server round-trip, Pro / trial only. */
@@ -101,18 +109,43 @@ export function shouldWarmEmailDraft(
   return doc.stage === 'draft';
 }
 
-// One warm-up per doc at a time. JobPreview re-mounts every time the tradie
-// loops out to a wizard section and back; without this each loop would fire
-// another generation before the first had landed.
-const warming = new Set<string>();
+// Bodies ready to use, and the generations still running, keyed by doc id.
+// Session-scoped: a warm body is worth minutes, not days, and the persisted
+// draftEmailBody covers anything longer.
+const warmedBodies = new Map<string, string>();
+const inFlight = new Map<string, Promise<void>>();
+
+// A tradie churns through a handful of docs per session; this only exists so
+// a very long session can't grow the map without bound.
+const MAX_WARMED = 20;
+
+/** The warmed body for this doc, ready right now. */
+export function getWarmedEmailBody(docId: string): string | undefined {
+  return warmedBodies.get(docId);
+}
 
 /**
- * Generate this doc's customer email in the background and persist it to
- * `draftEmailBody`, so the send flow opens on a finished email instead of a
- * progress spinner. Fire-and-forget — resolves quietly whatever happens.
+ * The in-flight warm-up for this doc, if one is still running. The send flow
+ * awaits it rather than starting a second generation — tapping Send while the
+ * warm-up is still going is the common case, not an edge one.
+ */
+export function whenEmailDraftWarm(docId: string): Promise<void> | undefined {
+  return inFlight.get(docId);
+}
+
+/** Test seam — the caches above are module state by design. */
+export function resetWarmedEmailDrafts(): void {
+  warmedBodies.clear();
+  inFlight.clear();
+}
+
+/**
+ * Generate this doc's customer email in the background so the send flow opens
+ * on a finished email instead of a progress spinner. Fire-and-forget —
+ * resolves quietly whatever happens, and never touches the store.
  *
- * Free tier is deliberately skipped: those users get the local template, which
- * is instant, so there's nothing to warm and no write worth spending.
+ * Free tier is deliberately skipped: those users get the local template,
+ * which is instant, so there's nothing to warm.
  */
 export async function warmEmailDraft(
   doc: Document,
@@ -121,37 +154,32 @@ export async function warmEmailDraft(
 ): Promise<void> {
   if (!opts.isPro) return;
   if (!shouldWarmEmailDraft(doc)) return;
-  if (warming.has(doc.id)) return;
+  // JobPreview re-mounts every time the tradie loops out to a wizard section
+  // and back; without this each loop would fire another generation.
+  if (warmedBodies.has(doc.id) || inFlight.has(doc.id)) return;
 
-  warming.add(doc.id);
-  try {
-    persistWarmedBody(doc, await buildEmailBodySource(doc, businessSettings).generate());
-  } catch {
-    // Best effort. The send flow still generates on tap when nothing landed.
-  } finally {
-    warming.delete(doc.id);
-  }
-}
+  const run = (async () => {
+    try {
+      const source = buildEmailBodySource(doc, businessSettings);
+      const body = await source.generate();
+      // generateQuoteEmail / generateInvoiceEmail never reject — on a network
+      // or server failure they return the plain template. Caching that would
+      // hand a Pro tradie the generic email for good, since every later path
+      // reads "a body exists" as "nothing to generate". Leave it uncached so
+      // the send flow gets its own go.
+      if (!body?.trim() || body === source.fallback()) return;
+      if (warmedBodies.size >= MAX_WARMED) {
+        const oldest = warmedBodies.keys().next().value;
+        if (oldest !== undefined) warmedBodies.delete(oldest);
+      }
+      warmedBodies.set(doc.id, body);
+    } catch {
+      // Best effort. The send flow still generates on tap when nothing landed.
+    } finally {
+      inFlight.delete(doc.id);
+    }
+  })();
 
-/**
- * Merge the warmed body onto the LATEST stored copy of the doc — never the
- * snapshot generation started from. The tradie keeps editing notes and the
- * reference number on JobPreview while this is in flight, and writing back a
- * stale snapshot would roll those edits back. No stored copy yet, or a body
- * that landed first, means we leave it alone.
- */
-function persistWarmedBody(doc: Document, body: string): void {
-  if (!body?.trim()) return;
-  const state = useStore.getState();
-
-  if (doc.type === 'invoice') {
-    const latest = state.invoices.find((i) => i.id === doc.id);
-    if (!latest || latest.draftEmailBody?.trim()) return;
-    void state.saveInvoice({ ...latest, draftEmailBody: body }).catch(() => { /* best effort */ });
-    return;
-  }
-
-  const latest = state.quotes.find((q) => q.id === doc.id);
-  if (!latest || latest.draftEmailBody?.trim()) return;
-  void state.saveDraft({ ...latest, draftEmailBody: body }).catch(() => { /* best effort */ });
+  inFlight.set(doc.id, run);
+  await run;
 }
