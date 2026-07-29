@@ -11,6 +11,7 @@ yarn-error.log*
 dist/
 dist-web/
 dist-web-demo/
+dist-prod-web/
 web-build/
 
 # Environment variables
