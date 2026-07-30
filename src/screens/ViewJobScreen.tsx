@@ -50,6 +50,7 @@ import {
 import { TakePaymentSheet, type TakePaymentTarget } from '../components/TakePaymentSheet';
 import { getReeceConnectionStatus } from '../services/reeceApi';
 import { SendDocumentDialog } from '../components/SendDocumentDialog';
+import { warmEmailDraft } from '../utils/emailDraft';
 import { FollowUpSheet, type FollowUpTone } from '../components/FollowUpSheet';
 import type { Document, DocumentStage } from '../types/document';
 import { documentToQuote, documentToInvoice } from '../types/documentAdapter';
@@ -201,6 +202,18 @@ export function ViewJobScreen() {
     ? documents.find((d) => d.id === job.primaryDocumentId) ?? actionableDoc
     : actionableDoc;
   const completedAt = formatScheduledDateLong(job.completedDate);
+
+  // Warm the customer email for the doc this screen is about. This screen's
+  // sticky-bar Send drives the same SendDocumentDialog as the wizard, but had
+  // no warm-up of its own — so sending from here always paid the full
+  // generation wait. warmEmailDraft is fire-and-forget and self-guarding: it
+  // no-ops off the free tier, on a doc that already carries a body, on
+  // anything past draft, and on a doc already warm or in flight. Safe to call
+  // on every doc change.
+  useEffect(() => {
+    if (!primaryDoc) return;
+    void warmEmailDraft(primaryDoc, businessSettings, { isPro });
+  }, [primaryDoc?.id, businessSettings, isPro]);
 
   // "Order from Reece" entry — only when Reece is connected and the doc has
   // at least one Reece-priced material with order identifiers. Slots into

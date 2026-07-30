@@ -380,6 +380,19 @@ export function JobPreviewScreen() {
     }
   }, [liveDoc?.number, isEditingNumber]);
 
+  // Warm the customer email on the viewing path too. The mount effect above
+  // bails on `viewing` and takes autoSave's warm-up with it, so every re-entry
+  // into an existing job — "View job preview", a price tap — used to arrive at
+  // Send with nothing warmed and pay the full generation wait. That hits
+  // exactly the tradie who built a quote, left, and came back to send it.
+  // Nothing to save here: the doc is already persisted, so warm off liveDoc.
+  // Deliberately placed after liveDoc — referencing it in a dep array before
+  // its declaration is a TDZ error, not a lint nit.
+  useEffect(() => {
+    if (!viewing || !liveDoc) return;
+    void warmEmailDraft(liveDoc, businessSettings, { isPro: isProForPdf });
+  }, [viewing, liveDoc?.id, businessSettings, isProForPdf]);
+
   const handleViewPDF = async () => {
     if (!liveDoc) return;
     setIsPdfLoading(true);

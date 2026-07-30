@@ -233,3 +233,35 @@ describe('warmEmailDraft', () => {
     expect(getWarmedEmailBody('q-24')).toBe('Written quote email 24');
   });
 });
+
+/**
+ * Which screens actually warm. warmEmailDraft's own behaviour is covered
+ * above; what broke in testing was purely wiring — the warm-up existed but
+ * only one of three routes to Send ever reached it, so the other two paid the
+ * full generation wait. These are source-level on purpose: rendering either
+ * screen is infeasible, and the regression is "the call site went missing",
+ * which is exactly what reading the source catches.
+ */
+describe('warm-up entry points', () => {
+  const sourceOf = (relativePath: string) =>
+    readFileSync(resolve(__dirname, relativePath), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/\/\/.*$/gm, '');
+
+  it('JobPreview warms on the viewing path, which its mount effect bails out of', () => {
+    // JobPreviewScreen's mount effect early-returns on `viewing`, and the
+    // save-path warm-up lives inside it. A tradie who built a quote, left,
+    // and came back via "View job preview" therefore arrived at Send cold —
+    // precisely the person the send audit is about. The warm-up must also
+    // hang off a `viewing`-positive branch.
+    expect(sourceOf('../screens/NewQuote/JobPreviewScreen.tsx'))
+      .toMatch(/!viewing[\s\S]{0,200}?warmEmailDraft\(/);
+  });
+
+  it('ViewJob warms the doc it is showing — its Send had none of its own', () => {
+    // ViewJobScreen's sticky bar drives the same SendDocumentDialog as the
+    // wizard but never warmed anything, so sending an existing job from the
+    // job screen always waited on generation.
+    expect(sourceOf('../screens/ViewJobScreen.tsx')).toMatch(/warmEmailDraft\(/);
+  });
+});

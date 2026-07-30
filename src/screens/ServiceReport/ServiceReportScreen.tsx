@@ -825,7 +825,10 @@ export function ServiceReportScreen() {
                   : '']
                   .filter(Boolean)
                   .join(', ')}
-                . Nothing is ticked.
+                {/* An instruction, not a status. "Nothing is ticked" went
+                    stale the moment the tradie ticked something — this stays
+                    true for the life of the banner. */}
+                . Tick what you did today.
               </Text>
               <TouchableOpacity
                 onPress={undoCarriedRows}
