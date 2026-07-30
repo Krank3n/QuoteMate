@@ -219,6 +219,40 @@ export function pruneSuggestions(
 }
 
 /**
+ * State of the checklist's tick-all control.
+ *
+ * Site memory carries a site's checklist forward UNTICKED, which is right —
+ * only the tradie can say what was done this visit — but it leaves them
+ * ticking a list they tick every time. One control, not a per-row chore.
+ *
+ * It reads and writes only rows WITH TEXT: a blank row isn't a checklist
+ * item yet (buildReportInput prunes it at save), so it neither counts
+ * towards "all ticked" nor gets ticked. With no such rows the control has
+ * nothing to act on and hides.
+ *
+ * Never automatic. This is a tap, same as ticking a box — the discipline is
+ * that Mate never ticks, not that ticking must be one row at a time.
+ */
+export function tickAllState(items: ReportChecklistItem[]): {
+  visible: boolean;
+  allTicked: boolean;
+} {
+  const withText = items.filter((it) => trim(it.text).length > 0);
+  return {
+    visible: withText.length > 0,
+    allTicked: withText.length > 0 && withText.every((it) => it.checked),
+  };
+}
+
+/** Tick (or untick) every checklist row that has text. */
+export function setAllChecked(
+  items: ReportChecklistItem[],
+  checked: boolean,
+): ReportChecklistItem[] {
+  return items.map((it) => (trim(it.text).length > 0 ? { ...it, checked } : it));
+}
+
+/**
  * Mate's confirmable write-up additions, pruned for display exactly as the
  * equipment / checklist chips are: blanks dropped, repeats removed, and
  * anything the target field ALREADY says retired.

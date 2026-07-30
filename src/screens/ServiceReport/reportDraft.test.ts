@@ -17,7 +17,9 @@ import {
   reportRowSummary,
   resumableReportId,
   sameSite,
+  setAllChecked,
   siteIdentity,
+  tickAllState,
   type ReportFormState,
 } from './reportDraft';
 import type { ServiceReport } from '../../../shared/report/types';
@@ -214,6 +216,86 @@ describe('pruneSuggestions', () => {
   it('returns empty when everything is already covered', () => {
     expect(pruneSuggestions(['Ladder'], ['ladder'])).toEqual([]);
     expect(pruneSuggestions([], ['Ladder'])).toEqual([]);
+  });
+});
+
+describe('tickAllState / setAllChecked', () => {
+  const item = (id: string, text: string, checked = false) => ({ id, text, checked });
+
+  it('offers Tick all when rows exist and any is unticked', () => {
+    const state = tickAllState([item('a', 'Clean air filters'), item('b', 'Check gas', true)]);
+    expect(state).toEqual({ visible: true, allTicked: false });
+  });
+
+  it('flips to Untick all once every row with text is ticked', () => {
+    const state = tickAllState([
+      item('a', 'Clean air filters', true),
+      item('b', 'Check gas', true),
+    ]);
+    expect(state).toEqual({ visible: true, allTicked: true });
+  });
+
+  it('hides when there is no row worth ticking', () => {
+    expect(tickAllState([])).toEqual({ visible: false, allTicked: false });
+    expect(tickAllState([item('a', '   ')])).toEqual({ visible: false, allTicked: false });
+  });
+
+  it('ignores blank rows when deciding all-ticked', () => {
+    // The blank row is not a checklist item yet (buildReportInput prunes it),
+    // so it must not hold the control on "Tick all" forever.
+    const state = tickAllState([item('a', 'Clean air filters', true), item('b', '  ')]);
+    expect(state.allTicked).toBe(true);
+  });
+
+  it('ticks every row with text', () => {
+    const out = setAllChecked([item('a', 'Clean air filters'), item('b', 'Check gas')], true);
+    expect(out.every((it) => it.checked)).toBe(true);
+  });
+
+  it('unticks every row with text', () => {
+    const out = setAllChecked(
+      [item('a', 'Clean air filters', true), item('b', 'Check gas', true)],
+      false,
+    );
+    expect(out.every((it) => !it.checked)).toBe(true);
+  });
+
+  it('leaves blank rows alone', () => {
+    const out = setAllChecked([item('a', 'Clean air filters'), item('b', '   ')], true);
+    expect(out[0].checked).toBe(true);
+    expect(out[1].checked).toBe(false);
+  });
+
+  it('preserves row identity and text', () => {
+    const rows = [item('a', 'Clean air filters'), item('b', 'Check gas')];
+    const out = setAllChecked(rows, true);
+    expect(out.map((it) => it.id)).toEqual(['a', 'b']);
+    expect(out.map((it) => it.text)).toEqual(['Clean air filters', 'Check gas']);
+    // Pure — the input is untouched.
+    expect(rows.every((it) => !it.checked)).toBe(true);
+  });
+
+  it('round-trips: carried rows land unticked, tick all, untick all', () => {
+    const carried = carryForwardSiteMemory(
+      {
+        equipment: [],
+        itemsChecked: [
+          { id: 'old-1', text: 'Clean air filters', checked: true },
+          { id: 'old-2', text: 'Check electrical components', checked: true },
+        ],
+      },
+      (() => {
+        let n = 0;
+        return () => `new-${++n}`;
+      })(),
+    );
+    expect(tickAllState(carried.itemsChecked)).toEqual({ visible: true, allTicked: false });
+
+    const ticked = setAllChecked(carried.itemsChecked, true);
+    expect(tickAllState(ticked)).toEqual({ visible: true, allTicked: true });
+
+    const unticked = setAllChecked(ticked, false);
+    expect(tickAllState(unticked)).toEqual({ visible: true, allTicked: false });
   });
 });
 

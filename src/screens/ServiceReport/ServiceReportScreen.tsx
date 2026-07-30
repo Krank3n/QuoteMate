@@ -68,6 +68,8 @@ import {
   pruneAdditions,
   pruneSuggestions,
   removeCarriedRows,
+  setAllChecked,
+  tickAllState,
   type ReportFormState,
   type SiteMemory,
 } from './reportDraft';
@@ -373,6 +375,12 @@ export function ServiceReportScreen() {
         it.id === id ? { ...it, checked: !it.checked } : it,
       ),
     });
+  // The whole-list version of the same tap. Still manual, still the tradie —
+  // it just spares them ticking a list they tick on every visit, which is
+  // exactly what site memory hands them.
+  const tickAll = tickAllState(form.itemsChecked);
+  const toggleAllChecklist = () =>
+    patch({ itemsChecked: setAllChecked(form.itemsChecked, !tickAll.allTicked) });
   const removeChecklistItem = (id: string) =>
     patch({ itemsChecked: form.itemsChecked.filter((it) => it.id !== id) });
 
@@ -869,7 +877,18 @@ export function ServiceReportScreen() {
           )}
 
           {/* Checklist — heading matches the PDF's "Items checked" */}
-          <SectionLabel text="Items checked" optional />
+          <SectionLabel
+            text="Items checked"
+            optional
+            action={
+              tickAll.visible
+                ? {
+                    label: tickAll.allTicked ? 'Untick all' : 'Tick all',
+                    onPress: toggleAllChecklist,
+                  }
+                : undefined
+            }
+          />
           {form.itemsChecked.map((item) => (
             <View key={item.id} style={styles.listRow}>
               <TouchableOpacity
@@ -1108,11 +1127,32 @@ export function ServiceReportScreen() {
   );
 }
 
-function SectionLabel({ text, optional }: { text: string; optional?: boolean }) {
+function SectionLabel({
+  text,
+  optional,
+  action,
+}: {
+  text: string;
+  optional?: boolean;
+  // Optional right-aligned action for the section. Lives in the heading row
+  // rather than as another button in the body — the screen is long enough.
+  action?: { label: string; onPress: () => void };
+}) {
   return (
     <View style={styles.sectionLabelRow}>
       <Text style={styles.sectionLabel}>{text}</Text>
       {optional ? <Text style={styles.optional}>optional</Text> : null}
+      {action ? (
+        <TouchableOpacity
+          onPress={action.onPress}
+          style={styles.sectionActionButton}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          accessibilityRole="button"
+          accessibilityLabel={action.label}
+        >
+          <Text style={styles.sectionAction}>{action.label}</Text>
+        </TouchableOpacity>
+      ) : null}
     </View>
   );
 }
@@ -1208,6 +1248,9 @@ const styles = StyleSheet.create({
   },
   sectionLabel: { fontSize: 14, fontWeight: '700', color: colors.text },
   optional: { fontSize: 12, color: colors.textMuted, fontStyle: 'italic' },
+  // Pushes a section action to the right-hand end of the heading row.
+  sectionActionButton: { marginLeft: 'auto' },
+  sectionAction: { fontSize: 12, color: colors.primary, fontWeight: '600' },
   input: { backgroundColor: colors.surface, marginBottom: 4 },
   dateRow: {
     flexDirection: 'row',
