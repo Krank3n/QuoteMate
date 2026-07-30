@@ -84,6 +84,13 @@ export const MAX_SUGGESTIONS = 8;
  */
 export const MAX_ADDITIONS = 4;
 
+/**
+ * How much of a previous visit's write-up we quote as a wording reference.
+ * It only has to demonstrate vocabulary and register, so a paragraph does
+ * the job — and the cap keeps one tradie's essay out of every later prompt.
+ */
+export const MAX_PREVIOUS_WRITE_UP = 1200;
+
 /** The three note fields, in output order, with their customer-facing labels. */
 const FIELDS: { key: keyof ComposeNotes; label: string; hint: string }[] = [
   {
@@ -171,7 +178,11 @@ export function buildComposePrompt(notes: ComposeNotes, context?: ComposeContext
   // Prior write-up: vocabulary only, fenced off from the facts. Tradespeople
   // have their own names for plant ("package unit", "high wall split") and a
   // report that matches last visit's language reads like theirs.
-  const previous = clean(context?.previousWriteUp);
+  //
+  // Capped: this is free-typed text off an old report, and a tradie who
+  // pasted an essay into one visit shouldn't blow out every later prompt.
+  // A vocabulary sample needs a paragraph, not a document.
+  const previous = clean(context?.previousWriteUp).slice(0, MAX_PREVIOUS_WRITE_UP);
   const previousBlock = previous
     ? `\n\nWORDING REFERENCE — the write-up from a PREVIOUS visit to this site. Use it ONLY to match the tradesperson's vocabulary, naming of equipment, and level of detail. It describes a DIFFERENT visit: do not carry any fact, finding, measurement or recommendation from it into this report.\n${previous}`
     : '';

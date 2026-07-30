@@ -65,6 +65,7 @@ import {
   latestSiteReport,
   latestSiteWriteUp,
   latestTechnicianSignature,
+  pruneAdditions,
   pruneSuggestions,
   removeCarriedRows,
   type ReportFormState,
@@ -245,7 +246,7 @@ export function ServiceReportScreen() {
     setForm((prev) => (prev ? { ...prev, ...removeCarriedRows(prev, carried) } : prev));
     setCarried(null);
     setCarriedFrom(null);
-    trackEvent('report_site_memory_undone', {});
+    trackEvent('report_site_memory_undone');
   };
 
   // Edit mode: load the existing report once.
@@ -384,6 +385,10 @@ export function ServiceReportScreen() {
     suggestedChecklist,
     form.itemsChecked.map((it) => it.text),
   );
+  // Same live pruning for the write-up additions: a sentence the field
+  // already carries — confirmed on an earlier pass, or typed by hand —
+  // retires its chip instead of offering to append itself twice.
+  const additionChips = pruneAdditions(suggestedAdditions, form);
 
   const addSuggestedEquipment = (text: string) => {
     setSuggestedEquipment((prev) => prev.filter((s) => s !== text));
@@ -405,10 +410,18 @@ export function ServiceReportScreen() {
   // statement reaches the report — the write-up itself never asserts one.
   const addSuggestedAddition = (addition: ComposeAddition) => {
     setSuggestedAdditions((prev) => prev.filter((a) => a.text !== addition.text));
-    const existing = form[addition.field].trim();
-    patch({
-      [addition.field]: existing ? `${existing} ${addition.text}` : addition.text,
-    } as Partial<ReportFormState>);
+    // Functional update, not patch(): two chips tapped before a re-render
+    // commits would both append to the SAME stale snapshot, and the second
+    // would silently drop the first one's sentence.
+    dirtyRef.current = true;
+    setForm((prev) => {
+      if (!prev) return prev;
+      const existing = prev[addition.field].trim();
+      return {
+        ...prev,
+        [addition.field]: existing ? `${existing} ${addition.text}` : addition.text,
+      };
+    });
   };
 
   // --- Write it up (compose) ------------------------------------------------
@@ -944,12 +957,12 @@ export function ServiceReportScreen() {
               words in the tradie's mouth, so it offers them instead: one tap
               drops the sentence into the field it belongs to. Sits directly
               under the three fields it edits. */}
-          {suggestedAdditions.length > 0 && (
+          {additionChips.length > 0 && (
             <SuggestionChips
               label="Mate won't claim these for you — tap any that are true"
-              items={suggestedAdditions.map((a) => a.text)}
+              items={additionChips.map((a) => a.text)}
               onAdd={(text) => {
-                const addition = suggestedAdditions.find((a) => a.text === text);
+                const addition = additionChips.find((a) => a.text === text);
                 if (addition) addSuggestedAddition(addition);
               }}
               onClear={() => setSuggestedAdditions([])}

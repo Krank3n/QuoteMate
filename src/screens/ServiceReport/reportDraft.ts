@@ -219,6 +219,33 @@ export function pruneSuggestions(
 }
 
 /**
+ * Mate's confirmable write-up additions, pruned for display exactly as the
+ * equipment / checklist chips are: blanks dropped, repeats removed, and
+ * anything the target field ALREADY says retired.
+ *
+ * That last rule is what stops a second "Write it up" from re-offering a
+ * sentence the tradie confirmed after the first one — tapping it again would
+ * append the same claim twice. Re-run on every render (like pruneSuggestions)
+ * so a sentence typed by hand retires its chip too.
+ */
+export function pruneAdditions<T extends { text: string; field: keyof WriteUpFields }>(
+  additions: T[],
+  current: WriteUpFields,
+): T[] {
+  const out: T[] = [];
+  const seen = new Set<string>();
+  for (const addition of additions) {
+    const text = trim(addition.text);
+    const key = text.toLowerCase();
+    if (!text || seen.has(key)) continue;
+    if (trim(current[addition.field]).toLowerCase().includes(key)) continue;
+    seen.add(key);
+    out.push(addition);
+  }
+  return out;
+}
+
+/**
  * The report the actions sheet should reopen instead of minting a new one.
  * Reports are expected newest-first (as listReports returns them): if the
  * newest report for the job is still a draft, that's an unfinished docket —

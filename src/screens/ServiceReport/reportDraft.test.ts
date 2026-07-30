@@ -11,6 +11,7 @@ import {
   latestSiteWriteUp,
   latestTechnicianSignature,
   normaliseSiteText,
+  pruneAdditions,
   pruneSuggestions,
   removeCarriedRows,
   reportRowSummary,
@@ -213,6 +214,63 @@ describe('pruneSuggestions', () => {
   it('returns empty when everything is already covered', () => {
     expect(pruneSuggestions(['Ladder'], ['ladder'])).toEqual([]);
     expect(pruneSuggestions([], ['Ladder'])).toEqual([]);
+  });
+});
+
+describe('pruneAdditions', () => {
+  const blank = { natureOfProblem: '', workCarriedOut: '', recommendedWork: '' };
+
+  it('keeps additions the fields do not already say', () => {
+    const additions = [
+      { text: 'The unit was tested after servicing.', field: 'workCarriedOut' as const },
+      { text: 'Compressor is nearing end of life.', field: 'recommendedWork' as const },
+    ];
+    expect(pruneAdditions(additions, blank)).toEqual(additions);
+  });
+
+  it('retires an addition the target field already carries', () => {
+    const additions = [
+      { text: 'The unit was tested after servicing.', field: 'workCarriedOut' as const },
+    ];
+    expect(
+      pruneAdditions(additions, {
+        ...blank,
+        workCarriedOut: 'Cleaned the coils. The unit was tested after servicing.',
+      }),
+    ).toEqual([]);
+  });
+
+  it('matches case-insensitively', () => {
+    const additions = [{ text: 'Tested After Servicing.', field: 'workCarriedOut' as const }];
+    expect(
+      pruneAdditions(additions, { ...blank, workCarriedOut: 'tested after servicing.' }),
+    ).toEqual([]);
+  });
+
+  it('only checks the field the addition would land in', () => {
+    const additions = [
+      { text: 'The unit was tested after servicing.', field: 'workCarriedOut' as const },
+    ];
+    // The sentence sits in a DIFFERENT field — the chip still stands.
+    expect(
+      pruneAdditions(additions, {
+        ...blank,
+        recommendedWork: 'The unit was tested after servicing.',
+      }),
+    ).toHaveLength(1);
+  });
+
+  it('drops blanks and repeats within the list', () => {
+    const additions = [
+      { text: '  Tested after servicing. ', field: 'workCarriedOut' as const },
+      { text: 'tested after servicing.', field: 'recommendedWork' as const },
+      { text: '   ', field: 'workCarriedOut' as const },
+    ];
+    expect(pruneAdditions(additions, blank)).toHaveLength(1);
+  });
+
+  it('returns empty for an empty list', () => {
+    expect(pruneAdditions([], blank)).toEqual([]);
   });
 });
 

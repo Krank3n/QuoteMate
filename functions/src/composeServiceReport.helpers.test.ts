@@ -4,6 +4,7 @@ import {
   sanitizeComposed,
   ComposeNotes,
   MAX_ADDITIONS,
+  MAX_PREVIOUS_WRITE_UP,
   MAX_SUGGESTIONS,
 } from './composeServiceReport.helpers';
 
@@ -324,6 +325,14 @@ describe('buildComposePrompt — previous write-up is vocabulary, not facts', ()
     expect(buildComposePrompt(notes, { previousWriteUp: '   ' })).not.toMatch(
       /WORDING REFERENCE/,
     );
+  });
+
+  it('caps an oversized previous write-up so it cannot blow out the prompt', () => {
+    const essay = 'x'.repeat(MAX_PREVIOUS_WRITE_UP + 500);
+    const prompt = buildComposePrompt(notes, { previousWriteUp: essay });
+    const quoted = prompt.split('WORDING REFERENCE')[1];
+    expect(quoted).toContain('x'.repeat(MAX_PREVIOUS_WRITE_UP));
+    expect(quoted).not.toContain('x'.repeat(MAX_PREVIOUS_WRITE_UP + 1));
   });
 });
 
