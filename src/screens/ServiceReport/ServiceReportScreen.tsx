@@ -44,7 +44,10 @@ import { useAlertModal } from '../../hooks/useAlertModal';
 import { generateId } from '../../utils/generateId';
 import { getTradeCategoryById } from '../../constants/tradeCategories';
 import { reportService } from '../../services/reportService';
-import { composeServiceReport } from '../../services/reportComposeService';
+import {
+  composeServiceReport,
+  type ComposeAddition,
+} from '../../services/reportComposeService';
 import { trackEvent } from '../../services/analyticsService';
 import { exportReportPDF } from '../../utils/pdfGenerator';
 import { createQuoteFromRecommendedWork } from '../../utils/quoteFromReport';
@@ -56,11 +59,16 @@ import {
   applyComposedWriteUp,
   buildInitialReportForm,
   buildReportInput,
+  carryForwardSiteMemory,
   deriveReportContext,
   formFromReport,
+  latestSiteReport,
+  latestSiteWriteUp,
   latestTechnicianSignature,
   pruneSuggestions,
+  removeCarriedRows,
   type ReportFormState,
+  type SiteMemory,
 } from './reportDraft';
 
 export function ServiceReportScreen() {
@@ -70,6 +78,7 @@ export function ServiceReportScreen() {
   const routeReportId: string | undefined = route.params?.reportId;
 
   const job = useJobStore((s) => s.jobs.find((j) => j.id === jobId));
+  const jobs = useJobStore((s) => s.jobs);
   const jobsLoaded = useJobStore((s) => s.jobsLoaded);
   const businessSettings = useStore((s) => s.businessSettings);
   const { showAlert, alertNode } = useAlertModal();
@@ -102,6 +111,21 @@ export function ServiceReportScreen() {
   // rows always land unticked. Not persisted — dismissing loses nothing.
   const [suggestedEquipment, setSuggestedEquipment] = useState<string[]>([]);
   const [suggestedChecklist, setSuggestedChecklist] = useState<string[]>([]);
+  // Closing statements the write-up refused to assert (it was tested, it was
+  // left running correctly) — offered as confirmable sentences, never prose.
+  const [suggestedAdditions, setSuggestedAdditions] = useState<ComposeAddition[]>([]);
+
+  // Site memory: what the previous visit to this address contributed, and
+  // the banner that says so. Held in state so "Undo" can take back exactly
+  // those rows; null once undone or when there was no previous visit.
+  const [carried, setCarried] = useState<SiteMemory | null>(null);
+  const [carriedFrom, setCarriedFrom] = useState<{
+    number: string;
+    visitDate: number;
+  } | null>(null);
+  // The previous visit's write-up, passed to compose as a VOCABULARY
+  // reference only — the server prompt forbids taking any fact from it.
+  const previousWriteUpRef = useRef<string | undefined>(undefined);
 
   // Signing locks the ScrollView so pen strokes don't fight the scroll.
   const [signing, setSigning] = useState(false);
@@ -131,34 +155,98 @@ export function ServiceReportScreen() {
     setForm(buildInitialReportForm(job));
   }, [job, form, routeReportId]);
 
-  // New report: pre-fill the technician pad with the tradie's most recent
-  // real signature — their squiggle never changes, so re-drawing it on
-  // every docket is pure friction. Visible in the pad, one tap to Clear.
-  // Functional setters keep any ink the tradie laid down before this fetch
-  // resolved; the CUSTOMER pad is never pre-filled — fresh ink every visit.
+  // New report: pre-fill from what's already known, in ONE pass over the
+  // tradie's reports.
+  //
+  //  - The technician pad gets their most recent real signature — their
+  //    squiggle never changes, so re-drawing it every docket is pure
+  //    friction. The CUSTOMER pad is never pre-filled: fresh ink each visit.
+  //  - Equipment and checklist rows come from the last visit to this SITE,
+  //    always unticked (see reportDraft's site-memory block).
+  //
+  // Runs once, only after the form is seeded, so the writes below can never
+  // race the seed and be overwritten by it. Deliberately does NOT set
+  // dirtyRef: a pre-filled report the tradie backs straight out of must not
+  // auto-save and mint an RP number, exactly as before.
+  const prefillRef = useRef(false);
+  // Deps are deliberately the IDENTITY of what gates the run, not the
+  // objects the body reads. `jobs` gets a new array on every store tick and
+  // `form` a new object on every keystroke — as deps, either would re-run
+  // the effect mid-fetch, and React fires the previous cleanup first, which
+  // would flip `cancelled` and silently bin the prefill in flight. The body
+  // only ever runs once (prefillRef), so reading current values off the
+  // closure is safe.
+  const formReady = !!form;
+  // Latest form for the async body to read — same pattern as hasContentRef
+  // below. Lets the decision to carry, the write, and the banner all agree
+  // on one snapshot instead of deciding inside a state updater (which
+  // StrictMode may run twice).
+  const formRef = useRef(form);
+  formRef.current = form;
   useEffect(() => {
-    if (routeReportId) return;
+    if (routeReportId || !job || !form || prefillRef.current) return;
+    prefillRef.current = true;
     let cancelled = false;
     reportService.listReports().then((reports) => {
       if (cancelled) return;
+
       const sig = latestTechnicianSignature(reports);
-      if (!sig) return;
-      setTechSigPath((prev) => {
-        if (prev) return prev;
-        // Carried-forward ink is not a fresh signing (ref set is idempotent,
-        // so a double updater run under StrictMode is harmless).
-        baselineTechInkRef.current = true;
-        return sig.svgPath;
-      });
-      setTechSigName((prev) => prev || sig.name);
-      setTechSigSize((prev) =>
-        prev ?? (sig.width && sig.height ? { width: sig.width, height: sig.height } : prev),
+      if (sig) {
+        setTechSigPath((prev) => {
+          if (prev) return prev;
+          // Carried-forward ink is not a fresh signing (ref set is
+          // idempotent, so a double updater run under StrictMode is
+          // harmless).
+          baselineTechInkRef.current = true;
+          return sig.svgPath;
+        });
+        setTechSigName((prev) => prev || sig.name);
+        setTechSigSize((prev) =>
+          prev ?? (sig.width && sig.height ? { width: sig.width, height: sig.height } : prev),
+        );
+      }
+
+      // Vocabulary reference is its own lookup — a previous visit can be
+      // worth quoting for its wording even with no equipment listed.
+      previousWriteUpRef.current = latestSiteWriteUp(reports, jobs, job);
+
+      const prior = latestSiteReport(reports, jobs, job);
+      if (!prior) return;
+      const memory = carryForwardSiteMemory(prior);
+      if (!memory.equipment.length && !memory.itemsChecked.length) return;
+      // Only ever fills blanks — anything the tradie typed while this fetch
+      // was in flight wins outright, and in that case no banner appears,
+      // because nothing was carried.
+      const live = formRef.current;
+      if (!live || live.equipment.length || live.itemsChecked.length) return;
+      setForm((prev) =>
+        prev
+          ? { ...prev, equipment: memory.equipment, itemsChecked: memory.itemsChecked }
+          : prev,
       );
+      setCarried(memory);
+      setCarriedFrom({ number: prior.number, visitDate: prior.visitDate });
+      trackEvent('report_site_memory_applied', {
+        equipment: memory.equipment.length,
+        checklist: memory.itemsChecked.length,
+      });
     });
     return () => {
       cancelled = true;
     };
-  }, [routeReportId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routeReportId, job?.id, formReady]);
+
+  // Wrong site, or a job that's moved on — take back exactly the rows site
+  // memory added and retire the banner. Rows the tradie has since reworded
+  // are theirs and survive (see removeCarriedRows).
+  const undoCarriedRows = () => {
+    if (!carried) return;
+    setForm((prev) => (prev ? { ...prev, ...removeCarriedRows(prev, carried) } : prev));
+    setCarried(null);
+    setCarriedFrom(null);
+    trackEvent('report_site_memory_undone', {});
+  };
 
   // Edit mode: load the existing report once.
   useEffect(() => {
@@ -312,6 +400,17 @@ export function ServiceReportScreen() {
     });
   };
 
+  // Confirming an addition appends its sentence to the field it belongs to
+  // and retires the chip. This is the ONLY way an unsupported closing
+  // statement reaches the report — the write-up itself never asserts one.
+  const addSuggestedAddition = (addition: ComposeAddition) => {
+    setSuggestedAdditions((prev) => prev.filter((a) => a.text !== addition.text));
+    const existing = form[addition.field].trim();
+    patch({
+      [addition.field]: existing ? `${existing} ${addition.text}` : addition.text,
+    } as Partial<ReportFormState>);
+  };
+
   // --- Write it up (compose) ------------------------------------------------
   const handleWriteItUp = async () => {
     const notes = {
@@ -341,6 +440,10 @@ export function ServiceReportScreen() {
       const composed = await composeServiceReport(notes, {
         businessName: businessSettings?.businessName || undefined,
         tradeCategory,
+        // Last visit's write-up teaches Mate this tradie's own words for
+        // their plant ("package unit", "high wall split"). Vocabulary only —
+        // the server prompt fences it off from this visit's facts.
+        previousWriteUp: previousWriteUpRef.current,
       });
       // Apply the returned trio wholesale: the write-up may REDISTRIBUTE a
       // fact into the field where it belongs, so a field can legitimately
@@ -358,9 +461,13 @@ export function ServiceReportScreen() {
           form.itemsChecked.map((it) => it.text),
         ),
       );
+      // Claims Mate would not assert on the tradie's behalf. Offered, never
+      // written — one tap each puts them in.
+      setSuggestedAdditions(composed.suggestedAdditions);
       trackEvent('report_written_up', {
         equipment_suggested: composed.suggestedEquipment.length,
         checklist_suggested: composed.suggestedChecklist.length,
+        additions_offered: composed.suggestedAdditions.length,
       });
     } catch (err: any) {
       showAlert({
@@ -680,6 +787,36 @@ export function ServiceReportScreen() {
             style={styles.input}
           />
 
+          {/* Site memory — says where the pre-filled rows came from and
+              takes them back in one tap. Sits above BOTH sections it
+              filled, so one banner explains the lot. */}
+          {carriedFrom && (
+            <View style={styles.carriedBanner}>
+              <MaterialCommunityIcons
+                name="history"
+                size={18}
+                color={colors.primary}
+              />
+              <Text style={styles.carriedText}>
+                Filled in from your last visit here —{' '}
+                {[carriedFrom.number, carriedFrom.visitDate
+                  ? format(new Date(carriedFrom.visitDate), 'd MMM yyyy')
+                  : '']
+                  .filter(Boolean)
+                  .join(', ')}
+                . Nothing is ticked.
+              </Text>
+              <TouchableOpacity
+                onPress={undoCarriedRows}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                accessibilityRole="button"
+                accessibilityLabel="Undo — remove the rows carried over from the last visit"
+              >
+                <Text style={styles.carriedUndo}>Undo</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
           {/* Equipment */}
           <SectionLabel text="Equipment on site" optional />
           {form.equipment.map((value, i) => (
@@ -711,6 +848,7 @@ export function ServiceReportScreen() {
           <AddRow label="Add equipment" onPress={addEquipment} />
           {equipmentChips.length > 0 && (
             <SuggestionChips
+              label="Mate reckons these came up — tap to add"
               items={equipmentChips}
               onAdd={addSuggestedEquipment}
               onClear={() => setSuggestedEquipment([])}
@@ -762,6 +900,7 @@ export function ServiceReportScreen() {
           <AddRow label="Add checklist item" onPress={addChecklistItem} />
           {checklistChips.length > 0 && (
             <SuggestionChips
+              label="Mate reckons these came up — tap to add"
               items={checklistChips}
               onAdd={addSuggestedChecklist}
               onClear={() => setSuggestedChecklist([])}
@@ -799,6 +938,24 @@ export function ServiceReportScreen() {
             numberOfLines={3}
             style={styles.input}
           />
+
+          {/* Confirmable additions — the closing statements a service report
+              normally carries that the notes didn't support. Mate won't put
+              words in the tradie's mouth, so it offers them instead: one tap
+              drops the sentence into the field it belongs to. Sits directly
+              under the three fields it edits. */}
+          {suggestedAdditions.length > 0 && (
+            <SuggestionChips
+              label="Mate won't claim these for you — tap any that are true"
+              items={suggestedAdditions.map((a) => a.text)}
+              onAdd={(text) => {
+                const addition = suggestedAdditions.find((a) => a.text === text);
+                if (addition) addSuggestedAddition(addition);
+              }}
+              onClear={() => setSuggestedAdditions([])}
+            />
+          )}
+
           {canQuoteRecommended && (
             <TouchableOpacity
               onPress={handleQuoteRecommendedWork}
@@ -951,12 +1108,18 @@ function SectionLabel({ text, optional }: { text: string; optional?: boolean }) 
  * Tap-to-add suggestions from Mate's write-up. Review-only by design: a tap
  * adds the row (checklist rows land unticked) and retires the chip; "Clear"
  * bins the lot. Mate never adds anything itself.
+ *
+ * `label` says which kind of offer this is — spotted rows for the equipment
+ * and checklist lists, unassertable claims for the write-up additions. Same
+ * mechanic, so the same component; different promise, so different words.
  */
 function SuggestionChips({
+  label,
   items,
   onAdd,
   onClear,
 }: {
+  label: string;
   items: string[];
   onAdd: (text: string) => void;
   onClear: () => void;
@@ -964,9 +1127,7 @@ function SuggestionChips({
   return (
     <View style={styles.suggestionBlock}>
       <View style={styles.suggestionHeader}>
-        <Text style={styles.suggestionLabel}>
-          Mate reckons these came up — tap to add
-        </Text>
+        <Text style={styles.suggestionLabel}>{label}</Text>
         <TouchableOpacity
           onPress={onClear}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
@@ -1107,6 +1268,20 @@ const styles = StyleSheet.create({
     padding: 12,
     marginTop: 4,
   },
+  carriedBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: colors.surface,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    marginTop: 12,
+  },
+  carriedText: { flex: 1, fontSize: 12, color: colors.textMuted, lineHeight: 17 },
+  carriedUndo: { fontSize: 12, color: colors.primary, fontWeight: '600' },
   suggestionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1126,6 +1301,16 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     paddingHorizontal: 10,
     backgroundColor: colors.background,
+    // flexWrap on the row wraps BETWEEN chips, not inside one. Write-up
+    // additions are whole sentences, so without these a long chip runs off
+    // the side of the card instead of wrapping within it.
+    maxWidth: '100%',
+    flexShrink: 1,
   },
-  chipText: { fontSize: 13, color: colors.primary, fontWeight: '600' },
+  chipText: {
+    fontSize: 13,
+    color: colors.primary,
+    fontWeight: '600',
+    flexShrink: 1,
+  },
 });

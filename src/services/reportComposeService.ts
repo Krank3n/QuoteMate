@@ -16,6 +16,13 @@
  * suggestedEquipment / suggestedChecklist are optional extras extracted from
  * the notes for the tradie to review and tap to add — nothing is ever added
  * to the report automatically.
+ *
+ * suggestedAdditions is the same idea applied to the write-up itself: the
+ * closing statements a service report normally carries ("tested after
+ * servicing and left operating correctly") that the notes do not support.
+ * The server refuses to write them as prose and hands them back as sentences
+ * to confirm with one tap, so the report reads in full without the tool
+ * asserting anything the tradie didn't.
  */
 
 import { auth } from '../config/firebase';
@@ -42,6 +49,16 @@ export interface ComposeNotes {
 export interface ComposeContext {
   businessName?: string;
   tradeCategory?: string;
+  /** Previous visit's write-up — vocabulary reference only (see server). */
+  previousWriteUp?: string;
+}
+
+export type WriteUpField = 'natureOfProblem' | 'workCarriedOut' | 'recommendedWork';
+
+/** A claim the write-up could not assert, offered for one-tap confirmation. */
+export interface ComposeAddition {
+  text: string;
+  field: WriteUpField;
 }
 
 export interface ComposedReport {
@@ -50,11 +67,39 @@ export interface ComposedReport {
   recommendedWork: string;
   suggestedEquipment: string[];
   suggestedChecklist: string[];
+  suggestedAdditions: ComposeAddition[];
 }
+
+const WRITE_UP_FIELDS: WriteUpField[] = [
+  'natureOfProblem',
+  'workCarriedOut',
+  'recommendedWork',
+];
 
 function asStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.filter((v): v is string => typeof v === 'string' && v.trim().length > 0);
+}
+
+/**
+ * Re-validate the additions on the way in. The server already clamps them;
+ * this is the same defensive narrowing the string lists get, so a malformed
+ * reply can never put an unlabelled sentence in front of the tradie.
+ */
+function asAdditions(value: unknown): ComposeAddition[] {
+  if (!Array.isArray(value)) return [];
+  const out: ComposeAddition[] = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== 'object') continue;
+    const raw = entry as Record<string, unknown>;
+    const text = typeof raw.text === 'string' ? raw.text.trim() : '';
+    if (!text) continue;
+    const field = WRITE_UP_FIELDS.includes(raw.field as WriteUpField)
+      ? (raw.field as WriteUpField)
+      : 'workCarriedOut';
+    out.push({ text, field });
+  }
+  return out;
 }
 
 /**
@@ -91,5 +136,6 @@ export async function composeServiceReport(
     recommendedWork: data.recommendedWork || '',
     suggestedEquipment: asStringArray(data.suggestedEquipment),
     suggestedChecklist: asStringArray(data.suggestedChecklist),
+    suggestedAdditions: asAdditions(data.suggestedAdditions),
   };
 }

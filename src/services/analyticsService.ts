@@ -104,6 +104,13 @@ export type AnalyticsEvent =
   | 'report_created'
   // Mate returned a clean write-up for the rough notes.
   | 'report_written_up'
+  // A new report pre-filled its equipment + checklist from the last visit to
+  // the same site. Paired with report_site_memory_undone, this is the
+  // read on whether site matching is picking the right previous visit.
+  | 'report_site_memory_applied'
+  // The tradie took those carried rows straight back off — a wrong match,
+  // or a site whose plant has changed.
+  | 'report_site_memory_undone'
   // First save carrying fresh signature ink (measured ink only — ghost
   // taps and carried-forward/loaded signatures don't count).
   | 'report_signed'

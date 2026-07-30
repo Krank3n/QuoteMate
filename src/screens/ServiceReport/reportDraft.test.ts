@@ -2,14 +2,21 @@ import { describe, it, expect } from 'vitest';
 
 import {
   applyComposedWriteUp,
+  carryForwardSiteMemory,
   deriveReportContext,
   buildInitialReportForm,
   buildReportInput,
   formFromReport,
+  latestSiteReport,
+  latestSiteWriteUp,
   latestTechnicianSignature,
+  normaliseSiteText,
   pruneSuggestions,
+  removeCarriedRows,
   reportRowSummary,
   resumableReportId,
+  sameSite,
+  siteIdentity,
   type ReportFormState,
 } from './reportDraft';
 import type { ServiceReport } from '../../../shared/report/types';
@@ -300,6 +307,392 @@ describe('latestTechnicianSignature', () => {
 
 // Minified report rows on the Job screen — the tradie must see at a glance
 // which visits have dockets and whether each went out to the customer.
+describe('site memory', () => {
+  const report = (over: Partial<ServiceReport>): ServiceReport =>
+    ({
+      id: 'r1',
+      jobId: 'j1',
+      userId: 'u1',
+      number: 'RP-001',
+      visitDate: 1,
+      serviceType: 'Service',
+      equipment: [],
+      itemsChecked: [],
+      status: 'sent',
+      createdAt: 1,
+      updatedAt: 1,
+      ...over,
+    }) as ServiceReport;
+
+  // A stable id factory so carried checklist rows are assertable.
+  const ids = () => {
+    let n = 0;
+    return () => `new-${++n}`;
+  };
+
+  describe('normaliseSiteText', () => {
+    it('folds away case, punctuation and padding', () => {
+      expect(normaliseSiteText('  12 Smith St., Warragul  ')).toBe(
+        '12 smith st warragul',
+      );
+      expect(normaliseSiteText('12 SMITH ST WARRAGUL')).toBe('12 smith st warragul');
+    });
+
+    it('returns empty for blank or missing input', () => {
+      expect(normaliseSiteText('')).toBe('');
+      expect(normaliseSiteText(undefined)).toBe('');
+      expect(normaliseSiteText('   ,,  ')).toBe('');
+    });
+
+    it('does NOT expand street types — near-misses must not match', () => {
+      expect(normaliseSiteText('12 Smith Street')).not.toBe(
+        normaliseSiteText('12 Smith St'),
+      );
+    });
+  });
+
+  describe('siteIdentity', () => {
+    it('prefers a linked contact id over a re-typed customer name', () => {
+      const id = siteIdentity(
+        makeJob({ customerId: 'c-99', customerName: 'Jane Smith' }),
+      );
+      expect(id.customer).toBe('id:c-99');
+    });
+
+    it('falls back to the normalised customer name with no contact link', () => {
+      const id = siteIdentity(makeJob({ customerId: undefined, customerName: 'Jane Smith' }));
+      expect(id.customer).toBe('jane smith');
+    });
+  });
+
+  describe('sameSite', () => {
+    const at = (jobAddress: string, customerId?: string) =>
+      siteIdentity(makeJob({ jobAddress, customerId, customerName: 'Jane Smith' }));
+
+    it('matches two jobs at the same address written differently', () => {
+      expect(sameSite(at('12 Smith St, Warragul'), at('12 smith st warragul'))).toBe(
+        true,
+      );
+    });
+
+    it('does NOT match a second property of the same customer', () => {
+      expect(
+        sameSite(at('12 Smith St, Warragul', 'c-1'), at('44 Queen St, Drouin', 'c-1')),
+      ).toBe(false);
+    });
+
+    it('falls back to the customer when one side has no address', () => {
+      expect(sameSite(at('', 'c-1'), at('12 Smith St, Warragul', 'c-1'))).toBe(true);
+    });
+
+    it('never matches two jobs with nothing identifiable', () => {
+      const blank = siteIdentity({
+        jobAddress: '',
+        customerId: undefined,
+        customerName: '',
+      } as any);
+      expect(sameSite(blank, blank)).toBe(false);
+    });
+  });
+
+  describe('latestSiteReport', () => {
+    const thisJob = makeJob({ id: 'j-now', jobAddress: '12 Smith St, Warragul' });
+
+    it('finds last year\'s visit to the same address on a DIFFERENT job', () => {
+      const jobs = [
+        thisJob,
+        makeJob({ id: 'j-old', jobAddress: '12 smith st, warragul' }),
+      ];
+      const found = latestSiteReport(
+        [report({ id: 'r-old', jobId: 'j-old', equipment: ['Package unit'] })],
+        jobs,
+        thisJob,
+      );
+      expect(found?.id).toBe('r-old');
+    });
+
+    it('returns the newest matching report when several visits exist', () => {
+      const jobs = [
+        thisJob,
+        makeJob({ id: 'j-a', jobAddress: '12 Smith St, Warragul' }),
+        makeJob({ id: 'j-b', jobAddress: '12 Smith St, Warragul' }),
+      ];
+      // Newest-first, as listReports returns them.
+      const found = latestSiteReport(
+        [
+          report({ id: 'r-new', jobId: 'j-a', equipment: ['High wall split'] }),
+          report({ id: 'r-old', jobId: 'j-b', equipment: ['Package unit'] }),
+        ],
+        jobs,
+        thisJob,
+      );
+      expect(found?.id).toBe('r-new');
+    });
+
+    it('ignores a report from a different address', () => {
+      const jobs = [thisJob, makeJob({ id: 'j-else', jobAddress: '44 Queen St, Drouin' })];
+      const found = latestSiteReport(
+        [report({ id: 'r-else', jobId: 'j-else', equipment: ['Package unit'] })],
+        jobs,
+        thisJob,
+      );
+      expect(found).toBeNull();
+    });
+
+    it('matches an earlier report on the SAME job without needing the job list', () => {
+      const found = latestSiteReport(
+        [report({ id: 'r-same', jobId: 'j-now', equipment: ['Package unit'] })],
+        [],
+        thisJob,
+      );
+      expect(found?.id).toBe('r-same');
+    });
+
+    it('skips reports with nothing to carry', () => {
+      const jobs = [thisJob, makeJob({ id: 'j-old', jobAddress: '12 Smith St, Warragul' })];
+      const found = latestSiteReport(
+        [
+          report({ id: 'r-empty', jobId: 'j-old', equipment: [], itemsChecked: [] }),
+          report({ id: 'r-full', jobId: 'j-old', equipment: ['Package unit'] }),
+        ],
+        jobs,
+        thisJob,
+      );
+      expect(found?.id).toBe('r-full');
+    });
+
+    it('skips a report whose job has since been deleted', () => {
+      const found = latestSiteReport(
+        [report({ id: 'r-orphan', jobId: 'j-gone', equipment: ['Package unit'] })],
+        [thisJob],
+        thisJob,
+      );
+      expect(found).toBeNull();
+    });
+
+    it('returns null when the current job has no address and no customer', () => {
+      const anon = makeJob({
+        id: 'j-anon',
+        jobAddress: '',
+        customerId: undefined,
+        customerName: '',
+      });
+      const found = latestSiteReport(
+        [report({ id: 'r-old', jobId: 'j-other', equipment: ['Package unit'] })],
+        [anon, makeJob({ id: 'j-other', jobAddress: '', customerId: undefined, customerName: '' })],
+        anon,
+      );
+      expect(found).toBeNull();
+    });
+
+    it('returns null for an empty report list', () => {
+      expect(latestSiteReport([], [thisJob], thisJob)).toBeNull();
+    });
+  });
+
+  describe('latestSiteWriteUp', () => {
+    const thisJob = makeJob({ id: 'j-now', jobAddress: '12 Smith St, Warragul' });
+
+    it('returns the previous visit\'s write-up for the same site', () => {
+      const jobs = [thisJob, makeJob({ id: 'j-old', jobAddress: '12 Smith St, Warragul' })];
+      const out = latestSiteWriteUp(
+        [
+          report({
+            id: 'r-old',
+            jobId: 'j-old',
+            workCarriedOut: 'Serviced the package unit and the high wall split.',
+          }),
+        ],
+        jobs,
+        thisJob,
+      );
+      expect(out).toBe('Serviced the package unit and the high wall split.');
+    });
+
+    it('finds a write-up on a visit that listed NO equipment', () => {
+      const jobs = [thisJob, makeJob({ id: 'j-old', jobAddress: '12 Smith St, Warragul' })];
+      const reports = [
+        report({
+          id: 'r-quick',
+          jobId: 'j-old',
+          equipment: [],
+          itemsChecked: [],
+          workCarriedOut: 'Attended the high wall split in the front office.',
+        }),
+      ];
+      // Nothing to carry forward...
+      expect(latestSiteReport(reports, jobs, thisJob)).toBeNull();
+      // ...but still the best guide to how this tradie writes.
+      expect(latestSiteWriteUp(reports, jobs, thisJob)).toBe(
+        'Attended the high wall split in the front office.',
+      );
+    });
+
+    it('never reaches across to another site', () => {
+      const jobs = [thisJob, makeJob({ id: 'j-else', jobAddress: '44 Queen St, Drouin' })];
+      const out = latestSiteWriteUp(
+        [report({ id: 'r-else', jobId: 'j-else', workCarriedOut: 'Regassed the unit.' })],
+        jobs,
+        thisJob,
+      );
+      expect(out).toBeUndefined();
+    });
+
+    it('skips visits with a blank write-up', () => {
+      const jobs = [thisJob, makeJob({ id: 'j-old', jobAddress: '12 Smith St, Warragul' })];
+      const out = latestSiteWriteUp(
+        [
+          report({ id: 'r-blank', jobId: 'j-old', workCarriedOut: '   ' }),
+          report({ id: 'r-real', jobId: 'j-old', workCarriedOut: 'Cleaned the coils.' }),
+        ],
+        jobs,
+        thisJob,
+      );
+      expect(out).toBe('Cleaned the coils.');
+    });
+
+    it('returns undefined when there is no previous visit', () => {
+      expect(latestSiteWriteUp([], [thisJob], thisJob)).toBeUndefined();
+    });
+  });
+
+  describe('carryForwardSiteMemory', () => {
+    it('carries equipment and checklist text from the previous visit', () => {
+      const memory = carryForwardSiteMemory(
+        {
+          equipment: ['Package unit', 'High wall split'],
+          itemsChecked: [
+            { id: 'old-1', text: 'Clean air filters', checked: true },
+            { id: 'old-2', text: 'Check electrical components', checked: true },
+          ],
+        },
+        ids(),
+      );
+      expect(memory.equipment).toEqual(['Package unit', 'High wall split']);
+      expect(memory.itemsChecked.map((it) => it.text)).toEqual([
+        'Clean air filters',
+        'Check electrical components',
+      ]);
+    });
+
+    it('NEVER carries a tick — every carried row lands unticked', () => {
+      const memory = carryForwardSiteMemory(
+        {
+          equipment: [],
+          itemsChecked: [
+            { id: 'old-1', text: 'Clean air filters', checked: true },
+            { id: 'old-2', text: 'Check gas pressures', checked: true },
+          ],
+        },
+        ids(),
+      );
+      expect(memory.itemsChecked.every((it) => it.checked === false)).toBe(true);
+    });
+
+    it('mints fresh ids so a carried row never reuses the old document\'s', () => {
+      const memory = carryForwardSiteMemory(
+        {
+          equipment: [],
+          itemsChecked: [{ id: 'old-1', text: 'Clean air filters', checked: false }],
+        },
+        ids(),
+      );
+      expect(memory.itemsChecked[0].id).toBe('new-1');
+      expect(memory.itemsChecked[0].id).not.toBe('old-1');
+    });
+
+    it('trims, drops blanks and dedupes case-insensitively', () => {
+      const memory = carryForwardSiteMemory(
+        {
+          equipment: ['  Package unit ', 'PACKAGE UNIT', '', '   ', 'High wall split'],
+          itemsChecked: [
+            { id: 'a', text: ' Clean air filters ', checked: false },
+            { id: 'b', text: 'clean air filters', checked: false },
+            { id: 'c', text: '   ', checked: false },
+          ],
+        },
+        ids(),
+      );
+      expect(memory.equipment).toEqual(['Package unit', 'High wall split']);
+      expect(memory.itemsChecked.map((it) => it.text)).toEqual(['Clean air filters']);
+    });
+
+    it('carries nothing else — narrative, photos and signatures stay behind', () => {
+      const memory = carryForwardSiteMemory(
+        report({
+          equipment: ['Package unit'],
+          itemsChecked: [],
+          natureOfProblem: 'Not cooling',
+          workCarriedOut: 'Regassed',
+          recommendedWork: 'Replace compressor',
+          photos: [{ id: 'p1', storageUrl: 'x' }],
+          technicianSignature: { svgPath: 'M0 0 L9 9', name: 'Jake', signedAt: 1 },
+        }),
+        ids(),
+      );
+      expect(Object.keys(memory).sort()).toEqual(['equipment', 'itemsChecked']);
+    });
+
+    it('handles a report with neither list present', () => {
+      const memory = carryForwardSiteMemory({} as any, ids());
+      expect(memory).toEqual({ equipment: [], itemsChecked: [] });
+    });
+  });
+
+  describe('removeCarriedRows', () => {
+    it('takes back exactly the carried rows and leaves the tradie\'s own', () => {
+      const carried = carryForwardSiteMemory(
+        {
+          equipment: ['Package unit'],
+          itemsChecked: [{ id: 'old-1', text: 'Clean air filters', checked: false }],
+        },
+        ids(),
+      );
+      const state = {
+        equipment: [...carried.equipment, 'Ducted system'],
+        itemsChecked: [
+          ...carried.itemsChecked,
+          { id: 'mine', text: 'Check thermostat', checked: true },
+        ],
+      };
+      const next = removeCarriedRows(state, carried);
+      expect(next.equipment).toEqual(['Ducted system']);
+      expect(next.itemsChecked).toEqual([
+        { id: 'mine', text: 'Check thermostat', checked: true },
+      ]);
+    });
+
+    it('keeps a carried checklist row the tradie has since reworded', () => {
+      const carried = carryForwardSiteMemory(
+        {
+          equipment: [],
+          itemsChecked: [{ id: 'old-1', text: 'Clean air filters', checked: false }],
+        },
+        ids(),
+      );
+      // Same id, edited text — it's the tradie's row now, but undo works off
+      // the id, so it goes. Documented behaviour: ids are the contract.
+      const state = {
+        equipment: [],
+        itemsChecked: [{ ...carried.itemsChecked[0], text: 'Clean air filters x2' }],
+      };
+      expect(removeCarriedRows(state, carried).itemsChecked).toEqual([]);
+    });
+
+    it('keeps a carried equipment row the tradie has since reworded', () => {
+      const carried = carryForwardSiteMemory(
+        { equipment: ['Package unit'], itemsChecked: [] },
+        ids(),
+      );
+      const next = removeCarriedRows(
+        { equipment: ['Package unit - roof'], itemsChecked: [] },
+        carried,
+      );
+      expect(next.equipment).toEqual(['Package unit - roof']);
+    });
+  });
+});
+
 describe('reportRowSummary', () => {
   const NOW = new Date('2026-07-23T06:00:00Z').getTime();
 

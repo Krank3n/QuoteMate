@@ -3,6 +3,7 @@ import {
   buildComposePrompt,
   sanitizeComposed,
   ComposeNotes,
+  MAX_ADDITIONS,
   MAX_SUGGESTIONS,
 } from './composeServiceReport.helpers';
 
@@ -31,7 +32,7 @@ describe('buildComposePrompt — factual, Aussie, no forbidden term', () => {
       '"recommend" or "should be done later" statement belongs in "recommendedWork"',
     );
     // And makes clear moving is not licence to add.
-    expect(prompt).toMatch(/facts may move between fields, but nothing may be added/i);
+    expect(prompt).toMatch(/facts may move between fields, but no new fact may be added/i);
   });
 
   it('permits filling a field whose own note was blank from other notes', () => {
@@ -131,6 +132,7 @@ describe('sanitizeComposed — cleans model output', () => {
       recommendedWork: 'Invented recommendation.',
       suggestedEquipment: ['Invented unit'],
       suggestedChecklist: ['Invented task'],
+      suggestedAdditions: [{ text: 'Invented claim.', field: 'workCarriedOut' }],
     });
     const out = sanitizeComposed(raw, {});
     expect(out).toEqual({
@@ -139,6 +141,7 @@ describe('sanitizeComposed — cleans model output', () => {
       recommendedWork: '',
       suggestedEquipment: [],
       suggestedChecklist: [],
+      suggestedAdditions: [],
     });
   });
 
@@ -211,6 +214,217 @@ describe('sanitizeComposed — cleans model output', () => {
       recommendedWork: '',
       suggestedEquipment: [],
       suggestedChecklist: [],
+      suggestedAdditions: [],
     });
+  });
+});
+
+/*
+ * Fuller prose without fuller claims.
+ *
+ * The trigger for this was a real tradie comparing our write-up to a
+ * general-purpose chatbot's. Given "cleaned filters condenser coils checked
+ * electrical components", the chatbot produced a solid paragraph — and closed
+ * it with "Unit was tested after servicing and found to be operating normally
+ * at the time of inspection." Nothing in the notes says the unit was tested,
+ * or that it was normal. On a document a customer keeps, that sentence is the
+ * whole liability.
+ *
+ * So the prompt buys length in two currencies it can afford — the recognised
+ * purpose of a stated action, and the sub-parts a stated action covers — and
+ * refuses to buy it with outcomes. The closing statement doesn't vanish; it
+ * comes back in suggestedAdditions for the tradie to confirm.
+ */
+describe('buildComposePrompt — fuller prose, same factual line', () => {
+  const notes = { workCarriedOut: 'cleaned filters condenser coils checked electrical components' };
+
+  it('asks for several sentences per field instead of one or two', () => {
+    const prompt = buildComposePrompt(notes);
+    expect(prompt).toMatch(/two to five sentences/i);
+    // The old ceiling is gone.
+    expect(prompt).not.toMatch(/keep each field to a sentence or two/i);
+  });
+
+  it('refuses to pad a thin note to reach the length', () => {
+    expect(buildComposePrompt(notes)).toMatch(/never pad with filler/i);
+  });
+
+  it('permits the recognised purpose and sub-parts of a stated action', () => {
+    const prompt = buildComposePrompt(notes);
+    expect(prompt).toMatch(/recognised, standard purpose of an action the notes say was performed/i);
+    expect(prompt).toMatch(/sub-parts a stated action inherently covers/i);
+    expect(prompt).toMatch(/describing work already in the notes, not adding work/i);
+  });
+
+  it('bans the exact class of claim that started this — tested, operating normally', () => {
+    const prompt = buildComposePrompt(notes);
+    expect(prompt).toMatch(/may NOT state any OUTCOME, RESULT, TEST, READING, or CONDITION/i);
+    expect(prompt).toMatch(/was tested/i);
+    expect(prompt).toMatch(/was operating normally/i);
+    expect(prompt).toMatch(/only the tradesperson can make them/i);
+  });
+
+  it('routes those claims to suggestedAdditions as confirmable sentences', () => {
+    const prompt = buildComposePrompt(notes);
+    expect(prompt).toContain('"suggestedAdditions"');
+    expect(prompt).toMatch(/do NOT write that statement into the write-up/i);
+    expect(prompt).toMatch(/confirm with one tap/i);
+    expect(prompt).toContain(`At most ${MAX_ADDITIONS} entries`);
+    // And the reply contract names the object shape.
+    expect(prompt).toContain('{"text","field"}');
+  });
+
+  it('still never contains the two-letter machine-intelligence term', () => {
+    const prompt = buildComposePrompt(notes, {
+      businessName: 'Coastal Air',
+      tradeCategory: 'HVAC',
+      previousWriteUp: 'Serviced the package unit.',
+    });
+    expect(prompt).not.toMatch(/\bAI\b/);
+  });
+});
+
+describe('buildComposePrompt — previous write-up is vocabulary, not facts', () => {
+  const notes = { workCarriedOut: 'serviced the unit' };
+
+  it('includes the previous write-up when one is supplied', () => {
+    const prompt = buildComposePrompt(notes, {
+      previousWriteUp: 'Serviced the package unit and the high wall split.',
+    });
+    expect(prompt).toContain('Serviced the package unit and the high wall split.');
+  });
+
+  it('fences it to vocabulary and forbids carrying its facts across', () => {
+    const prompt = buildComposePrompt(notes, {
+      previousWriteUp: 'Replaced the contactor; gas charge low.',
+    });
+    expect(prompt).toMatch(/WORDING REFERENCE/);
+    expect(prompt).toMatch(/ONLY to match the tradesperson's vocabulary/i);
+    expect(prompt).toMatch(
+      /do not carry any fact, finding, measurement or recommendation from it/i,
+    );
+    expect(prompt).toMatch(/describes a DIFFERENT visit/i);
+  });
+
+  it('keeps it out of the notes-to-rewrite block so it is never a source', () => {
+    const prompt = buildComposePrompt(notes, {
+      previousWriteUp: 'Replaced the contactor.',
+    });
+    const sourceBlock = prompt.split('NOTES TO REWRITE:')[1].split('WORDING REFERENCE')[0];
+    expect(sourceBlock).toContain('serviced the unit');
+    expect(sourceBlock).not.toContain('Replaced the contactor.');
+  });
+
+  it('adds no reference block at all when there is no previous visit', () => {
+    const prompt = buildComposePrompt(notes, { businessName: 'Coastal Air' });
+    expect(prompt).not.toMatch(/WORDING REFERENCE/);
+  });
+
+  it('ignores a blank previous write-up', () => {
+    expect(buildComposePrompt(notes, { previousWriteUp: '   ' })).not.toMatch(
+      /WORDING REFERENCE/,
+    );
+  });
+});
+
+describe('sanitizeComposed — confirmable additions', () => {
+  const notes = {
+    workCarriedOut: 'cleaned filters condenser coils checked electrical components',
+  };
+
+  it('returns well-formed additions with their target field', () => {
+    const raw = JSON.stringify({
+      workCarriedOut: 'Cleaned the air filters and condenser coils.',
+      suggestedAdditions: [
+        {
+          text: 'The unit was tested after servicing and found to be operating normally.',
+          field: 'workCarriedOut',
+        },
+        { text: 'Compressor is nearing end of life.', field: 'recommendedWork' },
+      ],
+    });
+    const out = sanitizeComposed(raw, notes);
+    expect(out.suggestedAdditions).toEqual([
+      {
+        text: 'The unit was tested after servicing and found to be operating normally.',
+        field: 'workCarriedOut',
+      },
+      { text: 'Compressor is nearing end of life.', field: 'recommendedWork' },
+    ]);
+    // Critically: the unsupported claim is NOT in the prose.
+    expect(out.workCarriedOut).not.toMatch(/operating normally/i);
+  });
+
+  it('defaults a bare string addition to work carried out', () => {
+    const raw = JSON.stringify({
+      workCarriedOut: 'Cleaned the coils.',
+      suggestedAdditions: ['The unit was left running correctly.'],
+    });
+    const out = sanitizeComposed(raw, notes);
+    expect(out.suggestedAdditions).toEqual([
+      { text: 'The unit was left running correctly.', field: 'workCarriedOut' },
+    ]);
+  });
+
+  it('falls back to work carried out when the field names a non-write-up slot', () => {
+    const raw = JSON.stringify({
+      workCarriedOut: 'Cleaned the coils.',
+      suggestedAdditions: [{ text: 'Tested and normal.', field: 'riskAssessment' }],
+    });
+    const out = sanitizeComposed(raw, notes);
+    expect(out.suggestedAdditions).toEqual([
+      { text: 'Tested and normal.', field: 'workCarriedOut' },
+    ]);
+  });
+
+  it('drops malformed entries: blanks, non-objects, missing text', () => {
+    const raw = JSON.stringify({
+      workCarriedOut: 'Cleaned the coils.',
+      suggestedAdditions: [
+        { text: '   ', field: 'workCarriedOut' },
+        { field: 'workCarriedOut' },
+        null,
+        42,
+        { text: 'Kept.', field: 'workCarriedOut' },
+      ],
+    });
+    const out = sanitizeComposed(raw, notes);
+    expect(out.suggestedAdditions).toEqual([{ text: 'Kept.', field: 'workCarriedOut' }]);
+  });
+
+  it(`dedupes and caps additions at ${MAX_ADDITIONS}`, () => {
+    const raw = JSON.stringify({
+      workCarriedOut: 'Cleaned the coils.',
+      suggestedAdditions: [
+        { text: 'Tested after servicing.', field: 'workCarriedOut' },
+        { text: 'tested after servicing.', field: 'recommendedWork' }, // dupe
+        { text: 'Claim two.', field: 'workCarriedOut' },
+        { text: 'Claim three.', field: 'workCarriedOut' },
+        { text: 'Claim four.', field: 'workCarriedOut' },
+        { text: 'Claim five.', field: 'workCarriedOut' }, // over the cap
+      ],
+    });
+    const out = sanitizeComposed(raw, notes);
+    expect(out.suggestedAdditions).toHaveLength(MAX_ADDITIONS);
+    expect(out.suggestedAdditions.map((a) => a.text)).not.toContain('Claim five.');
+  });
+
+  it('returns no additions when the key is absent or not an array', () => {
+    expect(
+      sanitizeComposed(JSON.stringify({ workCarriedOut: 'Cleaned.' }), notes)
+        .suggestedAdditions,
+    ).toEqual([]);
+    expect(
+      sanitizeComposed(
+        JSON.stringify({ workCarriedOut: 'Cleaned.', suggestedAdditions: 'nope' }),
+        notes,
+      ).suggestedAdditions,
+    ).toEqual([]);
+  });
+
+  it('offers no additions when the reply is unusable — notes are kept instead', () => {
+    const out = sanitizeComposed('not json', notes);
+    expect(out.workCarriedOut).toBe(notes.workCarriedOut);
+    expect(out.suggestedAdditions).toEqual([]);
   });
 });
