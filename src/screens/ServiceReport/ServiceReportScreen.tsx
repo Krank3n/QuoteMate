@@ -942,8 +942,25 @@ export function ServiceReportScreen() {
             />
           )}
 
-          {/* Narrative */}
-          <SectionLabel text="Nature of the problem" optional />
+          {/* Narrative.
+              One mic for the whole write-up: everything lands in Work
+              carried out, and "Write it up" sorts the facts into the right
+              sections. Four stacked mics read as clutter; one reads as a
+              feature.
+              It OPENS the block rather than trailing it. Sitting below
+              Recommended work, it read as that field's mic while actually
+              dictating into Work carried out two fields up; and "Talk
+              through the visit" is an invitation to start, which belongs
+              before the boxes it fills, not after them. */}
+          <View style={styles.dictationRow}>
+            <DictationButton
+              value={form.workCarriedOut}
+              onText={(next) => patch({ workCarriedOut: next })}
+              hint="Talk through the visit — Mate sorts it into the right sections"
+            />
+          </View>
+
+          <SectionLabel text="Nature of the problem" optional tight />
           <TextInput
             mode="outlined"
             value={form.natureOfProblem}
@@ -1012,18 +1029,6 @@ export function ServiceReportScreen() {
               </Text>
             </TouchableOpacity>
           )}
-
-          {/* One mic for the whole write-up: everything lands in Work
-              carried out, and "Write it up" sorts the facts into the right
-              sections. Four stacked mics read as clutter; one reads as a
-              feature. */}
-          <View style={styles.dictationRow}>
-            <DictationButton
-              value={form.workCarriedOut}
-              onText={(next) => patch({ workCarriedOut: next })}
-              hint="Talk through the visit — Mate sorts it into the right sections"
-            />
-          </View>
 
           <TouchableOpacity
             onPress={handleWriteItUp}
@@ -1134,15 +1139,20 @@ function SectionLabel({
   text,
   optional,
   action,
+  tight,
 }: {
   text: string;
   optional?: boolean;
   // Optional right-aligned action for the section. Lives in the heading row
   // rather than as another button in the body — the screen is long enough.
   action?: { label: string; onPress: () => void };
+  // Drops the standard section gap above. For a label that follows its own
+  // intro control (the dictation mic) and must group with it rather than
+  // float between sections.
+  tight?: boolean;
 }) {
   return (
-    <View style={styles.sectionLabelRow}>
+    <View style={[styles.sectionLabelRow, tight && styles.sectionLabelRowTight]}>
       <Text style={styles.sectionLabel}>{text}</Text>
       {optional ? <Text style={styles.optional}>optional</Text> : null}
       {action ? (
@@ -1249,6 +1259,7 @@ const styles = StyleSheet.create({
     marginTop: 18,
     marginBottom: 6,
   },
+  sectionLabelRowTight: { marginTop: 0 },
   sectionLabel: { fontSize: 14, fontWeight: '700', color: colors.text },
   optional: { fontSize: 12, color: colors.textMuted, fontStyle: 'italic' },
   // Pushes a section action to the right-hand end of the heading row.
@@ -1305,7 +1316,12 @@ const styles = StyleSheet.create({
     marginTop: 6,
     lineHeight: 16,
   },
-  dictationRow: { marginTop: 2, marginBottom: 4 },
+  // Heads the narrative block, so it must read as belonging to what's BELOW
+  // it: a full section gap above, and it sits tight against the "Nature of
+  // the problem" label (rendered with `tight`, which drops that label's own
+  // top margin). Even spacing on both sides left it looking like the
+  // checklist's mic.
+  dictationRow: { marginTop: 22, marginBottom: 2 },
   quoteWorkButton: {
     flexDirection: 'row',
     alignItems: 'center',
