@@ -152,6 +152,11 @@ export function buildComposePrompt(notes: ComposeNotes, context?: ComposeContext
     // general-purpose chatbot — not accuracy. The next three rules widen the
     // prose while holding the factual line exactly where it was.
     'WRITE IN FULL. Each supplied note should become two to five sentences of proper service-report prose, not a single clipped line. A very short note may still be one sentence — never pad with filler to reach a length.',
+    // Widening the prose re-opened an old failure in a new place: with room
+    // to fill, the model started manufacturing a "nature of the problem"
+    // out of the mere fact that a service happened ("a scheduled service
+    // was required"), which is a claim about the visit the notes never made.
+    'AN EMPTY FIELD IS A CORRECT ANSWER. Only write a field when the notes contain facts that belong in it. If the notes say nothing about what the customer reported or what was found on arrival, return "natureOfProblem" as an empty string — do NOT manufacture one by restating that a service took place, and do NOT characterise the visit as scheduled, routine, preventative, an emergency, or a breakdown unless the notes say so. The same applies to "recommendedWork": no recommendation in the notes means an empty string.',
     'You MAY state the recognised, standard purpose of an action the notes say was performed — for example, cleaning condenser coils improves airflow and heat-transfer efficiency, or replacing a worn seal restores the weather seal. You MAY name the sub-parts a stated action inherently covers — for example, checking electrical components covers wiring, terminals and connections. This is describing work already in the notes, not adding work.',
     'You may NOT state any OUTCOME, RESULT, TEST, READING, or CONDITION unless the notes say it. Never write that equipment was tested, was operating normally, was left in good working order, passed a check, or was found to be within specification, unless the notes state it. These are the claims a customer relies on and only the tradesperson can make them.',
     'Use Australian English spelling.',

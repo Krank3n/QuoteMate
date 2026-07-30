@@ -250,6 +250,24 @@ describe('buildComposePrompt — fuller prose, same factual line', () => {
     expect(buildComposePrompt(notes)).toMatch(/never pad with filler/i);
   });
 
+  // Observed against the live model once the prose was widened: given only
+  // "completed a service on the package unit", it filled the empty
+  // natureOfProblem with "a scheduled service was required" — a claim about
+  // the visit the tradesperson never made.
+  it('tells the model an empty field is a correct answer', () => {
+    const prompt = buildComposePrompt(notes);
+    expect(prompt).toMatch(/AN EMPTY FIELD IS A CORRECT ANSWER/);
+    expect(prompt).toMatch(/return "natureOfProblem" as an empty string/i);
+    expect(prompt).toMatch(/do NOT manufacture one by restating that a service took place/i);
+  });
+
+  it('bans characterising the visit type when the notes do not', () => {
+    const prompt = buildComposePrompt(notes);
+    expect(prompt).toMatch(
+      /scheduled, routine, preventative, an emergency, or a breakdown unless the notes say so/i,
+    );
+  });
+
   it('permits the recognised purpose and sub-parts of a stated action', () => {
     const prompt = buildComposePrompt(notes);
     expect(prompt).toMatch(/recognised, standard purpose of an action the notes say was performed/i);
