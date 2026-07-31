@@ -22,9 +22,9 @@
  */
 import * as admin from 'firebase-admin';
 import { isBilledSub, isRestoredStorePro } from '../src/subscription.helpers';
+import { isTestAccount } from '../src/adminFunnel.helpers';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const TEST_ACCOUNT_RE = /example\.com$|mate\.debug|newtestuser|testuser@|^qm-marketing-demo$/i;
 
 function ts(v: any): number | null {
   if (!v) return null;
@@ -95,9 +95,7 @@ async function main() {
     invoicesByUid.get(uid)!.push(d.data());
   }
 
-  const realUsers = authUsers.filter(
-    (u) => !TEST_ACCOUNT_RE.test(u.email || '') && !TEST_ACCOUNT_RE.test(u.displayName || ''),
-  );
+  const realUsers = authUsers.filter((u) => !isTestAccount(u.email, u.displayName));
 
   type Cls = 'customer' | 'selfOnly' | 'testOnly' | 'noSends';
   const byClass: Record<Cls, string[]> = { customer: [], selfOnly: [], testOnly: [], noSends: [] };

@@ -13,11 +13,15 @@
  * Needs Application Default Credentials. Makes no writes.
  */
 import * as admin from 'firebase-admin';
-import { computeFunnelStats, FunnelUserInput, isActivatingDoc } from '../src/adminFunnel.helpers';
+import {
+  computeFunnelStats,
+  FunnelUserInput,
+  isActivatingDoc,
+  isTestAccount,
+} from '../src/adminFunnel.helpers';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-const TEST_ACCOUNT_RE = /example\.com$|mate\.debug|newtestuser|testuser@|^qm-marketing-demo$/i;
 
 function ts(v: any): number | null {
   if (!v) return null;
@@ -124,8 +128,7 @@ async function main() {
       return noTrial && !hasAnyDoc.has(u.uid) && inWindow;
     });
 
-    const isTest = (u: admin.auth.UserRecord) =>
-      TEST_ACCOUNT_RE.test(u.email || '') || TEST_ACCOUNT_RE.test(u.displayName || '');
+    const isTest = (u: admin.auth.UserRecord) => isTestAccount(u.email, u.displayName);
     const test = cohort.filter(isTest);
     const real = cohort.filter((u) => !isTest(u));
 

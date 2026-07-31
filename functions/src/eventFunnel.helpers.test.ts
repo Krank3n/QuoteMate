@@ -1,11 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import {
   EventFunnelUserInput,
+  SendFlowFlags,
+  SendFlowUserInput,
   docHasSquarePayment,
+  emptySendFlowFlags,
   foldEvent,
+  furthestSendStage,
   furthestStage,
   isMonetized,
+  parseSendMethod,
   rollupEventFunnel,
+  rollupSendFlow,
+  summariseWaits,
 } from './eventFunnel.helpers';
 
 const NOW = Date.parse('2026-07-16T00:00:00.000Z');
@@ -156,12 +163,300 @@ describe('foldEvent', () => {
     let flags = foldEvent(undefined, 'paywall_viewed');
     flags = foldEvent(flags, 'paywall_viewed');
     flags = foldEvent(flags, 'checkout_started');
-    expect(flags).toEqual({ viewedPaywall: true, startedCheckout: true });
+    expect(flags).toEqual({
+      viewedPaywall: true,
+      startedCheckout: true,
+      ...emptySendFlowFlags(),
+    });
   });
 
   it('ignores unrelated events without creating noise', () => {
     const flags = foldEvent(undefined, 'quote_started');
-    expect(flags).toEqual({ viewedPaywall: false, startedCheckout: false });
+    expect(flags).toEqual({
+      viewedPaywall: false,
+      startedCheckout: false,
+      ...emptySendFlowFlags(),
+    });
+  });
+
+  it('threads send-flow props through onto the same flag bag', () => {
+    let flags = foldEvent(undefined, 'send_sheet_opened', { doc_type: 'quote', plan: 'trial' });
+    flags = foldEvent(flags, 'send_method_chosen', { method: 'email', doc_type: 'quote' });
+    flags = foldEvent(flags, 'email_preview_opened', { doc_type: 'quote', wait_ms: 4200 });
+    flags = foldEvent(flags, 'quote_send_succeeded', { method: 'email', to_self: false });
+
+    expect(flags.openedSendSheet).toBe(true);
+    expect(flags.choseSendMethod).toBe(true);
+    expect(flags.methods).toEqual(['email']);
+    expect(flags.previewWaitMs).toEqual([4200]);
+    expect(flags.sendSucceeded).toBe(true);
+    expect(flags.sentToSelf).toBe(false);
+    // Path A flags stay untouched by send-flow traffic.
+    expect(flags.viewedPaywall).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SEND-FLOW SUB-FUNNEL
+// ---------------------------------------------------------------------------
+
+function sendFlags(over: Partial<SendFlowFlags> = {}): SendFlowFlags {
+  return { ...emptySendFlowFlags(), ...over };
+}
+
+function sender(over: Partial<SendFlowUserInput> = {}): SendFlowUserInput {
+  return { hasSentDoc: false, ...over };
+}
+
+describe('parseSendMethod', () => {
+  it('accepts the four contracted methods and rejects anything else', () => {
+    expect(parseSendMethod('email')).toBe('email');
+    expect(parseSendMethod('sms')).toBe('sms');
+    expect(parseSendMethod('share')).toBe('share');
+    expect(parseSendMethod('export_pdf')).toBe('export_pdf');
+    expect(parseSendMethod('carrier_pigeon')).toBeNull();
+    expect(parseSendMethod(undefined)).toBeNull();
+    expect(parseSendMethod(7)).toBeNull();
+  });
+});
+
+describe('foldSendEvent (via foldEvent)', () => {
+  it('collects every method a tradie tried, without duplicates', () => {
+    let flags = foldEvent(undefined, 'send_method_chosen', { method: 'email' });
+    flags = foldEvent(flags, 'send_method_chosen', { method: 'email' });
+    flags = foldEvent(flags, 'send_method_chosen', { method: 'sms' });
+    expect(flags.methods).toEqual(['email', 'sms']);
+  });
+
+  it('records a step even when its props are missing or malformed', () => {
+    let flags = foldEvent(undefined, 'send_method_chosen', undefined);
+    flags = foldEvent(flags, 'email_preview_opened', 'not-an-object');
+    expect(flags.choseSendMethod).toBe(true);
+    expect(flags.methods).toEqual([]);
+    expect(flags.openedEmailPreview).toBe(true);
+    expect(flags.previewWaitMs).toEqual([]);
+  });
+
+  it('keeps one wait sample per preview open, dropping clock-skew values', () => {
+    let flags = foldEvent(undefined, 'email_preview_opened', { wait_ms: 1200 });
+    flags = foldEvent(flags, 'email_preview_opened', { wait_ms: 3400 });
+    flags = foldEvent(flags, 'email_preview_opened', { wait_ms: -50 });
+    flags = foldEvent(flags, 'email_preview_opened', { wait_ms: 'soon' });
+    expect(flags.previewWaitMs).toEqual([1200, 3400]);
+  });
+
+  it('flags a self-addressed send only when to_self is literally true', () => {
+    expect(foldEvent(undefined, 'quote_send_succeeded', { to_self: true }).sentToSelf).toBe(true);
+    expect(foldEvent(undefined, 'quote_send_succeeded', { to_self: 'yes' }).sentToSelf).toBe(false);
+    expect(foldEvent(undefined, 'quote_send_succeeded', {}).sentToSelf).toBe(false);
+  });
+
+  it('records an abandoned preview', () => {
+    const flags = foldEvent(undefined, 'email_preview_abandoned', {
+      doc_type: 'quote',
+      had_recipient: true,
+      edited_body: false,
+    });
+    expect(flags.abandonedEmailPreview).toBe(true);
+  });
+});
+
+describe('summariseWaits', () => {
+  it('reports the middle value for an odd sample count', () => {
+    expect(summariseWaits([3000, 1000, 2000])).toEqual({
+      samples: 3,
+      median: 2000,
+      p90: 3000,
+      max: 3000,
+    });
+  });
+
+  it('averages the two middle values for an even sample count', () => {
+    expect(summariseWaits([1000, 2000, 3000, 5000]).median).toBe(2500);
+  });
+
+  it('p90 is nearest-rank, so one slow outlier cannot drag the median', () => {
+    const samples = [...Array(9).fill(1000), 60000];
+    const summary = summariseWaits(samples);
+    expect(summary.median).toBe(1000);
+    expect(summary.p90).toBe(1000);
+    expect(summary.max).toBe(60000);
+  });
+
+  it('drops unusable samples and never divides by zero', () => {
+    expect(summariseWaits([])).toEqual({ samples: 0, median: 0, p90: 0, max: 0 });
+    expect(summariseWaits([NaN, -1, Infinity])).toEqual({
+      samples: 0,
+      median: 0,
+      p90: 0,
+      max: 0,
+    });
+    expect(summariseWaits([NaN, 500, -1]).samples).toBe(1);
+  });
+});
+
+describe('furthestSendStage', () => {
+  it('is null for anyone who never entered the send flow', () => {
+    expect(furthestSendStage(sender())).toBeNull();
+    expect(furthestSendStage(sender({ send: sendFlags() }))).toBeNull();
+  });
+
+  it('orders the steps sheet → method → preview', () => {
+    expect(furthestSendStage(sender({ send: sendFlags({ openedSendSheet: true }) }))).toBe(
+      'send_sheet_opened'
+    );
+    expect(furthestSendStage(sender({ send: sendFlags({ choseSendMethod: true }) }))).toBe(
+      'method_chosen'
+    );
+    expect(furthestSendStage(sender({ send: sendFlags({ openedEmailPreview: true }) }))).toBe(
+      'email_preview_opened'
+    );
+  });
+
+  it('an abandoned preview implies an opened one (either write can go missing)', () => {
+    expect(furthestSendStage(sender({ send: sendFlags({ abandonedEmailPreview: true }) }))).toBe(
+      'email_preview_opened'
+    );
+  });
+
+  it('durable evidence wins: a doc past draft is a send with no event at all', () => {
+    expect(furthestSendStage(sender({ hasSentDoc: true }))).toBe('quote_sent');
+    // …and it still wins when the events say they only got as far as the sheet.
+    expect(
+      furthestSendStage(sender({ hasSentDoc: true, send: sendFlags({ openedSendSheet: true }) }))
+    ).toBe('quote_sent');
+  });
+
+  it('a quote_send_succeeded event alone is enough when the doc lags', () => {
+    expect(furthestSendStage(sender({ send: sendFlags({ sendSucceeded: true }) }))).toBe(
+      'quote_sent'
+    );
+  });
+});
+
+describe('rollupSendFlow', () => {
+  it('measures reach, drop-off and the stall histogram across the flow', () => {
+    const inputs: SendFlowUserInput[] = [
+      // Opened the sheet, picked nothing — the darkest cohort.
+      sender({ send: sendFlags({ openedSendSheet: true }) }),
+      // Picked email, never reached the preview.
+      sender({ send: sendFlags({ openedSendSheet: true, choseSendMethod: true, methods: ['email'] }) }),
+      // Reached the preview, bailed, never sent — the leak we're hunting.
+      sender({
+        send: sendFlags({
+          openedSendSheet: true,
+          choseSendMethod: true,
+          methods: ['email'],
+          openedEmailPreview: true,
+          abandonedEmailPreview: true,
+          previewWaitMs: [6000],
+        }),
+      }),
+      // Bailed once, came back and sent it — abandonment isn't always fatal.
+      sender({
+        hasSentDoc: true,
+        send: sendFlags({
+          openedSendSheet: true,
+          choseSendMethod: true,
+          methods: ['email'],
+          openedEmailPreview: true,
+          abandonedEmailPreview: true,
+          sendSucceeded: true,
+          previewWaitMs: [2000],
+        }),
+      }),
+      // Sent by SMS — never sees a preview, so must not count as one.
+      sender({
+        hasSentDoc: true,
+        send: sendFlags({
+          openedSendSheet: true,
+          choseSendMethod: true,
+          methods: ['sms'],
+          sendSucceeded: true,
+        }),
+      }),
+      // Pre-instrumentation sender: durable doc, not a single event.
+      sender({ hasSentDoc: true }),
+      // Never opened the send sheet at all — outside this funnel entirely.
+      sender(),
+    ];
+
+    const out = rollupSendFlow(inputs);
+
+    expect(out.sheetOpened).toBe(6);
+    expect(out.methodChosen).toBe(5); // the sheet-only user is the one that drops
+    expect(out.sent).toBe(3);
+    expect(out.pctMethodChosen).toBe(5 / 6);
+    expect(out.pctSent).toBe(3 / 5);
+
+    // Preview counts are email-branch only: the SMS sender and the
+    // pre-instrumentation sender are deliberately absent.
+    expect(out.email.previewOpened).toBe(2);
+    expect(out.email.previewAbandoned).toBe(2);
+    expect(out.email.abandonedThenSent).toBe(1);
+    expect(out.email.pctPreviewOpened).toBe(2 / 3); // of the 3 who picked email
+    expect(out.email.pctPreviewAbandoned).toBe(1);
+    expect(out.email.waitMs).toEqual({ samples: 2, median: 4000, p90: 6000, max: 6000 });
+
+    expect(out.methods).toEqual({ email: 3, sms: 1, share: 0, export_pdf: 0 });
+    expect(out.durableOnlySends).toBe(1);
+    expect(out.selfSends).toBe(0);
+
+    // The histogram is the stall picture, and it sums to everyone who entered.
+    expect(out.histogram).toEqual({
+      send_sheet_opened: 1,
+      method_chosen: 1,
+      email_preview_opened: 1,
+      quote_sent: 3,
+    });
+    const entered = Object.values(out.histogram).reduce((a, b) => a + b, 0);
+    expect(entered).toBe(out.sheetOpened);
+  });
+
+  it('counts a self-addressed send as a send, but names it separately', () => {
+    const out = rollupSendFlow([
+      sender({
+        hasSentDoc: true,
+        send: sendFlags({
+          openedSendSheet: true,
+          choseSendMethod: true,
+          methods: ['email'],
+          sendSucceeded: true,
+          sentToSelf: true,
+        }),
+      }),
+    ]);
+    expect(out.sent).toBe(1);
+    expect(out.selfSends).toBe(1);
+  });
+
+  it('a tradie who tried two methods lands in both columns, once each', () => {
+    const out = rollupSendFlow([
+      sender({ send: sendFlags({ openedSendSheet: true, choseSendMethod: true, methods: ['email', 'share'] }) }),
+    ]);
+    expect(out.methods).toEqual({ email: 1, sms: 0, share: 1, export_pdf: 0 });
+    expect(out.methodChosen).toBe(1);
+  });
+
+  it('zero denominators produce 0, never NaN', () => {
+    const out = rollupSendFlow([]);
+    expect(out.pctMethodChosen).toBe(0);
+    expect(out.pctSent).toBe(0);
+    expect(out.email.pctPreviewOpened).toBe(0);
+    expect(out.email.pctPreviewAbandoned).toBe(0);
+    expect(out.email.waitMs.samples).toBe(0);
+    expect(out.histogram.quote_sent).toBe(0);
+  });
+
+  it('rides along on the main payload so the cron writes one document', () => {
+    const payload = rollupEventFunnel(
+      [user({ uid: 'a', hasSentDoc: true, send: sendFlags({ openedSendSheet: true, sendSucceeded: true }) })],
+      NOW,
+      30
+    );
+    expect(payload.sendFlow.sheetOpened).toBe(1);
+    expect(payload.sendFlow.sent).toBe(1);
+    expect(payload.shared.quoteSent).toBe(1);
   });
 });
 
