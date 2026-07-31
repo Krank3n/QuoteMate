@@ -4,7 +4,7 @@
  */
 
 import React from 'react';
-import { View, StyleSheet, Animated } from 'react-native';
+import { View, StyleSheet, Animated, TouchableOpacity } from 'react-native';
 import { Text } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { colors } from '../theme';
@@ -23,12 +23,24 @@ interface OnboardingProgressProps {
   currentStep: number;
   totalSteps: number;
   steps: OnboardingStep[];
+  /**
+   * Jump to a step. Omit to leave the bar as a read-only indicator.
+   * Only fires for steps `isStepReachable` approves.
+   */
+  onStepPress?: (stepId: number) => void;
+  /**
+   * Whether a step can be jumped to right now. Defaults to "none are" so the
+   * bar stays inert unless a caller opts in.
+   */
+  isStepReachable?: (stepId: number) => boolean;
 }
 
 export function OnboardingProgress({
   currentStep,
   totalSteps,
   steps,
+  onStepPress,
+  isStepReachable,
 }: OnboardingProgressProps) {
   const progressPercentage = ((currentStep - 1) / (totalSteps - 1)) * 100;
 
@@ -54,8 +66,27 @@ export function OnboardingProgress({
           const isCurrent = step.id === currentStep;
           const isUpcoming = step.id > currentStep;
 
+          const reachable = !!onStepPress && !isCurrent && (isStepReachable?.(step.id) ?? false);
+
           return (
-            <View key={step.id} style={styles.stepWrapper}>
+            <TouchableOpacity
+              key={step.id}
+              style={styles.stepWrapper}
+              onPress={() => onStepPress?.(step.id)}
+              disabled={!reachable}
+              // Generous tap target: the circle is only 32px in a row of up to
+              // eight, so the gaps between them have to be forgiving on a phone.
+              hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: !reachable, selected: isCurrent }}
+              accessibilityLabel={
+                isCurrent
+                  ? `${step.label}, current step`
+                  : reachable
+                  ? `Go to ${step.label}`
+                  : `${step.label}, not available yet`
+              }
+            >
               <View
                 style={[
                   styles.stepCircle,
@@ -93,7 +124,7 @@ export function OnboardingProgress({
               >
                 {step.label}
               </Text>
-            </View>
+            </TouchableOpacity>
           );
         })}
       </View>
