@@ -80,13 +80,16 @@ export interface DictationButtonProps {
    * 'inline' (default) — a small round mic with the hint beside it, for
    * sitting next to a single field.
    *
-   * 'card' — a full-width bordered button with the hint underneath, for when
-   * dictation heads a whole block of fields rather than belonging to one.
-   * A small floating mic reads as decoration at that size and doesn't say
-   * which fields it feeds; a full-width control reads as an action.
+   * 'hero' — the big centred mic with its label underneath, matching the
+   * record button on NewQuote/JobDetailsScreen. That is this app's
+   * established voice affordance, so dictation that heads a whole block of
+   * fields should look like it there too. (Deliberately NOT a full-width
+   * bordered button: that is the shape of the Mate clean-up action it sits
+   * above, and two identical shapes doing different things read as a pair
+   * of the same control.)
    */
-  variant?: 'inline' | 'card';
-  /** Button text in 'card' variant. Ignored when inline. */
+  variant?: 'inline' | 'hero';
+  /** Idle label under the mic in 'hero' variant. Ignored when inline. */
   label?: string;
 }
 
@@ -307,31 +310,32 @@ export function DictationButton({
   const supported = Platform.OS === 'web' ? !!getWebSpeechRecognition() : !!ExpoSpeechRecognitionModule;
   if (!supported) return null;
 
-  if (variant === 'card') {
+  if (variant === 'hero') {
     return (
-      <View>
+      <View style={styles.heroContainer}>
         <TouchableOpacity
           onPress={() => { handleToggle(); }}
           disabled={disabled || isRequestingPermission}
-          style={[styles.card, isRecording && styles.cardActive]}
+          style={[styles.heroButton, isRecording && styles.heroButtonActive]}
           activeOpacity={0.8}
           accessibilityRole="button"
           accessibilityLabel={isRecording ? 'Stop dictating' : 'Dictate into this field'}
         >
           <MaterialCommunityIcons
             name={isRecording ? 'stop' : 'microphone'}
-            size={18}
-            color={isRecording ? colors.error : colors.primary}
+            size={36}
+            color="#FFFFFF"
           />
-          <Text style={[styles.cardText, isRecording && styles.cardTextActive]}>
-            {isRequestingPermission
-              ? 'Requesting microphone permission…'
-              : isRecording
-                ? 'Listening — tap to stop'
-                : label}
-          </Text>
         </TouchableOpacity>
-        {hint ? <Text style={styles.cardHint}>{hint}</Text> : null}
+
+        <Text style={[styles.heroLabel, isRecording && styles.heroLabelActive]}>
+          {isRequestingPermission
+            ? 'Requesting microphone permission…'
+            : isRecording
+              ? 'Tap to stop recording'
+              : label}
+        </Text>
+        {hint ? <Text style={styles.heroHint}>{hint}</Text> : null}
       </View>
     );
   }
@@ -391,35 +395,52 @@ const styles = StyleSheet.create({
     color: colors.success,
     fontWeight: '600',
   },
-  // Card variant — deliberately the same shape as the "Write it up with
-  // Mate" button it pairs with, so the two bracket the fields between them
-  // as one family of Mate actions.
-  card: {
-    flexDirection: 'row',
+  // Hero variant — mirrors the record button on NewQuote/JobDetailsScreen
+  // (88px circle, white 36px glyph, label centred underneath) so voice input
+  // looks the same wherever it appears. The pulse/ripple animation on that
+  // screen is deliberately not copied: it belongs to a voice-FIRST flow
+  // where the mic is the main event, and here it is one way in among typed
+  // fields.
+  heroContainer: {
     alignItems: 'center',
+    marginVertical: 16,
+  },
+  heroButton: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    backgroundColor: colors.primary,
     justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 12,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: colors.primary,
-    backgroundColor: colors.surface,
+    alignItems: 'center',
+    elevation: 8,
+    shadowColor: colors.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    borderWidth: 3,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
   },
-  cardActive: {
-    borderColor: colors.error,
+  heroButtonActive: {
+    backgroundColor: colors.success,
+    shadowColor: colors.success,
+    shadowOpacity: 0.6,
+    elevation: 16,
   },
-  cardText: {
+  heroLabel: {
     fontSize: 14,
-    fontWeight: '700',
-    color: colors.primary,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginTop: 8,
+    color: colors.onSurface,
   },
-  cardTextActive: {
-    color: colors.error,
+  heroLabelActive: {
+    color: colors.success,
   },
-  cardHint: {
+  heroHint: {
     fontSize: 12,
     color: colors.textMuted,
-    marginTop: 6,
+    textAlign: 'center',
+    marginTop: 4,
     lineHeight: 16,
   },
 });

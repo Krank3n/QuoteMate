@@ -954,10 +954,10 @@ export function ServiceReportScreen() {
               before the boxes it fills, not after them. */}
           <View style={styles.dictationRow}>
             <DictationButton
-              variant="card"
+              variant="hero"
               value={form.workCarriedOut}
               onText={(next) => patch({ workCarriedOut: next })}
-              label="Talk through the visit"
+              label="Tap to talk through the visit"
               hint="Mate sorts it into the right sections when you clean it up."
             />
           </View>
@@ -1256,7 +1256,6 @@ const styles = StyleSheet.create({
     marginTop: 18,
     marginBottom: 6,
   },
-  sectionLabelRowTight: { marginTop: 0 },
   sectionLabel: { fontSize: 14, fontWeight: '700', color: colors.text },
   optional: { fontSize: 12, color: colors.textMuted, fontStyle: 'italic' },
   // Pushes a section action to the right-hand end of the heading row.
@@ -1313,12 +1312,10 @@ const styles = StyleSheet.create({
     marginTop: 6,
     lineHeight: 16,
   },
-  // Heads the narrative block, so it must read as belonging to what's BELOW
-  // it: a full section gap above, and it sits tight against the "Nature of
-  // the problem" label (rendered with `tight`, which drops that label's own
-  // top margin). Even spacing on both sides left it looking like the
-  // checklist's mic.
-  dictationRow: { marginTop: 22, marginBottom: 2 },
+  // Only a nudge — the hero variant carries its own vertical rhythm, and
+  // its size and centred label are what mark it as heading the block below
+  // rather than trailing the checklist above.
+  dictationRow: { marginTop: 6 },
   quoteWorkButton: {
     flexDirection: 'row',
     alignItems: 'center',
