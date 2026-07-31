@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  COHORT_WINDOW_DAYS,
   computeFunnelStats,
   isActivatingDoc,
   safeRatio,
@@ -147,5 +148,70 @@ describe('division-by-zero safety — empty / no-trial inputs never produce NaN'
   it('safeRatio guards the raw denominator', () => {
     expect(safeRatio(3, 0)).toBe(0);
     expect(safeRatio(1, 4)).toBe(0.25);
+  });
+  it('cohorts are present and NaN-free even with no users at all', () => {
+    const out = computeFunnelStats([], NOW);
+    for (const w of COHORT_WINDOW_DAYS) {
+      const c = out.cohorts[String(w)];
+      expect(c.signups).toBe(0);
+      expect(c.trialToPaid).toBe(0);
+      expect(Number.isNaN(c.activationRate)).toBe(false);
+    }
+  });
+});
+
+describe('signup cohorts — each window is a true cohort, sliced by signupAt', () => {
+  const billed = { isPro: true, platform: 'web', subscriptionId: 'sub_1', trialStartedAt: iso(NOW - 40 * DAY) };
+  const inputs: FunnelUserInput[] = [
+    // 3 days old: signed up, started a trial, sent a quote, not paying yet.
+    user({ uid: 'fresh', signupAt: NOW - 3 * DAY, sub: { trialStartedAt: iso(NOW - 3 * DAY) }, hasSentDoc: true }),
+    // 20 days old: trial started, never sent anything.
+    user({ uid: 'mid', signupAt: NOW - 20 * DAY, sub: { trialStartedAt: iso(NOW - 20 * DAY) } }),
+    // 60 days old: converted to a billed sub.
+    user({ uid: 'converted', signupAt: NOW - 60 * DAY, sub: billed, hasSentDoc: true }),
+    // 200 days old: ancient, all-time only.
+    user({ uid: 'ancient', signupAt: NOW - 200 * DAY, sub: { trialStartedAt: iso(NOW - 200 * DAY) }, hasSentDoc: true }),
+    // No signupAt at all — can't be placed in any window.
+    user({ uid: 'undated', signupAt: null, sub: { trialStartedAt: iso(NOW - 5 * DAY) } }),
+  ];
+  const out = computeFunnelStats(inputs, NOW);
+
+  it('7d holds only the 3-day-old signup', () => {
+    expect(out.cohorts['7'].signups).toBe(1);
+    expect(out.cohorts['7'].sentQuote).toBe(1);
+    expect(out.cohorts['7'].paying).toBe(0);
+  });
+  it('28d adds the 20-day-old one', () => {
+    expect(out.cohorts['28'].signups).toBe(2);
+    expect(out.cohorts['28'].startedTrial).toBe(2);
+    expect(out.cohorts['28'].sentQuote).toBe(1);
+  });
+  it('90d adds the converted 60-day-old, so the cohort has a payer', () => {
+    expect(out.cohorts['90'].signups).toBe(3);
+    expect(out.cohorts['90'].paying).toBe(1);
+    expect(out.cohorts['90'].trialToPaid).toBeCloseTo(1 / 3, 10);
+  });
+  it('all-time still counts the ancient AND the undated user that no window can hold', () => {
+    expect(out.funnel.signups).toBe(5);
+    expect(out.cohorts['90'].signups).toBeLessThan(out.funnel.signups);
+  });
+  it('flags 7d as too young to judge paid conversion, 28d and 90d as mature', () => {
+    expect(out.cohorts['7'].matureForPaid).toBe(false);
+    expect(out.cohorts['28'].matureForPaid).toBe(true);
+    expect(out.cohorts['90'].matureForPaid).toBe(true);
+  });
+  it('cohorts nest — every window is a subset of the next one up', () => {
+    expect(out.cohorts['7'].signups).toBeLessThanOrEqual(out.cohorts['28'].signups);
+    expect(out.cohorts['28'].signups).toBeLessThanOrEqual(out.cohorts['90'].signups);
+  });
+  it('a cohort covering everyone reproduces the all-time numbers exactly', () => {
+    const dated = inputs.filter((u) => u.signupAt !== null);
+    const all = computeFunnelStats(dated, NOW);
+    expect(all.cohorts['90'].signups).toBe(3);
+    // Widening to cover all dated users must match the headline funnel.
+    const wide = computeFunnelStats(dated.filter((u) => (u.signupAt as number) >= NOW - 90 * DAY), NOW);
+    expect(wide.funnel.signups).toBe(all.cohorts['90'].signups);
+    expect(wide.funnel.paying).toBe(all.cohorts['90'].paying);
+    expect(wide.funnel.sentQuote).toBe(all.cohorts['90'].sentQuote);
   });
 });

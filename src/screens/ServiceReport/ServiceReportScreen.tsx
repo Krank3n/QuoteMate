@@ -70,7 +70,9 @@ import {
   removeCarriedRows,
   setAllChecked,
   tickAllState,
+  writeUpSnapshot,
   type ReportFormState,
+  type WriteUpFields,
   type SiteMemory,
 } from './reportDraft';
 
@@ -117,6 +119,12 @@ export function ServiceReportScreen() {
   // Closing statements the write-up refused to assert (it was tested, it was
   // left running correctly) — offered as confirmable sentences, never prose.
   const [suggestedAdditions, setSuggestedAdditions] = useState<ComposeAddition[]>([]);
+
+  // The tradie's own words, snapshotted right before a clean-up so they can
+  // be put back. The whole promise of the feature is "these are your words,
+  // Mate only tidies them" — that's only true if the tidy is reversible.
+  // Same affordance as the description clean-up on NewQuote/JobDetailsScreen.
+  const [preCleanupSnapshot, setPreCleanupSnapshot] = useState<WriteUpFields | null>(null);
 
   // Site memory: what the previous visit to this address contributed, and
   // the banner that says so. Held in state so "Undo" can take back exactly
@@ -432,7 +440,30 @@ export function ServiceReportScreen() {
     });
   };
 
-  // --- Write it up (compose) ------------------------------------------------
+  // Typing in a narrative field retires the undo offer. Diverges from
+  // JobDetailsScreen deliberately: there the snapshot survives edits, so
+  // undo can bin work typed after the clean-up. Restoring a snapshot is
+  // destructive, and it must only ever destroy Mate's rewrite — never the
+  // tradie's own words. Tapping a suggestion chip is part of the clean-up,
+  // not a manual edit, so it leaves the offer standing.
+  const patchNarrative = (next: Partial<ReportFormState>) => {
+    if (preCleanupSnapshot) setPreCleanupSnapshot(null);
+    patch(next);
+  };
+
+  const handleUndoCleanup = () => {
+    if (!preCleanupSnapshot) return;
+    patch(preCleanupSnapshot);
+    setPreCleanupSnapshot(null);
+    // The offers came out of the clean-up being undone, and were pruned
+    // against text that no longer exists — they go with it.
+    setSuggestedAdditions([]);
+    setSuggestedEquipment([]);
+    setSuggestedChecklist([]);
+    trackEvent('report_cleanup_undone');
+  };
+
+  // --- Clean it up (compose) ------------------------------------------------
   const handleWriteItUp = async () => {
     const notes = {
       natureOfProblem: form.natureOfProblem,
@@ -485,6 +516,9 @@ export function ServiceReportScreen() {
       // Claims Mate would not assert on the tradie's behalf. Offered, never
       // written — one tap each puts them in.
       setSuggestedAdditions(composed.suggestedAdditions);
+      // Only now the rewrite has landed: the words it replaced are worth
+      // keeping, and the undo chip appears.
+      setPreCleanupSnapshot(writeUpSnapshot(notes));
       trackEvent('report_written_up', {
         equipment_suggested: composed.suggestedEquipment.length,
         checklist_suggested: composed.suggestedChecklist.length,
@@ -966,7 +1000,7 @@ export function ServiceReportScreen() {
           <TextInput
             mode="outlined"
             value={form.natureOfProblem}
-            onChangeText={(t) => patch({ natureOfProblem: t })}
+            onChangeText={(t) => patchNarrative({ natureOfProblem: t })}
             placeholder="What the customer reported or what you found"
             multiline
             numberOfLines={3}
@@ -976,7 +1010,7 @@ export function ServiceReportScreen() {
           <TextInput
             mode="outlined"
             value={form.workCarriedOut}
-            onChangeText={(t) => patch({ workCarriedOut: t })}
+            onChangeText={(t) => patchNarrative({ workCarriedOut: t })}
             placeholder="What you did on this visit"
             multiline
             numberOfLines={3}
@@ -986,7 +1020,7 @@ export function ServiceReportScreen() {
           <TextInput
             mode="outlined"
             value={form.recommendedWork}
-            onChangeText={(t) => patch({ recommendedWork: t })}
+            onChangeText={(t) => patchNarrative({ recommendedWork: t })}
             placeholder="Anything to sort on a future visit"
             multiline
             numberOfLines={3}
@@ -1051,10 +1085,32 @@ export function ServiceReportScreen() {
               {composing ? 'Cleaning it up…' : 'Clean it up with Mate'}
             </Text>
           </TouchableOpacity>
-          <Text style={styles.writeUpHint}>
-            Tidies your rough notes into clear wording for the customer. Sticks to
-            the facts you entered.
-          </Text>
+          {/* Once a clean-up has landed, the offer to undo it matters more
+              than the description of what the button will do — so the chip
+              takes the hint's place rather than stacking under it. */}
+          {preCleanupSnapshot && !composing ? (
+            <TouchableOpacity
+              onPress={handleUndoCleanup}
+              style={styles.undoCleanupChip}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              accessibilityRole="button"
+              accessibilityLabel="Undo the clean-up and put your own wording back"
+            >
+              <MaterialCommunityIcons
+                name="undo-variant"
+                size={14}
+                color={colors.textSecondary}
+              />
+              <Text style={styles.undoCleanupChipText}>
+                Cleaned up — undo and put my wording back
+              </Text>
+            </TouchableOpacity>
+          ) : (
+            <Text style={styles.writeUpHint}>
+              Tidies your rough notes into clear wording for the customer. Sticks to
+              the facts you entered.
+            </Text>
+          )}
 
           {/* Photos — reuses the standard job photo capture path; header
               hidden because this screen renders its own section label. */}
@@ -1311,6 +1367,19 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     marginTop: 6,
     lineHeight: 16,
+  },
+  undoCleanupChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    marginTop: 6,
+    paddingVertical: 4,
+  },
+  undoCleanupChipText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.textSecondary,
   },
   // Only a nudge — the hero variant carries its own vertical rhythm, and
   // its size and centred label are what mark it as heading the block below

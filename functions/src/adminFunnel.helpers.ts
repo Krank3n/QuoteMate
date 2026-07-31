@@ -8,9 +8,20 @@
  * Tier/status/billing derivation is reused from subscription.helpers.ts — the
  * single source of truth — never re-implemented here.
  */
-import { deriveSubFields, isBilledSub, isRestoredStorePro } from './subscription.helpers';
+import { deriveSubFields, isBilledSub, isRestoredStorePro, TRIAL_DAYS } from './subscription.helpers';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+// Signup-cohort windows offered alongside the all-time funnel. Each is a TRUE
+// cohort — the same people followed through every step — so it answers "of the
+// tradies who signed up in the last N days, how far did they get?".
+export const COHORT_WINDOW_DAYS = [7, 28, 90] as const;
+
+// A signup cohort can only contain paid conversions once its members have had
+// time to finish a trial and be billed. Below this, `paying` is structurally
+// near-zero and the rate is meaningless rather than bad — the UI says so
+// instead of showing a scary 0%.
+export const PAID_MATURITY_DAYS = TRIAL_DAYS + 3;
 
 // A brand-new signup hasn't had a fair chance to send a quote yet, so
 // "never sent a quote" only flags users past this grace window.
@@ -46,28 +57,49 @@ export interface FunnelActionRow {
   trialDaysRemaining: number | null;
 }
 
+/** The four funnel steps plus the step-to-step rates. Shared by the all-time
+ *  funnel and every signup cohort. */
+export interface FunnelSteps {
+  signups: number;
+  startedTrial: number;
+  sentQuote: number;
+  /** Total paying headcount: billed + incident-restored store subs. */
+  paying: number;
+  /** Subset of `paying` with a verifiable billing record (drives MRR). */
+  payingBilled: number;
+  /** Subset of `paying` restored from incident-2026-07, awaiting device receipt re-sync. */
+  payingRestored: number;
+  // Each step as a fraction (0..1) of the previous step.
+  pctStartedTrial: number;
+  pctSentQuote: number;
+  pctPaying: number;
+}
+
+/** One signup-cohort slice: everyone whose signupAt falls inside the window. */
+export interface FunnelCohort extends FunnelSteps {
+  days: number;
+  /** Lower bound of the cohort (ms epoch) — signups on or after this. */
+  since: number;
+  /** False when the window is shorter than a trial + billing lag, so `paying`
+   *  is structurally understated rather than genuinely bad. */
+  matureForPaid: boolean;
+  /** THE founder metric, scoped to this cohort. paying / startedTrial. */
+  trialToPaid: number;
+  /** sentQuote / signups, scoped to this cohort. */
+  activationRate: number;
+}
+
 export interface FunnelPayload {
-  funnel: {
-    signups: number;
-    startedTrial: number;
-    sentQuote: number;
-    /** Total paying headcount: billed + incident-restored store subs. */
-    paying: number;
-    /** Subset of `paying` with a verifiable billing record (drives MRR). */
-    payingBilled: number;
-    /** Subset of `paying` restored from incident-2026-07, awaiting device receipt re-sync. */
-    payingRestored: number;
-    // Each step as a fraction (0..1) of the previous step.
-    pctStartedTrial: number;
-    pctSentQuote: number;
-    pctPaying: number;
-  };
+  funnel: FunnelSteps;
   conversion: {
     // THE number the founder tracks (target >= 0.05). paying / startedTrial.
     trialToPaid: number;
     // sentQuote / signups.
     activationRate: number;
   };
+  /** Same funnel recomputed over signup cohorts, keyed by window in days.
+   *  Lets the dashboard time-slice the app funnel without a second query. */
+  cohorts: Record<string, FunnelCohort>;
   // Trialing users with <= EXPIRING_TRIAL_DAYS left, regardless of activity.
   // (The expiringTrialsInactive list below is the inactive subset that needs a nudge.)
   expiringTrials: number;
@@ -120,28 +152,29 @@ function sortAndCap(rows: FunnelActionRow[]): FunnelActionRow[] {
  * threaded into deriveSubFields so all trial math uses the same clock.
  */
 export function computeFunnelStats(inputs: FunnelUserInput[], now: number = Date.now()): FunnelPayload {
-  const signups = inputs.length;
-  let startedTrial = 0;
-  let sentQuote = 0;
-  let payingBilled = 0;
-  let payingRestored = 0;
-
   let expiringTrials = 0;
   const neverSentQuote: FunnelActionRow[] = [];
   const expiringTrialsInactive: FunnelActionRow[] = [];
 
+  // Per-user step flags, derived exactly once. Both the all-time funnel and
+  // every cohort aggregate from this, so the windowed numbers can never drift
+  // from the headline ones.
+  const marks: UserMarks[] = [];
+
   for (const u of inputs) {
     const f = deriveSubFields(u.sub, now);
 
-    // Funnel steps. A user "started a trial" iff their sub carries a
-    // trialStartedAt — this covers trialing, trial_expired AND now-Pro users
-    // who converted from a trial.
-    if (f.trialStartedAt !== null) startedTrial++;
-    if (u.hasSentDoc) sentQuote++;
-    // Headcount includes incident-restored store subs (their Apple/Google
-    // billing kept running; only the Firestore billing record is missing).
-    if (isBilledSub(u.sub)) payingBilled++;
-    else if (isRestoredStorePro(u.sub, now)) payingRestored++;
+    marks.push({
+      signupAt: u.signupAt,
+      // A user "started a trial" iff their sub carries a trialStartedAt — this
+      // covers trialing, trial_expired AND now-Pro users who converted.
+      startedTrial: f.trialStartedAt !== null,
+      sentQuote: u.hasSentDoc,
+      // Headcount includes incident-restored store subs (their Apple/Google
+      // billing kept running; only the Firestore billing record is missing).
+      payingBilled: isBilledSub(u.sub),
+      payingRestored: !isBilledSub(u.sub) && isRestoredStorePro(u.sub, now),
+    });
 
     // Actionable: signed up, past the grace window, never sent anything.
     if (
@@ -165,24 +198,31 @@ export function computeFunnelStats(inputs: FunnelUserInput[], now: number = Date
     }
   }
 
-  const paying = payingBilled + payingRestored;
+  const funnel = aggregateSteps(marks);
+
+  // Signup cohorts. Users with no signupAt at all can't be placed in a window,
+  // so they only ever appear in the all-time figures.
+  const cohorts: Record<string, FunnelCohort> = {};
+  for (const days of COHORT_WINDOW_DAYS) {
+    const since = now - days * DAY_MS;
+    const steps = aggregateSteps(marks.filter((m) => m.signupAt !== null && m.signupAt >= since));
+    cohorts[String(days)] = {
+      ...steps,
+      days,
+      since,
+      matureForPaid: days >= PAID_MATURITY_DAYS,
+      trialToPaid: safeRatio(steps.paying, steps.startedTrial),
+      activationRate: safeRatio(steps.sentQuote, steps.signups),
+    };
+  }
 
   return {
-    funnel: {
-      signups,
-      startedTrial,
-      sentQuote,
-      paying,
-      payingBilled,
-      payingRestored,
-      pctStartedTrial: safeRatio(startedTrial, signups),
-      pctSentQuote: safeRatio(sentQuote, startedTrial),
-      pctPaying: safeRatio(paying, sentQuote),
-    },
+    funnel,
     conversion: {
-      trialToPaid: safeRatio(paying, startedTrial),
-      activationRate: safeRatio(sentQuote, signups),
+      trialToPaid: safeRatio(funnel.paying, funnel.startedTrial),
+      activationRate: safeRatio(funnel.sentQuote, funnel.signups),
     },
+    cohorts,
     expiringTrials,
     actionable: {
       neverSentQuote: sortAndCap(neverSentQuote),
@@ -190,5 +230,43 @@ export function computeFunnelStats(inputs: FunnelUserInput[], now: number = Date
     },
     asOf: now,
     cached: false,
+  };
+}
+
+/** One user reduced to the flags the funnel counts, plus their signup time. */
+interface UserMarks {
+  signupAt: number | null;
+  startedTrial: boolean;
+  sentQuote: boolean;
+  payingBilled: boolean;
+  payingRestored: boolean;
+}
+
+/** Tally a set of already-derived users into the four funnel steps. */
+function aggregateSteps(marks: UserMarks[]): FunnelSteps {
+  const signups = marks.length;
+  let startedTrial = 0;
+  let sentQuote = 0;
+  let payingBilled = 0;
+  let payingRestored = 0;
+
+  for (const m of marks) {
+    if (m.startedTrial) startedTrial++;
+    if (m.sentQuote) sentQuote++;
+    if (m.payingBilled) payingBilled++;
+    else if (m.payingRestored) payingRestored++;
+  }
+
+  const paying = payingBilled + payingRestored;
+  return {
+    signups,
+    startedTrial,
+    sentQuote,
+    paying,
+    payingBilled,
+    payingRestored,
+    pctStartedTrial: safeRatio(startedTrial, signups),
+    pctSentQuote: safeRatio(sentQuote, startedTrial),
+    pctPaying: safeRatio(paying, sentQuote),
   };
 }

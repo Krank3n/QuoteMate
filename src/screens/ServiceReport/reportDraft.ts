@@ -253,6 +253,22 @@ export function setAllChecked(
 }
 
 /**
+ * The three write-up fields lifted off the form state, for the snapshot the
+ * undo chip restores.
+ *
+ * A clean-up rewrites all three at once and may legitimately EMPTY one (its
+ * fact moved elsewhere), so a per-field undo would be meaningless — the
+ * whole write-up reverts together or not at all.
+ */
+export function writeUpSnapshot(fields: WriteUpFields): WriteUpFields {
+  return {
+    natureOfProblem: fields.natureOfProblem,
+    workCarriedOut: fields.workCarriedOut,
+    recommendedWork: fields.recommendedWork,
+  };
+}
+
+/**
  * Mate's confirmable write-up additions, pruned for display exactly as the
  * equipment / checklist chips are: blanks dropped, repeats removed, and
  * anything the target field ALREADY says retired.

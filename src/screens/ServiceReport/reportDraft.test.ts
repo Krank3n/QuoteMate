@@ -20,6 +20,7 @@ import {
   setAllChecked,
   siteIdentity,
   tickAllState,
+  writeUpSnapshot,
   type ReportFormState,
 } from './reportDraft';
 import type { ServiceReport } from '../../../shared/report/types';
@@ -296,6 +297,60 @@ describe('tickAllState / setAllChecked', () => {
 
     const unticked = setAllChecked(ticked, false);
     expect(tickAllState(unticked)).toEqual({ visible: true, allTicked: false });
+  });
+});
+
+describe('writeUpSnapshot', () => {
+  it('lifts exactly the three write-up fields, nothing else', () => {
+    const snap = writeUpSnapshot({
+      natureOfProblem: 'no cooling',
+      workCarriedOut: 'regassed',
+      recommendedWork: 'replace compressor',
+      // Extra form state must not ride along into the snapshot.
+      equipment: ['Package unit'],
+      serviceType: 'Annual service',
+    } as any);
+    expect(snap).toEqual({
+      natureOfProblem: 'no cooling',
+      workCarriedOut: 'regassed',
+      recommendedWork: 'replace compressor',
+    });
+  });
+
+  it('is a copy — later edits to the form do not mutate it', () => {
+    const form = {
+      natureOfProblem: 'no cooling',
+      workCarriedOut: 'regassed',
+      recommendedWork: '',
+    };
+    const snap = writeUpSnapshot(form);
+    form.workCarriedOut = 'edited after the snapshot';
+    expect(snap.workCarriedOut).toBe('regassed');
+  });
+
+  // The whole promise is "these are your words, Mate only tidies them" —
+  // which is only true if the tidy is reversible, INCLUDING the case where
+  // the clean-up redistributed a fact and left one of the source fields
+  // empty. Restoring the snapshot must bring that field back.
+  it('round-trips a clean-up that emptied a field by redistribution', () => {
+    const original = {
+      natureOfProblem: 'no hot water, tripped rcd',
+      workCarriedOut: 'replaced split flex, recommend rcd upgrade next visit',
+      recommendedWork: '',
+    };
+    const snap = writeUpSnapshot(original);
+
+    // Mate moves the recommendation out of workCarriedOut into its own field.
+    const cleaned = applyComposedWriteUp(original, {
+      natureOfProblem: 'No hot water and a tripped RCD were reported.',
+      workCarriedOut: 'Replaced the split flex on the hot water isolator.',
+      recommendedWork: 'An RCD upgrade is recommended at the next visit.',
+    });
+    expect(cleaned.recommendedWork).not.toBe('');
+    expect(cleaned).not.toEqual(original);
+
+    // Undo puts every field back exactly as typed, empty one included.
+    expect(snap).toEqual(original);
   });
 });
 

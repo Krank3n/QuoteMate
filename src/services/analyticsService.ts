@@ -104,6 +104,10 @@ export type AnalyticsEvent =
   | 'report_created'
   // Mate returned a clean write-up for the rough notes.
   | 'report_written_up'
+  // The tradie put their own wording back. A rising ratio against
+  // report_written_up is the signal the clean-up prompt has drifted from
+  // what tradespeople actually want to send.
+  | 'report_cleanup_undone'
   // A new report pre-filled its equipment + checklist from the last visit to
   // the same site. Paired with report_site_memory_undone, this is the
   // read on whether site matching is picking the right previous visit.
