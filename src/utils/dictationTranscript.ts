@@ -41,45 +41,29 @@ export function appendTranscript(base: string, addition: string): string {
 /**
  * Fold one recognition result frame into the segment state.
  *
- * `resultCount` is the number of results in the frame. A frame with a single
- * result while we still hold a different `lastSegment` means the recogniser
- * silently restarted — we then have to decide whether the new transcript is
- * a refinement of what was already said (same first three words → replace)
- * or a genuinely new utterance (no containment either way → bank the old
- * segment into `accumulated` and show only the accumulated text this frame;
- * the next frame will re-add the current segment).
+ * `isFinal` comes directly from expo-speech-recognition. Interim frames are
+ * volatile revisions of the SAME utterance and must replace `lastSegment`,
+ * even when the recogniser changes the opening words ("I wanna" → "I want").
+ * Guessing from word similarity previously banked both revisions and produced
+ * duplicated phrases in customer scopes. Only an explicit final frame commits
+ * a segment; the native `end` handler commits any remaining interim segment.
  *
  * Returns null when the frame carries no usable transcript.
  */
 export function foldDictationResult(
   state: DictationSegmentState,
   transcript: string,
-  resultCount: number,
+  isFinal: boolean,
 ): { state: DictationSegmentState; display: string } | null {
   const current = transcript.trim();
   if (!current) return null;
 
-  if (resultCount === 1 && state.lastSegment && state.lastSegment !== current) {
-    const lastLower = state.lastSegment.toLowerCase();
-    const currentLower = current.toLowerCase();
-    const firstWords = (s: string) => s.split(/\s+/).slice(0, 3).join(' ');
-    const isRefinement = firstWords(lastLower) === firstWords(currentLower);
-
-    if (!isRefinement && !currentLower.includes(lastLower) && !lastLower.includes(currentLower)) {
-      // New utterance after a silent restart — bank the previous segment.
-      const accumulated = appendTranscript(state.accumulated, state.lastSegment);
-      return {
-        state: { accumulated, lastSegment: current },
-        display: accumulated,
-      };
-    }
-    if (isRefinement) {
-      return {
-        state: { ...state, lastSegment: current },
-        display: appendTranscript(state.accumulated, current),
-      };
-    }
-    // Containment without matching openings: treat as the default update.
+  if (isFinal) {
+    const accumulated = appendTranscript(state.accumulated, current);
+    return {
+      state: { accumulated, lastSegment: '' },
+      display: accumulated,
+    };
   }
 
   return {

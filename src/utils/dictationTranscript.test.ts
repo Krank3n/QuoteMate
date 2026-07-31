@@ -46,63 +46,49 @@ describe('appendTranscript', () => {
 
 describe('foldDictationResult', () => {
   it('returns null for a blank transcript', () => {
-    expect(foldDictationResult(state('notes', 'seg'), '   ', 2)).toBeNull();
+    expect(foldDictationResult(state('notes', 'seg'), '   ', false)).toBeNull();
   });
 
   it('displays accumulated + current segment on a normal interim update', () => {
-    const folded = foldDictationResult(state('existing notes', ''), 'replaced the valve', 1);
+    const folded = foldDictationResult(state('existing notes', ''), 'replaced the valve', false);
     expect(folded).not.toBeNull();
     expect(folded!.display).toBe('existing notes replaced the valve');
     expect(folded!.state).toEqual(state('existing notes', 'replaced the valve'));
   });
 
-  it('replaces the in-flight segment when a growing transcript arrives (multi-result frame)', () => {
+  it('replaces the in-flight segment when a growing interim transcript arrives', () => {
     const folded = foldDictationResult(
       state('existing', 'replaced the'),
       'replaced the valve',
-      2,
+      false,
     );
     expect(folded!.display).toBe('existing replaced the valve');
     expect(folded!.state.lastSegment).toBe('replaced the valve');
     expect(folded!.state.accumulated).toBe('existing');
   });
 
-  it('treats a single-result frame with matching first words as a refinement', () => {
+  it('does not duplicate an interim revision whose opening words changed', () => {
     const folded = foldDictationResult(
-      state('existing', 'replaced the valve today'),
-      'replaced the valve on Tuesday',
-      1,
+      state('', 'I wanna to quote'),
+      'I want to quote a job',
+      false,
     );
-    expect(folded!.display).toBe('existing replaced the valve on Tuesday');
-    expect(folded!.state).toEqual(state('existing', 'replaced the valve on Tuesday'));
+    expect(folded!.display).toBe('I want to quote a job');
+    expect(folded!.state).toEqual(state('', 'I want to quote a job'));
   });
 
-  it('banks the previous segment when a single-result frame is a new utterance', () => {
+  it('commits only when the recogniser marks the segment final', () => {
     const folded = foldDictationResult(
       state('existing', 'replaced the valve'),
-      'also flushed the lines',
-      1,
+      'replaced the valve today',
+      true,
     );
-    // Display shows accumulated only for this frame; next frame re-adds current.
-    expect(folded!.display).toBe('existing replaced the valve');
-    expect(folded!.state).toEqual(
-      state('existing replaced the valve', 'also flushed the lines'),
-    );
-  });
-
-  it('falls through to the default update when transcripts contain each other', () => {
-    const folded = foldDictationResult(
-      state('existing', 'the valve'),
-      'checked the valve',
-      1,
-    );
-    expect(folded!.display).toBe('existing checked the valve');
-    expect(folded!.state.accumulated).toBe('existing');
-    expect(folded!.state.lastSegment).toBe('checked the valve');
+    expect(folded!.display).toBe('existing replaced the valve today');
+    expect(folded!.state).toEqual(state('existing replaced the valve today', ''));
   });
 
   it('works with no pre-existing text', () => {
-    const folded = foldDictationResult(emptyDictationState(), 'first words', 1);
+    const folded = foldDictationResult(emptyDictationState(), 'first words', false);
     expect(folded!.display).toBe('first words');
     expect(folded!.state).toEqual(state('', 'first words'));
   });

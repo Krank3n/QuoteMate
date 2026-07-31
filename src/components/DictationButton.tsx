@@ -60,6 +60,8 @@ const NATIVE_START_OPTIONS = {
   maxAlternatives: 1,
   continuous: true, // Keep recording until the tradie taps stop
   requiresOnDeviceRecognition: false,
+  addsPunctuation: true,
+  iosTaskHint: 'dictation',
 };
 
 function getWebSpeechRecognition(): any {
@@ -147,7 +149,7 @@ export function DictationButton({
     const lastResult = allResults[allResults.length - 1];
     if (!lastResult?.transcript) return;
 
-    const folded = foldDictationResult(segmentRef.current, lastResult.transcript, allResults.length);
+    const folded = foldDictationResult(segmentRef.current, lastResult.transcript, event.isFinal === true);
     if (!folded) return;
     segmentRef.current = folded.state;
     onTextRef.current(folded.display);

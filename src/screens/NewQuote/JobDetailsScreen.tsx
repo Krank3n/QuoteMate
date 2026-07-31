@@ -62,6 +62,13 @@ import { FixedBottomButton } from '../../components/FixedBottomButton';
 import { ProBadge } from '../../components/ProBadge';
 import { AlertModal } from '../../components/AlertModal';
 import { JobPhotos } from '../../components/JobPhotos';
+import {
+  commitSegment,
+  emptyDictationState,
+  finalizeDictation,
+  foldDictationResult,
+} from '../../utils/dictationTranscript';
+import { buildJobDictationContext } from '../../utils/jobDictationContext';
 
 // Sentinel id for the Custom chip so it participates in MRU sorting alongside
 // niche template ids. Recorded via recordJobTypeUsed(CUSTOM_CHIP_ID) on tap.
@@ -142,17 +149,27 @@ export function JobDetailsScreen() {
   // Voice recording states
   const [isRecording, setIsRecording] = useState(false);
   const isRecordingRef = useRef(false);
+  // Speech events are global and can fire in the same frame as a tap. Keep the
+  // ref synchronous with state so a manual Stop can never be mistaken for an
+  // automatic recogniser end and restart the microphone behind the user's back.
+  const setRecordingState = React.useCallback((next: boolean) => {
+    isRecordingRef.current = next;
+    setIsRecording(next);
+  }, []);
   const [isProcessingVoice, setIsProcessingVoice] = useState(false);
   const [recognizing, setRecognizing] = useState(false);
   const [transcript, setTranscript] = useState('');
   const [isRequestingPermission, setIsRequestingPermission] = useState(false);
-  const startingDescriptionRef = useRef('');
-  const lastTranscriptRef = useRef('');
+  const dictationStateRef = useRef(emptyDictationState());
   const pulseAnim = useState(new Animated.Value(1))[0];
   const glowAnim = useState(new Animated.Value(0))[0];
   const rippleAnim = useState(new Animated.Value(0))[0];
   const rotateAnim = useState(new Animated.Value(0))[0];
   const webRecognitionRef = useRef<any>(null);
+  const dictationContext = React.useMemo(
+    () => buildJobDictationContext(selectedTemplate),
+    [selectedTemplate],
+  );
 
   // Keep ref in sync with state
   useEffect(() => {
@@ -243,104 +260,55 @@ export function JobDetailsScreen() {
 
   useSpeechRecognitionEvent('end', () => {
     setRecognizing(false);
-    const isStillRecording = isRecordingRef.current;
+    if (!isRecordingRef.current) return; // manual stop
 
-    // If user is still recording (didn't manually stop), save and restart
-    if (isStillRecording && lastTranscriptRef.current) {
-      // Save the last segment to accumulated
-      const newAccumulated = startingDescriptionRef.current
-        ? startingDescriptionRef.current + ' ' + lastTranscriptRef.current
-        : lastTranscriptRef.current;
+    // Bank any unfinished interim phrase. Final result frames are already
+    // committed by foldDictationResult, so this is idempotent.
+    dictationStateRef.current = commitSegment(dictationStateRef.current);
+    setJobDescription(dictationStateRef.current.accumulated);
 
-      startingDescriptionRef.current = newAccumulated;
-      lastTranscriptRef.current = '';
-
-      // Restart speech recognition
-      setTimeout(async () => {
-        if (isRecordingRef.current) {
-          try {
-            await ExpoSpeechRecognitionModule.start({
-              lang: 'en-AU',
-              interimResults: true,
-              maxAlternatives: 1,
-              continuous: true,
-              requiresOnDeviceRecognition: false,
-              contextualStrings: ['deck', 'handrail', 'timber', 'pine', 'meters', 'metres'],
-            });
-          } catch (error) {
-            setIsRecording(false);
-          }
-        }
-      }, 100);
-    }
+    // iOS can still end a continuous task after silence/final output. Restart
+    // even when there was no pending interim segment.
+    setTimeout(async () => {
+      if (!isRecordingRef.current) return;
+      try {
+        await ExpoSpeechRecognitionModule.start({
+          lang: 'en-AU',
+          interimResults: true,
+          maxAlternatives: 1,
+          continuous: true,
+          requiresOnDeviceRecognition: false,
+          addsPunctuation: true,
+          iosTaskHint: 'dictation',
+          contextualStrings: dictationContext,
+        });
+      } catch (error) {
+        setRecordingState(false);
+      }
+    }, 100);
   });
 
   useSpeechRecognitionEvent('result', (event: any) => {
-    if (!isRecordingRef.current) {
-      return; // Ignore results if we're not recording
-    }
+    if (!isRecordingRef.current) return;
 
     const allResults = event.results || [];
-
-    // Get the latest result (the last one in the array)
-    // Each result contains the full transcript for that segment, not incremental text
+    // `results` are alternatives; the last entry is the latest complete text
+    // for this utterance. `event.isFinal` is the authoritative segment boundary.
     const lastResult = allResults[allResults.length - 1];
-    if (!lastResult?.transcript) {
-      return;
-    }
+    if (!lastResult?.transcript) return;
 
-    const currentTranscript = lastResult.transcript.trim();
-    if (!currentTranscript) {
-      return;
-    }
-
-    // If results count is 1 and we have a previous transcript that's different,
-    // it means recognition restarted - check if it's a refinement or new segment
-    if (allResults.length === 1 && lastTranscriptRef.current && lastTranscriptRef.current !== currentTranscript) {
-      const lastLower = lastTranscriptRef.current.toLowerCase();
-      const currentLower = currentTranscript.toLowerCase();
-
-      // Check if current starts with a similar beginning to last (refinement/correction)
-      // Get first 3 words of each
-      const lastWords = lastLower.split(/\s+/).slice(0, 3).join(' ');
-      const currentWords = currentLower.split(/\s+/).slice(0, 3).join(' ');
-      const isRefinement = lastWords === currentWords;
-
-      // Check if this is truly a new segment (not just a refinement)
-      if (!isRefinement && !currentLower.includes(lastLower) && !lastLower.includes(currentLower)) {
-        const newAccumulated = startingDescriptionRef.current
-          ? startingDescriptionRef.current + ' ' + lastTranscriptRef.current
-          : lastTranscriptRef.current;
-
-        startingDescriptionRef.current = newAccumulated;
-        // Display ONLY accumulated text for this frame, next result will add current
-        setJobDescription(startingDescriptionRef.current);
-        lastTranscriptRef.current = currentTranscript;
-        return; // Exit early to avoid double display
-      } else if (isRefinement) {
-        // This is a refinement of what was already said, just update the display
-        const displayText = startingDescriptionRef.current
-          ? startingDescriptionRef.current + ' ' + currentTranscript
-          : currentTranscript;
-
-        setJobDescription(displayText);
-        lastTranscriptRef.current = currentTranscript;
-        return;
-      }
-    }
-
-    // Display accumulated + current transcript
-    const displayText = startingDescriptionRef.current
-      ? startingDescriptionRef.current + ' ' + currentTranscript
-      : currentTranscript;
-
-    setJobDescription(displayText);
-    lastTranscriptRef.current = currentTranscript;
-
+    const folded = foldDictationResult(
+      dictationStateRef.current,
+      lastResult.transcript,
+      event.isFinal === true,
+    );
+    if (!folded) return;
+    dictationStateRef.current = folded.state;
+    setJobDescription(folded.display);
   });
 
   useSpeechRecognitionEvent('error', (event: any) => {
-    setIsRecording(false);
+    setRecordingState(false);
     setRecognizing(false);
     Alert.alert('Voice Recognition Error', event.error || 'Could not recognize speech');
   });
@@ -478,7 +446,7 @@ export function JobDetailsScreen() {
         if (webRecognitionRef.current) {
           webRecognitionRef.current.stop();
         }
-        setIsRecording(false);
+        setRecordingState(false);
         // Auto-cleanup removed - user must press clean-up button manually
       } else {
         // Start recording
@@ -514,7 +482,7 @@ export function JobDetailsScreen() {
         };
 
         recognition.onerror = (event: any) => {
-          setIsRecording(false);
+          setRecordingState(false);
           Alert.alert('Error', 'Speech recognition failed: ' + event.error);
         };
 
@@ -527,7 +495,7 @@ export function JobDetailsScreen() {
 
         webRecognitionRef.current = recognition;
         recognition.start();
-        setIsRecording(true);
+        setRecordingState(true);
       }
       return;
     }
@@ -541,27 +509,20 @@ export function JobDetailsScreen() {
     if (isRecording) {
       // Stop recording manually
       try {
-        // Build final description from accumulated + last segment BEFORE stopping
-        const finalDescription = startingDescriptionRef.current && lastTranscriptRef.current
-          ? startingDescriptionRef.current + ' ' + lastTranscriptRef.current
-          : startingDescriptionRef.current || lastTranscriptRef.current || jobDescription;
-
-        // Set the description immediately to prevent any reset
+        // Compose accumulated finals + the latest interim before stopping.
+        const finalDescription = finalizeDictation(dictationStateRef.current, jobDescription);
         setJobDescription(finalDescription);
 
-        // Set isRecording to false FIRST so the end event handler knows user stopped manually
-        setIsRecording(false);
-
-        // Then stop the speech recognition (this will trigger the end event)
+        // Flip the ref synchronously FIRST so the native 'end' event cannot
+        // interpret this user stop as a silence timeout and restart recording.
+        setRecordingState(false);
         await ExpoSpeechRecognitionModule.stop();
 
-        // Reset transcript refs after stopping
         setTranscript('');
-        startingDescriptionRef.current = '';
-        lastTranscriptRef.current = '';
+        dictationStateRef.current = emptyDictationState();
         // Auto-cleanup removed - user must press clean-up button manually
       } catch (error) {
-        setIsRecording(false);
+        setRecordingState(false);
         Alert.alert('Error', 'Failed to stop voice recording');
       }
     } else {
@@ -605,9 +566,11 @@ export function JobDetailsScreen() {
         // Check if speech recognition is available
         const available = await ExpoSpeechRecognitionModule.getStateAsync();
 
-        // Save starting description and clear refs
-        startingDescriptionRef.current = jobDescription;
-        lastTranscriptRef.current = '';
+        // Seed committed text with anything already typed in the field.
+        dictationStateRef.current = {
+          accumulated: jobDescription.trim(),
+          lastSegment: '',
+        };
         setTranscript('');
 
         await ExpoSpeechRecognitionModule.start({
@@ -616,13 +579,15 @@ export function JobDetailsScreen() {
           maxAlternatives: 1,
           continuous: true, // Keep recording until user manually stops
           requiresOnDeviceRecognition: false,
-          contextualStrings: ['deck', 'handrail', 'timber', 'pine', 'meters', 'metres'],
+          addsPunctuation: true,
+          iosTaskHint: 'dictation',
+          contextualStrings: dictationContext,
         });
-        setIsRecording(true);
+        setRecordingState(true);
       } catch (error: any) {
         // Ensure we always reset the loading state
         setIsRequestingPermission(false);
-        setIsRecording(false);
+        setRecordingState(false);
         Alert.alert(
           'Error Starting Recording',
           `Failed to start voice recording: ${error?.message || 'Unknown error'}\n\nPlease check:\n1. Microphone permission is granted\n2. Speech recognition is available on your device\n3. Internet connection (for cloud recognition)`
@@ -635,8 +600,7 @@ export function JobDetailsScreen() {
     setJobDescription('');
     setJobName('');
     setTranscript('');
-    startingDescriptionRef.current = '';
-    lastTranscriptRef.current = '';
+    dictationStateRef.current = emptyDictationState();
     setPreCleanupSnapshot(null);
     setPillServerState(null);
   };
