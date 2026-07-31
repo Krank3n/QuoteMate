@@ -76,6 +76,18 @@ export interface DictationButtonProps {
   /** Idle helper label. Defaults to "Talk instead of type". */
   hint?: string;
   disabled?: boolean;
+  /**
+   * 'inline' (default) — a small round mic with the hint beside it, for
+   * sitting next to a single field.
+   *
+   * 'card' — a full-width bordered button with the hint underneath, for when
+   * dictation heads a whole block of fields rather than belonging to one.
+   * A small floating mic reads as decoration at that size and doesn't say
+   * which fields it feeds; a full-width control reads as an action.
+   */
+  variant?: 'inline' | 'card';
+  /** Button text in 'card' variant. Ignored when inline. */
+  label?: string;
 }
 
 export function DictationButton({
@@ -83,6 +95,8 @@ export function DictationButton({
   onText,
   hint = 'Talk instead of type',
   disabled = false,
+  variant = 'inline',
+  label = 'Talk instead of type',
 }: DictationButtonProps) {
   const [isRecording, setIsRecording] = useState(false);
   const isRecordingRef = useRef(false);
@@ -293,6 +307,35 @@ export function DictationButton({
   const supported = Platform.OS === 'web' ? !!getWebSpeechRecognition() : !!ExpoSpeechRecognitionModule;
   if (!supported) return null;
 
+  if (variant === 'card') {
+    return (
+      <View>
+        <TouchableOpacity
+          onPress={() => { handleToggle(); }}
+          disabled={disabled || isRequestingPermission}
+          style={[styles.card, isRecording && styles.cardActive]}
+          activeOpacity={0.8}
+          accessibilityRole="button"
+          accessibilityLabel={isRecording ? 'Stop dictating' : 'Dictate into this field'}
+        >
+          <MaterialCommunityIcons
+            name={isRecording ? 'stop' : 'microphone'}
+            size={18}
+            color={isRecording ? colors.error : colors.primary}
+          />
+          <Text style={[styles.cardText, isRecording && styles.cardTextActive]}>
+            {isRequestingPermission
+              ? 'Requesting microphone permission…'
+              : isRecording
+                ? 'Listening — tap to stop'
+                : label}
+          </Text>
+        </TouchableOpacity>
+        {hint ? <Text style={styles.cardHint}>{hint}</Text> : null}
+      </View>
+    );
+  }
+
   return (
     <View style={styles.row}>
       <TouchableOpacity
@@ -347,5 +390,36 @@ const styles = StyleSheet.create({
   hintTextActive: {
     color: colors.success,
     fontWeight: '600',
+  },
+  // Card variant — deliberately the same shape as the "Write it up with
+  // Mate" button it pairs with, so the two bracket the fields between them
+  // as one family of Mate actions.
+  card: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    backgroundColor: colors.surface,
+  },
+  cardActive: {
+    borderColor: colors.error,
+  },
+  cardText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.primary,
+  },
+  cardTextActive: {
+    color: colors.error,
+  },
+  cardHint: {
+    fontSize: 12,
+    color: colors.textMuted,
+    marginTop: 6,
+    lineHeight: 16,
   },
 });

@@ -8,7 +8,7 @@
  * the tradie set the visit date, service type and risk assessment; manage a
  * short equipment list and a tick-box checklist (Mate NEVER pre-ticks — every
  * tick is a manual tap); jot rough notes into the three narrative fields
- * (typed or dictated via DictationButton) and tap "Write it up" to have Mate
+ * (typed or dictated via DictationButton) and tap "Clean it up" to have Mate
  * tidy them into customer-ready prose — the write-up may redistribute facts
  * between the three fields, and any extra equipment/checklist items Mate
  * spots come back as tap-to-add suggestion chips (never auto-added, checklist
@@ -446,7 +446,7 @@ export function ServiceReportScreen() {
     ) {
       showAlert({
         type: 'info',
-        title: 'Nothing to write up yet',
+        title: 'Nothing to clean up yet',
         message: 'Jot down what you found, did, or recommend and Mate will tidy it up.',
       });
       return;
@@ -493,7 +493,7 @@ export function ServiceReportScreen() {
     } catch (err: any) {
       showAlert({
         type: 'error',
-        title: 'Could not write it up',
+        title: 'Could not clean it up',
         message: err?.message || 'Please try again in a moment.',
       });
     } finally {
@@ -944,7 +944,7 @@ export function ServiceReportScreen() {
 
           {/* Narrative.
               One mic for the whole write-up: everything lands in Work
-              carried out, and "Write it up" sorts the facts into the right
+              carried out, and "Clean it up" sorts the facts into the right
               sections. Four stacked mics read as clutter; one reads as a
               feature.
               It OPENS the block rather than trailing it. Sitting below
@@ -954,13 +954,15 @@ export function ServiceReportScreen() {
               before the boxes it fills, not after them. */}
           <View style={styles.dictationRow}>
             <DictationButton
+              variant="card"
               value={form.workCarriedOut}
               onText={(next) => patch({ workCarriedOut: next })}
-              hint="Talk through the visit — Mate sorts it into the right sections"
+              label="Talk through the visit"
+              hint="Mate sorts it into the right sections when you clean it up."
             />
           </View>
 
-          <SectionLabel text="Nature of the problem" optional tight />
+          <SectionLabel text="Nature of the problem" optional />
           <TextInput
             mode="outlined"
             value={form.natureOfProblem}
@@ -1046,7 +1048,7 @@ export function ServiceReportScreen() {
               />
             )}
             <Text style={styles.writeUpText}>
-              {composing ? 'Writing it up…' : 'Write it up with Mate'}
+              {composing ? 'Cleaning it up…' : 'Clean it up with Mate'}
             </Text>
           </TouchableOpacity>
           <Text style={styles.writeUpHint}>
@@ -1139,20 +1141,15 @@ function SectionLabel({
   text,
   optional,
   action,
-  tight,
 }: {
   text: string;
   optional?: boolean;
   // Optional right-aligned action for the section. Lives in the heading row
   // rather than as another button in the body — the screen is long enough.
   action?: { label: string; onPress: () => void };
-  // Drops the standard section gap above. For a label that follows its own
-  // intro control (the dictation mic) and must group with it rather than
-  // float between sections.
-  tight?: boolean;
 }) {
   return (
-    <View style={[styles.sectionLabelRow, tight && styles.sectionLabelRowTight]}>
+    <View style={styles.sectionLabelRow}>
       <Text style={styles.sectionLabel}>{text}</Text>
       {optional ? <Text style={styles.optional}>optional</Text> : null}
       {action ? (

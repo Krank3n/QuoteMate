@@ -31,6 +31,9 @@ import {
 } from '../components/FollowUpSheet';
 import { pickPrimaryDoc } from '../components/StickyJobActionBar';
 import { exportDocumentPDF } from '../utils/pdfGenerator';
+import { canUseServiceReports } from '../utils/reportEntitlement';
+import { reportService } from '../services/reportService';
+import { resumableReportId } from '../screens/ServiceReport/reportDraft';
 import {
   documentToInvoice,
   documentToQuote,
@@ -87,6 +90,7 @@ export function useJobActionsSheet(
   const pushInvoiceToXero = useStore((s) => s.pushInvoiceToXero);
   const pushQuoteToXero = useStore((s) => s.pushQuoteToXero);
   const subscriptionStatus = useStore((s) => s.subscriptionStatus);
+  const getEffectivePlan = useStore((s) => s.getEffectivePlan);
   const duplicateDocumentForJob = useStore((s) => s.duplicateDocumentForJob);
   const setCurrentQuote = useStore((s) => s.setCurrentQuote);
   const setCurrentInvoice = useStore((s) => s.setCurrentInvoice);
@@ -274,6 +278,24 @@ export function useJobActionsSheet(
         } catch {
           Alert.alert('Duplicate failed', 'Try again in a moment.');
         }
+        break;
+      }
+      // JobActionsSheet offers this on every job (`when: () => true`), so
+      // leaving it unhandled here made the row a dead tap everywhere the
+      // sheet is hosted by this hook — Dashboard and Jobs list — while the
+      // identical row worked from ViewJob, which wires its own onSelect.
+      // Same behaviour as ViewJobScreen: resume an unfinished draft rather
+      // than minting a duplicate, and send an elapsed trial to the paywall.
+      case 'service_report': {
+        if (!canUseServiceReports(getEffectivePlan())) {
+          navigation.navigate('Paywall');
+          break;
+        }
+        const reportId = resumableReportId(await reportService.listReports(job.id));
+        navigation.navigate('ServiceReport', {
+          jobId: job.id,
+          ...(reportId ? { reportId } : {}),
+        });
         break;
       }
       case 'archive':
