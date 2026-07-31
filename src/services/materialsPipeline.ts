@@ -25,7 +25,11 @@ import { keepSupplierPriceInclusive } from '../../shared/document';
 import { applyPackAwarePricing } from '../utils/packAwarePricing';
 import { parsePackInfo } from '../utils/parsePackInfo';
 import { coverageSanePurchaseCount, coverageFloorPurchaseCount } from '../utils/purchaseCoverage';
-import { parseJobAreaM2, geometricSanePieceCount } from '../utils/geometricCoverage';
+import {
+  parseJobAreaM2,
+  geometricSanePieceCount,
+  geometricMinimumPieceCount,
+} from '../utils/geometricCoverage';
 import {
   analyzeJobDescription,
   convertLLMMaterialsToMaterials,
@@ -1392,9 +1396,9 @@ async function fetchPricesForQuoteInner(
         m.totalPrice = roundToTwoDecimals(m.price * sane);
       }
 
-      // Geometric clamp: board piece-goods (decking/weatherboard/cladding)
-      // whose count is wildly over a width-derived ceiling for the job area.
-      // Reasonable counts and every non-board row pass through untouched.
+      // Geometric bounds for board piece-goods. The upper bound catches wild
+      // AI multiplication; the lower bound catches the opposite failure seen
+      // on this 18m² ModWood quote (14 × 5.4m × 137mm could cover only ~10m²).
       if (jobAreaM2 !== null) {
         const geoMax = geometricSanePieceCount({
           name: m.name,
@@ -1404,6 +1408,22 @@ async function fetchPricesForQuoteInner(
         if (geoMax !== null && geoMax < m.quantity) {
           m.quantity = geoMax;
           m.totalPrice = roundToTwoDecimals(m.price * geoMax);
+        }
+
+        // A floor is safe only for discrete each-count boards whose priced name
+        // exposes both face width and stock length. The helper returns null
+        // rather than guessing either dimension.
+        if (m.unit === 'each') {
+          const geoMin = geometricMinimumPieceCount({
+            name: m.name,
+            requirement: m.requiredQty,
+            areaM2: jobAreaM2,
+          });
+          if (geoMin !== null && geoMin > m.quantity) {
+            m.requiredQty = geoMin;
+            m.quantity = geoMin;
+            m.totalPrice = roundToTwoDecimals(m.price * geoMin);
+          }
         }
       }
     }

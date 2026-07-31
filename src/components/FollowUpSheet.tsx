@@ -14,7 +14,7 @@
  */
 
 import React, { useMemo, useState } from 'react';
-import { View, StyleSheet, Pressable, Linking, Platform, Share, Alert } from 'react-native';
+import { View, StyleSheet, Pressable, Platform, Share, Alert } from 'react-native';
 import { Text, ActivityIndicator } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation } from '@react-navigation/native';
@@ -27,6 +27,7 @@ import { BottomSheet } from './BottomSheet';
 import { selectionTap, lightTap } from '../utils/haptics';
 import { ensureCanDeliver } from '../utils/quoteDeliveryGuard';
 import { auth } from '../config/firebase';
+import { cleanSmsRecipient, openSmsComposer } from '../utils/smsComposer';
 
 const USE_EMULATOR = process.env.USE_FIREBASE_EMULATOR === 'true';
 const FIREBASE_FUNCTIONS_URL = USE_EMULATOR
@@ -158,36 +159,22 @@ export function FollowUpSheet({
 
   const handleSMS = async () => {
     selectionTap();
-    const phone = (customerPhone || '').replace(/\s+/g, '');
+    const phone = cleanSmsRecipient(customerPhone || '');
     if (!phone) {
       Alert.alert('No phone on file', 'Add a phone number to the customer to send an SMS.');
       return;
     }
     if (!(await passesDeliveryGate())) return;
 
-    // Desktop browsers don't handle sms:, so copy the message + phone to the
-    // clipboard and let the tradie paste into whichever messaging app they
-    // use. Mobile native (iOS/Android) keeps the prefilled sms: composer.
-    if (IS_WEB) {
-      try {
-        await Clipboard.setStringAsync(message);
+    try {
+      const result = await openSmsComposer(phone, message);
+      if (result === 'cancelled') return;
+      if (result === 'copied') {
         Alert.alert(
           'Message copied',
           `Phone: ${customerPhone}\n\nThe follow-up message is on your clipboard — paste it into your SMS or messaging app.`,
         );
-        onDismiss();
-      } catch {
-        Alert.alert('Error', 'Could not copy the message.');
       }
-      return;
-    }
-
-    const url =
-      Platform.OS === 'ios'
-        ? `sms:${phone}&body=${encodeURIComponent(message)}`
-        : `sms:${phone}?body=${encodeURIComponent(message)}`;
-    try {
-      await Linking.openURL(url);
       onDismiss();
     } catch {
       Alert.alert('Error', 'Could not open SMS.');

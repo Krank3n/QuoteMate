@@ -3,8 +3,7 @@
  * Handles generation of secure acceptance links for email-based quote responses
  */
 
-import { httpsCallable } from 'firebase/functions';
-import { functions, auth } from '../config/firebase';
+import { auth } from '../config/firebase';
 
 // Firebase Function base URL
 const FUNCTIONS_BASE_URL = 'https://us-central1-hansendev.cloudfunctions.net';
@@ -24,39 +23,33 @@ interface GenerateAcceptanceLinkResponse {
  * 3. Returns the full acceptance URL
  *
  * @param quoteId - The quote ID to generate a link for
- * @param userId - The owner's user ID (for security verification)
- * @returns The acceptance URL to include in email
+ * @returns The customer-facing URL to include in the SMS or email
  */
-export async function generateAcceptanceLink(
-  quoteId: string,
-  userId: string
-): Promise<string> {
-  try {
-    const idToken = await auth.currentUser?.getIdToken();
-    const response = await fetch(`${FUNCTIONS_BASE_URL}/generateQuoteAcceptanceLink`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${idToken}`,
-      },
-      body: JSON.stringify({ quoteId }),
-    });
+export async function generateAcceptanceLink(quoteId: string): Promise<string> {
+  const currentUser = auth.currentUser;
+  if (!currentUser) throw new Error('You must be signed in to create a quote link');
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Failed to generate acceptance link: ${errorText}`);
-    }
+  const idToken = await currentUser.getIdToken();
+  const response = await fetch(`${FUNCTIONS_BASE_URL}/generateQuoteAcceptanceLink`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${idToken}`,
+    },
+    body: JSON.stringify({ quoteId }),
+  });
 
-    const data: GenerateAcceptanceLinkResponse = await response.json();
-
-    if (!data.success || !data.acceptanceUrl) {
-      throw new Error(data.error || 'Failed to generate acceptance link');
-    }
-
-    return data.acceptanceUrl;
-  } catch (error: any) {
-    throw error;
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Failed to generate acceptance link: ${errorText}`);
   }
+
+  const data: GenerateAcceptanceLinkResponse = await response.json();
+  if (!data.success || !data.acceptanceUrl) {
+    throw new Error(data.error || 'Failed to generate acceptance link');
+  }
+
+  return data.acceptanceUrl;
 }
 
 /**

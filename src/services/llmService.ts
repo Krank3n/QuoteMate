@@ -387,6 +387,17 @@ RESPECT THE JOB DESCRIPTION — NAMED MATERIALS AND QUANTITIES ARE MANDATORY:
 - If a material is named but no quantity is given, derive the quantity from the area, length, or count in the description using its coverage (e.g. "10 m² of R2.5 batts" → batt pack coverage → packs needed) and show the derivation in "reasoning".
 - The named primary material is the core of the job — supporting items (fasteners, tape, PPE, blades) are ADDITIONAL to it, never a substitute for it.
 
+EXCLUSIONS AND REPLACEMENT-ONLY SCOPE ARE HARD CONSTRAINTS:
+- Treat phrases such as "only", "no ... included", "do not quote", "exclude", "existing ... to remain", and "condition unknown" as binding scope limits. Never add the excluded work as a precaution or assumption.
+- Surface replacement is NOT a rebuild. If the scope says decking boards only / no subfloor structure, do NOT include posts, footings, concrete, bearers, joists, framing screws, weed mat, fascia, or other subfloor materials.
+- Include every explicitly requested supporting cost/item: demolition labour, rubbish removal, tip/disposal fees, fixings/clips, blades and other named consumables. A demolition/disposal section may use the explicit tip/disposal allowance as its row and carry the demolition sectionLaborHours.
+- Do not emit builder's margin, markup or GST as material rows — the app applies those after materials and labour.
+
+DECK-BOARD REPLACEMENT CHECK:
+- Derive board quantity from deck area, installed board cover width (board width + gap), available stock length and sensible cutting layout, then add only 10–15% waste. State the calculation in reasoning.
+- Hidden clips/fixings must be derived from deck area or joist intersections and emitted as individual each-counts; the pricing layer converts them into packs.
+- Keep demolition/disposal labour separate from installation labour when both are requested.
+
 - "sectionLaborHours" is the estimated labor hours PER UNIT of that section (e.g. 1.5 hours per fence bay). All materials in the same section should have the same sectionLaborHours value. The sum of (sectionLaborHours × sectionMultiplier) across all sections should roughly equal estimatedHours.
 
 QUALITY TIER DETECTION — read the job description for tier qualifiers and set both "jobQualityTier" (top-level, one per job) and "qualityTier" (per-material, inherits jobQualityTier when omitted). This is what makes the pricing layer pick the RIGHT product out of the supplier search results instead of always grabbing the cheapest hit:

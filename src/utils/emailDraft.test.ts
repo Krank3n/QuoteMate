@@ -110,7 +110,7 @@ describe('warmEmailDraft', () => {
       businessName: 'Hansen Decks',
       customerName: 'Sam',
     });
-    expect(getWarmedEmailBody('q1')).toBe('Written quote email');
+    expect(getWarmedEmailBody(quoteDoc())).toBe('Written quote email');
   });
 
   // Guard, not decoration: saveDraft replaces `currentQuote`, the wizard's
@@ -146,14 +146,14 @@ describe('warmEmailDraft', () => {
     );
 
     const warming = warmEmailDraft(quoteDoc(), settings, { isPro: true });
-    const pending = whenEmailDraftWarm('q1');
+    const pending = whenEmailDraftWarm(quoteDoc());
     expect(pending).toBeTruthy();
 
     release('Written quote email');
     await Promise.all([warming, pending]);
 
-    expect(getWarmedEmailBody('q1')).toBe('Written quote email');
-    expect(whenEmailDraftWarm('q1')).toBeUndefined();
+    expect(getWarmedEmailBody(quoteDoc())).toBe('Written quote email');
+    expect(whenEmailDraftWarm(quoteDoc())).toBeUndefined();
   });
 
   it('does not re-generate once a body is already warm', async () => {
@@ -167,7 +167,7 @@ describe('warmEmailDraft', () => {
     await warmEmailDraft(quoteDoc({ draftEmailBody: 'Already written' }), settings, { isPro: true });
 
     expect(llm.generateQuoteEmail).not.toHaveBeenCalled();
-    expect(getWarmedEmailBody('q1')).toBeUndefined();
+    expect(getWarmedEmailBody(quoteDoc())).toBeUndefined();
   });
 
   it('does nothing on the free tier — that template is local and instant', async () => {
@@ -175,7 +175,7 @@ describe('warmEmailDraft', () => {
 
     expect(llm.generateQuoteEmail).not.toHaveBeenCalled();
     expect(llm.getDefaultEmailBody).not.toHaveBeenCalled();
-    expect(getWarmedEmailBody('q1')).toBeUndefined();
+    expect(getWarmedEmailBody(quoteDoc())).toBeUndefined();
   });
 
   // generateQuoteEmail swallows network/server failures and returns the plain
@@ -186,7 +186,7 @@ describe('warmEmailDraft', () => {
 
     await warmEmailDraft(quoteDoc(), settings, { isPro: true });
 
-    expect(getWarmedEmailBody('q1')).toBeUndefined();
+    expect(getWarmedEmailBody(quoteDoc())).toBeUndefined();
   });
 
   it('does not cache an empty body', async () => {
@@ -194,14 +194,14 @@ describe('warmEmailDraft', () => {
 
     await warmEmailDraft(quoteDoc(), settings, { isPro: true });
 
-    expect(getWarmedEmailBody('q1')).toBeUndefined();
+    expect(getWarmedEmailBody(quoteDoc())).toBeUndefined();
   });
 
   it('swallows a generation failure — the send flow still writes one on tap', async () => {
     llm.generateQuoteEmail.mockRejectedValueOnce(new Error('network down'));
 
     await expect(warmEmailDraft(quoteDoc(), settings, { isPro: true })).resolves.toBeUndefined();
-    expect(getWarmedEmailBody('q1')).toBeUndefined();
+    expect(getWarmedEmailBody(quoteDoc())).toBeUndefined();
   });
 
   it('recovers after a failure — the next warm-up for that doc still runs', async () => {
@@ -211,7 +211,7 @@ describe('warmEmailDraft', () => {
     await warmEmailDraft(quoteDoc(), settings, { isPro: true });
 
     expect(llm.generateQuoteEmail).toHaveBeenCalledTimes(2);
-    expect(getWarmedEmailBody('q1')).toBe('Written quote email');
+    expect(getWarmedEmailBody(quoteDoc())).toBe('Written quote email');
   });
 
   it('routes invoices through the invoice generator', async () => {
@@ -219,7 +219,30 @@ describe('warmEmailDraft', () => {
 
     expect(llm.generateInvoiceEmail).toHaveBeenCalledTimes(1);
     expect(llm.generateQuoteEmail).not.toHaveBeenCalled();
-    expect(getWarmedEmailBody('i1')).toBe('Written invoice email');
+    expect(getWarmedEmailBody(invoiceDoc())).toBe('Written invoice email');
+  });
+
+  // convertQuoteToInvoice is a server-side flip performed IN PLACE — same
+  // document id, type changes to 'invoice'. Keyed on id alone, the quote body
+  // warmed beforehand was handed straight to the invoice send, and the
+  // customer received an invoice reading "Please find attached your
+  // quotation… valid for 30 days" instead of an amount due and a due date.
+  it('does not serve a quote body for the invoice that replaced it in place', async () => {
+    await warmEmailDraft(quoteDoc(), settings, { isPro: true });
+
+    // Same id, now an invoice.
+    const converted = invoiceDoc({ id: 'q1' });
+    expect(getWarmedEmailBody(quoteDoc())).toBe('Written quote email');
+    expect(getWarmedEmailBody(converted)).toBeUndefined();
+  });
+
+  it('warms the converted invoice on its own, through the invoice generator', async () => {
+    await warmEmailDraft(quoteDoc(), settings, { isPro: true });
+    const converted = invoiceDoc({ id: 'q1' });
+    await warmEmailDraft(converted, settings, { isPro: true });
+
+    expect(llm.generateInvoiceEmail).toHaveBeenCalledTimes(1);
+    expect(getWarmedEmailBody(converted)).toBe('Written invoice email');
   });
 
   it('keeps the cache bounded across a long session', async () => {
@@ -229,8 +252,8 @@ describe('warmEmailDraft', () => {
     }
 
     // Oldest evicted, newest kept.
-    expect(getWarmedEmailBody('q-0')).toBeUndefined();
-    expect(getWarmedEmailBody('q-24')).toBe('Written quote email 24');
+    expect(getWarmedEmailBody({ id: 'q-0', type: 'quote' })).toBeUndefined();
+    expect(getWarmedEmailBody({ id: 'q-24', type: 'quote' })).toBe('Written quote email 24');
   });
 });
 
@@ -263,5 +286,40 @@ describe('warm-up entry points', () => {
     // wizard but never warmed anything, so sending an existing job from the
     // job screen always waited on generation.
     expect(sourceOf('../screens/ViewJobScreen.tsx')).toMatch(/warmEmailDraft\(/);
+  });
+});
+
+/**
+ * Ways off the send screen. Source-level for the same reason as above: the
+ * regression is structural — a branch that renders the Done bar INSTEAD of
+ * the send buttons — and rendering this modal in a test isn't feasible.
+ */
+describe('send screen — Send must never be unreachable', () => {
+  const modalSource = () =>
+    readFileSync(resolve(__dirname, '../components/DocumentEmailPreviewModal.tsx'), 'utf8');
+
+  it('drops edit mode when the keyboard goes', () => {
+    // isEditingBody was derived from the keyboard and is now standalone state,
+    // while the footer still swaps the send buttons out for a Done bar while
+    // it's true. On Android, system Back dismisses the keyboard — so without
+    // this the tradie was left on the send screen with no Send button, and
+    // the obvious exit (the header chevron) abandons the send entirely.
+    //
+    // Bounded to the hide listener itself — from the event name to the
+    // effect's cleanup `return`. A loose character window instead runs past
+    // the listener into stopEditingBody, whose own setIsEditingBody(false)
+    // makes this pass against the very code it is meant to catch.
+    const src = modalSource();
+    const start = src.indexOf("'keyboardDidHide'");
+    const end = src.indexOf('return () =>', start);
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    expect(src.slice(start, end)).toMatch(/setIsEditingBody\(false\)/);
+  });
+
+  it('handles Android hardware Back', () => {
+    // Without onRequestClose, Back is silently swallowed on what is now the
+    // send screen — the most reflexive dismissal doing nothing at all.
+    expect(modalSource()).toMatch(/<Modal[\s\S]{0,400}?onRequestClose=/);
   });
 });

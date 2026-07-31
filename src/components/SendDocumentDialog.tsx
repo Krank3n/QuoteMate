@@ -19,7 +19,7 @@
  */
 
 import React, { useMemo, useRef, useState, useEffect } from 'react';
-import { Alert, Share, Linking, Platform } from 'react-native';
+import { Alert, Share } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { format } from 'date-fns';
 
@@ -46,6 +46,9 @@ import {
   whenEmailDraftWarm,
 } from '../utils/emailDraft';
 import { hasCustomerEmail } from '../utils/sendFlow';
+import { cleanSmsRecipient, openSmsComposer } from '../utils/smsComposer';
+import { generateAcceptanceLink } from '../services/quoteAcceptanceService';
+import { hashTerms } from '../../shared/pdf/terms/defaultAuTradie';
 
 interface SendDocumentDialogProps {
   visible: boolean;
@@ -88,6 +91,7 @@ export function SendDocumentDialog({
   const [payLinkAttached, setPayLinkAttached] = useState(false);
   const [isAttachingPayLink, setIsAttachingPayLink] = useState(false);
   const [payLinkOfferVisible, setPayLinkOfferVisible] = useState(false);
+  const [isPreparingSms, setIsPreparingSms] = useState(false);
   // Set by the preview modal on a successful send; gates the post-send
   // pay-link ask so we only pitch payments to someone who just delivered,
   // and stops us re-writing the doc once it has left.
@@ -201,7 +205,7 @@ export function SendDocumentDialog({
       openPreviewWithBody(emailHandler.draftBody, true, 0);
       return;
     }
-    const warmed = getWarmedEmailBody(doc.id);
+    const warmed = getWarmedEmailBody(doc);
     if (warmed) {
       openPreviewWithBody(warmed, true, 0);
       emailHandler.persistBody(warmed);
@@ -215,9 +219,9 @@ export function SendDocumentDialog({
       // A warm-up already running for this doc is the common case when the
       // tradie sends straight off JobPreview — wait on it rather than paying
       // for a second generation of the same email.
-      const warming = whenEmailDraftWarm(doc.id);
+      const warming = whenEmailDraftWarm(doc);
       if (warming) await warming;
-      const body = getWarmedEmailBody(doc.id)
+      const body = getWarmedEmailBody(doc)
         ?? (isPro ? await emailHandler.generate() : emailHandler.fallback());
       setEmailBody(body);
       seededDocIdRef.current = doc.id;
@@ -338,7 +342,14 @@ export function SendDocumentDialog({
     // we only notify the host on a real draft→sent move (and never on failure).
     const wasDraft = doc.stage === 'draft';
     try {
-      await markDocumentSent(doc, method, { saveQuote, saveInvoice, createInvoiceFromQuote });
+      // Non-email sends do not pass through the email backend's snapshot
+      // step. Preserve the exact terms in force when the document leaves so
+      // later settings edits cannot rewrite what the customer accepted.
+      const currentTerms = businessSettings?.termsAndConditions?.trim();
+      const deliveredDoc = currentTerms && !doc.termsSnapshot
+        ? { ...doc, termsSnapshot: currentTerms, termsVersionHash: hashTerms(currentTerms) }
+        : doc;
+      await markDocumentSent(deliveredDoc, method, { saveQuote, saveInvoice, createInvoiceFromQuote });
     } catch {
       // Best-effort audit; ignore.
       return;
@@ -349,23 +360,100 @@ export function SendDocumentDialog({
   };
 
   const handleSendSMS = async () => {
-    if (!(await passesDeliveryGate())) return;
-    setActionSheetVisible(false);
-    trackEvent('send_method_chosen', { method: 'sms', doc_type: docType });
-    const message = isInvoice
-      ? `Hi ${invoice.customerName}, your invoice from ${businessSettings?.businessName || 'us'} for ${invoice.job.name} is ready. Total: ${formatCurrency(invoice.total)}. Payment due: ${format(new Date(invoice.dueDate), 'dd MMM yyyy')}. Thank you!`
-      : `Hi ${quote.customerName}, your quote from ${businessSettings?.businessName || 'us'} for ${quote.job.name} is ready. Total: ${formatCurrency(quote.total)}. Thank you for your business!`;
-    const phone = isInvoice ? (invoice.customerPhone || '') : (quote.customerPhone || '');
-    const url = Platform.OS === 'ios'
-      ? `sms:${phone}&body=${encodeURIComponent(message)}`
-      : `sms:${phone}?body=${encodeURIComponent(message)}`;
-    try {
-      await Linking.openURL(url);
-      await recordSend('sms');
-    } catch {
-      Alert.alert('Error', 'Could not open SMS');
+    if (isPreparingSms) return;
+    const rawPhone = isInvoice ? (invoice.customerPhone || '') : (quote.customerPhone || '');
+    const phone = cleanSmsRecipient(rawPhone);
+    if (!phone) {
+      Alert.alert('No phone on file', 'Add a phone number to the customer to send an SMS.');
+      return;
     }
-    onDismiss();
+    if (!(await passesDeliveryGate())) return;
+    trackEvent('send_method_chosen', { method: 'sms', doc_type: docType });
+
+    // A quote SMS must carry the quote itself, not merely announce a total.
+    // Minting also snapshots the current terms server-side for the public
+    // review page. Keep the sheet visible with progress copy while it runs.
+    let quoteUrl: string | undefined;
+    if (!isInvoice) {
+      setIsPreparingSms(true);
+      try {
+        quoteUrl = await generateAcceptanceLink(doc.id);
+      } catch {
+        Alert.alert(
+          'Could not create quote link',
+          'Check your connection and try again, or send the quote by email.',
+        );
+        return;
+      } finally {
+        setIsPreparingSms(false);
+      }
+    }
+
+    setActionSheetVisible(false);
+    const customerName = isInvoice ? invoice.customerName : quote.customerName;
+    const jobName = isInvoice ? invoice.job.name : quote.job.name;
+    const total = isInvoice ? invoice.total : quote.total;
+    const businessName = businessSettings?.businessName || 'us';
+    const invoicePayLine = invoice.squarePaymentLinkUrl
+      ? `\n\nView and pay online:\n${invoice.squarePaymentLinkUrl}`
+      : '';
+    // Deliberate line breaks make the composer easy to review and keep the
+    // customer-facing text readable instead of one long encoded URI payload.
+    const message = isInvoice
+      ? `Hi ${customerName},\n\nYour invoice from ${businessName} for ${jobName} is ready.\n\nTotal: ${formatCurrency(total)}\nPayment due: ${format(new Date(invoice.dueDate), 'dd MMM yyyy')}${invoicePayLine}\n\nThank you!`
+      : `Hi ${customerName},\n\nYour quote from ${businessName} for ${jobName} is ready.\n\nTotal: ${formatCurrency(total)}\n\nView and respond to your quote:\n${quoteUrl}\n\nPlease reply if you have any questions. Thank you!`;
+
+    try {
+      const result = await openSmsComposer(phone, message);
+      if (result === 'cancelled') {
+        setActionSheetVisible(true);
+        return;
+      }
+      if (result === 'copied') {
+        Alert.alert(
+          'Message copied',
+          `Phone: ${rawPhone}\n\nPaste the message into your SMS or messaging app, then confirm whether you sent it.`,
+          [
+            { text: 'Keep as draft', style: 'cancel', onPress: onDismiss },
+            {
+              text: 'Mark as sent',
+              onPress: async () => {
+                await recordSend('sms');
+                onDismiss();
+              },
+            },
+          ],
+          { cancelable: false },
+        );
+        return;
+      }
+      if (result === 'unknown') {
+        // Android does not tell apps whether the user pressed Send. Ask rather
+        // than turning a cancelled composer into a false customer delivery.
+        Alert.alert(
+          'Was the SMS sent?',
+          'Android cannot confirm whether the message was sent.',
+          [
+            { text: 'Not yet', style: 'cancel', onPress: () => setActionSheetVisible(true) },
+            {
+              text: 'Mark as sent',
+              onPress: async () => {
+                await recordSend('sms');
+                onDismiss();
+              },
+            },
+          ],
+          { cancelable: false },
+        );
+        return;
+      }
+      await recordSend('sms');
+      onDismiss();
+    } catch {
+      // Keep the send sheet available for a retry or another delivery method.
+      setActionSheetVisible(true);
+      Alert.alert('Could not open SMS', 'Check the customer phone number and try again.');
+    }
   };
 
   const handleShareFromDialog = async () => {
@@ -443,7 +531,7 @@ export function SendDocumentDialog({
 
   const sendOptions: ActionSheetOption[] = [
     { icon: 'email-outline', label: 'Email', onPress: handleEmailOption },
-    { icon: 'message-text', label: 'SMS', onPress: handleSendSMS },
+    { icon: 'message-text', label: isPreparingSms ? 'Preparing SMS…' : 'SMS', onPress: handleSendSMS },
     { icon: 'share-variant', label: 'Share', onPress: handleShareFromDialog },
     { icon: 'file-pdf-box', label: 'Export PDF', onPress: handleExportFromDialog },
   ];

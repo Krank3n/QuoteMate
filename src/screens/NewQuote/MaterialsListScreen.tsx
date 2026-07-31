@@ -946,10 +946,14 @@ export function MaterialsListScreen() {
       const isNetworkError =
         error?.name === 'TypeError' ||
         /network request failed|failed to fetch|network error|offline|timeout|timed out/i.test(message);
+      const isRateLimitError = /\b429\b|too many requests|rate.?limit/i.test(message);
       setSuccessType('error');
       if (isNetworkError) {
         setSuccessTitle('No Internet Connection');
         setSuccessMessage('Generating materials needs an internet connection. Please check your connection and try again.');
+      } else if (isRateLimitError) {
+        setSuccessTitle('Give It a Moment');
+        setSuccessMessage('The estimator is getting too many requests. Wait about a minute, then tap Get Recommended Gear again.');
       } else {
         setSuccessTitle('Generation Failed');
         setSuccessMessage('Could not generate materials list. Please add materials manually or try again.');

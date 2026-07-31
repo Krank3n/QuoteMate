@@ -246,6 +246,14 @@ export function DocumentEmailPreviewModal({
       () => {
         setIsKeyboardVisible(false);
         setKeyboardHeight(0);
+        // Leaving the keyboard leaves edit mode. isEditingBody used to be
+        // derived (isBodyFocused && isKeyboardVisible) and is now standalone
+        // state, but the footer still renders the Done bar INSTEAD of the send
+        // buttons while it's true. So on Android, dismissing the keyboard with
+        // system Back stranded the tradie on the send screen with no Send
+        // button at all — the one action this screen exists for — and the
+        // obvious way out (the header's Back chevron) abandons the send.
+        setIsEditingBody(false);
       },
     );
     return () => { showSub.remove(); hideSub.remove(); };
@@ -731,8 +739,19 @@ export function DocumentEmailPreviewModal({
     </KeyboardAvoidingView>
   );
 
+  // onRequestClose is required for Android's hardware/gesture Back to do
+  // anything at all here — without it the tradie's most reflexive dismissal
+  // was silently swallowed on what is now the send screen. Back closes the
+  // keyboard first (which drops edit mode via the hide listener above), so a
+  // second Back lands here and dismisses, matching platform behaviour.
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" statusBarTranslucent>
+    <Modal
+      visible={visible}
+      animationType="slide"
+      presentationStyle="pageSheet"
+      statusBarTranslucent
+      onRequestClose={handleDismiss}
+    >
       {/* Quote modal historically wraps in Portal.Host so menus rendered
           inside the modal anchor correctly; invoice modal didn't need it.
           Wrap everything in Portal.Host now to keep menu/popup positioning
@@ -1069,8 +1088,12 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
   },
   doneButton: {
-    paddingVertical: 6,
-    paddingHorizontal: 16,
+    // 44pt minimum. This is the only way back to the send buttons from edit
+    // mode, so it can't be a 29pt target a tradie has to hit with gloves on.
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 20,
   },
   doneButtonText: {
     fontSize: 16,

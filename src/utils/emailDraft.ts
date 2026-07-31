@@ -109,7 +109,23 @@ export function shouldWarmEmailDraft(
   return doc.stage === 'draft';
 }
 
-// Bodies ready to use, and the generations still running, keyed by doc id.
+/** The identity a warmed body is filed under. */
+export type WarmTarget = Pick<Document, 'id' | 'type'>;
+
+/**
+ * Cache key — type as well as id, and the type half is load-bearing.
+ * `convertQuoteToInvoice` is a server-side flip performed IN PLACE: it loads
+ * the document, sets type to 'invoice', and writes it back under the SAME id
+ * (functions/src/documentHandlers.ts). Keyed on id alone, a quote body warmed
+ * before the convert was handed straight to the invoice send afterwards — the
+ * customer received an invoice reading "Please find attached your quotation…
+ * valid for 30 days" instead of an amount due and a due date.
+ */
+function cacheKey(doc: WarmTarget): string {
+  return `${doc.type}:${doc.id}`;
+}
+
+// Bodies ready to use, and the generations still running, keyed by cacheKey.
 // Session-scoped: a warm body is worth minutes, not days, and the persisted
 // draftEmailBody covers anything longer.
 const warmedBodies = new Map<string, string>();
@@ -120,8 +136,8 @@ const inFlight = new Map<string, Promise<void>>();
 const MAX_WARMED = 20;
 
 /** The warmed body for this doc, ready right now. */
-export function getWarmedEmailBody(docId: string): string | undefined {
-  return warmedBodies.get(docId);
+export function getWarmedEmailBody(doc: WarmTarget): string | undefined {
+  return warmedBodies.get(cacheKey(doc));
 }
 
 /**
@@ -129,8 +145,8 @@ export function getWarmedEmailBody(docId: string): string | undefined {
  * awaits it rather than starting a second generation — tapping Send while the
  * warm-up is still going is the common case, not an edge one.
  */
-export function whenEmailDraftWarm(docId: string): Promise<void> | undefined {
-  return inFlight.get(docId);
+export function whenEmailDraftWarm(doc: WarmTarget): Promise<void> | undefined {
+  return inFlight.get(cacheKey(doc));
 }
 
 /** Test seam — the caches above are module state by design. */
@@ -156,7 +172,8 @@ export async function warmEmailDraft(
   if (!shouldWarmEmailDraft(doc)) return;
   // JobPreview re-mounts every time the tradie loops out to a wizard section
   // and back; without this each loop would fire another generation.
-  if (warmedBodies.has(doc.id) || inFlight.has(doc.id)) return;
+  const key = cacheKey(doc);
+  if (warmedBodies.has(key) || inFlight.has(key)) return;
 
   const run = (async () => {
     try {
@@ -172,14 +189,14 @@ export async function warmEmailDraft(
         const oldest = warmedBodies.keys().next().value;
         if (oldest !== undefined) warmedBodies.delete(oldest);
       }
-      warmedBodies.set(doc.id, body);
+      warmedBodies.set(key, body);
     } catch {
       // Best effort. The send flow still generates on tap when nothing landed.
     } finally {
-      inFlight.delete(doc.id);
+      inFlight.delete(key);
     }
   })();
 
-  inFlight.set(doc.id, run);
+  inFlight.set(key, run);
   await run;
 }

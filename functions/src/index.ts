@@ -88,6 +88,7 @@ export { generatePresenterClip } from './generatePresenterClip';
 export { adminAssistantCosts, reportAssistantLiveUsage } from './assistantCosts';
 export { reportPriceFetchUsage } from './featureUsage';
 import { recordMaterialsRecommend } from './featureUsage';
+import { userRateLimitKey } from './rateLimitKey';
 import { randomUUID } from 'crypto';
 import {
   normalizeResetEmail,
@@ -498,12 +499,17 @@ async function verifyAuth(
 async function verifyAuthWithRateLimit(
   req: functions.https.Request,
   res: functions.Response,
-  limit: RateLimitConfig = RATE_LIMITS.standard
+  limit: RateLimitConfig = RATE_LIMITS.standard,
+  bucket = 'shared',
 ): Promise<admin.auth.DecodedIdToken | null> {
   const decodedToken = await verifyAuth(req, res);
   if (!decodedToken) return null;
 
-  const allowed = await checkRateLimit(`user:${decodedToken.uid}`, limit, res);
+  // Keep stricter/expensive features out of the timestamp stream written by
+  // high-frequency standard calls such as address autocomplete. Previously all
+  // authenticated endpoints shared `user:<uid>`; 10 autocomplete requests were
+  // enough to make this 10/min materials endpoint reject its first request.
+  const allowed = await checkRateLimit(userRateLimitKey(decodedToken.uid, limit, bucket), limit, res);
   if (!allowed) return null;
 
   return decodedToken;
@@ -1798,7 +1804,12 @@ export const analyzeJobDescription = functions.runWith({ timeoutSeconds: 420 }).
       return;
     }
 
-    const decodedToken = await verifyAuthWithRateLimit(req, res, RATE_LIMITS.heavy);
+    const decodedToken = await verifyAuthWithRateLimit(
+      req,
+      res,
+      RATE_LIMITS.heavy,
+      'materials-analyze',
+    );
     if (!decodedToken) return;
 
     // Recommend-run telemetry clock — started after auth so it measures the
@@ -1949,6 +1960,18 @@ RESPECT THE JOB DESCRIPTION — NAMED MATERIALS AND QUANTITIES ARE MANDATORY:
 - If the job description states a quantity for a material (e.g. "12 batts", "6 sheets", "20 litres"), use EXACTLY that quantity and unit — do not recompute, round, or override it.
 - If a material is named but no quantity is given, derive the quantity from the area, length, or count in the description using its coverage (e.g. "10 m² of R2.5 batts" → batt pack coverage → packs needed) and show the derivation in "reasoning".
 - The named primary material is the core of the job — supporting items (fasteners, tape, PPE, blades) are ADDITIONAL to it, never a substitute for it.
+
+EXCLUSIONS AND REPLACEMENT-ONLY SCOPE ARE HARD CONSTRAINTS:
+- Treat phrases such as "only", "no ... included", "do not quote", "exclude", "existing ... to remain", and "condition unknown" as binding scope limits. Never add the excluded work as a precaution or assumption.
+- Surface replacement is NOT a rebuild. If the scope says decking boards only / no subfloor structure, do NOT include posts, footings, concrete, bearers, joists, framing screws, weed mat, fascia, or other subfloor materials. Keep the customer's scope as removal and replacement of the boards on the existing structure.
+- Preserve the uncertainty as a scope caveat in the job summary/reasoning, not as extra materials: the existing structure is excluded and any defects found after demolition require inspection/variation.
+- Include every explicitly requested supporting cost/item: demolition labour, rubbish removal, tip/disposal fees, fixings/clips, blades and other named consumables. A demolition/disposal section may use the explicit tip/disposal allowance as its row and carry the demolition sectionLaborHours; do not invent structural materials just to give that labour a section.
+- Do not emit builder's margin, markup or GST as material rows — the app applies those after materials and labour.
+
+DECK-BOARD REPLACEMENT CHECK:
+- Derive board quantity from deck area, installed board cover width (board width + gap), available stock length and sensible cutting layout, then add only 10–15% waste. State the calculation in reasoning.
+- Hidden clips/fixings must be derived from deck area or joist intersections and emitted as individual each-counts; the pricing layer converts them into packs.
+- Keep demolition/disposal labour separate from installation labour when both are requested.
 
 - "sectionLaborHours" is the estimated labor hours PER UNIT of that section (e.g. 1.5 hours per fence bay). All materials in the same section should have the same sectionLaborHours value. The sum of (sectionLaborHours × sectionMultiplier) across all sections should roughly equal estimatedHours.
 
@@ -5802,30 +5825,61 @@ export const generateQuoteAcceptanceLink = functions.https.onRequest((req, res) 
 
 
       const db = admin.firestore();
-      const quoteRef = db.collection('users').doc(userId).collection('quotes').doc(quoteId);
-      const quoteDoc = await quoteRef.get();
+      const userRef = db.collection('users').doc(userId);
+      const quoteRef = userRef.collection('quotes').doc(quoteId);
+      const documentRef = userRef.collection('documents').doc(quoteId);
+      const settingsRef = userRef.collection('settings').doc('business');
+      const [quoteDoc, documentDoc, settingsDoc] = await Promise.all([
+        quoteRef.get(),
+        documentRef.get(),
+        settingsRef.get(),
+      ]);
 
       if (!quoteDoc.exists) {
         res.status(404).json({ success: false, error: 'Quote not found' });
         return;
       }
 
-      // Generate a 256-bit (32 byte) secure random token
+      // Generate a 256-bit (32 byte) secure random token.
       const token = crypto.randomBytes(32).toString('hex'); // 64 characters
       const tokenHash = hashToken(token);
 
-      // Store the hashed token and metadata on the quote
-      await quoteRef.update({
-        acceptanceTokenHash: tokenHash,
-        acceptanceTokenCreatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
+      // Freeze the terms shown with this quote. A resend preserves an earlier
+      // snapshot instead of silently replacing the agreement with whatever is
+      // currently in Settings.
+      const quoteData = quoteDoc.data() || {};
+      const configuredTerms = typeof settingsDoc.data()?.termsAndConditions === 'string'
+        ? settingsDoc.data()!.termsAndConditions.trim()
+        : '';
+      const termsSnapshot = typeof quoteData.termsSnapshot === 'string' && quoteData.termsSnapshot.trim()
+        ? quoteData.termsSnapshot.trim()
+        : configuredTerms;
+      const termsVersionHash = termsSnapshot
+        ? (quoteData.termsVersionHash || hashTerms(termsSnapshot))
+        : undefined;
 
-      // Store hashed token in dedicated collection for O(1) lookup
-      await db.collection('quoteAcceptanceTokens').doc(tokenHash).set({
+      const tokenCreatedAt = admin.firestore.FieldValue.serverTimestamp();
+      const batch = db.batch();
+      batch.set(quoteRef, {
+        acceptanceTokenHash: tokenHash,
+        acceptanceTokenCreatedAt: tokenCreatedAt,
+        ...(termsSnapshot ? { termsSnapshot, termsVersionHash } : {}),
+      }, { merge: true });
+      // Do not create a sparse unified document for legacy-only quotes.
+      if (documentDoc.exists) {
+        batch.set(documentRef, {
+          acceptanceTokenCreatedAt: Date.now(),
+          ...(termsSnapshot ? { termsSnapshot, termsVersionHash } : {}),
+          updatedAt: Date.now(),
+        }, { merge: true });
+      }
+      // Store the hashed token in a dedicated collection for O(1) lookup.
+      batch.set(db.collection('quoteAcceptanceTokens').doc(tokenHash), {
         userId,
         quoteId,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        createdAt: tokenCreatedAt,
       });
+      await batch.commit();
 
       // Build the acceptance URL
       const acceptanceUrl = `https://us-central1-hansendev.cloudfunctions.net/quoteAcceptancePage?token=${token}`;
@@ -6282,6 +6336,9 @@ export const getQuoteForAcceptance = functions.https.onRequest((req, res) => {
           gstRegistered: foundQuote.gstRegistered !== false,
           total: foundQuote.total,
           notes: foundQuote.notes,
+          // Only expose the immutable send-time snapshot. Never fall back to
+          // live settings here or an old SMS link could show revised terms.
+          terms: foundQuote.termsSnapshot || null,
           createdAt: foundQuote.createdAt,
           aiEmailBody: foundQuote.aiEmailBody || null,
           photoUrls: photoUrls,
@@ -6870,6 +6927,9 @@ function generateConfirmationPage(
  * Generate the quote acceptance HTML page (fallback review page)
  */
 function generateAcceptancePage(token: string): string {
+  // This value is embedded in a <script>, so quote it as JSON and neutralise
+  // `<` to prevent a crafted query token from terminating the script tag.
+  const tokenLiteral = JSON.stringify(token).replace(/</g, '\\u003c');
   return `
 <!DOCTYPE html>
 <html lang="en">
@@ -6981,12 +7041,18 @@ function generateAcceptancePage(token: string): string {
       margin-top: 8px;
     }
     .totals-row.total .amount { color: var(--accent, #f97316); }
-    .notes {
+    .notes, .terms {
       background: #0f172a;
       padding: 16px;
       border-radius: 8px;
       color: #94a3b8;
       line-height: 1.6;
+      white-space: normal;
+    }
+    .terms {
+      font-size: 14px;
+      max-height: 260px;
+      overflow-y: auto;
     }
     .client-notes {
       width: 100%;
@@ -7087,7 +7153,7 @@ function generateAcceptancePage(token: string): string {
   </div>
 
   <script>
-    const TOKEN = '${token}';
+    const TOKEN = ${tokenLiteral};
     const API_BASE = 'https://us-central1-hansendev.cloudfunctions.net';
 
     function formatCurrency(amount) {
@@ -7227,6 +7293,12 @@ function generateAcceptancePage(token: string): string {
           '<div class="section">' +
             '<div class="section-title">Notes</div>' +
             '<div class="notes">' + escapeHtml(quote.notes) + '</div>' +
+          '</div>' : '') +
+
+        (quote.terms ?
+          '<div class="section">' +
+            '<div class="section-title">Terms &amp; Conditions</div>' +
+            '<div class="terms">' + escapeHtml(quote.terms).replace(/\\n/g, '<br/>') + '</div>' +
           '</div>' : '') +
 
         '<div class="section">' +

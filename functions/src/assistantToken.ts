@@ -15,6 +15,7 @@ import * as admin from 'firebase-admin';
 import fetch from 'node-fetch';
 import cors from 'cors';
 import { todayKey, reserveTurnUpdate, refundTurnUpdate, Plan } from './assistantQuota.helpers';
+import { userRateLimitKey } from './rateLimitKey';
 
 const corsHandler = cors({ origin: true });
 const db = () => admin.firestore();
@@ -179,7 +180,14 @@ export const assistantToken = functions
 
       const decodedToken = await verifyAuth(req, res);
       if (!decodedToken) return;
-      const ok = await checkRateLimit(`user:${decodedToken.uid}`, HEAVY, res);
+      // Token reconnects must not consume the materials-analysis bucket (or
+      // vice versa). Both used to write `user:<uid>`, so a voice reconnect
+      // storm could block the user's next quote generation.
+      const ok = await checkRateLimit(
+        userRateLimitKey(decodedToken.uid, HEAVY, 'assistant-token'),
+        HEAVY,
+        res,
+      );
       if (!ok) return;
       const uid = decodedToken.uid;
 

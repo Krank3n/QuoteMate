@@ -156,3 +156,28 @@ export function geometricSanePieceCount(input: GeometricCoverageInput): number |
   if (requirement <= ceiling * FIRE_FACTOR) return null;
   return ceiling;
 }
+
+/**
+ * Return the theoretical minimum board count needed to cover the stated area
+ * when the priced product exposes BOTH its face width and stock length.
+ *
+ * Unlike the generous over-count ceiling above, this is safe to use as a floor:
+ * fewer boards physically cannot cover the area even with zero cutting waste.
+ * We deliberately refuse to guess missing dimensions — defaulting a 137mm
+ * composite board to 65mm would manufacture an expensive false shortfall.
+ */
+export function geometricMinimumPieceCount(input: GeometricCoverageInput): number | null {
+  const { name, requirement, areaM2 } = input;
+  if (!(requirement > 0) || !(areaM2 > 0)) return null;
+  if (!BOARD_RE.test(name)) return null;
+
+  const widthMm = parseBoardWidthMm(name);
+  const lengthM = parseBoardLengthM(name);
+  if (widthMm === null || lengthM === null) return null;
+
+  const coveragePerBoardM2 = ((widthMm + GAP_MM) / 1000) * lengthM;
+  if (!(coveragePerBoardM2 > 0)) return null;
+
+  const minimum = Math.ceil(areaM2 / coveragePerBoardM2);
+  return requirement < minimum ? minimum : null;
+}

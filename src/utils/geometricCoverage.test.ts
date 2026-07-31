@@ -4,6 +4,7 @@ import {
   parseBoardWidthMm,
   parseBoardLengthM,
   geometricSanePieceCount,
+  geometricMinimumPieceCount,
 } from './geometricCoverage';
 
 describe('parseJobAreaM2', () => {
@@ -67,6 +68,34 @@ describe('parseBoardLengthM', () => {
   });
   it('returns null when absent', () => {
     expect(parseBoardLengthM('Merbau Decking Board 90x19mm')).toBeNull();
+  });
+});
+
+describe('geometricMinimumPieceCount', () => {
+  it('catches the Bui deck quote under-buy: 14 boards cannot cover 18m²', () => {
+    // 137mm board + 4mm gap × 5.4m = 0.7614m² theoretical coverage.
+    // Even with zero cutting waste, 18m² needs at least 24 boards.
+    expect(geometricMinimumPieceCount({
+      name: 'ModWood Composite Decking Board 137mm x 5.4m',
+      requirement: 14,
+      areaM2: 18,
+    })).toBe(24);
+  });
+
+  it('leaves an adequate count alone', () => {
+    expect(geometricMinimumPieceCount({
+      name: 'ModWood Composite Decking Board 137mm x 5.4m',
+      requirement: 26,
+      areaM2: 18,
+    })).toBeNull();
+  });
+
+  it('refuses to invent a floor when width or stock length is unknown', () => {
+    expect(geometricMinimumPieceCount({
+      name: 'ModWood Composite Decking Board',
+      requirement: 14,
+      areaM2: 18,
+    })).toBeNull();
   });
 });
 

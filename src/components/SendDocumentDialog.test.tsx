@@ -14,6 +14,7 @@
 import React from 'react';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, fireEvent, screen, waitFor } from '@testing-library/react';
+import { Alert } from 'react-native';
 
 vi.mock('react-native', () => ({
   Alert: { alert: vi.fn() },
@@ -22,6 +23,21 @@ vi.mock('react-native', () => ({
   Platform: { OS: 'android', select: (o: any) => o.android ?? o.default },
 }));
 vi.mock('@react-navigation/native', () => ({ useNavigation: () => ({ navigate: vi.fn() }) }));
+
+const sms = vi.hoisted(() => ({
+  openSmsComposer: vi.fn(async () => 'sent' as const),
+}));
+vi.mock('../utils/smsComposer', () => ({
+  cleanSmsRecipient: (phone: string) => {
+    const trimmed = phone.trim();
+    return `${trimmed.startsWith('+') ? '+' : ''}${trimmed.replace(/\D/g, '')}`;
+  },
+  openSmsComposer: sms.openSmsComposer,
+}));
+const acceptance = vi.hoisted(() => ({
+  generateAcceptanceLink: vi.fn(async () => 'https://example.test/quote/secure-token'),
+}));
+vi.mock('../services/quoteAcceptanceService', () => acceptance);
 
 vi.mock('./ActionSheet', () => ({
   ActionSheet: ({ visible, title, options }: any) =>
@@ -431,15 +447,102 @@ describe('the pay-link ask, now after the send', () => {
 });
 
 describe('non-email channels', () => {
-  it('records the method and the send for SMS', async () => {
+  it('opens SMS with readable, unencoded text and records the send', async () => {
+    renderDialog({ doc: doc({ customerEmail: undefined, customerPhone: '0412 345 678' }) });
+    await waitFor(() => expect(screen.getByTestId('sheet')).toBeTruthy());
+
+    fireEvent.click(screen.getByText('SMS'));
+
+    await waitFor(() => expect(sms.openSmsComposer).toHaveBeenCalledTimes(1));
+    const [recipient, message] = sms.openSmsComposer.mock.calls[0];
+    expect(recipient).toBe('0412345678');
+    expect(message).toContain('Hi Sam,\n\nYour quote from Hansen Decks');
+    expect(message).toContain('Total: $770.00');
+    expect(message).toContain('View and respond to your quote:\nhttps://example.test/quote/secure-token');
+    expect(message).not.toContain('%20');
+    expect(eventProps('send_method_chosen')).toEqual({ method: 'sms', doc_type: 'quote' });
+    expect(eventProps('quote_send_succeeded')).toEqual({ doc_type: 'quote', method: 'sms', to_self: false });
+  });
+
+  it('keeps the quote in draft when the SMS composer is cancelled', async () => {
+    sms.openSmsComposer.mockResolvedValueOnce('cancelled' as any);
     renderDialog({ doc: doc({ customerEmail: undefined, customerPhone: '0412345678' }) });
     await waitFor(() => expect(screen.getByTestId('sheet')).toBeTruthy());
 
     fireEvent.click(screen.getByText('SMS'));
 
-    await waitFor(() => expect(eventProps('quote_send_succeeded')).toBeTruthy());
-    expect(eventProps('send_method_chosen')).toEqual({ method: 'sms', doc_type: 'quote' });
+    await waitFor(() => expect(sms.openSmsComposer).toHaveBeenCalled());
+    expect(eventProps('quote_send_succeeded')).toBeUndefined();
+    expect(screen.getByTestId('sheet')).toBeTruthy();
+  });
+
+  it('asks Android users to confirm an unknown send result before marking sent', async () => {
+    sms.openSmsComposer.mockResolvedValueOnce('unknown' as any);
+    const { props } = renderDialog({ doc: doc({ customerEmail: undefined, customerPhone: '0412345678' }) });
+    await waitFor(() => expect(screen.getByTestId('sheet')).toBeTruthy());
+
+    fireEvent.click(screen.getByText('SMS'));
+
+    await waitFor(() => expect(vi.mocked(Alert.alert)).toHaveBeenCalledWith(
+      'Was the SMS sent?',
+      expect.any(String),
+      expect.any(Array),
+      { cancelable: false },
+    ));
+    expect(eventProps('quote_send_succeeded')).toBeUndefined();
+    expect(props.onDismiss).not.toHaveBeenCalled();
+
+    const buttons = vi.mocked(Alert.alert).mock.calls.find(([title]) => title === 'Was the SMS sent?')?.[2] as any[];
+    await buttons[1].onPress();
+
     expect(eventProps('quote_send_succeeded')).toEqual({ doc_type: 'quote', method: 'sms', to_self: false });
+    expect(props.onDismiss).toHaveBeenCalled();
+  });
+
+  it('does not mark a web clipboard copy until the user confirms it was sent', async () => {
+    sms.openSmsComposer.mockResolvedValueOnce('copied' as any);
+    const { props } = renderDialog({ doc: doc({ customerEmail: undefined, customerPhone: '0412345678' }) });
+    await waitFor(() => expect(screen.getByTestId('sheet')).toBeTruthy());
+
+    fireEvent.click(screen.getByText('SMS'));
+
+    await waitFor(() => expect(vi.mocked(Alert.alert)).toHaveBeenCalledWith(
+      'Message copied',
+      expect.any(String),
+      expect.any(Array),
+      { cancelable: false },
+    ));
+    expect(eventProps('quote_send_succeeded')).toBeUndefined();
+    expect(props.onDismiss).not.toHaveBeenCalled();
+
+    const buttons = vi.mocked(Alert.alert).mock.calls.find(([title]) => title === 'Message copied')?.[2] as any[];
+    await buttons[1].onPress();
+
+    expect(eventProps('quote_send_succeeded')).toEqual({ doc_type: 'quote', method: 'sms', to_self: false });
+    expect(props.onDismiss).toHaveBeenCalled();
+  });
+
+  it('does not open SMS when a secure quote link cannot be created', async () => {
+    acceptance.generateAcceptanceLink.mockRejectedValueOnce(new Error('offline'));
+    renderDialog({ doc: doc({ customerEmail: undefined, customerPhone: '0412345678' }) });
+    await waitFor(() => expect(screen.getByTestId('sheet')).toBeTruthy());
+
+    fireEvent.click(screen.getByText('SMS'));
+
+    await waitFor(() => expect(acceptance.generateAcceptanceLink).toHaveBeenCalledWith('q1'));
+    expect(sms.openSmsComposer).not.toHaveBeenCalled();
+    expect(eventProps('quote_send_succeeded')).toBeUndefined();
+    expect(screen.getByTestId('sheet')).toBeTruthy();
+  });
+
+  it('does not attempt SMS when the customer has no phone number', async () => {
+    renderDialog({ doc: doc({ customerEmail: undefined, customerPhone: undefined }) });
+    await waitFor(() => expect(screen.getByTestId('sheet')).toBeTruthy());
+
+    fireEvent.click(screen.getByText('SMS'));
+
+    expect(sms.openSmsComposer).not.toHaveBeenCalled();
+    expect(guard.ensureCanDeliver).not.toHaveBeenCalled();
   });
 });
 
