@@ -115,7 +115,7 @@ Every existing AU test passes **unchanged**, plus new named cases:
    
    Not cosmetic: these links go into quotes and material cards a tradie taps through.
 
-2. **HYDRATION RACE — and this is an existing AU bug, not an NZ one.** The wait condition (`scraper.ts:~500`) waits for `#__NEXT_DATA__` *or* a tile element, but the script tag exists before results are populated. Measured on `"90x45 framing"`: parsed **0 products immediately after the selector fired, 17 products 3s later** on the same page. The parser silently fell through to CSS selectors and returned nothing. In production this is an invisible zero-result generator — the material drops to an LLM estimate with no error logged. **Fix regardless of NZ**: wait for a populated `results` array in the payload (or a rendered price), not for the script tag. Worth its own ticket ahead of the NZ work.
+2. ~~**HYDRATION RACE**~~ — **FIXED 2026-07-29**, see §3.0a. Was an existing AU bug, not an NZ one. The wait condition accepted mere element *presence*; the real mechanism turned out to be a **document navigation ~400ms after `commit`**, so the parse ran against a document being torn down. Measured cost: **3 of 12 runs** on terms that definitely have results returned zero (2 of them AU).
 
 3. **AU vocabulary hard-zeros on NZ.** `"90x45 MGP10"` → literally `0 of 0 results` with the site's no-results copy (selector MISS). Not degraded ranking — nothing. Meanwhile `"SG8 framing"` → 8 products, `"H3.2 timber framing"` → 5. Confirms §3.4 is required work, not polish. NZ catalogue is a different brand set: **GIB / ProRoc** where AU has **Gyprock / CSR**.
 
@@ -129,6 +129,34 @@ Every existing AU test passes **unchanged**, plus new named cases:
    | both (what we send today) | 11 | 11 |
 
    Dropped items are exactly the big sheets a plasterer wants — 4800, 6000, 3600 TE/SE. **Prices for shared items are identical** (0 of 15 and 0 of 9 differ filtered vs unfiltered), so this is pure coverage loss, not price distortion. Whether it's true filtering or a payload-shape artifact isn't pinned down; either way NZ needs its own validated param set rather than a copy of AU's.
+
+### 3.0a Hydration race — fixed (uncommitted, in `bunnings-scraper`)
+
+New `src/readiness.ts` + `tests/readiness.test.ts` (31 cases); `scraper.ts` rewired at all three wait sites (search, pagination, `getProductDetail`).
+
+**Root cause was not what the symptom suggested.** Polling the page every 250ms from `commit` showed the payload is *complete* at ~1.2s and the execution context is destroyed at ~1.6s — the search page navigates after it already holds full results. So "the payload has results" never proved the document would survive being read, and **no wait tuned to observed timings could fix it.** The fix is therefore navigation-agnostic:
+
+1. Gate on the *data the parser consumes* (a populated results array), not element presence.
+2. Treat "execution context destroyed" as *not ready yet*, not as an error.
+3. **Re-read when the document turns out to have been replaced** — detected via `state === 'results'` but an empty parse, since the parser swallows the teardown error internally and returns `[]`. This is the part that actually fixes it.
+
+Two wrong turns worth recording, both caught by measurement rather than review:
+- Accepting *rendered tiles* as readiness reintroduced a silent zero (the CSS fallback can't extract from a hydrated-but-unparsed page). Now payload-only, with a regression test.
+- Treating `no-results` as terminal reintroduced it again: a throttled/soft-blocked response renders an empty state **indistinguishable** from a genuinely empty catalogue (a term with 5 results reported "no results" twice through rotating proxy exits). `no-results` is now advisory — it stops the *waiting*, never the parse.
+
+Measured after the fix (real compiled scraper, live site, paced): **0/6 silent zeros** on should-have-results terms, genuine empties still fast (~2.3s), and the retry observed firing and recovering in the wild:
+
+```
+ready after 111ms (1 polls, 5 results)
+WARN payload had results but parse was empty — document was replaced, re-reading
+ready after 4ms (1 polls, 5 results)  →  5 products
+```
+
+Also now distinguishable in logs: a throttled read warns *"may be throttled, NOT necessarily an empty catalogue"* instead of silently reading as zero — which is what let this hide for so long.
+
+**Caveat on measurement:** an intermediate verification run showed 3/5 failures that turned out to be **my own test loop being throttled** (15 rapid requests, one IP, proxy off), not a scraper defect. Live scraper numbers need pacing and the production proxy to mean anything.
+
+**One latency regression to note:** page 2 of an exhausted result set renders neither results nor no-results copy, so it can only end in a timeout — capped at 2.5s. Pre-fix it cost ~300ms. Cheap follow-up: skip pagination when page 1 returns fewer than `limit`.
 
 **One loose end:** item `0299359` (GIB 10x3600x1200) read `$51.23` in the first run and `$56.11` in two later runs. Not filter-related (the A/B shows filters don't move prices) and not reproducible afterwards. NZ result *sets* also reshuffle between runs under `BoostOrder`. Logged as unexplained — re-check during implementation rather than assume price instability. (A `$59.75` reading in an intermediate run was my own harness bug: the name fragment `10x3600x1200` matches five GIB variants.)
 
@@ -283,7 +311,7 @@ Given `project_monetization_square` (revenue thesis = Square payment cuts), NZ l
 
 | Risk | Impact | Mitigation |
 |---|---|---|
-| **Hydration race (existing, AU too)** | Silent 0-result terms → materials fall to LLM estimates, no error logged | Wait on populated results, not the script tag (§3.0 defect 2). Fix before NZ |
+| ~~Hydration race (existing, AU too)~~ | ~~Silent 0-result terms → materials fall to LLM estimates~~ | **FIXED** 2026-07-29 (§3.0a) — payload gate + re-read on replaced document, 31 tests. Uncommitted |
 | Region-blind scraper cache | AU quotes filled with NZ GIB/ProRoc at NZD prices, every row individually plausible | Region in cache key (§3.2) + currency assertion at document entry |
 | NZ product links 404 | Tradie taps a material and lands on a Bunnings AU error page | Region base in `parser.ts` (§3.0 defect 1) + resolve-check regression test |
 | AU filter params on NZ | ~50% of NZ candidates dropped, incl. the large sheets | Region-specific param set, measured (§3.0 defect 4) |
@@ -299,7 +327,7 @@ Given `project_monetization_square` (revenue thesis = Square payment cuts), NZ l
 | Phase | Estimate |
 |---|---|
 | 0 — Spikes | ~~1 day~~ scraper spike **done**; Reece email outstanding |
-| 0b — Hydration-race fix (AU + NZ) | 0.5 day, do first |
+| 0b — Hydration-race fix (AU + NZ) | **done** (uncommitted, needs deploy) |
 | 1 — Region foundation | 2–3 days |
 | 2 — Scraper NZ | 1–2 days (parser change is smaller than feared) + vocab tuning |
 | 3 — Reece NZ | 2 days (gated on Reece) |

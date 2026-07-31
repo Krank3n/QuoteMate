@@ -151,6 +151,7 @@ export { onJobWriteSyncCal } from './googleCalendarSync';
 export { requestKatieDemoCall, getKatieSignupLink, katieRecoveryDrip } from './callKatie';
 import { quoteRecordToDocumentRecord, invoiceRecordToDocumentRecord } from './shared/document/adapter';
 import { getAussieMessage, AussieEvent } from './aussieNotifications';
+import { sendExpoPushNotifications } from './expoPush';
 import { hashTerms } from './shared/pdf/terms/defaultAuTradie';
 import { dollarsToCents, centsToDollars } from './shared/pdf/money';
 import { validateAndRepairAiOutput } from './shared/ai/validateAiOutput';
@@ -6529,39 +6530,21 @@ export const respondToQuote = functions.https.onRequest((req, res) => {
         }
       }
 
-      // Send push notification via FCM
+      // The app stores Expo push tokens (despite the legacy collection name),
+      // so delivery must go through Expo rather than Firebase Admin Messaging.
       try {
-        const fcmTokensSnapshot = await db
-          .collection('users')
-          .doc(foundUserId)
-          .collection('fcmTokens')
-          .get();
-
-        if (!fcmTokensSnapshot.empty) {
-          const tokens = fcmTokensSnapshot.docs.map(doc => doc.data().token);
-          const aussieEvent: AussieEvent = response === 'accepted' ? 'quote_accepted' : 'quote_rejected';
-          const aussieMsg = getAussieMessage(aussieEvent, {
-            customer: foundQuote.customerName,
-            job: foundQuote.job?.name || 'the job',
-          });
-
-          const message = {
-            notification: {
-              title: aussieMsg.title,
-              body: aussieMsg.body,
-            },
-            data: {
-              quoteId: foundQuote.id,
-              type: 'quote_response',
-              response: response,
-            },
-            tokens: tokens,
-          };
-
-          await admin.messaging().sendEachForMulticast(message);
-        }
-      } catch (fcmError: any) {
-        // Don't fail the request if push fails
+        const aussieEvent: AussieEvent = response === 'accepted' ? 'quote_accepted' : 'quote_rejected';
+        const aussieMsg = getAussieMessage(aussieEvent, {
+          customer: foundQuote.customerName,
+          job: foundQuote.job?.name || 'the job',
+        });
+        await sendExpoPushToUser(foundUserId, aussieMsg.title, aussieMsg.body, {
+          quoteId: foundQuote.id,
+          type: 'quote_response',
+          response,
+        });
+      } catch {
+        // Push is best-effort; sendExpoPushToUser logs gateway failures.
       }
 
       res.status(200).json({
@@ -6741,23 +6724,20 @@ export const quoteAcceptancePage = functions.https.onRequest(async (req, res) =>
       }
     }
 
-    // Send push notification
+    // Send the stored Expo token through Expo's push gateway.
     try {
-      const fcmTokensSnapshot = await db.collection('users').doc(foundUserId).collection('fcmTokens').get();
-      if (!fcmTokensSnapshot.empty) {
-        const tokens = fcmTokensSnapshot.docs.map(doc => doc.data().token);
-        const aussieEvent: AussieEvent = responseType === 'accepted' ? 'quote_accepted' : 'quote_rejected';
-        const aussieMsg = getAussieMessage(aussieEvent, {
-          customer: foundQuote.customerName,
-          job: foundQuote.job?.name || 'the job',
-        });
-        await admin.messaging().sendEachForMulticast({
-          notification: { title: aussieMsg.title, body: aussieMsg.body },
-          data: { quoteId: foundQuote.id, type: 'quote_response', response: responseType },
-          tokens,
-        });
-      }
-    } catch (fcmError) {
+      const aussieEvent: AussieEvent = responseType === 'accepted' ? 'quote_accepted' : 'quote_rejected';
+      const aussieMsg = getAussieMessage(aussieEvent, {
+        customer: foundQuote.customerName,
+        job: foundQuote.job?.name || 'the job',
+      });
+      await sendExpoPushToUser(foundUserId, aussieMsg.title, aussieMsg.body, {
+        quoteId: foundQuote.id,
+        type: 'quote_response',
+        response: responseType,
+      });
+    } catch {
+      // Push is best-effort; sendExpoPushToUser logs gateway failures.
     }
 
     // Show confirmation page
@@ -10148,15 +10128,72 @@ export const recordAffiliatePayout = functions.https.onCall(async (data, context
 const db = admin.firestore();
 
 /**
+ * Deliver to the Expo tokens stored in the legacy-named fcmTokens collection.
+ * Returns true when Expo accepted at least one device message.
+ */
+async function sendExpoPushToUser(
+  userId: string,
+  title: string,
+  body: string,
+  data: Record<string, unknown> = {}
+): Promise<boolean> {
+  const tokensSnapshot = await db.collection('users').doc(userId).collection('fcmTokens').get();
+  if (tokensSnapshot.empty) return false;
+
+  try {
+    const result = await sendExpoPushNotifications(
+      tokensSnapshot.docs.map((doc) => ({
+        id: doc.id,
+        token: typeof doc.data().token === 'string' ? doc.data().token : '',
+      })),
+      { title, body, data }
+    );
+
+    if (result.tokenDocumentIdsToDelete.length > 0) {
+      const batch = db.batch();
+      for (const tokenDocumentId of result.tokenDocumentIdsToDelete) {
+        batch.delete(db.doc(`users/${userId}/fcmTokens/${tokenDocumentId}`));
+      }
+      await batch.commit();
+      functions.logger.warn('expo_push_tokens_removed', {
+        userId,
+        tokenDocumentIds: result.tokenDocumentIdsToDelete,
+      });
+    }
+
+    if (result.errors.length > 0) {
+      functions.logger.warn('expo_push_ticket_errors', {
+        userId,
+        acceptedCount: result.acceptedCount,
+        failedCount: result.failedCount,
+        errors: result.errors.map(({ code, message, recipientIds }) => ({
+          code,
+          message,
+          tokenDocumentIds: recipientIds,
+        })),
+      });
+    }
+
+    return result.acceptedCount > 0;
+  } catch (error: any) {
+    functions.logger.error('expo_push_send_failed', {
+      userId,
+      message: error?.message || String(error),
+    });
+    throw error;
+  }
+}
+
+/**
  * Send an Aussie-themed push notification to a user.
- * Fetches FCM tokens, checks notification preferences, and sends via FCM.
+ * Checks notification preferences and delivers via Expo's push gateway.
  */
 async function sendAussiePush(
   userId: string,
   event: AussieEvent,
   vars: Record<string, string> = {},
   dataPayload: Record<string, string> = {}
-): Promise<void> {
+): Promise<boolean> {
   // Check notification preferences
   const prefsDoc = await db.collection('users').doc(userId).collection('settings').doc('notificationPreferences').get();
   const prefs = prefsDoc.exists ? prefsDoc.data() : {};
@@ -10176,45 +10213,14 @@ async function sendAussiePush(
 
   const prefKey = prefMap[event];
   if (prefs && prefKey && prefs[prefKey] === false) {
-    return;
+    return false;
   }
 
-  const fcmTokensSnapshot = await db.collection('users').doc(userId).collection('fcmTokens').get();
-  if (fcmTokensSnapshot.empty) {
-    return;
-  }
-
-  const tokens = fcmTokensSnapshot.docs.map(doc => doc.data().token);
   const aussieMsg = getAussieMessage(event, vars);
-
-  const message = {
-    notification: {
-      title: aussieMsg.title,
-      body: aussieMsg.body,
-    },
-    data: {
-      type: event,
-      ...dataPayload,
-    },
-    tokens,
-  };
-
-  const fcmResponse = await admin.messaging().sendEachForMulticast(message);
-
-  // Clean up invalid tokens
-  const tokensToDelete: string[] = [];
-  fcmResponse.responses.forEach((resp, idx) => {
-    if (!resp.success && resp.error?.code === 'messaging/registration-token-not-registered') {
-      tokensToDelete.push(fcmTokensSnapshot.docs[idx].id);
-    }
+  return sendExpoPushToUser(userId, aussieMsg.title, aussieMsg.body, {
+    type: event,
+    ...dataPayload,
   });
-  if (tokensToDelete.length > 0) {
-    const batch = db.batch();
-    for (const tokenDocId of tokensToDelete) {
-      batch.delete(db.collection('users').doc(userId).collection('fcmTokens').doc(tokenDocId));
-    }
-    await batch.commit();
-  }
 }
 
 // -----------------------------------------------------------
@@ -10604,7 +10610,7 @@ export const dailyMotivation = functions.pubsub
     const usersSnapshot = await db.collection('users').get();
 
     for (const userDoc of usersSnapshot.docs) {
-      // Only send to users who have FCM tokens (active users)
+      // Only send to users who have stored Expo push tokens (active users)
       const tokensSnapshot = await userDoc.ref.collection('fcmTokens').get();
       if (tokensSnapshot.empty) continue;
 
@@ -10700,7 +10706,8 @@ export const inactivityNudge = functions.pubsub
         continue;
       }
 
-      await sendAussiePush(userDoc.id, 'inactivity');
+      const pushAccepted = await sendAussiePush(userDoc.id, 'inactivity');
+      if (!pushAccepted) continue;
 
       await userDoc.ref.collection('settings').doc('nudges').set({
         lastNudgedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -14023,21 +14030,17 @@ export const squareWebhook = functions.https.onRequest(async (req, res) => {
           // Swallow.
         }
         try {
-          const fcmSnap = await firestore.collection(`users/${userId}/fcmTokens`).get();
-          if (!fcmSnap.empty) {
-            const tokens = fcmSnap.docs.map((d) => d.data().token).filter(Boolean);
-            const aussieMsg = getAussieMessage('quote_accepted', {
-              customer: quote.customerName,
-              job: quote.job?.name || 'the job',
-            });
-            await admin.messaging().sendEachForMulticast({
-              notification: { title: aussieMsg.title, body: aussieMsg.body },
-              data: { quoteId: quote.id, type: 'quote_response', response: 'accepted' },
-              tokens,
-            });
-          }
+          const aussieMsg = getAussieMessage('quote_accepted', {
+            customer: quote.customerName,
+            job: quote.job?.name || 'the job',
+          });
+          await sendExpoPushToUser(userId, aussieMsg.title, aussieMsg.body, {
+            quoteId: quote.id,
+            type: 'quote_response',
+            response: 'accepted',
+          });
         } catch {
-          // Swallow.
+          // Push is best-effort; sendExpoPushToUser logs gateway failures.
         }
       }
       return;

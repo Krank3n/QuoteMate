@@ -793,8 +793,8 @@ class FirestoreService {
   }
 
   /**
-   * Save FCM token for push notifications
-   * Stores the token with device info for multi-device support
+   * Save an Expo push token for multi-device support.
+   * The fcmTokens collection/method name is retained for schema compatibility.
    */
   async saveFcmToken(token: string, deviceId: string): Promise<void> {
     const userId = this.getUserId();
@@ -806,6 +806,7 @@ class FirestoreService {
       const tokenRef = doc(db, 'users', userId, 'fcmTokens', deviceId);
       await setDoc(tokenRef, {
         token,
+        provider: 'expo',
         deviceId,
         platform: require('react-native').Platform.OS,
         updatedAt: new Date().toISOString(),
@@ -816,7 +817,7 @@ class FirestoreService {
   }
 
   /**
-   * Remove FCM token when user logs out or disables notifications
+   * Remove the stored Expo push token when the user logs out or opts out.
    */
   async removeFcmToken(deviceId: string): Promise<void> {
     const userId = this.getUserId();
