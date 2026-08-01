@@ -5802,6 +5802,18 @@ function resolveTokenCreatedAt(
 }
 
 /**
+ * Customer-facing acceptance page URL for a token. Defaults to the Cloud
+ * Function URL; production sets QUOTE_LINK_BASE_URL=https://quotemateapp.au/q
+ * so SMS/email links present the branded domain. The branded page embeds the
+ * function page, so both URL shapes stay valid indefinitely.
+ */
+export function acceptancePageUrlForToken(token: string): string {
+  const base = (process.env.QUOTE_LINK_BASE_URL
+    || 'https://us-central1-hansendev.cloudfunctions.net/quoteAcceptancePage').replace(/\/$/, '');
+  return `${base}?token=${token}`;
+}
+
+/**
  * Generate a secure acceptance token for a quote
  * Creates a 256-bit random token, stores it on the quote, returns the acceptance URL
  */
@@ -5883,7 +5895,7 @@ export const generateQuoteAcceptanceLink = functions.https.onRequest((req, res) 
       await batch.commit();
 
       // Build the acceptance URL
-      const acceptanceUrl = `https://us-central1-hansendev.cloudfunctions.net/quoteAcceptancePage?token=${token}`;
+      const acceptanceUrl = acceptancePageUrlForToken(token);
 
 
       res.status(200).json({
@@ -5996,8 +6008,7 @@ export const sendQuoteEmail = functions.runWith({ timeoutSeconds: 120, memory: '
           const r = await mintAndRotate(uid, iid, 'invoice');
           return r ? { paymentLinkId: r.paymentLinkId, paymentLinkUrl: r.paymentLinkUrl } : null;
         },
-        acceptanceUrlForToken: (token) =>
-          `https://us-central1-hansendev.cloudfunctions.net/quoteAcceptancePage?token=${token}`,
+        acceptanceUrlForToken: acceptancePageUrlForToken,
         fetchPhotoAttachments,
         generateAcceptanceToken: () => {
           const token = crypto.randomBytes(32).toString('hex');
@@ -6904,9 +6915,10 @@ function generateConfirmationPage(
 }
 
 /**
- * Generate the quote acceptance HTML page (fallback review page)
+ * Generate the quote acceptance HTML page (fallback review page).
+ * Exported for acceptancePage.test.ts, which parses the inline script.
  */
-function generateAcceptancePage(token: string): string {
+export function generateAcceptancePage(token: string): string {
   // This value is embedded in a <script>, so quote it as JSON and neutralise
   // `<` to prevent a crafted query token from terminating the script tag.
   const tokenLiteral = JSON.stringify(token).replace(/</g, '\\u003c');
@@ -7207,11 +7219,11 @@ function generateAcceptancePage(token: string): string {
 
       // Photos section — skip non-http(s) URLs (legacy local file:// URIs)
       var photosHtml = '';
-      var remotePhotoUrls = (quote.photoUrls || []).filter(function(url: string) {
+      var remotePhotoUrls = (quote.photoUrls || []).filter(function(url) {
         return /^https?:\/\//i.test(url);
       });
       if (remotePhotoUrls.length > 0) {
-        var imgs = remotePhotoUrls.map(function(url: string) {
+        var imgs = remotePhotoUrls.map(function(url) {
           return '<img src="' + escapeHtml(url) + '" alt="Job photo" />';
         }).join('');
         photosHtml =
@@ -10474,8 +10486,7 @@ export const customerQuoteFollowUp = functions.pubsub
           quoteId: quoteDoc.id,
           createdAt: admin.firestore.FieldValue.serverTimestamp(),
         });
-        const acceptanceUrl =
-          `https://us-central1-hansendev.cloudfunctions.net/quoteAcceptancePage?token=${token}`;
+        const acceptanceUrl = acceptancePageUrlForToken(token);
 
         // Fall back to the auth email so replies still route to the tradie
         // even if they haven't filled in business.email — same shape as
