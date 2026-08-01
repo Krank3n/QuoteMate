@@ -142,6 +142,7 @@ import {
   createOrRotatePaymentLink,
   logShimInvocation,
   resolveTradieReplyEmail,
+  buildQuotePdfHtmlForQuote,
   type SquareLinkMinter,
 } from './documentHandlers';
 export { getStageViolationCounts, convertDocumentToInvoice } from './documentHandlers';
@@ -153,6 +154,7 @@ import { quoteRecordToDocumentRecord, invoiceRecordToDocumentRecord } from './sh
 import { getAussieMessage, AussieEvent } from './aussieNotifications';
 import { sendExpoPushNotifications } from './expoPush';
 import { hashTerms } from './shared/pdf/terms/defaultAuTradie';
+import { generateQuotePdfBuffer } from './pdfGenerator';
 import { dollarsToCents, centsToDollars } from './shared/pdf/money';
 import { validateAndRepairAiOutput } from './shared/ai/validateAiOutput';
 import { getFeedbackDocId, getCategoryLabel, isSideEffectFreeRequest, isRatingRecordRequest } from './quickFeedback.helpers';
@@ -6362,6 +6364,9 @@ export const getQuoteForAcceptance = functions.https.onRequest((req, res) => {
           name: businessSettings?.businessName || 'Your Trade Business',
           email: businessSettings?.email,
           phone: businessSettings?.phone,
+          abn: businessSettings?.abn || null,
+          address: businessSettings?.address || null,
+          website: businessSettings?.website || null,
           logoUrl: businessSettings?.logoStorageUrl || businessSettings?.logoUri || null,
           brandColor: businessSettings?.brandColor || null,
         },
@@ -6812,6 +6817,73 @@ export const quoteAcceptancePage = functions.https.onRequest(async (req, res) =>
 });
 
 /**
+ * Public PDF download for the acceptance page. Validates the same token as
+ * the page itself (hashed lookup + 30-day expiry), then renders the exact
+ * PDF the email flow attaches — same builder, same visibility settings, and
+ * the send-time terms snapshot where one exists.
+ */
+export const downloadQuotePdf = functions.runWith({ timeoutSeconds: 120, memory: '1GB' }).https.onRequest(async (req, res) => {
+  if (!(await checkRateLimit(`ip:${getClientIp(req)}`, RATE_LIMITS.public, res))) return;
+
+  const token = req.query.token as string;
+  if (!token || typeof token !== 'string' || token.length > 200) {
+    res.status(400).send('Invalid token');
+    return;
+  }
+
+  try {
+    const db = admin.firestore();
+    const tokenHash = hashToken(token);
+    let tokenDoc = await db.collection('quoteAcceptanceTokens').doc(tokenHash).get();
+    if (!tokenDoc.exists) {
+      tokenDoc = await db.collection('quoteAcceptanceTokens').doc(token).get();
+    }
+    if (!tokenDoc.exists) {
+      res.status(404).send('Quote not found. The link may have expired.');
+      return;
+    }
+
+    const tokenData = tokenDoc.data()!;
+    const quoteDoc = await db.collection('users').doc(tokenData.userId)
+      .collection('quotes').doc(tokenData.quoteId).get();
+    if (!quoteDoc.exists) {
+      res.status(404).send('Quote not found.');
+      return;
+    }
+    const quote = quoteDoc.data()!;
+
+    const tokenCreatedAt = resolveTokenCreatedAt(quote, tokenData);
+    if (tokenCreatedAt && Date.now() - tokenCreatedAt.getTime() > TOKEN_EXPIRATION_MS) {
+      res.status(410).send('This link has expired. Please contact the business directly.');
+      return;
+    }
+
+    const settingsDoc = await db.collection('users').doc(tokenData.userId)
+      .collection('settings').doc('business').get();
+    const business = settingsDoc.exists ? settingsDoc.data()! : {};
+
+    // The send-time snapshot wins; only fall back to live settings for links
+    // minted before snapshots existed.
+    const snapshotTerms = typeof quote.termsSnapshot === 'string' ? quote.termsSnapshot.trim() : '';
+    const configuredTerms = typeof business.termsAndConditions === 'string' ? business.termsAndConditions.trim() : '';
+    const terms = snapshotTerms || configuredTerms || undefined;
+
+    const pdfHtml = buildQuotePdfHtmlForQuote(quote, business as any, { terms });
+    const pdfBuffer = await generateQuotePdfBuffer(pdfHtml);
+
+    const filename = `Quote-${String(quote.quoteNumber || quote.id || tokenData.quoteId)}`
+      .replace(/[^a-zA-Z0-9-_]/g, '_');
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}.pdf"`);
+    res.setHeader('Cache-Control', 'private, max-age=300');
+    res.status(200).send(pdfBuffer);
+  } catch (error: any) {
+    functions.logger.error('downloadQuotePdf failed', { message: error?.message });
+    res.status(500).send('Could not generate the PDF. Please try again later.');
+  }
+});
+
+/**
  * Generate a simple confirmation page after accepting/declining
  */
 function generateConfirmationPage(
@@ -6927,304 +6999,289 @@ export function generateAcceptancePage(token: string): string {
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Quote Response - QuoteMate</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Your Quote</title>
   <style>
+    :root {
+      --accent: #f97316;
+      --ink: #0f172a;
+      --muted: #64748b;
+      --line: #e2e8f0;
+      --bg: #eef2f7;
+      --card: #ffffff;
+    }
     * { box-sizing: border-box; margin: 0; padding: 0; }
+    html { -webkit-text-size-adjust: 100%; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-      background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+      background: var(--bg);
+      color: var(--ink);
       min-height: 100vh;
-      padding: 20px;
-      color: #f8fafc;
+      padding: 24px 16px calc(120px + env(safe-area-inset-bottom));
     }
-    .container {
-      max-width: 600px;
-      margin: 0 auto;
-    }
+    .page { max-width: 680px; margin: 0 auto; }
     .card {
-      background: #1e293b;
+      background: var(--card);
+      border-radius: 20px;
+      box-shadow: 0 12px 40px rgba(15, 23, 42, 0.10);
+      overflow: hidden;
+    }
+    .brand-strip { height: 6px; background: var(--accent); }
+
+    /* ---- Header ---- */
+    .header { padding: 32px 32px 0; text-align: center; }
+    .biz-logo {
+      width: 76px; height: 76px; border-radius: 18px; object-fit: cover;
+      margin: 0 auto 14px; display: block;
+      box-shadow: 0 4px 14px rgba(15, 23, 42, 0.14);
+    }
+    .biz-initial {
+      width: 76px; height: 76px; border-radius: 18px; margin: 0 auto 14px;
+      display: flex; align-items: center; justify-content: center;
+      background: var(--accent); color: #fff; font-size: 30px; font-weight: 800;
+    }
+    .biz-name { font-size: 24px; font-weight: 800; letter-spacing: -0.02em; }
+    .quote-ref { color: var(--muted); font-size: 14px; margin-top: 6px; }
+
+    /* ---- Hero ---- */
+    .hero { padding: 24px 32px 8px; text-align: center; }
+    .hero-greeting { font-size: 17px; line-height: 1.55; color: var(--ink); }
+    .hero-greeting strong { font-weight: 700; }
+    .total-hero {
+      margin: 20px auto 8px;
+      background: linear-gradient(180deg, #f8fafc, #f1f5f9);
+      border: 1px solid var(--line);
       border-radius: 16px;
-      padding: 32px;
-      margin-bottom: 20px;
-      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
-      border: 1px solid #334155;
+      padding: 20px 24px;
+      display: inline-block;
+      min-width: 240px;
     }
-    .logo {
-      text-align: center;
-      margin-bottom: 24px;
-    }
-    .logo img {
-      width: 80px;
-      height: 80px;
-      border-radius: 16px;
-      object-fit: cover;
-      margin-bottom: 12px;
-    }
-    .logo h1 {
-      font-size: 28px;
-      color: var(--accent, #f97316);
-      margin-bottom: 8px;
-    }
-    .logo p { color: #94a3b8; font-size: 14px; }
-    .ai-summary {
-      background: #0f172a;
-      padding: 16px;
-      border-radius: 8px;
-      color: #cbd5e1;
-      line-height: 1.7;
-      font-size: 15px;
-      border-left: 3px solid var(--accent, #f97316);
-    }
-    .photos-grid {
-      display: flex;
-      gap: 8px;
-      overflow-x: auto;
-      padding-bottom: 8px;
-    }
-    .photos-grid img {
-      width: 140px;
-      height: 105px;
-      object-fit: cover;
-      border-radius: 8px;
-      flex-shrink: 0;
-    }
-    .quote-number {
-      text-align: center;
-      color: #94a3b8;
-      font-size: 14px;
-      margin-bottom: 24px;
-    }
-    .section {
-      margin-bottom: 24px;
-      padding-bottom: 24px;
-      border-bottom: 1px solid #334155;
-    }
+    .total-label { font-size: 12px; text-transform: uppercase; letter-spacing: 1.2px; color: var(--muted); }
+    .total-amount { font-size: 38px; font-weight: 800; color: var(--accent); letter-spacing: -0.02em; margin-top: 4px; }
+
+    /* ---- Sections ---- */
+    .body-sections { padding: 8px 32px 32px; }
+    .section { padding: 22px 0; border-bottom: 1px solid var(--line); }
     .section:last-child { border-bottom: none; }
     .section-title {
-      font-size: 12px;
-      text-transform: uppercase;
-      letter-spacing: 1px;
-      color: #94a3b8;
-      margin-bottom: 12px;
+      font-size: 11px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 1.4px; color: var(--muted); margin-bottom: 12px;
     }
-    .job-name { font-size: 20px; font-weight: 600; margin-bottom: 8px; }
-    .job-desc { color: #94a3b8; line-height: 1.6; }
-    .material-row {
-      display: flex;
-      justify-content: space-between;
-      padding: 12px 0;
-      border-bottom: 1px solid #334155;
+    .job-name { font-size: 19px; font-weight: 700; margin-bottom: 6px; }
+    .job-desc { color: var(--muted); line-height: 1.65; font-size: 15px; }
+    .scope-box {
+      background: #f8fafc; border-left: 3px solid var(--accent);
+      border-radius: 10px; padding: 16px 18px;
+      color: #334155; line-height: 1.7; font-size: 15px;
     }
-    .material-row:last-child { border-bottom: none; }
-    .material-name { flex: 1; }
-    .material-qty { color: #94a3b8; margin-right: 16px; }
-    .material-price { font-weight: 500; color: var(--accent, #f97316); }
+    .photos-grid { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 6px; }
+    .photos-grid img {
+      width: 150px; height: 112px; object-fit: cover;
+      border-radius: 12px; flex-shrink: 0; border: 1px solid var(--line);
+    }
+    .line-items { width: 100%; border-collapse: collapse; font-size: 15px; }
+    .line-items th {
+      text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 1px;
+      color: var(--muted); padding: 8px 0; border-bottom: 2px solid var(--line);
+    }
+    .line-items th.qty, .line-items td.qty { text-align: right; width: 70px; }
+    .line-items th.price, .line-items td.price { text-align: right; width: 100px; }
+    .line-items td { padding: 11px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+    .line-items tr:last-child td { border-bottom: none; }
+    .line-items td.qty { color: var(--muted); white-space: nowrap; }
+    .line-items td.price { font-weight: 600; }
+    .totals { margin-top: 4px; }
     .totals-row {
-      display: flex;
-      justify-content: space-between;
-      padding: 8px 0;
+      display: flex; justify-content: space-between;
+      padding: 7px 0; font-size: 15px; color: #334155;
     }
-    .totals-row.total {
-      font-size: 20px;
-      font-weight: 700;
-      padding-top: 16px;
-      border-top: 2px solid #334155;
-      margin-top: 8px;
+    .totals-row.grand {
+      font-size: 20px; font-weight: 800; color: var(--ink);
+      border-top: 2px solid var(--ink); margin-top: 10px; padding-top: 14px;
     }
-    .totals-row.total .amount { color: var(--accent, #f97316); }
-    .notes, .terms {
-      background: #0f172a;
-      padding: 16px;
-      border-radius: 8px;
-      color: #94a3b8;
-      line-height: 1.6;
-      white-space: normal;
+    .totals-row.grand .amount { color: var(--accent); }
+    .gst-note { font-size: 13px; color: var(--muted); margin-top: 6px; }
+    .notes-box, .terms-box {
+      background: #f8fafc; border: 1px solid var(--line); border-radius: 10px;
+      padding: 16px 18px; color: #475569; line-height: 1.65; font-size: 14px;
     }
-    .terms {
-      font-size: 14px;
-      max-height: 260px;
-      overflow-y: auto;
-    }
+    .terms-box { max-height: 220px; overflow-y: auto; }
     .client-notes {
-      width: 100%;
-      background: #0f172a;
-      border: 1px solid #334155;
-      border-radius: 8px;
-      padding: 12px;
-      color: #f8fafc;
-      font-size: 16px;
-      resize: vertical;
-      min-height: 80px;
-      margin-bottom: 16px;
+      width: 100%; border: 1px solid var(--line); border-radius: 12px;
+      padding: 14px 16px; font-size: 16px; font-family: inherit; color: var(--ink);
+      resize: vertical; min-height: 84px; background: #fff;
     }
-    .client-notes::placeholder { color: #64748b; }
-    .buttons {
-      display: flex;
-      gap: 12px;
-      margin-top: 24px;
+    .client-notes:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: transparent; }
+    .client-notes::placeholder { color: #94a3b8; }
+    .contact-box {
+      background: #f8fafc; border-radius: 12px; padding: 16px 18px;
+      font-size: 14px; color: #475569; line-height: 1.9;
     }
+    .contact-box a { color: var(--accent); text-decoration: none; font-weight: 600; }
+    .powered {
+      text-align: center; color: #94a3b8; font-size: 12px;
+      padding: 22px 0 4px;
+    }
+
+    /* ---- Sticky action bar ---- */
+    .action-bar {
+      position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
+      background: rgba(255, 255, 255, 0.92);
+      backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+      border-top: 1px solid var(--line);
+      padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+    }
+    .action-inner { max-width: 680px; margin: 0 auto; display: flex; gap: 10px; }
     .btn {
-      flex: 1;
-      padding: 16px 24px;
-      border: none;
-      border-radius: 12px;
-      font-size: 16px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all 0.2s;
+      flex: 1; border: none; border-radius: 14px; cursor: pointer;
+      padding: 15px 10px; font-size: 16px; font-weight: 700; font-family: inherit;
+      display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+      text-decoration: none; transition: transform 0.06s ease, opacity 0.15s ease;
     }
-    .btn-accept {
-      background: #22c55e;
-      color: white;
-    }
-    .btn-accept:hover { background: #16a34a; }
-    .btn-decline {
-      background: #334155;
-      color: #f8fafc;
-    }
-    .btn-decline:hover { background: #475569; }
-    .btn:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-    .loading {
-      text-align: center;
-      padding: 60px 20px;
-    }
+    .btn:active { transform: scale(0.98); }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-accept { background: #16a34a; color: #fff; flex: 1.4; }
+    .btn-decline { background: #fff; color: var(--muted); border: 1px solid var(--line); flex: 0.9; }
+    .btn-pdf { background: var(--ink); color: #fff; flex: 1; }
+
+    /* ---- States ---- */
+    .state { text-align: center; padding: 72px 24px; }
     .spinner {
-      width: 40px;
-      height: 40px;
-      border: 3px solid #334155;
-      border-top-color: var(--accent, #f97316);
-      border-radius: 50%;
-      animation: spin 1s linear infinite;
-      margin: 0 auto 16px;
+      width: 42px; height: 42px; margin: 0 auto 18px;
+      border: 3px solid var(--line); border-top-color: var(--accent);
+      border-radius: 50%; animation: spin 0.9s linear infinite;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
-    .error {
-      text-align: center;
-      padding: 40px 20px;
+    .state-icon { font-size: 56px; margin-bottom: 16px; }
+    .state h2 { font-size: 22px; margin-bottom: 10px; letter-spacing: -0.01em; }
+    .state p { color: var(--muted); line-height: 1.6; font-size: 15px; }
+    .state.success h2 { color: #16a34a; }
+    .state-icon-ring {
+      width: 76px; height: 76px; border-radius: 50%; margin: 0 auto 18px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 34px; color: #fff; background: #16a34a;
     }
-    .error-icon {
-      font-size: 48px;
-      margin-bottom: 16px;
+    .state-icon-ring.neutral { background: var(--muted); }
+    .state-icon-ring.warn { background: #dc2626; }
+
+    @media (max-width: 480px) {
+      body { padding-left: 10px; padding-right: 10px; }
+      .header, .hero { padding-left: 20px; padding-right: 20px; }
+      .body-sections { padding: 8px 20px 24px; }
+      .total-amount { font-size: 32px; }
+      .action-inner { flex-wrap: wrap; }
+      .btn-pdf { order: 3; flex-basis: 100%; }
     }
-    .success {
-      text-align: center;
-      padding: 40px 20px;
-    }
-    .success-icon {
-      font-size: 64px;
-      margin-bottom: 16px;
-    }
-    .success h2 { color: #22c55e; margin-bottom: 12px; }
-    .already-responded h2 { color: var(--accent, #f97316); }
-    .contact-info {
-      background: #0f172a;
-      padding: 16px;
-      border-radius: 8px;
-      margin-top: 16px;
-    }
-    .contact-info p { margin-bottom: 8px; }
-    .contact-info a { color: var(--accent, #f97316); text-decoration: none; }
   </style>
 </head>
 <body>
-  <div class="container">
+  <div class="page">
     <div class="card">
-      <div class="logo"></div>
-
+      <div class="brand-strip"></div>
       <div id="content">
-        <div class="loading">
+        <div class="state">
           <div class="spinner"></div>
-          <p>Loading quote...</p>
+          <p>Loading your quote…</p>
         </div>
       </div>
+    </div>
+    <div class="powered">Sent with QuoteMate</div>
+  </div>
+
+  <div class="action-bar" id="actionBar" style="display:none;">
+    <div class="action-inner">
+      <a class="btn btn-pdf" id="pdfBtn" href="#">&#11015;&#65038; Download PDF</a>
+      <button class="btn btn-decline" id="declineBtn" onclick="respondToQuote('rejected')">Decline</button>
+      <button class="btn btn-accept" id="acceptBtn" onclick="respondToQuote('accepted')">Accept Quote</button>
     </div>
   </div>
 
   <script>
-    const TOKEN = ${tokenLiteral};
-    const API_BASE = 'https://us-central1-hansendev.cloudfunctions.net';
+    var TOKEN = ${tokenLiteral};
+    var API_BASE = 'https://us-central1-hansendev.cloudfunctions.net';
 
     function formatCurrency(amount) {
-      return new Intl.NumberFormat('en-AU', {
-        style: 'currency',
-        currency: 'AUD'
-      }).format(amount || 0);
+      return new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD' }).format(amount || 0);
+    }
+
+    function formatDate(value) {
+      var d = new Date(value);
+      if (isNaN(d.getTime())) return '';
+      return d.toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' });
+    }
+
+    function escapeHtml(text) {
+      if (text === null || text === undefined) return '';
+      var div = document.createElement('div');
+      div.textContent = String(text);
+      return div.innerHTML;
+    }
+
+    function nl2br(text) {
+      return escapeHtml(text).replace(/\\n/g, '<br/>');
     }
 
     async function loadQuote() {
       try {
-        const response = await fetch(API_BASE + '/getQuoteForAcceptance', {
+        var response = await fetch(API_BASE + '/getQuoteForAcceptance', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ token: TOKEN })
         });
-
-        const data = await response.json();
-
+        var data = await response.json();
         if (!data.success) {
           showError(data.error || 'Failed to load quote');
           return;
         }
-
         if (data.alreadyResponded) {
           showAlreadyResponded(data.status);
           return;
         }
-
         renderQuote(data.quote, data.business);
       } catch (error) {
-        showError('Failed to load quote. Please try again later.');
+        showError('Failed to load quote. Please check your connection and try again.');
       }
     }
 
     function renderQuote(quote, business) {
-      const content = document.getElementById('content');
+      var content = document.getElementById('content');
 
-      // GST mode: 'none' = business not registered for GST (no GST line,
-      // "No GST has been charged" note). undefined gstRegistered = registered.
+      // GST mode: 'none' = business not registered; 'inclusive' prices already
+      // include GST; 'exclusive' GST is added on top.
       var gstMode = quote.gstRegistered === false ? 'none'
         : quote.pricesIncludeGst === true ? 'inclusive' : 'exclusive';
 
-      // Set brand color as CSS variable
       if (business.brandColor) {
         document.documentElement.style.setProperty('--accent', business.brandColor);
       }
+      document.title = 'Quote from ' + (business.name || 'your tradie');
 
-      // Business logo
-      var logoHtml = '';
-      if (business.logoUrl) {
-        logoHtml = '<img src="' + escapeHtml(business.logoUrl) + '" alt="' + escapeHtml(business.name) + '" />';
-      }
+      var logoHtml = business.logoUrl
+        ? '<img class="biz-logo" src="' + escapeHtml(business.logoUrl) + '" alt="" />'
+        : '<div class="biz-initial">' + escapeHtml((business.name || 'Q').trim().charAt(0).toUpperCase()) + '</div>';
 
-      // Update logo section
-      var logoSection = document.querySelector('.logo');
-      if (logoSection) {
-        logoSection.innerHTML = logoHtml +
-          '<h1>' + escapeHtml(business.name) + '</h1>';
-      }
+      var dateLine = formatDate(quote.createdAt);
+      var firstName = (quote.customerName || '').trim().split(/\\s+/)[0];
 
-      // AI summary section
-      var aiSummaryHtml = '';
-      if (quote.aiEmailBody) {
-        aiSummaryHtml =
-          '<div class="section">' +
+      // The grand total always includes GST whenever GST is charged.
+      var totalLabel = gstMode === 'none' ? 'Total' : 'Total (inc GST)';
+
+      // Scope of work (the tradie's message / AI summary)
+      var scopeHtml = quote.aiEmailBody
+        ? '<div class="section">' +
             '<div class="section-title">Scope of Work</div>' +
-            '<div class="ai-summary">' + escapeHtml(quote.aiEmailBody).replace(/\\n/g, '<br/>') + '</div>' +
-          '</div>';
-      }
+            '<div class="scope-box">' + nl2br(quote.aiEmailBody) + '</div>' +
+          '</div>'
+        : '';
 
-      // Photos section — skip non-http(s) URLs (legacy local file:// URIs)
+      // Photos — skip non-http(s) URLs (legacy local file:// URIs)
       var photosHtml = '';
       var remotePhotoUrls = (quote.photoUrls || []).filter(function(url) {
-        return /^https?:\/\//i.test(url);
+        return /^https?:\\/\\//i.test(url);
       });
       if (remotePhotoUrls.length > 0) {
         var imgs = remotePhotoUrls.map(function(url) {
-          return '<img src="' + escapeHtml(url) + '" alt="Job photo" />';
+          return '<img src="' + escapeHtml(url) + '" alt="Job photo" loading="lazy" />';
         }).join('');
         photosHtml =
           '<div class="section">' +
@@ -7233,152 +7290,182 @@ export function generateAcceptancePage(token: string): string {
           '</div>';
       }
 
-      let materialsHtml = '';
+      // Materials (only present when the tradie shows material costs)
+      var materialsHtml = '';
       if (quote.materials && quote.materials.length > 0) {
-        materialsHtml = quote.materials.map(m =>
-          '<div class="material-row">' +
-            '<span class="material-name">' + escapeHtml(m.name) + '</span>' +
-            '<span class="material-qty">' + m.quantity + ' ' + m.unit + '</span>' +
-            '<span class="material-price">' + formatCurrency(m.totalPrice) + '</span>' +
-          '</div>'
-        ).join('');
-      }
-
-      content.innerHTML =
-        '<div class="quote-number">Quote #' + escapeHtml(quote.quoteNumber || quote.id) + '</div>' +
-
-        aiSummaryHtml +
-
-        '<div class="section">' +
-          '<div class="section-title">Job Details</div>' +
-          '<div class="job-name">' + escapeHtml(quote.jobName || 'Quote') + '</div>' +
-          (quote.jobDescription ? '<div class="job-desc">' + escapeHtml(quote.jobDescription) + '</div>' : '') +
-        '</div>' +
-
-        photosHtml +
-
-        (materialsHtml ?
+        var rows = quote.materials.map(function(m) {
+          return '<tr>' +
+            '<td>' + escapeHtml(m.name) + '</td>' +
+            '<td class="qty">' + escapeHtml(String(m.quantity)) + ' ' + escapeHtml(m.unit || '') + '</td>' +
+            '<td class="price">' + formatCurrency(m.totalPrice) + '</td>' +
+          '</tr>';
+        }).join('');
+        materialsHtml =
           '<div class="section">' +
             '<div class="section-title">Materials</div>' +
-            materialsHtml +
-          '</div>' : '') +
+            '<table class="line-items">' +
+              '<thead><tr><th>Item</th><th class="qty">Qty</th><th class="price">Price</th></tr></thead>' +
+              '<tbody>' + rows + '</tbody>' +
+            '</table>' +
+          '</div>';
+      }
 
-        '<div class="section">' +
-          '<div class="section-title">Summary</div>' +
-          (quote.showMaterialCosts !== false ?
-            '<div class="totals-row"><span>Materials</span><span>' + formatCurrency(quote.materialsSubtotal) + '</span></div>' : '') +
-          (quote.showLaborCosts !== false ?
-            '<div class="totals-row"><span>Labour</span><span>' + formatCurrency(quote.laborTotal) + '</span></div>' : '') +
-          (quote.showSubtotal !== false ?
-            ((quote.markupAmount || quote.travelAdjustmentAmount) ?
-              '<div class="totals-row"><span>' + (gstMode === 'exclusive' ? 'Subtotal (ex GST)' : 'Subtotal') + '</span><span>' + formatCurrency(quote.subtotal + (quote.markupAmount || 0) + (quote.travelAdjustmentAmount || 0)) + '</span></div>' :
-              '<div class="totals-row"><span>' + (gstMode === 'exclusive' ? 'Subtotal (ex GST)' : 'Subtotal') + '</span><span>' + formatCurrency(quote.subtotal) + '</span></div>')
-            : '') +
-          (gstMode !== 'none' ?
-            '<div class="totals-row"><span>' + (gstMode === 'inclusive' ? 'Includes GST' : 'GST (10%)') + '</span><span>' + formatCurrency(quote.gst) + '</span></div>' : '') +
-          '<div class="totals-row total"><span>Total</span><span class="amount">' + formatCurrency(quote.total) + '</span></div>' +
-          (gstMode === 'none' ?
-            '<div class="totals-row" style="font-size:0.85em;color:#666;"><span>No GST has been charged.</span><span></span></div>' : '') +
+      // Summary — mirrors the emailed PDF's visibility settings
+      var summaryRows = '';
+      if (quote.showMaterialCosts !== false && quote.materialsSubtotal !== undefined) {
+        summaryRows += '<div class="totals-row"><span>Materials</span><span>' + formatCurrency(quote.materialsSubtotal) + '</span></div>';
+      }
+      if (quote.showLaborCosts !== false && quote.laborTotal !== undefined) {
+        summaryRows += '<div class="totals-row"><span>Labour</span><span>' + formatCurrency(quote.laborTotal) + '</span></div>';
+      }
+      if (quote.showSubtotal !== false && quote.subtotal !== undefined) {
+        var sub = quote.subtotal + (quote.markupAmount || 0) + (quote.travelAdjustmentAmount || 0);
+        summaryRows += '<div class="totals-row"><span>' + (gstMode === 'exclusive' ? 'Subtotal (ex GST)' : 'Subtotal') + '</span><span>' + formatCurrency(sub) + '</span></div>';
+      }
+      if (gstMode !== 'none') {
+        summaryRows += '<div class="totals-row"><span>' + (gstMode === 'inclusive' ? 'Includes GST' : 'GST (10%)') + '</span><span>' + formatCurrency(quote.gst) + '</span></div>';
+      }
+
+      var notesHtml = quote.notes
+        ? '<div class="section">' +
+            '<div class="section-title">Notes</div>' +
+            '<div class="notes-box">' + nl2br(quote.notes) + '</div>' +
+          '</div>'
+        : '';
+
+      var termsHtml = quote.terms
+        ? '<div class="section">' +
+            '<div class="section-title">Terms &amp; Conditions</div>' +
+            '<div class="terms-box">' + nl2br(quote.terms) + '</div>' +
+          '</div>'
+        : '';
+
+      var contactBits = [];
+      if (business.phone) contactBits.push('Phone: <a href="tel:' + escapeHtml(business.phone) + '">' + escapeHtml(business.phone) + '</a>');
+      if (business.email) contactBits.push('Email: <a href="mailto:' + escapeHtml(business.email) + '">' + escapeHtml(business.email) + '</a>');
+      if (business.website) contactBits.push('Web: <a href="' + escapeHtml(business.website) + '" target="_blank" rel="noopener">' + escapeHtml(business.website.replace(/^https?:\\/\\//, '')) + '</a>');
+      var contactHtml = (contactBits.length || business.abn)
+        ? '<div class="section">' +
+            '<div class="section-title">Questions?</div>' +
+            '<div class="contact-box">' +
+              contactBits.join('<br/>') +
+              (business.abn ? (contactBits.length ? '<br/>' : '') + 'ABN ' + escapeHtml(business.abn) : '') +
+            '</div>' +
+          '</div>'
+        : '';
+
+      content.innerHTML =
+        '<div class="header">' +
+          logoHtml +
+          '<div class="biz-name">' + escapeHtml(business.name) + '</div>' +
+          '<div class="quote-ref">Quote ' + escapeHtml(String(quote.quoteNumber || quote.id)) + (dateLine ? ' &middot; ' + dateLine : '') + '</div>' +
         '</div>' +
 
-        (quote.notes ?
-          '<div class="section">' +
-            '<div class="section-title">Notes</div>' +
-            '<div class="notes">' + escapeHtml(quote.notes) + '</div>' +
-          '</div>' : '') +
-
-        (quote.terms ?
-          '<div class="section">' +
-            '<div class="section-title">Terms &amp; Conditions</div>' +
-            '<div class="terms">' + escapeHtml(quote.terms).replace(/\\n/g, '<br/>') + '</div>' +
-          '</div>' : '') +
-
-        '<div class="section">' +
-          '<div class="section-title">Your Response</div>' +
-          '<textarea id="clientNotes" class="client-notes" placeholder="Optional: Add any comments or questions..."></textarea>' +
-          '<div class="buttons">' +
-            '<button class="btn btn-decline" onclick="respondToQuote(\\'rejected\\')">Decline</button>' +
-            '<button class="btn btn-accept" onclick="respondToQuote(\\'accepted\\')">Accept Quote</button>' +
+        '<div class="hero">' +
+          '<p class="hero-greeting">' + (firstName ? 'Hi <strong>' + escapeHtml(firstName) + '</strong>, ' : '') +
+            'your quote for <strong>' + escapeHtml(quote.jobName || 'your job') + '</strong> is ready to review.</p>' +
+          '<div class="total-hero">' +
+            '<div class="total-label">' + totalLabel + '</div>' +
+            '<div class="total-amount">' + formatCurrency(quote.total) + '</div>' +
           '</div>' +
         '</div>' +
 
-        (business.email || business.phone ?
-          '<div class="contact-info">' +
-            '<div class="section-title">Questions?</div>' +
-            (business.email ? '<p>Email: <a href="mailto:' + business.email + '">' + business.email + '</a></p>' : '') +
-            (business.phone ? '<p>Phone: <a href="tel:' + business.phone + '">' + business.phone + '</a></p>' : '') +
-          '</div>' : '');
+        '<div class="body-sections">' +
+          scopeHtml +
+          (quote.jobDescription
+            ? '<div class="section">' +
+                '<div class="section-title">Job Details</div>' +
+                '<div class="job-name">' + escapeHtml(quote.jobName || 'Quote') + '</div>' +
+                '<div class="job-desc">' + nl2br(quote.jobDescription) + '</div>' +
+              '</div>'
+            : '') +
+          photosHtml +
+          materialsHtml +
+          '<div class="section">' +
+            '<div class="section-title">Summary</div>' +
+            '<div class="totals">' +
+              summaryRows +
+              '<div class="totals-row grand"><span>Total</span><span class="amount">' + formatCurrency(quote.total) + '</span></div>' +
+              (gstMode === 'none' ? '<div class="gst-note">No GST has been charged.</div>' : '') +
+            '</div>' +
+          '</div>' +
+          notesHtml +
+          termsHtml +
+          '<div class="section">' +
+            '<div class="section-title">Anything we should know? (optional)</div>' +
+            '<textarea id="clientNotes" class="client-notes" placeholder="Add any comments or questions for ' + escapeHtml(business.name) + '..."></textarea>' +
+          '</div>' +
+          contactHtml +
+        '</div>';
+
+      // Wire the action bar now that the quote is confirmed loaded.
+      var pdfBtn = document.getElementById('pdfBtn');
+      pdfBtn.href = API_BASE + '/downloadQuotePdf?token=' + encodeURIComponent(TOKEN);
+      document.getElementById('actionBar').style.display = 'block';
     }
 
     async function respondToQuote(response) {
-      const buttons = document.querySelectorAll('.btn');
-      buttons.forEach(btn => btn.disabled = true);
-
-      const clientNotes = document.getElementById('clientNotes')?.value || '';
+      var buttons = document.querySelectorAll('.btn');
+      buttons.forEach(function(btn) { btn.disabled = true; });
+      var clientNotesEl = document.getElementById('clientNotes');
+      var clientNotes = clientNotesEl ? clientNotesEl.value : '';
 
       try {
-        const resp = await fetch(API_BASE + '/respondToQuote', {
+        var resp = await fetch(API_BASE + '/respondToQuote', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            token: TOKEN,
-            response: response,
-            clientNotes: clientNotes
-          })
+          body: JSON.stringify({ token: TOKEN, response: response, clientNotes: clientNotes })
         });
-
-        const data = await resp.json();
-
+        var data = await resp.json();
         if (data.success) {
           showSuccess(response);
         } else {
-          showError(data.error || 'Failed to submit response');
-          buttons.forEach(btn => btn.disabled = false);
+          showError(data.error || 'Failed to submit your response');
+          buttons.forEach(function(btn) { btn.disabled = false; });
         }
       } catch (error) {
-        showError('Failed to submit response. Please try again.');
-        buttons.forEach(btn => btn.disabled = false);
+        showError('Failed to submit your response. Please try again.');
+        buttons.forEach(function(btn) { btn.disabled = false; });
       }
     }
 
+    function hideActionBar() {
+      var bar = document.getElementById('actionBar');
+      if (bar) bar.style.display = 'none';
+    }
+
     function showSuccess(response) {
-      const content = document.getElementById('content');
-      const isAccepted = response === 'accepted';
-      content.innerHTML =
-        '<div class="success">' +
-          '<div class="success-icon">' + (isAccepted ? '✅' : '📝') + '</div>' +
-          '<h2>' + (isAccepted ? 'Quote Accepted!' : 'Response Submitted') + '</h2>' +
+      hideActionBar();
+      var isAccepted = response === 'accepted';
+      document.getElementById('content').innerHTML =
+        '<div class="state success">' +
+          '<div class="state-icon-ring">' + (isAccepted ? '&#10003;' : '&#9998;') + '</div>' +
+          '<h2>' + (isAccepted ? 'Quote accepted — nice one!' : 'Response sent') + '</h2>' +
           '<p>' + (isAccepted
-            ? 'Thank you for accepting this quote. The business has been notified and will be in touch soon.'
-            : 'Your response has been recorded. The business has been notified.') + '</p>' +
+            ? 'Thanks for accepting this quote. The business has been notified and will be in touch shortly.'
+            : 'Your response has been recorded and the business has been notified.') + '</p>' +
         '</div>';
+      window.scrollTo(0, 0);
     }
 
     function showAlreadyResponded(status) {
-      const content = document.getElementById('content');
-      content.innerHTML =
-        '<div class="success already-responded">' +
-          '<div class="success-icon">📋</div>' +
-          '<h2>Already Responded</h2>' +
-          '<p>This quote has already been ' + status + '.</p>' +
+      hideActionBar();
+      document.getElementById('content').innerHTML =
+        '<div class="state">' +
+          '<div class="state-icon-ring neutral">&#8505;</div>' +
+          '<h2>Already responded</h2>' +
+          '<p>This quote has already been ' + escapeHtml(status || 'responded to') + '.</p>' +
         '</div>';
     }
 
     function showError(message) {
-      const content = document.getElementById('content');
-      content.innerHTML =
-        '<div class="error">' +
-          '<div class="error-icon">⚠️</div>' +
+      hideActionBar();
+      document.getElementById('content').innerHTML =
+        '<div class="state">' +
+          '<div class="state-icon-ring warn">!</div>' +
           '<h2>Something went wrong</h2>' +
           '<p>' + escapeHtml(message) + '</p>' +
         '</div>';
-    }
-
-    function escapeHtml(text) {
-      if (!text) return '';
-      const div = document.createElement('div');
-      div.textContent = text;
-      return div.innerHTML;
     }
 
     loadQuote();
@@ -7387,7 +7474,6 @@ export function generateAcceptancePage(token: string): string {
 </html>
 `;
 }
-
 /**
  * Generate an error page HTML
  */

@@ -31,6 +31,19 @@ describe('generateAcceptancePage', () => {
     const script = inlineScript(generateAcceptancePage('a'.repeat(64)));
     expect(script).not.toMatch(/function\s*\([^)]*:\s*[a-zA-Z]/);
   });
+
+  it('offers a PDF download through the token-validated endpoint', () => {
+    const html = generateAcceptancePage('a'.repeat(64));
+    expect(html).toContain('Download PDF');
+    expect(html).toContain("/downloadQuotePdf?token=' + encodeURIComponent(TOKEN)");
+  });
+
+  it('presents accept and decline actions and the quote shell', () => {
+    const html = generateAcceptancePage('a'.repeat(64));
+    expect(html).toContain('Accept Quote');
+    expect(html).toContain('Decline');
+    expect(html).toContain('Loading your quote');
+  });
 });
 
 describe('acceptancePageUrlForToken', () => {

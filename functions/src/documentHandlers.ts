@@ -449,6 +449,84 @@ function sanitizeFilename(s: string): string {
   return s.replace(/[^a-zA-Z0-9\s]/g, '').replace(/\s+/g, '_').substring(0, 30);
 }
 
+export interface QuotePdfHtmlOptions {
+  /** Exact terms to print. Pass the send-time snapshot when one exists. */
+  terms?: string;
+  squarePaymentLinkUrl?: string;
+}
+
+/**
+ * Single source of truth for the customer-facing quote PDF HTML. Used by the
+ * email send (attachment) and the public acceptance-page download endpoint,
+ * so the document a customer downloads is byte-for-byte the one the email
+ * flow would have attached. Honour the same visibility settings in both:
+ * per-doc overrides > business defaults for material/labour cost display,
+ * markup visibility, GST mode and the tradie's chosen PDF template.
+ */
+export function buildQuotePdfHtmlForQuote(
+  quote: AnyData,
+  business: BusinessSettings,
+  options: QuotePdfHtmlOptions = {},
+): string {
+  return buildQuotePdfHtml(
+    {
+      customerName: quote.customerName || 'Client',
+      customerEmail: quote.customerEmail,
+      customerPhone: quote.customerPhone,
+      jobAddress: quote.jobAddress,
+      quoteNumber: quote.quoteNumber,
+      quoteDate: fmtAuDate(quote.updatedAt),
+      job: quote.job || { name: 'Job', description: '' },
+      materials: buildPdfMaterials(quote.materials),
+      materialsSubtotal: quote.materialsSubtotal || 0,
+      laborHours: quote.laborHours,
+      laborRate: quote.laborRate,
+      laborUnit: quote.laborUnit,
+      laborTotal: quote.laborTotal || 0,
+      laborExtraHours: quote.laborExtraHours,
+      sections: buildPdfSections(quote.sections),
+      subtotal: quote.subtotal || 0,
+      markup: quote.markup || 0,
+      markupAmount: quote.markupAmount || 0,
+      laborMarkup: quote.laborMarkup ?? quote.markup ?? 0,
+      showMarkup: quote.showMarkup !== undefined
+        ? quote.showMarkup === true
+        : business.showMarkup === true,
+      showMaterialCosts: quote.showMaterialCosts !== undefined
+        ? quote.showMaterialCosts
+        : business.showMaterialCostsByDefault !== false,
+      showLaborCosts: quote.showLaborCosts !== undefined
+        ? quote.showLaborCosts
+        : business.showLaborCostsByDefault !== false,
+      travelAdjustment: quote.travelAdjustment,
+      gst: quote.gst || 0,
+      total: quote.total || 0,
+      pricesIncludeGst: quote.pricesIncludeGst,
+      gstRegistered: quote.gstRegistered,
+      notes: quote.notes,
+      showLaborHours: business.showLaborHours,
+      showLaborBreakdown: quote.showLaborBreakdown !== false,
+      groupMaterialsBySection: business.groupMaterialsBySection,
+      paymentMethods: business.paymentMethods,
+      squarePaymentLinkUrl: options.squarePaymentLinkUrl ?? quote.squarePaymentLinkUrl,
+      surchargePaymentFees: business.surchargePaymentFees === true,
+      terms: options.terms,
+    },
+    {
+      businessName: business.businessName || 'Business',
+      email: business.email,
+      phone: business.phone,
+      website: business.website,
+      abn: business.abn,
+      address: business.address,
+      logoHtml: businessLogoHtml(business),
+      credentials: businessCredentials(business),
+      brandColor: business.brandColor,
+      pdfTemplate: business.pdfTemplate,
+    },
+  );
+}
+
 function fmtAuDate(value: any): string {
   return new Date(value || Date.now()).toLocaleDateString('en-AU', {
     day: '2-digit', month: 'long', year: 'numeric',
@@ -759,63 +837,10 @@ async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailRes
     business: businessData,
   });
 
-  const pdfHtml = buildQuotePdfHtml(
-    {
-      customerName: quote.customerName || 'Client',
-      customerEmail: quote.customerEmail,
-      customerPhone: quote.customerPhone,
-      jobAddress: quote.jobAddress,
-      quoteNumber: quote.quoteNumber,
-      quoteDate: fmtAuDate(quote.updatedAt),
-      job: quote.job || { name: 'Job', description: '' },
-      materials: buildPdfMaterials(quote.materials),
-      materialsSubtotal: quote.materialsSubtotal || 0,
-      laborHours: quote.laborHours,
-      laborRate: quote.laborRate,
-      laborUnit: quote.laborUnit,
-      laborTotal: quote.laborTotal || 0,
-      laborExtraHours: quote.laborExtraHours,
-      sections: buildPdfSections(quote.sections),
-      subtotal: quote.subtotal || 0,
-      markup: quote.markup || 0,
-      markupAmount: quote.markupAmount || 0,
-      laborMarkup: quote.laborMarkup ?? quote.markup ?? 0,
-      showMarkup: quote.showMarkup !== undefined
-        ? quote.showMarkup === true
-        : business.showMarkup === true,
-      showMaterialCosts: quote.showMaterialCosts !== undefined
-        ? quote.showMaterialCosts
-        : business.showMaterialCostsByDefault !== false,
-      showLaborCosts: quote.showLaborCosts !== undefined
-        ? quote.showLaborCosts
-        : business.showLaborCostsByDefault !== false,
-      travelAdjustment: quote.travelAdjustment,
-      gst: quote.gst || 0,
-      total: quote.total || 0,
-      pricesIncludeGst: quote.pricesIncludeGst,
-      gstRegistered: quote.gstRegistered,
-      notes: quote.notes,
-      showLaborHours: business.showLaborHours,
-      showLaborBreakdown: quote.showLaborBreakdown !== false,
-      groupMaterialsBySection: business.groupMaterialsBySection,
-      paymentMethods: business.paymentMethods,
-      squarePaymentLinkUrl: depositPayNowUrl || quote.squarePaymentLinkUrl,
-      surchargePaymentFees: business.surchargePaymentFees === true,
-      terms: termsToSend || undefined,
-    },
-    {
-      businessName: business.businessName || 'Business',
-      email: business.email,
-      phone: business.phone,
-      website: business.website,
-      abn: business.abn,
-      address: business.address,
-      logoHtml: businessLogoHtml(business),
-      credentials: businessCredentials(business),
-      brandColor: business.brandColor,
-      pdfTemplate: business.pdfTemplate,
-    },
-  );
+  const pdfHtml = buildQuotePdfHtmlForQuote(quote, business, {
+    terms: termsToSend || undefined,
+    squarePaymentLinkUrl: depositPayNowUrl || quote.squarePaymentLinkUrl,
+  });
 
   const pdfBuffer = await generateQuotePdfBuffer(pdfHtml);
   const pdfBase64 = pdfBuffer.toString('base64');
