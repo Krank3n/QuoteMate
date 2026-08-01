@@ -12,7 +12,7 @@ export default {
     // 1.46: adds the @sentry/react-native NATIVE module. Do not publish JS
     // built from this tree as an OTA for 1.45 — the appVersion runtime
     // policy below is what stops that from happening automatically.
-    version: "1.48",
+    version: "1.49",
     orientation: "portrait",
     icon: "./assets/icon.png",
     userInterfaceStyle: "dark",
@@ -128,7 +128,7 @@ export default {
       supportsTablet: true,
       bundleIdentifier: "com.hansendev.quotemate",
       usesAppleSignIn: true,
-      buildNumber: "17",
+      buildNumber: "83",
       associatedDomains: ["applinks:quotemateapp.au"],
       infoPlist: {
         ITSAppUsesNonExemptEncryption: false,
@@ -141,7 +141,7 @@ export default {
         backgroundColor: "#1E293B"  // Dark blue-gray to match app theme
       },
       package: "com.quotemate.app",
-      versionCode: 159,
+      versionCode: 160,
       permissions: ["android.permission.RECORD_AUDIO", "android.permission.CAMERA", "android.permission.READ_CONTACTS"],
       intentFilters: [
         {
