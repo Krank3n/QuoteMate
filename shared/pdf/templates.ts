@@ -34,7 +34,10 @@ export const PDF_TEMPLATES: PdfTemplateInfo[] = [
 
 /** Print media CSS shared across all templates */
 export const printMediaCSS = `
-  @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');
+  /* No external font imports: Android's print bridge renders this HTML in a
+     WebView and can stall indefinitely fetching remote resources — a hung
+     font request froze Preview PDF. Every template's font stack falls back
+     to Helvetica/Arial, which is visually near-identical on A4. */
   html, body {
     min-height: 100%;
     margin: 0;
@@ -103,9 +106,9 @@ export const printMediaCSS = `
   .business-identity .logo {
     display: block;
     width: auto !important;
-    max-width: 180px !important;
+    max-width: 240px !important;
     height: auto !important;
-    max-height: 52px !important;
+    max-height: 84px !important;
     margin: 0 0 8px 0 !important;
     object-fit: contain;
   }
@@ -276,9 +279,9 @@ const professionalCSS = `
   }
   .logo {
     width: auto;
-    max-width: 150px;
+    max-width: 220px;
     height: auto;
-    max-height: 64px;
+    max-height: 80px;
     object-fit: contain;
     flex-shrink: 0;
   }
@@ -447,9 +450,9 @@ const cleanCSS = `
   }
   .logo {
     width: auto;
-    max-width: 150px;
+    max-width: 220px;
     height: auto;
-    max-height: 56px;
+    max-height: 76px;
     object-fit: contain;
     flex-shrink: 0;
     margin-top: 6px;
@@ -654,9 +657,9 @@ const boldCSS = `
   }
   .logo {
     width: auto;
-    max-width: 150px;
+    max-width: 220px;
     height: auto;
-    max-height: 64px;
+    max-height: 80px;
     object-fit: contain;
     flex-shrink: 0;
     border-radius: 8px;
@@ -876,9 +879,9 @@ const tradesmanCSS = `
   }
   .logo {
     width: auto;
-    max-width: 150px;
+    max-width: 220px;
     height: auto;
-    max-height: 60px;
+    max-height: 76px;
     object-fit: contain;
     flex-shrink: 0;
     border: 1px solid #D6D3D1;

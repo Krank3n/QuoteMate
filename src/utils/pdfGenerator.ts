@@ -724,8 +724,38 @@ export async function previewDocumentPDF(
     return;
   }
   // iOS: shows the AirPrint-style preview with zoom + share.
-  // Android: same — opens the system print preview UI.
-  await Print.printAsync({ html });
+  if (Platform.OS === 'ios') {
+    await Print.printAsync({ html });
+    return;
+  }
+  // Android: the print bridge renders the HTML in a WebView and can stall
+  // indefinitely (a slow remote resource historically froze Preview PDF).
+  // Race it against a timeout and fall back to generating the file and
+  // opening it in the device's PDF viewer instead.
+  try {
+    await Promise.race([
+      Print.printAsync({ html }),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('PDF preview timed out')), 25000),
+      ),
+    ]);
+  } catch (error) {
+    try {
+      const { uri } = await Print.printToFileAsync({ html });
+      const namedUri = `${FileSystem.cacheDirectory}QuoteMate-Preview.pdf`;
+      await FileSystem.copyAsync({ from: uri, to: namedUri });
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(namedUri, {
+          mimeType: 'application/pdf',
+          dialogTitle: 'PDF Preview',
+        });
+        return;
+      }
+    } catch {
+      // Fall through to the original error below.
+    }
+    throw error;
+  }
 }
 
 export async function generateQuotePDF(quote: Quote, businessSettings: BusinessSettings | null, options?: { isPro?: boolean }): Promise<string> {
