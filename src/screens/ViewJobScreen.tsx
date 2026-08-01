@@ -218,17 +218,18 @@ export function ViewJobScreen() {
   // "Order from Reece" entry — only when Reece is connected and the doc has
   // at least one Reece-priced material with order identifiers. Slots into
   // the ScopeBlock right under the JobScopeCard via the `extra` prop.
-  // Minified service-report rows for the scope card. Reuses the Reece entry's
-  // row styling so the "extras" under the scope card read as one family.
-  // Tap → reopen that report (draft resumes, sent reports open read-back).
+  // Saved service reports get their own labelled, compact block so the answer
+  // to "where did Save/Share put it?" is obvious on return to the job. Tap a
+  // row to resume a draft or open a sent report.
   const serviceReportRows = jobReports.length > 0 ? (
-    <>
+    <View style={styles.serviceReportsWrap}>
+      <Text style={styles.serviceReportsLabel}>Service reports</Text>
       {jobReports.map((report) => {
         const row = reportRowSummary(report);
         return (
           <TouchableOpacity
             key={report.id}
-            style={styles.reeceOrderButton}
+            style={styles.serviceReportButton}
             onPress={() =>
               navigation.navigate('ServiceReport', {
                 jobId: job.id,
@@ -250,7 +251,7 @@ export function ViewJobScreen() {
           </TouchableOpacity>
         );
       })}
-    </>
+    </View>
   ) : null;
 
   const reeceOrderEntry =
@@ -1204,6 +1205,29 @@ const styles = StyleSheet.create({
   },
   secondaryDocsWrap: {
     marginTop: 4,
+  },
+  serviceReportsWrap: {
+    marginHorizontal: 16,
+    marginTop: 12,
+  },
+  serviceReportsLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginHorizontal: 4,
+    marginBottom: 6,
+  },
+  serviceReportButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   reeceOrderButton: {
     flexDirection: 'row',

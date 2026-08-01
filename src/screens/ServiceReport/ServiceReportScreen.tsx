@@ -693,6 +693,11 @@ export function ServiceReportScreen() {
         jobAddress: context?.jobAddress,
       });
       trackEvent('report_shared', { method: 'share' });
+      showAlert({
+        type: 'success',
+        title: 'Report saved to job',
+        message: 'You can reopen it anytime under Service reports on this job.',
+      });
     } catch (err: any) {
       showAlert({
         type: 'error',

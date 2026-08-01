@@ -3,7 +3,21 @@ import {
   computeNextReportNumber,
   stripUndefined,
   normaliseReport,
+  sortReportsNewestFirst,
 } from '../reportService';
+
+describe('sortReportsNewestFirst', () => {
+  it('orders job reports by updatedAt without mutating the input', () => {
+    const reports = [
+      { id: 'old', updatedAt: 10 },
+      { id: 'new', updatedAt: 30 },
+      { id: 'middle', updatedAt: 20 },
+    ] as any;
+    const sorted = sortReportsNewestFirst(reports);
+    expect(sorted.map((report) => report.id)).toEqual(['new', 'middle', 'old']);
+    expect(reports.map((report: any) => report.id)).toEqual(['old', 'new', 'middle']);
+  });
+});
 
 describe('computeNextReportNumber', () => {
   it('starts at RP-001 when there are no existing reports', () => {

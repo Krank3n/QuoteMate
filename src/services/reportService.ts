@@ -72,6 +72,14 @@ export function normaliseReport(raw: any, id: string): ServiceReport {
   } as ServiceReport;
 }
 
+/** Newest-first ordering used after job-scoped queries. Keeping this client-side
+ * avoids a Firestore composite index for jobId + updatedAt — without that index
+ * the old query failed silently and made saved reports disappear from the Job
+ * screen. */
+export function sortReportsNewestFirst(reports: ServiceReport[]): ServiceReport[] {
+  return [...reports].sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
 /**
  * Compute the next "RP-NNN" report number from a list of existing reports.
  * Pure — extracted so it can be tested without live Firestore. Reconciles the
@@ -171,10 +179,11 @@ class ReportService {
     try {
       const ref = this.colRef(uid);
       const q = jobId
-        ? query(ref, where('jobId', '==', jobId), orderBy('updatedAt', 'desc'))
+        ? query(ref, where('jobId', '==', jobId))
         : query(ref, orderBy('updatedAt', 'desc'));
       const snap = await getDocs(q);
-      return snap.docs.map((d) => normaliseReport(d.data(), d.id));
+      const reports = snap.docs.map((d) => normaliseReport(d.data(), d.id));
+      return jobId ? sortReportsNewestFirst(reports) : reports;
     } catch {
       return [];
     }
@@ -191,12 +200,13 @@ class ReportService {
       this.unsubscribe?.();
       const ref = this.colRef(uid);
       const q = jobId
-        ? query(ref, where('jobId', '==', jobId), orderBy('updatedAt', 'desc'))
+        ? query(ref, where('jobId', '==', jobId))
         : query(ref, orderBy('updatedAt', 'desc'));
       this.unsubscribe = onSnapshot(
         q,
         (snap) => {
-          callback(snap.docs.map((d) => normaliseReport(d.data(), d.id)));
+          const reports = snap.docs.map((d) => normaliseReport(d.data(), d.id));
+          callback(jobId ? sortReportsNewestFirst(reports) : reports);
         },
         () => {},
       );
