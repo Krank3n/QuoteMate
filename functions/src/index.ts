@@ -7031,9 +7031,10 @@ export function generateAcceptancePage(token: string): string {
     /* ---- Header ---- */
     .header { padding: 32px 32px 0; text-align: center; }
     .biz-logo {
-      width: 76px; height: 76px; border-radius: 18px; object-fit: cover;
-      margin: 0 auto 14px; display: block;
-      box-shadow: 0 4px 14px rgba(15, 23, 42, 0.14);
+      max-width: 132px; max-height: 76px; border-radius: 14px; object-fit: contain;
+      margin: 0 auto 14px; display: block; background: #fff;
+      padding: 8px 12px; border: 1px solid var(--line);
+      box-shadow: 0 4px 14px rgba(15, 23, 42, 0.10);
     }
     .biz-initial {
       width: 76px; height: 76px; border-radius: 18px; margin: 0 auto 14px;
@@ -7358,7 +7359,7 @@ export function generateAcceptancePage(token: string): string {
         '<div class="header">' +
           logoHtml +
           '<div class="biz-name">' + escapeHtml(business.name) + '</div>' +
-          '<div class="quote-ref">Quote ' + escapeHtml(String(quote.quoteNumber || quote.id)) + (dateLine ? ' &middot; ' + dateLine : '') + '</div>' +
+          '<div class="quote-ref">' + (quote.quoteNumber ? 'Quote ' + escapeHtml(String(quote.quoteNumber)) + (dateLine ? ' &middot; ' : '') : '') + dateLine + '</div>' +
         '</div>' +
 
         '<div class="hero">' +
