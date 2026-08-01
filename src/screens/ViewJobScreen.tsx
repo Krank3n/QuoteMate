@@ -28,7 +28,8 @@ import { JobActionsSheet, type JobAction } from '../components/JobActionsSheet';
 import { exportDocumentPDF } from '../utils/pdfGenerator';
 import { canUseServiceReports } from '../utils/reportEntitlement';
 import { reportService } from '../services/reportService';
-import { resumableReportId, reportRowSummary } from './ServiceReport/reportDraft';
+import { resumableReportId, reportRowMeta } from './ServiceReport/reportDraft';
+import { ServiceReportRow } from '../components/ServiceReportRow';
 import type { ServiceReport } from '../../shared/report/types';
 import { StageSheet } from '../components/StageSheet';
 import { JobStageSheet, stageMetaFor } from '../components/JobStageSheet';
@@ -223,34 +224,22 @@ export function ViewJobScreen() {
   // row to resume a draft or open a sent report.
   const serviceReportRows = jobReports.length > 0 ? (
     <View style={styles.serviceReportsWrap}>
-      <Text style={styles.serviceReportsLabel}>Service reports</Text>
-      {jobReports.map((report) => {
-        const row = reportRowSummary(report);
-        return (
-          <TouchableOpacity
-            key={report.id}
-            style={styles.serviceReportButton}
-            onPress={() =>
-              navigation.navigate('ServiceReport', {
-                jobId: job.id,
-                reportId: report.id,
-              })
-            }
-            activeOpacity={0.7}
-          >
-            <MaterialCommunityIcons
-              name="clipboard-check-outline"
-              size={20}
-              color={colors.primary}
-            />
-            <View style={{ flex: 1, marginLeft: 12 }}>
-              <Text style={styles.reeceOrderButtonTitle}>{row.title}</Text>
-              <Text style={styles.reeceOrderButtonSubtitle}>{row.subtitle}</Text>
-            </View>
-            <MaterialCommunityIcons name="chevron-right" size={22} color={colors.textMuted} />
-          </TouchableOpacity>
-        );
-      })}
+      {/* Same section-label treatment as "Also on this job" below it —
+          reports are another list of things hanging off this job, not a
+          special case with its own typography. */}
+      <Text style={styles.secondaryDocsLabel}>Service reports</Text>
+      {jobReports.map((report) => (
+        <ServiceReportRow
+          key={report.id}
+          meta={reportRowMeta(report)}
+          onPress={() =>
+            navigation.navigate('ServiceReport', {
+              jobId: job.id,
+              reportId: report.id,
+            })
+          }
+        />
+      ))}
     </View>
   ) : null;
 
@@ -1206,28 +1195,10 @@ const styles = StyleSheet.create({
   secondaryDocsWrap: {
     marginTop: 4,
   },
+  // Rows inside carry their own horizontal margin (they're DocumentRow-
+  // shaped), so this wrapper only spaces the group vertically.
   serviceReportsWrap: {
-    marginHorizontal: 16,
-    marginTop: 12,
-  },
-  serviceReportsLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: colors.textMuted,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    marginHorizontal: 4,
-    marginBottom: 6,
-  },
-  serviceReportButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 8,
-    borderWidth: 1,
-    borderColor: colors.border,
+    marginTop: 4,
   },
   reeceOrderButton: {
     flexDirection: 'row',

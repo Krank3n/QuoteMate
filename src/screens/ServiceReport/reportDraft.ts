@@ -534,28 +534,69 @@ export function latestTechnicianSignature(
 }
 
 /**
- * Compact one-line summary for a report row on the Job screen: the service
- * type leads (that's how the tradie thinks of the visit), with the report
- * number and lifecycle state underneath. `now` is injectable for tests.
+ * The fields a minimised report row on the Job screen renders.
+ *
+ * Deliberately shaped like the document rows it sits beside: a leading
+ * title, a right-hand value (the visit date, where a doc shows its total),
+ * then a chip strip for lifecycle state and what the docket carries. Pure
+ * data — the component owns every colour and icon, so the row can be
+ * restyled without touching this, and this can be tested without React.
  */
-export function reportRowSummary(
-  report: Pick<ServiceReport, 'number' | 'serviceType' | 'status' | 'sentAt' | 'updatedAt'>,
+export interface ReportRowMeta {
+  /** Service type — how the tradie thinks of the visit. */
+  title: string;
+  /** Report number, or '' before one is stamped. */
+  number: string;
+  /** Visit date, year dropped when it's the current one. */
+  visitLabel: string;
+  status: ServiceReport['status'];
+  /** Chip copy: 'Sent 21 Jul' / 'Sent' / 'Draft'. */
+  statusLabel: string;
+  /** Muted tail on a draft ('edited about 2 hours ago'), else ''. */
+  detail: string;
+  photoCount: number;
+  /** True only for measurable customer ink — a ghost tap isn't a signature. */
+  signed: boolean;
+}
+
+type ReportRowFields = Pick<
+  ServiceReport,
+  'number' | 'serviceType' | 'status' | 'sentAt' | 'updatedAt' | 'visitDate'
+> &
+  Partial<Pick<ServiceReport, 'photos' | 'customerSignature'>>;
+
+/**
+ * Compact summary for a report row on the Job screen. `now` is injectable
+ * for tests and drives both the "edited ago" tail and the year-dropping on
+ * the visit date.
+ */
+export function reportRowMeta(
+  report: ReportRowFields,
   now: number = Date.now(),
-): { title: string; subtitle: string } {
-  const title = report.serviceType?.trim() || 'Service report';
-  const parts: string[] = [];
-  if (report.number) parts.push(report.number);
-  if (report.status === 'sent') {
-    parts.push(
-      report.sentAt ? `Sent ${format(new Date(report.sentAt), 'd MMM')}` : 'Sent',
-    );
-  } else {
-    parts.push('Draft');
-    if (report.updatedAt) {
-      parts.push(
-        `edited ${formatDistance(new Date(report.updatedAt), new Date(now), { addSuffix: true })}`,
-      );
-    }
-  }
-  return { title, subtitle: parts.join(' · ') };
+): ReportRowMeta {
+  const sent = report.status === 'sent';
+  const visit = report.visitDate ? new Date(report.visitDate) : null;
+  return {
+    title: report.serviceType?.trim() || 'Service report',
+    number: trim(report.number),
+    // This year's visits read as '21 Jul'; anything older keeps its year so
+    // a carried-forward service history can't be misread as recent.
+    visitLabel: visit
+      ? format(visit, visit.getFullYear() === new Date(now).getFullYear() ? 'd MMM' : 'd MMM yyyy')
+      : '',
+    status: report.status,
+    statusLabel: sent
+      ? report.sentAt
+        ? `Sent ${format(new Date(report.sentAt), 'd MMM')}`
+        : 'Sent'
+      : 'Draft',
+    // Only a draft earns the tail: on a sent report the send date is the
+    // fact that matters, and an edit stamp beside it just raises questions.
+    detail:
+      !sent && report.updatedAt
+        ? `edited ${formatDistance(new Date(report.updatedAt), new Date(now), { addSuffix: true })}`
+        : '',
+    photoCount: report.photos?.length ?? 0,
+    signed: pathHasInk(report.customerSignature?.svgPath ?? ''),
+  };
 }

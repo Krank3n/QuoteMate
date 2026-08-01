@@ -14,7 +14,7 @@ import {
   pruneAdditions,
   pruneSuggestions,
   removeCarriedRows,
-  reportRowSummary,
+  reportRowMeta,
   resumableReportId,
   sameSite,
   setAllChecked,
@@ -888,50 +888,141 @@ describe('site memory', () => {
   });
 });
 
-describe('reportRowSummary', () => {
+describe('reportRowMeta', () => {
   const NOW = new Date('2026-07-23T06:00:00Z').getTime();
 
   it('leads with the service type and shows number + sent date for sent reports', () => {
-    const row = reportRowSummary(
+    const row = reportRowMeta(
       {
         number: 'RP-003',
         serviceType: 'Aircon service',
         status: 'sent',
+        visitDate: new Date('2026-07-20T02:00:00Z').getTime(),
         sentAt: new Date('2026-07-21T02:00:00Z').getTime(),
         updatedAt: NOW - 1000,
       },
       NOW,
     );
     expect(row.title).toBe('Aircon service');
-    expect(row.subtitle).toBe('RP-003 · Sent 21 Jul');
+    expect(row.number).toBe('RP-003');
+    expect(row.statusLabel).toBe('Sent 21 Jul');
   });
 
-  it('shows Draft with an edited-ago tail for unfinished reports', () => {
-    const row = reportRowSummary(
+  it('drops the edited-ago tail on a sent report — the send date is the fact', () => {
+    const row = reportRowMeta(
       {
-        number: 'RP-004',
-        serviceType: 'Filter replacement',
-        status: 'draft',
+        number: 'RP-003',
+        serviceType: 'Aircon service',
+        status: 'sent',
+        visitDate: NOW,
+        sentAt: NOW,
         updatedAt: NOW - 2 * 60 * 60 * 1000,
       },
       NOW,
     );
-    expect(row.subtitle).toBe('RP-004 · Draft · edited about 2 hours ago');
+    expect(row.detail).toBe('');
+  });
+
+  it('shows Draft with an edited-ago detail line for unfinished reports', () => {
+    const row = reportRowMeta(
+      {
+        number: 'RP-004',
+        serviceType: 'Filter replacement',
+        status: 'draft',
+        visitDate: NOW,
+        updatedAt: NOW - 2 * 60 * 60 * 1000,
+      },
+      NOW,
+    );
+    expect(row.statusLabel).toBe('Draft');
+    expect(row.detail).toBe('edited about 2 hours ago');
+  });
+
+  it('drops the year on a visit in the current year and keeps it on older ones', () => {
+    const thisYear = reportRowMeta(
+      {
+        number: 'RP-005',
+        serviceType: 'Service',
+        status: 'draft',
+        visitDate: new Date('2026-02-09T02:00:00Z').getTime(),
+        updatedAt: NOW,
+      },
+      NOW,
+    );
+    expect(thisYear.visitLabel).toBe('9 Feb');
+
+    const lastYear = reportRowMeta(
+      {
+        number: 'RP-000',
+        serviceType: 'Service',
+        status: 'sent',
+        visitDate: new Date('2025-02-09T02:00:00Z').getTime(),
+        updatedAt: NOW,
+      },
+      NOW,
+    );
+    expect(lastYear.visitLabel).toBe('9 Feb 2025');
+  });
+
+  it('counts photos and only calls a report signed on measurable ink', () => {
+    const base = {
+      number: 'RP-006',
+      serviceType: 'Service',
+      status: 'draft' as const,
+      visitDate: NOW,
+      updatedAt: NOW,
+    };
+    const withInk = reportRowMeta(
+      {
+        ...base,
+        photos: [{ uri: 'a' }, { uri: 'b' }] as any,
+        customerSignature: {
+          svgPath: 'M 0 0 L 40 40 L 80 10',
+          name: 'Jane',
+          signedAt: NOW,
+        },
+      },
+      NOW,
+    );
+    expect(withInk.photoCount).toBe(2);
+    expect(withInk.signed).toBe(true);
+
+    const ghost = reportRowMeta(
+      {
+        ...base,
+        customerSignature: { svgPath: '', name: 'Jane', signedAt: NOW },
+      },
+      NOW,
+    );
+    expect(ghost.photoCount).toBe(0);
+    expect(ghost.signed).toBe(false);
   });
 
   it('falls back to a generic title when serviceType is blank', () => {
-    const row = reportRowSummary(
-      { number: 'RP-001', serviceType: '  ', status: 'draft', updatedAt: NOW },
+    const row = reportRowMeta(
+      {
+        number: 'RP-001',
+        serviceType: '  ',
+        status: 'draft',
+        visitDate: NOW,
+        updatedAt: NOW,
+      },
       NOW,
     );
     expect(row.title).toBe('Service report');
   });
 
   it('handles a sent report with no sentAt stamp', () => {
-    const row = reportRowSummary(
-      { number: 'RP-002', serviceType: 'Ducted heating', status: 'sent', updatedAt: NOW },
+    const row = reportRowMeta(
+      {
+        number: 'RP-002',
+        serviceType: 'Ducted heating',
+        status: 'sent',
+        visitDate: NOW,
+        updatedAt: NOW,
+      },
       NOW,
     );
-    expect(row.subtitle).toBe('RP-002 · Sent');
+    expect(row.statusLabel).toBe('Sent');
   });
 });
