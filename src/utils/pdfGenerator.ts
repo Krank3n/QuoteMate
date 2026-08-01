@@ -14,7 +14,7 @@ import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import * as MailComposer from 'expo-mail-composer';
 import { format } from 'date-fns';
-import { Quote, BusinessSettings, Invoice } from '../types';
+import { Quote, BusinessSettings, Invoice, BusinessCredential } from '../types';
 import { Document } from '../types/document';
 import { quoteToDocument, invoiceToDocument } from '../types/documentAdapter';
 import { formatPaymentTerms, getAmountDue } from './invoiceCalculator';
@@ -38,37 +38,35 @@ import { checkSquareConnection } from '../services/squareService';
 // export blocks the main thread — caching for the app session is a clean win.
 const logoHtmlCache = new Map<string, string>();
 
-/**
- * Prepare the logo HTML tag from business settings (platform-specific)
- */
-export async function prepareLogoHtml(businessSettings: BusinessSettings | null, isPro?: boolean): Promise<string> {
-  const showLogo = isPro !== false;
-  if (!showLogo || !businessSettings?.logoUri) return '';
+const escapeHtmlAttribute = (value: string) =>
+  value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-  const uri = businessSettings.logoUri;
-  const alt = businessSettings.businessName || '';
+async function preparePdfImageHtml(
+  uri: string,
+  alt: string,
+  className: string,
+  inlineStyle = '',
+): Promise<string> {
+  const safeUri = escapeHtmlAttribute(uri);
+  const safeAlt = escapeHtmlAttribute(alt);
+  const styleAttr = inlineStyle ? ` style="${inlineStyle}"` : '';
 
   // Web: the browser fetches remote images natively, embed URL as-is.
   if (Platform.OS === 'web') {
-    return `<img src="${uri}" alt="${alt}" class="logo" />`;
+    return `<img src="${safeUri}" alt="${safeAlt}" class="${className}"${styleAttr} />`;
   }
 
-  const cacheKey = `${uri}::${alt}`;
+  const cacheKey = `${className}::${uri}::${alt}`;
   const cached = logoHtmlCache.get(cacheKey);
   if (cached) return cached;
 
-  // Mobile (iOS + Android): embed the logo as a base64 data URI.
-  //
-  // Why we can't just embed a remote URL: Android's print/PDF bridge
-  // tries to fetch <img src="https://…"> inside the native print
-  // process. On real devices this stalls indefinitely — Preview PDF
-  // hangs forever with no error. Local files are fast; remote logos
-  // (Firebase Storage) must be downloaded + inlined here first.
+  // Mobile print bridges are unreliable with remote images, so download and
+  // inline both the company logo and accreditation badges before rendering.
   try {
     const isRemote = uri.startsWith('http://') || uri.startsWith('https://');
     let base64: string;
     if (isRemote) {
-      const tmp = `${FileSystem.cacheDirectory}logo-${Date.now()}.img`;
+      const tmp = `${FileSystem.cacheDirectory}pdf-brand-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.img`;
       const downloaded = await FileSystem.downloadAsync(uri, tmp);
       base64 = await FileSystem.readAsStringAsync(downloaded.uri, {
         encoding: FileSystem.EncodingType.Base64,
@@ -78,21 +76,43 @@ export async function prepareLogoHtml(businessSettings: BusinessSettings | null,
         encoding: FileSystem.EncodingType.Base64,
       });
     }
-    // image/png decodes correctly for both PNG and JPEG payloads in
-    // the renderers expo-print uses (WebKit on iOS, Android print's
-    // WebView). No need to sniff the actual content type.
-    const html = `<img src="data:image/png;base64,${base64}" alt="${alt}" class="logo" />`;
+    const html = `<img src="data:image/png;base64,${base64}" alt="${safeAlt}" class="${className}"${styleAttr} />`;
     logoHtmlCache.set(cacheKey, html);
     return html;
-  } catch (error) {
+  } catch {
     return '';
   }
+}
+
+/** Prepare the company logo HTML tag from business settings. */
+export async function prepareLogoHtml(businessSettings: BusinessSettings | null, isPro?: boolean): Promise<string> {
+  if (isPro === false || !businessSettings?.logoUri) return '';
+  return preparePdfImageHtml(
+    businessSettings.logoUri,
+    businessSettings.businessName || '',
+    'logo',
+  );
+}
+
+async function prepareCredentialLogoHtml(credential: BusinessCredential): Promise<string> {
+  if (!credential.logoUri) return '';
+  return preparePdfImageHtml(
+    credential.logoUri,
+    credential.label || 'Accreditation',
+    'credential-logo',
+    'width:64px;height:38px;object-fit:contain;',
+  );
 }
 
 /**
  * Map app BusinessSettings to shared BusinessPdfData
  */
-function mapBusinessData(businessSettings: BusinessSettings | null, logoHtml: string): BusinessPdfData {
+function mapBusinessData(
+  businessSettings: BusinessSettings | null,
+  logoHtml: string,
+  credentialLogos: Map<string, string> = new Map(),
+  includeCredentials = true,
+): BusinessPdfData {
   const business = businessSettings || {
     businessName: 'Your Business',
     email: '',
@@ -107,9 +127,41 @@ function mapBusinessData(businessSettings: BusinessSettings | null, logoHtml: st
     abn: business.abn,
     address: businessSettings?.address,
     logoHtml,
+    credentials: includeCredentials
+      ? businessSettings?.credentials
+          ?.filter((credential) => credential.label?.trim() || credential.number?.trim() || credential.logoUri)
+          .map((credential) => ({
+            label: credential.label || '',
+            number: credential.number,
+            logoHtml: credentialLogos.get(credential.id) || '',
+          }))
+      : undefined,
     brandColor: businessSettings?.brandColor,
     pdfTemplate: businessSettings?.pdfTemplate,
   };
+}
+
+async function prepareBusinessPdfData(
+  businessSettings: BusinessSettings | null,
+  isPro?: boolean,
+): Promise<BusinessPdfData> {
+  const includeCredentials = isPro !== false;
+  const credentials = includeCredentials ? businessSettings?.credentials || [] : [];
+  const [logoHtml, preparedCredentialLogos] = await Promise.all([
+    prepareLogoHtml(businessSettings, isPro),
+    Promise.all(
+      credentials.map(async (credential) => [
+        credential.id,
+        await prepareCredentialLogoHtml(credential),
+      ] as const),
+    ),
+  ]);
+  return mapBusinessData(
+    businessSettings,
+    logoHtml,
+    new Map(preparedCredentialLogos),
+    includeCredentials,
+  );
 }
 
 /**
@@ -152,8 +204,7 @@ export async function generateDocumentPDF(
   businessSettings: BusinessSettings | null,
   options?: { isPro?: boolean },
 ): Promise<string> {
-  const logoHtml = await prepareLogoHtml(businessSettings, options?.isPro);
-  const business = mapBusinessData(businessSettings, logoHtml);
+  const business = await prepareBusinessPdfData(businessSettings, options?.isPro);
 
   // Plan is read from the store at render time so the PDF reflects the
   // current tier (a free user's PDF must show only Square; Pro shows all
@@ -501,8 +552,7 @@ export async function generateReportPDF(
   businessSettings: BusinessSettings | null,
   options?: ReportPdfOptions,
 ): Promise<string> {
-  const logoHtml = await prepareLogoHtml(businessSettings, options?.isPro);
-  const business = mapBusinessData(businessSettings, logoHtml);
+  const business = await prepareBusinessPdfData(businessSettings, options?.isPro);
 
   // Inline photos before building the HTML — remote URLs hang the Android
   // print bridge and race the iOS snapshot (see prepareReportPhoto).

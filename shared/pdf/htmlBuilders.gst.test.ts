@@ -38,6 +38,32 @@ function invoiceData(over: Partial<InvoicePdfData> = {}): InvoicePdfData {
   };
 }
 
+describe('licence and accreditation header lockup', () => {
+  const accreditedBusiness: BusinessPdfData = {
+    ...business,
+    credentials: [{ label: 'ARC Authorisation', number: 'AU12345' }],
+  };
+
+  it('appears inside the quote business header rather than as a page-wide banner', () => {
+    const html = buildQuotePdfHtml(quoteData(), accreditedBusiness);
+    expect(html).toContain('class="business-credentials"');
+    expect(html).toContain('ARC Authorisation');
+    expect(html).toContain('AU12345');
+    const businessHeader = html.indexOf('class="header-business"');
+    const credentials = html.indexOf('class="business-credentials"');
+    const documentMeta = html.indexOf('class="header-meta"');
+    expect(credentials).toBeGreaterThan(businessHeader);
+    expect(credentials).toBeLessThan(documentMeta);
+  });
+
+  it('appears on invoice PDFs', () => {
+    const html = buildInvoicePdfHtml(invoiceData(), accreditedBusiness);
+    expect(html).toContain('class="business-credentials"');
+    expect(html).toContain('ARC Authorisation');
+    expect(html).toContain('AU12345');
+  });
+});
+
 describe('buildQuotePdfHtml — GST modes', () => {
   it('exclusive (default): shows ex-GST subtotal and a GST (10%) row, no note', () => {
     const html = buildQuotePdfHtml(quoteData(), business);

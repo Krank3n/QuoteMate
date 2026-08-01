@@ -80,6 +80,70 @@ function buildWatermarkHTML(text: string): string {
   `;
 }
 
+export function buildBusinessCredentialsHTML(business: BusinessPdfData): string {
+  const credentials = (business.credentials || []).filter(
+    (credential) => credential.label?.trim() || credential.number?.trim() || credential.logoHtml,
+  );
+  if (credentials.length === 0) return '';
+
+  return `
+      <div class="business-credentials">
+        ${credentials.map((credential) => `
+          <div class="business-credential">
+            ${credential.logoHtml || ''}
+            <div class="business-credential-copy">
+              ${!credential.logoHtml && credential.label?.trim() ? `<strong>${escapeHtml(credential.label.trim())}</strong>` : ''}
+              ${credential.number?.trim() ? `<div>${escapeHtml(credential.number.trim())}</div>` : ''}
+            </div>
+          </div>`).join('')}
+      </div>`;
+}
+
+function buildBusinessHeaderHTML(business: BusinessPdfData): string {
+  const hasLogo = !!business.logoHtml;
+  const directContacts = [business.email, business.phone]
+    .filter((value): value is string => !!value)
+    .map(escapeHtml)
+    .join(' &middot; ');
+  return `
+        <div class="header-business">
+          <div class="header-content business-identity${hasLogo ? ' has-logo' : ''}">
+            ${business.logoHtml || ''}
+            <div class="header-text">
+              <h1>${escapeHtml(business.businessName)}</h1>
+              <div class="business-contact-details">
+                ${business.abn ? `<div><strong>ABN</strong> ${escapeHtml(business.abn)}</div>` : ''}
+                ${business.address ? `<div>${formatMultiline(business.address)}</div>` : ''}
+                ${directContacts ? `<div>${directContacts}</div>` : ''}
+                ${business.website ? `<div>${escapeHtml(business.website)}</div>` : ''}
+              </div>
+            </div>
+          </div>
+          ${buildBusinessCredentialsHTML(business)}
+        </div>`;
+}
+
+function buildHeaderRecipientHTML(input: {
+  label: string;
+  name?: string;
+  address?: string;
+  email?: string;
+  phone?: string;
+}): string {
+  const contacts = [input.email, input.phone]
+    .filter((value): value is string => !!value)
+    .map(escapeHtml)
+    .join(' &middot; ');
+  if (!input.name?.trim() && !input.address?.trim() && !contacts) return '';
+  return `
+          <div class="header-recipient">
+            <div class="header-recipient-label">${escapeHtml(input.label)}</div>
+            ${input.name?.trim() ? `<div class="header-recipient-name">${escapeHtml(input.name.trim())}</div>` : ''}
+            ${input.address?.trim() ? `<div>${formatMultiline(input.address.trim())}</div>` : ''}
+            ${contacts ? `<div class="header-recipient-contact">${contacts}</div>` : ''}
+          </div>`;
+}
+
 export function buildTermsHTML(terms: string | undefined): string {
   if (!terms || !terms.trim()) return '';
   const paras = terms
@@ -540,30 +604,19 @@ export function buildQuotePdfHtml(
     <body>
       ${watermark ? buildWatermarkHTML(watermark) : ''}
       <div class="content-wrapper">
-      <div class="header">
-        <div class="header-business">
-          <div class="header-content">
-            ${business.logoHtml || ''}
-            <div class="header-text">
-              <h1>${business.businessName}</h1>
-              <p>
-                ${business.abn ? `<strong>ABN:</strong> ${business.abn}<br>` : ''}
-                ${business.address ? `<strong>Address:</strong> ${business.address.replace(/\n/g, '<br>')}<br>` : ''}
-                ${business.email ? `<strong>Email:</strong> ${business.email}<br>` : ''}
-                ${business.phone ? `<strong>Phone:</strong> ${business.phone}${business.website ? '<br>' : ''}` : ''}
-                ${business.website ? `<strong>Web:</strong> ${business.website}` : ''}
-              </p>
-            </div>
-          </div>
-        </div>
+      <div class="header document-header">
+        ${buildBusinessHeaderHTML(business)}
         <div class="header-meta">
           <h2>QUOTATION</h2>
-          ${quote.quoteNumber ? `<p><strong>Quote #:</strong> ${quote.quoteNumber}</p>` : ''}
-          <p><strong>Quote Date:</strong> ${quote.quoteDate}</p>
-          <p><strong>Customer:</strong> ${quote.customerName}</p>
-          ${quote.customerEmail ? `<p><strong>Email:</strong> ${quote.customerEmail}</p>` : ''}
-          ${quote.customerPhone ? `<p><strong>Phone:</strong> ${quote.customerPhone}</p>` : ''}
-          ${quote.jobAddress ? `<p><strong>Job Address:</strong> ${quote.jobAddress}</p>` : ''}
+          ${quote.quoteNumber ? `<div class="document-reference">${escapeHtml(quote.quoteNumber)}</div>` : ''}
+          <div class="document-date">${escapeHtml(quote.quoteDate)}</div>
+          ${buildHeaderRecipientHTML({
+            label: 'Prepared for',
+            name: quote.customerName,
+            address: quote.jobAddress,
+            email: quote.customerEmail,
+            phone: quote.customerPhone,
+          })}
         </div>
       </div>
 
@@ -737,31 +790,20 @@ export function buildReportPdfHtml(data: ReportPdfData, business: BusinessPdfDat
     </head>
     <body>
       <div class="content-wrapper">
-      <div class="header">
-        <div class="header-business">
-          <div class="header-content">
-            ${business.logoHtml || ''}
-            <div class="header-text">
-              <h1>${business.businessName}</h1>
-              <p>
-                ${business.abn ? `<strong>ABN:</strong> ${business.abn}<br>` : ''}
-                ${business.address ? `<strong>Address:</strong> ${business.address.replace(/\n/g, '<br>')}<br>` : ''}
-                ${business.email ? `<strong>Email:</strong> ${business.email}<br>` : ''}
-                ${business.phone ? `<strong>Phone:</strong> ${business.phone}${business.website ? '<br>' : ''}` : ''}
-                ${business.website ? `<strong>Web:</strong> ${business.website}` : ''}
-              </p>
-            </div>
-          </div>
-        </div>
+      <div class="header document-header">
+        ${buildBusinessHeaderHTML(business)}
         <div class="header-meta">
           <h2>SERVICE REPORT</h2>
-          ${data.reportNumber ? `<p><strong>Report #:</strong> ${escapeHtml(data.reportNumber)}</p>` : ''}
-          <p><strong>Visit Date:</strong> ${escapeHtml(data.visitDate)}</p>
-          <p><strong>Service Type:</strong> ${escapeHtml(data.serviceType)}</p>
-          <p><strong>Customer:</strong> ${escapeHtml(data.customerName)}</p>
-          ${data.customerEmail ? `<p><strong>Email:</strong> ${escapeHtml(data.customerEmail)}</p>` : ''}
-          ${data.customerPhone ? `<p><strong>Phone:</strong> ${escapeHtml(data.customerPhone)}</p>` : ''}
-          ${data.jobAddress ? `<p><strong>Job Address:</strong> ${escapeHtml(data.jobAddress)}</p>` : ''}
+          <div class="document-subtitle">${escapeHtml(data.serviceType)}</div>
+          ${data.reportNumber ? `<div class="document-reference">${escapeHtml(data.reportNumber)}</div>` : ''}
+          <div class="document-date">${escapeHtml(data.visitDate)}</div>
+          ${buildHeaderRecipientHTML({
+            label: 'Customer',
+            name: data.customerName,
+            address: data.jobAddress,
+            email: data.customerEmail,
+            phone: data.customerPhone,
+          })}
         </div>
       </div>
 
@@ -822,32 +864,20 @@ export function buildInvoicePdfHtml(
     <body>
       ${watermark ? buildWatermarkHTML(watermark) : ''}
       <div class="content-wrapper">
-      <div class="header">
-        <div class="header-business">
-          <div class="header-content">
-            ${business.logoHtml || ''}
-            <div class="header-text">
-              <h1>${business.businessName}</h1>
-              <p>
-                ${business.abn ? `<strong>ABN:</strong> ${business.abn}<br>` : ''}
-                ${business.address ? `<strong>Address:</strong> ${business.address.replace(/\n/g, '<br>')}<br>` : ''}
-                ${business.email ? `<strong>Email:</strong> ${business.email}<br>` : ''}
-                ${business.phone ? `<strong>Phone:</strong> ${business.phone}${business.website ? '<br>' : ''}` : ''}
-                ${business.website ? `<strong>Web:</strong> ${business.website}` : ''}
-              </p>
-            </div>
-          </div>
-        </div>
+      <div class="header document-header">
+        ${buildBusinessHeaderHTML(business)}
         <div class="header-meta">
           <h2>INVOICE</h2>
-          ${invoice.invoiceNumber ? `<p><strong>Invoice #:</strong> ${invoice.invoiceNumber}</p>` : ''}
-          <p><strong>Issue Date:</strong> ${invoice.issueDate}</p>
-          <p><strong>Due Date:</strong> ${invoice.dueDate}</p>
-          ${invoice.paymentTerms ? `<p><strong>Payment Terms:</strong> ${invoice.paymentTerms}</p>` : ''}
-          <p><strong>Customer:</strong> ${invoice.customerName}</p>
-          ${invoice.customerEmail ? `<p><strong>Email:</strong> ${invoice.customerEmail}</p>` : ''}
-          ${invoice.customerPhone ? `<p><strong>Phone:</strong> ${invoice.customerPhone}</p>` : ''}
-          ${invoice.jobAddress ? `<p><strong>Job Address:</strong> ${invoice.jobAddress}</p>` : ''}
+          ${invoice.invoiceNumber ? `<div class="document-reference">${escapeHtml(invoice.invoiceNumber)}</div>` : ''}
+          <div class="document-date">Issued ${escapeHtml(invoice.issueDate)} &middot; Due ${escapeHtml(invoice.dueDate)}</div>
+          ${invoice.paymentTerms ? `<div class="document-terms">${escapeHtml(invoice.paymentTerms)}</div>` : ''}
+          ${buildHeaderRecipientHTML({
+            label: 'Customer',
+            name: invoice.customerName,
+            address: invoice.jobAddress,
+            email: invoice.customerEmail,
+            phone: invoice.customerPhone,
+          })}
         </div>
       </div>
 

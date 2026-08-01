@@ -31,7 +31,7 @@ import { auth, db } from '../../config/firebase';
 import { doc, updateDoc } from 'firebase/firestore';
 import { geocodeAddress } from '../../utils/travelCalculator';
 import { checkSquareConnection } from '../../services/squareService';
-import { uploadBusinessLogo } from '../../services/photoService';
+import { uploadBusinessCredentialLogo, uploadBusinessLogo } from '../../services/photoService';
 import { colors } from '../../theme';
 import { WebContainer } from '../../components/WebContainer';
 import { FixedBottomButton } from '../../components/FixedBottomButton';
@@ -39,6 +39,8 @@ import { AlertModal } from '../../components/AlertModal';
 import { AddressSearchInput } from '../../components/AddressSearchInput';
 import { ProBadge } from '../../components/ProBadge';
 import { useUnsavedChangesGuard } from '../../hooks/useUnsavedChangesGuard';
+import { generateId } from '../../utils/generateId';
+import type { BusinessCredential } from '../../types';
 
 export function BusinessProfileScreen() {
   const navigation = useNavigation<any>();
@@ -54,6 +56,8 @@ export function BusinessProfileScreen() {
   const [address, setAddress] = useState('');
   const [logoUri, setLogoUri] = useState<string | undefined>(undefined);
   const [logoMimeType, setLogoMimeType] = useState<string | undefined>(undefined);
+  const [credentials, setCredentials] = useState<BusinessCredential[]>([]);
+  const [credentialLogoMimeTypes, setCredentialLogoMimeTypes] = useState<Record<string, string | undefined>>({});
   const [brandColor, setBrandColor] = useState<string | undefined>(undefined);
   const [hexInput, setHexInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -70,6 +74,12 @@ export function BusinessProfileScreen() {
       const w = businessSettings.website || '';
       const addr = businessSettings.address || '';
       const logo = businessSettings.logoUri;
+      const savedCredentials = (businessSettings.credentials || []).map((credential) => ({
+        id: credential.id || generateId(),
+        label: String(credential.label || ''),
+        number: credential.number ? String(credential.number) : undefined,
+        logoUri: credential.logoUri,
+      }));
       const brand = businessSettings.brandColor;
 
       setBusinessName(name);
@@ -79,9 +89,11 @@ export function BusinessProfileScreen() {
       setWebsite(w);
       setAddress(addr);
       setLogoUri(logo);
+      setCredentials(savedCredentials);
+      setCredentialLogoMimeTypes({});
       setBrandColor(brand);
 
-      setInitialSnapshot(JSON.stringify({ name, a, e, p, w, addr, logo, brand }));
+      setInitialSnapshot(JSON.stringify({ name, a, e, p, w, addr, logo, credentials: savedCredentials, brand }));
     }
   }, [businessSettings]);
 
@@ -95,10 +107,11 @@ export function BusinessProfileScreen() {
       w: website,
       addr: address,
       logo: logoUri,
+      credentials,
       brand: brandColor,
     });
     return current !== initialSnapshot;
-  }, [businessName, abn, email, phone, website, address, logoUri, brandColor, initialSnapshot]);
+  }, [businessName, abn, email, phone, website, address, logoUri, credentials, brandColor, initialSnapshot]);
 
   const { unsavedModalProps } = useUnsavedChangesGuard({
     isDirty,
@@ -157,6 +170,51 @@ export function BusinessProfileScreen() {
     );
   };
 
+  const updateCredential = (id: string, patch: Partial<BusinessCredential>) => {
+    setCredentials((current) =>
+      current.map((credential) => credential.id === id ? { ...credential, ...patch } : credential),
+    );
+  };
+
+  const handleAddCredential = () => {
+    if (!isPro) {
+      navigation.navigate('Paywall' as never);
+      return;
+    }
+    if (credentials.length >= 6) {
+      Alert.alert('Maximum reached', 'You can show up to six licences or accreditations.');
+      return;
+    }
+    setCredentials((current) => [
+      ...current,
+      { id: generateId(), label: '', number: '' },
+    ]);
+  };
+
+  const handlePickCredentialLogo = async (credential: BusinessCredential) => {
+    try {
+      const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permissionResult.granted) {
+        Alert.alert('Permission Required', 'Permission to access camera roll is required!');
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: false,
+        quality: 0.8,
+      });
+      if (!result.canceled && result.assets[0]) {
+        updateCredential(credential.id, { logoUri: result.assets[0].uri });
+        setCredentialLogoMimeTypes((current) => ({
+          ...current,
+          [credential.id]: result.assets[0].mimeType,
+        }));
+      }
+    } catch {
+      Alert.alert('Error', 'Failed to pick image. Please try again.');
+    }
+  };
+
   const uploadLogoToStorage = async (uri: string, mimeType?: string): Promise<string> => {
     const userId = auth.currentUser?.uid;
     if (!userId) throw new Error('Not signed in');
@@ -186,6 +244,40 @@ export function BusinessProfileScreen() {
         }
       }
 
+      const userId = auth.currentUser?.uid;
+      const credentialsToSave = credentials.filter(
+        (credential) => credential.label.trim() || credential.number?.trim() || credential.logoUri,
+      );
+      const savedCredentials: BusinessCredential[] = [];
+      for (const credential of credentialsToSave) {
+        let savedCredentialLogoUri = credential.logoUri;
+        if (savedCredentialLogoUri && !savedCredentialLogoUri.startsWith('https://')) {
+          if (!userId) throw new Error('Not signed in');
+          try {
+            savedCredentialLogoUri = await uploadBusinessCredentialLogo(
+              userId,
+              credential.id,
+              savedCredentialLogoUri,
+              credentialLogoMimeTypes[credential.id],
+            );
+          } catch (error: any) {
+            console.error('[BusinessProfile] Credential logo upload failed:', error);
+            const reason = error?.code || error?.message || 'Unknown error';
+            Alert.alert(
+              'Accreditation Logo Upload Failed',
+              `Could not upload the badge (${reason}). Please try again.`,
+            );
+            return false;
+          }
+        }
+        savedCredentials.push({
+          id: credential.id,
+          label: credential.label.trim(),
+          number: credential.number?.trim() || undefined,
+          logoUri: savedCredentialLogoUri,
+        });
+      }
+
       await setBusinessSettings({
         ...businessSettings!,
         businessName: businessName.trim(),
@@ -195,6 +287,7 @@ export function BusinessProfileScreen() {
         website: website.trim() || undefined,
         address: address.trim() || undefined,
         logoUri: savedLogoUri,
+        credentials: savedCredentials,
         brandColor: brandColor,
       });
 
@@ -301,7 +394,7 @@ export function BusinessProfileScreen() {
               {!isPro && <ProBadge size="small" />}
             </View>
             <Text style={styles.helperText}>
-              {isPro ? 'This will appear on your PDF quotes and invoices' : 'Upgrade to Pro to add your logo to PDFs'}
+              {isPro ? 'This appears on quote, invoice and service report PDFs' : 'Upgrade to Pro to add your logo to PDFs'}
             </Text>
 
             {logoUri ? (
@@ -336,6 +429,96 @@ export function BusinessProfileScreen() {
                 <Text style={styles.logoUploadHint}>Recommended: 500x500px (Square)</Text>
               </TouchableOpacity>
             )}
+          </Surface>
+
+          <Surface style={styles.card}>
+            <View style={styles.sectionHeadingRow}>
+              <Title style={[styles.sectionTitle, styles.sectionHeadingTitle]}>Licences &amp; accreditations</Title>
+              {!isPro && <ProBadge size="small" />}
+            </View>
+            <Text style={styles.helperText}>
+              Add licence numbers and optional badges once. They appear as a compact banner on quotes, invoices and service reports.
+            </Text>
+
+            {credentials.map((credential, index) => (
+              <View key={credential.id} style={styles.credentialCard}>
+                <View style={styles.credentialHeader}>
+                  <Text style={styles.credentialHeading}>
+                    {credential.label.trim() || `Credential ${index + 1}`}
+                  </Text>
+                  <IconButton
+                    icon="delete-outline"
+                    iconColor={colors.error}
+                    size={21}
+                    onPress={() => {
+                      setCredentials((current) => current.filter((item) => item.id !== credential.id));
+                      setCredentialLogoMimeTypes((current) => {
+                        const next = { ...current };
+                        delete next[credential.id];
+                        return next;
+                      });
+                    }}
+                  />
+                </View>
+
+                {credential.logoUri ? (
+                  <View style={styles.credentialLogoRow}>
+                    <Image
+                      source={{ uri: credential.logoUri }}
+                      style={styles.credentialLogo}
+                      resizeMode="contain"
+                    />
+                    <Button
+                      mode="outlined"
+                      compact
+                      onPress={() => handlePickCredentialLogo(credential)}
+                    >
+                      Change badge
+                    </Button>
+                    <IconButton
+                      icon="close-circle-outline"
+                      size={20}
+                      onPress={() => updateCredential(credential.id, { logoUri: undefined })}
+                    />
+                  </View>
+                ) : null}
+
+                <TextInput
+                  label="Name"
+                  placeholder="e.g. ARC Authorisation"
+                  value={credential.label}
+                  onChangeText={(label) => updateCredential(credential.id, { label })}
+                  mode="outlined"
+                  style={styles.credentialInput}
+                />
+                <TextInput
+                  label="Licence or authorisation number"
+                  placeholder="e.g. AU12345"
+                  value={credential.number || ''}
+                  onChangeText={(number) => updateCredential(credential.id, { number })}
+                  mode="outlined"
+                  style={styles.credentialInput}
+                />
+                {!credential.logoUri ? (
+                  <Button
+                    mode="outlined"
+                    icon="image-plus"
+                    onPress={() => handlePickCredentialLogo(credential)}
+                  >
+                    Add badge or logo
+                  </Button>
+                ) : null}
+              </View>
+            ))}
+
+            <Button
+              mode="outlined"
+              icon={isPro ? 'plus' : 'lock-outline'}
+              onPress={handleAddCredential}
+              disabled={isPro && credentials.length >= 6}
+            >
+              Add licence or accreditation
+            </Button>
           </Surface>
 
           <Surface style={styles.card}>
@@ -481,6 +664,51 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: colors.onSurface,
     marginBottom: 16,
+  },
+  sectionHeadingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 16,
+  },
+  sectionHeadingTitle: {
+    marginBottom: 0,
+  },
+  credentialCard: {
+    borderWidth: 1,
+    borderColor: colors.outline,
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 12,
+    backgroundColor: colors.surfaceLight,
+  },
+  credentialHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    minHeight: 36,
+  },
+  credentialHeading: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.onSurface,
+  },
+  credentialInput: {
+    marginBottom: 10,
+    backgroundColor: colors.surface,
+  },
+  credentialLogoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 12,
+  },
+  credentialLogo: {
+    width: 72,
+    height: 44,
+    borderRadius: 6,
+    backgroundColor: colors.surface,
   },
   logoUploadBox: {
     borderWidth: 2,

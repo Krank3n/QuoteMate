@@ -145,6 +145,33 @@ export async function uploadBusinessLogo(
   return url;
 }
 
+/** Upload one customer-facing licence/accreditation badge. Kept separate from
+ * the company logo so a business can carry several credentials at once. */
+export async function uploadBusinessCredentialLogo(
+  userId: string,
+  credentialId: string,
+  uri: string,
+  mimeType?: string,
+): Promise<string> {
+  if (uri.startsWith('https://')) return uri;
+
+  const safeId = credentialId.replace(/[^a-zA-Z0-9_-]/g, '');
+  if (!safeId) throw new Error('Invalid credential id');
+  const { uri: compressedUri, contentType, extension } = await compressLogo(uri, mimeType);
+  const blob = await uriToBlob(compressedUri);
+  const badgeRef = ref(storage, `users/${userId}/credential-logos/${safeId}.${extension}`);
+  await uploadBytes(badgeRef, blob, { contentType });
+  const url = await getDownloadURL(badgeRef);
+
+  const otherExtension = extension === 'png' ? 'jpg' : 'png';
+  try {
+    await deleteObject(ref(storage, `users/${userId}/credential-logos/${safeId}.${otherExtension}`));
+  } catch {
+    // No previous badge in the other format.
+  }
+  return url;
+}
+
 /**
  * Save a photo for use in a quote.
  * Compresses, uploads to Firebase Storage, and returns the public download URL.

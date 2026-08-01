@@ -559,6 +559,16 @@ export interface PaymentMethodSettings {
   other?: OtherPaymentDetails;
 }
 
+export interface BusinessCredential {
+  id: string;
+  /** Customer-facing name, e.g. "ARC Authorisation" or "Electrical licence". */
+  label: string;
+  /** Licence / authorisation number shown beside the name, e.g. "AU12345". */
+  number?: string;
+  /** Optional accreditation badge supplied by the business. */
+  logoUri?: string;
+}
+
 export interface BusinessSettings {
   businessName: string;
   abn?: string;
@@ -567,6 +577,9 @@ export interface BusinessSettings {
   address?: string;
   website?: string; // Shown on PDFs/emails alongside other contact details
   logoUri?: string; // Local file URI for company logo
+  // Repeatable licences/accreditations rendered as one compact banner on
+  // quote, invoice and service-report PDFs.
+  credentials?: BusinessCredential[];
   defaultLaborRate: number;
   defaultMarkup: number;
   defaultLaborMarkup?: number; // Default labor markup percentage. Falls back to defaultMarkup if undefined.

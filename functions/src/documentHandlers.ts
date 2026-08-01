@@ -428,6 +428,23 @@ function businessLogoHtml(business: BusinessSettings): string {
   return `<img src="${url}" alt="${business.businessName || 'Business'}" class="logo" />`;
 }
 
+function businessCredentials(business: BusinessSettings): Array<{
+  label: string;
+  number?: string;
+  logoHtml?: string;
+}> | undefined {
+  if (!Array.isArray(business.credentials)) return undefined;
+  return business.credentials
+    .filter((credential: any) => credential?.label || credential?.number || credential?.logoUri)
+    .map((credential: any) => ({
+      label: String(credential.label || ''),
+      number: credential.number ? String(credential.number) : undefined,
+      logoHtml: credential.logoUri
+        ? `<img src="${String(credential.logoUri)}" alt="Accreditation" class="credential-logo" style="width:64px;height:38px;object-fit:contain;" />`
+        : '',
+    }));
+}
+
 function sanitizeFilename(s: string): string {
   return s.replace(/[^a-zA-Z0-9\s]/g, '').replace(/\s+/g, '_').substring(0, 30);
 }
@@ -794,6 +811,7 @@ async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailRes
       abn: business.abn,
       address: business.address,
       logoHtml: businessLogoHtml(business),
+      credentials: businessCredentials(business),
       brandColor: business.brandColor,
       pdfTemplate: business.pdfTemplate,
     },
@@ -1025,6 +1043,7 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
       abn: business.abn,
       address: business.address,
       logoHtml: businessLogoHtml(business),
+      credentials: businessCredentials(business),
       brandColor: business.brandColor,
       pdfTemplate: business.pdfTemplate,
     },

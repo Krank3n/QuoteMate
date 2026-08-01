@@ -135,6 +135,13 @@ export interface ReportPdfData {
   technicianSignature?: { svgPath: string; name: string; width?: number; height?: number };
 }
 
+export interface PdfBusinessCredential {
+  label: string;
+  number?: string;
+  /** Prepared <img> tag. Client PDFs inline local/remote files; server PDFs use URLs. */
+  logoHtml?: string;
+}
+
 export interface BusinessPdfData {
   businessName: string;
   email?: string;
@@ -143,6 +150,7 @@ export interface BusinessPdfData {
   abn?: string;
   address?: string;
   logoHtml?: string; // Pre-built <img> tag or empty string
+  credentials?: PdfBusinessCredential[];
   brandColor?: string;
   pdfTemplate?: PdfTemplateId;
 }

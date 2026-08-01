@@ -90,6 +90,116 @@ export const printMediaCSS = `
     font-size: 12px;
     line-height: 1.3;
   }
+  /* Compact document header. Business identity stays quiet on the left;
+     customer/job context sits as plain recipient copy under the document
+     metadata rather than in a full-width form-like banner. !important is
+     deliberate where templates forced square logos / oversized names. */
+  .document-header {
+    margin-bottom: 12px !important;
+  }
+  .business-identity {
+    display: block !important;
+  }
+  .business-identity .logo {
+    display: block;
+    width: auto !important;
+    max-width: 180px !important;
+    height: auto !important;
+    max-height: 52px !important;
+    margin: 0 0 8px 0 !important;
+    object-fit: contain;
+  }
+  .business-identity.has-logo .header-text h1 {
+    margin: 0 0 4px 0 !important;
+    color: inherit;
+    font-size: 13px !important;
+    font-weight: 700 !important;
+    letter-spacing: 0 !important;
+    line-height: 1.2 !important;
+    text-transform: none !important;
+    font-variant: normal !important;
+  }
+  .business-contact-details {
+    color: inherit;
+    font-size: 9.5px;
+    line-height: 1.35;
+    opacity: .88;
+  }
+  .business-contact-details strong {
+    font-weight: 700;
+  }
+  .business-credentials {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 7px 14px;
+    margin-top: 8px;
+  }
+  .business-credential {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 38px;
+  }
+  .business-credential-copy {
+    color: inherit;
+    font-size: 9px;
+    font-weight: 600;
+    line-height: 1.25;
+  }
+  .header-meta h2 {
+    margin-bottom: 8px !important;
+    font-size: 20px !important;
+    letter-spacing: 1.8px !important;
+  }
+  .header-meta p {
+    font-size: 10px !important;
+    line-height: 1.35 !important;
+  }
+  .header-meta p strong {
+    font-weight: 600;
+  }
+  .document-subtitle {
+    margin: -2px 0 5px 0;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.3;
+  }
+  .document-reference {
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1.35;
+  }
+  .document-date,
+  .document-terms {
+    font-size: 9px;
+    line-height: 1.35;
+    opacity: .78;
+  }
+  .header-recipient {
+    margin-top: 12px;
+    padding-top: 9px;
+    border-top: 1px solid rgba(107, 114, 128, .3);
+    font-size: 9px;
+    line-height: 1.35;
+  }
+  .header-recipient-label {
+    margin-bottom: 3px;
+    font-size: 7.5px;
+    font-weight: 700;
+    letter-spacing: .8px;
+    text-transform: uppercase;
+    opacity: .62;
+  }
+  .header-recipient-name {
+    font-size: 10.5px;
+    font-weight: 700;
+  }
+  .header-recipient-contact {
+    margin-top: 2px;
+    opacity: .72;
+    overflow-wrap: anywhere;
+  }
   @page {
     size: A4;
     margin: 40px;
@@ -165,8 +275,10 @@ const professionalCSS = `
     gap: 16px;
   }
   .logo {
-    width: 64px;
-    height: 64px;
+    width: auto;
+    max-width: 150px;
+    height: auto;
+    max-height: 64px;
     object-fit: contain;
     flex-shrink: 0;
   }
@@ -334,8 +446,10 @@ const cleanCSS = `
     gap: 22px;
   }
   .logo {
-    width: 56px;
-    height: 56px;
+    width: auto;
+    max-width: 150px;
+    height: auto;
+    max-height: 56px;
     object-fit: contain;
     flex-shrink: 0;
     margin-top: 6px;
@@ -539,13 +653,16 @@ const boldCSS = `
     gap: 20px;
   }
   .logo {
-    width: 64px;
-    height: 64px;
+    width: auto;
+    max-width: 150px;
+    height: auto;
+    max-height: 64px;
     object-fit: contain;
     flex-shrink: 0;
     border-radius: 8px;
     background-color: rgba(255, 255, 255, 0.06);
     padding: 5px;
+    box-sizing: border-box;
   }
   .header-text {
     flex: 1;
@@ -758,13 +875,16 @@ const tradesmanCSS = `
     gap: 18px;
   }
   .logo {
-    width: 60px;
-    height: 60px;
+    width: auto;
+    max-width: 150px;
+    height: auto;
+    max-height: 60px;
     object-fit: contain;
     flex-shrink: 0;
     border: 1px solid #D6D3D1;
     padding: 4px;
     background-color: #FFFFFF;
+    box-sizing: border-box;
   }
   .header-text {
     flex: 1;

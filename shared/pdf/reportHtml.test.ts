@@ -57,6 +57,28 @@ describe('buildReportPdfHtml', () => {
     expect(html).not.toContain('QuoteMate');
   });
 
+  it('renders a compact accreditation lockup without repeating a logo label', () => {
+    const html = buildReportPdfHtml(reportData(), {
+      ...business,
+      credentials: [
+        {
+          label: 'ARC Authorisation',
+          number: 'AU12345',
+          logoHtml: '<img src="data:image/png;base64,AAAA" class="credential-logo" />',
+        },
+      ],
+    });
+    expect(html).toContain('class="business-credentials"');
+    expect(html).not.toContain('ARC Authorisation');
+    expect(html).toContain('AU12345');
+    expect(html).toContain('credential-logo');
+  });
+
+  it('omits the credential lockup when none are configured', () => {
+    const html = buildReportPdfHtml(reportData(), business);
+    expect(html).not.toContain('class="business-credentials"');
+  });
+
   it('renders a signature svgPath inline in the output', () => {
     const svgPath = 'M10 10 L20 20 L30 5';
     const html = buildReportPdfHtml(

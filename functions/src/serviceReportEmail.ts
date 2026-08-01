@@ -213,6 +213,17 @@ export async function sendServiceReportEmail(
     abn: business.abn,
     address: business.address,
     logoHtml: logoUrl ? `<img src="${logoUrl}" alt="${business.businessName || 'Business'}" class="logo" />` : '',
+    credentials: Array.isArray(business.credentials)
+      ? business.credentials
+          .filter((credential: any) => credential?.label || credential?.number || credential?.logoUri)
+          .map((credential: any) => ({
+            label: String(credential.label || ''),
+            number: credential.number ? String(credential.number) : undefined,
+            logoHtml: credential.logoUri
+              ? `<img src="${String(credential.logoUri)}" alt="Accreditation" class="credential-logo" style="width:64px;height:38px;object-fit:contain;" />`
+              : '',
+          }))
+      : undefined,
     brandColor: business.brandColor,
     pdfTemplate: business.pdfTemplate,
   };
