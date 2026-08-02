@@ -4,7 +4,7 @@
     "details": [
       {
         "appID": "21374347912.com.hansendev.quotemate",
-        "paths": ["/join", "/join/*", "/join?*"]
+        "paths": ["/join", "/join/*", "/join?*", "/ref/*"]
       }
     ]
   }

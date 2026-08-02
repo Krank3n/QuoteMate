@@ -978,6 +978,13 @@ export const stripeWebhook = functions.https.onRequest(async (req, res) => {
         await handleInvoicePaymentFailed(invoice);
         break;
       }
+      case 'charge.refunded': {
+        // Refund/chargeback → claw back the affiliate commission we recorded for
+        // that payment. Without this we paid commission on revenue we gave back.
+        const charge = event.data.object as Stripe.Charge;
+        await handleChargeRefunded(charge);
+        break;
+      }
       default:
     }
 
@@ -1144,6 +1151,87 @@ async function handleInvoicePaymentSucceeded(invoice: Stripe.Invoice) {
   } catch (error) {
     console.error('[referral] invoice.payment_succeeded commission failed', {
       customerId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+/**
+ * Reverse a recorded affiliate commission after a refund or chargeback.
+ *
+ * Marks the earning `cancelled` and decrements the referrer's running totals.
+ * Only earnings that are still `pending` (not yet paid out) are reversed — once
+ * cash has left our account the reversal is a manual conversation, not a silent
+ * negative balance, so a paid earning is left alone and logged for review.
+ *
+ * Without this the ledger only ever went up: a subscriber could pay, trigger
+ * commission, refund the same day, and the affiliate still got paid.
+ */
+async function reverseAffiliateEarning(
+  referredUserId: string,
+  billingPeriod: string,
+  reason: 'refund' | 'chargeback'
+): Promise<void> {
+  const firestore = admin.firestore();
+  const referralSnap = await firestore.doc(`users/${referredUserId}/profile/referral`).get();
+  const referrerUserId = referralSnap.data()?.referredBy;
+  if (!referrerUserId) return;
+
+  const earningRef = firestore
+    .collection(`users/${referrerUserId}/affiliateEarnings`)
+    .doc(earningDocId(referredUserId, billingPeriod));
+  const referrerReferralRef = firestore.doc(`users/${referrerUserId}/profile/referral`);
+
+  await firestore.runTransaction(async (tx) => {
+    const earning = await tx.get(earningRef);
+    if (!earning.exists) return;
+
+    const data = earning.data()!;
+    if (data.status !== 'pending') {
+      console.warn('[referral] refund on an already-settled earning — needs manual review', {
+        referrerUserId, referredUserId, billingPeriod, status: data.status, reason,
+      });
+      return;
+    }
+
+    const amount = typeof data.commissionAmount === 'number' ? Math.round(data.commissionAmount) : 0;
+
+    tx.update(earningRef, {
+      status: 'cancelled',
+      cancelledAt: admin.firestore.FieldValue.serverTimestamp(),
+      cancelledReason: reason,
+    });
+
+    if (amount > 0) {
+      tx.set(referrerReferralRef, {
+        totalEarnings: admin.firestore.FieldValue.increment(-amount),
+        pendingEarnings: admin.firestore.FieldValue.increment(-amount),
+      }, { merge: true });
+    }
+  });
+}
+
+/**
+ * Handle a refunded charge — reverse any affiliate commission recorded for the
+ * billing period that charge paid for.
+ */
+async function handleChargeRefunded(charge: Stripe.Charge) {
+  try {
+    const customerId = typeof charge.customer === 'string' ? charge.customer : null;
+    if (!customerId) return;
+
+    const customer = await stripe.customers.retrieve(customerId);
+    if (customer.deleted) return;
+    const userId = customer.metadata?.firebaseUserId;
+    if (!userId) return;
+
+    // Bucket by when the charge was CREATED, not now — a refund next month must
+    // reverse the earning it actually created.
+    const billingPeriod = billingPeriodFor(new Date(charge.created * 1000));
+    await reverseAffiliateEarning(userId, billingPeriod, 'refund');
+  } catch (error) {
+    console.error('[referral] charge.refunded reversal failed', {
+      chargeId: charge.id,
       error: error instanceof Error ? error.message : String(error),
     });
   }

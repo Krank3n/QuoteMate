@@ -14,6 +14,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 LogBox.ignoreLogs(['ref.measureLayout must be called with a ref to a native component']);
 import { NavigationContainer, DarkTheme, LinkingOptions, createNavigationContainerRef, getStateFromPath as defaultGetStateFromPath, getPathFromState as defaultGetPathFromState } from '@react-navigation/native';
 import * as Linking from 'expo-linking';
+import { LINKING_SCREENS } from './src/navigation/linkingConfig';
 import { Provider as PaperProvider, ActivityIndicator } from 'react-native-paper';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -57,6 +58,7 @@ import { documentService } from './src/services/documentService';
 import { notificationService } from './src/services/notificationService';
 import { checkForUpdate, AppUpdateInfo } from './src/services/appUpdateService';
 import { checkDeferredLink } from './src/services/supplierDiscoveryService';
+import { applyPendingReferral, storePendingReferral } from './src/services/pendingReferral';
 import { AppUpdateSheet } from './src/components/AppUpdateSheet';
 
 const navigationRef = createNavigationContainerRef<any>();
@@ -90,15 +92,11 @@ if (Platform.OS === 'web' && typeof window !== 'undefined') {
 const WEB_BASE = '/app';
 const linking: LinkingOptions<any> = {
   prefixes: [Linking.createURL('/'), 'https://quotemateapp.au', 'quotemate://'],
+  // Route map lives in src/navigation/linkingConfig.ts so it can be unit
+  // tested (see linkingConfig.test.ts) and cross-checked against the native
+  // Universal Link / App Link path allow-lists.
   config: {
-    screens: {
-      DiscoverSuppliers: 'join',
-      // Referral QR/links (https://quotemateapp.au/ref/QM-AB2CD3). Without this
-      // route the link only ever opened the website, even with the app
-      // installed — the tradie was told to type the code in by hand. The
-      // Referral screen reads `code` and pre-fills the apply field.
-      Referral: 'ref/:code',
-    },
+    screens: { ...LINKING_SCREENS },
   },
   ...(Platform.OS === 'web'
     ? {
@@ -226,6 +224,24 @@ function App() {
     // Stash ad-attribution params (utm_*/fbclid) from the launch URL before
     // anything can navigate away from them. No-op on native and organic loads.
     captureAttributionFromUrl();
+    // Park a referral code from the launch URL BEFORE the auth gate can throw
+    // it away. applyReferralCode needs auth, and a referral link almost always
+    // lands on a fresh install that isn't signed in yet — without this the
+    // referrer never got credited unless the tradie retyped the code from
+    // memory in Settings. Applied automatically after first sign-in below.
+    Linking.getInitialURL()
+      .then((url) => (url ? storePendingReferral(url) : null))
+      .catch(() => {});
+    // Same for a link that arrives while the app is already running (warm
+    // start): the code is parked, and applied on the spot if already signed in.
+    const referralLinkSub = Linking.addEventListener('url', ({ url }) => {
+      void storePendingReferral(url).then((code) => {
+        if (!code || !auth.currentUser) return;
+        void applyPendingReferral().then((result) => {
+          if (result === 'applied') void useStore.getState().loadReferralInfo();
+        });
+      });
+    });
     // Listen to authentication state changes
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       // Firebase's React Native AsyncStorage persistence sometimes refires
@@ -339,6 +355,19 @@ function App() {
           }
         });
 
+        // Apply a referral code captured before sign-in (see storePendingReferral
+        // at launch). Silent and fire-and-forget: this only credits the referrer,
+        // it grants the new user nothing, so there is nothing to report. A
+        // terminal rejection drops the code; a transport failure retries next
+        // launch.
+        void applyPendingReferral()
+          .then((result) => {
+            if (result === 'applied') {
+              void useStore.getState().loadReferralInfo();
+            }
+          })
+          .catch(() => {});
+
         // Register for push notifications
         if (Platform.OS !== 'web') {
           notificationService.registerForPushNotifications().then((token) => {
@@ -410,7 +439,10 @@ function App() {
       }
     });
 
-    return unsubscribe;
+    return () => {
+      referralLinkSub.remove();
+      unsubscribe();
+    };
   }, []);
 
   useEffect(() => {

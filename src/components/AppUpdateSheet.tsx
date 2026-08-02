@@ -26,14 +26,17 @@ import Constants from 'expo-constants';
 import { LinearGradient } from 'expo-linear-gradient';
 
 import { colors } from '../theme';
+import { APP_STORE_URL, PLAY_STORE_URL } from '../config/storeLinks';
 import type { AppUpdateInfo } from '../services/appUpdateService';
 
 const SCREEN_HEIGHT = Dimensions.get('window').height;
 
+// Store URLs come from src/config/storeLinks.ts — the id hard-coded here
+// (6740091464) was dead, so every iOS user who tapped "Update" landed on an
+// App Store 404 instead of the listing.
 const STORE_URL = Platform.select({
-  ios: 'https://apps.apple.com/app/quotemate/id6740091464',
-  android:
-    'https://play.google.com/store/apps/details?id=com.quotemate.app',
+  ios: APP_STORE_URL,
+  android: PLAY_STORE_URL,
   default: '',
 });
 

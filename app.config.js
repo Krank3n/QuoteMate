@@ -129,6 +129,8 @@ export default {
       bundleIdentifier: "com.hansendev.quotemate",
       usesAppleSignIn: true,
       buildNumber: "83",
+      // Universal Links. The path allow-list lives in
+      // public/.well-known/apple-app-site-association (/join* and /ref/*).
       associatedDomains: ["applinks:quotemateapp.au"],
       infoPlist: {
         ITSAppUsesNonExemptEncryption: false,
@@ -147,7 +149,15 @@ export default {
         {
           action: "VIEW",
           autoVerify: true,
-          data: [{ scheme: "https", host: "quotemateapp.au", pathPrefix: "/join" }],
+          data: [
+            { scheme: "https", host: "quotemateapp.au", pathPrefix: "/join" },
+            // Referral QR codes / shared links. Without this the link only ever
+            // opened the website even with the app installed, and the tradie was
+            // asked to retype the code by hand. Mirrors the /ref/* entry in
+            // public/.well-known/apple-app-site-association (iOS) and the
+            // `Referral: 'ref/:code'` route in App.tsx.
+            { scheme: "https", host: "quotemateapp.au", pathPrefix: "/ref" }
+          ],
           category: ["BROWSABLE", "DEFAULT"]
         },
         // expo-auth-session computes the Google OAuth redirect URI as
