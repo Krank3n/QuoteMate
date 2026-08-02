@@ -9,6 +9,7 @@ import { Platform } from 'react-native';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { generateId } from '../utils/generateId';
+import { trimLogoWhitespace } from '../utils/logoTrim';
 import { storage } from '../config/firebase';
 
 const MAX_WIDTH = 1200;
@@ -73,11 +74,17 @@ export async function compressLogo(
   uri: string,
   mimeType?: string
 ): Promise<CompressedLogo> {
+  // Trim uniform whitespace margins first — a wordmark exported onto a big
+  // square canvas would otherwise scale to fit *with* the empty margins and
+  // print tiny no matter how the user resizes the file. Best-effort: on any
+  // detection failure the untrimmed image carries on.
+  const trimmedUri = await trimLogoWhitespace(uri);
+
   const isPng = mimeType === 'image/png' || /\.png(\?|$)/i.test(uri);
 
   if (isPng) {
     const result = await manipulateAsync(
-      uri,
+      trimmedUri,
       [{ resize: { width: LOGO_MAX_WIDTH } }],
       { format: SaveFormat.PNG }
     );
@@ -85,7 +92,7 @@ export async function compressLogo(
   }
 
   const result = await manipulateAsync(
-    uri,
+    trimmedUri,
     [{ resize: { width: LOGO_MAX_WIDTH } }],
     { compress: LOGO_JPEG_QUALITY, format: SaveFormat.JPEG }
   );
