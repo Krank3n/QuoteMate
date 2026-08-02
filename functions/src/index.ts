@@ -89,6 +89,19 @@ export { adminAssistantCosts, reportAssistantLiveUsage } from './assistantCosts'
 export { reportPriceFetchUsage } from './featureUsage';
 import { recordMaterialsRecommend } from './featureUsage';
 import { userRateLimitKey } from './rateLimitKey';
+import {
+  APPLY_CODE_MESSAGES,
+  billingPeriodFor,
+  buildReferralCode,
+  calculateCommission,
+  clampCommissionRate,
+  DEFAULT_COMMISSION_RATE,
+  earningDocId,
+  evaluateApplyCode,
+  isValidReferralCode,
+  normaliseReferralCode,
+  reconcilePayout,
+} from './referralProgram.helpers';
 import { randomUUID } from 'crypto';
 import {
   normalizeResetEmail,
@@ -231,17 +244,17 @@ const stripe = new Stripe(stripeSecretKey, {
 
 // ============================================
 // Affiliate Commission Configuration
+//
+// Fee tables, commission maths, code validation and payout reconciliation live
+// in referralProgram.helpers.ts so they are unit-tested (see
+// referralProgram.helpers.test.ts) and shared by every caller.
 // ============================================
-const PLATFORM_FEES: Record<string, { percentage: number; fixedCents: number }> = {
-  ios: { percentage: 0.30, fixedCents: 0 },       // Apple takes 30%
-  android: { percentage: 0.15, fixedCents: 0 },    // Google takes 15% (small business program)
-  web: { percentage: 0.029, fixedCents: 30 },      // Stripe takes 2.9% + $0.30
-};
-
-const DEFAULT_COMMISSION_RATE = 0.50; // 50% of net revenue
 
 // Emails to auto-grant affiliate status on signup (loaded from env config)
-const PENDING_AFFILIATE_EMAILS = (process.env.PENDING_AFFILIATE_EMAILS || '').split(',').filter(Boolean);
+const PENDING_AFFILIATE_EMAILS = (process.env.PENDING_AFFILIATE_EMAILS || '')
+  .split(',')
+  .map((e) => e.trim().toLowerCase())
+  .filter(Boolean);
 
 // Pricing in cents (AUD)
 const PRODUCT_PRICES: Record<string, number> = {
@@ -254,31 +267,13 @@ const PRODUCT_PRICES: Record<string, number> = {
 };
 
 /**
- * Calculate affiliate commission for a subscription payment.
- * Returns amounts in cents.
- */
-function calculateCommission(
-  platform: string,
-  grossAmountCents: number,
-  commissionRate: number
-): { platformFee: number; netRevenue: number; commissionAmount: number } {
-  const fees = PLATFORM_FEES[platform] || PLATFORM_FEES.web;
-  const platformFee = Math.round(grossAmountCents * fees.percentage + fees.fixedCents);
-  const netRevenue = grossAmountCents - platformFee;
-  const commissionAmount = Math.round(netRevenue * commissionRate);
-  return { platformFee, netRevenue, commissionAmount };
-}
-
-/**
- * Get the current billing period string (e.g., "2026-03")
- */
-function getBillingPeriod(): string {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-}
-
-/**
  * Record an affiliate earning for a referrer when a referred user pays.
+ *
+ * Idempotent by construction: the earning doc id is derived from the referred
+ * user + billing period and written with `create()` inside a transaction, so a
+ * retried store/Stripe webhook can never pay the same commission twice. The
+ * previous read-then-write existence check lost that race (both reads saw
+ * "empty", both wrote, and both incremented the running totals).
  */
 async function recordAffiliateEarning(
   referredUserId: string,
@@ -288,6 +283,12 @@ async function recordAffiliateEarning(
   grossAmountCents: number,
   billingPeriod: string
 ): Promise<void> {
+  // No revenue collected → no commission. Guards $0/trialing invoices and any
+  // caller that could not resolve a real charge amount.
+  if (!Number.isFinite(grossAmountCents) || grossAmountCents <= 0) {
+    return;
+  }
+
   const firestore = admin.firestore();
   const referrerReferralRef = firestore.doc(`users/${referrerUserId}/profile/referral`);
   const referrerReferral = await referrerReferralRef.get();
@@ -298,27 +299,22 @@ async function recordAffiliateEarning(
     return;
   }
 
-  const commissionRate = referrerData.commissionRate || DEFAULT_COMMISSION_RATE;
-
-  // Check if earning already exists for this billing period + referred user
-  const existingEarnings = await firestore
-    .collection(`users/${referrerUserId}/affiliateEarnings`)
-    .where('referredUserId', '==', referredUserId)
-    .where('billingPeriod', '==', billingPeriod)
-    .limit(1)
-    .get();
-
-  if (!existingEarnings.empty) {
+  const commissionRate = clampCommissionRate(referrerData.commissionRate);
+  const { platformFee, netRevenue, commissionAmount } = calculateCommission(
+    platform,
+    grossAmountCents,
+    commissionRate
+  );
+  if (commissionAmount <= 0) {
     return;
   }
 
-  const { platformFee, netRevenue, commissionAmount } = calculateCommission(platform, grossAmountCents, commissionRate);
-
-  // Get referred user email (masked)
-  let referredUserEmail = '';
+  // Get referred user email (masked — the affiliate must not see the full
+  // address of someone else's account).
+  let referredUserEmail = 'unknown';
   try {
     const email = await getUserEmail(referredUserId);
-    if (email) {
+    if (email && email.includes('@')) {
       const [local, domain] = email.split('@');
       referredUserEmail = `${local.charAt(0)}***@${domain}`;
     }
@@ -326,34 +322,45 @@ async function recordAffiliateEarning(
     referredUserEmail = 'unknown';
   }
 
-  const earningDoc = firestore.collection(`users/${referrerUserId}/affiliateEarnings`).doc();
-  const batch = firestore.batch();
+  const earningRef = firestore
+    .collection(`users/${referrerUserId}/affiliateEarnings`)
+    .doc(earningDocId(referredUserId, billingPeriod));
 
-  batch.set(earningDoc, {
-    referredUserId,
-    referredUserEmail,
-    platform,
-    grossAmount: grossAmountCents,
-    platformFee,
-    netRevenue,
-    commissionRate,
-    commissionAmount,
-    billingPeriod,
-    productId,
-    status: 'pending',
-    createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    confirmedAt: null,
-    paidAt: null,
+  await firestore.runTransaction(async (tx) => {
+    const existing = await tx.get(earningRef);
+    if (existing.exists) return; // already recorded for this period
+
+    tx.create(earningRef, {
+      referredUserId,
+      referredUserEmail,
+      platform,
+      grossAmount: Math.round(grossAmountCents),
+      platformFee,
+      netRevenue,
+      commissionRate,
+      commissionAmount,
+      billingPeriod,
+      productId,
+      status: 'pending',
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      confirmedAt: null,
+      paidAt: null,
+    });
+
+    // Update referrer's running totals. `isAffiliate` is deliberately NOT
+    // re-asserted here — this function already refuses to run for a
+    // non-affiliate, and writing it back would resurrect the flag on someone an
+    // admin had just revoked.
+    tx.set(
+      referrerReferralRef,
+      {
+        totalEarnings: admin.firestore.FieldValue.increment(commissionAmount),
+        pendingEarnings: admin.firestore.FieldValue.increment(commissionAmount),
+        lastEarningAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
   });
-
-  // Update referrer's running totals
-  batch.set(referrerReferralRef, {
-    isAffiliate: true,
-    totalEarnings: admin.firestore.FieldValue.increment(commissionAmount),
-    pendingEarnings: admin.firestore.FieldValue.increment(commissionAmount),
-  }, { merge: true });
-
-  await batch.commit();
 }
 
 // CORS configuration - whitelist allowed origins
@@ -446,6 +453,45 @@ async function checkRateLimit(
 
 function getClientIp(req: functions.https.Request): string {
   return (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || 'unknown';
+}
+
+/**
+ * Rate limit for CALLABLE functions (throws HttpsError instead of writing a
+ * 429 response). `checkRateLimit` above needs a functions.Response, which
+ * callables don't have.
+ *
+ * Fails OPEN on infrastructure errors — same posture as checkRateLimit — but
+ * never on an actual limit breach.
+ */
+async function assertCallableRateLimit(
+  uid: string,
+  bucket: string,
+  config: RateLimitConfig
+): Promise<void> {
+  const now = Date.now();
+  const windowStart = now - config.windowMs;
+  const ref = rateLimitDb().collection('rateLimits').doc(userRateLimitKey(uid, config, bucket));
+
+  let allowed = true;
+  try {
+    allowed = await rateLimitDb().runTransaction(async (tx) => {
+      const doc = await tx.get(ref);
+      let timestamps: number[] = (doc.data()?.timestamps ?? []).filter((t: number) => t > windowStart);
+      if (timestamps.length >= config.maxRequests) return false;
+      timestamps.push(now);
+      tx.set(ref, { timestamps, updatedAt: admin.firestore.FieldValue.serverTimestamp() });
+      return true;
+    });
+  } catch {
+    return; // fail open on infrastructure errors
+  }
+
+  if (!allowed) {
+    throw new functions.https.HttpsError(
+      'resource-exhausted',
+      'Too many attempts. Please wait a minute and try again.'
+    );
+  }
 }
 
 // Input validation helpers
@@ -991,16 +1037,14 @@ async function handleSubscriptionUpdate(subscription: Stripe.Subscription) {
     }, { merge: true });
 
 
-    // Process referral commission if this user was referred and just became Pro
+    // Affiliate commission is deliberately NOT recorded here.
+    // customer.subscription.created/updated fires while merely `trialing` ($0
+    // collected), on plan changes, and on card updates — recording from it
+    // credited the affiliate for money Stripe had not collected, and could fire
+    // again later in the same billing month. Commission is recorded only from
+    // invoice.payment_succeeded (handleInvoicePaymentSucceeded), the
+    // settled-money event.
     if (isActive) {
-      try {
-        const priceId = subscription.items.data[0]?.price?.id || '';
-        const amountCents = subscription.items.data[0]?.price?.unit_amount || 0;
-        await processReferralCommission(userId, 'web', priceId, amountCents);
-      } catch (refError) {
-        // silently ignore
-      }
-
       // Notify admin of new Pro subscription
       try {
         const userEmail = await getUserEmail(userId) || 'unknown';
@@ -1068,8 +1112,16 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription) {
 async function handleInvoicePaymentSucceeded(invoice: Stripe.Invoice) {
   const customerId = invoice.customer as string;
 
-  // Record recurring affiliate commission for renewal payments
+  // Record recurring affiliate commission for renewal payments.
+  // This is the ONLY web path that records commission — it is the event where
+  // money has actually been collected.
   try {
+    // amount_paid is what Stripe actually collected. A $0 invoice (trial start,
+    // 100% coupon, credit-balance-covered renewal) must not pay commission, and
+    // the line-item amount alone does not tell us that.
+    const amountPaid = invoice.amount_paid || 0;
+    if (amountPaid <= 0) return;
+
     const customer = await stripe.customers.retrieve(customerId);
     if (customer.deleted) return;
 
@@ -1080,13 +1132,20 @@ async function handleInvoicePaymentSucceeded(invoice: Stripe.Invoice) {
     const lineItem = invoice.lines?.data?.[0];
     if (!lineItem) return;
 
-    const amountCents = lineItem.amount || 0;
     const priceId = lineItem.price?.id || '';
+    if (!priceId) return;
 
-    if (amountCents > 0 && priceId) {
-      await processReferralCommission(userId, 'web', priceId, amountCents);
-    }
+    // Commission on collected revenue, capped at the line amount so a
+    // multi-item invoice can't inflate the subscription's share.
+    const lineAmount = lineItem.amount || 0;
+    const grossCents = lineAmount > 0 ? Math.min(amountPaid, lineAmount) : amountPaid;
+
+    await processReferralCommission(userId, 'web', priceId, grossCents);
   } catch (error) {
+    console.error('[referral] invoice.payment_succeeded commission failed', {
+      customerId,
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
 }
 
@@ -7617,31 +7676,38 @@ export const onUserCreated = functions.auth.user().onCreate(async (user) => {
       const referralDoc = await referralRef.get();
       const existingData = referralDoc.exists ? referralDoc.data() : {};
 
-      // Generate a referral code if they don't already have one
-      let referralCode = existingData?.referralCode;
+      // Generate a referral code if they don't already have one. Claim it with
+      // create() so two signups can't be handed the same code (the old set()
+      // silently repointed an existing code at the newer user).
+      let referralCode: string | undefined = existingData?.referralCode;
       if (!referralCode) {
-        const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-        let code = 'QM-';
-        for (let i = 0; i < 6; i++) {
-          code += chars.charAt(Math.floor(Math.random() * chars.length));
+        for (let attempt = 0; attempt < 10; attempt++) {
+          const candidate = buildReferralCode();
+          try {
+            await admin.firestore().doc(`referrals/${candidate}`).create({
+              referrerUserId: user.uid,
+              createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+            referralCode = candidate;
+            break;
+          } catch {
+            // ALREADY_EXISTS — try another candidate.
+          }
         }
-        referralCode = code;
-        await admin.firestore().doc(`referrals/${referralCode}`).set({
-          referrerUserId: user.uid,
-          createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        });
       }
 
-      await referralRef.set({
-        referralCode,
-        isAffiliate: true,
-        commissionRate: DEFAULT_COMMISSION_RATE,
-        totalReferrals: existingData?.totalReferrals || 0,
-        convertedReferrals: existingData?.convertedReferrals || 0,
-        totalEarnings: existingData?.totalEarnings || 0,
-        pendingEarnings: existingData?.pendingEarnings || 0,
-        paidEarnings: existingData?.paidEarnings || 0,
-      }, { merge: true });
+      if (referralCode) {
+        await referralRef.set({
+          referralCode,
+          isAffiliate: true,
+          commissionRate: DEFAULT_COMMISSION_RATE,
+          totalReferrals: existingData?.totalReferrals || 0,
+          convertedReferrals: existingData?.convertedReferrals || 0,
+          totalEarnings: existingData?.totalEarnings || 0,
+          pendingEarnings: existingData?.pendingEarnings || 0,
+          paidEarnings: existingData?.paidEarnings || 0,
+        }, { merge: true });
+      }
 
     } catch (error) {
     }
@@ -9917,37 +9983,40 @@ export const generateReferralCode = functions.https.onCall(async (data, context)
 
   // Check if user already has a code
   const existing = await referralRef.get();
-  if (existing.exists && existing.data()?.referralCode) {
-    return { referralCode: existing.data()!.referralCode };
+  const existingCode = existing.exists ? existing.data()?.referralCode : null;
+  if (typeof existingCode === 'string' && existingCode) {
+    return { referralCode: existingCode };
   }
 
-  // Generate unique 6-char code with QM- prefix
-  let code = '';
-  let attempts = 0;
-  while (attempts < 10) {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // No I/O/0/1 to avoid confusion
-    let raw = '';
-    for (let i = 0; i < 6; i++) {
-      raw += chars.charAt(Math.floor(Math.random() * chars.length));
+  // Claim a unique code. `create()` fails if the doc already exists, so the
+  // claim is atomic — the old "get() then batch.set()" could hand the SAME
+  // code to two users racing, and the second set() silently repointed the
+  // code at the second user (stealing the first one's referrals).
+  let code: string | null = null;
+  const now = admin.firestore.FieldValue.serverTimestamp();
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const candidate = buildReferralCode();
+    try {
+      await firestore.doc(`referrals/${candidate}`).create({
+        referrerUserId: userId,
+        createdAt: now,
+      });
+      code = candidate;
+      break;
+    } catch {
+      // ALREADY_EXISTS — try another candidate.
     }
-    code = `QM-${raw}`;
-
-    // Check uniqueness
-    const codeDoc = await firestore.doc(`referrals/${code}`).get();
-    if (!codeDoc.exists) break;
-    attempts++;
   }
 
   if (!code) {
     throw new functions.https.HttpsError('internal', 'Failed to generate unique code');
   }
 
-  const now = admin.firestore.FieldValue.serverTimestamp();
-
-  // Write both docs atomically
-  const batch = firestore.batch();
-  batch.set(referralRef, {
-    referralCode: code,
+  // Seed the profile without clobbering affiliate/earnings fields an admin may
+  // already have set (merge + only-if-absent defaults).
+  const seed: Record<string, unknown> = { referralCode: code, createdAt: now };
+  const current = existing.exists ? existing.data()! : {};
+  const defaults: Record<string, unknown> = {
     referredBy: null,
     totalReferrals: 0,
     convertedReferrals: 0,
@@ -9958,15 +10027,12 @@ export const generateReferralCode = functions.https.onCall(async (data, context)
     pendingEarnings: 0,
     paidEarnings: 0,
     lastPayoutAt: null,
-    createdAt: now,
-  }, { merge: true });
+  };
+  for (const [key, value] of Object.entries(defaults)) {
+    if (current[key] === undefined) seed[key] = value;
+  }
 
-  batch.set(firestore.doc(`referrals/${code}`), {
-    referrerUserId: userId,
-    createdAt: now,
-  });
-
-  await batch.commit();
+  await referralRef.set(seed, { merge: true });
 
   return { referralCode: code };
 });
@@ -9974,6 +10040,10 @@ export const generateReferralCode = functions.https.onCall(async (data, context)
 /**
  * Apply a referral code to the current user.
  * Callable function — requires authentication.
+ *
+ * Attribution only: applying a code does NOT grant, extend, or discount any
+ * subscription (App Store Guideline 3.1.1) — it records who referred whom so
+ * commission can be paid from our net revenue after a real purchase settles.
  */
 export const applyReferralCode = functions.https.onCall(async (data, context) => {
   if (!context.auth) {
@@ -9981,54 +10051,87 @@ export const applyReferralCode = functions.https.onCall(async (data, context) =>
   }
 
   const userId = context.auth.uid;
-  const referralCode = (data?.referralCode || '').trim().toUpperCase();
+  // Normalise BEFORE the value reaches a document path — the raw input used to
+  // be interpolated into `referrals/${code}`, so a code containing '/'
+  // addressed a different document.
+  const referralCode = normaliseReferralCode(data?.referralCode);
 
-  if (!referralCode) {
-    throw new functions.https.HttpsError('invalid-argument', 'Referral code is required');
+  // Cheap abuse brake: code-guessing is the obvious attack on a payout system.
+  await assertCallableRateLimit(userId, 'referral-apply', { maxRequests: 10, windowMs: 60_000 });
+
+  if (!isValidReferralCode(referralCode)) {
+    throw new functions.https.HttpsError('invalid-argument', APPLY_CODE_MESSAGES.invalid_format);
   }
 
   const firestore = admin.firestore();
-
-  // Check if this user already has a referrer
   const userReferralRef = firestore.doc(`users/${userId}/profile/referral`);
-  const userReferral = await userReferralRef.get();
-  if (userReferral.exists && userReferral.data()?.referredBy) {
-    throw new functions.https.HttpsError('already-exists', 'You have already applied a referral code');
+
+  const [userReferral, codeDoc, subDoc, authUser] = await Promise.all([
+    userReferralRef.get(),
+    firestore.doc(`referrals/${referralCode}`).get(),
+    firestore.doc(`users/${userId}/profile/subscription`).get(),
+    admin.auth().getUser(userId).catch(() => null),
+  ]);
+
+  const createdAtRaw = authUser?.metadata?.creationTime;
+  const createdAtMs = createdAtRaw ? new Date(createdAtRaw).getTime() : NaN;
+
+  const verdict = evaluateApplyCode({
+    code: referralCode,
+    referrerUserId: codeDoc.exists ? (codeDoc.data()?.referrerUserId ?? null) : null,
+    selfUid: userId,
+    existingReferredBy: userReferral.exists ? userReferral.data()?.referredBy : null,
+    alreadySubscribed: subDoc.exists && subDoc.data()?.isPro === true,
+    accountCreatedAtMs: Number.isFinite(createdAtMs) ? createdAtMs : null,
+    nowMs: Date.now(),
+  });
+
+  if (!verdict.ok) {
+    const message = APPLY_CODE_MESSAGES[verdict.reason];
+    const codeMap: Record<typeof verdict.reason, functions.https.FunctionsErrorCode> = {
+      invalid_format: 'invalid-argument',
+      not_found: 'not-found',
+      self_referral: 'invalid-argument',
+      already_referred: 'already-exists',
+      already_subscribed: 'failed-precondition',
+      window_expired: 'failed-precondition',
+    };
+    throw new functions.https.HttpsError(codeMap[verdict.reason], message);
   }
 
-  // Validate the referral code
-  const codeDoc = await firestore.doc(`referrals/${referralCode}`).get();
-  if (!codeDoc.exists) {
-    throw new functions.https.HttpsError('not-found', 'Invalid referral code — not found');
-  }
-
-  const referrerUserId = codeDoc.data()!.referrerUserId;
-
-  // Can't refer yourself
-  if (referrerUserId === userId) {
-    throw new functions.https.HttpsError('invalid-argument', "You can't use your own referral code");
-  }
-
-  // Save referredBy on the new user + increment referrer's totalReferrals
-  const batch = firestore.batch();
-
-  batch.set(userReferralRef, {
-    referredBy: referrerUserId,
-  }, { merge: true });
-
+  const referrerUserId: string = codeDoc.data()!.referrerUserId;
   const referrerReferralRef = firestore.doc(`users/${referrerUserId}/profile/referral`);
-  batch.set(referrerReferralRef, {
-    totalReferrals: admin.firestore.FieldValue.increment(1),
-  }, { merge: true });
 
-  await batch.commit();
+  // Transaction, not a batch: re-read referredBy inside the transaction so two
+  // concurrent applies can't both increment the referrer's totalReferrals.
+  await firestore.runTransaction(async (tx) => {
+    const fresh = await tx.get(userReferralRef);
+    if (fresh.exists && fresh.data()?.referredBy) {
+      throw new functions.https.HttpsError('already-exists', APPLY_CODE_MESSAGES.already_referred);
+    }
+    tx.set(
+      userReferralRef,
+      {
+        referredBy: referrerUserId,
+        referredByCode: referralCode,
+        referredAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+    tx.set(
+      referrerReferralRef,
+      { totalReferrals: admin.firestore.FieldValue.increment(1) },
+      { merge: true }
+    );
+  });
 
   return { success: true };
 });
 
 /**
  * Process referral commission when a referred user pays for Pro.
- * Called internally from subscription update handlers.
+ * Called internally from settled-payment handlers only (Apple/Google receipt
+ * validation, Stripe invoice.payment_succeeded with amount_paid > 0).
  * Records affiliate commission earnings only — no Pro reward is granted.
  */
 async function processReferralCommission(
@@ -10045,16 +10148,49 @@ async function processReferralCommission(
   const data = userReferral.data()!;
   const referrerUserId = data.referredBy;
 
-  if (!referrerUserId) return;
+  if (!referrerUserId || referrerUserId === userId) return;
 
-  // Record affiliate earning for this billing period (recurring commission)
-  if (platform && productId && grossAmountCents) {
+  // Record affiliate earning for this billing period (recurring commission).
+  // Bucket in the billing timezone — a UTC bucket mis-files early-morning AEST
+  // payments into the previous month and can double-count a renewal.
+  if (platform && productId && typeof grossAmountCents === 'number' && grossAmountCents > 0) {
     try {
       await recordAffiliateEarning(
         userId, referrerUserId, platform, productId,
-        grossAmountCents, getBillingPeriod()
+        grossAmountCents, billingPeriodFor(new Date())
       );
     } catch (err) {
+      console.error('[referral] failed to record affiliate earning', {
+        userId, referrerUserId, platform, productId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+
+    // Count the conversion once, the first time this referred user pays.
+    // `convertedReferrals` was read by the app and the admin CRM but NOTHING
+    // ever incremented it — every affiliate saw "0 paying" forever.
+    if (!data.convertedAt) {
+      try {
+        await firestore.runTransaction(async (tx) => {
+          const fresh = await tx.get(userReferralRef);
+          if (fresh.data()?.convertedAt) return;
+          tx.set(
+            userReferralRef,
+            { convertedAt: admin.firestore.FieldValue.serverTimestamp() },
+            { merge: true }
+          );
+          tx.set(
+            firestore.doc(`users/${referrerUserId}/profile/referral`),
+            { convertedReferrals: admin.firestore.FieldValue.increment(1) },
+            { merge: true }
+          );
+        });
+      } catch (err) {
+        console.error('[referral] failed to record conversion', {
+          userId, referrerUserId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
     }
   }
 }
@@ -10108,8 +10244,12 @@ export const getAffiliateEarnings = functions.https.onCall(async (data, context)
 
   return {
     summary: {
-      isAffiliate: referralData.isAffiliate || false,
-      commissionRate: referralData.commissionRate || DEFAULT_COMMISSION_RATE,
+      isAffiliate: referralData.isAffiliate === true,
+      // 0 is meaningful (affiliate disabled / no rate set) — `||` turned it into
+      // the 50% default, so a revoked affiliate was shown a 50% cut.
+      commissionRate: typeof referralData.commissionRate === 'number'
+        ? referralData.commissionRate
+        : DEFAULT_COMMISSION_RATE,
       totalEarnings: referralData.totalEarnings || 0,
       pendingEarnings: referralData.pendingEarnings || 0,
       paidEarnings: referralData.paidEarnings || 0,
@@ -10131,28 +10271,40 @@ export const setAffiliateStatus = functions.https.onCall(async (data, context) =
     throw new functions.https.HttpsError('unauthenticated', 'Must be signed in');
   }
 
-  const adminEmails = (process.env.ADMIN_EMAILS || '').split(',');
-  const callerEmail = context.auth.token?.email || '';
-  if (!adminEmails.includes(callerEmail)) {
+  // Email-verified admin check: an unverified account can be created with any
+  // address, so matching on the raw claim alone let anyone who signed up as
+  // admin@… without confirming the inbox grant themselves affiliate powers.
+  const adminEmails = (process.env.ADMIN_EMAILS || '')
+    .split(',')
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean);
+  const callerEmail = (context.auth.token?.email || '').toLowerCase();
+  const callerVerified = context.auth.token?.email_verified === true;
+  if (!callerVerified || !adminEmails.includes(callerEmail)) {
     throw new functions.https.HttpsError('permission-denied', 'Only admins can manage affiliates');
   }
 
   const { userId, isAffiliate, commissionRate } = data || {};
 
-  if (!userId) {
+  if (typeof userId !== 'string' || !userId.trim()) {
     throw new functions.https.HttpsError('invalid-argument', 'userId is required');
   }
 
+  const enabled = isAffiliate !== false;
+  // Clamp so a fat-fingered 50 (meaning 50%) can't pay out 5000% of net revenue.
+  const rate = enabled ? clampCommissionRate(commissionRate ?? DEFAULT_COMMISSION_RATE) : 0;
+
   const firestore = admin.firestore();
-  const referralRef = firestore.doc(`users/${userId}/profile/referral`);
+  const referralRef = firestore.doc(`users/${userId.trim()}/profile/referral`);
 
   await referralRef.set({
-    isAffiliate: isAffiliate !== false,
-    commissionRate: commissionRate || DEFAULT_COMMISSION_RATE,
+    isAffiliate: enabled,
+    commissionRate: rate,
+    affiliateUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    affiliateUpdatedBy: callerEmail,
   }, { merge: true });
 
-
-  return { success: true };
+  return { success: true, isAffiliate: enabled, commissionRate: rate };
 });
 
 /**
@@ -10164,60 +10316,79 @@ export const recordAffiliatePayout = functions.https.onCall(async (data, context
     throw new functions.https.HttpsError('unauthenticated', 'Must be signed in');
   }
 
-  // Simple admin check — only the app owner can record payouts
-  const adminEmails = (process.env.ADMIN_EMAILS || '').split(',');
-  const callerEmail = context.auth.token?.email || '';
-  if (!adminEmails.includes(callerEmail)) {
+  // Admin check — only a verified app owner can record payouts.
+  const adminEmails = (process.env.ADMIN_EMAILS || '')
+    .split(',')
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean);
+  const callerEmail = (context.auth.token?.email || '').toLowerCase();
+  if (context.auth.token?.email_verified !== true || !adminEmails.includes(callerEmail)) {
     throw new functions.https.HttpsError('permission-denied', 'Only admins can record payouts');
   }
 
-  const { affiliateUserId, amount, paymentMethod, reference } = data || {};
+  const { affiliateUserId, paymentMethod, reference } = data || {};
 
-  if (!affiliateUserId || !amount) {
-    throw new functions.https.HttpsError('invalid-argument', 'affiliateUserId and amount are required');
+  if (typeof affiliateUserId !== 'string' || !affiliateUserId.trim()) {
+    throw new functions.https.HttpsError('invalid-argument', 'affiliateUserId is required');
   }
+  const uid = affiliateUserId.trim();
 
   const firestore = admin.firestore();
+  const referralRef = firestore.doc(`users/${uid}/profile/referral`);
 
-  // Mark pending earnings as paid
+  // Mark pending earnings as paid. The payout amount is DERIVED from the
+  // earning docs, not accepted from the caller: the old version marked every
+  // pending earning paid, zeroed pendingEarnings, then incremented paidEarnings
+  // by a hand-typed number — so any typo (or a partial payment) permanently
+  // desynced the ledger from the earnings it claimed to settle.
   const pendingEarnings = await firestore
-    .collection(`users/${affiliateUserId}/affiliateEarnings`)
+    .collection(`users/${uid}/affiliateEarnings`)
     .where('status', '==', 'pending')
     .get();
 
-  const batch = firestore.batch();
-  const earningIds: string[] = [];
+  const { earningIds, amountCents } = reconcilePayout(
+    pendingEarnings.docs.map((d) => ({ id: d.id, commissionAmount: d.data().commissionAmount }))
+  );
 
-  for (const doc of pendingEarnings.docs) {
-    batch.update(doc.ref, {
-      status: 'paid',
-      paidAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
-    earningIds.push(doc.id);
+  if (earningIds.length === 0) {
+    return { success: true, earningsMarkedPaid: 0, amount: 0 };
   }
 
-  // Create payout record
+  const byId = new Map(pendingEarnings.docs.map((d) => [d.id, d.ref]));
   const payoutRef = firestore.collection('affiliatePayouts').doc();
+  const batch = firestore.batch();
+
+  for (const id of earningIds) {
+    const ref = byId.get(id);
+    if (!ref) continue;
+    batch.update(ref, {
+      status: 'paid',
+      paidAt: admin.firestore.FieldValue.serverTimestamp(),
+      payoutId: payoutRef.id,
+    });
+  }
+
   batch.set(payoutRef, {
-    affiliateUserId,
-    amount,
-    paymentMethod: paymentMethod || 'bank_transfer',
-    reference: reference || '',
+    affiliateUserId: uid,
+    amount: amountCents,
+    paymentMethod: typeof paymentMethod === 'string' ? paymentMethod.slice(0, 60) : 'bank_transfer',
+    reference: typeof reference === 'string' ? reference.slice(0, 200) : '',
     earningIds,
+    recordedBy: callerEmail,
     paidAt: admin.firestore.FieldValue.serverTimestamp(),
   });
 
-  // Update referrer's totals
-  const referralRef = firestore.doc(`users/${affiliateUserId}/profile/referral`);
+  // Decrement by exactly what was settled instead of zeroing — an earning
+  // recorded between the query and this write must stay pending, not vanish.
   batch.set(referralRef, {
-    pendingEarnings: 0,
-    paidEarnings: admin.firestore.FieldValue.increment(amount),
+    pendingEarnings: admin.firestore.FieldValue.increment(-amountCents),
+    paidEarnings: admin.firestore.FieldValue.increment(amountCents),
     lastPayoutAt: admin.firestore.FieldValue.serverTimestamp(),
   }, { merge: true });
 
   await batch.commit();
 
-  return { success: true, earningsMarkedPaid: earningIds.length };
+  return { success: true, earningsMarkedPaid: earningIds.length, amount: amountCents };
 });
 
 // ============================================================

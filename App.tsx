@@ -93,6 +93,11 @@ const linking: LinkingOptions<any> = {
   config: {
     screens: {
       DiscoverSuppliers: 'join',
+      // Referral QR/links (https://quotemateapp.au/ref/QM-AB2CD3). Without this
+      // route the link only ever opened the website, even with the app
+      // installed — the tradie was told to type the code in by hand. The
+      // Referral screen reads `code` and pre-fills the apply field.
+      Referral: 'ref/:code',
     },
   },
   ...(Platform.OS === 'web'

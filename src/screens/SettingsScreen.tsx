@@ -41,6 +41,10 @@ interface SettingsSection {
 export function SettingsScreen() {
   const navigation = useNavigation<any>();
   const subscriptionStatus = useStore((s) => s.subscriptionStatus);
+  // Only approved affiliates actually earn commission. Promising "rewards" to
+  // everyone was both untrue (a code grants nothing) and an unreviewed
+  // income-opportunity claim on a store listing surface.
+  const isAffiliate = useStore((s) => s.referralInfo?.isAffiliate === true);
 
   const sections: SettingsSection[] = [
     {
@@ -180,12 +184,13 @@ export function SettingsScreen() {
       items: [
         {
           id: 'referral',
-          title: 'Refer a Friend',
-          subtitle: 'Earn rewards for referrals',
+          title: isAffiliate ? 'Affiliate Program' : 'Refer a Mate',
+          subtitle: isAffiliate
+            ? 'Your code, earnings and payouts'
+            : 'Share QuoteMate with other tradies',
           icon: 'gift',
           screen: 'Referral',
-          badge: 'EARN',
-          badgeColor: colors.success,
+          ...(isAffiliate ? { badge: 'EARN', badgeColor: colors.success } : {}),
         },
         {
           id: 'subscription',

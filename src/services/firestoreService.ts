@@ -770,13 +770,19 @@ class FirestoreService {
       if (snapshot.exists()) {
         const data = snapshot.data();
         return {
-          referralCode: data.referralCode,
+          referralCode: typeof data.referralCode === 'string' ? data.referralCode : '',
           referredBy: data.referredBy || null,
           totalReferrals: data.totalReferrals || 0,
           convertedReferrals: data.convertedReferrals || 0,
-          // Affiliate fields
-          isAffiliate: data.isAffiliate || false,
-          commissionRate: data.commissionRate || 0.50,
+          // Affiliate fields. commissionRate must NOT default to 0.50: a
+          // non-affiliate (or an affiliate an admin revoked, left on rate 0)
+          // was then shown a 50% cut and an earnings projection they could
+          // never collect. 0 is the correct value when no rate is set — the UI
+          // hides the percentage entirely (see utils/referral.ts).
+          isAffiliate: data.isAffiliate === true,
+          commissionRate: typeof data.commissionRate === 'number' && Number.isFinite(data.commissionRate)
+            ? data.commissionRate
+            : 0,
           totalEarnings: data.totalEarnings || 0,
           pendingEarnings: data.pendingEarnings || 0,
           paidEarnings: data.paidEarnings || 0,

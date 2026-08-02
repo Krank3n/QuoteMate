@@ -30,9 +30,10 @@ service cloud.firestore {
     }
 
     // Users can read/write their own user document and ALL subcollections —
-    // EXCEPT profile/subscription, which gets the field-guarded match below.
+    // EXCEPT profile/subscription and profile/referral, which get the
+    // field-guarded matches below.
     // Overlapping matches OR together, so no match here may grant a write to
-    // that doc. In particular a recursive {x=**} matches ZERO or more segments
+    // those docs. In particular a recursive {x=**} matches ZERO or more segments
     // under rules_version 2, so it must start below the doc, never at it.
     match /users/{userId} {
       allow read, write: if isOwner(userId);
@@ -40,7 +41,10 @@ service cloud.firestore {
     // Direct subcollection docs (users/{uid}/{collection}/{docId}).
     match /users/{userId}/{collection}/{docId} {
       allow read: if isOwner(userId);
-      allow write: if isOwner(userId) && !(collection == 'profile' && docId == 'subscription');
+      allow write: if isOwner(userId)
+        && !(collection == 'profile' && docId == 'subscription')
+        && !(collection == 'profile' && docId == 'referral')
+        && collection != 'affiliateEarnings';
     }
     // Anything nested deeper. {rest=**} can only resolve to a document here
     // when it covers at least one segment, so this never re-grants the doc
@@ -67,6 +71,46 @@ service cloud.firestore {
             || (request.resource.data.isPro == false && resource.data.get('isPro', false) == false));
       // NOTE: trialStartedAt/trialExpired stay client-writable for the trial
       // bootstrap — a known, accepted weakness (tracked as follow-up).
+    }
+
+    // Referral / affiliate profile (PAY-04). EVERY field here is server-owned:
+    // the referral code is claimed atomically in `referrals/{code}`,
+    // `referredBy` is set by the applyReferralCode callable (which enforces
+    // self-referral, one-referrer, pre-subscription and attribution-window
+    // rules), and `isAffiliate`/`commissionRate`/the earnings counters decide
+    // real money that leaves our bank account.
+    //
+    // Before this rule the owner wildcard above let any signed-in user write
+    // their own referral doc, i.e. set isAffiliate:true, commissionRate:1.0 and
+    // an arbitrary pendingEarnings, then request a payout. Read stays open so
+    // the app can show the code, referral counts and earnings.
+    match /users/{userId}/profile/referral {
+      allow read: if isOwner(userId);
+      allow write: if false;
+    }
+
+    // Affiliate earning ledger — read-only to the affiliate, written only by
+    // the payment webhooks / receipt validators (admin SDK bypasses rules).
+    match /users/{userId}/affiliateEarnings/{earningId} {
+      allow read: if isOwner(userId);
+      allow write: if false;
+    }
+
+    // Referral code → owner index. Public-read is required so the marketing
+    // site can validate a scanned/typed code before signup, and the docs hold
+    // nothing sensitive beyond the owning uid. Writes are Cloud Functions only:
+    // a client create would let anyone squat a code or repoint someone else's
+    // code at their own account, redirecting that affiliate's commission.
+    match /referrals/{code} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // Affiliate payout records — admin/Cloud Functions only. The affiliate sees
+    // their payout history via the paid earnings in affiliateEarnings; these
+    // docs also carry the admin's identity and payment reference.
+    match /affiliatePayouts/{payoutId} {
+      allow read, write: if false;
     }
 
     // Unified documents collection (phase-1 dual-write mirror of quotes+invoices).

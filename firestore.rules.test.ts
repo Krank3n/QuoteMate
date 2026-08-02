@@ -195,3 +195,115 @@ describe('squareOAuthStates (PAY-03)', () => {
     await assertFails(setDoc(doc(aliceDb(), 'squareOAuthStates/forged'), { uid: 'alice', createdAtMs: 1 }));
   });
 });
+
+describe('referral / affiliate program (PAY-04)', () => {
+  const REFERRAL_PATH = 'users/alice/profile/referral';
+
+  const referralDoc = {
+    referralCode: 'QM-AB2CD3',
+    referredBy: null,
+    totalReferrals: 3,
+    convertedReferrals: 1,
+    isAffiliate: false,
+    commissionRate: 0,
+    totalEarnings: 0,
+    pendingEarnings: 0,
+    paidEarnings: 0,
+  };
+
+  it('lets the owner READ their referral profile (code, counts, earnings)', async () => {
+    await seed(REFERRAL_PATH, referralDoc);
+    await assertSucceeds(getDoc(doc(aliceDb(), REFERRAL_PATH)));
+  });
+
+  it('denies self-promotion to affiliate — the original PAY-04 exploit', async () => {
+    await seed(REFERRAL_PATH, referralDoc);
+    await assertFails(updateDoc(doc(aliceDb(), REFERRAL_PATH), { isAffiliate: true }));
+  });
+
+  it('denies raising your own commission rate', async () => {
+    await seed(REFERRAL_PATH, { ...referralDoc, isAffiliate: true, commissionRate: 0.5 });
+    await assertFails(updateDoc(doc(aliceDb(), REFERRAL_PATH), { commissionRate: 1 }));
+  });
+
+  it('denies inventing an earnings balance to be paid out', async () => {
+    await seed(REFERRAL_PATH, { ...referralDoc, isAffiliate: true, commissionRate: 0.5 });
+    await assertFails(updateDoc(doc(aliceDb(), REFERRAL_PATH), { pendingEarnings: 500000 }));
+    await assertFails(updateDoc(doc(aliceDb(), REFERRAL_PATH), { totalEarnings: 500000 }));
+    await assertFails(updateDoc(doc(aliceDb(), REFERRAL_PATH), { paidEarnings: 0 }));
+  });
+
+  it('denies self-attributing a referrer (bypassing the callable\'s checks)', async () => {
+    await seed(REFERRAL_PATH, referralDoc);
+    await assertFails(updateDoc(doc(aliceDb(), REFERRAL_PATH), { referredBy: 'mallory' }));
+  });
+
+  it('denies inflating your own referral counts', async () => {
+    await seed(REFERRAL_PATH, referralDoc);
+    await assertFails(updateDoc(doc(aliceDb(), REFERRAL_PATH), { totalReferrals: 9999 }));
+    await assertFails(updateDoc(doc(aliceDb(), REFERRAL_PATH), { convertedReferrals: 9999 }));
+  });
+
+  it('denies creating the referral doc from scratch as an affiliate', async () => {
+    await assertFails(setDoc(doc(aliceDb(), REFERRAL_PATH), {
+      referralCode: 'QM-SELF11',
+      isAffiliate: true,
+      commissionRate: 1,
+      pendingEarnings: 1000000,
+    }));
+  });
+
+  it('denies deleting the referral doc to reset attribution', async () => {
+    await seed(REFERRAL_PATH, { ...referralDoc, referredBy: 'bob' });
+    await assertFails(deleteDoc(doc(aliceDb(), REFERRAL_PATH)));
+  });
+
+  it('denies another user reading or writing the referral doc', async () => {
+    await seed(REFERRAL_PATH, referralDoc);
+    const mallory = env.authenticatedContext('mallory').firestore();
+    await assertFails(getDoc(doc(mallory, REFERRAL_PATH)));
+    await assertFails(updateDoc(doc(mallory, REFERRAL_PATH), { referredBy: 'mallory' }));
+  });
+
+  it('lets the affiliate READ but never write their earnings ledger', async () => {
+    await seed('users/alice/affiliateEarnings/uid2_2026-08', {
+      referredUserId: 'uid2',
+      commissionAmount: 1715,
+      status: 'pending',
+    });
+    await assertSucceeds(getDoc(doc(aliceDb(), 'users/alice/affiliateEarnings/uid2_2026-08')));
+    // Forging an earning is forging a payout claim.
+    await assertFails(setDoc(doc(aliceDb(), 'users/alice/affiliateEarnings/forged'), {
+      referredUserId: 'victim',
+      commissionAmount: 999999,
+      status: 'pending',
+    }));
+    // Nor may they flip an existing one back to pending to be paid twice.
+    await assertFails(updateDoc(doc(aliceDb(), 'users/alice/affiliateEarnings/uid2_2026-08'), {
+      commissionAmount: 999999,
+    }));
+  });
+
+  it('allows public read of the code index (marketing site validates codes)', async () => {
+    await seed('referrals/QM-AB2CD3', { referrerUserId: 'alice' });
+    await assertSucceeds(getDoc(doc(env.unauthenticatedContext().firestore(), 'referrals/QM-AB2CD3')));
+  });
+
+  it('denies squatting a new code or repointing someone else\'s code', async () => {
+    await seed('referrals/QM-AB2CD3', { referrerUserId: 'bob' });
+    // Repointing bob's code at mallory would redirect bob's commission.
+    const mallory = env.authenticatedContext('mallory').firestore();
+    await assertFails(setDoc(doc(mallory, 'referrals/QM-AB2CD3'), { referrerUserId: 'mallory' }));
+    await assertFails(setDoc(doc(mallory, 'referrals/QM-NEW222'), { referrerUserId: 'mallory' }));
+    await assertFails(deleteDoc(doc(mallory, 'referrals/QM-AB2CD3')));
+  });
+
+  it('denies all client access to payout records', async () => {
+    await seed('affiliatePayouts/p1', { affiliateUserId: 'alice', amount: 1715 });
+    await assertFails(getDoc(doc(aliceDb(), 'affiliatePayouts/p1')));
+    await assertFails(setDoc(doc(aliceDb(), 'affiliatePayouts/forged'), {
+      affiliateUserId: 'alice',
+      amount: 999999,
+    }));
+  });
+});

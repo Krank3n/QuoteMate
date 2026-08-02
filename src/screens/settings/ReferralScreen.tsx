@@ -1,11 +1,30 @@
 /**
  * Referral Screen
+ *
  * Two distinct experiences:
  * - Affiliates: QR-first layout with earnings dashboard and commission tracking
- * - Regular users: Simple referral code sharing to help friends discover the app
+ * - Regular users: referral code sharing to help mates discover the app
+ *
+ * ── App Store compliance notes (read before changing copy) ────────────────
+ * A referral code is ATTRIBUTION ONLY. It never unlocks, discounts, or extends
+ * a subscription, and this screen must never imply that it does (Guideline
+ * 3.1.1 — no purchases or entitlements outside IAP; 3.1.3 — no external
+ * purchase CTAs).
+ *
+ * Affiliate commission is paid by us, out-of-band, from net revenue AFTER the
+ * store's cut. Every dollar figure shown is therefore derived from the
+ * affiliate's real commission rate and the real platform fee
+ * (src/utils/referral.ts, unit-tested) — never a default or a rounded-up
+ * "average". Projections are labelled as illustrative, which keeps them clear
+ * of Guideline 2.3.1 (accurate metadata / no misleading claims).
+ *
+ * The affiliate-recruitment material (game plan, tips, WhatsApp contact) is
+ * shown ONLY to approved affiliates. Presenting an earn-money programme to
+ * every user turns the app into an unreviewed income-opportunity pitch, and the
+ * WhatsApp button was an off-platform contact CTA on a monetisation screen.
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   StyleSheet,
@@ -17,6 +36,7 @@ import {
   ActivityIndicator,
   Linking,
   Image,
+  RefreshControl,
 } from 'react-native';
 import {
   Text,
@@ -26,6 +46,8 @@ import {
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import QRCode from 'react-native-qrcode-svg';
+import * as Clipboard from 'expo-clipboard';
+import { useRoute } from '@react-navigation/native';
 
 import { colors } from '../../theme';
 import { WebContainer } from '../../components/WebContainer';
@@ -33,23 +55,52 @@ import { AlertModal, AlertType } from '../../components/AlertModal';
 import { ReferralInfo, AffiliateEarning } from '../../types';
 import { firestoreService } from '../../services/firestoreService';
 import { auth } from '../../config/firebase';
+import { useStore } from '../../store/useStore';
+import {
+  applyCodeEligibility,
+  buildSharePayload,
+  commissionPerUserCents,
+  displayCommissionRate,
+  earningsProjection,
+  extractReferralCode,
+  formatCents,
+  isValidReferralCode,
+  referralLink as buildReferralLink,
+} from '../../utils/referral';
 
-const REFERRAL_BASE_URL = 'https://quotemateapp.au/ref/';
+const SUPPORT_EMAIL = 'support@quotemateapp.au';
 
 export function ReferralScreen() {
   const [referralInfo, setReferralInfo] = useState<ReferralInfo | null>(null);
   const [earnings, setEarnings] = useState<AffiliateEarning[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [loadingEarnings, setLoadingEarnings] = useState(false);
   const [codeInput, setCodeInput] = useState('');
   const [applyingCode, setApplyingCode] = useState(false);
   const [generatingCode, setGeneratingCode] = useState(false);
   const [copied, setCopied] = useState(false);
   const [showCode, setShowCode] = useState(false);
-  const [activeTab, setActiveTab] = useState<'qr' | 'dashboard'>('qr');
   const [modal, setModal] = useState<{ visible: boolean; type: AlertType; title: string; message: string }>({
     visible: false, type: 'info', title: '', message: '',
   });
+
+  // Gate the apply-code form on real entitlement state: the backend refuses a
+  // code once the account is paying, so offering the form to a Pro user is a
+  // guaranteed dead end.
+  const isPro = useStore((s) => s.subscriptionStatus?.isPro === true);
+
+  // Deep link: https://quotemateapp.au/ref/QM-AB2CD3 routes here with the code
+  // as a param (see the `linking` config in App.tsx). Pre-fill it so the tradie
+  // taps Apply instead of retyping a code off someone else's phone.
+  const route = useRoute();
+  const deepLinkCode = extractReferralCode((route.params as { code?: string } | undefined)?.code);
+
+  useEffect(() => {
+    if (deepLinkCode && isValidReferralCode(deepLinkCode)) {
+      setCodeInput(deepLinkCode);
+    }
+  }, [deepLinkCode]);
 
   const showModal = (type: AlertType, title: string, message: string) => {
     setModal({ visible: true, type, title, message });
@@ -60,6 +111,8 @@ export function ReferralScreen() {
       const info = await firestoreService.loadReferralInfo();
       setReferralInfo(info);
     } catch (error) {
+      // Non-fatal: the screen renders its empty state and the user can retry
+      // with pull-to-refresh.
     } finally {
       setLoading(false);
     }
@@ -72,9 +125,16 @@ export function ReferralScreen() {
       const functions = getFunctions();
       const getAffiliateEarnings = httpsCallable(functions, 'getAffiliateEarnings');
       const result = await getAffiliateEarnings();
-      const data = result.data as { summary: any; earnings: AffiliateEarning[] };
-      setEarnings(data.earnings || []);
+      const data = result.data as { summary?: Partial<ReferralInfo>; earnings?: AffiliateEarning[] };
+      setEarnings(Array.isArray(data?.earnings) ? data.earnings : []);
+      // The callable is the authoritative view of the ledger (the Firestore doc
+      // can lag a webhook). Fold its summary over the cached profile so the
+      // balances on screen match the earnings list underneath them.
+      if (data?.summary) {
+        setReferralInfo((prev) => (prev ? { ...prev, ...data.summary } as ReferralInfo : prev));
+      }
     } catch (error) {
+      // Leave whatever we already had rather than blanking the dashboard.
     } finally {
       setLoadingEarnings(false);
     }
@@ -85,13 +145,36 @@ export function ReferralScreen() {
     if (referralInfo?.isAffiliate) loadEarnings();
   }, [referralInfo?.isAffiliate, loadEarnings]);
 
-  // ── Shared handlers ──
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await loadReferralInfo();
+    if (referralInfo?.isAffiliate) await loadEarnings();
+    setRefreshing(false);
+  }, [loadReferralInfo, loadEarnings, referralInfo?.isAffiliate]);
 
-  const referralLink = referralInfo?.referralCode
-    ? `${REFERRAL_BASE_URL}${referralInfo.referralCode}` : '';
+  // ── Derived values ──
 
-  const commissionPercent = referralInfo?.commissionRate
-    ? Math.round(referralInfo.commissionRate * 100) : 80;
+  const referralCode = referralInfo?.referralCode || '';
+  const referralLink = referralCode ? buildReferralLink(referralCode) : '';
+
+  // null when the user has no genuine commission rate — the UI then shows no
+  // percentage at all instead of an invented default (the old screen fell back
+  // to 80% for everyone, including non-affiliates).
+  const commissionRate = displayCommissionRate(referralInfo);
+  const commissionPercent = commissionRate !== null ? Math.round(commissionRate * 100) : null;
+
+  const projection = useMemo(() => earningsProjection(referralInfo), [referralInfo]);
+  const maxProjection = projection.length
+    ? Math.max(...projection.map((p) => p.amountCents))
+    : 0;
+  const perUserIos = commissionRate !== null ? commissionPerUserCents('ios', commissionRate) : 0;
+  const perUserWeb = commissionRate !== null ? commissionPerUserCents('web', commissionRate) : 0;
+
+  const eligibility = applyCodeEligibility(referralInfo, isPro);
+  const normalisedInput = extractReferralCode(codeInput);
+  const inputLooksValid = isValidReferralCode(normalisedInput);
+
+  // ── Handlers ──
 
   const handleGenerateCode = async () => {
     if (!auth.currentUser) {
@@ -103,77 +186,104 @@ export function ReferralScreen() {
       const functions = getFunctions();
       const generateReferralCode = httpsCallable(functions, 'generateReferralCode');
       const result = await generateReferralCode();
-      const data = result.data as { referralCode: string };
-      setReferralInfo({
-        referralCode: data.referralCode, referredBy: null,
-        totalReferrals: 0, convertedReferrals: 0,
-        isAffiliate: false, commissionRate: 0, totalEarnings: 0, pendingEarnings: 0, paidEarnings: 0, lastPayoutAt: null,
-      });
+      const data = result.data as { referralCode?: string };
+      if (!data?.referralCode) throw new Error('No code returned');
+      // Re-read the profile instead of fabricating one locally: the old code
+      // overwrote isAffiliate/commissionRate/earnings with zeros in local
+      // state, so an existing affiliate who tapped this lost their dashboard
+      // until the next app launch.
+      await loadReferralInfo();
     } catch (error: any) {
-      showModal('error', 'Error', 'Failed to generate referral code. Please try again.');
+      showModal('error', 'Something went wrong', 'Could not create your referral code. Please try again.');
     } finally {
       setGeneratingCode(false);
     }
   };
 
   const handleCopyCode = async () => {
-    if (!referralInfo?.referralCode) return;
-    if (Platform.OS === 'web' && navigator?.clipboard) {
-      await navigator.clipboard.writeText(referralLink);
+    if (!referralLink) return;
+    try {
+      // expo-clipboard works on native AND web. The old code only ever copied
+      // on web (`Platform.OS === 'web' && navigator.clipboard`), so on iOS and
+      // Android the button showed "Copied!" while the clipboard was untouched.
+      await Clipboard.setStringAsync(referralLink);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      showModal('error', 'Could not copy', 'Copying failed. You can still use Share instead.');
     }
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
   };
 
   const handleShare = async () => {
-    if (!referralInfo?.referralCode) return;
+    if (!referralCode || !referralLink) return;
     try {
-      await Share.share({
-        message: referralInfo.isAffiliate
-          ? `Try QuoteMate — the fastest way to create professional trade quotes and invoices! Sign up with my code ${referralInfo.referralCode} to get started. ${referralLink}`
-          : `Try QuoteMate for creating professional trade quotes! Use my referral code ${referralInfo.referralCode} when you sign up. ${referralLink}`,
-      });
+      await Share.share(buildSharePayload(referralCode, referralLink, Platform.OS));
     } catch (error) {
+      // User dismissed the share sheet, or no share target — nothing to do.
     }
   };
 
   const handleApplyCode = async () => {
-    const code = codeInput.trim().toUpperCase();
-    if (!code) { showModal('warning', 'Enter a Code', 'Please enter a referral code.'); return; }
-    if (!auth.currentUser) { showModal('warning', 'Sign In Required', 'Please sign in to apply a referral code.'); return; }
+    const code = extractReferralCode(codeInput);
+    if (!code) {
+      showModal('warning', 'Enter a Code', 'Please enter your mate\'s referral code.');
+      return;
+    }
+    if (!isValidReferralCode(code)) {
+      showModal('warning', 'Check the Code', 'Referral codes look like QM-AB2CD3. Double-check it with your mate.');
+      return;
+    }
+    if (!auth.currentUser) {
+      showModal('warning', 'Sign In Required', 'Please sign in to apply a referral code.');
+      return;
+    }
 
     setApplyingCode(true);
     try {
       const functions = getFunctions();
       const applyReferralCode = httpsCallable(functions, 'applyReferralCode');
       await applyReferralCode({ referralCode: code });
-      showModal('success', 'Code Applied!', 'The referral code has been applied successfully!');
+      showModal(
+        'success',
+        'Code Applied',
+        'Your mate is now credited for referring you. Nice one!'
+      );
       setCodeInput('');
       await loadReferralInfo();
     } catch (error: any) {
-      const msg = error?.message || 'Failed to apply referral code.';
-      if (msg.includes('not found') || msg.includes('Invalid')) {
-        showModal('error', 'Invalid Code', 'That referral code was not found. Please check and try again.');
-      } else if (msg.includes('own code')) {
-        showModal('error', 'Invalid Code', "You can't use your own referral code.");
-      } else if (msg.includes('already')) {
-        showModal('warning', 'Already Applied', 'You have already applied a referral code.');
-      } else {
-        showModal('error', 'Error', msg);
-      }
+      // The backend sends precise, user-ready messages for every rejection
+      // (unknown code, own code, already applied, already subscribed, outside
+      // the attribution window). Surfacing them beats the old substring
+      // sniffing, which mislabelled anything it didn't recognise.
+      const message = typeof error?.message === 'string' && error.message.trim()
+        ? error.message
+        : 'Could not apply that code. Please try again.';
+      const isExpected = ['not-found', 'invalid-argument', 'already-exists', 'failed-precondition']
+        .includes(error?.code?.replace?.('functions/', '') || '');
+      showModal(isExpected ? 'warning' : 'error', isExpected ? 'Code Not Applied' : 'Something went wrong', message);
     } finally {
       setApplyingCode(false);
     }
   };
 
-  const formatDate = (date: Date) => date.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
-  const formatCurrency = (cents: number) => `$${(cents / 100).toFixed(2)}`;
+  const formatCurrency = formatCents;
 
   const getPlatformIcon = (platform: string) => {
-    switch (platform) { case 'ios': return 'apple'; case 'android': return 'android'; case 'web': return 'web'; default: return 'help-circle'; }
+    switch (platform) {
+      case 'ios': return 'apple' as const;
+      case 'android': return 'android' as const;
+      case 'web': return 'web' as const;
+      default: return 'help-circle' as const;
+    }
   };
   const getStatusColor = (status: string) => {
-    switch (status) { case 'pending': return colors.secondary; case 'confirmed': return colors.primary; case 'paid': return colors.success; case 'cancelled': return colors.error; default: return colors.onSurface; }
+    switch (status) {
+      case 'pending': return colors.secondary;
+      case 'confirmed': return colors.primary;
+      case 'paid': return colors.success;
+      case 'cancelled': return colors.error;
+      default: return colors.onSurface;
+    }
   };
 
   // ── Loading ──
@@ -186,73 +296,153 @@ export function ReferralScreen() {
     );
   }
 
-  // ── Generate code (no code yet) ──
+  // ── Shared blocks ──
 
   const renderGenerateCode = () => (
-    <Surface style={styles.card}>
-      <TouchableOpacity style={styles.generateButton} onPress={handleGenerateCode} disabled={generatingCode}>
-        {generatingCode ? (
-          <ActivityIndicator size="small" color={colors.white} />
-        ) : (
-          <MaterialCommunityIcons name="qrcode" size={20} color={colors.white} />
-        )}
-        <Text style={styles.generateButtonText}>
-          {generatingCode ? 'Generating...' : 'Get My Referral Code'}
-        </Text>
-      </TouchableOpacity>
+    <TouchableOpacity
+      style={styles.generateButton}
+      onPress={handleGenerateCode}
+      disabled={generatingCode}
+      accessibilityRole="button"
+      accessibilityLabel="Get my referral code"
+    >
+      {generatingCode ? (
+        <ActivityIndicator size="small" color={colors.white} />
+      ) : (
+        <MaterialCommunityIcons name="qrcode" size={20} color={colors.white} />
+      )}
+      <Text style={styles.generateButtonText}>
+        {generatingCode ? 'Generating...' : 'Get My Referral Code'}
+      </Text>
+    </TouchableOpacity>
+  );
+
+  const renderQrCard = (subtitle: React.ReactNode) => (
+    <Surface style={styles.adQrCard}>
+      <Image
+        source={require('../../../assets/logo-scaled.png')}
+        style={styles.adLogo}
+        resizeMode="contain"
+      />
+
+      <View style={styles.qrContainer}>
+        <QRCode value={referralLink} size={240} backgroundColor="#ffffff" color="#000000" />
+      </View>
+
+      <Text style={styles.adScanText}>Scan to download QuoteMate</Text>
+      {subtitle}
+
+      <View style={styles.buttonRow}>
+        <TouchableOpacity
+          style={styles.shareButton}
+          onPress={handleShare}
+          accessibilityRole="button"
+          accessibilityLabel="Share your referral link"
+        >
+          <MaterialCommunityIcons name="share-variant" size={20} color={colors.white} />
+          <Text style={styles.shareButtonText}>Share Link</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.codeToggleButton}
+          onPress={() => { handleCopyCode(); setShowCode(true); }}
+          accessibilityRole="button"
+          accessibilityLabel="Copy your referral link and show your code"
+        >
+          <MaterialCommunityIcons
+            name={copied ? 'check' : 'content-copy'} size={20}
+            color={copied ? colors.success : colors.primary}
+          />
+          <Text style={[styles.codeToggleText, copied && { color: colors.success }]}>
+            {copied ? 'Copied!' : 'Copy'}
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {showCode && (
+        <View style={styles.codeBox}>
+          <Text style={styles.codeText} selectable>{referralCode}</Text>
+        </View>
+      )}
     </Surface>
   );
 
-  // ── Enter a friend's code ──
-
-  const renderApplyCode = () => (
-    <>
-      {!referralInfo?.referredBy && (
-        <Surface style={styles.card}>
-          <Title style={styles.sectionTitle}>Have a Referral Code?</Title>
-          <Text style={styles.hint}>If a friend gave you their code, enter it below.</Text>
-          <View style={styles.inputRow}>
-            <TextInput
-              style={styles.textInput}
-              placeholder="e.g. QM-AB12CD"
-              placeholderTextColor={colors.onSurface + '80'}
-              value={codeInput}
-              onChangeText={setCodeInput}
-              autoCapitalize="characters"
-              maxLength={10}
-            />
-            <TouchableOpacity
-              style={[styles.applyButton, !codeInput.trim() && styles.applyButtonDisabled]}
-              onPress={handleApplyCode}
-              disabled={applyingCode || !codeInput.trim()}
-            >
-              {applyingCode ? <ActivityIndicator size="small" color={colors.white} /> : <Text style={styles.applyButtonText}>Apply</Text>}
-            </TouchableOpacity>
-          </View>
-        </Surface>
-      )}
-      {referralInfo?.referredBy && (
-        <Surface style={styles.card}>
-          <View style={styles.referredByRow}>
-            <MaterialCommunityIcons name="check-circle" size={20} color={colors.success} />
-            <Text style={styles.referredByText}>You were referred by a friend</Text>
-          </View>
-        </Surface>
-      )}
-    </>
+  const renderFeaturePills = () => (
+    <View style={styles.adFeaturePills}>
+      {[
+        { icon: 'robot' as const, label: 'AI-Powered' },
+        { icon: 'currency-usd' as const, label: 'Live Pricing' },
+        { icon: 'file-document-outline' as const, label: 'GST Ready' },
+        { icon: 'wifi-off' as const, label: 'Offline' },
+      ].map((feature, index) => (
+        <View key={index} style={styles.adFeaturePill}>
+          <MaterialCommunityIcons name={feature.icon} size={14} color={colors.primary} />
+          <Text style={styles.adFeaturePillText}>{feature.label}</Text>
+        </View>
+      ))}
+    </View>
   );
 
-  // ── Earnings projection data ──
-  // Shows what they COULD earn based on commission rate @ $49/mo avg
-  const avgCommissionPerUser = Math.round(4900 * 0.85 * (referralInfo?.commissionRate || 0.50)); // cents (net after ~15% avg platform fee)
-  const projectionData = [
-    { users: 5, label: '5' },
-    { users: 10, label: '10' },
-    { users: 25, label: '25' },
-    { users: 50, label: '50' },
-    { users: 100, label: '100' },
-  ];
-  const maxProjection = 100 * avgCommissionPerUser;
+  const renderApplyCode = () => {
+    // Already attributed — confirm it and stop. No form to submit.
+    if (!eligibility.canApply) {
+      if (eligibility.reason === 'already_referred') {
+        return (
+          <Surface style={styles.card}>
+            <View style={styles.referredByRow}>
+              <MaterialCommunityIcons name="check-circle" size={20} color={colors.success} />
+              <Text style={styles.referredByText}>You were referred by a mate</Text>
+            </View>
+          </Surface>
+        );
+      }
+      // Pro user: the server will reject an apply, so explain rather than
+      // showing a form that cannot succeed.
+      return null;
+    }
+
+    return (
+      <Surface style={styles.card}>
+        <Title style={styles.sectionTitle}>Got a Referral Code?</Title>
+        <Text style={styles.hint}>
+          If a mate gave you their code, pop it in below so they get credited.
+          It doesn&apos;t change your price or your plan.
+        </Text>
+        <View style={styles.inputRow}>
+          <TextInput
+            style={styles.textInput}
+            placeholder="QM-AB2CD3"
+            placeholderTextColor={colors.onSurface + '80'}
+            value={codeInput}
+            onChangeText={setCodeInput}
+            autoCapitalize="characters"
+            autoCorrect={false}
+            autoComplete="off"
+            spellCheck={false}
+            // A pasted link is normalised for us, so allow room for one.
+            maxLength={64}
+            returnKeyType="done"
+            onSubmitEditing={() => { if (inputLooksValid) handleApplyCode(); }}
+            editable={!applyingCode}
+            accessibilityLabel="Referral code"
+          />
+          <TouchableOpacity
+            style={[styles.applyButton, !inputLooksValid && styles.applyButtonDisabled]}
+            onPress={handleApplyCode}
+            disabled={applyingCode || !inputLooksValid}
+            accessibilityRole="button"
+            accessibilityLabel="Apply referral code"
+          >
+            {applyingCode
+              ? <ActivityIndicator size="small" color={colors.white} />
+              : <Text style={styles.applyButtonText}>Apply</Text>}
+          </TouchableOpacity>
+        </View>
+        {codeInput.trim().length > 0 && !inputLooksValid && (
+          <Text style={styles.inputHelp}>Codes look like QM-AB2CD3 — you can paste the whole link too.</Text>
+        )}
+      </Surface>
+    );
+  };
 
   // ════════════════════════════════════════
   // AFFILIATE SCREEN
@@ -261,185 +451,140 @@ export function ReferralScreen() {
   if (referralInfo?.isAffiliate) {
     return (
       <View style={styles.container}>
-        {/* Tab Switcher - hidden for now
-        <View style={styles.tabBar}>
-          <TouchableOpacity
-            style={[styles.tab, activeTab === 'qr' && styles.tabActive]}
-            onPress={() => setActiveTab('qr')}
-          >
-            <MaterialCommunityIcons name="qrcode" size={20} color={activeTab === 'qr' ? colors.white : colors.onSurface} />
-            <Text style={[styles.tabText, activeTab === 'qr' && styles.tabTextActive]}>QR Code</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.tab, activeTab === 'dashboard' && styles.tabActive]}
-            onPress={() => setActiveTab('dashboard')}
-          >
-            <MaterialCommunityIcons name="chart-line" size={20} color={activeTab === 'dashboard' ? colors.white : colors.onSurface} />
-            <Text style={[styles.tabText, activeTab === 'dashboard' && styles.tabTextActive]}>Dashboard</Text>
-          </TouchableOpacity>
-        </View>
-        */}
-
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={[styles.scrollContent, activeTab === 'qr' && styles.scrollContentGrow]}>
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={styles.scrollContent}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={colors.primary} />
+          }
+        >
           <WebContainer>
-            {activeTab === 'qr' ? (
+            {referralCode ? (
               <>
-                {referralInfo.referralCode ? (
-                  <>
-                    {/* Logo + QR hero card */}
-                    <Surface style={styles.adQrCard}>
-                      <Image
-                        source={require('../../../assets/logo-scaled.png')}
-                        style={styles.adLogo}
-                        resizeMode="contain"
-                      />
+                {renderQrCard(null)}
+                {renderFeaturePills()}
 
-                      <View style={styles.qrContainer}>
-                        <QRCode value={referralLink} size={240} backgroundColor="#ffffff" color="#000000" />
-                      </View>
+                {/* ── Your earnings ── */}
+                <Surface style={styles.card}>
+                  <Title style={styles.sectionTitle}>Your Earnings</Title>
+                  <View style={styles.earningsGrid}>
+                    <View style={styles.earningBox}>
+                      <Text style={[styles.earningValue, { color: colors.success }]}>
+                        {formatCurrency(referralInfo.totalEarnings)}
+                      </Text>
+                      <Text style={styles.earningLabel}>Earned</Text>
+                    </View>
+                    <View style={styles.earningBox}>
+                      <Text style={[styles.earningValue, { color: colors.secondary }]}>
+                        {formatCurrency(referralInfo.pendingEarnings)}
+                      </Text>
+                      <Text style={styles.earningLabel}>Awaiting Payout</Text>
+                    </View>
+                    <View style={styles.earningBox}>
+                      <Text style={[styles.earningValue, { color: colors.primary }]}>
+                        {formatCurrency(referralInfo.paidEarnings)}
+                      </Text>
+                      <Text style={styles.earningLabel}>Paid Out</Text>
+                    </View>
+                  </View>
 
-                      <Text style={styles.adScanText}>Scan to download QuoteMate</Text>
-
-                      <View style={styles.buttonRow}>
-                        <TouchableOpacity style={styles.shareButton} onPress={handleShare}>
-                          <MaterialCommunityIcons name="share-variant" size={20} color={colors.white} />
-                          <Text style={styles.shareButtonText}>Share Link</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          style={styles.codeToggleButton}
-                          onPress={() => { handleCopyCode(); setShowCode(true); }}
-                        >
-                          <MaterialCommunityIcons
-                            name={copied ? 'check' : 'content-copy'} size={20}
-                            color={copied ? colors.success : colors.primary}
-                          />
-                          <Text style={[styles.codeToggleText, copied && { color: colors.success }]}>
-                            {copied ? 'Copied!' : 'Code'}
+                  <View style={styles.affiliateStatsRow}>
+                    <View style={styles.affiliateStatItem}>
+                      <Text style={styles.affiliateStatValue}>{referralInfo.totalReferrals}</Text>
+                      <Text style={styles.affiliateStatLabel}>Signups</Text>
+                    </View>
+                    <View style={styles.affiliateStatDivider} />
+                    <View style={styles.affiliateStatItem}>
+                      <Text style={styles.affiliateStatValue}>{referralInfo.convertedReferrals}</Text>
+                      <Text style={styles.affiliateStatLabel}>Subscribed</Text>
+                    </View>
+                    {commissionPercent !== null && (
+                      <>
+                        <View style={styles.affiliateStatDivider} />
+                        <View style={styles.affiliateStatItem}>
+                          <Text style={[styles.affiliateStatValue, { color: colors.primary }]}>
+                            {commissionPercent}%
                           </Text>
-                        </TouchableOpacity>
-                      </View>
-
-                      {showCode && (
-                        <View style={styles.codeBox}>
-                          <Text style={styles.codeText}>{referralInfo.referralCode}</Text>
+                          <Text style={styles.affiliateStatLabel}>Your Cut</Text>
                         </View>
-                      )}
-                    </Surface>
+                      </>
+                    )}
+                  </View>
 
-                    {/* Compact feature pills */}
-                    <View style={styles.adFeaturePills}>
-                      {[
-                        { icon: 'robot' as const, label: 'AI-Powered' },
-                        { icon: 'currency-usd' as const, label: 'Live Pricing' },
-                        { icon: 'file-document-outline' as const, label: 'GST Ready' },
-                        { icon: 'wifi-off' as const, label: 'Offline' },
-                      ].map((feature, index) => (
-                        <View key={index} style={styles.adFeaturePill}>
-                          <MaterialCommunityIcons name={feature.icon} size={14} color={colors.primary} />
-                          <Text style={styles.adFeaturePillText}>{feature.label}</Text>
-                        </View>
-                      ))}
-                    </View>
+                  {referralInfo.lastPayoutAt && (
+                    <Text style={styles.payoutNote}>
+                      Last payout {new Date(referralInfo.lastPayoutAt).toLocaleDateString('en-AU', {
+                        day: 'numeric', month: 'short', year: 'numeric',
+                      })}
+                    </Text>
+                  )}
+                </Surface>
 
-                    <TouchableOpacity
-                      style={styles.adWhatsappButton}
-                      onPress={() => Linking.openURL('https://api.whatsapp.com/send/?phone=61480232922&text=Hey%20mate%21%20Got%20some%20feedback%20from%20a%20user%20about%20QuoteMate%3A%20&type=phone_number&app_absent=0')}
-                    >
-                      <MaterialCommunityIcons name="whatsapp" size={20} color="#064E3B" />
-                      <Text style={styles.whatsappButtonText}>Got Feedback? Flick Me a Message</Text>
-                    </TouchableOpacity>
-                  </>
-                ) : renderGenerateCode()}
-              </>
-            ) : (
-              <>
-                {/* ── Dashboard Tab ── */}
-
-                {/* Your Bag */}
-                {referralInfo.referralCode && (
+                {/* ── How the commission works ── */}
+                {commissionPercent !== null && (
                   <Surface style={styles.card}>
-                    <Title style={styles.sectionTitle}>Your Bag</Title>
-                    <View style={styles.earningsGrid}>
-                      <View style={styles.earningBox}>
-                        <Text style={[styles.earningValue, { color: colors.success }]}>
-                          {formatCurrency(referralInfo.totalEarnings)}
-                        </Text>
-                        <Text style={styles.earningLabel}>Earned</Text>
+                    <Title style={styles.sectionTitle}>How Your Commission Works</Title>
+                    <Text style={styles.gameplanIntro}>
+                      You earn {commissionPercent}% of the net revenue on every subscription payment
+                      from someone who signed up with your code — for as long as they stay
+                      subscribed. Net revenue is what&apos;s left after the app store or card
+                      processor takes their cut, which is why the amount differs by platform.
+                    </Text>
+
+                    <View style={styles.rateRow}>
+                      <View style={styles.rateItem}>
+                        <MaterialCommunityIcons name="apple" size={18} color={colors.onSurface} />
+                        <Text style={styles.rateLabel}>App Store</Text>
+                        <Text style={styles.rateValue}>{formatCurrency(perUserIos)}/mo</Text>
                       </View>
-                      <View style={styles.earningBox}>
-                        <Text style={[styles.earningValue, { color: colors.secondary }]}>
-                          {formatCurrency(referralInfo.pendingEarnings)}
-                        </Text>
-                        <Text style={styles.earningLabel}>Incoming</Text>
-                      </View>
-                      <View style={styles.earningBox}>
-                        <Text style={[styles.earningValue, { color: colors.primary }]}>
-                          {formatCurrency(referralInfo.paidEarnings)}
-                        </Text>
-                        <Text style={styles.earningLabel}>Cashed Out</Text>
+                      <View style={styles.rateItem}>
+                        <MaterialCommunityIcons name="web" size={18} color={colors.onSurface} />
+                        <Text style={styles.rateLabel}>Web</Text>
+                        <Text style={styles.rateValue}>{formatCurrency(perUserWeb)}/mo</Text>
                       </View>
                     </View>
-
-                    <View style={styles.affiliateStatsRow}>
-                      <View style={styles.affiliateStatItem}>
-                        <Text style={styles.affiliateStatValue}>{referralInfo.totalReferrals}</Text>
-                        <Text style={styles.affiliateStatLabel}>Signups</Text>
-                      </View>
-                      <View style={styles.affiliateStatDivider} />
-                      <View style={styles.affiliateStatItem}>
-                        <Text style={styles.affiliateStatValue}>{referralInfo.convertedReferrals}</Text>
-                        <Text style={styles.affiliateStatLabel}>Paying</Text>
-                      </View>
-                      <View style={styles.affiliateStatDivider} />
-                      <View style={styles.affiliateStatItem}>
-                        <Text style={[styles.affiliateStatValue, { color: colors.primary }]}>{commissionPercent}%</Text>
-                        <Text style={styles.affiliateStatLabel}>Your Cut</Text>
-                      </View>
-                    </View>
-
+                    <Text style={styles.disclaimer}>
+                      Per subscriber on the $49/month plan. Commission is paid by bank transfer
+                      once a payment has settled and is not refunded.
+                    </Text>
                   </Surface>
                 )}
 
-                {/* Potential Earnings Graph */}
-                <Surface style={styles.card}>
-                  <Title style={styles.sectionTitle}>What You Could Be Making</Title>
-                  <Text style={styles.projectionSubtext}>Monthly recurring income per active Pro user</Text>
-
-                  <View style={styles.chartContainer}>
-                    {projectionData.map((item) => {
-                      const amount = item.users * avgCommissionPerUser;
-                      const barHeight = Math.max(8, (amount / maxProjection) * 140);
-                      return (
-                        <View key={item.users} style={styles.chartBarWrapper}>
-                          <Text style={styles.chartBarAmount}>{formatCurrency(amount)}</Text>
-                          <View style={[styles.chartBar, { height: barHeight }]} />
-                          <Text style={styles.chartBarLabel}>{item.label}</Text>
-                        </View>
-                      );
-                    })}
-                  </View>
-                  <Text style={styles.chartFooter}>users</Text>
-
-                  <View style={styles.projectionHighlight}>
-                    <Text style={styles.projectionHighlightText}>
-                      50 users = <Text style={{ color: colors.success, fontWeight: '800' }}>{formatCurrency(50 * avgCommissionPerUser)}/mo</Text> hitting your account.
+                {/* ── Illustrative projection ── */}
+                {projection.length > 0 && (
+                  <Surface style={styles.card}>
+                    <Title style={styles.sectionTitle}>Example Monthly Earnings</Title>
+                    <Text style={styles.projectionSubtext}>
+                      An illustration only — based on your {commissionPercent}% rate at App Store
+                      fees. Actual earnings depend entirely on how many people subscribe and stay
+                      subscribed.
                     </Text>
-                    <Text style={styles.projectionEmphasis}>Every. Single. Month.</Text>
-                  </View>
-                </Surface>
 
-                {/* The Game Plan */}
+                    <View style={styles.chartContainer}>
+                      {projection.map((item) => {
+                        const barHeight = maxProjection > 0
+                          ? Math.max(8, (item.amountCents / maxProjection) * 140)
+                          : 8;
+                        return (
+                          <View key={item.users} style={styles.chartBarWrapper}>
+                            <Text style={styles.chartBarAmount}>{formatCurrency(item.amountCents)}</Text>
+                            <View style={[styles.chartBar, { height: barHeight }]} />
+                            <Text style={styles.chartBarLabel}>{item.users}</Text>
+                          </View>
+                        );
+                      })}
+                    </View>
+                    <Text style={styles.chartFooter}>active subscribers</Text>
+                  </Surface>
+                )}
+
+                {/* ── Sharing tips ── */}
                 <Surface style={styles.card}>
-                  <Title style={styles.sectionTitle}>The Game Plan</Title>
-                  <Text style={styles.gameplanIntro}>
-                    Here's the deal — you're earning {commissionPercent}% on every subscription payment from people you bring in. Not just once. Every month they stay subscribed, you get paid. That's passive income, legend.
-                  </Text>
-
+                  <Title style={styles.sectionTitle}>Getting the Word Out</Title>
                   {[
-                    { icon: 'qrcode-scan' as const, title: 'Flash the QR', text: 'At the pub, on site, at Bunnings — anywhere you bump into a tradie. Takes 2 seconds.' },
-                    { icon: 'cellphone-play' as const, title: 'Give them a quick demo', text: 'Open the app, show them how fast they can bang out a quote. That\'s the hook — they\'ll be sold.' },
-                    { icon: 'message-text' as const, title: 'Feedback is gold', text: 'If they want something added or changed, flick me a message straight away. Seriously — this is how I make the app better and keep people subscribed. Every bit of feedback helps us all earn more.', whatsapp: true },
-                    { icon: 'cash-register' as const, title: 'Stack that bread', text: 'Every time they pay their monthly sub, your cut lands automatically. More users = more money. Simple.' },
+                    { icon: 'qrcode-scan' as const, title: 'Show the QR code', text: 'On site, at the supplier, at trade nights — it takes a couple of seconds to scan.' },
+                    { icon: 'cellphone-play' as const, title: 'Give them a quick demo', text: 'Open the app and show how fast a quote comes together. That does more than any pitch.' },
+                    { icon: 'account-group' as const, title: 'Trade groups', text: 'A genuine recommendation in a trade group lands far better than an ad. Follow each group\'s rules on promotion.' },
                   ].map((item, index) => (
                     <View key={index} style={styles.gameplanStep}>
                       <View style={styles.gameplanIcon}>
@@ -448,62 +593,64 @@ export function ReferralScreen() {
                       <View style={styles.gameplanContent}>
                         <Text style={styles.gameplanStepTitle}>{item.title}</Text>
                         <Text style={styles.gameplanStepText}>{item.text}</Text>
-                        {'whatsapp' in item && item.whatsapp && (
-                          <TouchableOpacity
-                            style={styles.whatsappButton}
-                            onPress={() => Linking.openURL('https://api.whatsapp.com/send/?phone=61480232922&text=Hey%20mate%21%20Got%20some%20feedback%20from%20a%20user%20about%20QuoteMate%3A%20&type=phone_number&app_absent=0')}
-                          >
-                            <MaterialCommunityIcons name="whatsapp" size={20} color="#064E3B" />
-                            <Text style={styles.whatsappButtonText}>Message Me on WhatsApp</Text>
-                          </TouchableOpacity>
-                        )}
                       </View>
                     </View>
                   ))}
                 </Surface>
 
-                {/* Tips */}
+                {/* ── Recent earnings ── */}
                 <Surface style={styles.card}>
-                  <Title style={styles.sectionTitle}>Few Tips</Title>
-                  {[
-                    'Facebook trade groups are goldmines — one genuine post in a 10K group can land you heaps of signups',
-                    'Don\'t sound like an ad. Just be a bloke recommending something you rate',
-                    'Tradies talk to other tradies on site every day — one convo at smoko can snowball into 5 signups',
-                    'SEND ME FEEDBACK. If someone says "I wish it did X" — message me. I\'m building this thing non-stop and the faster I hear what people want, the faster I ship it. That keeps them subscribed which keeps us both earning.',
-                  ].map((tip, index) => (
-                    <View key={index} style={styles.tipRow}>
-                      <MaterialCommunityIcons name="lightning-bolt" size={18} color={colors.secondary} />
-                      <Text style={styles.tipText}>{tip}</Text>
-                    </View>
-                  ))}
-                </Surface>
-
-                {/* Recent Earnings */}
-                {earnings.length > 0 && (
-                  <Surface style={styles.card}>
-                    <Title style={styles.sectionTitle}>Recent Earnings</Title>
-                    {loadingEarnings ? (
-                      <ActivityIndicator size="small" color={colors.primary} />
-                    ) : (
-                      earnings.slice(0, 15).map((earning) => (
-                        <View key={earning.id} style={styles.earningRow}>
-                          <View style={styles.earningRowLeft}>
-                            <MaterialCommunityIcons name={getPlatformIcon(earning.platform)} size={20} color={colors.onSurface} />
-                            <View style={styles.earningRowInfo}>
-                              <Text style={styles.earningRowEmail}>{earning.referredUserEmail}</Text>
-                              <Text style={styles.earningRowPeriod}>{earning.billingPeriod}</Text>
-                            </View>
-                          </View>
-                          <View style={styles.earningRowRight}>
-                            <Text style={styles.earningRowAmount}>{formatCurrency(earning.commissionAmount)}</Text>
-                            <Text style={[styles.earningRowStatus, { color: getStatusColor(earning.status) }]}>{earning.status}</Text>
+                  <Title style={styles.sectionTitle}>Recent Earnings</Title>
+                  {loadingEarnings ? (
+                    <ActivityIndicator size="small" color={colors.primary} />
+                  ) : earnings.length === 0 ? (
+                    <Text style={styles.hint}>
+                      No commission yet. Earnings appear here once someone who used your code
+                      completes a subscription payment.
+                    </Text>
+                  ) : (
+                    earnings.slice(0, 15).map((earning) => (
+                      <View key={earning.id} style={styles.earningRow}>
+                        <View style={styles.earningRowLeft}>
+                          <MaterialCommunityIcons name={getPlatformIcon(earning.platform)} size={20} color={colors.onSurface} />
+                          <View style={styles.earningRowInfo}>
+                            <Text style={styles.earningRowEmail}>{earning.referredUserEmail}</Text>
+                            <Text style={styles.earningRowPeriod}>{earning.billingPeriod}</Text>
                           </View>
                         </View>
-                      ))
-                    )}
-                  </Surface>
-                )}
+                        <View style={styles.earningRowRight}>
+                          <Text style={styles.earningRowAmount}>{formatCurrency(earning.commissionAmount)}</Text>
+                          <Text style={[styles.earningRowStatus, { color: getStatusColor(earning.status) }]}>
+                            {earning.status}
+                          </Text>
+                        </View>
+                      </View>
+                    ))
+                  )}
+                </Surface>
+
+                {/* Support contact — plain email, no off-platform messaging CTA
+                    on a monetisation screen. */}
+                <TouchableOpacity
+                  style={styles.supportButton}
+                  onPress={() => Linking.openURL(
+                    `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent('QuoteMate affiliate question')}`
+                  )}
+                  accessibilityRole="button"
+                  accessibilityLabel="Email support about the affiliate program"
+                >
+                  <MaterialCommunityIcons name="email-outline" size={20} color={colors.primary} />
+                  <Text style={styles.supportButtonText}>Questions about payouts? Email us</Text>
+                </TouchableOpacity>
               </>
+            ) : (
+              <Surface style={styles.card}>
+                <Title style={styles.sectionTitle}>Get Your Affiliate Code</Title>
+                <Text style={styles.hint}>
+                  Create your code to start sharing QuoteMate and earning commission.
+                </Text>
+                {renderGenerateCode()}
+              </Surface>
             )}
           </WebContainer>
         </ScrollView>
@@ -524,73 +671,47 @@ export function ReferralScreen() {
 
   return (
     <View style={styles.container}>
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.scrollContent}>
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={styles.scrollContent}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={colors.primary} />
+        }
+      >
         <WebContainer>
-          {/* QR Hero Card */}
-          {referralInfo?.referralCode ? (
-            <Surface style={styles.adQrCard}>
-              <Image
-                source={require('../../../assets/logo-scaled.png')}
-                style={styles.adLogo}
-                resizeMode="contain"
-              />
-
-              <View style={styles.qrContainer}>
-                <QRCode value={referralLink} size={240} backgroundColor="#ffffff" color="#000000" />
-              </View>
-
-              <Text style={styles.adScanText}>Scan to download QuoteMate</Text>
-
-              <View style={styles.regularQrSubtext}>
-                <MaterialCommunityIcons name="account-plus" size={18} color={colors.primary} />
-                <Text style={styles.regularQrSubtextText}>
-                  Help your mates discover QuoteMate!
-                </Text>
-              </View>
-
-              <TouchableOpacity style={[styles.shareButton, { alignSelf: 'center' }]} onPress={handleShare}>
-                <MaterialCommunityIcons name="share-variant" size={20} color={colors.white} />
-                <Text style={styles.shareButtonText}>Share with Mates</Text>
-              </TouchableOpacity>
-            </Surface>
+          {referralCode ? (
+            <>
+              {renderQrCard(
+                <View style={styles.regularQrSubtext}>
+                  <MaterialCommunityIcons name="account-plus" size={18} color={colors.primary} />
+                  <Text style={styles.regularQrSubtextText}>
+                    Help your mates find QuoteMate
+                  </Text>
+                </View>
+              )}
+              {renderFeaturePills()}
+            </>
           ) : (
             <Surface style={styles.heroCard}>
               <MaterialCommunityIcons name="account-plus" size={48} color={colors.primary} />
-              <Title style={styles.heroTitle}>Refer a Friend</Title>
+              <Title style={styles.heroTitle}>Refer a Mate</Title>
               <Text style={styles.heroText}>
-                Share your referral code with mates and help them discover QuoteMate
-                for creating professional trade quotes.
+                Create your referral code and share QuoteMate with other tradies.
               </Text>
               {renderGenerateCode()}
             </Surface>
           )}
 
-          {/* Feature pills */}
-          {referralInfo?.referralCode && (
-            <View style={styles.adFeaturePills}>
-              {[
-                { icon: 'robot' as const, label: 'AI-Powered' },
-                { icon: 'currency-usd' as const, label: 'Live Pricing' },
-                { icon: 'file-document-outline' as const, label: 'GST Ready' },
-                { icon: 'wifi-off' as const, label: 'Offline' },
-              ].map((feature, index) => (
-                <View key={index} style={styles.adFeaturePill}>
-                  <MaterialCommunityIcons name={feature.icon} size={14} color={colors.primary} />
-                  <Text style={styles.adFeaturePillText}>{feature.label}</Text>
-                </View>
-              ))}
-            </View>
-          )}
-
           {renderApplyCode()}
 
-          {/* How it works */}
+          {/* How it works — states plainly that a code is attribution only, so
+              nobody expects a discount that does not exist. */}
           <Surface style={styles.card}>
             <Title style={styles.sectionTitle}>How It Works</Title>
             {[
-              { step: '1', text: 'Share your unique referral code with friends' },
-              { step: '2', text: 'They sign up and enter your code' },
-              { step: '3', text: 'Track how many mates you\'ve referred' },
+              { step: '1', text: 'Share your code or QR with other tradies' },
+              { step: '2', text: 'They download QuoteMate and enter your code' },
+              { step: '3', text: 'You can see how many mates you\'ve referred here' },
             ].map((item) => (
               <View key={item.step} style={styles.stepRow}>
                 <View style={styles.stepCircle}>
@@ -599,7 +720,20 @@ export function ReferralScreen() {
                 <Text style={styles.stepText}>{item.text}</Text>
               </View>
             ))}
+            <Text style={styles.disclaimer}>
+              Referral codes are for keeping track of who told who about QuoteMate. They
+              don&apos;t change the price of a subscription or add anything to your plan.
+            </Text>
           </Surface>
+
+          {referralCode && (
+            <View style={styles.statsRow}>
+              <View style={styles.statItem}>
+                <Text style={styles.statValue}>{referralInfo?.totalReferrals ?? 0}</Text>
+                <Text style={styles.statLabel}>Mates referred</Text>
+              </View>
+            </View>
+          )}
         </WebContainer>
       </ScrollView>
 
@@ -630,11 +764,6 @@ const styles = StyleSheet.create({
     padding: 16,
     paddingBottom: 32,
   },
-  scrollContentGrow: {
-    flexGrow: 1,
-  },
-
-
 
   // ── Shared ──
   card: {
@@ -657,26 +786,33 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     borderRadius: 10,
     gap: 8,
+    marginTop: 8,
   },
   generateButtonText: {
     fontSize: 16,
     fontWeight: '700',
     color: colors.white,
   },
-  copiedText: {
-    fontSize: 13,
-    color: colors.success,
-    textAlign: 'center',
-    marginTop: 6,
-  },
   hint: {
     fontSize: 14,
     color: colors.onSurface,
     marginBottom: 12,
+    lineHeight: 20,
+  },
+  disclaimer: {
+    fontSize: 12,
+    color: colors.onSurface + 'B0',
+    lineHeight: 18,
+    marginTop: 14,
   },
   inputRow: {
     flexDirection: 'row',
     gap: 10,
+  },
+  inputHelp: {
+    fontSize: 12,
+    color: colors.secondary,
+    marginTop: 8,
   },
   textInput: {
     flex: 1,
@@ -697,6 +833,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
+    minWidth: 88,
   },
   applyButtonDisabled: {
     opacity: 0.5,
@@ -768,6 +905,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-around',
+    backgroundColor: colors.surface,
+    borderRadius: 12,
+    padding: 20,
+    marginBottom: 16,
+    elevation: 2,
   },
   statItem: {
     alignItems: 'center',
@@ -783,45 +925,8 @@ const styles = StyleSheet.create({
     color: colors.onSurface,
     marginTop: 4,
   },
-  statDivider: {
-    width: 1,
-    height: 40,
-    backgroundColor: colors.outline + '30',
-  },
 
-  // ── Tab bar ──
-  tabBar: {
-    flexDirection: 'row',
-    backgroundColor: colors.surface,
-    marginHorizontal: 16,
-    marginTop: 16,
-    borderRadius: 12,
-    padding: 4,
-    elevation: 2,
-  },
-  tab: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 12,
-    borderRadius: 10,
-    gap: 8,
-  },
-  tabActive: {
-    backgroundColor: colors.primary,
-  },
-  tabText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: colors.onSurface,
-  },
-  tabTextActive: {
-    color: colors.white,
-  },
-
-  // ── Affiliate screen ──
-  // ── Ad-style QR tab ──
+  // ── QR hero card ──
   adQrCard: {
     padding: 24,
     marginBottom: 16,
@@ -865,17 +970,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     color: colors.text,
-  },
-  adWhatsappButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#25D366',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 10,
-    marginBottom: 16,
-    gap: 8,
   },
   regularQrSubtext: {
     flexDirection: 'row',
@@ -954,6 +1048,8 @@ const styles = StyleSheet.create({
     color: colors.primary,
     letterSpacing: 2,
   },
+
+  // ── Affiliate earnings ──
   earningsGrid: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -971,6 +1067,7 @@ const styles = StyleSheet.create({
     color: colors.onSurface,
     marginTop: 4,
     fontWeight: '500',
+    textAlign: 'center',
   },
   earningValue: {
     fontSize: 20,
@@ -1005,11 +1102,43 @@ const styles = StyleSheet.create({
     height: 32,
     backgroundColor: colors.outline + '30',
   },
-  // ── Earnings projection chart ──
+  payoutNote: {
+    fontSize: 12,
+    color: colors.onSurface + 'B0',
+    marginTop: 12,
+    textAlign: 'center',
+  },
+
+  // ── Commission rates ──
+  rateRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  rateItem: {
+    flex: 1,
+    backgroundColor: colors.background,
+    borderRadius: 10,
+    padding: 14,
+    alignItems: 'center',
+    gap: 4,
+  },
+  rateLabel: {
+    fontSize: 12,
+    color: colors.onSurface,
+    fontWeight: '500',
+  },
+  rateValue: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: colors.success,
+  },
+
+  // ── Projection chart ──
   projectionSubtext: {
     fontSize: 13,
     color: colors.onSurface,
     marginBottom: 20,
+    lineHeight: 19,
   },
   chartContainer: {
     flexDirection: 'row',
@@ -1047,34 +1176,13 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 4,
   },
-  projectionHighlight: {
-    backgroundColor: colors.success + '15',
-    borderRadius: 10,
-    padding: 14,
-    marginTop: 16,
-  },
-  projectionHighlightText: {
-    fontSize: 14,
-    color: colors.text,
-    textAlign: 'center',
-    lineHeight: 22,
-    fontWeight: '500',
-  },
-  projectionEmphasis: {
-    fontSize: 22,
-    fontWeight: '900',
-    color: colors.success,
-    textAlign: 'center',
-    marginTop: 6,
-    letterSpacing: 1,
-  },
 
-  // ── Game plan ──
+  // ── Sharing tips ──
   gameplanIntro: {
-    fontSize: 15,
+    fontSize: 14,
     color: colors.onSurface,
-    lineHeight: 24,
-    marginBottom: 20,
+    lineHeight: 21,
+    marginBottom: 16,
   },
   gameplanStep: {
     flexDirection: 'row',
@@ -1104,36 +1212,22 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
 
-  whatsappButton: {
+  // ── Support ──
+  supportButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#25D366',
-    paddingVertical: 10,
+    backgroundColor: colors.primary + '15',
+    paddingVertical: 14,
     paddingHorizontal: 16,
-    borderRadius: 8,
-    marginTop: 10,
+    borderRadius: 10,
+    marginBottom: 16,
     gap: 8,
-    alignSelf: 'flex-start',
   },
-  whatsappButtonText: {
+  supportButtonText: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#064E3B',
-  },
-
-  // ── Pro tips ──
-  tipRow: {
-    flexDirection: 'row',
-    gap: 10,
-    marginBottom: 14,
-    alignItems: 'flex-start',
-  },
-  tipText: {
-    fontSize: 14,
-    color: colors.onSurface,
-    lineHeight: 20,
-    flex: 1,
+    color: colors.primary,
   },
 
   // ── Earnings list ──
