@@ -142,7 +142,19 @@ export const printMediaCSS = `
     display: flex;
     align-items: center;
     gap: 7px;
-    min-height: 38px;
+    min-height: 46px;
+  }
+  /* Accreditation badges usually bake their own text into the artwork (the ARC
+     badge carries "AUTHORISED" plus the licence number), so a 64x38 hard box
+     rendered that text unreadable. Cap on height only and let width follow the
+     source ratio — no squashing, no stretching. Beats the inline width/height
+     the callers emit for older clients. */
+  .business-credential .credential-logo {
+    width: auto !important;
+    height: auto !important;
+    max-width: 132px !important;
+    max-height: 46px !important;
+    object-fit: contain;
   }
   .business-credential-copy {
     color: inherit;
@@ -877,6 +889,11 @@ const tradesmanCSS = `
     align-items: center;
     gap: 18px;
   }
+  /* No frame around the logo. The header is already on light paper, so the
+     border + white fill added nothing but a visible box — on a
+     background-removed PNG it reads as a generic "logo block" dropped in the
+     corner instead of the business's own branding. Bold keeps its plate
+     because its header is dark and a dark logo would otherwise disappear. */
   .logo {
     width: auto;
     max-width: 220px;
@@ -884,9 +901,6 @@ const tradesmanCSS = `
     max-height: 76px;
     object-fit: contain;
     flex-shrink: 0;
-    border: 1px solid #D6D3D1;
-    padding: 4px;
-    background-color: #FFFFFF;
     box-sizing: border-box;
   }
   .header-text {

@@ -285,16 +285,14 @@ class FirestoreService {
     try {
       const settingsRef = doc(db, 'users', userId, 'settings', 'business');
 
-      // Remove undefined values as Firestore doesn't support them
-      const cleanedSettings = Object.entries(settings).reduce((acc, [key, value]) => {
-        if (value !== undefined) {
-          acc[key] = value;
-        }
-        return acc;
-      }, {} as any);
-
+      // Firestore rejects undefined at ANY depth, so this must recurse.
+      // A shallow strip left nested undefined in place and threw: a credential
+      // saved without a licence number (or without a badge) carries
+      // `number: undefined` / `logoUri: undefined`, which aborted the whole
+      // business-settings write. The badge was already in Storage by then, so
+      // users saw an upload error with a half-applied save.
       await setDoc(settingsRef, {
-        ...cleanedSettings,
+        ...stripUndefined(settings),
         syncedAt: new Date().toISOString(),
       });
     } catch (error) {

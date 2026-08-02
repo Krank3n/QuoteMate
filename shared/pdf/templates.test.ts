@@ -6,6 +6,9 @@
  *     Preview PDF froze. printMediaCSS must stay free of remote resources.
  *  2. The compact-header logo cap dropped to 52px, making uploaded logos
  *     unreadably small no matter how large the source image was.
+ *  3. Tradesman framed the logo in a border + white fill. On a
+ *     background-removed PNG that reads as a generic "logo block" bolted into
+ *     the corner rather than the business's own branding.
  */
 import { describe, expect, it } from 'vitest';
 import { printMediaCSS, getTemplateCSS } from './templates';
@@ -35,6 +38,20 @@ describe('template logo caps', () => {
       expect(match).toBeTruthy();
       const maxHeight = Number(match![0].match(/max-height:\s*(\d+)px/)?.[1]);
       expect(maxHeight).toBeGreaterThanOrEqual(72);
+    },
+  );
+});
+
+describe('logo framing on light-header templates', () => {
+  // Bold is excluded on purpose: its header is dark (#1F2937), so the
+  // translucent plate behind the logo is what keeps a dark logo visible.
+  it.each(['professional', 'clean', 'tradesman'] as const)(
+    '%s renders the logo unframed, not as a boxed-in block',
+    (templateId) => {
+      const css = getTemplateCSS(templateId);
+      const rule = css.match(/\.logo \{[^}]*\}/s)![0];
+      expect(rule).not.toMatch(/(^|[^-])border:\s*(?!none)/);
+      expect(rule).not.toMatch(/background-color:\s*(?!transparent)/);
     },
   );
 });
