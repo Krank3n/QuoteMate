@@ -2293,17 +2293,23 @@ const DISCOVERY_DEADLINE_MS = 420_000;
 // Internal discovery — same logic as adminLeadDiscovery but no auth context.
 // Returns IDs of leads created so the scheduler can chain enrichment + gen.
 /**
- * Build the full trade × location grid in a stable order. Locations vary
- * fastest so consecutive cells spread across the country rather than grinding
- * one state through every trade.
+ * Build the full location × trade grid in a stable order.
+ *
+ * TRADE varies fastest, location slowest. The sweep only consumes a handful of
+ * cells a day (the 2026-08-03 run hit its 43-lead target in 4), so whichever
+ * axis is outermost stays fixed for weeks. Holding location fixed costs
+ * nothing — a tradie in Geelong is worth the same as one in Perth — whereas
+ * holding trade fixed would mean a fortnight of nothing but fencers before the
+ * first plumber, and with 0 replies so far the open question is which trade
+ * bites, not which postcode.
  */
 export function buildDiscoveryGrid(
   trades: readonly Trade[],
   suburbs: readonly string[],
 ): Array<{ trade: Trade; suburb: string }> {
   const grid: Array<{ trade: Trade; suburb: string }> = [];
-  for (const trade of trades) {
-    for (const suburb of suburbs) grid.push({ trade, suburb });
+  for (const suburb of suburbs) {
+    for (const trade of trades) grid.push({ trade, suburb });
   }
   return grid;
 }

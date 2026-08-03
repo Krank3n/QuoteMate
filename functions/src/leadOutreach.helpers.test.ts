@@ -314,10 +314,13 @@ describe('buildDiscoveryGrid', () => {
     expect(new Set(grid.map(c => `${c.trade}|${c.suburb}`)).size).toBe(6);
   });
 
-  it('varies location fastest so consecutive cells span the country', () => {
-    const grid = buildDiscoveryGrid(['fencer'], ['Sydney NSW', 'Perth WA']);
-    expect(grid[0].suburb).toBe('Sydney NSW');
-    expect(grid[1].suburb).toBe('Perth WA');
+  it('varies trade fastest so a short daily sweep samples many trades', () => {
+    // Location outermost: the sweep consumes only a few cells a day, and a
+    // fortnight of nothing but fencers would answer no question worth asking.
+    const grid = buildDiscoveryGrid(['fencer', 'plumber', 'roofer'], ['Sydney NSW', 'Perth WA']);
+    expect(grid.slice(0, 3).map(c => c.trade)).toEqual(['fencer', 'plumber', 'roofer']);
+    expect(grid.slice(0, 3).every(c => c.suburb === 'Sydney NSW')).toBe(true);
+    expect(grid[3]).toEqual({ trade: 'fencer', suburb: 'Perth WA' });
   });
 
   it('is empty when either axis is empty', () => {
