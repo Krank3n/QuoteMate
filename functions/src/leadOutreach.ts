@@ -2258,7 +2258,7 @@ export const adminUpdateLeadConfig = functions.https.onCall(async (data, context
 });
 
 // ============================================================
-// weeklyLeadDiscovery — auto-fill the queue every Monday morning
+// dailyLeadDiscovery — national Places sweep, rotating across the grid
 // ============================================================
 //
 // Runs daily. Reads `leadOutreachConfig/discovery`, pulls fresh Google Maps
