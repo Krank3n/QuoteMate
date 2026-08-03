@@ -94,6 +94,48 @@ describe('deriveSubFields billing rollup', () => {
   });
 });
 
+describe('deriveSubFields trial dates (admin CRM read "trial ended" off currentPeriodEnd)', () => {
+  const NOW = Date.parse('2026-08-03T00:00:00Z');
+  const DAY = 24 * 60 * 60 * 1000;
+  // What a trialing user's doc actually holds: currentPeriodEnd is the free-quote
+  // counter's calendar month end, which sits in the PAST for the first days of
+  // every month and has nothing to do with the trial.
+  const trialingUser = {
+    isPro: false,
+    trialStartedAt: new Date(NOW - 4 * DAY).toISOString(),
+    currentPeriodStart: '2026-07-01T00:00:00.000Z',
+    currentPeriodEnd: '2026-07-31T13:59:59.000Z',
+  };
+
+  it('reports a trial end 14 days after the start, not the quota month end', () => {
+    const f = deriveSubFields(trialingUser, NOW);
+    expect(f.status).toBe('trialing');
+    expect(f.trialEndsAt).toBe(Date.parse(trialingUser.trialStartedAt) + TRIAL_MS);
+    expect(f.trialEndsAt!).toBeGreaterThan(NOW);
+    expect(f.currentPeriodEnd!).toBeLessThan(NOW);
+  });
+
+  it('never reports a trialing user as already ended', () => {
+    const f = deriveSubFields(trialingUser, NOW);
+    expect(f.trialDaysRemaining).toBe(10);
+    expect(Math.ceil((f.trialEndsAt! - NOW) / DAY)).toBeGreaterThan(0);
+  });
+
+  it('dates an expired trial from its start, not from the month boundary', () => {
+    const f = deriveSubFields(
+      { ...trialingUser, trialStartedAt: new Date(NOW - 20 * DAY).toISOString() },
+      NOW,
+    );
+    expect(f.status).toBe('trial_expired');
+    expect(Math.floor((NOW - f.trialEndsAt!) / DAY)).toBe(6);
+  });
+
+  it('leaves trialEndsAt null when no trial ever started', () => {
+    expect(deriveSubFields({ isPro: false, currentPeriodEnd: '2026-07-31T13:59:59.000Z' }, NOW).trialEndsAt).toBeNull();
+    expect(deriveSubFields(undefined, NOW).trialEndsAt).toBeNull();
+  });
+});
+
 describe('resolveServerPlan (PAY-02 MAJOR-1 — client plan string is not trusted)', () => {
   const NOW = Date.parse('2026-07-19T00:00:00Z');
   const inTrial = new Date(NOW - 3 * 24 * 60 * 60 * 1000).toISOString();

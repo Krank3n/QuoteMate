@@ -129,6 +129,13 @@ export interface SubFields {
   validatedAt: number | null;
   cancelAt: number | null;
   trialStartedAt: number | null;
+  /**
+   * When the 14-day trial runs (or ran) out. NOT currentPeriodEnd — for a
+   * non-Pro user that field is the calendar month end of the free-quote
+   * counter, so reading it as a trial date makes every trial look like it
+   * ended on the 1st of the month.
+   */
+  trialEndsAt: number | null;
   trialDaysRemaining: number | null;
   billed: boolean;
   interval: 'yearly' | 'monthly' | null;
@@ -189,6 +196,7 @@ export function deriveSubFields(sub: any | undefined | null, now: number = Date.
     validatedAt: ts(sub?.validatedAt),
     cancelAt: canceling ? ts(sub?.currentPeriodEnd) : null,
     trialStartedAt,
+    trialEndsAt: trialStartedAt !== null ? trialStartedAt + TRIAL_MS : null,
     trialDaysRemaining,
     billed: isBilledSub(sub),
     interval: isBilledSub(sub) ? subInterval(sub) : null,
