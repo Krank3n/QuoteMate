@@ -652,6 +652,35 @@ export const adminAddUserNote = functions.https.onCall(async (data, context) => 
   return { ok: true, id: ref.id };
 });
 
+/**
+ * Undo for a note that shouldn't have been written — chiefly a mis-tick on the
+ * dashboard action list, where one click logs "Contacted" against someone.
+ * The note is removed so the follow-up queue stops treating them as handled;
+ * the audit log keeps the text so nothing is silently erased.
+ */
+export const adminDeleteUserNote = functions.https.onCall(async (data, context) => {
+  const adminUid = requireAdmin(context);
+  const uid = (data?.uid || '').toString();
+  const noteId = (data?.noteId || '').toString();
+  if (!uid || !noteId) throw new functions.https.HttpsError('invalid-argument', 'uid and noteId required');
+
+  const ref = db().doc(`users/${uid}/adminNotes/${noteId}`);
+  const snap = await ref.get();
+  // Already gone (double-tapped undo) is the desired end state, not an error.
+  if (!snap.exists) return { ok: true, alreadyGone: true };
+
+  const note = (snap.data()?.note || '').toString();
+  await ref.delete();
+  await logAdminAction({
+    adminUid,
+    action: 'delete_note',
+    targetType: 'user',
+    targetId: uid,
+    payload: { noteId, deletedText: note.slice(0, 280) },
+  });
+  return { ok: true, alreadyGone: false };
+});
+
 export const adminLogCall = functions.https.onCall(async (data, context) => {
   const adminUid = requireAdmin(context);
   const uid = (data?.uid || '').toString();
