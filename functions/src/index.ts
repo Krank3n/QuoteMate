@@ -66,7 +66,7 @@ export {
   adminAddLeadNote,
   adminMarkLeadReplied,
   brevoInboundWebhook,
-  weeklyLeadDiscovery,
+  dailyLeadDiscovery,
   autoEnrichLeads,
   autoGenerateLeadMessages,
   adminGetDiscoveryConfig,
