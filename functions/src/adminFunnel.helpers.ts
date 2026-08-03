@@ -46,6 +46,89 @@ export interface FunnelUserInput {
   lastActivityAt: number | null;
   /** True iff the user has ≥1 document with stage !== 'draft' (see isActivatingDoc). */
   hasSentDoc: boolean;
+  /**
+   * Furthest point reached in the quote wizard across all their documents —
+   * what turns "60 lost between trial and send" into "lost on the materials
+   * screen". Optional: absent means unknown, which counts as 'none'.
+   */
+  quoteStage?: QuoteStage;
+}
+
+/**
+ * Where a tradie got to in the quote wizard, in screen order. The app stamps
+ * `draftStep` with the screen it will RESUME at, written as they leave each
+ * screen, so the marker names what they were about to do NEXT: 'MaterialsList'
+ * means the customer step is behind them and materials are not.
+ *
+ * 'started' is a saved draft carrying no evidence of a finished screen;
+ * 'none' is a user with no saved document at all — they opened the wizard
+ * (which is what starts the trial) and left before the first save.
+ */
+export type QuoteStage =
+  | 'none'
+  | 'started'
+  | 'job_details'
+  | 'customer'
+  | 'materials'
+  | 'preview'
+  | 'sent';
+
+/** Screen order. Index doubles as the rank used to take a per-user maximum. */
+export const QUOTE_STAGES: QuoteStage[] = [
+  'none',
+  'started',
+  'job_details',
+  'customer',
+  'materials',
+  'preview',
+  'sent',
+];
+
+export function quoteStageRank(stage: QuoteStage | null | undefined): number {
+  const index = QUOTE_STAGES.indexOf((stage || 'none') as QuoteStage);
+  return index < 0 ? 0 : index;
+}
+
+export function maxQuoteStage(a: QuoteStage | null | undefined, b: QuoteStage | null | undefined): QuoteStage {
+  return quoteStageRank(a) >= quoteStageRank(b) ? (a || 'none') : (b || 'none');
+}
+
+/** draftStep (the screen to resume at) → the last step actually completed. */
+const DRAFT_STEP_STAGE: Record<string, QuoteStage> = {
+  Details: 'started',
+  JobDetails: 'started',
+  CustomerDetails: 'job_details',
+  MaterialsList: 'customer',
+  AddMaterial: 'customer',
+  LaborMarkup: 'materials',
+  JobPreview: 'preview',
+};
+
+function hasText(value: unknown): boolean {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+/**
+ * Read the wizard step out of a document's content, for drafts with no
+ * draftStep marker — anything saved before the marker shipped, plus documents
+ * minted outside the wizard. Deliberately conservative: content can only prove
+ * the steps whose output it carries, so this understates rather than inflates.
+ */
+function quoteStageFromContent(doc: any): QuoteStage {
+  const materials = Array.isArray(doc?.materials) ? doc.materials.length : 0;
+  const total = typeof doc?.total === 'number' ? doc.total : 0;
+  if (materials > 0 || total > 0) return 'materials';
+  if (hasText(doc?.customerName) || hasText(doc?.customerEmail) || hasText(doc?.customerPhone)) return 'customer';
+  if (hasText(doc?.job?.description) || hasText(doc?.job?.name)) return 'job_details';
+  return 'started';
+}
+
+/** The furthest wizard step a single document is evidence of. */
+export function quoteStageOfDoc(doc: any | null | undefined): QuoteStage {
+  if (!doc) return 'none';
+  if (isActivatingDoc(doc)) return 'sent';
+  const marked = typeof doc.draftStep === 'string' ? DRAFT_STEP_STAGE[doc.draftStep] : undefined;
+  return marked || quoteStageFromContent(doc);
 }
 
 export interface FunnelActionRow {
@@ -62,6 +145,15 @@ export interface FunnelActionRow {
 export interface FunnelSteps {
   signups: number;
   startedTrial: number;
+  /**
+   * The quote wizard, screen by screen — cumulative reach, so each is a subset
+   * of the one above and a superset of `sentQuote`. This is where the trial →
+   * sent collapse actually happens, and these say on which screen.
+   */
+  describedJob: number;
+  addedCustomer: number;
+  addedMaterials: number;
+  reachedPreview: number;
   sentQuote: number;
   /** Total paying headcount: billed + incident-restored store subs. */
   paying: number;
@@ -198,6 +290,8 @@ export function computeFunnelStats(inputs: FunnelUserInput[], now: number = Date
       // covers trialing, trial_expired AND now-Pro users who converted.
       startedTrial: f.trialStartedAt !== null,
       sentQuote: u.hasSentDoc,
+      // A sent document is proof of the whole wizard, whatever the drafts say.
+      quoteStage: maxQuoteStage(u.quoteStage, u.hasSentDoc ? 'sent' : 'none'),
       // Headcount includes incident-restored store subs (their Apple/Google
       // billing kept running; only the Firestore billing record is missing).
       payingBilled: isBilledSub(u.sub),
@@ -266,20 +360,31 @@ interface UserMarks {
   signupAt: number | null;
   startedTrial: boolean;
   sentQuote: boolean;
+  quoteStage: QuoteStage;
   payingBilled: boolean;
   payingRestored: boolean;
 }
 
-/** Tally a set of already-derived users into the four funnel steps. */
+/** Tally a set of already-derived users into the funnel steps. */
 function aggregateSteps(marks: UserMarks[]): FunnelSteps {
   const signups = marks.length;
   let startedTrial = 0;
+  let describedJob = 0;
+  let addedCustomer = 0;
+  let addedMaterials = 0;
+  let reachedPreview = 0;
   let sentQuote = 0;
   let payingBilled = 0;
   let payingRestored = 0;
 
   for (const m of marks) {
     if (m.startedTrial) startedTrial++;
+    // Cumulative: reaching the preview means every screen before it is done.
+    const rank = quoteStageRank(m.quoteStage);
+    if (rank >= quoteStageRank('job_details')) describedJob++;
+    if (rank >= quoteStageRank('customer')) addedCustomer++;
+    if (rank >= quoteStageRank('materials')) addedMaterials++;
+    if (rank >= quoteStageRank('preview')) reachedPreview++;
     if (m.sentQuote) sentQuote++;
     if (m.payingBilled) payingBilled++;
     else if (m.payingRestored) payingRestored++;
@@ -289,6 +394,10 @@ function aggregateSteps(marks: UserMarks[]): FunnelSteps {
   return {
     signups,
     startedTrial,
+    describedJob,
+    addedCustomer,
+    addedMaterials,
+    reachedPreview,
     sentQuote,
     paying,
     payingBilled,

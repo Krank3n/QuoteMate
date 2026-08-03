@@ -5,6 +5,9 @@ import {
   isActivatingDoc,
   isRecoveredDocId,
   isTestAccount,
+  maxQuoteStage,
+  quoteStageOfDoc,
+  quoteStageRank,
   safeRatio,
   type FunnelUserInput,
 } from './adminFunnel.helpers';
@@ -23,6 +26,7 @@ function user(over: Partial<FunnelUserInput>): FunnelUserInput {
     signupAt: 'signupAt' in over ? (over.signupAt as number | null) : NOW - 10 * DAY,
     lastActivityAt: 'lastActivityAt' in over ? (over.lastActivityAt as number | null) : null,
     hasSentDoc: over.hasSentDoc ?? false,
+    ...(over.quoteStage ? { quoteStage: over.quoteStage } : {}),
   };
 }
 
@@ -250,5 +254,99 @@ describe('signup cohorts — each window is a true cohort, sliced by signupAt', 
     expect(wide.funnel.signups).toBe(all.cohorts['90'].signups);
     expect(wide.funnel.paying).toBe(all.cohorts['90'].paying);
     expect(wide.funnel.sentQuote).toBe(all.cohorts['90'].sentQuote);
+  });
+});
+
+describe('quoteStageOfDoc — which wizard screen a document is evidence of', () => {
+  it('reads draftStep as the screen to RESUME at, so the step before it is done', () => {
+    expect(quoteStageOfDoc({ draftStep: 'Details' })).toBe('started');
+    expect(quoteStageOfDoc({ draftStep: 'CustomerDetails' })).toBe('job_details');
+    expect(quoteStageOfDoc({ draftStep: 'MaterialsList' })).toBe('customer');
+    expect(quoteStageOfDoc({ draftStep: 'AddMaterial' })).toBe('customer');
+    expect(quoteStageOfDoc({ draftStep: 'LaborMarkup' })).toBe('materials');
+    expect(quoteStageOfDoc({ draftStep: 'JobPreview' })).toBe('preview');
+  });
+
+  it('treats a sent document as the whole wizard, marker or not', () => {
+    expect(quoteStageOfDoc({ stage: 'quote_sent' })).toBe('sent');
+    // The draft parked at preview that later went out still reads as sent.
+    expect(quoteStageOfDoc({ stage: 'draft', sentAt: NOW, draftStep: 'JobPreview' })).toBe('sent');
+  });
+
+  it('falls back to content when there is no marker, and never overstates', () => {
+    expect(quoteStageOfDoc({ materials: [{ id: 'm1' }] })).toBe('materials');
+    expect(quoteStageOfDoc({ total: 1200 })).toBe('materials');
+    expect(quoteStageOfDoc({ customerName: 'Jane' })).toBe('customer');
+    expect(quoteStageOfDoc({ customerPhone: '0400000000' })).toBe('customer');
+    expect(quoteStageOfDoc({ job: { description: 'Rear fence, 18m' } })).toBe('job_details');
+    // An empty saved draft proves only that a draft exists.
+    expect(quoteStageOfDoc({ materials: [], total: 0, customerName: '  ' })).toBe('started');
+    expect(quoteStageOfDoc(null)).toBe('none');
+  });
+
+  it('keeps the furthest of several documents', () => {
+    expect(maxQuoteStage('customer', 'preview')).toBe('preview');
+    expect(maxQuoteStage('preview', 'customer')).toBe('preview');
+    expect(maxQuoteStage(undefined, 'started')).toBe('started');
+    expect(maxQuoteStage(undefined, undefined)).toBe('none');
+    expect(quoteStageRank('sent')).toBeGreaterThan(quoteStageRank('preview'));
+  });
+});
+
+describe('wizard steps — where the trial→sent collapse actually happens', () => {
+  const trial = (uid: string, quoteStage: any, hasSentDoc = false) =>
+    user({ uid, sub: { trialStartedAt: iso(NOW - 5 * DAY) }, quoteStage, hasSentDoc });
+
+  const out = computeFunnelStats(
+    [
+      trial('never_saved', 'none'),
+      trial('left_at_customer', 'job_details'),
+      trial('left_at_materials', 'customer'),
+      trial('left_at_labour', 'materials'),
+      trial('parked_at_preview', 'preview'),
+      trial('sent_it', 'sent', true),
+    ],
+    NOW,
+  );
+
+  it('counts each screen cumulatively, so every step contains the ones below', () => {
+    const f = out.funnel;
+    expect(f.startedTrial).toBe(6);
+    expect(f.describedJob).toBe(5);
+    expect(f.addedCustomer).toBe(4);
+    expect(f.addedMaterials).toBe(3);
+    expect(f.reachedPreview).toBe(2);
+    expect(f.sentQuote).toBe(1);
+  });
+
+  it('never lets a step exceed the one above it', () => {
+    const f = out.funnel;
+    const ladder = [f.startedTrial, f.describedJob, f.addedCustomer, f.addedMaterials, f.reachedPreview, f.sentQuote];
+    for (let i = 1; i < ladder.length; i++) expect(ladder[i]).toBeLessThanOrEqual(ladder[i - 1]);
+  });
+
+  it('credits a sender the whole wizard even when their drafts say otherwise', () => {
+    const f = computeFunnelStats([trial('sent_no_drafts', 'none', true)], NOW).funnel;
+    expect(f.reachedPreview).toBe(1);
+    expect(f.describedJob).toBe(1);
+  });
+
+  it('leaves the ladder at zero when no quote stage is known at all', () => {
+    const f = computeFunnelStats([user({ uid: 'legacy', sub: { trialStartedAt: iso(NOW - 5 * DAY) } })], NOW).funnel;
+    expect(f.startedTrial).toBe(1);
+    expect(f.describedJob).toBe(0);
+    expect(f.reachedPreview).toBe(0);
+  });
+
+  it('slices the wizard steps by cohort like every other step', () => {
+    const cohort = computeFunnelStats(
+      [
+        trial('recent', 'preview'),
+        { ...trial('old', 'preview'), signupAt: NOW - 60 * DAY },
+      ],
+      NOW,
+    ).cohorts['28'];
+    expect(cohort.signups).toBe(1);
+    expect(cohort.reachedPreview).toBe(1);
   });
 });

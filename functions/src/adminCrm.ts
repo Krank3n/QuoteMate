@@ -27,8 +27,11 @@ import {
   isActivatingDoc,
   isRecoveredDocId,
   isTestAccount,
+  maxQuoteStage,
+  quoteStageOfDoc,
   type FunnelUserInput,
   type FunnelPayload,
+  type QuoteStage,
 } from './adminFunnel.helpers';
 import {
   rollupEventFunnel,
@@ -1841,12 +1844,18 @@ export async function computeFunnelPayload(): Promise<FunnelPayload> {
   ]);
 
   // One pass over every document: mark which uids have an activating (sent)
-  // doc — never a second documents scan.
+  // doc and how far each got through the quote wizard — never a second
+  // documents scan. `recovered-` docs are email-derived reconstructions from
+  // the 2026-07 reclaim, not quotes anyone authored, and they carry a
+  // sent-looking stage — counting them reads as a send that never happened.
   const activatedUids = new Set<string>();
+  const quoteStages = new Map<string, QuoteStage>();
   for (const d of docsSnap.docs) {
     const uid = d.ref.parent.parent?.id;
-    if (!uid) continue;
-    if (isActivatingDoc(d.data() as any)) activatedUids.add(uid);
+    if (!uid || isRecoveredDocId(d.id)) continue;
+    const data = d.data() as any;
+    if (isActivatingDoc(data)) activatedUids.add(uid);
+    quoteStages.set(uid, maxQuoteStage(quoteStages.get(uid), quoteStageOfDoc(data)));
   }
 
   const inputs: FunnelUserInput[] = authUsers.map((u) => {
@@ -1860,6 +1869,7 @@ export async function computeFunnelPayload(): Promise<FunnelPayload> {
       signupAt,
       lastActivityAt: ts(es.lastActivityAt),
       hasSentDoc: activatedUids.has(u.uid),
+      quoteStage: quoteStages.get(u.uid) || 'none',
     };
   });
 
