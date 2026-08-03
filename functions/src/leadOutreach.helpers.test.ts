@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { normaliseEmail, suppressionDocId, buildDiscoveryQuery, isNonAustralianPlace, domainAcceptsMail, isPermanentDomainBounce } from './leadOutreach';
+import { normaliseEmail, suppressionDocId, buildDiscoveryQuery, isNonAustralianPlace, domainAcceptsMail, isPermanentDomainBounce, mapWithConcurrency } from './leadOutreach';
 
 /**
  * Regression tests for the Jun-Jul 2026 poisoned send queue: a scraped
@@ -177,5 +177,74 @@ describe('isPermanentDomainBounce', () => {
     expect(isPermanentDomainBounce('Greylisted, try again later')).toBe(false);
     expect(isPermanentDomainBounce(null)).toBe(false);
     expect(isPermanentDomainBounce(undefined)).toBe(false);
+  });
+});
+
+/**
+ * Regression tests for the Jul-Aug 2026 starved send queue: weeklyLeadDiscovery
+ * ran discovery + enrichment + generation serially in one 540s function and
+ * timed out on 5 consecutive runs, truncating the generation step that is the
+ * ONLY writer of status:'queued'. Sends collapsed to ~9/week against 500/week
+ * of capacity. mapWithConcurrency is what now keeps each stage inside its
+ * budget: bounded parallelism, a deadline that stops cleanly instead of being
+ * killed, and per-item isolation so one bad lead can't abort the batch.
+ */
+describe('mapWithConcurrency', () => {
+  const far = () => Date.now() + 60_000;
+
+  it('processes every item and preserves results', async () => {
+    const { results, processed, hitDeadline } = await mapWithConcurrency(
+      [1, 2, 3, 4, 5, 6, 7], 3, far(), async (n) => n * 2,
+    );
+    expect(results).toEqual([2, 4, 6, 8, 10, 12, 14]);
+    expect(processed).toBe(7);
+    expect(hitDeadline).toBe(false);
+  });
+
+  it('never exceeds the concurrency limit', async () => {
+    let inFlight = 0;
+    let peak = 0;
+    await mapWithConcurrency([...Array(12).keys()], 4, far(), async () => {
+      inFlight++;
+      peak = Math.max(peak, inFlight);
+      await new Promise(r => setTimeout(r, 5));
+      inFlight--;
+      return null;
+    });
+    expect(peak).toBeLessThanOrEqual(4);
+  });
+
+  it('stops starting work once the deadline passes and reports it', async () => {
+    const seen: number[] = [];
+    const { processed, hitDeadline } = await mapWithConcurrency(
+      [...Array(20).keys()], 2, Date.now() + 30, async (n) => {
+        seen.push(n);
+        await new Promise(r => setTimeout(r, 20));
+        return n;
+      },
+    );
+    expect(hitDeadline).toBe(true);
+    expect(processed).toBeLessThan(20);
+    expect(seen.length).toBe(processed);
+  });
+
+  it('isolates a throwing item instead of aborting the batch', async () => {
+    const { results, processed } = await mapWithConcurrency(
+      [1, 2, 3, 4], 2, far(), async (n) => {
+        if (n === 2) throw new Error('poison lead');
+        return n;
+      },
+    );
+    // The poison lead is counted as processed but contributes no result —
+    // the other three still complete.
+    expect(results).toEqual([1, 3, 4]);
+    expect(processed).toBe(4);
+  });
+
+  it('handles an empty backlog without work', async () => {
+    const { results, processed, hitDeadline } = await mapWithConcurrency([], 4, far(), async () => 1);
+    expect(results).toEqual([]);
+    expect(processed).toBe(0);
+    expect(hitDeadline).toBe(false);
   });
 });
