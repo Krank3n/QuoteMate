@@ -47,6 +47,30 @@ export function initSentry(): void {
   });
 }
 
+/**
+ * Report a non-fatal operational problem.
+ *
+ * Exists for the splash-gate timeout: the normal analytics channel
+ * (analyticsService.trackEvent) writes to Firestore, so if a hung Firestore
+ * read is what stalled the gate, the event describing the stall cannot land
+ * either — and on native there is no GA fallback. Sentry is a separate
+ * transport, which makes it the only channel guaranteed to survive the exact
+ * failure it is reporting.
+ *
+ * Never throws: diagnostics must not become the outage.
+ */
+export function reportIssue(message: string, context?: Record<string, unknown>): void {
+  if (!shouldEnableSentry(SENTRY_DSN, __DEV__)) return;
+  try {
+    Sentry.captureMessage(message, {
+      level: 'warning',
+      extra: context,
+    });
+  } catch {
+    // swallow
+  }
+}
+
 /** Root-component wrapper: captures fatal render/runtime errors. */
 export const wrapRootComponent: <P extends Record<string, unknown>>(
   component: React.ComponentType<P>,

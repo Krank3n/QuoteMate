@@ -25,6 +25,16 @@ import { Platform } from 'react-native';
 import { auth, db } from '../config/firebase';
 
 export type AnalyticsEvent =
+  // — Auth bootstrap (the window between sign-in and the app being usable) —
+  // Fires the instant onAuthStateChanged hands us a user, BEFORE any load
+  // runs. Pairs with auth_bootstrap_finished: a started with no finished is a
+  // user stranded on the splash, which is the only way to see that failure —
+  // it writes nothing, renders nothing, and fires no other event. The 2026-08
+  // audit had to infer it from the absence of profile/onboarding docs.
+  | 'auth_bootstrap_started'
+  // The splash gate opened. `outcome` is settled | timeout, `duration_ms` how
+  // long the user waited, `failed_loaders` names any loader that rejected.
+  | 'auth_bootstrap_finished'
   // — Onboarding (the setup flow that gates the whole app) —
   // Entering the flow. `resumed` distinguishes a fresh start from a draft
   // picked back up, so resume rate is measurable.
