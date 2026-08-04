@@ -13,6 +13,18 @@ export const SUBSCRIPTION_SKUS = Platform.OS === 'android'
   ? { MONTHLY: 'quotemate_premium_monthly', YEARLY: 'quotemate_premium_yearly' }
   : { MONTHLY: 'quotemate_pro_monthly', YEARLY: 'quotemate_pro_yearly' };
 
+// Every SKU this app has ever sold on either store. SUBSCRIPTION_SKUS is the
+// current platform's *sellable* pair, which is deliberately narrower — but a
+// subscriber can still be sitting on a SKU we no longer offer here (there is a
+// live Android subscriber on quotemate_pro_yearly, which is not in Android's
+// pair). Recovery must recognise those or it silently skips real payers.
+export const ALL_KNOWN_SUBSCRIPTION_SKUS = [
+  'quotemate_premium_monthly',
+  'quotemate_premium_yearly',
+  'quotemate_pro_monthly',
+  'quotemate_pro_yearly',
+];
+
 export const SUBSCRIPTION_PRODUCTS = Platform.select({
   android: [SUBSCRIPTION_SKUS.MONTHLY, SUBSCRIPTION_SKUS.YEARLY],
   ios: [SUBSCRIPTION_SKUS.MONTHLY, SUBSCRIPTION_SKUS.YEARLY],
@@ -268,6 +280,32 @@ class BillingService {
         p?.productId === SUBSCRIPTION_SKUS.MONTHLY ||
         p?.productId === SUBSCRIPTION_SKUS.YEARLY
       );
+    } catch (error: any) {
+      return [];
+    }
+  }
+
+  /**
+   * Purchases the store still considers outstanding, across EVERY SKU we have
+   * ever sold — not just the current platform's sellable pair.
+   *
+   * Deliberately does not pass onlyIncludeActiveItemsIOS: a transaction left
+   * unfinished by a failed validation is exactly what we need back, and that
+   * is the case this exists to repair.
+   */
+  async getRecoverablePurchases(): Promise<any[]> {
+    try {
+      if (!this.isInitialized) {
+        const initialized = await this.initialize();
+        if (!initialized) return [];
+      }
+
+      const purchases = await RNIap.getAvailablePurchases({
+        alsoPublishToEventListenerIOS: false,
+      });
+      if (!purchases || !Array.isArray(purchases)) return [];
+
+      return purchases.filter((p: any) => ALL_KNOWN_SUBSCRIPTION_SKUS.includes(p?.productId));
     } catch (error: any) {
       return [];
     }

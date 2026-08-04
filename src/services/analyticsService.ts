@@ -97,6 +97,11 @@ export type AnalyticsEvent =
   | 'checkout_started'
   | 'purchase_completed'
   | 'purchase_failed'
+  // A purchase the stores still had outstanding was entitled by the launch-time
+  // sweep rather than by the buyer returning to the paywall. Non-zero here means
+  // someone was charged-but-not-Pro and we healed it without them noticing —
+  // worth watching, because a rising count implies validation is flaking again.
+  | 'purchase_recovered_on_launch'
   // The 14-day Pro trial began (fires with the first quote). Deliberately
   // redundant with the durable trialStartedAt field — events are lossy,
   // Firestore state stays the source of truth.

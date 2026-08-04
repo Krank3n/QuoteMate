@@ -67,6 +67,7 @@ const CRITICAL_LOADERS: readonly LoaderName[] = [
 import { NewOnboardingScreen } from './src/screens/NewOnboardingScreen';
 import { AuthScreen } from './src/screens/AuthScreen';
 import { subscriptionSyncService } from './src/services/subscriptionSyncService';
+import { recoverPendingPurchases } from './src/services/receiptEntitlement';
 import { auth } from './src/config/firebase';
 import { shouldClearLocalData } from './src/utils/localDataReset';
 import { initWebAnalytics } from './src/utils/webAnalytics';
@@ -581,6 +582,23 @@ function App() {
           loadContacts().catch(() => {});
           try {
             await subscriptionSyncService.initialize();
+          } catch {}
+          // Finish any purchase the stores still consider outstanding. This is
+          // what makes "it'll finish automatically next time you open the app"
+          // true — before this, entitlement could only ever be granted from
+          // PaywallScreen, so a buyer whose validation failed had to find their
+          // way back to that exact screen or stay charged-but-not-Pro.
+          try {
+            const summary = await recoverPendingPurchases({
+              onGranted: async () => { await loadSubscription(); },
+            });
+            if (summary.granted > 0) {
+              trackEvent('purchase_recovered_on_launch', {
+                granted: summary.granted,
+                checked: summary.checked,
+                platform: Platform.OS,
+              });
+            }
           } catch {}
           try {
             const update = await checkForUpdate();

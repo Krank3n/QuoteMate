@@ -34,7 +34,8 @@ import {
 } from '../config/pricingConfig';
 import { trackEvent } from '../services/analyticsService';
 import { resolvePurchaseAnalytics } from '../services/paywallAnalytics.helpers';
-import { classifyReceiptResponse, ReceiptOutcome } from '../utils/purchaseValidation';
+import { ReceiptOutcome } from '../utils/purchaseValidation';
+import { validatePurchase, purchaseKey, claimPurchase, releasePurchase } from '../services/receiptEntitlement';
 
 const PRO_NUDGES = [
   "Your quotes deserve the VIP treatment",
@@ -237,27 +238,16 @@ export function PaywallScreen() {
               // PAY-01: premium is granted only when the server verifies the
               // receipt — no local fallback. On transient failures the store
               // transaction stays unfinished so validation retries later.
-              let outcome: ReceiptOutcome = 'retry';
-              const currentUser = auth.currentUser;
-              if (currentUser) {
-                const API_BASE_URL = process.env.API_BASE_URL || 'https://us-central1-hansendev.cloudfunctions.net';
-                const endpoint = Platform.OS === 'ios' ? 'validateAppleReceipt' : 'validateGoogleReceipt';
-                try {
-                  const idToken = await currentUser.getIdToken();
-                  const response = await fetch(`${API_BASE_URL}/${endpoint}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
-                    body: JSON.stringify({
-                      transactionId: purchase.transactionId || purchase.id,
-                      productId: purchase.productId,
-                      purchaseToken: purchase.purchaseToken || null,
-                    }),
-                  });
-                  const data = await response.json().catch(() => null);
-                  outcome = classifyReceiptResponse(response.status, data);
-                } catch (serverError) {
-                  outcome = 'retry';
-                }
+              // The launch-time sweep in receiptEntitlement can observe the
+              // same transaction, so claim it first; if it already has it,
+              // stay out of the way rather than double-posting the receipt.
+              const key = purchaseKey(purchase);
+              if (!claimPurchase(key)) return;
+              let outcome: ReceiptOutcome;
+              try {
+                outcome = await validatePurchase(purchase);
+              } finally {
+                releasePurchase(key);
               }
 
               if (outcome === 'granted') {
@@ -385,28 +375,7 @@ export function PaywallScreen() {
         const purchase = activeSubscriptions[0];
         // PAY-01: restore only completes when the server verifies the
         // receipt — no local-premium fallback.
-        let outcome: ReceiptOutcome = 'retry';
-        const currentUser = auth.currentUser;
-        if (currentUser) {
-          const API_BASE_URL = process.env.API_BASE_URL || 'https://us-central1-hansendev.cloudfunctions.net';
-          const endpoint = Platform.OS === 'ios' ? 'validateAppleReceipt' : 'validateGoogleReceipt';
-          try {
-            const idToken = await currentUser.getIdToken();
-            const response = await fetch(`${API_BASE_URL}/${endpoint}`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
-              body: JSON.stringify({
-                transactionId: purchase.transactionId || purchase.id,
-                productId: purchase.productId,
-                purchaseToken: purchase.purchaseToken || null,
-              }),
-            });
-            const data = await response.json().catch(() => null);
-            outcome = classifyReceiptResponse(response.status, data);
-          } catch (serverError) {
-            outcome = 'retry';
-          }
-        }
+        const outcome: ReceiptOutcome = await validatePurchase(purchase);
 
         if (outcome === 'granted') {
           await loadSubscription();
