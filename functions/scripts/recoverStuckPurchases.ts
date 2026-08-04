@@ -18,14 +18,17 @@
  *
  *   npx tsx scripts/recoverStuckPurchases.ts [--apply]
  */
+// MUST be first: src/email.ts reads process.env.ADMIN_EMAILS at module scope,
+// and ES imports are hoisted — a dotenv.config() call further down runs too
+// late, leaving the admin alert with no recipient.
+import 'dotenv/config';
 import * as admin from 'firebase-admin';
-import * as dotenv from 'dotenv';
 import * as crypto from 'crypto';
 import { JWT } from 'google-auth-library';
 import { verifyAppleJws } from '../src/appleJws.helpers';
 import { receiptVerdict } from '../src/receiptValidation.helpers';
+import { sendNewProSubscriptionEmail } from '../src/email';
 
-dotenv.config({ path: '.env' });
 admin.initializeApp({ projectId: process.env.GOOGLE_CLOUD_PROJECT || 'hansendev' });
 
 const APPLY = process.argv.includes('--apply');
@@ -99,10 +102,35 @@ async function writeEntitlement(t: Target, fields: Record<string, unknown>, expi
     console.log('    [dry-run] would write:', JSON.stringify(
       { ...payload, validatedAt: '<serverTimestamp>', purchaseToken: fields.purchaseToken ? '<token>' : undefined },
     ));
+    console.log('    [dry-run] would send the "New Pro subscriber" admin alert');
     return;
   }
   await ref.set(payload, { merge: true });
   console.log('    WROTE entitlement');
+  await notifyNewPro(t, String(payload.productId));
+}
+
+/**
+ * The validate endpoints send this on a successful grant. Recovering straight
+ * into Firestore skipped it, so a recovered subscriber landed silently — the
+ * admin alert is the only passive signal that anyone upgraded at all.
+ */
+async function notifyNewPro(t: Target, productId: string) {
+  try {
+    const [authRec, biz] = await Promise.all([
+      admin.auth().getUser(t.uid).catch(() => null),
+      // settings/business, not profile/business — the latter does not exist,
+      // which is why historical alerts arrived with a blank business name.
+      admin.firestore().doc(`users/${t.uid}/settings/business`).get(),
+    ]);
+    const email = authRec?.email || t.email;
+    const businessName = biz.data()?.businessName || '';
+    const ok = await sendNewProSubscriptionEmail(email, t.uid, t.platform, productId, businessName);
+    console.log(`    admin alert ${ok ? 'sent' : 'NOT sent (sendEmail returned false)'} — ${businessName || '(no business name)'}`);
+  } catch (err) {
+    // Never let a notification failure look like a failed recovery.
+    console.log('    admin alert FAILED:', String(err).slice(0, 140));
+  }
 }
 
 (async () => {

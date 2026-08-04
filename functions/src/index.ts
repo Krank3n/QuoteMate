@@ -1058,7 +1058,7 @@ async function handleSubscriptionUpdate(subscription: Stripe.Subscription) {
       // Notify admin of new Pro subscription
       try {
         const userEmail = await getUserEmail(userId) || 'unknown';
-        const userProfile = await firestore.doc(`users/${userId}/profile/business`).get();
+        const userProfile = await firestore.doc(`users/${userId}/settings/business`).get();
         const businessName = userProfile.data()?.businessName || '';
         const productId = subscription.items.data[0]?.price?.id || '';
         await sendNewProSubscriptionEmail(userEmail, userId, 'web', productId, businessName);
@@ -1516,7 +1516,7 @@ export const validateAppleReceipt = functions.https.onRequest((req, res) => {
       try {
         const userEmail = await getUserEmail(userId) || 'unknown';
         const iosFirestore = admin.firestore();
-        const userProfile = await iosFirestore.doc(`users/${userId}/profile/business`).get();
+        const userProfile = await iosFirestore.doc(`users/${userId}/settings/business`).get();
         const businessName = userProfile.data()?.businessName || '';
         await sendNewProSubscriptionEmail(userEmail, userId, 'ios', signedProductId, businessName);
       } catch (emailError) {
@@ -1675,7 +1675,7 @@ export const validateGoogleReceipt = functions.https.onRequest((req, res) => {
       // Notify admin of new Pro subscription
       try {
         const userEmail = await getUserEmail(userId) || 'unknown';
-        const userProfile = await firestore.doc(`users/${userId}/profile/business`).get();
+        const userProfile = await firestore.doc(`users/${userId}/settings/business`).get();
         const businessName = userProfile.data()?.businessName || '';
         await sendNewProSubscriptionEmail(userEmail, userId, 'android', productId, businessName);
       } catch (emailError) {
