@@ -103,13 +103,18 @@ export const printMediaCSS = `
   .business-identity {
     display: block !important;
   }
+  /* Logos are trimmed of their surrounding whitespace at upload (see
+     utils/logoTrim.ts), so this box sizes the artwork itself rather than a
+     mostly-empty export canvas. That makes it safe to allot real space: a
+     wide wordmark now lands ~300px across instead of the ~110px the old
+     240x84 box gave it once the canvas padding had eaten the height. */
   .business-identity .logo {
     display: block;
     width: auto !important;
-    max-width: 240px !important;
+    max-width: 300px !important;
     height: auto !important;
-    max-height: 84px !important;
-    margin: 0 0 8px 0 !important;
+    max-height: 110px !important;
+    margin: 0 0 12px 0 !important;
     object-fit: contain;
   }
   .business-identity.has-logo .header-text h1 {

@@ -107,14 +107,21 @@ describe('buildQuotePdfHtml — GST modes', () => {
 });
 
 describe('buildInvoicePdfHtml — GST modes', () => {
-  it('is not titled "Tax Invoice" in any mode (AU compliance for non-registered)', () => {
+  it('is titled "Tax Invoice" only when registered (AU compliance)', () => {
     const registered = buildInvoicePdfHtml(invoiceData(), business);
     const notRegistered = buildInvoicePdfHtml(
       invoiceData({ gstRegistered: false, gst: 0, total: 300 }),
       business,
     );
-    expect(registered).not.toMatch(/tax invoice/i);
+    expect(registered).toContain('<h2>TAX INVOICE</h2>');
+    // A business that isn't registered for GST must not issue a tax invoice.
     expect(notRegistered).not.toMatch(/tax invoice/i);
+    expect(notRegistered).toContain('<h2>INVOICE</h2>');
+  });
+
+  it('legacy invoices with gstRegistered undefined are treated as registered', () => {
+    const legacy = buildInvoicePdfHtml(invoiceData({ gstRegistered: undefined }), business);
+    expect(legacy).toContain('<h2>TAX INVOICE</h2>');
   });
 
   it('not registered: invoice carries the note and no GST row', () => {

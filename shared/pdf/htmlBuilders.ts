@@ -834,6 +834,12 @@ export function buildReportPdfHtml(data: ReportPdfData, business: BusinessPdfDat
 
 /**
  * Build the full invoice PDF HTML document
+ *
+ * Titled "TAX INVOICE" for GST-registered businesses — the ATO expects a tax
+ * invoice to be identifiable as one, and every AU tradie's own paperwork says
+ * it. Non-registered businesses (gstRegistered === false) must NOT issue a tax
+ * invoice, so they keep the plain "INVOICE" heading. Legacy docs leave
+ * gstRegistered undefined, which means registered.
  */
 export function buildInvoicePdfHtml(
   invoice: InvoicePdfData,
@@ -867,7 +873,7 @@ export function buildInvoicePdfHtml(
       <div class="header document-header">
         ${buildBusinessHeaderHTML(business)}
         <div class="header-meta">
-          <h2>INVOICE</h2>
+          <h2>${invoice.gstRegistered === false ? 'INVOICE' : 'TAX INVOICE'}</h2>
           ${invoice.invoiceNumber ? `<div class="document-reference">${escapeHtml(invoice.invoiceNumber)}</div>` : ''}
           <div class="document-date">Issued ${escapeHtml(invoice.issueDate)} &middot; Due ${escapeHtml(invoice.dueDate)}</div>
           ${invoice.paymentTerms ? `<div class="document-terms">${escapeHtml(invoice.paymentTerms)}</div>` : ''}
