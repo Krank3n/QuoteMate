@@ -211,6 +211,13 @@ export interface ChatMessage {
   // tradie can review the priced draft (and keep chatting to adjust) without
   // bouncing out to the wizard.
   inlineQuoteId?: string;
+  // A "[context]" note for the model only — carried in the history sent to
+  // Gemini but never rendered as a bubble. The voice path delivers the same
+  // notes over the live socket via sendContextNote(); text chat has no socket,
+  // so outcomes have to ride in the history instead. Without this, an apply
+  // that failed was invisible to the model and it would cheerfully re-propose
+  // the same broken action turn after turn.
+  hidden?: boolean;
 }
 
 export interface Conversation {

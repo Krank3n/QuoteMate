@@ -672,9 +672,10 @@ export function AssistantScreen() {
 
   const items: ChatItem[] = useMemo(() => {
     if (!conversation) return [];
-    const ordered = inverted
-      ? conversation.messages.slice().reverse()
-      : conversation.messages.slice();
+    // Hidden messages are "[context]" notes for the model only — they ride in
+    // the history sent to Gemini but must never render as a bubble.
+    const visible = conversation.messages.filter((m) => !m.hidden);
+    const ordered = inverted ? visible.slice().reverse() : visible;
     return ordered.map((m) => ({ key: m.id, message: m }));
   }, [conversation, inverted]);
 
@@ -724,6 +725,50 @@ export function AssistantScreen() {
       }
     },
     [navigation, quotes, documents, setCurrentQuote],
+  );
+
+  // Tell Mate what just happened. Voice has a live socket and takes the note
+  // over the wire; text chat has no socket, so the note is parked in the
+  // history as a hidden message the next turn will carry. Either way the
+  // model learns the outcome — before this, text-mode Mate never found out
+  // an Apply had failed and would re-propose the same broken card forever.
+  const noteToMate = useCallback(
+    (convoId: string, note: string) => {
+      const liveSession = voiceSessionRef.current;
+      if (liveSession?.isOpen()) {
+        liveSession.sendContextNote(note);
+        return;
+      }
+      appendMessage(convoId, {
+        id: generateId(),
+        role: 'user',
+        text: note,
+        createdAt: new Date().toISOString(),
+        hidden: true,
+      });
+    },
+    [appendMessage],
+  );
+
+  // Append an error bubble unless the tail of the chat already says the same
+  // thing. A voice reconnect storm used to stack eleven identical "too many
+  // requests" bubbles in ninety seconds; the tradie only needs to be told
+  // once.
+  const appendErrorMessage = useCallback(
+    (convoId: string, errorMessage: string) => {
+      const messages =
+        useStore.getState().conversations.find((c) => c.id === convoId)?.messages || [];
+      const last = messages[messages.length - 1];
+      if (last?.errorMessage === errorMessage) return;
+      appendMessage(convoId, {
+        id: generateId(),
+        role: 'assistant',
+        text: '',
+        createdAt: new Date().toISOString(),
+        errorMessage,
+      });
+    },
+    [appendMessage],
   );
 
   const handleApply = useCallback(
@@ -837,13 +882,22 @@ export function AssistantScreen() {
         // instead of just an opaque "Failed" badge on the card.
         // eslint-disable-next-line no-console
         console.warn('[Mate] applyProposal failed', result.error);
-        appendMessage(conversation.id, {
-          id: generateId(),
-          role: 'assistant',
-          text: '',
-          createdAt: new Date().toISOString(),
-          errorMessage: result.error || 'Apply failed without an error message.',
-        });
+        appendErrorMessage(
+          conversation.id,
+          result.error || 'Apply failed without an error message.',
+        );
+        // Tell the model too. It has no other way to know the card failed —
+        // it only ever saw `{ ok: true, proposalId }` from the tool call —
+        // which is how a tradie ended up tapping the same broken "mark paid"
+        // card three times in a row while Mate re-proposed it each time.
+        noteToMate(
+          conversation.id,
+          `[context] The tradie tapped Apply on ${proposal.type} and it FAILED: ` +
+            `"${result.error || 'unknown error'}". Do NOT propose the same action again — ` +
+            `it will fail the same way. Tell them plainly what went wrong in one short line, ` +
+            `and either try a genuinely different approach or point them at the manual path ` +
+            `in the app. Never claim it worked.`,
+        );
         return;
       }
       // Surface a note (e.g. partial success — draft created but pipeline
@@ -874,27 +928,27 @@ export function AssistantScreen() {
         if (mintedId) rememberAppliedQuote(proposal.id, mintedId);
       }
 
-      // If a voice session is open, feed it the resolved quote id so
-      // Mate stops trying to re-find the draft via list_recent_quotes on
-      // the next utterance. turnComplete:false means the model logs it
-      // as context without speaking a reply about it.
-      const liveSession = voiceSessionRef.current;
+      // Feed Mate the resolved quote id so it stops trying to re-find the
+      // draft via list_recent_quotes on the next turn. noteToMate picks the
+      // right channel: the live socket in voice (logged as context without
+      // speaking a reply), a hidden history message in text.
+      const note = (text: string) => noteToMate(conversation.id, text);
       // Most context notes need result.navigate (they reference the minted
       // quote/invoice/contact id). propose_delete_quote is the exception —
       // the doc is gone, so it never returns a navigate, but Mate still
       // needs the heads-up that the id is dead.
-      if (liveSession?.isOpen() && proposal.type === 'propose_delete_quote') {
+      if (proposal.type === 'propose_delete_quote') {
         const label = proposal.displayName || proposal.displayCustomerName || proposal.quoteId;
-        liveSession.sendContextNote(
+        note(
           `[context] Deleted ${proposal.displayDocType || 'quote'} ${proposal.quoteId} ("${label}"). ` +
             `It's gone — do NOT reference this id on follow-ups, and don't list it.`,
         );
       }
-      if (liveSession?.isOpen() && result.navigate) {
+      if (result.navigate) {
         switch (proposal.type) {
           case 'propose_draft_quote':
             if (result.navigate.kind === 'job_preview' || result.navigate.kind === 'quote_materials_list') {
-              liveSession.sendContextNote(
+              note(
                 `[context] The tradie tapped Apply on propose_draft_quote. ` +
                 `The resulting quote is ${result.navigate.quoteId} ` +
                 `("${proposal.jobName}"). Reference this id on follow-ups; ` +
@@ -903,43 +957,43 @@ export function AssistantScreen() {
             }
             break;
           case 'propose_add_line_item':
-            liveSession.sendContextNote(
+            note(
               `[context] Added "${proposal.searchTerm}" (${proposal.qty} ${proposal.unit}) to quote ${proposal.quoteId}.`,
             );
             break;
           case 'propose_delete_line_item':
-            liveSession.sendContextNote(
+            note(
               `[context] Removed material ${proposal.materialId} from quote ${proposal.quoteId}.`,
             );
             break;
 
           case 'propose_send_quote':
-            liveSession.sendContextNote(
+            note(
               `[context] Sent quote ${proposal.quoteId} to the customer.`,
             );
             break;
           case 'propose_convert_to_invoice':
             if (result.navigate.kind === 'open_invoice') {
-              liveSession.sendContextNote(
+              note(
                 `[context] Converted quote ${proposal.quoteId} to invoice ${result.navigate.invoiceId}.`,
               );
             }
             break;
           case 'propose_create_contact':
             if (result.navigate.kind === 'open_contact') {
-              liveSession.sendContextNote(
+              note(
                 `[context] Created new contact ${result.navigate.contactId} ("${proposal.name}").`,
               );
             }
             break;
           case 'propose_update_customer':
-            liveSession.sendContextNote(
+            note(
               `[context] Changed the customer on quote ${proposal.quoteId}` +
               (proposal.customerName ? ` to "${proposal.customerName}".` : '.'),
             );
             break;
           case 'propose_reprice':
-            liveSession.sendContextNote(
+            note(
               `[context] Re-priced quote ${proposal.quoteId}.` +
               (result.review ? ` ${result.review.summary}` : ''),
             );
@@ -950,7 +1004,7 @@ export function AssistantScreen() {
             if (typeof proposal.laborMarkup === 'number') parts.push(`labour markup ${proposal.laborMarkup}%`);
             if (typeof proposal.laborRate === 'number') parts.push(`labour rate $${proposal.laborRate}/h`);
             if (typeof proposal.laborHours === 'number') parts.push(`labour hours ${proposal.laborHours}`);
-            liveSession.sendContextNote(
+            note(
               `[context] Updated rates on quote ${proposal.quoteId}: ${parts.join(', ')}.`,
             );
             break;
@@ -1019,10 +1073,9 @@ export function AssistantScreen() {
       // confirm verbally / textually on the next turn. The [context] line
       // below tells the model the payment landed.
       if (proposal.type === 'propose_mark_paid') {
-        const liveSession = voiceSessionRef.current;
-        if (liveSession?.isOpen() && result.navigate?.kind === 'open_invoice') {
+        if (result.navigate?.kind === 'open_invoice') {
           const label = proposal.displayName || proposal.displayCustomerName || 'that invoice';
-          liveSession.sendContextNote(
+          note(
             `[context] Marked invoice ${result.navigate.invoiceId} ("${label}") as paid in full. ` +
               `The books are updated — confirm to the tradie in one short line, don't navigate or re-show it.`,
           );
@@ -1032,7 +1085,16 @@ export function AssistantScreen() {
 
       handleNavigate(result.navigate);
     },
-    [conversation, applyProposal, appendMessage, updateMessage, updateProposalStatus, handleNavigate],
+    [
+      conversation,
+      applyProposal,
+      appendMessage,
+      appendErrorMessage,
+      noteToMate,
+      updateMessage,
+      updateProposalStatus,
+      handleNavigate,
+    ],
   );
 
   const handleDismiss = useCallback(
@@ -1550,13 +1612,7 @@ export function AssistantScreen() {
         onError: (err) => {
           // eslint-disable-next-line no-console
           console.warn('[Mate voice] session error', err.message);
-          appendMessage(convoId!, {
-            id: generateId(),
-            role: 'assistant',
-            text: '',
-            createdAt: new Date().toISOString(),
-            errorMessage: err.message,
-          });
+          appendErrorMessage(convoId!, err.message);
           void stopVoiceSession();
         },
         onClose: () => {
@@ -1694,16 +1750,12 @@ export function AssistantScreen() {
         }
         micRef.current = mic;
       } catch (err: any) {
-        appendMessage(convoId!, {
-          id: generateId(),
-          role: 'assistant',
-          text: '',
-          createdAt: new Date().toISOString(),
-          errorMessage:
-            err instanceof MicUnavailableError
-              ? err.message
-              : `Mate couldn't open the mic: ${err?.message || 'unknown error'}`,
-        });
+        appendErrorMessage(
+          convoId!,
+          err instanceof MicUnavailableError
+            ? err.message
+            : `Mate couldn't open the mic: ${err?.message || 'unknown error'}`,
+        );
         await stopVoiceSession();
         return;
       }
@@ -1719,16 +1771,10 @@ export function AssistantScreen() {
         err instanceof LiveAuthError
           ? err.message
           : `Voice mode is offline: ${err?.message || 'unknown error'}`;
-      appendMessage(convoId!, {
-        id: generateId(),
-        role: 'assistant',
-        text: '',
-        createdAt: new Date().toISOString(),
-        errorMessage: message,
-      });
+      appendErrorMessage(convoId!, message);
       await stopVoiceSession();
     }
-  }, [stopVoiceSession, appendMessage, updateMessage, startConversation, micLevel, handleApply, handleDismiss, showQuoteInChat]);
+  }, [stopVoiceSession, appendMessage, appendErrorMessage, updateMessage, startConversation, micLevel, handleApply, handleDismiss, showQuoteInChat]);
 
   // Keep the latest openVoiceMode / stopVoiceSession in refs so the
   // auto-start focus effect below can call them without taking them as

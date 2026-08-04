@@ -3,7 +3,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { auth } from '../../../config/firebase';
-import { sendAssistantTurn } from '../../assistantService';
+import { sendAssistantTurn, stripLeakedToolJson } from '../../assistantService';
 import {
   mintLiveToken,
   fetchWithTimeout,
@@ -202,5 +202,78 @@ describe('fetchWithTimeout', () => {
     const res = await fetchWithTimeout('https://x', {}, 5000);
     expect(res.ok).toBe(true);
     await vi.advanceTimersByTimeAsync(10_000); // no unhandled abort
+  });
+});
+
+// A function-calling model sometimes *writes* a tool call instead of emitting
+// one: the reply arrives as a fenced JSON blob of the arguments, with no
+// functionCall part. One tradie got a chat bubble reading
+// ```json { "query": "Hansen" } ``` mid-conversation. There's no tool name in
+// the blob to re-dispatch, so it gets dropped rather than shown.
+describe('stripLeakedToolJson', () => {
+  it('drops a reply that is only a fenced JSON tool call', () => {
+    expect(stripLeakedToolJson('```json\n{\n  "query": "Hansen"\n}\n```')).toBe('');
+  });
+
+  it('drops an unlabelled fenced JSON object', () => {
+    expect(stripLeakedToolJson('```\n{"quoteId": "abc"}\n```')).toBe('');
+  });
+
+  it('drops a bare JSON object with no fence', () => {
+    expect(stripLeakedToolJson('  {"query": "Hansen"}  ')).toBe('');
+  });
+
+  it('keeps a normal reply', () => {
+    const text = "Drafted ABC's deck quote — tap Apply.";
+    expect(stripLeakedToolJson(text)).toBe(text);
+  });
+
+  it('keeps prose that merely contains JSON', () => {
+    const text = 'Set it to {"markup": 30} if you want — say the word.';
+    expect(stripLeakedToolJson(text)).toBe(text);
+  });
+
+  it('keeps a fenced block that is not JSON', () => {
+    const text = '```\nrun this on site\n```';
+    expect(stripLeakedToolJson(text)).toBe(text);
+  });
+
+  it('keeps a JSON array (never a tool-call arg shape)', () => {
+    const text = '[1, 2, 3]';
+    expect(stripLeakedToolJson(text)).toBe(text);
+  });
+
+  it('leaves empty input alone', () => {
+    expect(stripLeakedToolJson('')).toBe('');
+  });
+});
+
+// Hidden "[context]" notes are written as user turns, so an apply-failed note
+// followed by the tradie's next message would send two user turns back to
+// back. Merge same-role neighbours rather than risk the model rejecting it.
+describe('history assembly', () => {
+  beforeEach(() => {
+    vi.mocked(auth).currentUser = { getIdToken: async () => 'id-token' } as any;
+  });
+
+  it('merges consecutive same-role messages and keeps hidden context notes', async () => {
+    fetchMock.mockResolvedValueOnce(okChatResponse('righto'));
+
+    await sendAssistantTurn({
+      history: [
+        { id: '1', role: 'user', text: 'mark it paid', createdAt: '' },
+        { id: '2', role: 'assistant', text: 'tap Apply', createdAt: '' },
+        { id: '3', role: 'assistant', text: '', createdAt: '', errorMessage: 'Invoice not found' },
+        { id: '4', role: 'user', text: '[context] Apply FAILED', createdAt: '', hidden: true },
+        { id: '5', role: 'user', text: 'why not?', createdAt: '' },
+      ] as ChatMessage[],
+    });
+
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as any).body);
+    expect(body.contents).toEqual([
+      { role: 'user', parts: [{ text: 'mark it paid' }] },
+      { role: 'model', parts: [{ text: 'tap Apply' }] },
+      { role: 'user', parts: [{ text: '[context] Apply FAILED' }, { text: 'why not?' }] },
+    ]);
   });
 });
