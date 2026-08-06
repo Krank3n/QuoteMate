@@ -188,7 +188,15 @@ async function main() {
       await file.copy(bucket.file(`${objPath}.pre-trim-backup`));
       await file.save(cropped, {
         contentType: meta.contentType || (img.kind === 'png' ? 'image/png' : 'image/jpeg'),
-        metadata: { firebaseStorageDownloadTokens: (meta.metadata as any)?.firebaseStorageDownloadTokens },
+        // Custom metadata lives one level deeper than the resource metadata.
+        // Passing it flat writes a field GCS ignores AND drops the existing
+        // custom metadata, silently destroying the download token — the URLs
+        // then only keep working because storage.rules allows public read.
+        metadata: {
+          metadata: {
+            firebaseStorageDownloadTokens: (meta.metadata as any)?.firebaseStorageDownloadTokens,
+          },
+        },
         resumable: false,
       });
     }
