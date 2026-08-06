@@ -11,8 +11,14 @@ import { auth } from '../config/firebase';
 
 const STRIPE_PUBLISHABLE_KEY = stripeConfig.publishableKey;
 
+// Falling back to '' silently pointed every checkout call at the marketing
+// site (POST https://quotemateapp.au/createPaymentIntent → 400 XML), so the
+// modal died on "Failed to initialize payment". API_BASE_URL lives in .env but
+// not .env.web, which is the file web builds read — so the web bundle never
+// had a value. Default to the deployed functions host, matching PaywallScreen.
 const API_BASE_URL = process.env.API_BASE_URL ||
-  Constants.expoConfig?.extra?.apiBaseUrl || '';
+  Constants.expoConfig?.extra?.apiBaseUrl ||
+  'https://us-central1-hansendev.cloudfunctions.net';
 
 class StripeService {
   private stripe: Stripe | null = null;

@@ -18,6 +18,7 @@ export const READ_TOOL_NAMES = [
   'get_business_defaults',
   'review_quote',
   'get_job_requirements',
+  'list_service_reports',
 ] as const;
 
 export const PROPOSAL_TOOL_NAMES = [
@@ -162,6 +163,21 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
         freeText: { type: 'string', description: 'The job description or blurb to match a niche from (e.g. "colorbond fence", "lawn mow and edge")' },
       },
       required: [],
+    },
+  },
+  {
+    name: 'list_service_reports',
+    description:
+      "List the tradie's service reports — the customer-facing leave-behind written up after a service visit (what was found, what was done, what's recommended next). A service report is NOT a quote or an invoice: it carries no prices or line items, and it lives on the Job, not in the quotes list. Call this ANY time the tradie says \"service report\", \"report\", \"job sheet\", \"leave-behind\", or asks to see/find/edit one — never answer with an invoice instead. Returns id, number (RP-001), jobId, jobName, customerName, serviceType, visitDate, status ('draft' | 'sent'), and hasRecommendedWork. Pass `query` to fuzzy-match over customer name, job name and service type.",
+    parameters: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Optional fuzzy search over customerName + jobName + serviceType. Omit to list the most recent.',
+        },
+        limit: { type: 'integer', description: 'Max rows to return (default 10, max 25).' },
+      },
     },
   },
   {

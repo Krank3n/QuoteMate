@@ -66,7 +66,9 @@ export {
   adminAddLeadNote,
   adminMarkLeadReplied,
   brevoInboundWebhook,
-  weeklyLeadDiscovery,
+  dailyLeadDiscovery,
+  autoEnrichLeads,
+  autoGenerateLeadMessages,
   adminGetDiscoveryConfig,
   adminUpdateDiscoveryConfig,
   adminGetLeadConfig,
@@ -110,6 +112,7 @@ import {
   evaluateThrottle,
 } from './passwordReset.helpers';
 import { receiptVerdict } from './receiptValidation.helpers';
+import { verifyAppleJws } from './appleJws.helpers';
 import { resolveServerPlan } from './subscription.helpers';
 import {
   SQUARE_OAUTH_STATES_COLLECTION,
@@ -1055,7 +1058,7 @@ async function handleSubscriptionUpdate(subscription: Stripe.Subscription) {
       // Notify admin of new Pro subscription
       try {
         const userEmail = await getUserEmail(userId) || 'unknown';
-        const userProfile = await firestore.doc(`users/${userId}/profile/business`).get();
+        const userProfile = await firestore.doc(`users/${userId}/settings/business`).get();
         const businessName = userProfile.data()?.businessName || '';
         const productId = subscription.items.data[0]?.price?.id || '';
         await sendNewProSubscriptionEmail(userEmail, userId, 'web', productId, businessName);
@@ -1434,65 +1437,35 @@ export const validateAppleReceipt = functions.https.onRequest((req, res) => {
       }
 
 
-      // Validate receipt with Apple's servers
-      const receiptData = purchaseToken || transactionId;
-      const sharedSecret = process.env.APPLE_SHARED_SECRET || '';
+      // expo-iap 3.x sends a StoreKit 2 JWS signed transaction, not a legacy
+      // base64 app receipt — Apple's /verifyReceipt rejects a JWS as malformed
+      // (21002), which this endpoint used to read as an affirmative rejection.
+      // A JWS carries its own Apple-issued certificate chain, so it verifies
+      // offline against Apple's root CA with no shared secret at all.
+      const jwsResult = await verifyAppleJws(purchaseToken);
+      const appleOutcome = jwsResult.outcome;
+      const appleExpiryDate = jwsResult.expiryDate;
 
-      // 'unavailable' = couldn't reach a verdict (store unreachable / missing
-      // secret) → retryable. 'invalid' = Apple affirmatively rejected → terminal.
-      let appleOutcome: 'valid' | 'invalid' | 'unavailable' = 'unavailable';
-      let appleExpiryDate: Date | null = null;
+      if (appleOutcome !== 'valid') {
+        console.warn('[receipts] Apple JWS not verified', {
+          userId, productId, transactionId,
+          outcome: appleOutcome, detail: jwsResult.detail,
+        });
+      }
 
-      if (sharedSecret && receiptData) {
-        // Try production first, then sandbox (21007 = sandbox receipt sent to
-        // production). Only a definitive non-zero, non-21007 status is an
-        // affirmative rejection; a thrown fetch leaves the outcome unavailable.
-        for (const url of [
-          'https://buy.itunes.apple.com/verifyReceipt',
-          'https://sandbox.itunes.apple.com/verifyReceipt',
-        ]) {
-          try {
-            const appleRes = await fetch(url, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                'receipt-data': receiptData,
-                'password': sharedSecret,
-                'exclude-old-transactions': true,
-              }),
-            });
-
-            const appleData = await appleRes.json() as any;
-
-            if (appleData.status === 0) {
-              appleOutcome = 'valid';
-              const latestInfo = appleData.latest_receipt_info;
-              if (latestInfo && latestInfo.length > 0) {
-                const latestExpiry = Math.max(...latestInfo.map((r: any) => parseInt(r.expires_date_ms || '0', 10)));
-                if (latestExpiry > 0) {
-                  appleExpiryDate = new Date(latestExpiry);
-                }
-              }
-              break;
-            } else if (appleData.status === 21007) {
-              continue; // retry against sandbox
-            } else {
-              appleOutcome = 'invalid'; // Apple affirmatively rejected
-              break;
-            }
-          } catch (appleError) {
-            console.warn('[receipts] Apple verifyReceipt call failed', { userId, url, error: String(appleError) });
-            // leave outcome 'unavailable'; try the next url
-          }
-        }
-      } else {
-        console.warn('[receipts] Apple validation skipped — missing shared secret or receipt data', { userId });
+      // Trust the SIGNED product id over the client-supplied one — the request
+      // body is attacker-controlled, the JWS payload is not (PAY-02).
+      const signedProductId = jwsResult.productId || productId;
+      if (jwsResult.productId && jwsResult.productId !== productId) {
+        console.warn('[receipts] Apple JWS productId mismatch — using signed value', {
+          userId, claimed: productId, signed: jwsResult.productId,
+        });
       }
 
       // PAY-01: no validation, no entitlement. Never write isPro from an
       // unverified (or already-expired) receipt.
       const now = new Date();
-      const verdict = receiptVerdict({ outcome: appleOutcome, storeExpiry: appleExpiryDate, productId, now });
+      const verdict = receiptVerdict({ outcome: appleOutcome, storeExpiry: appleExpiryDate, productId: signedProductId, now });
       if (!verdict.grant) {
         console.warn('[receipts] Apple receipt not granted', {
           userId, productId, transactionId, reason: verdict.reason, retryable: verdict.retryable,
@@ -1516,9 +1489,12 @@ export const validateAppleReceipt = functions.https.onRequest((req, res) => {
       await subscriptionRef.set({
         isPro: true,
         platform: 'ios',
-        productId,
-        transactionId,
+        productId: signedProductId,
+        transactionId: jwsResult.transactionId || transactionId,
         purchaseToken: purchaseToken || null,
+        // Persist the signed environment so isBilledSub() can exclude sandbox
+        // purchases from revenue without re-decoding the token every read.
+        environment: jwsResult.environment,
         appleValidated,
         validatedAt: admin.firestore.FieldValue.serverTimestamp(),
         currentPeriodStart: now,
@@ -1527,10 +1503,11 @@ export const validateAppleReceipt = functions.https.onRequest((req, res) => {
       }, { merge: true });
 
 
-      // Process referral commission
+      // Process referral commission — bill against the signed SKU so a forged
+      // request body can't inflate a referrer's commission.
       try {
-        const grossCents = PRODUCT_PRICES[productId] || 4900;
-        await processReferralCommission(userId, 'ios', productId, grossCents);
+        const grossCents = PRODUCT_PRICES[signedProductId] || 4900;
+        await processReferralCommission(userId, 'ios', signedProductId, grossCents);
       } catch (refError) {
         // silently ignore
       }
@@ -1539,9 +1516,9 @@ export const validateAppleReceipt = functions.https.onRequest((req, res) => {
       try {
         const userEmail = await getUserEmail(userId) || 'unknown';
         const iosFirestore = admin.firestore();
-        const userProfile = await iosFirestore.doc(`users/${userId}/profile/business`).get();
+        const userProfile = await iosFirestore.doc(`users/${userId}/settings/business`).get();
         const businessName = userProfile.data()?.businessName || '';
-        await sendNewProSubscriptionEmail(userEmail, userId, 'ios', productId, businessName);
+        await sendNewProSubscriptionEmail(userEmail, userId, 'ios', signedProductId, businessName);
       } catch (emailError) {
         // silently ignore
       }
@@ -1599,23 +1576,26 @@ export const validateGoogleReceipt = functions.https.onRequest((req, res) => {
           const serviceAccount = typeof googleServiceAccount === 'string'
             ? JSON.parse(googleServiceAccount) : googleServiceAccount;
 
-          const { google } = require('googleapis');
-          const authClient = new google.auth.JWT(
-            serviceAccount.client_email,
-            undefined,
-            serviceAccount.private_key,
-            ['https://www.googleapis.com/auth/androidpublisher']
-          );
-
-          const androidPublisher = google.androidpublisher({ version: 'v3', auth: authClient });
-          const googleRes = await androidPublisher.purchases.subscriptions.get({
-            packageName: googlePackageName,
-            subscriptionId: productId,
-            token: purchaseToken,
+          // Call the Play Developer API over REST via google-auth-library
+          // rather than `googleapis` — that package was never a dependency of
+          // functions/, so this block threw MODULE_NOT_FOUND the moment a
+          // service account was configured.
+          const { JWT } = require('google-auth-library');
+          const authClient = new JWT({
+            email: serviceAccount.client_email,
+            key: serviceAccount.private_key,
+            scopes: ['https://www.googleapis.com/auth/androidpublisher'],
           });
+          const { token: accessToken } = await authClient.getAccessToken();
 
-          if (googleRes.data) {
-            const expiryTimeMs = parseInt(googleRes.data.expiryTimeMillis || '0', 10);
+          const url = 'https://androidpublisher.googleapis.com/androidpublisher/v3/applications/' +
+            `${encodeURIComponent(googlePackageName)}/purchases/subscriptions/` +
+            `${encodeURIComponent(productId)}/tokens/${encodeURIComponent(purchaseToken)}`;
+          const googleRes = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+
+          if (googleRes.ok) {
+            const data = await googleRes.json() as any;
+            const expiryTimeMs = parseInt(data?.expiryTimeMillis || '0', 10);
             if (expiryTimeMs > Date.now()) {
               googleOutcome = 'valid';
               googleExpiryDate = new Date(expiryTimeMs);
@@ -1623,16 +1603,26 @@ export const validateGoogleReceipt = functions.https.onRequest((req, res) => {
               googleOutcome = 'invalid'; // Google confirmed the sub has lapsed
             }
           } else {
-            googleOutcome = 'invalid'; // API responded with no subscription data
+            // 401/403 mean OUR service account lacks Play Console access — a
+            // config fault, not a verdict on the buyer's purchase. Treating it
+            // as 'invalid' would hard-reject (402) a genuine payment and let
+            // the client finish the transaction. Keep those retryable so the
+            // purchase survives until the permission is granted. Only a true
+            // 4xx about the token itself (400/404/410) is an actual rejection.
+            googleOutcome = (googleRes.status === 401 || googleRes.status === 403 || googleRes.status >= 500)
+              ? 'unavailable'
+              : 'invalid';
+            console.warn('[receipts] Google subscriptions.get failed', {
+              userId,
+              httpStatus: googleRes.status,
+              outcome: googleOutcome,
+              body: (await googleRes.text().catch(() => '')).slice(0, 300),
+            });
           }
         } catch (googleError: any) {
-          // A 4xx (invalid/not-found purchase token) is an affirmative
-          // rejection; a 5xx / network error is a transient outage.
-          const httpStatus = googleError?.code ?? googleError?.response?.status;
-          googleOutcome = (typeof httpStatus === 'number' && httpStatus >= 400 && httpStatus < 500)
-            ? 'invalid'
-            : 'unavailable';
-          console.warn('[receipts] Google subscriptions.get failed', { userId, httpStatus, outcome: googleOutcome, error: String(googleError) });
+          // Network/JWT failure — never a verdict on the purchase.
+          googleOutcome = 'unavailable';
+          console.warn('[receipts] Google validation threw', { userId, error: String(googleError) });
         }
       } else {
         console.warn('[receipts] Google validation skipped — missing service account or purchase token', { userId });
@@ -1685,7 +1675,7 @@ export const validateGoogleReceipt = functions.https.onRequest((req, res) => {
       // Notify admin of new Pro subscription
       try {
         const userEmail = await getUserEmail(userId) || 'unknown';
-        const userProfile = await firestore.doc(`users/${userId}/profile/business`).get();
+        const userProfile = await firestore.doc(`users/${userId}/settings/business`).get();
         const businessName = userProfile.data()?.businessName || '';
         await sendNewProSubscriptionEmail(userEmail, userId, 'android', productId, businessName);
       } catch (emailError) {

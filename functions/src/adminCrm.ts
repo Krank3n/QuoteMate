@@ -2109,7 +2109,10 @@ function summariseConversation(messages: any[]): ConversationSummary {
     lastText: null,
   };
   const types = new Set<string>();
-  const arr = Array.isArray(messages) ? messages : [];
+  // Hidden "[context]" notes are written by the app to tell the model what an
+  // Apply did — they're role:'user' but the tradie never typed or saw them.
+  // Counting them would inflate userMessages and hijack the preview text.
+  const arr = (Array.isArray(messages) ? messages : []).filter((m) => !m?.hidden);
   for (const m of arr) {
     const text = typeof m?.text === 'string' ? m.text.trim() : '';
     if (m?.role === 'user') {
@@ -2244,6 +2247,10 @@ export const adminGetAssistantConversation = functions.https.onCall(async (data,
     errorMessage: m?.errorMessage || undefined,
     working: m?.working || undefined,
     inlineQuoteId: m?.inlineQuoteId || undefined,
+    // Kept in the detail view (they explain why Mate changed tack) but
+    // flagged so the panel can render them as system notes, not as the
+    // tradie talking.
+    hidden: m?.hidden || undefined,
   }));
 
   return {

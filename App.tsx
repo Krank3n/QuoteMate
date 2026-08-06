@@ -5,7 +5,7 @@
 
 import 'react-native-gesture-handler';
 import React, { useEffect, useRef, useState } from 'react';
-import { initSentry, wrapRootComponent } from './src/config/sentry';
+import { initSentry, wrapRootComponent, reportIssue } from './src/config/sentry';
 import { Platform, View, Image, StyleSheet, LogBox, InteractionManager } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
@@ -44,9 +44,30 @@ const navigationTheme = {
 };
 import { RootNavigator } from './src/navigation/RootNavigator';
 import { isDemoCaptureActive } from './src/demo/demoPlayback';
+import { trackEvent } from './src/services/analyticsService';
+import { trackWebEvent } from './src/utils/webAnalytics';
+import {
+  raceTimeout,
+  failedLoaderNames,
+  BOOTSTRAP_TIMEOUT_MS,
+  SPLASH_MAX_MS,
+  type LoaderName,
+} from './src/utils/bootstrapGate';
+
+// Order MUST match the Promise.allSettled batch in the auth handler — the
+// names are positional, and a mismatch would blame the wrong loader in the
+// telemetry that exists to diagnose exactly this.
+const CRITICAL_LOADERS: readonly LoaderName[] = [
+  'quotes',
+  'businessSettings',
+  'onboarding',
+  'subscription',
+  'nextQuoteNumber',
+];
 import { NewOnboardingScreen } from './src/screens/NewOnboardingScreen';
 import { AuthScreen } from './src/screens/AuthScreen';
 import { subscriptionSyncService } from './src/services/subscriptionSyncService';
+import { recoverPendingPurchases } from './src/services/receiptEntitlement';
 import { auth } from './src/config/firebase';
 import { shouldClearLocalData } from './src/utils/localDataReset';
 import { initWebAnalytics } from './src/utils/webAnalytics';
@@ -186,6 +207,11 @@ function App() {
   const [fontsLoaded, setFontsLoaded] = useState(false);
   const [user, setUser] = useState<any>(null);
   const [userDataLoaded, setUserDataLoaded] = useState(false);
+  // Absolute ceiling on the splash. The batch timeouts cover the two load
+  // gates; this covers everything else that can wedge them (a font load that
+  // never resolves, a throw before either flag is set). Nothing is worth
+  // leaving a signed-in tradie on a motionless logo — they don't come back.
+  const [splashExpired, setSplashExpired] = useState(false);
   // Tracks which uid we've already completed first-sign-in setup for.
   // Firebase fires onAuthStateChanged on EVERY token refresh — including the
   // refresh that getIdToken() in xeroService.ts (and others) triggers shortly
@@ -243,7 +269,7 @@ function App() {
       });
     });
     // Listen to authentication state changes
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+    const handleAuthChange = async (currentUser: typeof auth.currentUser) => {
       // Firebase's React Native AsyncStorage persistence sometimes refires
       // this listener with a transient `null` during an ID-token refresh
       // (e.g. when `getIdToken()` runs inside xeroService.loadXeroConnection
@@ -313,6 +339,10 @@ function App() {
         if (initialisedForUidRef.current === newUid && newUid !== null) {
           return;
         }
+        // Claim the uid now so a token refresh mid-load can't start a second
+        // batch — but RELEASE it below if the load times out, so the next auth
+        // event can retry. Claiming permanently before the await is what made
+        // a hung load unrecoverable for the rest of the session.
         initialisedForUidRef.current = newUid;
 
         // Ad attribution (web only, fire-and-forget): write-once first-touch
@@ -323,19 +353,63 @@ function App() {
 
         setUserDataLoaded(false); // Reset when new user signs in
 
+        // Fires BEFORE any load, so a user who never gets past this point
+        // still leaves a trace. Until this existed, a stranded sign-in was
+        // invisible: no document written, no screen mounted, no other event.
+        const bootstrapStartedAt = Date.now();
+        const bootstrapProps = { platform: Platform.OS };
+        trackEvent('auth_bootstrap_started', bootstrapProps);
+        trackWebEvent('auth_bootstrap_started', bootstrapProps);
+
         // Critical-for-first-paint: dashboard needs quotes, business settings,
         // subscription (trial banner), onboarding flag (router gate), and the
         // quote-number counter. Everything else gets deferred until after first
         // paint so the splash dismisses sooner.
-        await Promise.all([
+        //
+        // allSettled + a timeout, never a bare Promise.all: each loader already
+        // swallows its own errors, so the risk here was never rejection — it
+        // was a Firestore read that never settles at all, holding the splash
+        // open forever. See src/utils/bootstrapGate.ts.
+        let settled: PromiseSettledResult<void>[] = [];
+        const batch = Promise.allSettled([
           loadQuotes(),
           loadBusinessSettings(),
           checkOnboarding(),
           loadSubscription(),
           loadNextQuoteNumber(),
-        ]);
+        ]).then((r) => { settled = r; });
+
+        const outcome = await raceTimeout(batch, BOOTSTRAP_TIMEOUT_MS);
 
         setUserDataLoaded(true); // Mark user data as loaded — dashboard can render
+
+        if (outcome === 'timeout') {
+          // Let the next auth event have another go. The user is already
+          // looking at the app (onboarding or a thin dashboard) rather than a
+          // dead splash, and the loaders keep running in the background.
+          initialisedForUidRef.current = null;
+          // Sentry, not just trackEvent: the analytics channel writes to
+          // Firestore, so a hung Firestore read would swallow the very event
+          // reporting it. This is the one path that must not depend on the
+          // subsystem it's diagnosing.
+          reportIssue('auth bootstrap timed out', {
+            platform: Platform.OS,
+            timeoutMs: BOOTSTRAP_TIMEOUT_MS,
+          });
+        }
+
+        trackEvent('auth_bootstrap_finished', {
+          ...bootstrapProps,
+          outcome,
+          duration_ms: Date.now() - bootstrapStartedAt,
+          failed_loaders: failedLoaderNames(CRITICAL_LOADERS, settled),
+        });
+        trackWebEvent('auth_bootstrap_finished', {
+          ...bootstrapProps,
+          outcome,
+          duration_ms: Date.now() - bootstrapStartedAt,
+          failed_loaders: failedLoaderNames(CRITICAL_LOADERS, settled),
+        });
 
         // Deferred batch — fires after the first interaction frame so the
         // splash → dashboard transition isn't gated on these.
@@ -437,6 +511,23 @@ function App() {
         notificationService.removeNotificationListeners();
         setUserDataLoaded(false);
       }
+    };
+
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      // Recovery lives here rather than inside the handler so the whole body
+      // above — including the awaits that sit outside their own try/catch
+      // (clearAllData, the AsyncStorage writes) — is covered. A throw used to
+      // skip setUserDataLoaded entirely and strand the user on the splash with
+      // no way back: the uid was already claimed, so re-fired auth events
+      // short-circuited. Open the gate, release the claim, report it.
+      void handleAuthChange(currentUser).catch((err) => {
+        initialisedForUidRef.current = null;
+        setUserDataLoaded(true);
+        reportIssue('auth state handler threw', {
+          platform: Platform.OS,
+          error: (err as any)?.message ?? String(err),
+        });
+      });
     });
 
     return () => {
@@ -447,6 +538,14 @@ function App() {
 
   useEffect(() => {
     MaterialCommunityIcons.loadFont().then(() => setFontsLoaded(true)).catch(() => setFontsLoaded(true));
+  }, []);
+
+  // Dead-man's switch on the splash overlay. Runs once from mount rather than
+  // resetting per gate, so a chain of individually-short stalls still can't
+  // add up to an indefinite logo screen.
+  useEffect(() => {
+    const timer = setTimeout(() => setSplashExpired(true), SPLASH_MAX_MS);
+    return () => clearTimeout(timer);
   }, []);
 
   useEffect(() => {
@@ -461,13 +560,19 @@ function App() {
     async function initialize() {
       try {
         // First-paint critical: cached state from AsyncStorage for instant UI.
-        await Promise.all([
-          checkOnboarding(),
-          loadQuotes(),
-          loadBusinessSettings(),
-          loadSubscription(),
-          loadNextQuoteNumber(),
-        ]);
+        // Same timeout treatment as the post-sign-in batch — this gate feeds
+        // the same splash, and an AsyncStorage read that never settles strands
+        // the user just as effectively. See src/utils/bootstrapGate.ts.
+        await raceTimeout(
+          Promise.allSettled([
+            checkOnboarding(),
+            loadQuotes(),
+            loadBusinessSettings(),
+            loadSubscription(),
+            loadNextQuoteNumber(),
+          ]),
+          BOOTSTRAP_TIMEOUT_MS,
+        );
 
         setIsLoading(false);
 
@@ -477,6 +582,23 @@ function App() {
           loadContacts().catch(() => {});
           try {
             await subscriptionSyncService.initialize();
+          } catch {}
+          // Finish any purchase the stores still consider outstanding. This is
+          // what makes "it'll finish automatically next time you open the app"
+          // true — before this, entitlement could only ever be granted from
+          // PaywallScreen, so a buyer whose validation failed had to find their
+          // way back to that exact screen or stay charged-but-not-Pro.
+          try {
+            const summary = await recoverPendingPurchases({
+              onGranted: async () => { await loadSubscription(); },
+            });
+            if (summary.granted > 0) {
+              trackEvent('purchase_recovered_on_launch', {
+                granted: summary.granted,
+                checked: summary.checked,
+                platform: Platform.OS,
+              });
+            }
           } catch {}
           try {
             const update = await checkForUpdate();
@@ -552,7 +674,9 @@ function App() {
   // so signing in doesn't tear down and rebuild the entire React tree, which
   // is what caused the "app reloads on sign-in" symptom.
   const splashVisible =
-    !DEMO_CAPTURE && (isLoading || !fontsLoaded || (!!user && !userDataLoaded));
+    !DEMO_CAPTURE &&
+    !splashExpired &&
+    (isLoading || !fontsLoaded || (!!user && !userDataLoaded));
   const showAuthScreen = !DEMO_CAPTURE && requiresAuth && !user;
   const showMainApp = DEMO_CAPTURE || isOnboarded;
 

@@ -1,14 +1,21 @@
 /**
- * Trial lifecycle emails — five conversion-focused sends anchored to the
- * TRIAL clock (trialStartedAt), not the signup clock:
+ * Trial lifecycle emails — conversion-focused sends anchored to the TRIAL
+ * clock (trialStartedAt), not the signup clock:
  *
  *   - trial_start_value  (day 0–1):  value framing + "send that quote today"
  *   - trial_square_pitch (day 3–4):  Path B — turn on payments (skipped when
  *                                    Square is already connected)
- *   - trial_mid_value    (day 7–8):  the user's OWN real numbers; thin data
- *                                    drops the figures
  *   - trial_ending       (≤3 days):  what changes + REAL founding-spots count
+ *                                    (declined for users who never sent a quote)
  *   - trial_ended        (T+0..3d):  free-plan reassurance + churn question
+ *
+ * TRIMMED 2026-08-04 on measured performance. Across 227 sends every step
+ * after trial_start_value produced ZERO clicks, so two were retired:
+ *   - trial_mid_value      42 sends,  7% open, 0% click — cut entirely
+ *   - trial_ending (nudge) 20 sends,  0% open, 0% click — cut; those users now
+ *                          get nothing here and still receive trial_ended
+ * Their templates and send-once fields survive so either can be reinstated if
+ * the copy is reworked. Delivery was never the problem — 227/227 delivered.
  *
  * The signup-anchored onboarding drip (sendOnboardingDrip in index.ts) keeps
  * owning activation tips and the never-activated note (tip 5); this function
@@ -41,7 +48,6 @@ import { listAllAuthUsers } from './authUsers.helpers';
 import { isUnreachableEmail } from './reEngagement.helpers';
 import {
   lifecycleVerdict,
-  midTrialRecap,
   trialEndingVariant,
   SEND_ONCE_FIELD,
   suppressedByOnboardingDrip,
@@ -53,9 +59,7 @@ import { ts } from './subscription.helpers';
 import {
   sendTrialStartValueEmail,
   sendTrialSquarePitchEmail,
-  sendTrialMidValueEmail,
   sendTrialEndingEmail,
-  sendTrialEndingNudgeEmail,
   sendTrialEndedEmail,
   sendSquareIdleNudgeEmail,
   sendSquareNoPaylinkNudgeEmail,
@@ -152,16 +156,19 @@ export const trialLifecycleDaily = functions.pubsub
         const send = verdict.send ?? nudge;
         if (!send) continue;
 
-        // trial_ending splits: never-sent users get the personal never-sent
-        // note instead of the pricing pitch (same window, same send-once flag).
+        // trial_ending is declined for users who never sent a quote — the
+        // nudge that used to serve them measured 0 opens across 20 sends.
         const endingVariant =
           send === 'trial_ending'
             ? trialEndingVariant(activatedUids.has(userId), docsScanOk)
             : null;
 
         if (!live) {
-          const label = endingVariant === 'nudge' ? `${send}(nudge)` : send;
-          wouldSend.push(`${label} -> ${email} (${userId})`);
+          if (endingVariant === 'skip') {
+            wouldSend.push(`${send}(SKIPPED: never sent a quote) -> ${email} (${userId})`);
+          } else {
+            wouldSend.push(`${send} -> ${email} (${userId})`);
+          }
           continue;
         }
 
@@ -172,6 +179,10 @@ export const trialLifecycleDaily = functions.pubsub
         } catch {}
 
         let ok = false;
+        // A step we deliberately decline to send. Stamped like a success so the
+        // cron stops re-evaluating the same user every day for the rest of the
+        // window — declining is a decision, not a failure to be retried.
+        let declined = false;
         switch (send) {
           case 'trial_start_value':
             ok = await sendTrialStartValueEmail(email, businessName, userId);
@@ -179,20 +190,12 @@ export const trialLifecycleDaily = functions.pubsub
           case 'trial_square_pitch':
             ok = await sendTrialSquarePitchEmail(email, businessName, userId);
             break;
-          case 'trial_mid_value': {
-            const docsSnap = await db.collection(`users/${userId}/documents`).get();
-            const recap = midTrialRecap(
-              docsSnap.docs.map((d) => d.data() as any),
-              verdict.trialStartedAt ?? now
-            );
-            ok = await sendTrialMidValueEmail(email, businessName, recap, userId);
-            break;
-          }
           case 'trial_ending':
-            ok =
-              endingVariant === 'nudge'
-                ? await sendTrialEndingNudgeEmail(email, businessName, verdict.daysRemaining ?? 3, userId)
-                : await sendTrialEndingEmail(email, businessName, verdict.daysRemaining ?? 3, userId, founding);
+            if (endingVariant === 'skip') {
+              declined = true;
+              break;
+            }
+            ok = await sendTrialEndingEmail(email, businessName, verdict.daysRemaining ?? 3, userId, founding);
             break;
           case 'trial_ended':
             ok = await sendTrialEndedEmail(email, businessName, userId, founding);
@@ -205,7 +208,7 @@ export const trialLifecycleDaily = functions.pubsub
             break;
         }
 
-        if (ok) {
+        if (ok || declined) {
           const field = verdict.send
             ? SEND_ONCE_FIELD[verdict.send]
             : NUDGE_SEND_ONCE_FIELD[nudge!];

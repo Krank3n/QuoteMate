@@ -25,6 +25,16 @@ import { Platform } from 'react-native';
 import { auth, db } from '../config/firebase';
 
 export type AnalyticsEvent =
+  // — Auth bootstrap (the window between sign-in and the app being usable) —
+  // Fires the instant onAuthStateChanged hands us a user, BEFORE any load
+  // runs. Pairs with auth_bootstrap_finished: a started with no finished is a
+  // user stranded on the splash, which is the only way to see that failure —
+  // it writes nothing, renders nothing, and fires no other event. The 2026-08
+  // audit had to infer it from the absence of profile/onboarding docs.
+  | 'auth_bootstrap_started'
+  // The splash gate opened. `outcome` is settled | timeout, `duration_ms` how
+  // long the user waited, `failed_loaders` names any loader that rejected.
+  | 'auth_bootstrap_finished'
   // — Onboarding (the setup flow that gates the whole app) —
   // Entering the flow. `resumed` distinguishes a fresh start from a draft
   // picked back up, so resume rate is measurable.
@@ -87,6 +97,11 @@ export type AnalyticsEvent =
   | 'checkout_started'
   | 'purchase_completed'
   | 'purchase_failed'
+  // A purchase the stores still had outstanding was entitled by the launch-time
+  // sweep rather than by the buyer returning to the paywall. Non-zero here means
+  // someone was charged-but-not-Pro and we healed it without them noticing —
+  // worth watching, because a rising count implies validation is flaking again.
+  | 'purchase_recovered_on_launch'
   // The 14-day Pro trial began (fires with the first quote). Deliberately
   // redundant with the durable trialStartedAt field — events are lossy,
   // Firestore state stays the source of truth.

@@ -694,3 +694,80 @@ export async function getJobRequirements(input: { category?: string; niche?: str
   }
   return resolveJobRequirements({ categoryId: category, nicheId: niche, freeText: input.freeText });
 }
+
+/**
+ * List the tradie's service reports.
+ *
+ * A ServiceReport (users/{uid}/reports) is a customer-facing leave-behind for
+ * a service visit — no money, no line items, attached to a Job rather than to
+ * the quotes list. Mate had no way to see them, so "pull up the service report
+ * from the July job" got answered with that job's invoice: a confidently wrong
+ * document, which is the worst failure mode there is. This gives it eyes.
+ *
+ * Reports carry only jobId, so the job name and customer are resolved from the
+ * jobs collection in one batch read.
+ */
+export async function listServiceReports(input: {
+  query?: string;
+  limit?: number;
+}): Promise<unknown> {
+  const uid = requireUid();
+  const rowLimit = Math.min(Math.max(input.limit ?? 10, 1), 25);
+  const rawQuery = typeof input.query === 'string' ? input.query.trim() : '';
+
+  const snap = await getDocs(
+    query(collection(db, 'users', uid, 'reports'), orderBy('visitDate', 'desc'), fsLimit(50)),
+  ).catch(() => null);
+  if (!snap || snap.empty) {
+    return { reports: [], count: 0, note: 'No service reports on file yet.' };
+  }
+
+  // Resolve job name + customer for the jobs these reports hang off. Reports
+  // are few, so a per-job get is cheaper than scanning the whole collection.
+  const jobIds = Array.from(
+    new Set(snap.docs.map((d) => String((d.data() as any).jobId || '')).filter(Boolean)),
+  );
+  const jobEntries = await Promise.all(
+    jobIds.map(async (jobId) => {
+      const jobSnap = await getDoc(doc(db, 'users', uid, 'jobs', jobId)).catch(() => null);
+      return [jobId, jobSnap?.exists() ? (jobSnap.data() as any) : null] as const;
+    }),
+  );
+  const jobs = new Map(jobEntries);
+
+  let rows = snap.docs.map((d) => {
+    const r = d.data() as any;
+    const job = jobs.get(String(r.jobId || '')) || null;
+    return {
+      id: d.id,
+      number: r.number,
+      jobId: r.jobId || undefined,
+      jobName: job?.name || undefined,
+      customerName: job?.customerName || undefined,
+      serviceType: r.serviceType || undefined,
+      visitDate: typeof r.visitDate === 'number' ? new Date(r.visitDate).toISOString() : undefined,
+      status: r.status || 'draft',
+      hasRecommendedWork: !!(r.recommendedWork && String(r.recommendedWork).trim()),
+    };
+  });
+
+  if (rawQuery) {
+    const scored = rows
+      .map((row) => ({
+        row,
+        score: fuzzyScoreQuote(
+          rawQuery,
+          `${row.jobName || ''} ${row.serviceType || ''}`.trim(),
+          row.customerName,
+        ),
+      }))
+      .filter((s) => s.score > 0)
+      .sort((a, b) => b.score - a.score);
+    // A query that matches nothing falls back to the recent list rather than
+    // an empty result — Mate can then read the candidates back instead of
+    // telling the tradie their report doesn't exist.
+    if (scored.length) rows = scored.map((s) => s.row);
+  }
+
+  return { reports: rows.slice(0, rowLimit), count: Math.min(rows.length, rowLimit) };
+}

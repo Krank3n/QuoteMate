@@ -39,14 +39,43 @@ export function RecordPaymentScreen() {
 
   const invoices = useStore((s) => s.invoices);
   const currentInvoice = useStore((s) => s.currentInvoice);
+  const documents = useStore((s) => s.documents);
   const xeroConnection = useStore((s) => s.xeroConnection);
   const recordPayment = useStore((s) => s.recordPayment);
+  const recordDocumentPayment = useStore((s) => s.recordDocumentPayment);
   const pushPaymentToXero = useStore((s) => s.pushPaymentToXero);
 
-  // Check both saved invoices and currentInvoice (for unsaved invoices)
-  const invoice = invoices.find((i) => i.id === invoiceId) ||
+  // Callers navigate here with a *Document* id (ViewJobScreen passes
+  // actionableDoc.id). The legacy `invoices` array is never loaded at
+  // bootstrap and its ids diverge from Document ids after a quote → invoice
+  // conversion, so a legacy-only lookup dead-ended on "Invoice not found"
+  // for the modern flow. Resolve the unified doc as well and render from
+  // whichever we find.
+  const legacyInvoice = invoices.find((i) => i.id === invoiceId) ||
     (currentInvoice?.id === invoiceId ? currentInvoice : null);
-  const amountDue = invoice ? getAmountDue(invoice) : 0;
+  const document = documents.find(
+    (d) => d.type === 'invoice' && (d.id === invoiceId || d.legacyInvoiceId === invoiceId),
+  );
+  // A payment written to the unified ledger is the one that sticks; the
+  // legacy row is only kept in step when it exists.
+  const invoice = legacyInvoice ||
+    (document
+      ? {
+          id: document.id,
+          invoiceNumber: document.number,
+          total: Number(document.total) || 0,
+          paidAmount: Number(document.paidTotal) || 0,
+          customerName: document.customerName || '',
+          squarePaymentId: document.squarePaymentId,
+          squarePaidAt: document.squarePaidAt,
+          xeroInvoiceId: document.xeroInvoiceId,
+        } as any
+      : null);
+  const amountDue = document
+    ? Math.max(0, (Number(document.total) || 0) - (Number(document.paidTotal) || 0))
+    : invoice
+      ? getAmountDue(invoice)
+      : 0;
 
   const [amount, setAmount] = useState(amountDue.toFixed(2));
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('bank_transfer');
@@ -57,9 +86,9 @@ export function RecordPaymentScreen() {
 
   useEffect(() => {
     if (invoice) {
-      setAmount(getAmountDue(invoice).toFixed(2));
+      setAmount(amountDue.toFixed(2));
     }
-  }, [invoice]);
+  }, [invoice, amountDue]);
 
   const handleRecordPayment = async () => {
     if (!invoice) return;
@@ -89,7 +118,13 @@ export function RecordPaymentScreen() {
 
     setIsSubmitting(true);
     try {
-      await recordPayment(invoice.id, paymentAmount, paymentMethod, notes || undefined, paymentDate);
+      if (document) {
+        // recordDocumentPayment mirrors into the legacy row itself when one
+        // exists, so this branch covers both id-spaces.
+        await recordDocumentPayment(document.id, paymentAmount, paymentMethod, notes || undefined, paymentDate);
+      } else {
+        await recordPayment(invoice.id, paymentAmount, paymentMethod, notes || undefined, paymentDate);
+      }
 
       // Also push payment to Xero if connected and invoice is synced
       if (xeroConnection && invoice.xeroInvoiceId) {

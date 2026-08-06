@@ -133,9 +133,10 @@ export function lifecycleVerdict(
         trialStartedAt: f.trialStartedAt,
       };
     }
-    if (elapsedDays >= 7 && elapsedDays < 9 && !emailState?.trialMidValueEmailAt) {
-      return { send: 'trial_mid_value', trialStartedAt: f.trialStartedAt };
-    }
+    // trial_mid_value (day 7–8) was retired 2026-08-04: 42 sends, 7% open,
+    // 0% click. Every step after trial_start_value earned zero clicks, and this
+    // was the weakest of them — the send-once field and template are kept so it
+    // can be reinstated if the copy is reworked, but nothing selects it now.
     if (
       elapsedDays >= 3 &&
       elapsedDays < 5 &&
@@ -160,19 +161,24 @@ export function lifecycleVerdict(
   return { send: null };
 }
 
-export type TrialEndingVariant = 'standard' | 'nudge';
+export type TrialEndingVariant = 'standard' | 'skip';
 
 /**
- * Which trial_ending email to send. Trial starters who built quotes but never
- * SENT one get a personal "what got in the way?" note from Tom instead of the
- * pricing pitch — sending is the activation event, and the what-changes email
- * lands wrong on someone who hasn't seen the payoff yet. Same window and
- * send-once flag either way: one email, different message. When the documents
- * scan failed the sent-signal is unknowable, so fall back to the standard
- * email rather than guess anyone inactive.
+ * Which trial_ending email to send, if any.
+ *
+ * Trial starters who never SENT a quote used to get a personal "what got in the
+ * way?" nudge here instead of the pricing pitch. The reasoning was sound —
+ * sending is the activation event, and a pricing email lands wrong on someone
+ * who hasn't seen the payoff — but it measured 20 sends, 0 opens, 0 clicks.
+ * Retired 2026-08-04: they now get nothing at this step rather than a second
+ * unread email. They still receive trial_ended after expiry, which is the
+ * better-performing of the two (10% vs 0%) and reads correctly for them.
+ *
+ * When the documents scan fails the sent-signal is unknowable, so fall back to
+ * the standard email rather than silently skip someone who did activate.
  */
 export function trialEndingVariant(hasSentDoc: boolean, docsScanOk: boolean): TrialEndingVariant {
-  return docsScanOk && !hasSentDoc ? 'nudge' : 'standard';
+  return docsScanOk && !hasSentDoc ? 'skip' : 'standard';
 }
 
 export interface MidTrialRecap {

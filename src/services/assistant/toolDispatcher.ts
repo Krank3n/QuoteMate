@@ -13,6 +13,7 @@ import {
   getJobRequirements,
   getQuote,
   listRecentQuotes,
+  listServiceReports,
   reviewQuote,
 } from './readTools';
 import { buildProposal } from './proposalTools';
@@ -71,6 +72,9 @@ export async function dispatchToolCall(call: ToolCallInput): Promise<ToolCallOut
           break;
         case 'get_job_requirements':
           result = await getJobRequirements(input as { category?: string; niche?: string; freeText?: string });
+          break;
+        case 'list_service_reports':
+          result = await listServiceReports(input as { query?: string; limit?: number });
           break;
       }
       return { name, id, response: result as any };

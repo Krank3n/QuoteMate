@@ -84,17 +84,20 @@ describe('trial_square_pitch (day 3–4, Path B)', () => {
   });
 });
 
-describe('trial_mid_value (day 7–8)', () => {
-  it('fires inside the window with trialStartedAt for the personalisation read', () => {
-    const v = lifecycleVerdict(trialSub(7.5), undefined, NOW);
-    expect(v.send).toBe('trial_mid_value');
-    expect(v.trialStartedAt).toBe(NOW - 7.5 * DAY);
+describe('trial_mid_value — retired 2026-08-04 (7% open, 0% click over 42 sends)', () => {
+  it('no longer fires anywhere in the old day 7–8 window', () => {
+    for (const day of [7, 7.5, 8, 8.9]) {
+      expect(lifecycleVerdict(trialSub(day), undefined, NOW).send).toBeNull();
+    }
   });
 
-  it('send-once and never stale', () => {
-    const state = { trialMidValueEmailAt: iso(NOW - DAY) };
-    expect(lifecycleVerdict(trialSub(7.5), state, NOW).send).toBeNull();
-    expect(lifecycleVerdict(trialSub(9.1), undefined, NOW).send).toBeNull();
+  it('stays silent even for a user who never received it', () => {
+    expect(lifecycleVerdict(trialSub(7.5), {}, NOW).send).toBeNull();
+  });
+
+  it('does not disturb the steps either side of it', () => {
+    expect(lifecycleVerdict(trialSub(1), undefined, NOW).send).toBe('trial_start_value');
+    expect(lifecycleVerdict(trialSub(12), undefined, NOW).send).toBe('trial_ending');
   });
 });
 
@@ -233,17 +236,25 @@ describe('midTrialRecap', () => {
   });
 });
 
-describe('trialEndingVariant — never-sent users get the personal nudge', () => {
-  it('never sent a doc + scan ok → nudge', () => {
-    expect(trialEndingVariant(false, true)).toBe('nudge');
+describe('trialEndingVariant — the never-sent nudge was retired (0 opens / 20 sends)', () => {
+  it('never sent a doc + scan ok → skip, no email at this step', () => {
+    expect(trialEndingVariant(false, true)).toBe('skip');
   });
 
-  it('has sent a doc → standard pitch', () => {
+  it('has sent a doc → standard pitch, unchanged', () => {
     expect(trialEndingVariant(true, true)).toBe('standard');
   });
 
-  it('docs scan failed → standard, never guess someone inactive', () => {
+  it('docs scan failed → standard, never silently skip someone who did activate', () => {
+    // A failed scan makes everyone look never-sent. Falling back to 'skip'
+    // would mute trial_ending for the entire cohort on a bad day.
     expect(trialEndingVariant(false, false)).toBe('standard');
     expect(trialEndingVariant(true, false)).toBe('standard');
+  });
+
+  it('only ever returns a value the caller handles', () => {
+    for (const [sent, ok] of [[true, true], [false, true], [true, false], [false, false]] as const) {
+      expect(['standard', 'skip']).toContain(trialEndingVariant(sent, ok));
+    }
   });
 });

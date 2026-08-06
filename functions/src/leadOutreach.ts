@@ -250,11 +250,79 @@ function recordDomainSend(domainCounts: Map<string, number>, domain: string | nu
   domainCounts.set(domain, (domainCounts.get(domain) || 0) + 1);
 }
 
+export const AU_STATES = ['NSW', 'VIC', 'QLD', 'WA', 'SA', 'TAS', 'ACT', 'NT'] as const;
+const STATE_SUFFIX_RE = new RegExp(`\\s+(${AU_STATES.join('|')})$`, 'i');
+
+/** Strip a trailing state code: "Sydney NSW" → "Sydney". */
+export function stripStateSuffix(suburb: string | null | undefined): string {
+  return (suburb || '').trim().replace(STATE_SUFFIX_RE, '').trim();
+}
+
+/**
+ * Fallback state when Google omits administrative_area_level_1. Reads it off
+ * the configured location ("Geelong VIC" → "VIC"). Previously hardcoded 'NSW',
+ * which silently mislabelled every interstate lead once discovery went national.
+ */
+export function stateFromSuburb(suburb: string | null | undefined): string | null {
+  const m = (suburb || '').trim().match(STATE_SUFFIX_RE);
+  return m ? m[1].toUpperCase() : null;
+}
+
+/**
+ * Secondary dedupe key (placeId is primary). The state suffix is stripped so
+ * keys stay compatible with the 590 NSW-era leads created before locations
+ * carried one — otherwise "Sydney" and "Sydney NSW" hash differently and every
+ * existing lead looks new. Trade-off: two same-named businesses in, say,
+ * Richmond NSW and Richmond VIC collide and we drop one. That's the right way
+ * to be wrong — a missed lead costs nothing now that supply is wide, while a
+ * double-send to the same business burns sender reputation.
+ */
 function normaliseBusinessKey(name: string | null | undefined, suburb: string | null | undefined): string {
   const n = (name || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
-  const s = (suburb || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+  const s = stripStateSuffix(suburb).toLowerCase().replace(/[^a-z0-9]+/g, '');
   return `${n}::${s}`;
 }
+
+/**
+ * National discovery surface. Locations carry their state code so Places
+ * queries are unambiguous — "plumber Richmond, Australia" straddles four
+ * states and wastes calls on the wrong one.
+ */
+export const AU_REGIONS: Record<typeof AU_STATES[number], string[]> = {
+  NSW: [
+    'Sydney NSW', 'Parramatta NSW', 'Penrith NSW', 'Liverpool NSW', 'Campbelltown NSW',
+    'Blacktown NSW', 'Hornsby NSW', 'Sutherland NSW', 'Cronulla NSW', 'Manly NSW',
+    'Bondi NSW', 'Chatswood NSW', 'Newcastle NSW', 'Central Coast NSW', 'Wollongong NSW',
+    'Gosford NSW', 'Maitland NSW', 'Byron Bay NSW', 'Coffs Harbour NSW', 'Port Macquarie NSW',
+    'Wagga Wagga NSW', 'Orange NSW', 'Tamworth NSW', 'Dubbo NSW', 'Albury NSW',
+  ],
+  VIC: [
+    'Melbourne VIC', 'Geelong VIC', 'Ballarat VIC', 'Bendigo VIC', 'Frankston VIC',
+    'Dandenong VIC', 'Werribee VIC', 'Ringwood VIC', 'Box Hill VIC', 'Preston VIC',
+    'Sunshine VIC', 'Cranbourne VIC', 'Pakenham VIC', 'Shepparton VIC', 'Traralgon VIC',
+    'Mornington VIC', 'Sunbury VIC', 'Melton VIC',
+  ],
+  QLD: [
+    'Brisbane QLD', 'Gold Coast QLD', 'Sunshine Coast QLD', 'Ipswich QLD', 'Logan QLD',
+    'Toowoomba QLD', 'Cairns QLD', 'Townsville QLD', 'Mackay QLD', 'Rockhampton QLD',
+    'Bundaberg QLD', 'Hervey Bay QLD', 'Caboolture QLD', 'Redcliffe QLD', 'Gladstone QLD',
+  ],
+  WA: [
+    'Perth WA', 'Fremantle WA', 'Joondalup WA', 'Rockingham WA', 'Mandurah WA',
+    'Bunbury WA', 'Geraldton WA', 'Albany WA', 'Midland WA', 'Armadale WA',
+    'Busselton WA', 'Kalgoorlie WA',
+  ],
+  SA: [
+    'Adelaide SA', 'Port Adelaide SA', 'Elizabeth SA', 'Noarlunga SA', 'Mount Barker SA',
+    'Mount Gambier SA', 'Whyalla SA', 'Gawler SA', 'Murray Bridge SA',
+  ],
+  TAS: ['Hobart TAS', 'Launceston TAS', 'Devonport TAS', 'Burnie TAS'],
+  ACT: ['Canberra ACT', 'Belconnen ACT', 'Tuggeranong ACT', 'Gungahlin ACT'],
+  NT: ['Darwin NT', 'Palmerston NT', 'Alice Springs NT'],
+};
+
+/** Every location, in a stable order. 90 across all 8 states/territories. */
+export const AU_ALL_REGIONS: string[] = AU_STATES.flatMap(s => AU_REGIONS[s]);
 
 async function findExistingUserByEmail(email: string): Promise<string | null> {
   const e = normaliseEmail(email);
@@ -431,10 +499,14 @@ async function placesDetails(placeId: string): Promise<PlacesDetailsResult | nul
   return body.result as PlacesDetailsResult;
 }
 
-function pickFromAddressComponents(comps: PlacesDetailsResult['address_components'] | undefined, type: string): string | null {
+function pickFromAddressComponents(
+  comps: PlacesDetailsResult['address_components'] | undefined,
+  type: string,
+  form: 'long' | 'short' = 'long',
+): string | null {
   if (!comps) return null;
   const m = comps.find(c => c.types.includes(type));
-  return m?.long_name || null;
+  return (form === 'short' ? m?.short_name : m?.long_name) || null;
 }
 
 // `region=au` on textsearch is only a ranking bias, not a restriction —
@@ -875,7 +947,7 @@ export const adminLeadDiscovery = functions
           const phone = det.formatted_phone_number || null;
           const intlPhone = det.international_phone_number || null;
           const website = det.website || null;
-          const state = pickFromAddressComponents(det.address_components, 'administrative_area_level_1');
+          const state = pickFromAddressComponents(det.address_components, 'administrative_area_level_1', 'short');
           const postcode = pickFromAddressComponents(det.address_components, 'postal_code');
           const reviews = (det.reviews || []).slice(0, 5).map(rev => ({
             author: rev.author_name || null,
@@ -896,7 +968,7 @@ export const adminLeadDiscovery = functions
             internationalPhone: intlPhone,
             address: det.formatted_address || null,
             suburb,
-            state: state || 'NSW',
+            state: state || stateFromSuburb(suburb),
             postcode: postcode || null,
             websiteUrl: website,
             facebookUrl: null,
@@ -963,6 +1035,206 @@ export const adminLeadDiscovery = functions
   });
 
 // ============================================================
+// PER-LEAD PIPELINE STEPS (shared by the callables + the schedulers)
+// ============================================================
+//
+// Concurrency + deadline budgets. Every stage is a serial chain of network
+// calls per lead (Places → scrape → Claude), so these run in small parallel
+// chunks and stop cleanly before the 540s function ceiling rather than being
+// killed mid-loop. Keep concurrency low: callClaudeJSON has no 429 retry, so
+// a rate-limited lead just fails and gets picked up on the next sweep.
+const ENRICH_CONCURRENCY = 4;
+const GENERATE_CONCURRENCY = 4;
+/** Stop starting new chunks after this long, leaving headroom under the 540s cap. */
+const ENRICH_DEADLINE_MS = 460_000;
+const GENERATE_DEADLINE_MS = 460_000;
+/** Per-run ceiling on enrichment, to bound Places + Claude spend on a spike. */
+const MAX_ENRICH_PER_RUN = 60;
+/** Give up on a lead that keeps failing enrichment (no website, dead site, …). */
+const MAX_ENRICH_ATTEMPTS = 3;
+/** Per-run ceiling on message generation. */
+const MAX_GENERATE_PER_RUN = 60;
+/** Keep this many days of send capacity sitting in the queue. */
+const QUEUE_TARGET_DAYS = 2;
+//
+// enrichOneLead / generateOneLead are the SINGLE implementation of each stage.
+// They used to be copy-pasted into weeklyLeadDiscovery, and the copy drifted:
+// it never applied the no_email gate, so it produced 'researched' leads with
+// no address that the sender could never send (159 of them by Aug 2026).
+// Every caller goes through these now — don't reintroduce an inline copy.
+
+/** Run enrichment for one lead. Caller is responsible for status eligibility. */
+async function enrichOneLead(leadId: string): Promise<'enriched' | 'no_email' | 'failed' | 'skipped'> {
+  const ref = db().doc(`leads/${leadId}`);
+  const snap = await ref.get();
+  if (!snap.exists) return 'skipped';
+  const lead: any = snap.data();
+  if (!['new', 'researching'].includes(lead.status)) return 'skipped';
+
+  // Count the attempt up front, not just on Claude failure: a lead that kills
+  // the whole run (hung fetch, poison HTML) never reaches the failure branch,
+  // and autoEnrichLeads would otherwise retry it every 2 hours forever.
+  await ref.set({
+    status: 'researching' as LeadStatus,
+    enrichmentAttempts: admin.firestore.FieldValue.increment(1),
+  }, { merge: true });
+
+  // Backfill googleReviews / types / editorial summary for leads created
+  // before we started saving them at discovery time.
+  if (!Array.isArray(lead.googleReviews) && lead.googlePlaceId) {
+    const det = await placesDetails(lead.googlePlaceId);
+    if (det) {
+      const reviews = (det.reviews || []).slice(0, 5).map(rev => ({
+        author: rev.author_name || null,
+        rating: rev.rating ?? null,
+        text: (rev.text || '').slice(0, 800),
+        when: rev.relative_time_description || null,
+      })).filter(rev => rev.text);
+      await ref.set({
+        googleReviews: reviews,
+        googleEditorialSummary: det.editorial_summary?.overview || null,
+        googleTypes: det.types || [],
+      }, { merge: true });
+      lead.googleReviews = reviews;
+      lead.googleEditorialSummary = det.editorial_summary?.overview || null;
+      lead.googleTypes = det.types || [];
+    }
+  }
+
+  let scraped: ScrapedSiteContent | null = null;
+  if (lead.websiteUrl) {
+    scraped = await scrapeWebsite(lead.websiteUrl);
+  }
+
+  const enrich = await claudeEnrich({
+    businessName: lead.businessName,
+    trade: lead.trade as Trade,
+    suburb: lead.suburb,
+    websiteUrl: lead.websiteUrl,
+    scraped,
+    googleReviews: Array.isArray(lead.googleReviews) ? lead.googleReviews : [],
+    googleEditorialSummary: lead.googleEditorialSummary || null,
+    googleTypes: Array.isArray(lead.googleTypes) ? lead.googleTypes : [],
+  });
+
+  if (!enrich) {
+    await ref.set({
+      status: 'new' as LeadStatus,
+      enrichmentFailureReason: scraped ? 'claude_failed' : 'no_website_content',
+      enrichmentAttemptedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+    return 'failed';
+  }
+
+  // Pull email/mobile from scrape if not already set
+  const updates: any = {
+    status: 'researched' as LeadStatus,
+    ownerName: enrich.ownerName,
+    ownerNameSource: enrich.ownerNameSource,
+    enrichmentSummary: enrich.enrichmentSummary,
+    personalizationHooks: enrich.personalizationHooks || [],
+    enrichmentConfidence: enrich.confidence,
+    enrichedAt: admin.firestore.FieldValue.serverTimestamp(),
+    enrichmentFailureReason: admin.firestore.FieldValue.delete(),
+  };
+  if (!lead.email && scraped?.emails?.length) updates.email = scraped.emails[0];
+  if (!lead.mobile && scraped?.mobiles?.length) updates.mobile = scraped.mobiles[0];
+  if (!lead.facebookUrl && scraped?.socials?.facebook) updates.facebookUrl = scraped.socials.facebook;
+  if (!lead.instagramUrl && scraped?.socials?.instagram) updates.instagramUrl = scraped.socials.instagram;
+
+  // Cold outreach is email-only. If enrichment couldn't find a sendable
+  // address (no website, contact-form-only site, obfuscated email), park
+  // the lead in 'no_email' rather than letting it flow to 'researched' →
+  // 'queued', where it would clog the queue and get skipped forever.
+  const gotEmail = !!normaliseEmail(updates.email || lead.email);
+  if (!gotEmail) updates.status = 'no_email' as LeadStatus;
+
+  await ref.set(updates, { merge: true });
+
+  // Save research raw
+  await ref.collection('research').add({
+    at: admin.firestore.FieldValue.serverTimestamp(),
+    scrapedPages: scraped?.pages || [],
+    scrapedTitle: scraped?.title || null,
+    scrapedDescription: scraped?.description || null,
+    scrapedEmails: scraped?.emails || [],
+    scrapedMobiles: scraped?.mobiles || [],
+    claudeOwnerName: enrich.ownerName,
+    claudeConfidence: enrich.confidence,
+    claudeHooks: enrich.personalizationHooks,
+  });
+  return gotEmail ? 'enriched' : 'no_email';
+}
+
+/** Generate + queue the message for one lead. Caller filters on status. */
+async function generateOneLead(
+  ref: FirebaseFirestore.DocumentReference,
+  lead: any,
+): Promise<'generated' | 'no_email' | 'failed'> {
+  // No email = nothing to send. Don't spend a Claude call generating copy
+  // for a lead we can never email; park it in 'no_email' so it leaves the
+  // pipeline instead of silently sitting in the send queue.
+  if (!normaliseEmail(lead.email)) {
+    await ref.set({ status: 'no_email' as LeadStatus }, { merge: true });
+    return 'no_email';
+  }
+
+  const msg = await claudeGenerateMessage({
+    businessName: lead.businessName,
+    ownerName: lead.ownerName || null,
+    ownerNameSource: lead.ownerNameSource || null,
+    enrichmentConfidence: lead.enrichmentConfidence || null,
+    trade: lead.trade as Trade,
+    suburb: lead.suburb,
+    hooks: lead.personalizationHooks || [],
+    enrichmentSummary: lead.enrichmentSummary || '',
+  });
+  if (!msg || !msg.subject || !msg.body) return 'failed';
+
+  // Sanity guard: never let "AI" leak into copy
+  const cleanBody = msg.body.replace(/\bAI\b/g, 'smart');
+  const cleanSubject = msg.subject.replace(/\bAI\b/g, 'smart');
+
+  await ref.set({
+    generatedSubject: cleanSubject,
+    generatedBody: cleanBody,
+    generatedBodyVersion: admin.firestore.FieldValue.increment(1),
+    generatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    status: 'queued' as LeadStatus,
+    queuedAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, { merge: true });
+  return 'generated';
+}
+
+/**
+ * Run `fn` over `items` with bounded concurrency, stopping early once
+ * `deadlineAt` passes. Each stage step is a serial chain of network calls
+ * (Places → scrape → Claude, ~15s/lead); running them one at a time is what
+ * blew the 540s budget. Returns results for the items actually processed.
+ */
+export async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  deadlineAt: number,
+  fn: (item: T) => Promise<R>,
+): Promise<{ results: R[]; processed: number; hitDeadline: boolean }> {
+  const results: R[] = [];
+  let processed = 0;
+  let hitDeadline = false;
+  for (let i = 0; i < items.length; i += concurrency) {
+    if (Date.now() >= deadlineAt) { hitDeadline = true; break; }
+    const chunk = items.slice(i, i + concurrency);
+    const settled = await Promise.allSettled(chunk.map(fn));
+    for (const s of settled) {
+      processed++;
+      if (s.status === 'fulfilled') results.push(s.value);
+      else console.warn('mapWithConcurrency: item failed:', (s.reason as any)?.message || s.reason);
+    }
+  }
+  return { results, processed, hitDeadline };
+}
+
+// ============================================================
 // 2. adminEnrichLeads — fetch sites + Claude extract owner + hooks
 // ============================================================
 
@@ -976,115 +1248,30 @@ export const adminEnrichLeads = functions
     }
 
     let enriched = 0;
+    let noEmail = 0;
     let failed = 0;
     let skipped = 0;
 
-    for (const leadId of leadIds) {
-      const ref = db().doc(`leads/${leadId}`);
-      const snap = await ref.get();
-      if (!snap.exists) { skipped++; continue; }
-      const lead: any = snap.data();
-      if (!['new', 'researching'].includes(lead.status)) { skipped++; continue; }
-
-      await ref.set({ status: 'researching' as LeadStatus }, { merge: true });
-
-      // Backfill googleReviews / types / editorial summary for leads created
-      // before we started saving them at discovery time.
-      if (!Array.isArray(lead.googleReviews) && lead.googlePlaceId) {
-        const det = await placesDetails(lead.googlePlaceId);
-        if (det) {
-          const reviews = (det.reviews || []).slice(0, 5).map(rev => ({
-            author: rev.author_name || null,
-            rating: rev.rating ?? null,
-            text: (rev.text || '').slice(0, 800),
-            when: rev.relative_time_description || null,
-          })).filter(rev => rev.text);
-          await ref.set({
-            googleReviews: reviews,
-            googleEditorialSummary: det.editorial_summary?.overview || null,
-            googleTypes: det.types || [],
-          }, { merge: true });
-          lead.googleReviews = reviews;
-          lead.googleEditorialSummary = det.editorial_summary?.overview || null;
-          lead.googleTypes = det.types || [];
-        }
-      }
-
-      let scraped: ScrapedSiteContent | null = null;
-      if (lead.websiteUrl) {
-        scraped = await scrapeWebsite(lead.websiteUrl);
-      }
-
-      const enrich = await claudeEnrich({
-        businessName: lead.businessName,
-        trade: lead.trade as Trade,
-        suburb: lead.suburb,
-        websiteUrl: lead.websiteUrl,
-        scraped,
-        googleReviews: Array.isArray(lead.googleReviews) ? lead.googleReviews : [],
-        googleEditorialSummary: lead.googleEditorialSummary || null,
-        googleTypes: Array.isArray(lead.googleTypes) ? lead.googleTypes : [],
-      });
-
-      if (!enrich) {
-        await ref.set({
-          status: 'new' as LeadStatus,
-          enrichmentFailureReason: scraped ? 'claude_failed' : 'no_website_content',
-          enrichmentAttemptedAt: admin.firestore.FieldValue.serverTimestamp(),
-        }, { merge: true });
-        failed++;
-        continue;
-      }
-
-      // Pull email/mobile from scrape if not already set
-      const updates: any = {
-        status: 'researched' as LeadStatus,
-        ownerName: enrich.ownerName,
-        ownerNameSource: enrich.ownerNameSource,
-        enrichmentSummary: enrich.enrichmentSummary,
-        personalizationHooks: enrich.personalizationHooks || [],
-        enrichmentConfidence: enrich.confidence,
-        enrichedAt: admin.firestore.FieldValue.serverTimestamp(),
-        enrichmentFailureReason: admin.firestore.FieldValue.delete(),
-      };
-      if (!lead.email && scraped?.emails?.length) updates.email = scraped.emails[0];
-      if (!lead.mobile && scraped?.mobiles?.length) updates.mobile = scraped.mobiles[0];
-      if (!lead.facebookUrl && scraped?.socials?.facebook) updates.facebookUrl = scraped.socials.facebook;
-      if (!lead.instagramUrl && scraped?.socials?.instagram) updates.instagramUrl = scraped.socials.instagram;
-
-      // Cold outreach is email-only. If enrichment couldn't find a sendable
-      // address (no website, contact-form-only site, obfuscated email), park
-      // the lead in 'no_email' rather than letting it flow to 'researched' →
-      // 'queued', where it would clog the queue and get skipped forever.
-      if (!normaliseEmail(updates.email || lead.email)) {
-        updates.status = 'no_email' as LeadStatus;
-      }
-
-      await ref.set(updates, { merge: true });
-
-      // Save research raw
-      await ref.collection('research').add({
-        at: admin.firestore.FieldValue.serverTimestamp(),
-        scrapedPages: scraped?.pages || [],
-        scrapedTitle: scraped?.title || null,
-        scrapedDescription: scraped?.description || null,
-        scrapedEmails: scraped?.emails || [],
-        scrapedMobiles: scraped?.mobiles || [],
-        claudeOwnerName: enrich.ownerName,
-        claudeConfidence: enrich.confidence,
-        claudeHooks: enrich.personalizationHooks,
-      });
-      enriched++;
+    const deadlineAt = Date.now() + ENRICH_DEADLINE_MS;
+    const { results } = await mapWithConcurrency(leadIds, ENRICH_CONCURRENCY, deadlineAt, enrichOneLead);
+    for (const r of results) {
+      if (r === 'enriched') enriched++;
+      else if (r === 'no_email') noEmail++;
+      else if (r === 'failed') failed++;
+      else skipped++;
     }
+    // Anything we couldn't reach before the deadline stays 'new' and gets
+    // picked up by autoEnrichLeads on its next pass.
+    skipped += leadIds.length - results.length;
 
     await logAdminAction({
       adminUid,
       action: 'lead_enrich',
       targetType: 'lead_batch',
-      payload: { count: leadIds.length, enriched, failed, skipped },
+      payload: { count: leadIds.length, enriched, noEmail, failed, skipped },
     });
 
-    return { ok: true, enriched, failed, skipped };
+    return { ok: true, enriched, noEmail, failed, skipped };
   });
 
 // ============================================================
@@ -1104,48 +1291,23 @@ export const adminGenerateLeadMessages = functions
     let failed = 0;
     let skipped = 0;
 
-    for (const leadId of leadIds) {
+    const deadlineAt = Date.now() + GENERATE_DEADLINE_MS;
+    const { results } = await mapWithConcurrency(leadIds, GENERATE_CONCURRENCY, deadlineAt, async (leadId) => {
       const ref = db().doc(`leads/${leadId}`);
       const snap = await ref.get();
-      if (!snap.exists) { skipped++; continue; }
+      if (!snap.exists) return 'skipped' as const;
       const lead: any = snap.data();
-      if (!['researched', 'queued'].includes(lead.status)) { skipped++; continue; }
-
-      // No email = nothing to send. Don't spend a Claude call generating copy
-      // for a lead we can never email; park it in 'no_email' so it leaves the
-      // pipeline instead of silently sitting in the send queue.
-      if (!normaliseEmail(lead.email)) {
-        await ref.set({ status: 'no_email' as LeadStatus }, { merge: true });
-        skipped++;
-        continue;
-      }
-
-      const msg = await claudeGenerateMessage({
-        businessName: lead.businessName,
-        ownerName: lead.ownerName || null,
-        ownerNameSource: lead.ownerNameSource || null,
-        enrichmentConfidence: lead.enrichmentConfidence || null,
-        trade: lead.trade as Trade,
-        suburb: lead.suburb,
-        hooks: lead.personalizationHooks || [],
-        enrichmentSummary: lead.enrichmentSummary || '',
-      });
-      if (!msg || !msg.subject || !msg.body) { failed++; continue; }
-
-      // Sanity guard: never let "AI" leak into copy
-      const cleanBody = msg.body.replace(/\bAI\b/g, 'smart');
-      const cleanSubject = msg.subject.replace(/\bAI\b/g, 'smart');
-
-      await ref.set({
-        generatedSubject: cleanSubject,
-        generatedBody: cleanBody,
-        generatedBodyVersion: admin.firestore.FieldValue.increment(1),
-        generatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        status: 'queued' as LeadStatus,
-        queuedAt: admin.firestore.FieldValue.serverTimestamp(),
-      }, { merge: true });
-      generated++;
+      // 'queued' is allowed so an admin can regenerate copy for a lead that's
+      // already in the queue but hasn't gone out yet.
+      if (!['researched', 'queued'].includes(lead.status)) return 'skipped' as const;
+      return generateOneLead(ref, lead);
+    });
+    for (const r of results) {
+      if (r === 'generated') generated++;
+      else if (r === 'failed') failed++;
+      else skipped++; // 'skipped' | 'no_email'
     }
+    skipped += leadIds.length - results.length;
 
     await logAdminAction({
       adminUid,
@@ -2096,59 +2258,112 @@ export const adminUpdateLeadConfig = functions.https.onCall(async (data, context
 });
 
 // ============================================================
-// weeklyLeadDiscovery — auto-fill the queue every Monday morning
+// dailyLeadDiscovery — national Places sweep, rotating across the grid
 // ============================================================
 //
-// Runs every Monday 8am AEST (1 hour before the weekly report). Reads
-// `leadOutreachConfig/discovery`, pulls fresh Google Maps results for the
-// configured trades + suburbs, dedupes against existing leads, and lands
-// them as 'new'. If autoResearch is on, immediately enriches them. If
-// autoGenerate is on, generates messages too — meaning by Monday afternoon
-// the queue is full of personalised emails ready for the auto-sender to
-// trickle out across the week.
+// Runs daily. Reads `leadOutreachConfig/discovery`, pulls fresh Google Maps
+// results for a ROTATING slice of the configured trades × locations, dedupes
+// against existing leads, and lands them as 'new'. Enrichment and message
+// generation are separate scheduled stages (autoEnrichLeads /
+// autoGenerateLeadMessages) — see the comment on dailyLeadDiscovery.
 
 interface DiscoveryConfig {
   enabled: boolean;
   trades: Trade[];
   suburbs: string[];
-  targetPerWeek: number;     // hard cap on new leads created per run
-  autoResearch: boolean;     // chain enrichment after discovery
-  autoGenerate: boolean;     // chain message generation after research
+  targetPerWeek: number;     // weekly lead target; each daily run takes ~1/7th
+  autoResearch: boolean;     // enrichment stage enabled
+  autoGenerate: boolean;     // message-generation stage enabled
+  rotationOffset?: number;   // cursor into the trade × location grid
 }
 
 const DEFAULT_DISCOVERY_CONFIG: DiscoveryConfig = {
   enabled: false,
   trades: ['fencer'],
-  suburbs: ['Sydney'],
+  suburbs: ['Sydney NSW'],
   targetPerWeek: 50,
   autoResearch: true,
   autoGenerate: true,
+  rotationOffset: 0,
 };
+
+/** Stop starting new Places queries after this long, under the 540s cap. */
+const DISCOVERY_DEADLINE_MS = 420_000;
 
 // Internal discovery — same logic as adminLeadDiscovery but no auth context.
 // Returns IDs of leads created so the scheduler can chain enrichment + gen.
-async function runDiscoveryBatch(params: {
-  trade: Trade;
-  suburbs: string[];
+/**
+ * Build the full location × trade grid in a stable order.
+ *
+ * TRADE varies fastest, location slowest. The sweep only consumes a handful of
+ * cells a day (the 2026-08-03 run hit its 43-lead target in 4), so whichever
+ * axis is outermost stays fixed for weeks. Holding location fixed costs
+ * nothing — a tradie in Geelong is worth the same as one in Perth — whereas
+ * holding trade fixed would mean a fortnight of nothing but fencers before the
+ * first plumber, and with 0 replies so far the open question is which trade
+ * bites, not which postcode.
+ */
+export function buildDiscoveryGrid(
+  trades: readonly Trade[],
+  suburbs: readonly string[],
+): Array<{ trade: Trade; suburb: string }> {
+  const grid: Array<{ trade: Trade; suburb: string }> = [];
+  for (const suburb of suburbs) {
+    for (const trade of trades) grid.push({ trade, suburb });
+  }
+  return grid;
+}
+
+/**
+ * Sweep the grid starting at `startOffset`, wrapping, until the target is hit,
+ * the grid is exhausted, or the deadline passes.
+ *
+ * The rotation is the point. The old loop always restarted at suburbs[0], so
+ * every run re-ground the same mined-out Sydney queries — by 2026-08-02 it was
+ * burning 776 dedupes to create 32 leads (96% waste) and the tail of the list
+ * was only ever reached once the head was fully exhausted. Persisting the
+ * cursor means each run picks up where the last left off and coverage spreads
+ * evenly across all 8 states.
+ */
+async function runDiscoverySweep(params: {
+  grid: Array<{ trade: Trade; suburb: string }>;
+  startOffset: number;
   maxResults: number;
+  deadlineAt: number;
   campaignId: string;
-}): Promise<{ created: string[]; dedupedExisting: number; dedupedSuppressed: number; dedupedExistingUser: number }> {
-  const { trade, suburbs, maxResults, campaignId } = params;
+}): Promise<{
+  created: string[];
+  dedupedExisting: number;
+  dedupedSuppressed: number;
+  dedupedExistingUser: number;
+  cellsVisited: number;
+  nextOffset: number;
+  hitDeadline: boolean;
+}> {
+  const { grid, startOffset, maxResults, deadlineAt, campaignId } = params;
   const created: string[] = [];
   let dedupedExisting = 0;
   let dedupedSuppressed = 0;
   let dedupedExistingUser = 0;
+  let cellsVisited = 0;
+  let hitDeadline = false;
+  const total = grid.length;
 
-  for (const suburb of suburbs) {
+  for (let i = 0; i < total; i++) {
     if (created.length >= maxResults) break;
+    if (Date.now() >= deadlineAt) { hitDeadline = true; break; }
+    const { trade, suburb } = grid[(startOffset + i) % total];
+    cellsVisited++;
+
     for (const phrase of TRADE_QUERY[trade]) {
       if (created.length >= maxResults) break;
+      if (Date.now() >= deadlineAt) { hitDeadline = true; break; }
       let results: PlacesSearchResult[] = [];
       const query = buildDiscoveryQuery(phrase, suburb);
       try {
         results = await placesTextSearch(query);
       } catch (e: any) {
-        console.warn(`runDiscoveryBatch: places search failed for "${query}":`, e?.message);
+        console.warn(`runDiscoverySweep: places search failed for "${query}":`, e?.message);
         continue;
       }
 
@@ -2175,7 +2390,7 @@ async function runDiscoveryBatch(params: {
         const phone = det.formatted_phone_number || null;
         const intlPhone = det.international_phone_number || null;
         const website = det.website || null;
-        const state = pickFromAddressComponents(det.address_components, 'administrative_area_level_1');
+        const state = pickFromAddressComponents(det.address_components, 'administrative_area_level_1', 'short');
         const postcode = pickFromAddressComponents(det.address_components, 'postal_code');
         const reviews = (det.reviews || []).slice(0, 5).map(rev => ({
           author: rev.author_name || null,
@@ -2196,7 +2411,7 @@ async function runDiscoveryBatch(params: {
           internationalPhone: intlPhone,
           address: det.formatted_address || null,
           suburb,
-          state: state || 'NSW',
+          state: state || stateFromSuburb(suburb),
           postcode: postcode || null,
           websiteUrl: website,
           facebookUrl: null,
@@ -2218,27 +2433,52 @@ async function runDiscoveryBatch(params: {
       }
     }
   }
-  return { created, dedupedExisting, dedupedSuppressed, dedupedExistingUser };
+  return {
+    created,
+    dedupedExisting,
+    dedupedSuppressed,
+    dedupedExistingUser,
+    cellsVisited,
+    nextOffset: total ? (startOffset + cellsVisited) % total : 0,
+    hitDeadline,
+  };
 }
 
-export const weeklyLeadDiscovery = functions
+// Discovery ONLY. Enrichment and message generation used to be chained inline
+// here, which meant one 540s function had to do all three stages serially — it
+// timed out on every run from 2026-07-05 to 2026-08-02 and the truncated
+// generation step starved the send queue (~9 emails/week against 500/week of
+// capacity). Those stages are now autoEnrichLeads and autoGenerateLeadMessages,
+// which sweep by status on their own schedules, so a slow or failed discovery
+// run can no longer stop sends.
+//
+// Daily rather than weekly: with a national grid (14 trades × 90 locations)
+// a single weekly run big enough to feed the sender would push back against
+// the 540s ceiling and spike Places spend into one burst. Seven small runs
+// hold each one to ~60s and spread the cost evenly.
+export const dailyLeadDiscovery = functions
   .runWith({ memory: '1GB', timeoutSeconds: 540 })
   .pubsub
-  .schedule('every monday 08:00')
+  .schedule('every day 08:00')
   .timeZone('Australia/Sydney')
   .onRun(async () => {
-    const cfgSnap = await db().doc('leadOutreachConfig/discovery').get();
+    const cfgRef = db().doc('leadOutreachConfig/discovery');
+    const cfgSnap = await cfgRef.get();
     const cfg: DiscoveryConfig = cfgSnap.exists
       ? { ...DEFAULT_DISCOVERY_CONFIG, ...(cfgSnap.data() as any) }
       : DEFAULT_DISCOVERY_CONFIG;
     if (!cfg.enabled) {
-      console.info('weeklyLeadDiscovery: disabled in config');
+      console.info('dailyLeadDiscovery: disabled in config');
       return null;
     }
     if (!cfg.trades?.length || !cfg.suburbs?.length) {
-      console.warn('weeklyLeadDiscovery: trades/suburbs empty');
+      console.warn('dailyLeadDiscovery: trades/suburbs empty');
       return null;
     }
+
+    const grid = buildDiscoveryGrid(cfg.trades, cfg.suburbs);
+    const startOffset = ((cfg.rotationOffset ?? 0) % grid.length + grid.length) % grid.length;
+    const targetPerRun = Math.max(1, Math.ceil(cfg.targetPerWeek / 7));
 
     const campaignRef = db().collection('leadCampaigns').doc();
     await campaignRef.set({
@@ -2248,167 +2488,201 @@ export const weeklyLeadDiscovery = functions
       requestedAt: admin.firestore.FieldValue.serverTimestamp(),
       leadsCreated: 0,
       status: 'running',
+      startOffset,
+      gridSize: grid.length,
     });
 
-    let totalCreated: string[] = [];
-    let totalDeduped = 0;
-    const perTradeRemaining = Math.max(1, Math.floor(cfg.targetPerWeek / cfg.trades.length));
+    const r = await runDiscoverySweep({
+      grid,
+      startOffset,
+      maxResults: targetPerRun,
+      deadlineAt: Date.now() + DISCOVERY_DEADLINE_MS,
+      campaignId: campaignRef.id,
+    });
+    const totalDeduped = r.dedupedExisting + r.dedupedSuppressed + r.dedupedExistingUser;
 
-    for (const trade of cfg.trades) {
-      if (totalCreated.length >= cfg.targetPerWeek) break;
-      const remaining = Math.min(perTradeRemaining, cfg.targetPerWeek - totalCreated.length);
-      const r = await runDiscoveryBatch({ trade, suburbs: cfg.suburbs, maxResults: remaining, campaignId: campaignRef.id });
-      totalCreated.push(...r.created);
-      totalDeduped += r.dedupedExisting + r.dedupedSuppressed + r.dedupedExistingUser;
-    }
+    // Advance the cursor even on a barren run, so the next one explores new
+    // ground instead of re-grinding the cells that just came back empty.
+    await cfgRef.set({ rotationOffset: r.nextOffset }, { merge: true });
 
     await campaignRef.set({
-      leadsCreated: totalCreated.length,
+      leadsCreated: r.created.length,
       dedupedTotal: totalDeduped,
+      cellsVisited: r.cellsVisited,
+      nextOffset: r.nextOffset,
+      hitDeadline: r.hitDeadline,
       status: 'completed',
       completedAt: admin.firestore.FieldValue.serverTimestamp(),
     }, { merge: true });
 
-    // OPTIONAL: chain enrichment + generation
-    let enriched = 0;
-    let generated = 0;
-    if (cfg.autoResearch && totalCreated.length > 0) {
-      // Enrich in chunks to avoid hitting timeout
-      for (const leadId of totalCreated) {
-        const ref = db().doc(`leads/${leadId}`);
-        const snap = await ref.get();
-        if (!snap.exists) continue;
-        const lead: any = snap.data();
-        if (!['new', 'researching'].includes(lead.status)) continue;
-
-        await ref.set({ status: 'researching' as LeadStatus }, { merge: true });
-
-        if (!Array.isArray(lead.googleReviews) && lead.googlePlaceId) {
-          const det = await placesDetails(lead.googlePlaceId);
-          if (det) {
-            const reviews = (det.reviews || []).slice(0, 5).map(rev => ({
-              author: rev.author_name || null,
-              rating: rev.rating ?? null,
-              text: (rev.text || '').slice(0, 800),
-              when: rev.relative_time_description || null,
-            })).filter(rev => rev.text);
-            await ref.set({
-              googleReviews: reviews,
-              googleEditorialSummary: det.editorial_summary?.overview || null,
-              googleTypes: det.types || [],
-            }, { merge: true });
-            lead.googleReviews = reviews;
-            lead.googleEditorialSummary = det.editorial_summary?.overview || null;
-            lead.googleTypes = det.types || [];
-          }
-        }
-
-        let scraped: ScrapedSiteContent | null = null;
-        if (lead.websiteUrl) scraped = await scrapeWebsite(lead.websiteUrl);
-
-        const enrich = await claudeEnrich({
-          businessName: lead.businessName,
-          trade: lead.trade as Trade,
-          suburb: lead.suburb,
-          websiteUrl: lead.websiteUrl,
-          scraped,
-          googleReviews: Array.isArray(lead.googleReviews) ? lead.googleReviews : [],
-          googleEditorialSummary: lead.googleEditorialSummary || null,
-          googleTypes: Array.isArray(lead.googleTypes) ? lead.googleTypes : [],
-        });
-
-        if (!enrich) {
-          await ref.set({ status: 'new' as LeadStatus, enrichmentFailureReason: 'auto_research_failed' }, { merge: true });
-          continue;
-        }
-
-        const updates: any = {
-          status: 'researched' as LeadStatus,
-          ownerName: enrich.ownerName,
-          ownerNameSource: enrich.ownerNameSource,
-          enrichmentSummary: enrich.enrichmentSummary,
-          personalizationHooks: enrich.personalizationHooks || [],
-          enrichmentConfidence: enrich.confidence,
-          enrichedAt: admin.firestore.FieldValue.serverTimestamp(),
-        };
-        if (!lead.email && scraped?.emails?.length) updates.email = scraped.emails[0];
-        if (!lead.mobile && scraped?.mobiles?.length) updates.mobile = scraped.mobiles[0];
-        if (!lead.facebookUrl && scraped?.socials?.facebook) updates.facebookUrl = scraped.socials.facebook;
-        if (!lead.instagramUrl && scraped?.socials?.instagram) updates.instagramUrl = scraped.socials.instagram;
-        await ref.set(updates, { merge: true });
-        enriched++;
-      }
-    }
-
-    // Generate messages + queue. Runs INDEPENDENTLY of whether this run created
-    // new leads — otherwise a week where discovery dedupes everything (e.g.
-    // Sydney exhausted) leaves the queue empty and 0 sends. We sweep the whole
-    // 'researched' backlog (oldest first), not just leads created this run, so
-    // stranded leads from earlier weeks actually get queued. Capped per run to
-    // bound Claude cost; the auto-sender trickles them out under its daily cap.
-    if (cfg.autoGenerate) {
-      const genCap = Math.max(cfg.targetPerWeek, 50);
-      // Query by status only (no composite index needed) and sort oldest-first
-      // in memory — the researched backlog is at most a few hundred docs.
-      const backlogSnap = await db().collection('leads')
-        .where('status', '==', 'researched')
-        .get();
-      const backlogDocs = backlogSnap.docs.sort((a, b) => {
-        const am = (a.data() as any)?.enrichedAt?.toMillis?.() ?? 0;
-        const bm = (b.data() as any)?.enrichedAt?.toMillis?.() ?? 0;
-        return am - bm;
-      });
-      for (const d of backlogDocs) {
-        if (generated >= genCap) break;
-        const ref = d.ref;
-        const lead: any = d.data();
-        // Only auto-generate if we have an email AND meaningful enrichment, and
-        // we haven't already written a message for this lead.
-        if (!lead.email) continue;
-        if (lead.enrichmentConfidence === 'low') continue;
-        if (lead.generatedSubject && lead.generatedBody) continue;
-
-        const msg = await claudeGenerateMessage({
-          businessName: lead.businessName,
-          ownerName: lead.ownerName || null,
-          ownerNameSource: lead.ownerNameSource || null,
-          enrichmentConfidence: lead.enrichmentConfidence || null,
-          trade: lead.trade as Trade,
-          suburb: lead.suburb,
-          hooks: lead.personalizationHooks || [],
-          enrichmentSummary: lead.enrichmentSummary || '',
-        });
-        if (!msg || !msg.subject || !msg.body) continue;
-        const cleanBody = msg.body.replace(/\bAI\b/g, 'smart');
-        const cleanSubject = msg.subject.replace(/\bAI\b/g, 'smart');
-        await ref.set({
-          generatedSubject: cleanSubject,
-          generatedBody: cleanBody,
-          generatedBodyVersion: admin.firestore.FieldValue.increment(1),
-          generatedAt: admin.firestore.FieldValue.serverTimestamp(),
-          status: 'queued' as LeadStatus,
-          queuedAt: admin.firestore.FieldValue.serverTimestamp(),
-        }, { merge: true });
-        generated++;
-      }
-    }
-
     await logAdminAction({
       adminUid: 'system',
-      action: 'weekly_discovery_run',
+      action: 'daily_discovery_run',
       targetType: 'system',
       payload: {
         campaignId: campaignRef.id,
-        created: totalCreated.length,
+        created: r.created.length,
         dedupedTotal: totalDeduped,
-        enriched,
-        generated,
-        trades: cfg.trades,
-        suburbs: cfg.suburbs,
+        cellsVisited: r.cellsVisited,
+        startOffset,
+        nextOffset: r.nextOffset,
+        gridSize: grid.length,
       },
     });
 
-    console.info(`weeklyLeadDiscovery: created=${totalCreated.length} deduped=${totalDeduped} enriched=${enriched} generated=${generated}`);
+    console.info(
+      `dailyLeadDiscovery: created=${r.created.length}/${targetPerRun} deduped=${totalDeduped} ` +
+      `cells=${r.cellsVisited}/${grid.length} offset=${startOffset}->${r.nextOffset} ` +
+      `hitDeadline=${r.hitDeadline}`,
+    );
+    return null;
+  });
+
+// ============================================================
+// 10b. autoEnrichLeads — sweep 'new'/'researching' → 'researched'/'no_email'
+// ============================================================
+//
+// Runs on its own clock instead of only on leads created by the current
+// discovery run. The old inline loop iterated the just-created IDs, so any
+// lead left 'new' (Claude failure) or stuck 'researching' (mid-loop timeout)
+// was orphaned forever — 32 leads had accumulated that way by Aug 2026.
+
+export const autoEnrichLeads = functions
+  .runWith({ memory: '1GB', timeoutSeconds: 540 })
+  .pubsub
+  .schedule('every 2 hours')
+  .timeZone('Australia/Sydney')
+  .onRun(async () => {
+    const cfgSnap = await db().doc('leadOutreachConfig/discovery').get();
+    const cfg: DiscoveryConfig = cfgSnap.exists
+      ? { ...DEFAULT_DISCOVERY_CONFIG, ...(cfgSnap.data() as any) }
+      : DEFAULT_DISCOVERY_CONFIG;
+    if (!cfg.autoResearch) {
+      console.info('autoEnrichLeads: autoResearch disabled in config');
+      return null;
+    }
+
+    // Query by status only (no composite index needed) and sort oldest-first
+    // in memory — the un-enriched backlog is at most a few hundred docs.
+    const [newSnap, researchingSnap] = await Promise.all([
+      db().collection('leads').where('status', '==', 'new').get(),
+      db().collection('leads').where('status', '==', 'researching').get(),
+    ]);
+    const backlog = [...newSnap.docs, ...researchingSnap.docs]
+      .filter(d => ((d.data() as any)?.enrichmentAttempts ?? 0) < MAX_ENRICH_ATTEMPTS)
+      .sort((a, b) => {
+        const am = (a.data() as any)?.createdAt?.toMillis?.() ?? 0;
+        const bm = (b.data() as any)?.createdAt?.toMillis?.() ?? 0;
+        return am - bm;
+      })
+      .slice(0, MAX_ENRICH_PER_RUN);
+
+    if (!backlog.length) {
+      console.info('autoEnrichLeads: nothing to enrich');
+      return null;
+    }
+
+    const deadlineAt = Date.now() + ENRICH_DEADLINE_MS;
+    const { results, processed, hitDeadline } = await mapWithConcurrency(
+      backlog.map(d => d.id), ENRICH_CONCURRENCY, deadlineAt, enrichOneLead,
+    );
+    const tally = { enriched: 0, no_email: 0, failed: 0, skipped: 0 };
+    for (const r of results) tally[r]++;
+
+    console.info(
+      `autoEnrichLeads: backlog=${backlog.length} processed=${processed} ` +
+      `enriched=${tally.enriched} noEmail=${tally.no_email} failed=${tally.failed} ` +
+      `skipped=${tally.skipped} hitDeadline=${hitDeadline}`,
+    );
+    return null;
+  });
+
+// ============================================================
+// 10c. autoGenerateLeadMessages — top the send queue up to N days of capacity
+// ============================================================
+//
+// Generation used to be the last block of the weekly discovery job, capped at
+// max(targetPerWeek, 50) messages per week — 50/week against 500/week of send
+// capacity, and in practice truncated to near-zero by the timeout. This runs
+// hourly and sizes each batch from the sender's ACTUAL daily cap (which ramps
+// with the warmup schedule), so the queue tracks capacity instead of a
+// hardcoded number, and Claude spend tracks what will really be sent.
+
+export const autoGenerateLeadMessages = functions
+  .runWith({ memory: '512MB', timeoutSeconds: 540 })
+  .pubsub
+  .schedule('every 1 hours')
+  .timeZone('Australia/Sydney')
+  .onRun(async () => {
+    const [discSnap, sendSnap] = await Promise.all([
+      db().doc('leadOutreachConfig/discovery').get(),
+      db().doc('leadOutreachConfig/current').get(),
+    ]);
+    const cfg: DiscoveryConfig = discSnap.exists
+      ? { ...DEFAULT_DISCOVERY_CONFIG, ...(discSnap.data() as any) }
+      : DEFAULT_DISCOVERY_CONFIG;
+    if (!cfg.autoGenerate) {
+      console.info('autoGenerateLeadMessages: autoGenerate disabled in config');
+      return null;
+    }
+    const sendCfg: LeadOutreachConfig = sendSnap.exists
+      ? { ...DEFAULT_CONFIG, ...(sendSnap.data() as any) }
+      : DEFAULT_CONFIG;
+    // Respect the kill switch: if sends are off, don't burn Claude calls
+    // building a queue that can't drain.
+    if (!sendCfg.enabled) {
+      console.info('autoGenerateLeadMessages: outreach disabled (kill switch)');
+      return null;
+    }
+
+    // Target queue depth = a couple of days of real send capacity.
+    const eff = effectiveCaps(sendCfg);
+    const targetDepth = Math.max(1, eff.daily * QUEUE_TARGET_DAYS);
+    const queuedSnap = await db().collection('leads').where('status', '==', 'queued').select().get();
+    const shortfall = Math.min(targetDepth - queuedSnap.size, MAX_GENERATE_PER_RUN);
+    if (shortfall <= 0) {
+      console.info(`autoGenerateLeadMessages: queue full (${queuedSnap.size}/${targetDepth})`);
+      return null;
+    }
+
+    const backlogSnap = await db().collection('leads').where('status', '==', 'researched').get();
+    const candidates = backlogSnap.docs
+      .filter(d => {
+        const lead: any = d.data();
+        // Only generate for leads we can actually email, with enrichment good
+        // enough to personalise from, and no message written already.
+        if (!normaliseEmail(lead.email)) return false;
+        if (lead.enrichmentConfidence === 'low') return false;
+        if (lead.generatedSubject && lead.generatedBody) return false;
+        return true;
+      })
+      .sort((a, b) => {
+        const am = (a.data() as any)?.enrichedAt?.toMillis?.() ?? 0;
+        const bm = (b.data() as any)?.enrichedAt?.toMillis?.() ?? 0;
+        return am - bm;
+      })
+      .slice(0, shortfall);
+
+    if (!candidates.length) {
+      console.info(
+        `autoGenerateLeadMessages: no sendable researched leads ` +
+        `(backlog=${backlogSnap.size}, shortfall=${shortfall})`,
+      );
+      return null;
+    }
+
+    const deadlineAt = Date.now() + GENERATE_DEADLINE_MS;
+    const { results, processed, hitDeadline } = await mapWithConcurrency(
+      candidates, GENERATE_CONCURRENCY, deadlineAt, d => generateOneLead(d.ref, d.data()),
+    );
+    const tally = { generated: 0, no_email: 0, failed: 0 };
+    for (const r of results) tally[r]++;
+
+    console.info(
+      `autoGenerateLeadMessages: queued=${queuedSnap.size}/${targetDepth} ` +
+      `candidates=${candidates.length} processed=${processed} generated=${tally.generated} ` +
+      `noEmail=${tally.no_email} failed=${tally.failed} hitDeadline=${hitDeadline}`,
+    );
     return null;
   });
 
@@ -2430,9 +2704,16 @@ export const adminUpdateDiscoveryConfig = functions.https.onCall(async (data, co
   }
   if (Array.isArray(data?.suburbs)) {
     updates.suburbs = data.suburbs.filter((s: any) => typeof s === 'string' && s.trim().length > 0).map((s: string) => s.trim());
+    // Changing the grid shape invalidates the cursor — restart the sweep
+    // rather than resume at an offset that now points somewhere unrelated.
+    updates.rotationOffset = 0;
   }
+  if (Array.isArray(data?.trades)) updates.rotationOffset = 0;
   if (typeof data?.targetPerWeek === 'number') {
-    updates.targetPerWeek = Math.max(1, Math.min(500, Math.floor(data.targetPerWeek)));
+    updates.targetPerWeek = Math.max(1, Math.min(2000, Math.floor(data.targetPerWeek)));
+  }
+  if (typeof data?.rotationOffset === 'number' && data.rotationOffset >= 0) {
+    updates.rotationOffset = Math.floor(data.rotationOffset);
   }
   if (typeof data?.autoResearch === 'boolean') updates.autoResearch = data.autoResearch;
   if (typeof data?.autoGenerate === 'boolean') updates.autoGenerate = data.autoGenerate;

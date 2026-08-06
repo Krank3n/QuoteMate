@@ -88,6 +88,28 @@ interface SendTurnArgs {
   onTextDelta?: (delta: string) => void;
 }
 
+// Function-calling models occasionally *write* a tool call instead of emitting
+// one — the reply comes back as a fenced JSON blob of the arguments with no
+// functionCall part. It reached at least one tradie as a chat bubble reading
+// ```json { "query": "Hansen" } ```, which is gibberish to them. There's no
+// tool name in the blob so it can't be re-dispatched; drop it rather than
+// render it. Only strips when the WHOLE reply is that blob — a JSON snippet
+// alongside real prose is left alone.
+export function stripLeakedToolJson(text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed) return text;
+  const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+  const candidate = fenced ? fenced[1].trim() : trimmed;
+  if (!candidate.startsWith('{') || !candidate.endsWith('}')) return text;
+  try {
+    const parsed = JSON.parse(candidate);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return '';
+  } catch {
+    // Not valid JSON — it's prose that happens to start with a brace.
+  }
+  return text;
+}
+
 // functionResponse.response must be a JSON object (a protobuf Struct). Read
 // tools already return objects, but guard primitives/arrays just in case.
 function asStruct(value: unknown): Record<string, unknown> {
@@ -132,14 +154,24 @@ async function callChat(
 
 export async function sendAssistantTurn({ history, onTextDelta }: SendTurnArgs): Promise<AssistantChatResponse> {
   // Seed the conversation. Drop empty-text messages (inline quote cards, error
-  // bubbles) — Gemini rejects a part whose text is empty.
-  const contents: unknown[] = history
-    .slice(-MAX_HISTORY_TURNS)
-    .filter((m) => m.text?.trim())
-    .map((m) => ({
-      role: m.role === 'assistant' ? 'model' : 'user',
-      parts: [{ text: m.text }],
-    }));
+  // bubbles) — Gemini rejects a part whose text is empty. Hidden "[context]"
+  // notes DO carry text and are deliberately kept: they're how the model
+  // learns what an Apply actually did.
+  //
+  // Consecutive same-role turns get merged into one. A hidden note is written
+  // as a user turn, so an apply-failed note immediately followed by the
+  // tradie's next message would otherwise send two user turns back to back.
+  const contents: unknown[] = [];
+  for (const m of history.slice(-MAX_HISTORY_TURNS)) {
+    if (!m.text?.trim()) continue;
+    const role = m.role === 'assistant' ? 'model' : 'user';
+    const prev = contents[contents.length - 1] as { role: string; parts: { text: string }[] } | undefined;
+    if (prev?.role === role) {
+      prev.parts.push({ text: m.text });
+      continue;
+    }
+    contents.push({ role, parts: [{ text: m.text }] });
+  }
 
   const proposals: Proposal[] = [];
   // Document ids the model asked to show on screen via show_quote. The chat
@@ -192,9 +224,11 @@ export async function sendAssistantTurn({ history, onTextDelta }: SendTurnArgs):
     });
   }
 
+  const text = stripLeakedToolJson(textBuf);
+
   return {
     messageId: generateId(),
-    text: textBuf,
+    text,
     proposals,
     showQuoteIds,
     usage: {

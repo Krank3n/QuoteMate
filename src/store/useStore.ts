@@ -8,7 +8,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { generateId } from '../utils/generateId';
 import { withOrigin } from '../utils/materialOrigin';
 import { Quote, BusinessSettings, Material, SubscriptionStatus, Invoice, PaymentMethod, ReferralInfo, XeroConnection, XeroSyncStatus, Contact } from '../types';
-import { Document } from '../types/document';
+import { Document, DocumentPayment, DocumentPaymentMethod } from '../types/document';
 import {
   ChatMessage,
   Conversation,
@@ -47,6 +47,17 @@ import { searchLocalSources } from '../services/localMaterialSearch';
 import { loadGroups as loadSupplierGroups } from '../services/supplierGroupService';
 import { applyPackAwarePricing } from '../utils/packAwarePricing';
 import { roundToTwoDecimals } from '../utils/documentCalculator';
+
+// The legacy PaymentMethod enum is finer-grained than the unified ledger's.
+// Cheque and card have no ledger equivalent, so they land on 'other' — the
+// human-readable detail survives in the payment's notes.
+const PAYMENT_METHOD_TO_LEDGER: Record<string, DocumentPaymentMethod> = {
+  cash: 'cash',
+  bank_transfer: 'bank',
+  card: 'other',
+  cheque: 'other',
+  other: 'other',
+};
 
 /**
  * A user-visible record of the last sync failure. Populated by the saveDraft /
@@ -163,6 +174,21 @@ interface AppState {
     notes?: string,
     paymentDate?: Date
   ) => Promise<void>;
+  /**
+   * Record a manual payment against a unified Document's ledger. The legacy
+   * `recordPayment` above only knows the `invoices` array, which is never
+   * loaded at bootstrap and whose ids diverge from Document ids after a
+   * quote → invoice conversion — so every payment on a modern invoice used
+   * to fail with "Invoice not found". This is the id-space that actually
+   * exists. Returns the updated doc so callers can report the new balance.
+   */
+  recordDocumentPayment: (
+    documentId: string,
+    amount: number,
+    method: PaymentMethod,
+    notes?: string,
+    paymentDate?: Date
+  ) => Promise<Document>;
   duplicateInvoice: (invoice: Invoice) => Promise<Invoice>;
 
   // Referral
@@ -1909,6 +1935,78 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
+  recordDocumentPayment: async (
+    documentId: string,
+    amount: number,
+    method: PaymentMethod,
+    notes?: string,
+    paymentDate?: Date,
+  ) => {
+    // Resolve in the id-space the app actually keeps loaded. A doc converted
+    // from a quote keeps the quote's id while its legacy mirror gets a fresh
+    // one, so a legacy-id lookup has to be tried both ways round.
+    const doc =
+      get().getDocumentById(documentId) ||
+      get().getDocumentByLegacyId(documentId) ||
+      (await documentService.getDocumentById(documentId)) ||
+      undefined;
+    if (!doc) throw new Error('Invoice not found');
+    if (doc.type !== 'invoice') {
+      throw new Error('That document is a quote, not an invoice.');
+    }
+
+    const total = Number(doc.total) || 0;
+    const alreadyPaid = Number(doc.paidTotal) || 0;
+    // Never bank more than is owed — the balance is the cap, matching the
+    // overpayment guard the manual RecordPayment screen enforces.
+    const capped = Math.min(Math.max(amount, 0), Math.max(0, total - alreadyPaid));
+    const payment: DocumentPayment = {
+      id: generateId(),
+      kind: 'manual',
+      amount: capped,
+      paidAt: (paymentDate || new Date()).getTime(),
+      method: PAYMENT_METHOD_TO_LEDGER[method] ?? 'other',
+      ...(notes ? { notes } : {}),
+    };
+
+    const payments = [...(doc.payments || []), payment];
+    const paidTotal = payments.reduce((acc, p) => acc + (Number(p.amount) || 0), 0);
+    const balanceDue = Math.max(0, total - paidTotal);
+    // 'paid' the moment the balance closes (half a cent of slack for float
+    // noise), otherwise the doc is partially paid.
+    const fullyPaid = paidTotal + 0.005 >= total;
+
+    const next: Document = {
+      ...doc,
+      payments,
+      paidTotal,
+      balanceDue,
+      stage: fullyPaid ? 'paid' : 'partially_paid',
+      ...(fullyPaid ? { paidInFullAt: payment.paidAt } : {}),
+    };
+    await get().saveDocument(next);
+
+    // Keep the legacy mirror in step when one exists, so the old invoice
+    // list, Xero push and any un-migrated screen see the same money. Absent
+    // legacy row is the normal case now — not an error.
+    const legacyId = doc.legacyInvoiceId || doc.id;
+    const legacy = get().invoices.find((i) => i.id === legacyId);
+    if (legacy) {
+      try {
+        await get().recordPayment(legacy.id, capped, method, notes, paymentDate);
+      } catch {
+        // The unified ledger is the source of truth; a stale legacy row
+        // must not fail a payment the tradie already recorded.
+      }
+    } else if (fullyPaid && doc.stage !== 'paid') {
+      // recordPayment normally owns this prompt; fire it here for the
+      // document-only path so the ask still lands on the best moment.
+      maybeRequestReview('invoice_paid').catch(() => {});
+    }
+
+    return next;
+  },
+
   duplicateInvoice: async (invoice: Invoice) => {
     try {
       const { invoices } = get();
@@ -3389,12 +3487,26 @@ export const useStore = create<AppState>((set, get) => ({
             };
           }
           try {
-            await get().recordPayment(
-              invoiceId!,
-              balance,
-              proposal.method ?? 'other',
-              proposal.notes,
-            );
+            // Write the unified ledger when we resolved a real Document —
+            // that's the id-space the app keeps loaded. Routing this through
+            // the legacy recordPayment used to throw "Invoice not found" on
+            // every modern invoice, because `invoices` is never populated at
+            // bootstrap and a converted doc's id doesn't match its legacy row.
+            if (doc) {
+              await get().recordDocumentPayment(
+                doc.id,
+                balance,
+                proposal.method ?? 'other',
+                proposal.notes,
+              );
+            } else {
+              await get().recordPayment(
+                invoiceId!,
+                balance,
+                proposal.method ?? 'other',
+                proposal.notes,
+              );
+            }
           } catch (err: any) {
             return { ok: false, error: err?.message || 'Failed to record payment.' };
           }
