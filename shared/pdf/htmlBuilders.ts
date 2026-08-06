@@ -99,7 +99,15 @@ export function buildBusinessCredentialsHTML(business: BusinessPdfData): string 
       </div>`;
 }
 
-function buildBusinessHeaderHTML(business: BusinessPdfData): string {
+/**
+ * `omitCredentials` lets a template showcase them elsewhere (the accredited
+ * template puts the badge at the top of the right-hand column) without ending
+ * up with two copies in the header.
+ */
+function buildBusinessHeaderHTML(
+  business: BusinessPdfData,
+  options?: { omitCredentials?: boolean },
+): string {
   const hasLogo = !!business.logoHtml;
   const directContacts = [business.email, business.phone]
     .filter((value): value is string => !!value)
@@ -119,8 +127,13 @@ function buildBusinessHeaderHTML(business: BusinessPdfData): string {
               </div>
             </div>
           </div>
-          ${buildBusinessCredentialsHTML(business)}
+          ${options?.omitCredentials ? '' : buildBusinessCredentialsHTML(business)}
         </div>`;
+}
+
+/** Templates that print the accreditation badge large, in the document corner. */
+export function showcasesCredentials(templateId: PdfTemplateId): boolean {
+  return templateId === 'accredited';
 }
 
 function buildHeaderRecipientHTML(input: {
@@ -605,8 +618,9 @@ export function buildQuotePdfHtml(
       ${watermark ? buildWatermarkHTML(watermark) : ''}
       <div class="content-wrapper">
       <div class="header document-header">
-        ${buildBusinessHeaderHTML(business)}
+        ${buildBusinessHeaderHTML(business, { omitCredentials: showcasesCredentials(templateId) })}
         <div class="header-meta">
+          ${showcasesCredentials(templateId) ? buildBusinessCredentialsHTML(business) : ''}
           <h2>QUOTATION</h2>
           ${quote.quoteNumber ? `<div class="document-reference">${escapeHtml(quote.quoteNumber)}</div>` : ''}
           <div class="document-date">${escapeHtml(quote.quoteDate)}</div>
@@ -791,8 +805,9 @@ export function buildReportPdfHtml(data: ReportPdfData, business: BusinessPdfDat
     <body>
       <div class="content-wrapper">
       <div class="header document-header">
-        ${buildBusinessHeaderHTML(business)}
+        ${buildBusinessHeaderHTML(business, { omitCredentials: showcasesCredentials(templateId) })}
         <div class="header-meta">
+          ${showcasesCredentials(templateId) ? buildBusinessCredentialsHTML(business) : ''}
           <h2>SERVICE REPORT</h2>
           <div class="document-subtitle">${escapeHtml(data.serviceType)}</div>
           ${data.reportNumber ? `<div class="document-reference">${escapeHtml(data.reportNumber)}</div>` : ''}
@@ -871,8 +886,9 @@ export function buildInvoicePdfHtml(
       ${watermark ? buildWatermarkHTML(watermark) : ''}
       <div class="content-wrapper">
       <div class="header document-header">
-        ${buildBusinessHeaderHTML(business)}
+        ${buildBusinessHeaderHTML(business, { omitCredentials: showcasesCredentials(templateId) })}
         <div class="header-meta">
+          ${showcasesCredentials(templateId) ? buildBusinessCredentialsHTML(business) : ''}
           <h2>${invoice.gstRegistered === false ? 'INVOICE' : 'TAX INVOICE'}</h2>
           ${invoice.invoiceNumber ? `<div class="document-reference">${escapeHtml(invoice.invoiceNumber)}</div>` : ''}
           <div class="document-date">Issued ${escapeHtml(invoice.issueDate)} &middot; Due ${escapeHtml(invoice.dueDate)}</div>

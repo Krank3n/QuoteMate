@@ -1,4 +1,5 @@
 import { buildQuotePdfHtml, buildInvoicePdfHtml } from './htmlBuilders';
+import { getTemplateCSS } from './templates';
 import type { QuotePdfData, InvoicePdfData, BusinessPdfData } from './types';
 
 const business: BusinessPdfData = {
@@ -137,5 +138,40 @@ describe('buildInvoicePdfHtml — GST modes', () => {
     const html = buildInvoicePdfHtml(invoiceData(), business);
     expect(html).toContain('GST (10%)');
     expect(html).not.toContain('No GST has been charged.');
+  });
+});
+
+describe('accredited template — credential placement', () => {
+  const credentialed = {
+    ...business,
+    credentials: [
+      {
+        label: 'ARC Authorisation',
+        number: 'AU 065871',
+        logoHtml: '<img src="arc.png" class="credential-logo" />',
+      },
+    ],
+  };
+
+  it('moves the badge into the document-meta column, and only once', () => {
+    const html = buildInvoicePdfHtml(invoiceData(), { ...credentialed, pdfTemplate: 'accredited' });
+    const meta = html.slice(html.indexOf('<div class="header-meta">'));
+    expect(meta).toContain('business-credentials');
+    // Exactly one copy of the MARKUP — the left column must not also render
+    // it. Counting the bare class name would also match the stylesheet.
+    expect(html.split('<div class="business-credentials">').length - 1).toBe(1);
+  });
+
+  it('leaves every other template with the badge in the left column', () => {
+    const html = buildInvoicePdfHtml(invoiceData(), { ...credentialed, pdfTemplate: 'professional' });
+    const meta = html.slice(html.indexOf('<div class="header-meta">'));
+    expect(meta).not.toContain('business-credentials');
+    expect(html).toContain('business-credentials');
+  });
+
+  it('sizes the badge far larger than the inline placement', () => {
+    const css = getTemplateCSS('accredited');
+    expect(css).toContain('max-height: 96px !important');
+    expect(getTemplateCSS('professional')).not.toContain('max-height: 96px !important');
   });
 });

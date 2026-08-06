@@ -25,6 +25,12 @@ export const PDF_TEMPLATES: PdfTemplateInfo[] = [
     accentColor: '#1F2937',
   },
   {
+    id: 'accredited',
+    name: 'Accredited',
+    description: 'Licence or accreditation badge shown large in the top corner, beside the document title',
+    accentColor: '#059669',
+  },
+  {
     id: 'tradesman',
     name: 'Tradesman',
     description: 'Premium letterpress feel with warm paper tone, small-caps and double rules',
@@ -1091,11 +1097,54 @@ const tradesmanCSS = `
   }
 `;
 
+/**
+ * Accredited — for licensed trades whose authorisation is the selling point.
+ *
+ * Jake at Coastal HVAC put it plainly: his ARC badge is what tells a customer
+ * he is allowed to touch refrigerant, and his own invoices carry it large in
+ * the top corner. Every other template tucks credentials under the business
+ * address at roughly 76x46px, where the "Australian Refrigeration Council /
+ * AUTHORISED / AU 065871" baked into the artwork is unreadable.
+ *
+ * Deliberately professional + overrides rather than a fifth full stylesheet.
+ * The padded-logo bug had to be fixed in four places at once; there is no
+ * reason to make that five.
+ */
+const accreditedCSS =
+  professionalCSS +
+  `
+  /* The badge rides at the top of the right-hand column, above the document
+     title, which is where a trade customer's eye already goes. */
+  .header-meta .business-credentials {
+    justify-content: flex-end;
+    gap: 10px 18px;
+    margin: 0 0 14px 0;
+  }
+  .header-meta .business-credential {
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 3px;
+    min-height: 0;
+  }
+  /* ~2.5x the inline size — enough that the accrediting body and the licence
+     number printed inside the artwork are legible at A4. */
+  .header-meta .business-credential .credential-logo {
+    max-width: 190px !important;
+    max-height: 96px !important;
+  }
+  .header-meta .business-credential-copy {
+    font-size: 11px;
+    font-weight: 700;
+    text-align: right;
+  }
+`;
+
 const templateCSSMap: Record<PdfTemplateId, string> = {
   professional: professionalCSS,
   clean: cleanCSS,
   bold: boldCSS,
   tradesman: tradesmanCSS,
+  accredited: accreditedCSS,
 };
 
 /** Map of template ID to its default accent color for brand color replacement */
@@ -1104,6 +1153,7 @@ const templateAccentMap: Record<PdfTemplateId, string> = {
   clean: '#6B7280',
   bold: '#1F2937',
   tradesman: '#374151',
+  accredited: '#059669',
 };
 
 export function getTemplateCSS(templateId: PdfTemplateId, brandColor?: string): string {

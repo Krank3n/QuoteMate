@@ -2,7 +2,7 @@
  * Shared PDF types used by both client and server PDF generators
  */
 
-export type PdfTemplateId = 'professional' | 'clean' | 'bold' | 'tradesman';
+export type PdfTemplateId = 'professional' | 'clean' | 'bold' | 'tradesman' | 'accredited';
 
 export interface PdfTemplateInfo {
   id: PdfTemplateId;
