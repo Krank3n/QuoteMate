@@ -46,7 +46,7 @@ import { OnboardingProgress, OnboardingStep } from '../components/OnboardingProg
 import { CelebrationAnimation } from '../components/CelebrationAnimation';
 import { AlertModal } from '../components/AlertModal';
 import { WebContainer } from '../components/WebContainer';
-import { LogoCropper } from '../components/LogoCropper';
+import { BrandImageEditor, type BrandImageValue } from '../components/BrandImageEditor';
 import { TRADE_CATEGORIES } from '../constants/tradeCategories';
 import { auth } from '../config/firebase';
 import * as squareService from '../services/squareService';
@@ -111,8 +111,10 @@ export function NewOnboardingScreen() {
     const [abn, setAbn] = useState('');
 
     // Step 4: Branding
-    const [logoUri, setLogoUri] = useState<string | undefined>(undefined);
-    const [logoMimeType, setLogoMimeType] = useState<string | undefined>(undefined);
+    // One value object, same shape the settings screen uses, so both screens
+    // drive the identical editor.
+    const [logoValue, setLogoValue] = useState<BrandImageValue>({});
+    const logoUri = logoValue.uri;
     const [brandColor, setBrandColor] = useState<string | undefined>(undefined);
     const [hexInput, setHexInput] = useState('');
 
@@ -440,45 +442,7 @@ export function NewOnboardingScreen() {
 
     // Logo picker (ported from BusinessProfileScreen)
     const [logoPickError, setLogoPickError] = useState<string | null>(null);
-    // A pick waiting to be framed, so the crop happens before it's committed.
-    const [pendingLogo, setPendingLogo] = useState<{ uri: string; mimeType?: string } | null>(null);
 
-    /** Cropper finished. It always writes PNG, so a changed URI means the
-     *  mime type is now PNG whatever was picked — mislabelling it re-encodes a
-     *  transparent logo as JPEG and flattens its alpha onto black. */
-    const handleCropped = (croppedUri: string) => {
-        const mimeType = croppedUri !== pendingLogo?.uri ? 'image/png' : pendingLogo?.mimeType;
-        setPendingLogo(null);
-        setLogoUri(croppedUri);
-        setLogoMimeType(mimeType);
-    };
-    const handlePickLogo = async () => {
-        setLogoPickError(null);
-        try {
-            const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
-
-            if (permissionResult.granted === false) {
-                setLogoPickError('Permission to access your photo library is required to pick a logo.');
-                return;
-            }
-
-            const result = await ImagePicker.launchImageLibraryAsync({
-                mediaTypes: ImagePicker.MediaTypeOptions.Images,
-                // Framing is handled by our own cropper (LogoCropper), which
-                // works on web too and doesn't force the platform's square /
-                // 4:3 frame onto a wide wordmark.
-                allowsEditing: false,
-                quality: 0.8,
-            });
-
-            if (!result.canceled && result.assets[0]) {
-                selectionTap();
-                setPendingLogo({ uri: result.assets[0].uri, mimeType: result.assets[0].mimeType });
-            }
-        } catch (error) {
-            setLogoPickError("We couldn't open the image picker. Please try again.");
-        }
-    };
 
     const handleRemoveLogo = () => {
         setRemoveLogoModalVisible(true);
@@ -486,8 +450,7 @@ export function NewOnboardingScreen() {
 
     const confirmRemoveLogo = () => {
         setRemoveLogoModalVisible(false);
-        setLogoUri(undefined);
-        setLogoMimeType(undefined);
+        setLogoValue({});
     };
 
     const uploadLogoToStorage = async (uri: string, mimeType?: string): Promise<string> => {
@@ -555,7 +518,7 @@ export function NewOnboardingScreen() {
             let savedLogoUri: string | undefined = logoUri;
             if (logoUri) {
                 try {
-                    savedLogoUri = await uploadLogoToStorage(logoUri, logoMimeType);
+                    savedLogoUri = await uploadLogoToStorage(logoUri);
                 } catch (error: any) {
                     console.error('[Onboarding] Logo upload failed:', error);
                     savedLogoUri = undefined;
@@ -951,32 +914,14 @@ export function NewOnboardingScreen() {
 
             <Surface style={styles.card}>
                 <Title style={styles.cardTitle}>Company Logo</Title>
-                {logoUri ? (
-                    <View style={styles.logoPreview}>
-                        <Image source={{ uri: logoUri }} style={styles.logoImage} resizeMode="contain" />
-                        <View style={styles.logoButtons}>
-                            <Button mode="outlined" onPress={handlePickLogo} style={styles.logoButton}>
-                                Change Logo
-                            </Button>
-                            <IconButton
-                                icon="delete"
-                                iconColor={colors.error}
-                                size={24}
-                                onPress={handleRemoveLogo}
-                            />
-                        </View>
-                    </View>
-                ) : (
-                    <TouchableOpacity style={styles.logoUploadBox} onPress={handlePickLogo}>
-                        <MaterialCommunityIcons
-                            name="image-plus"
-                            size={48}
-                            color={colors.primary}
-                        />
-                        <Text style={styles.logoUploadText}>Tap to Upload Logo</Text>
-                        <Text style={styles.logoUploadHint}>{LOGO_UPLOAD_HINT}</Text>
-                    </TouchableOpacity>
-                )}
+                <BrandImageEditor
+                    value={logoValue}
+                    onChange={setLogoValue}
+                    userId={auth.currentUser?.uid}
+                    folder="logo-uploads"
+                    emptyTitle="Tap to upload your logo"
+                    emptyHint={LOGO_UPLOAD_HINT}
+                />
                 {logoPickError && (
                     <View style={styles.errorBox}>
                         <MaterialCommunityIcons name="alert-circle-outline" size={16} color={colors.error} />
@@ -1311,12 +1256,6 @@ export function NewOnboardingScreen() {
                 primaryButtonAction={() => setCompleteErrorVisible(false)}
             />
 
-            <LogoCropper
-                visible={!!pendingLogo}
-                uri={pendingLogo?.uri || ''}
-                onCancel={() => setPendingLogo(null)}
-                onCropped={handleCropped}
-            />
         </KeyboardAvoidingView>
     );
 }

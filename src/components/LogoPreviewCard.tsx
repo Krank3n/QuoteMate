@@ -92,7 +92,11 @@ export function LogoPreviewCard({
             backdrop={backdrop}
             label="Keep background"
             selected={!useNoBackground}
-            onPress={() => onChangeUseNoBackground(false)}
+            // Tap an unselected card to choose it; tap the one already chosen
+            // to edit it. Keeps a single tap target per card instead of
+            // nesting a button inside a button.
+            onPress={() => (useNoBackground ? onChangeUseNoBackground(false) : onRecropLogo?.())}
+            onEdit={onRecropLogo}
             disabled={disabled}
           />
           <ChoiceCard
@@ -100,19 +104,36 @@ export function LogoPreviewCard({
             backdrop={backdrop}
             label="Remove it"
             selected={useNoBackground}
-            onPress={() => onChangeUseNoBackground(true)}
+            onPress={() => (useNoBackground ? onRecropLogo?.() : onChangeUseNoBackground(true))}
+            onEdit={onRecropLogo}
             disabled={disabled}
           />
         </View>
       ) : (
-        <View style={[styles.single, { backgroundColor: backdrop }]}>
+        // Tapping the image is the obvious way to edit it, so make the preview
+        // itself the target rather than hiding editing behind the button row.
+        <TouchableOpacity
+          style={[styles.single, { backgroundColor: backdrop }]}
+          onPress={onRecropLogo}
+          disabled={disabled || !onRecropLogo}
+          accessibilityRole="button"
+          accessibilityLabel="Crop this image"
+        >
           <Image source={{ uri: originalUri }} style={styles.singleImage} resizeMode="contain" />
-        </View>
+          {!!onRecropLogo && (
+            <View style={styles.editBadge}>
+              <MaterialCommunityIcons name="crop" size={13} color={colors.onPrimary} />
+              <Text style={styles.editBadgeText}>Edit</Text>
+            </View>
+          )}
+        </TouchableOpacity>
       )}
 
       {!loading && (
         <Text style={styles.hint}>
-          {canChoose ? 'Tap whichever looks right on the page.' : unavailableReason(background, noBackgroundReason)}
+          {canChoose
+            ? 'Tap whichever looks right on the page, or tap it again to crop.'
+            : unavailableReason(background, noBackgroundReason)}
         </Text>
       )}
 
@@ -183,6 +204,7 @@ function ChoiceCard({
   label,
   selected,
   onPress,
+  onEdit,
   disabled,
 }: {
   uri: string;
@@ -190,6 +212,7 @@ function ChoiceCard({
   label: string;
   selected: boolean;
   onPress: () => void;
+  onEdit?: () => void;
   disabled?: boolean;
 }) {
   return (
@@ -203,6 +226,12 @@ function ChoiceCard({
     >
       <View style={[styles.choicePreview, { backgroundColor: backdrop }]}>
         <Image source={{ uri }} style={styles.choiceImage} resizeMode="contain" />
+        {selected && !!onEdit && (
+          <View style={styles.editBadge}>
+            <MaterialCommunityIcons name="crop" size={12} color={colors.onPrimary} />
+            <Text style={styles.editBadgeText}>Edit</Text>
+          </View>
+        )}
       </View>
       <View style={styles.choiceFooter}>
         <MaterialCommunityIcons
@@ -319,6 +348,23 @@ const styles = StyleSheet.create({
   choiceLabelSelected: {
     color: colors.text,
     fontWeight: '600',
+  },
+  editBadge: {
+    position: 'absolute',
+    right: 8,
+    bottom: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 4,
+    paddingHorizontal: 9,
+    borderRadius: 12,
+    backgroundColor: colors.primary,
+  },
+  editBadgeText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: colors.onPrimary,
   },
   single: {
     height: 130,
