@@ -8,6 +8,7 @@
 import { Platform } from 'react-native';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 import { generateId } from '../utils/generateId';
 import { trimLogoWhitespace } from '../utils/logoTrim';
 import { storage } from '../config/firebase';
@@ -131,7 +132,8 @@ export async function uploadBusinessLogo(
   uri: string,
   mimeType?: string
 ): Promise<string> {
-  // Already a remote URL (previously uploaded), nothing to do.
+  // Already a remote URL (previously uploaded, or a processed variant the
+  // tradie picked), nothing to do.
   if (uri.startsWith('https://')) return uri;
 
   const { uri: compressedUri, contentType, extension } = await compressLogo(uri, mimeType);
@@ -150,6 +152,91 @@ export async function uploadBusinessLogo(
   }
 
   return url;
+}
+
+/**
+ * Upload a logo and get back both variants for the tradie to choose between.
+ *
+ * Deliberately writes to a fresh path under logo-uploads/ rather than the
+ * canonical users/<uid>/logo.png. The preview needs the file on the server
+ * before the tradie has decided anything, and overwriting the canonical path
+ * at that point would destroy the logo they are still using on every document
+ * — even if they then backed out without saving.
+ *
+ * Falls back to just the uploaded URL when processing fails or the image was
+ * already remote: a logo that defeats the analysis still has to work.
+ */
+export async function uploadAndProcessBusinessLogo(
+  userId: string,
+  uri: string,
+  mimeType?: string,
+): Promise<ProcessedLogoVariants> {
+  return uploadAndProcessBrandImage(userId, 'logo-uploads', uri, mimeType);
+}
+
+/**
+ * As above, for any brand image the tradie puts on a document — company logo,
+ * accreditation badge, and whatever comes next. `folder` keeps them apart
+ * under the user's own Storage path.
+ */
+export async function uploadAndProcessBrandImage(
+  userId: string,
+  folder: string,
+  uri: string,
+  mimeType?: string,
+): Promise<ProcessedLogoVariants> {
+  if (uri.startsWith('https://')) {
+    return { originalUrl: uri, background: 'transparent', recommendNoBackground: false };
+  }
+
+  const safeFolder = folder.replace(/[^a-zA-Z0-9_-]/g, '') || 'brand-uploads';
+  const { uri: compressedUri, contentType, extension } = await compressLogo(uri, mimeType);
+  const blob = await uriToBlob(compressedUri);
+  const sourcePath = `users/${userId}/${safeFolder}/${generateId()}.${extension}`;
+  await uploadBytes(ref(storage, sourcePath), blob, { contentType });
+  const url = await getDownloadURL(ref(storage, sourcePath));
+
+  const processed = await processUploadedLogo(sourcePath);
+  return processed ?? { originalUrl: url, background: 'transparent', recommendNoBackground: false };
+}
+
+export interface ProcessedLogoVariants {
+  originalUrl: string;
+  noBackgroundUrl?: string;
+  background: 'transparent' | 'light' | 'dark' | 'busy';
+  recommendNoBackground: boolean;
+  /** Why no variant, when there is none — see functions/src/logoProcessing. */
+  noBackgroundReason?: 'transparent' | 'busy' | 'ragged';
+}
+
+/**
+ * Ask the server to tidy a just-uploaded logo and hand back both variants.
+ *
+ * Background removal can't happen on-device — expo-image-manipulator resizes
+ * and crops but cannot write pixels. Returns null on any failure: a logo we
+ * can't process must still be usable as uploaded, never a blocked save.
+ */
+/** users/<uid>/logo.png from a Firebase Storage download URL, or null. */
+export function storagePathFromDownloadUrl(url: string): string | null {
+  if (!url?.startsWith('https://firebasestorage.googleapis.com/')) return null;
+  const match = url.match(/\/o\/([^?]+)/);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+export async function processUploadedLogo(
+  sourcePath: string,
+): Promise<ProcessedLogoVariants | null> {
+  try {
+    const callable = httpsCallable<{ sourcePath: string }, ProcessedLogoVariants>(
+      getFunctions(),
+      'processBusinessLogo',
+    );
+    const { data } = await callable({ sourcePath });
+    return data ?? null;
+  } catch (error) {
+    console.warn('[photoService] logo processing failed, keeping the upload as-is', error);
+    return null;
+  }
 }
 
 /** Upload one customer-facing licence/accreditation badge. Kept separate from

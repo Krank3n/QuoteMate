@@ -559,6 +559,11 @@ export interface PaymentMethodSettings {
   other?: OtherPaymentDetails;
 }
 
+/**
+ * A licence or accreditation shown on customer-facing documents. The badge
+ * carries the same variant fields as the company logo so both go through the
+ * one editor — see components/BrandImageEditor.
+ */
 export interface BusinessCredential {
   id: string;
   /** Customer-facing name, e.g. "ARC Authorisation" or "Electrical licence". */
@@ -567,6 +572,11 @@ export interface BusinessCredential {
   number?: string;
   /** Optional accreditation badge supplied by the business. */
   logoUri?: string;
+  /** Both processed variants, so the choice below stays reversible. */
+  logoOriginalUri?: string;
+  logoNoBackgroundUri?: string;
+  logoBackground?: 'transparent' | 'light' | 'dark' | 'busy';
+  logoUseNoBackground?: boolean;
 }
 
 export interface BusinessSettings {
@@ -576,7 +586,14 @@ export interface BusinessSettings {
   phone?: string;
   address?: string;
   website?: string; // Shown on PDFs/emails alongside other contact details
-  logoUri?: string; // Local file URI for company logo
+  logoUri?: string; // The logo the PDFs actually use — whichever variant is chosen
+  // Both variants the server produced from the upload, so the choice below can
+  // be flipped later without re-uploading. See functions/src/logoProcessing.ts.
+  logoOriginalUri?: string;
+  logoNoBackgroundUri?: string; // absent when removing the background is unsafe
+  logoBackground?: 'transparent' | 'light' | 'dark' | 'busy';
+  // The tradie's pick. Undefined means "follow the recommendation".
+  logoUseNoBackground?: boolean;
   // Repeatable licences/accreditations rendered as one compact banner on
   // quote, invoice and service-report PDFs.
   credentials?: BusinessCredential[];

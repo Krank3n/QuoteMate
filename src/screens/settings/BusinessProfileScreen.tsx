@@ -31,7 +31,13 @@ import { auth, db } from '../../config/firebase';
 import { doc, updateDoc } from 'firebase/firestore';
 import { geocodeAddress } from '../../utils/travelCalculator';
 import { checkSquareConnection } from '../../services/squareService';
-import { uploadBusinessCredentialLogo, uploadBusinessLogo } from '../../services/photoService';
+import {
+  uploadBusinessCredentialLogo,
+  uploadBusinessLogo,
+  uploadAndProcessBusinessLogo,
+  type ProcessedLogoVariants,
+} from '../../services/photoService';
+import { BrandImageEditor, type BrandImageValue } from '../../components/BrandImageEditor';
 import { colors } from '../../theme';
 import { WebContainer } from '../../components/WebContainer';
 import { FixedBottomButton } from '../../components/FixedBottomButton';
@@ -56,6 +62,10 @@ export function BusinessProfileScreen() {
   const [address, setAddress] = useState('');
   const [logoUri, setLogoUri] = useState<string | undefined>(undefined);
   const [logoMimeType, setLogoMimeType] = useState<string | undefined>(undefined);
+  // Both processed variants, so the Keep/Remove choice can be flipped later
+  // without re-uploading. Populated on upload and from saved settings.
+  const [logoVariants, setLogoVariants] = useState<ProcessedLogoVariants | null>(null);
+  const [useNoBackground, setUseNoBackground] = useState(false);
   const [credentials, setCredentials] = useState<BusinessCredential[]>([]);
   const [credentialLogoMimeTypes, setCredentialLogoMimeTypes] = useState<Record<string, string | undefined>>({});
   const [brandColor, setBrandColor] = useState<string | undefined>(undefined);
@@ -79,6 +89,10 @@ export function BusinessProfileScreen() {
         label: String(credential.label || ''),
         number: credential.number ? String(credential.number) : undefined,
         logoUri: credential.logoUri,
+        logoOriginalUri: credential.logoOriginalUri,
+        logoNoBackgroundUri: credential.logoNoBackgroundUri,
+        logoBackground: credential.logoBackground,
+        logoUseNoBackground: credential.logoUseNoBackground,
       }));
       const brand = businessSettings.brandColor;
 
@@ -93,7 +107,22 @@ export function BusinessProfileScreen() {
       setCredentialLogoMimeTypes({});
       setBrandColor(brand);
 
-      setInitialSnapshot(JSON.stringify({ name, a, e, p, w, addr, logo, credentials: savedCredentials, brand }));
+      const noBg = !!businessSettings.logoUseNoBackground;
+      setUseNoBackground(noBg);
+      setLogoVariants(
+        businessSettings.logoOriginalUri
+          ? {
+              originalUrl: businessSettings.logoOriginalUri,
+              noBackgroundUrl: businessSettings.logoNoBackgroundUri,
+              background: businessSettings.logoBackground || 'transparent',
+              recommendNoBackground: noBg,
+            }
+          : null,
+      );
+
+      setInitialSnapshot(
+        JSON.stringify({ name, a, e, p, w, addr, logo, credentials: savedCredentials, brand, noBg }),
+      );
     }
   }, [businessSettings]);
 
@@ -109,9 +138,10 @@ export function BusinessProfileScreen() {
       logo: logoUri,
       credentials,
       brand: brandColor,
+      noBg: useNoBackground,
     });
     return current !== initialSnapshot;
-  }, [businessName, abn, email, phone, website, address, logoUri, credentials, brandColor, initialSnapshot]);
+  }, [businessName, abn, email, phone, website, address, logoUri, credentials, brandColor, useNoBackground, initialSnapshot]);
 
   const { unsavedModalProps } = useUnsavedChangesGuard({
     isDirty,
@@ -128,28 +158,24 @@ export function BusinessProfileScreen() {
     setHexInput(hex);
   }, []);
 
-  const handlePickLogo = async () => {
-    try {
-      const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
 
-      if (permissionResult.granted === false) {
-        Alert.alert('Permission Required', 'Permission to access camera roll is required!');
-        return;
-      }
 
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        quality: 0.8,
-      });
 
-      if (!result.canceled && result.assets[0]) {
-        setLogoUri(result.assets[0].uri);
-        setLogoMimeType(result.assets[0].mimeType);
-      }
-    } catch (error) {
-      Alert.alert('Error', 'Failed to pick image. Please try again.');
-    }
+
+  /** Single entry point for everything the logo editor reports back. */
+  const handleLogoChange = (next: BrandImageValue) => {
+    setLogoUri(next.uri);
+    setUseNoBackground(!!next.useNoBackground);
+    setLogoVariants(
+      next.originalUri
+        ? {
+            originalUrl: next.originalUri,
+            noBackgroundUrl: next.noBackgroundUri,
+            background: next.background || 'transparent',
+            recommendNoBackground: !!next.useNoBackground,
+          }
+        : null,
+    );
   };
 
   const handleRemoveLogo = () => {
@@ -164,6 +190,8 @@ export function BusinessProfileScreen() {
           onPress: () => {
             setLogoUri(undefined);
             setLogoMimeType(undefined);
+            setLogoVariants(null);
+            setUseNoBackground(false);
           },
         },
       ]
@@ -191,29 +219,6 @@ export function BusinessProfileScreen() {
     ]);
   };
 
-  const handlePickCredentialLogo = async (credential: BusinessCredential) => {
-    try {
-      const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!permissionResult.granted) {
-        Alert.alert('Permission Required', 'Permission to access camera roll is required!');
-        return;
-      }
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: false,
-        quality: 0.8,
-      });
-      if (!result.canceled && result.assets[0]) {
-        updateCredential(credential.id, { logoUri: result.assets[0].uri });
-        setCredentialLogoMimeTypes((current) => ({
-          ...current,
-          [credential.id]: result.assets[0].mimeType,
-        }));
-      }
-    } catch {
-      Alert.alert('Error', 'Failed to pick image. Please try again.');
-    }
-  };
 
   const uploadLogoToStorage = async (uri: string, mimeType?: string): Promise<string> => {
     const userId = auth.currentUser?.uid;
@@ -275,6 +280,10 @@ export function BusinessProfileScreen() {
           label: credential.label.trim(),
           number: credential.number?.trim() || undefined,
           logoUri: savedCredentialLogoUri,
+          logoOriginalUri: credential.logoOriginalUri,
+          logoNoBackgroundUri: credential.logoNoBackgroundUri,
+          logoBackground: credential.logoBackground,
+          logoUseNoBackground: credential.logoUseNoBackground,
         });
       }
 
@@ -287,6 +296,12 @@ export function BusinessProfileScreen() {
         website: website.trim() || undefined,
         address: address.trim() || undefined,
         logoUri: savedLogoUri,
+        // Keep both variants so the Keep/Remove choice stays reversible without
+        // making the tradie upload the file again.
+        logoOriginalUri: logoVariants?.originalUrl,
+        logoNoBackgroundUri: logoVariants?.noBackgroundUrl,
+        logoBackground: logoVariants?.background,
+        logoUseNoBackground: useNoBackground,
         credentials: savedCredentials,
         brandColor: brandColor,
       });
@@ -397,38 +412,25 @@ export function BusinessProfileScreen() {
               {isPro ? 'This appears on quote, invoice and service report PDFs' : 'Upgrade to Pro to add your logo to PDFs'}
             </Text>
 
-            {logoUri ? (
-              <View style={styles.logoPreview}>
-                <Image source={{ uri: logoUri }} style={styles.logoImage} resizeMode="contain" />
-                <View style={styles.logoButtons}>
-                  <Button mode="outlined" onPress={handlePickLogo} style={styles.logoButton}>
-                    Change Logo
-                  </Button>
-                  <IconButton
-                    icon="delete"
-                    iconColor={colors.error}
-                    size={24}
-                    onPress={handleRemoveLogo}
-                  />
-                </View>
-              </View>
-            ) : (
-              <TouchableOpacity style={styles.logoUploadBox} onPress={() => {
-                if (!isPro) {
-                  navigation.navigate('Paywall' as never);
-                  return;
-                }
-                handlePickLogo();
-              }}>
-                <MaterialCommunityIcons
-                  name={isPro ? 'image-plus' : 'lock-outline'}
-                  size={48}
-                  color={isPro ? colors.primary : colors.textMuted}
-                />
-                <Text style={styles.logoUploadText}>{isPro ? 'Tap to Upload Logo' : 'Pro Feature'}</Text>
-                <Text style={styles.logoUploadHint}>Recommended: 500x500px (Square)</Text>
-              </TouchableOpacity>
-            )}
+            <BrandImageEditor
+              value={{
+                uri: logoUri,
+                originalUri: logoVariants?.originalUrl,
+                noBackgroundUri: logoVariants?.noBackgroundUrl,
+                background: logoVariants?.background,
+                useNoBackground,
+              }}
+              onChange={handleLogoChange}
+              userId={auth.currentUser?.uid}
+              folder="logo-uploads"
+              emptyTitle={isPro ? 'Tap to upload your logo' : 'Pro Feature'}
+              // Not "500x500 square": a square canvas is what makes a wide
+              // wordmark print tiny, because the empty margins scale with the
+              // artwork. Crop tight and any shape works.
+              emptyHint="PNG or JPG, cropped close to the artwork"
+              locked={!isPro}
+              onLockedPress={() => navigation.navigate('Paywall' as never)}
+            />
           </Surface>
 
           <Surface style={styles.card}>
@@ -461,27 +463,31 @@ export function BusinessProfileScreen() {
                   />
                 </View>
 
-                {credential.logoUri ? (
-                  <View style={styles.credentialLogoRow}>
-                    <Image
-                      source={{ uri: credential.logoUri }}
-                      style={styles.credentialLogo}
-                      resizeMode="contain"
-                    />
-                    <Button
-                      mode="outlined"
-                      compact
-                      onPress={() => handlePickCredentialLogo(credential)}
-                    >
-                      Change badge
-                    </Button>
-                    <IconButton
-                      icon="close-circle-outline"
-                      size={20}
-                      onPress={() => updateCredential(credential.id, { logoUri: undefined })}
-                    />
-                  </View>
-                ) : null}
+                {/* Same editor as the company logo: an ARC badge is a brand
+                    image on the same documents and deserves the same crop,
+                    background handling and on-paper preview. */}
+                <BrandImageEditor
+                  value={{
+                    uri: credential.logoUri,
+                    originalUri: credential.logoOriginalUri,
+                    noBackgroundUri: credential.logoNoBackgroundUri,
+                    background: credential.logoBackground,
+                    useNoBackground: credential.logoUseNoBackground,
+                  }}
+                  onChange={(next) =>
+                    updateCredential(credential.id, {
+                      logoUri: next.uri,
+                      logoOriginalUri: next.originalUri,
+                      logoNoBackgroundUri: next.noBackgroundUri,
+                      logoBackground: next.background,
+                      logoUseNoBackground: next.useNoBackground,
+                    })
+                  }
+                  userId={auth.currentUser?.uid}
+                  folder="credential-uploads"
+                  emptyTitle="Add badge or logo"
+                  emptyHint="Optional — e.g. your ARC or licence badge"
+                />
 
                 <TextInput
                   label="Name"
@@ -499,15 +505,6 @@ export function BusinessProfileScreen() {
                   mode="outlined"
                   style={styles.credentialInput}
                 />
-                {!credential.logoUri ? (
-                  <Button
-                    mode="outlined"
-                    icon="image-plus"
-                    onPress={() => handlePickCredentialLogo(credential)}
-                  >
-                    Add badge or logo
-                  </Button>
-                ) : null}
               </View>
             ))}
 

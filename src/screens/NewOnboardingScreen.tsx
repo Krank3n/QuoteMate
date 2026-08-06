@@ -46,6 +46,7 @@ import { OnboardingProgress, OnboardingStep } from '../components/OnboardingProg
 import { CelebrationAnimation } from '../components/CelebrationAnimation';
 import { AlertModal } from '../components/AlertModal';
 import { WebContainer } from '../components/WebContainer';
+import { LogoCropper } from '../components/LogoCropper';
 import { TRADE_CATEGORIES } from '../constants/tradeCategories';
 import { auth } from '../config/firebase';
 import * as squareService from '../services/squareService';
@@ -70,18 +71,10 @@ const STORAGE_KEY = 'onboarding:draft';
 // onboarding flow doesn't stretch full-width on desktop browsers.
 const ONBOARDING_MAX_WIDTH = 600;
 
-// Logo upload hint. iOS/Android get a crop-and-zoom step from
-// ImagePicker's `allowsEditing: true`; expo-image-picker's WEB
-// implementation is a bare <input type="file"> that ignores the flag, so
-// promising a crop screen there is simply untrue.
-//
-// "Any shape" holds on both: the PDF templates render the logo into a fixed
-// square with `object-fit: contain` (shared/pdf/templates.ts), so an
-// off-square logo is letterboxed, never cropped or stretched.
-const LOGO_UPLOAD_HINT =
-    Platform.OS === 'web'
-        ? "Any shape — we'll size it to fit your quotes"
-        : 'Any shape — crop and zoom on the next screen';
+// Logo upload hint. Used to differ by platform, because the OS crop step from
+// ImagePicker's `allowsEditing` never fired on web. LogoCropper now handles
+// framing on every platform, so one honest line covers all three.
+const LOGO_UPLOAD_HINT = 'Any shape — crop it on the next screen';
 
 // The static base of the onboarding flow. The Reece step is inserted
 // dynamically inside the component when the user picks plumbing, so it isn't
@@ -447,6 +440,18 @@ export function NewOnboardingScreen() {
 
     // Logo picker (ported from BusinessProfileScreen)
     const [logoPickError, setLogoPickError] = useState<string | null>(null);
+    // A pick waiting to be framed, so the crop happens before it's committed.
+    const [pendingLogo, setPendingLogo] = useState<{ uri: string; mimeType?: string } | null>(null);
+
+    /** Cropper finished. It always writes PNG, so a changed URI means the
+     *  mime type is now PNG whatever was picked — mislabelling it re-encodes a
+     *  transparent logo as JPEG and flattens its alpha onto black. */
+    const handleCropped = (croppedUri: string) => {
+        const mimeType = croppedUri !== pendingLogo?.uri ? 'image/png' : pendingLogo?.mimeType;
+        setPendingLogo(null);
+        setLogoUri(croppedUri);
+        setLogoMimeType(mimeType);
+    };
     const handlePickLogo = async () => {
         setLogoPickError(null);
         try {
@@ -459,14 +464,16 @@ export function NewOnboardingScreen() {
 
             const result = await ImagePicker.launchImageLibraryAsync({
                 mediaTypes: ImagePicker.MediaTypeOptions.Images,
-                allowsEditing: true,
+                // Framing is handled by our own cropper (LogoCropper), which
+                // works on web too and doesn't force the platform's square /
+                // 4:3 frame onto a wide wordmark.
+                allowsEditing: false,
                 quality: 0.8,
             });
 
             if (!result.canceled && result.assets[0]) {
                 selectionTap();
-                setLogoUri(result.assets[0].uri);
-                setLogoMimeType(result.assets[0].mimeType);
+                setPendingLogo({ uri: result.assets[0].uri, mimeType: result.assets[0].mimeType });
             }
         } catch (error) {
             setLogoPickError("We couldn't open the image picker. Please try again.");
@@ -1302,6 +1309,13 @@ export function NewOnboardingScreen() {
                 message="We couldn't save your settings. Please check your connection and try again."
                 primaryButtonText="OK"
                 primaryButtonAction={() => setCompleteErrorVisible(false)}
+            />
+
+            <LogoCropper
+                visible={!!pendingLogo}
+                uri={pendingLogo?.uri || ''}
+                onCancel={() => setPendingLogo(null)}
+                onCropped={handleCropped}
             />
         </KeyboardAvoidingView>
     );
