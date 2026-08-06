@@ -206,7 +206,7 @@ export function BusinessProfileScreen() {
 
   const handleAddCredential = () => {
     if (!isPro) {
-      navigation.navigate('Paywall' as never);
+      navigation.navigate('Paywall' as never, { source: 'business_profile' } as never);
       return;
     }
     if (credentials.length >= 6) {
@@ -429,7 +429,7 @@ export function BusinessProfileScreen() {
               // artwork. Crop tight and any shape works.
               emptyHint="PNG or JPG, cropped close to the artwork"
               locked={!isPro}
-              onLockedPress={() => navigation.navigate('Paywall' as never)}
+              onLockedPress={() => navigation.navigate('Paywall' as never, { source: 'business_profile' } as never)}
             />
           </Surface>
 

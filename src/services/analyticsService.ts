@@ -92,11 +92,23 @@ export type AnalyticsEvent =
   // (send_gate / trial_banner / dashboard / unknown).
   | 'paywall_viewed'
   | 'paywall_dismissed'
-  // Purchase flow: started → completed | failed. User-cancels are not
-  // failures and are never tracked as such.
+  // Purchase flow: started → completed | failed | unconfirmed. User-cancels are
+  // not failures and are never tracked as such.
   | 'checkout_started'
+  // Fires only once the server has actually granted Pro. It used to fire the
+  // moment the store handed back a purchase, i.e. before validation — which is
+  // why the Jul–Aug 2026 outage was invisible: telemetry read three healthy
+  // purchases while nobody was entitled. Keep this on the granted branch.
   | 'purchase_completed'
+  // A settled rejection: the store's own error, or a receipt the server refused.
   | 'purchase_failed'
+  // The store took the money but validation couldn't confirm it (transient 5xx,
+  // offline, credentials missing). Distinct from purchase_failed: the transaction
+  // is still live, deliberately left unfinished so the store re-delivers it, and
+  // the launch-time sweep should heal it. This is the exact shape of the 2026
+  // outage and the branch was previously silent — any non-zero count here means
+  // someone has paid and is waiting, so it warrants an alert, not a dashboard row.
+  | 'purchase_unconfirmed'
   // A purchase the stores still had outstanding was entitled by the launch-time
   // sweep rather than by the buyer returning to the paywall. Non-zero here means
   // someone was charged-but-not-Pro and we healed it without them noticing —

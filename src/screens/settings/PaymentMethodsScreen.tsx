@@ -190,7 +190,7 @@ export function PaymentMethodsScreen() {
         <WebContainer>
           {isFreeTier && (
             <TouchableOpacity
-              onPress={() => navigation.navigate('Paywall' as never)}
+              onPress={() => navigation.navigate('Paywall' as never, { source: 'payment_methods' } as never)}
               activeOpacity={0.7}
             >
               <Surface style={styles.freeTierBanner} elevation={2}>

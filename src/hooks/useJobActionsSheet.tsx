@@ -288,7 +288,7 @@ export function useJobActionsSheet(
       // than minting a duplicate, and send an elapsed trial to the paywall.
       case 'service_report': {
         if (!canUseServiceReports(getEffectivePlan())) {
-          navigation.navigate('Paywall');
+          navigation.navigate('Paywall', { source: 'job_actions' });
           break;
         }
         const reportId = resumableReportId(await reportService.listReports(job.id));

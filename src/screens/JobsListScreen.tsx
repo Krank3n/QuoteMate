@@ -120,7 +120,7 @@ export function JobsListScreen() {
 
   const handleNew = () => {
     if (!canCreateQuote()) {
-      navigation.navigate('Paywall' as never);
+      navigation.navigate('Paywall' as never, { source: 'jobs_list' } as never);
       return;
     }
     lightTap();

@@ -149,7 +149,7 @@ export function FollowUpSheet({
           text: 'Upgrade to Pro',
           onPress: () => {
             onDismiss();
-            navigation.navigate('Paywall' as never);
+            navigation.navigate('Paywall' as never, { source: 'follow_up_sheet' } as never);
           },
         },
       ].filter(Boolean) as any

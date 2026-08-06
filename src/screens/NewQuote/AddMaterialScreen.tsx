@@ -714,7 +714,7 @@ export function AddMaterialScreen() {
 
   const handleSearch = useCallback(async () => {
     if (!isPro) {
-      navigation.navigate('Paywall' as never);
+      navigation.navigate('Paywall' as never, { source: 'add_material' } as never);
       return;
     }
 
@@ -1332,7 +1332,7 @@ export function AddMaterialScreen() {
       {!isPro ? (
         <TouchableOpacity
           style={styles.proSearchPrompt}
-          onPress={() => navigation.navigate('Paywall' as never)}
+          onPress={() => navigation.navigate('Paywall' as never, { source: 'add_material' } as never)}
         >
           <MaterialCommunityIcons name="lock-outline" size={20} color={colors.onSurface} />
           <Text style={styles.proSearchPromptText}>

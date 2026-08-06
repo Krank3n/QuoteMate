@@ -60,7 +60,7 @@ export function SubscriptionSettingsScreen() {
       </View>
 
       <TouchableOpacity
-        onPress={() => navigation.navigate('Paywall' as never)}
+        onPress={() => navigation.navigate('Paywall' as never, { source: 'subscription_settings' } as never)}
         style={styles.manageSubscriptionButton}
       >
         <Text style={styles.manageSubscriptionText}>Manage Subscription</Text>
@@ -107,7 +107,7 @@ export function SubscriptionSettingsScreen() {
 
       <Button
         mode="contained"
-        onPress={() => navigation.navigate('Paywall' as never)}
+        onPress={() => navigation.navigate('Paywall' as never, { source: 'subscription_settings' } as never)}
         style={styles.upgradeButton}
         contentStyle={styles.upgradeButtonContent}
         icon="crown"
@@ -147,7 +147,7 @@ export function SubscriptionSettingsScreen() {
 
       <Button
         mode="contained"
-        onPress={() => navigation.navigate('Paywall' as never)}
+        onPress={() => navigation.navigate('Paywall' as never, { source: 'subscription_settings' } as never)}
         style={styles.upgradeButton}
         contentStyle={styles.upgradeButtonContent}
         icon="crown"

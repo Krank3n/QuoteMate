@@ -1984,7 +1984,7 @@ export function MaterialsListScreen() {
     lightTap();
     switch (emptyContent.hero.action) {
       case 'paywall':
-        navigation.navigate('Paywall' as never);
+        navigation.navigate('Paywall' as never, { source: 'materials_list' } as never);
         break;
       case 'add-notes':
         navigation.navigate('Details', { focusDescription: true });

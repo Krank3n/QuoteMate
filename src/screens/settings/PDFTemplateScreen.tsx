@@ -738,7 +738,7 @@ export function PDFTemplateScreen() {
                 activeOpacity={0.9}
                 onPress={() => {
                   if (isLocked) {
-                    navigation.navigate('Paywall' as never);
+                    navigation.navigate('Paywall' as never, { source: 'pdf_template' } as never);
                     return;
                   }
                   setSelectedTemplate(template.id);

@@ -234,7 +234,6 @@ export function PaywallScreen() {
             // expo-iap 3.x: check purchaseToken (not transactionReceipt)
             const hasValidPurchase = purchase.purchaseToken || purchase.transactionReceipt || purchase.id;
             if (hasValidPurchase) {
-              trackEvent('purchase_completed', resolvePurchaseAnalytics(purchase, Platform.OS));
               // PAY-01: premium is granted only when the server verifies the
               // receipt — no local fallback. On transient failures the store
               // transaction stays unfinished so validation retries later.
@@ -251,6 +250,9 @@ export function PaywallScreen() {
               }
 
               if (outcome === 'granted') {
+                // Only now is the money actually a subscription: fire this on
+                // the granted branch, never on the store handing back a purchase.
+                trackEvent('purchase_completed', resolvePurchaseAnalytics(purchase, Platform.OS));
                 // Reload subscription from Firestore (server wrote it)
                 await loadSubscription();
                 await setPremium(
@@ -274,7 +276,13 @@ export function PaywallScreen() {
                 );
               } else {
                 // Transient failure: leave the transaction unfinished so the
-                // store re-delivers it and validation retries.
+                // store re-delivers it and validation retries. Track it — this
+                // branch stayed silent through the whole 2026 outage, so three
+                // charged-but-unentitled buyers left no trace in the funnel.
+                trackEvent('purchase_unconfirmed', {
+                  ...resolvePurchaseAnalytics(purchase, Platform.OS),
+                  source: paywallSource,
+                });
                 Alert.alert(
                   'Almost there',
                   "Your purchase went through but we couldn't confirm it just now. It'll finish automatically next time you open the app.",

@@ -689,7 +689,7 @@ export function ViewJobScreen() {
             ...(reportId ? { reportId } : {}),
           });
         } else {
-          navigation.navigate('Paywall');
+          navigation.navigate('Paywall', { source: 'view_job' });
         }
         break;
       case 'exportPdf':
@@ -798,7 +798,7 @@ export function ViewJobScreen() {
     const doc = docStageSheetDoc;
     setDocStageSheetDoc(null);
     if (target === 'invoice_sent' && doc.type === 'quote' && !isPro) {
-      navigation.navigate('Paywall');
+      navigation.navigate('Paywall', { source: 'view_job' });
       return;
     }
     try {

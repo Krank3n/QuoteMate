@@ -75,6 +75,27 @@ describe('trackEvent', () => {
     ]);
   });
 
+  // A store purchase settles exactly one of three ways, and each has to be
+  // distinguishable: the Jul–Aug 2026 outage read as three healthy purchases
+  // because the unconfirmed branch was silent and purchase_completed fired
+  // before validation. "Charged" is the sum of all three, so no case is lost.
+  it('writes the purchase funnel events under their agreed names', async () => {
+    trackEvent('checkout_started', { plan: 'yearly', platform: 'ios', source: 'send_gate' });
+    trackEvent('purchase_completed', { plan: 'yearly', platform: 'ios' });
+    trackEvent('purchase_failed', { platform: 'ios', code: 'validation_rejected' });
+    trackEvent('purchase_unconfirmed', { plan: 'yearly', platform: 'ios', source: 'send_gate' });
+    trackEvent('purchase_recovered_on_launch', { platform: 'ios' });
+    await flush();
+
+    expect(addDocMock.mock.calls.map(([, payload]: any) => payload.event)).toEqual([
+      'checkout_started',
+      'purchase_completed',
+      'purchase_failed',
+      'purchase_unconfirmed',
+      'purchase_recovered_on_launch',
+    ]);
+  });
+
   it('never throws (or leaves an unhandled rejection) when the write fails', async () => {
     addDocMock.mockRejectedValueOnce(new Error('client is offline'));
 
