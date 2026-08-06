@@ -7,7 +7,7 @@
  * canvas rather than the artwork, so a wide wordmark on a 3:2 canvas prints at
  * a fraction of its intended size with a mystery gap underneath.
  *
- * Detection reuses computeContentBBox from the app (src/utils/logoTrimCore.ts)
+ * Detection reuses computeContentBBox from shared/logo/trimCore.ts
  * so this produces byte-identical crops to what a fresh upload would, rather
  * than a second implementation that can drift.
  *
@@ -21,7 +21,7 @@
 import * as admin from 'firebase-admin';
 import * as fs from 'fs';
 import * as path from 'path';
-import { computeContentBBox } from '../../src/utils/logoTrimCore';
+import { computeContentBBox } from '../src/shared/logo/trimCore';
 
 // Decoders live in the app's node_modules; functions doesn't depend on them and
 // shouldn't grow a dependency for a one-off migration.

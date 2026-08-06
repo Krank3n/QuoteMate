@@ -5,7 +5,7 @@
  * these tests pin its contract without any RN mocks.
  */
 import { describe, expect, it } from 'vitest';
-import { computeContentBBox } from './logoTrimCore';
+import { computeContentBBox } from '../../shared/logo/trimCore';
 
 /** Build an RGBA buffer; `paint` sets non-white pixels. */
 function makeImage(

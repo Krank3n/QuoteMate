@@ -171,6 +171,7 @@ import { getAussieMessage, AussieEvent } from './aussieNotifications';
 import { sendExpoPushNotifications } from './expoPush';
 import { hashTerms } from './shared/pdf/terms/defaultAuTradie';
 import { generateQuotePdfBuffer } from './pdfGenerator';
+import { processAndStoreLogo } from './logoProcessing';
 import { dollarsToCents, centsToDollars } from './shared/pdf/money';
 import { validateAndRepairAiOutput } from './shared/ai/validateAiOutput';
 import { getFeedbackDocId, getCategoryLabel, isSideEffectFreeRequest, isRatingRecordRequest } from './quickFeedback.helpers';
@@ -9946,6 +9947,35 @@ export const sendUpdateAnnouncement = functions
  * Submit feedback directly from the app.
  * Sends an email to the admin with the user's feedback.
  */
+/**
+ * Tidy an uploaded logo and hand back both variants for the tradie to choose.
+ *
+ * Runs here rather than on-device because expo-image-manipulator can only
+ * resize/crop/rotate — it cannot write pixels, so background removal is
+ * impossible client-side without shipping a PNG encoder. Server-side also
+ * means web and native produce identical results.
+ */
+export const processBusinessLogo = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'Must be signed in');
+  }
+  const uid = context.auth.uid;
+  const sourcePath = String(data?.sourcePath || '');
+
+  // Only ever touch the caller's own folder — the path arrives from the client.
+  if (!sourcePath.startsWith(`users/${uid}/`) || sourcePath.includes('..')) {
+    throw new functions.https.HttpsError('permission-denied', 'Not your logo');
+  }
+
+  try {
+    return await processAndStoreLogo(uid, sourcePath);
+  } catch (err: any) {
+    console.error('[processBusinessLogo] failed', uid, sourcePath, err?.message);
+    // A logo we can't decode must not block saving the rest of the profile.
+    throw new functions.https.HttpsError('internal', 'Could not process that image');
+  }
+});
+
 export const submitFeedback = functions.https.onCall(async (data, context) => {
   if (!context.auth) {
     throw new functions.https.HttpsError('unauthenticated', 'Must be signed in');

@@ -16,7 +16,7 @@
 
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import jpeg from 'jpeg-js';
-import { computeContentBBox } from './logoTrimCore';
+import { computeContentBBox } from '../../shared/logo/trimCore';
 
 /** Detection probe resolution — plenty for finding margins. */
 const PROBE_WIDTH = 128;
