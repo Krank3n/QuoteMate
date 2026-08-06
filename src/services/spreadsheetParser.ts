@@ -159,18 +159,47 @@ function inferKind(
 
 // ─── Parsing ──────────────────────────────────────────────────────────────
 
+/**
+ * Excel writes ="0012" so leading zeros survive, and some supplier exports
+ * wrap every cell that way — including prices. Left alone, "=\"24.59\"" reads
+ * as NaN and the whole row is silently dropped at import.
+ */
+function unwrapExcelLiteral(value: string): string {
+  const match = value.match(/^="(.*)"$/s);
+  return match ? match[1] : value;
+}
+
 function pickHeaderRow(matrix: any[][]): number {
-  // Heuristic: pick the first row in the top 5 where ≥2 cells are non-empty
-  // short strings and no cell is purely numeric. Falls back to row 0.
-  const limit = Math.min(5, matrix.length);
+  // Score candidates rather than taking the first plausible one. Trade
+  // pricebooks routinely open with account/date lines — "Customer name",
+  // "COASTAL HVAC" is two non-empty text cells, so a first-match rule stops
+  // there and reads the real header as data, leaving the user to map columns
+  // called "Column 3" onto rows that are off by four.
+  const limit = Math.min(10, matrix.length);
+  let bestIdx = 0;
+  let bestScore = -1;
+
   for (let i = 0; i < limit; i++) {
     const row = matrix[i] || [];
-    const cells = row.map(c => (c == null ? '' : String(c).trim())).filter(Boolean);
+    const cells = row
+      .map(c => (c == null ? '' : unwrapExcelLiteral(String(c).trim())))
+      .filter(Boolean);
     if (cells.length < 2) continue;
     const allText = cells.every(c => c.length <= 60 && !/^-?\$?\d+(\.\d+)?$/.test(c));
-    if (allText) return i;
+    if (!allText) continue;
+
+    // A row that names the columns we actually need is a header, near enough
+    // regardless of how many cells it has.
+    const looksLikeName = cells.some(c => NAME_PRIMARY_PATTERNS.some(p => p.test(c)));
+    const looksLikePrice = cells.some(c => PRICE_PATTERNS.some(p => p.test(c)));
+    const score = cells.length + (looksLikeName ? 10 : 0) + (looksLikePrice ? 10 : 0);
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestIdx = i;
+    }
   }
-  return 0;
+  return bestIdx;
 }
 
 function dedupeHeaders(raw: string[]): string[] {
@@ -194,7 +223,7 @@ function matrixToParsed(
   }
   const headerIdx = pickHeaderRow(matrix);
   const rawHeaders: string[] = (matrix[headerIdx] || []).map(c =>
-    c == null ? '' : String(c).trim(),
+    c == null ? '' : unwrapExcelLiteral(String(c).trim()),
   );
   const headers = dedupeHeaders(rawHeaders);
   const dataRows = matrix.slice(headerIdx + 1, headerIdx + 1 + MAX_ROWS);
@@ -204,7 +233,7 @@ function matrixToParsed(
       let hasValue = false;
       headers.forEach((h, i) => {
         const raw = row?.[i];
-        const cell = raw == null ? '' : String(raw).trim();
+        const cell = raw == null ? '' : unwrapExcelLiteral(String(raw).trim());
         if (cell) hasValue = true;
         obj[h] = cell;
       });

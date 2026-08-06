@@ -207,3 +207,71 @@ describe('real flooring supplier spreadsheet', () => {
     expect(warnings.length).toBeGreaterThan(0);
   });
 });
+
+/**
+ * A real trade pricebook that failed to import (Coastal HVAC, Aug 2026).
+ *
+ * Two independent faults, either of which sinks the import on its own:
+ *   1. Four account/date lines above the real header. The old rule took the
+ *      FIRST row with two non-empty text cells, so "Customer name","COASTAL
+ *      HVAC" won and the actual header was read as data.
+ *   2. Every code and price wrapped as ="..." by Excel, so a price parsed
+ *      to NaN and the row was dropped.
+ */
+describe('supplier pricebook with a preamble and Excel-wrapped cells', () => {
+  const CSV = [
+    '"Customer name","COASTAL HVAC","",""',
+    '"Customer ID","54346","",""',
+    '"date","03-08-2026","",""',
+    '"","","",""',
+    '"product code","description","net price$","category"',
+    '"=""110018""","FIREBREAK FLEX DUCT R1.0 6MX150","=""24.59""","FIREBREAK R1.0 FLEX 6M"',
+    '"=""110020""","FIREBREAK FLEX DUCT R1.0 6MX200","=""29.15""","FIREBREAK R1.0 FLEX 6M"',
+  ].join('\n');
+
+  async function parseCsv(body: string): Promise<ParsedSpreadsheet> {
+    const fs = require('fs');
+    const os = require('os');
+    const file = path.join(os.tmpdir(), `pricebook-${Date.now()}-${Math.random()}.csv`);
+    fs.writeFileSync(file, body);
+    try {
+      return await parseSpreadsheet(file, 'pricebook.csv', 'text/csv');
+    } finally {
+      fs.unlinkSync(file);
+    }
+  }
+
+  it('finds the real header row below the account preamble', async () => {
+    const parsed = await parseCsv(CSV);
+    expect(parsed.headers).toEqual(['product code', 'description', 'net price$', 'category']);
+    expect(parsed.rows).toHaveLength(2);
+  });
+
+  it('unwraps Excel ="..." cells so prices are numbers, not NaN', async () => {
+    const parsed = await parseCsv(CSV);
+    expect(parsed.rows[0]['net price$']).toBe('24.59');
+    expect(parsed.rows[0]['product code']).toBe('110018');
+  });
+
+  it('auto-detects the mapping and extracts priced items end to end', async () => {
+    const parsed = await parseCsv(CSV);
+    const mapping = autoDetectMapping(parsed.headers, parsed.rows);
+    expect(mapping).toMatchObject({ name: 'description', price: 'net price$' });
+
+    const result = buildExtractFromMapping(parsed, mapping!, {});
+    expect(result.items).toHaveLength(2);
+    expect(result.items[0]).toMatchObject({
+      name: 'FIREBREAK FLEX DUCT R1.0 6MX150',
+      price: 24.59,
+      itemNumber: '110018',
+    });
+  });
+
+  it('still takes row 0 when the header really is on the first row', async () => {
+    const parsed = await parseCsv(
+      ['"Description","Unit Price"', '"Copper elbow 15mm","4.20"'].join('\n'),
+    );
+    expect(parsed.headers).toEqual(['Description', 'Unit Price']);
+    expect(parsed.rows).toHaveLength(1);
+  });
+});
