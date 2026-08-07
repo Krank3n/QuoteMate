@@ -50,6 +50,7 @@ import {
 } from '../../services/reportComposeService';
 import { trackEvent } from '../../services/analyticsService';
 import { reservePrintWindow, exportReportPDF } from '../../utils/pdfGenerator';
+import { SendReportDialog } from '../../components/SendReportDialog';
 import { createQuoteFromRecommendedWork } from '../../utils/quoteFromReport';
 import type { QuotePhoto } from '../../types';
 import type { JobPhoto } from '../../../shared/job/types';
@@ -109,6 +110,9 @@ export function ServiceReportScreen() {
   const [composing, setComposing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [exporting, setExporting] = useState(false);
+  // Send persists first, then opens the sheet — hence its own busy flag.
+  const [sending, setSending] = useState(false);
+  const [sendVisible, setSendVisible] = useState(false);
   const [quoting, setQuoting] = useState(false);
 
   // Mate's tap-to-add suggestions from the last write-up. Review-only:
@@ -673,6 +677,36 @@ export function ServiceReportScreen() {
     }
   };
 
+  /**
+   * Send opens the same sheet a quote uses. The report is persisted first —
+   * the email endpoint renders server-side from the saved doc, so an unsaved
+   * report has nothing to attach.
+   */
+  const handleSend = async () => {
+    if (!hasMeaningfulContent) {
+      showAlert({
+        type: 'info',
+        title: 'Nothing to send yet',
+        message: 'Fill in what you did on the visit before sending the report.',
+      });
+      return;
+    }
+    setSending(true);
+    try {
+      const report = await persist();
+      if (!report) return;
+      setSendVisible(true);
+    } catch (err: any) {
+      showAlert({
+        type: 'error',
+        title: 'Could not save',
+        message: err?.message || 'Please try again in a moment.',
+      });
+    } finally {
+      setSending(false);
+    }
+  };
+
   const handleExport = async () => {
     if (!hasMeaningfulContent) {
       showAlert({
@@ -1192,14 +1226,25 @@ export function ServiceReportScreen() {
         onPress={handleSave}
         loading={saving}
         disabled={saving || exporting || quoting}
-        secondaryLabel="Share PDF"
-        secondaryOnPress={handleExport}
-        secondaryLoading={exporting}
+        secondaryLabel="Send report"
+        secondaryOnPress={handleSend}
+        secondaryLoading={sending || exporting}
         // Without this the shared button falls back to its materials-flow
         // default copy, "Fetching prices..." — nonsense on a report.
         secondaryLoadingText="Preparing PDF..."
         secondaryDisabled={saving || quoting}
         disableKeyboardSticky
+      />
+
+      <SendReportDialog
+        visible={sendVisible}
+        onDismiss={() => setSendVisible(false)}
+        reportId={meta?.id ?? null}
+        reportNumber={meta?.number}
+        customerName={context?.customerName || job.customerName}
+        customerEmail={context?.customerEmail}
+        businessName={businessSettings?.businessName}
+        onShare={handleExport}
       />
 
       {alertNode}

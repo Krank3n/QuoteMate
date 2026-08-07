@@ -146,7 +146,10 @@ export type AnalyticsEvent =
   // taps and carried-forward/loaded signatures don't count).
   | 'report_signed'
   // The report PDF went out via the export/share path.
-  | 'report_shared';
+  | 'report_shared'
+  // Emailed to the customer with the PDF attached — distinct from
+  // report_shared, which is the OS share sheet / print dialog.
+  | 'report_sent';
 
 interface BaseProps {
   // Free-form per-event payload. Keep it flat (Firestore indexes flat fields
