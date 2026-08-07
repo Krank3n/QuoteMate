@@ -377,8 +377,11 @@ export async function exportDocumentPDF(
   doc: Document,
   businessSettings: BusinessSettings | null,
   action: 'export' | 'share' = 'export',
-  options?: { isPro?: boolean },
+  options?: { isPro?: boolean; printWindow?: Window | null },
 ): Promise<void> {
+  // Reserve the tab before the first await — generateDocumentPDF is async, and
+  // a popup blocker refuses window.open once the gesture is spent.
+  const reserved = options?.printWindow ?? reservePrintWindow();
   try {
     const html = await generateDocumentPDF(doc, businessSettings, options);
 
@@ -397,19 +400,7 @@ export async function exportDocumentPDF(
       : `Please find attached your quote for ${doc.job.name}.\n\nTotal: ${formatCurrency(doc.total)}\n\nThank you for your interest!`;
 
     if (Platform.OS === 'web') {
-      // On web, use browser's native print functionality
-      const printWindow = window.open('', '_blank');
-      if (printWindow) {
-        printWindow.document.write(html);
-        printWindow.document.close();
-        printWindow.document.title = filename;
-        printWindow.onload = () => {
-          printWindow.focus();
-          printWindow.print();
-        };
-      } else {
-        Alert.alert('Error', 'Please allow popups to export PDF');
-      }
+      writeToPrintWindow(reserved, html, filename, true);
       return;
     }
 
@@ -475,7 +466,12 @@ export async function exportDocumentPDF(
       ],
     );
   } catch (error) {
+    // Alert.alert is a no-op on react-native-web, so a blocked or failed
+    // export used to vanish silently while the caller announced success.
+    // Close the reserved tab and rethrow — callers surface a real message.
+    reserved?.close();
     Alert.alert('Error', 'Failed to export PDF. Please try again.');
+    throw error;
   }
 }
 
@@ -488,8 +484,59 @@ export async function exportDocumentPDF(
  * id and holds no customer fields, so the caller passes the resolved customer
  * / address details (read off the linked Job) through options.
  */
+
+/**
+ * Reserve a browser tab for a print/preview, synchronously.
+ *
+ * Popup blockers — iOS Safari especially — only honour window.open inside the
+ * synchronous part of a user gesture. Every export here awaits something first
+ * (persisting the report, generating HTML, inlining the logo), and by the time
+ * window.open runs the gesture has been spent, so it returns null. That is the
+ * whole reason "Share PDF" did nothing on mobile web: the popup was blocked,
+ * the failure was reported via Alert.alert — a no-op on react-native-web — and
+ * the caller carried on to announce success.
+ *
+ * Callers therefore reserve the tab on the tap and pass it in; the export
+ * fills it once the HTML is ready.
+ */
+export function reservePrintWindow(): Window | null {
+  if (Platform.OS !== 'web') return null;
+  try {
+    return window.open('', '_blank');
+  } catch {
+    return null;
+  }
+}
+
+/** Fill a reserved tab, or throw something the UI can actually show. */
+function writeToPrintWindow(
+  win: Window | null,
+  html: string,
+  filename: string,
+  autoPrint: boolean,
+): void {
+  if (!win) {
+    throw new Error(
+      'Your browser blocked the PDF tab. Allow pop-ups for this site and try again.',
+    );
+  }
+  win.document.write(html);
+  win.document.close();
+  win.document.title = filename;
+  if (autoPrint) {
+    win.onload = () => {
+      win.focus();
+      win.print();
+    };
+  } else {
+    win.focus();
+  }
+}
+
 export interface ReportPdfOptions {
   isPro?: boolean;
+  /** Tab reserved during the tap — see reservePrintWindow. Web only. */
+  printWindow?: Window | null;
   customerName?: string;
   customerEmail?: string;
   customerPhone?: string;
@@ -609,6 +656,7 @@ export async function exportReportPDF(
   action: 'export' | 'share' = 'export',
   options?: ReportPdfOptions,
 ): Promise<void> {
+  const reserved = options?.printWindow ?? reservePrintWindow();
   try {
     const html = await generateReportPDF(report, businessSettings, options);
 
@@ -618,18 +666,7 @@ export async function exportReportPDF(
     const emailBody = `Please find attached your service report from ${format(new Date(report.visitDate), 'dd MMMM yyyy')}.\n\nThank you.`;
 
     if (Platform.OS === 'web') {
-      const printWindow = window.open('', '_blank');
-      if (printWindow) {
-        printWindow.document.write(html);
-        printWindow.document.close();
-        printWindow.document.title = filename;
-        printWindow.onload = () => {
-          printWindow.focus();
-          printWindow.print();
-        };
-      } else {
-        Alert.alert('Error', 'Please allow popups to export PDF');
-      }
+      writeToPrintWindow(reserved, html, filename, true);
       return;
     }
 
@@ -692,7 +729,12 @@ export async function exportReportPDF(
       ],
     );
   } catch (error) {
+    // Alert.alert is a no-op on react-native-web, so a blocked or failed
+    // export used to vanish silently while the caller announced success.
+    // Close the reserved tab and rethrow — callers surface a real message.
+    reserved?.close();
     Alert.alert('Error', 'Failed to export PDF. Please try again.');
+    throw error;
   }
 }
 
@@ -709,18 +751,12 @@ export async function exportReportPDF(
 export async function previewDocumentPDF(
   doc: Document,
   businessSettings: BusinessSettings | null,
-  options?: { isPro?: boolean },
+  options?: { isPro?: boolean; printWindow?: Window | null },
 ): Promise<void> {
+  const reserved = options?.printWindow ?? reservePrintWindow();
   const html = await generateDocumentPDF(doc, businessSettings, options);
   if (Platform.OS === 'web') {
-    const win = window.open('', '_blank');
-    if (win) {
-      win.document.write(html);
-      win.document.close();
-      win.focus();
-      return;
-    }
-    Alert.alert('Error', 'Please allow popups to preview the PDF.');
+    writeToPrintWindow(reserved, html, 'Preview', false);
     return;
   }
   // iOS: shows the AirPrint-style preview with zoom + share.

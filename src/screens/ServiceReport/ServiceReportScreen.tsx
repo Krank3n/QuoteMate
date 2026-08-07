@@ -49,7 +49,7 @@ import {
   type ComposeAddition,
 } from '../../services/reportComposeService';
 import { trackEvent } from '../../services/analyticsService';
-import { exportReportPDF } from '../../utils/pdfGenerator';
+import { reservePrintWindow, exportReportPDF } from '../../utils/pdfGenerator';
 import { createQuoteFromRecommendedWork } from '../../utils/quoteFromReport';
 import type { QuotePhoto } from '../../types';
 import type { JobPhoto } from '../../../shared/job/types';
@@ -682,11 +682,19 @@ export function ServiceReportScreen() {
       });
       return;
     }
+    // Reserve the tab NOW, while the tap is still a user gesture. persist()
+    // below is async, and after it iOS Safari refuses window.open outright —
+    // which is why this silently did nothing on mobile web.
+    const printWindow = reservePrintWindow();
     setExporting(true);
     try {
       const report = await persist();
-      if (!report) return;
+      if (!report) {
+        printWindow?.close();
+        return;
+      }
       await exportReportPDF(report, businessSettings, 'share', {
+        printWindow,
         customerName: context?.customerName,
         customerEmail: context?.customerEmail,
         customerPhone: context?.customerPhone,
@@ -699,6 +707,7 @@ export function ServiceReportScreen() {
         message: 'You can reopen it anytime under Service reports on this job.',
       });
     } catch (err: any) {
+      printWindow?.close();
       showAlert({
         type: 'error',
         title: 'Could not export',
