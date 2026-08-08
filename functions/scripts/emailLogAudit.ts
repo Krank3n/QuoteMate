@@ -5,6 +5,14 @@
  *
  * Run (ADC; gcloud-authed on hansendev):
  *   cd functions && npx tsx scripts/emailLogAudit.ts
+ *
+ * The raw output contains recipient addresses and customer names in subject
+ * lines. This repo is PUBLIC — never commit it verbatim. To snapshot a run as
+ * a baseline, redact it first (pseudonyms are stable across files, so pass the
+ * existing baselines too and the same person keeps the same handle):
+ *   npx tsx scripts/emailLogAudit.ts > /tmp/audit.txt
+ *   python3 scripts/redactEmailAudit.py /tmp/audit.txt
+ *   cp /tmp/audit.txt.redacted scripts/emailAudit.baseline-YYYY-MM-DD.txt
  */
 import * as admin from 'firebase-admin';
 admin.initializeApp({ projectId: process.env.GOOGLE_CLOUD_PROJECT || 'hansendev' });

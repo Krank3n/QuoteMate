@@ -1,199 +1,256 @@
 
-=== emailLog audit — 3804 rows, 210 types (0 untagged) ===
+=== emailLog audit — 4754 rows, 222 types (0 untagged) ===
 
 welcome
-  total=339 (30d=87)  delivered=286  blocked=0  bounced=16  spam=0  unsub=0
-  open=68 (20%)  click=17 (5%)  span=2026-04-18..2026-07-25
-    192× keen for an 8-min QuoteMate walkthrough?
+  total=417 (30d=137)  delivered=353  blocked=11  bounced=16  spam=0  unsub=0
+  open=93 (23%)  click=22 (5%)  span=2026-04-18..2026-08-07
+    270× keen for an 8-min QuoteMate walkthrough?
     138× Welcome to QuoteMate, [name]!
     3× [business], fancy an 8-min QuoteMate walkthrough?
 
 admin-notification/new-user
-  total=334 (30d=114)  delivered=334  blocked=0  bounced=0  spam=0  unsub=0
-  open=243 (73%)  click=0 (0%)  span=2026-04-18..2026-07-25
+  total=412 (30d=154)  delivered=412  blocked=0  bounced=0  spam=0  unsub=0
+  open=307 (75%)  click=0 (0%)  span=2026-04-18..2026-08-07
     5× New QuoteMate user: tom@hansendev.com.au (Android)
     2× New QuoteMate user: user22@[freemail] (Android)
     2× New QuoteMate user: user24@[test-domain] (Android)
 
 onboarding/tip-1
-  total=270 (30d=80)  delivered=264  blocked=0  bounced=2  spam=0  unsub=0
-  open=42 (16%)  click=6 (2%)  span=2026-04-18..2026-07-24
-    270× Pro tip: Use your voice to create quotes
+  total=339 (30d=116)  delivered=332  blocked=0  bounced=3  spam=0  unsub=0
+  open=52 (15%)  click=7 (2%)  span=2026-04-18..2026-08-07
+    339× Pro tip: Use your voice to create quotes
+
+onboarding/tip-4
+  total=310 (30d=124)  delivered=306  blocked=0  bounced=0  spam=0  unsub=0
+  open=38 (12%)  click=7 (2%)  span=2026-04-18..2026-08-07
+    310× Pro tip: Send your quote to a client in one tap
+
+re-engagement/inactive-7d
+  total=292 (30d=98)  delivered=288  blocked=1  bounced=2  spam=0  unsub=0
+  open=31 (11%)  click=7 (2%)  span=2026-04-19..2026-08-08
+    41× Your next quote is waiting
+    18× [business], your next quote is waiting
+    3× [business], your next quote is waiting
 
 onboarding/tip-2
-  total=268 (30d=81)  delivered=260  blocked=0  bounced=1  spam=0  unsub=0
-  open=28 (10%)  click=7 (3%)  span=2026-04-18..2026-07-24
+  total=268 (30d=52)  delivered=260  blocked=0  bounced=1  spam=0  unsub=0
+  open=29 (11%)  click=7 (3%)  span=2026-04-18..2026-07-24
     268× Pro tip: Real material prices, automatically
 
+quote-to-client
+  total=265 (30d=118)  delivered=240  blocked=0  bounced=7  spam=0  unsub=0
+  open=179 (68%)  click=30 (11%)  span=2026-04-19..2026-08-07
+    7× Quotation from [business] - [job]
+    4× Quotation from [business] - [job]
+    3× Quotation from [business] - [job]
+
 onboarding/tip-3
-  total=259 (30d=80)  delivered=255  blocked=0  bounced=1  spam=0  unsub=0
+  total=259 (30d=56)  delivered=255  blocked=0  bounced=1  spam=0  unsub=0
   open=24 (9%)  click=4 (2%)  span=2026-04-18..2026-07-24
     259× Pro tip: Clients can accept quotes online
 
 onboarding/tip-5
-  total=259 (30d=38)  delivered=183  blocked=0  bounced=2  spam=0  unsub=0
+  total=259 (30d=9)  delivered=183  blocked=0  bounced=2  spam=0  unsub=0
   open=29 (11%)  click=4 (2%)  span=2026-04-19..2026-07-15
     259× You've got the hang of it — here's what Pro unlocks
 
-re-engagement/inactive-7d
-  total=242 (30d=74)  delivered=239  blocked=0  bounced=2  spam=0  unsub=0
-  open=29 (12%)  click=7 (3%)  span=2026-04-19..2026-07-25
-    28× Your next quote is waiting
-    18× [business], your next quote is waiting
-    3× [business], your next quote is waiting
-
-onboarding/tip-4
-  total=231 (30d=72)  delivered=227  blocked=0  bounced=0  spam=0  unsub=0
-  open=26 (11%)  click=6 (3%)  span=2026-04-18..2026-07-24
-    231× Pro tip: Send your quote to a client in one tap
-
-quote-to-client
-  total=199 (30d=77)  delivered=175  blocked=0  bounced=6  spam=0  unsub=0
-  open=132 (66%)  click=21 (11%)  span=2026-04-19..2026-07-25
-    4× Quotation from [business] - [job]
-    3× Quotation from [business] - [job]
-    3× Quotation from [business] - [job]
+quote-sent
+  total=216 (30d=90)  delivered=186  blocked=13  bounced=0  spam=0  unsub=0
+  open=95 (47%)  click=0 (0%)  span=2026-04-19..2026-08-07
+    4× Quote #[id] sent to [customer]
+    4× Quote #[id] sent to [customer]
+    4× Quote #[id] sent to [customer]
 
 quote-follow-up
-  total=157 (30d=36)  delivered=130  blocked=0  bounced=0  spam=0  unsub=0
-  open=19 (12%)  click=5 (3%)  span=2026-04-18..2026-07-24
+  total=187 (30d=54)  delivered=160  blocked=0  bounced=0  spam=0  unsub=0
+  open=24 (13%)  click=5 (3%)  span=2026-04-18..2026-08-08
     126× How'd your first quote go? 🤔
     2× How'd the quote to [customer] go? 🤔
-    2× How'd your first quote go?
-
-quote-sent
-  total=150 (30d=32)  delivered=133  blocked=0  bounced=0  spam=0  unsub=0
-  open=77 (51%)  click=0 (0%)  span=2026-04-19..2026-07-25
-    4× Quote #[id] sent to [customer]
-    3× Quote #[id] sent to [customer]
-    3× Quote #[id] sent to [customer]
+    2× [name], how'd your first quote go?
 
 lead_outreach/campaign:RZeMPylP8l1CdI1d9CXu/auto_send
-  total=116 (30d=28)  delivered=104  blocked=0  bounced=9  spam=0  unsub=0
-  open=37 (32%)  click=10 (9%)  span=2026-05-07..2026-07-13
+  total=151 (30d=62)  delivered=133  blocked=2  bounced=13  spam=0  unsub=0
+  open=47 (32%)  click=10 (7%)  span=2026-05-07..2026-08-03
     1× [personalised subject redacted]
     1× [personalised subject redacted]
     1× [personalised subject redacted]
 
 re-engagement/inactive-29d
-  total=88 (30d=16)  delivered=87  blocked=0  bounced=0  spam=0  unsub=0
-  open=9 (10%)  click=3 (3%)  span=2026-05-08..2026-07-25
-    14× Your next quote is waiting
+  total=109 (30d=30)  delivered=108  blocked=0  bounced=0  spam=0  unsub=0
+  open=13 (12%)  click=3 (3%)  span=2026-05-08..2026-08-08
+    19× Your next quote is waiting
     3× [business], your next quote is waiting
     2× [business], your next quote is waiting
 
+ready-to-send-nudge
+  total=91 (30d=57)  delivered=91  blocked=0  bounced=0  spam=0  unsub=0
+  open=19 (21%)  click=2 (2%)  span=2026-07-03..2026-08-08
+    6× Your quote for [customer] is ready to send
+    3× Your quote for [customer] is ready to send
+    3× Your quote for [customer] is ready to send
+
 quote-test
-  total=70 (30d=3)  delivered=30  blocked=0  bounced=0  spam=0  unsub=0
-  open=18 (26%)  click=1 (1%)  span=2026-04-19..2026-07-18
+  total=73 (30d=6)  delivered=32  blocked=1  bounced=0  spam=0  unsub=0
+  open=20 (28%)  click=1 (1%)  span=2026-04-19..2026-08-07
     13× [TEST] Quotation from [business] - [job]
     5× [TEST] Quotation from [business] - [job]
     4× [TEST] Quotation from [business] - [job]
 
-ready-to-send-nudge
-  total=57 (30d=57)  delivered=57  blocked=0  bounced=0  spam=0  unsub=0
-  open=14 (25%)  click=2 (4%)  span=2026-07-03..2026-07-23
-    3× Your quote for [customer] is ready to send
-    3× Your quote for [customer] is ready to send
-    2× Your quote for [customer] is ready to send
+trial-lifecycle/trial-start-value
+  total=65 (30d=65)  delivered=65  blocked=0  bounced=0  spam=0  unsub=0
+  open=11 (17%)  click=2 (3%)  span=2026-07-16..2026-08-07
+    65× Your 14 days of Pro start now
+
+trial-lifecycle/trial-square-pitch
+  total=62 (30d=62)  delivered=62  blocked=0  bounced=0  spam=0  unsub=0
+  open=5 (8%)  click=0 (0%)  span=2026-07-16..2026-08-07
+    62× Want to get paid the second the job's done?
 
 product-update/v1.0.61
   total=55 (30d=0)  delivered=0  blocked=0  bounced=0  spam=0  unsub=0
   open=0 (0%)  click=0 (0%)  span=—..—
     55× What's new in QuoteMate — Invoicing, Payment Tracking & More
 
-re-engagement/inactive-51d
-  total=42 (30d=17)  delivered=42  blocked=0  bounced=0  spam=0  unsub=0
-  open=2 (5%)  click=1 (2%)  span=2026-05-30..2026-07-24
-    6× Your next quote is waiting
-    1× [business], your next quote is waiting
-    1× [business], your next quote is waiting
+trial-lifecycle/trial-ended
+  total=48 (30d=48)  delivered=48  blocked=0  bounced=0  spam=0  unsub=0
+  open=5 (10%)  click=0 (0%)  span=2026-07-16..2026-08-07
+    33× Your trial's wrapped up — quick question
+    15× You're on the free plan now — one question
 
 re-engagement/inactive-28d
-  total=38 (30d=21)  delivered=38  blocked=0  bounced=0  spam=0  unsub=0
-  open=6 (16%)  click=1 (3%)  span=2026-05-15..2026-07-20
-    7× Your next quote is waiting
+  total=46 (30d=14)  delivered=46  blocked=0  bounced=0  spam=0  unsub=0
+  open=6 (13%)  click=1 (2%)  span=2026-05-15..2026-08-08
+    10× Your next quote is waiting
     2× [business], your next quote is waiting
     1× [business], your next quote is waiting
 
+re-engagement/inactive-51d
+  total=45 (30d=10)  delivered=45  blocked=0  bounced=0  spam=0  unsub=0
+  open=4 (9%)  click=1 (2%)  span=2026-05-30..2026-08-07
+    8× Your next quote is waiting
+    1× [business], your next quote is waiting
+    1× [business], your next quote is waiting
+
 re-engagement/inactive-50d
-  total=34 (30d=21)  delivered=33  blocked=0  bounced=0  spam=0  unsub=0
-  open=3 (9%)  click=0 (0%)  span=2026-05-08..2026-07-24
-    6× Your next quote is waiting
+  total=42 (30d=18)  delivered=41  blocked=0  bounced=0  spam=0  unsub=0
+  open=6 (14%)  click=0 (0%)  span=2026-05-08..2026-08-07
+    10× Your next quote is waiting
     1× [business], your next quote is waiting
     1× [business], your next quote is waiting
 
-trial-lifecycle/trial-start-value
-  total=25 (30d=25)  delivered=25  blocked=0  bounced=0  spam=0  unsub=0
-  open=4 (16%)  click=0 (0%)  span=2026-07-16..2026-07-24
-    25× Your 14 days of Pro start now
+trial-lifecycle/trial-mid-value
+  total=42 (30d=42)  delivered=42  blocked=0  bounced=0  spam=0  unsub=0
+  open=3 (7%)  click=0 (0%)  span=2026-07-16..2026-08-03
+    34× One week in — 7 days of Pro to go
+    1× You've quoted $3,091 in your first week
+    1× You've quoted $5,733 in your first week
 
-trial-lifecycle/trial-square-pitch
-  total=24 (30d=24)  delivered=24  blocked=0  bounced=0  spam=0  unsub=0
-  open=3 (13%)  click=0 (0%)  span=2026-07-16..2026-07-22
-    24× Want to get paid the second the job's done?
+invoice-test
+  total=23 (30d=2)  delivered=18  blocked=1  bounced=0  spam=0  unsub=0
+  open=17 (77%)  click=0 (0%)  span=2026-04-25..2026-07-26
+    5× [TEST] Invoice from [business] - [job]
+    5× [TEST] Rescue Round - MVP Proposal & Next Steps
+    3× [TEST] Invoice from [business] - [job]
 
 quote-accepted
-  total=23 (30d=9)  delivered=21  blocked=0  bounced=0  spam=0  unsub=0
+  total=23 (30d=3)  delivered=21  blocked=0  bounced=0  spam=0  unsub=0
   open=10 (43%)  click=6 (26%)  span=2026-04-21..2026-07-21
     1× Quote #[id] accepted by [customer]
     1× Quote #[id] accepted by [customer]
     1× Quote #[id] accepted by [customer]
 
-invoice-test
-  total=22 (30d=2)  delivered=18  blocked=0  bounced=0  spam=0  unsub=0
-  open=17 (77%)  click=0 (0%)  span=2026-04-25..2026-07-20
-    5× [TEST] Invoice from [business] - [job]
-    5× [TEST] Rescue Round - MVP Proposal & Next Steps
-    3× [TEST] Invoice from [business] - [job]
-
-trial-lifecycle/trial-mid-value
-  total=22 (30d=22)  delivered=22  blocked=0  bounced=0  spam=0  unsub=0
-  open=1 (5%)  click=0 (0%)  span=2026-07-16..2026-07-24
-    19× One week in — 7 days of Pro to go
-    1× You've quoted $3,091 in your first week
-    1× You've quoted $17,302 in your first week
-
 invoice-to-client
-  total=21 (30d=12)  delivered=18  blocked=0  bounced=3  spam=0  unsub=0
-  open=15 (71%)  click=1 (5%)  span=2026-05-22..2026-07-24
+  total=23 (30d=12)  delivered=20  blocked=0  bounced=3  spam=0  unsub=0
+  open=16 (70%)  click=2 (9%)  span=2026-05-22..2026-08-02
     3× Invoice from [business] - [job]
     2× Invoice from [business] - [job]
     2× Invoice from [business] - [job]
 
+trial-lifecycle/trial-ending
+  total=22 (30d=22)  delivered=22  blocked=0  bounced=0  spam=0  unsub=0
+  open=2 (9%)  click=0 (0%)  span=2026-07-16..2026-08-07
+    14× Your trial ends in 3 days — and 98 founding spots to go
+    7× Your Pro access ends in 3 days
+    1× Your trial ends tomorrow — here's exactly what changes
+
+lead_outreach/campaign:jNPUxH4MP4ZqN1DwfZMi/auto_send
+  total=21 (30d=21)  delivered=20  blocked=1  bounced=0  spam=0  unsub=0
+  open=4 (20%)  click=1 (5%)  span=2026-08-06..2026-08-07
+    1× [personalised subject redacted]
+    1× [personalised subject redacted]
+    1× [personalised subject redacted]
+
+onboarding/activation-note
+  total=21 (30d=21)  delivered=19  blocked=2  bounced=0  spam=0  unsub=0
+  open=3 (16%)  click=0 (0%)  span=2026-07-16..2026-08-07
+    21× Your first quote's the hard part — let's knock it over
+
+trial-lifecycle/trial-ending-nudge
+  total=20 (30d=20)  delivered=20  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=0 (0%)  span=2026-07-25..2026-08-03
+    20× Your quote never went out — what got in the way?
+
+lead_outreach/campaign:EMO9B1qAH7JesMHXYt6Q/auto_send
+  total=20 (30d=20)  delivered=19  blocked=0  bounced=1  spam=0  unsub=0
+  open=7 (35%)  click=1 (5%)  span=2026-08-03..2026-08-05
+    1× [personalised subject redacted]
+    1× [personalised subject redacted]
+    1× [personalised subject redacted]
+
+lead_outreach/campaign:M7dPrBoKgU45fScESUZ5/auto_send
+  total=20 (30d=20)  delivered=15  blocked=1  bounced=4  spam=0  unsub=0
+  open=4 (21%)  click=0 (0%)  span=2026-08-07..2026-08-07
+    1× [personalised subject redacted]
+    1× [personalised subject redacted]
+    1× [personalised subject redacted]
+
 quick-feedback-admin
-  total=18 (30d=3)  delivered=18  blocked=0  bounced=0  spam=0  unsub=0
+  total=18 (30d=1)  delivered=18  blocked=0  bounced=0  spam=0  unsub=0
   open=17 (94%)  click=0 (0%)  span=2026-04-21..2026-07-10
     4× Quick feedback: "great" from user20@[business-domain]
     3× Quick feedback: "okay" from user20@[business-domain]
     3× Quick feedback: "bad" from user20@[business-domain]
 
+lead_outreach/campaign:feHe2JWlCcOEXBCX3i51/auto_send
+  total=17 (30d=17)  delivered=16  blocked=1  bounced=0  spam=0  unsub=0
+  open=8 (50%)  click=2 (13%)  span=2026-08-05..2026-08-05
+    1× [personalised subject redacted]
+    1× [personalised subject redacted]
+    1× [personalised subject redacted]
+
 re-engagement/inactive-72d
-  total=16 (30d=13)  delivered=15  blocked=0  bounced=0  spam=0  unsub=0
+  total=16 (30d=6)  delivered=15  blocked=0  bounced=0  spam=0  unsub=0
   open=1 (6%)  click=1 (6%)  span=2026-05-30..2026-07-22
     1× [business], your next quote is waiting
     1× [business], your next quote is waiting
     1× [business], your next quote is waiting
 
-trial-lifecycle/trial-ending
+square-nudge/no-paylink
   total=15 (30d=15)  delivered=15  blocked=0  bounced=0  spam=0  unsub=0
-  open=1 (7%)  click=0 (0%)  span=2026-07-16..2026-07-24
-    14× Your trial ends in 3 days — and 98 founding spots to go
-    1× Your trial ends tomorrow — here's exactly what changes
+  open=1 (7%)  click=1 (7%)  span=2026-07-16..2026-08-07
+    15× Get paid the day the job’s done — your quotes are ready
 
-trial-lifecycle/trial-ended
-  total=15 (30d=15)  delivered=15  blocked=0  bounced=0  spam=0  unsub=0
-  open=0 (0%)  click=0 (0%)  span=2026-07-16..2026-07-24
-    15× You're on the free plan now — one question
+lead_outreach/campaign:O6RNfoL7hBvdoRkPX7hG/auto_send
+  total=15 (30d=15)  delivered=14  blocked=0  bounced=1  spam=0  unsub=0
+  open=5 (33%)  click=2 (13%)  span=2026-08-05..2026-08-06
+    1× [personalised subject redacted]
+    1× [personalised subject redacted]
+    1× [personalised subject redacted]
+
+callkatie/demo-recovery
+  total=15 (30d=15)  delivered=5  blocked=10  bounced=0  spam=0  unsub=0
+  open=2 (40%)  click=0 (0%)  span=2026-07-13..2026-08-08
+    15× [personalised subject redacted]
 
 lead_weekly_report
-  total=12 (30d=4)  delivered=12  blocked=0  bounced=0  spam=0  unsub=0
-  open=10 (83%)  click=0 (0%)  span=2026-05-03..2026-07-19
+  total=14 (30d=4)  delivered=14  blocked=0  bounced=0  spam=0  unsub=0
+  open=11 (79%)  click=0 (0%)  span=2026-05-03..2026-08-02
+    1× Lead Outreach: 0 sent, 0.0% reply rate · week of 19/07/2026
     1× Lead Outreach: 70 sent, 0.0% reply rate · week of 17/05/2026
     1× Lead Outreach: 1 sent, 0.0% reply rate · week of 24/05/2026
-    1× Lead Outreach: 0 sent, 0.0% reply rate · week of 21/06/2026
 
 admin-notification/material-list-error
-  total=11 (30d=1)  delivered=11  blocked=0  bounced=0  spam=0  unsub=0
+  total=11 (30d=0)  delivered=11  blocked=0  bounced=0  spam=0  unsub=0
   open=6 (55%)  click=0 (0%)  span=2026-04-21..2026-07-07
     6× Material list generation failed for thomas.andrew.hansen@gmail.com
     5× Material list generation failed for user17@[freemail]
@@ -205,36 +262,38 @@ lead_outreach/campaign:N4km9x2aOP3yIwegQTnL/auto_send
     1× [personalised subject redacted]
     1× [personalised subject redacted]
 
+quote-accepted/square-hook
+  total=9 (30d=9)  delivered=9  blocked=0  bounced=0  spam=0  unsub=0
+  open=2 (22%)  click=0 (0%)  span=2026-07-26..2026-08-07
+    1× Quote #[id] accepted by [customer]
+    1× Quote #[id] accepted by [customer]
+    1× Quote #[id] accepted by [customer]
+
 quote-customer-reminder/followup:1
-  total=8 (30d=1)  delivered=8  blocked=0  bounced=0  spam=0  unsub=0
-  open=5 (63%)  click=1 (13%)  span=2026-06-14..2026-06-29
+  total=9 (30d=1)  delivered=9  blocked=0  bounced=0  spam=0  unsub=0
+  open=5 (56%)  click=1 (11%)  span=2026-06-14..2026-08-07
     1× Reminder: your quote from [business] for [job]
     1× Reminder: your quote from [business] for [job]
     1× Reminder: your quote from [business] for [job]
 
-square-nudge/no-paylink
-  total=8 (30d=8)  delivered=8  blocked=0  bounced=0  spam=0  unsub=0
-  open=1 (13%)  click=1 (13%)  span=2026-07-16..2026-07-16
-    8× Get paid the day the job’s done — your quotes are ready
+admin-notification/new-pro-subscription
+  total=8 (30d=2)  delivered=8  blocked=0  bounced=0  spam=0  unsub=0
+  open=8 (100%)  click=0 (0%)  span=2026-05-01..2026-08-04
+    2× 💰 New Pro subscriber: [email] (Monthly ($29/mo) — iOS (App Store))
+    2× 💰 New Pro subscriber: [email] (Yearly ($328/yr) — iOS (App St
+    1× 💰 New Pro subscriber: [email] (Yearly ($199/yr) — Android (
 
-onboarding/activation-note
-  total=8 (30d=8)  delivered=8  blocked=0  bounced=0  spam=0  unsub=0
-  open=1 (13%)  click=0 (0%)  span=2026-07-16..2026-07-24
-    8× Your first quote's the hard part — let's knock it over
+square-nudge/connected-idle
+  total=7 (30d=7)  delivered=7  blocked=0  bounced=0  spam=0  unsub=0
+  open=0 (0%)  click=1 (14%)  span=2026-07-16..2026-08-07
+    7× Your Pay Now button's ready — put it to work
 
 re-engagement/inactive-73d
-  total=7 (30d=4)  delivered=7  blocked=0  bounced=0  spam=0  unsub=0
+  total=7 (30d=2)  delivered=7  blocked=0  bounced=0  spam=0  unsub=0
   open=0 (0%)  click=0 (0%)  span=2026-05-08..2026-07-24
     1× Your next quote is waiting
     1× [business], your next quote is waiting
     1× [business], your next quote is waiting
-
-admin-notification/new-pro-subscription
-  total=6 (30d=2)  delivered=6  blocked=0  bounced=0  spam=0  unsub=0
-  open=6 (100%)  click=0 (0%)  span=2026-05-01..2026-07-08
-    2× 💰 New Pro subscriber: [email] (Monthly ($29/mo) — iOS (App Store))
-    2× 💰 New Pro subscriber: [email] (Yearly ($328/yr) — iOS (App St
-    1× 💰 New Pro subscriber: [email] (Yearly ($199/yr) — Android (
 
 re-engagement/inactive-11d
   total=6 (30d=1)  delivered=3  blocked=0  bounced=0  spam=0  unsub=0
@@ -265,14 +324,14 @@ re-engagement/inactive-16d
     1× [business], your next quote is waiting
 
 re-engagement/inactive-49d
-  total=5 (30d=4)  delivered=5  blocked=0  bounced=0  spam=0  unsub=0
+  total=5 (30d=2)  delivered=5  blocked=0  bounced=0  spam=0  unsub=0
   open=0 (0%)  click=0 (0%)  span=2026-05-08..2026-07-16
     1× [business], your next quote is waiting
     1× [business], your next quote is waiting
     1× Your next quote is waiting
 
 lead-interest/callkatie
-  total=5 (30d=2)  delivered=5  blocked=0  bounced=0  spam=0  unsub=0
+  total=5 (30d=0)  delivered=5  blocked=0  bounced=0  spam=0  unsub=0
   open=5 (100%)  click=0 (0%)  span=2026-06-02..2026-06-28
     2× New Katie lead: [business]
     1× New Katie lead: [business]
@@ -298,7 +357,7 @@ re-engagement/inactive-191d
     1× [business], your next quote is waiting
 
 quote-declined
-  total=5 (30d=1)  delivered=5  blocked=0  bounced=0  spam=0  unsub=0
+  total=5 (30d=0)  delivered=5  blocked=0  bounced=0  spam=0  unsub=0
   open=0 (0%)  click=0 (0%)  span=2026-04-19..2026-07-01
     1× Quote #[id] declined by [customer]
     1× Quote #[id] declined by [customer]
@@ -311,10 +370,25 @@ lead_outreach/campaign:CcLFvhHx7zuslprVUVzu/auto_send
     1× [personalised subject redacted]
     1× [personalised subject redacted]
 
-square-nudge/connected-idle
+service-report-to-client
   total=4 (30d=4)  delivered=4  blocked=0  bounced=0  spam=0  unsub=0
-  open=0 (0%)  click=0 (0%)  span=2026-07-16..2026-07-16
-    4× Your Pay Now button's ready — put it to work
+  open=2 (50%)  click=0 (0%)  span=2026-07-22..2026-08-07
+    2× Service report from [business] - [job]
+    2× Service report from [business] - [job]
+
+lead_outreach/campaign:sQp1U8Hv1RpFgcNNi8cN/auto_send
+  total=4 (30d=4)  delivered=3  blocked=0  bounced=1  spam=0  unsub=0
+  open=1 (25%)  click=0 (0%)  span=2026-08-07..2026-08-07
+    1× [personalised subject redacted]
+    1× [personalised subject redacted]
+    1× [personalised subject redacted]
+
+analytics_digest
+  total=4 (30d=4)  delivered=4  blocked=0  bounced=0  spam=0  unsub=0
+  open=4 (100%)  click=0 (0%)  span=2026-07-14..2026-08-02
+    1× QuoteMate weekly digest — 2026-08-02
+    1× QuoteMate weekly digest — 2026-07-14
+    1× QuoteMate weekly digest — 2026-07-26
 
 re-engagement/inactive-175d
   total=4 (30d=0)  delivered=2  blocked=0  bounced=0  spam=0  unsub=0
@@ -323,15 +397,20 @@ re-engagement/inactive-175d
     1× [business], your next quote is waiting
     1× [business], your next quote is waiting
 
+password-reset
+  total=4 (30d=4)  delivered=4  blocked=0  bounced=0  spam=0  unsub=0
+  open=4 (100%)  click=3 (75%)  span=2026-07-29..2026-07-29
+    4× Set a new QuoteMate password
+
 re-engagement/inactive-14d
-  total=4 (30d=1)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  total=4 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
   open=0 (0%)  click=0 (0%)  span=2026-07-02..2026-07-02
     1× [business], your next quote is waiting
     1× [business], your next quote is waiting
     1× [business], your next quote is waiting
 
 re-engagement/inactive-71d
-  total=4 (30d=2)  delivered=4  blocked=0  bounced=0  spam=0  unsub=0
+  total=4 (30d=1)  delivered=4  blocked=0  bounced=0  spam=0  unsub=0
   open=0 (0%)  click=0 (0%)  span=2026-05-08..2026-07-16
     1× [business], your next quote is waiting
     1× [business], your next quote is waiting
@@ -422,7 +501,7 @@ re-engagement/inactive-13d
     1× [business], your next quote is waiting
 
 re-engagement/inactive-37d
-  total=3 (30d=1)  delivered=3  blocked=0  bounced=0  spam=0  unsub=0
+  total=3 (30d=0)  delivered=3  blocked=0  bounced=0  spam=0  unsub=0
   open=1 (33%)  click=0 (0%)  span=2026-05-08..2026-07-09
     1× [business], your next quote is waiting
     1× [business], your next quote is waiting
@@ -450,7 +529,7 @@ re-engagement/inactive-135d
     1× [business], your next quote is waiting
 
 re-engagement/inactive-55d
-  total=3 (30d=1)  delivered=2  blocked=0  bounced=0  spam=0  unsub=0
+  total=3 (30d=0)  delivered=2  blocked=0  bounced=0  spam=0  unsub=0
   open=0 (0%)  click=0 (0%)  span=2026-05-08..2026-07-08
     1× [business], your next quote is waiting
     1× [business], your next quote is waiting
@@ -459,6 +538,20 @@ re-engagement/inactive-55d
 re-engagement/inactive-69d
   total=3 (30d=0)  delivered=3  blocked=0  bounced=0  spam=0  unsub=0
   open=0 (0%)  click=0 (0%)  span=2026-05-08..2026-05-30
+    1× [business], your next quote is waiting
+    1× [business], your next quote is waiting
+    1× [business], your next quote is waiting
+
+payment-receipt
+  total=3 (30d=2)  delivered=3  blocked=0  bounced=0  spam=0  unsub=0
+  open=1 (33%)  click=0 (0%)  span=2026-07-02..2026-08-03
+    1× Receipt from [business] — Invoice [id]
+    1× Receipt from [business] — Invoice [id]
+    1× Receipt from [business] — Invoice [id]
+
+re-engagement/inactive-32d
+  total=3 (30d=1)  delivered=2  blocked=1  bounced=0  spam=0  unsub=0
+  open=1 (50%)  click=0 (0%)  span=2026-05-08..2026-08-05
     1× [business], your next quote is waiting
     1× [business], your next quote is waiting
     1× [business], your next quote is waiting
@@ -498,11 +591,6 @@ re-engagement/inactive-83d
   open=0 (0%)  click=0 (0%)  span=—..—
     1× [business], your next quote is waiting
     1× [business], your next quote is waiting
-
-service-report-to-client
-  total=2 (30d=2)  delivered=2  blocked=0  bounced=0  spam=0  unsub=0
-  open=2 (100%)  click=0 (0%)  span=2026-07-22..2026-07-22
-    2× Service report from [business] - [job]
 
 re-engagement/inactive-87d
   total=2 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
@@ -594,16 +682,16 @@ re-engagement/inactive-39d
     1× [business], your next quote is waiting
     1× [business], your next quote is waiting
 
+password-reset/social-signin-reminder
+  total=2 (30d=2)  delivered=2  blocked=0  bounced=0  spam=0  unsub=0
+  open=2 (100%)  click=1 (50%)  span=2026-07-29..2026-08-03
+    2× Sign in with Google — no password needed
+
 re-engagement/inactive-111d
   total=2 (30d=1)  delivered=2  blocked=0  bounced=0  spam=0  unsub=0
   open=0 (0%)  click=0 (0%)  span=2026-05-30..2026-07-13
     1× [business], your next quote is waiting
     1× [business], your next quote is waiting
-
-callkatie/demo-recovery
-  total=2 (30d=2)  delivered=2  blocked=0  bounced=0  spam=0  unsub=0
-  open=1 (50%)  click=0 (0%)  span=2026-07-13..2026-07-22
-    2× [personalised subject redacted]
 
 re-engagement/inactive-12d
   total=2 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
@@ -634,12 +722,6 @@ re-engagement/inactive-137d
   open=0 (0%)  click=0 (0%)  span=2026-05-08..2026-05-08
     1× [business], your next quote is waiting
     1× [business], your next quote is waiting
-
-analytics_digest
-  total=2 (30d=2)  delivered=2  blocked=0  bounced=0  spam=0  unsub=0
-  open=2 (100%)  click=0 (0%)  span=2026-07-14..2026-07-19
-    1× QuoteMate weekly digest — 2026-07-14
-    1× QuoteMate weekly digest — 2026-07-19
 
 re-engagement/inactive-8d
   total=2 (30d=1)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
@@ -714,7 +796,7 @@ re-engagement/inactive-54d
     1× [business], your next quote is waiting
 
 re-engagement/inactive-9d
-  total=2 (30d=2)  delivered=2  blocked=0  bounced=0  spam=0  unsub=0
+  total=2 (30d=1)  delivered=2  blocked=0  bounced=0  spam=0  unsub=0
   open=0 (0%)  click=0 (0%)  span=2026-07-02..2026-07-19
     1× [business], your next quote is waiting
     1× [business], your next quote is waiting
@@ -734,12 +816,6 @@ re-engagement/inactive-19d
 re-engagement/inactive-173d
   total=2 (30d=1)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
   open=0 (0%)  click=0 (0%)  span=2026-07-13..2026-07-13
-    1× [business], your next quote is waiting
-    1× [business], your next quote is waiting
-
-re-engagement/inactive-32d
-  total=2 (30d=0)  delivered=2  blocked=0  bounced=0  spam=0  unsub=0
-  open=1 (50%)  click=0 (0%)  span=2026-05-08..2026-06-16
     1× [business], your next quote is waiting
     1× [business], your next quote is waiting
 
@@ -784,12 +860,6 @@ re-engagement/inactive-262d
   open=0 (0%)  click=0 (0%)  span=2026-07-13..2026-07-13
     1× [business], your next quote is waiting
     1× Your next quote is waiting
-
-payment-receipt
-  total=2 (30d=2)  delivered=2  blocked=0  bounced=0  spam=0  unsub=0
-  open=1 (50%)  click=0 (0%)  span=2026-07-02..2026-07-23
-    1× Receipt from [business] — Invoice [id]
-    1× Receipt from [business] — Invoice [id]
 
 admin_manual
   total=2 (30d=0)  delivered=2  blocked=0  bounced=0  spam=0  unsub=0
@@ -866,7 +936,7 @@ website_contact/submission:pXRI9DtxP2iDPLPpDZik
 
 re-engagement/inactive-166d
   total=1 (30d=1)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
-  open=0 (0%)  click=0 (0%)  span=2026-07-13..2026-07-13
+  open=1 (100%)  click=0 (0%)  span=2026-07-13..2026-07-13
     1× [business], your next quote is waiting
 
 re-engagement/inactive-226d
@@ -960,7 +1030,7 @@ re-engagement/inactive-198d
     1× [business], your next quote is waiting
 
 feedback/other-feedback
-  total=1 (30d=1)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  total=1 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
   open=1 (100%)  click=0 (0%)  span=2026-06-25..2026-06-25
     1× QuoteMate Feedback: Other feedback
 
@@ -1013,6 +1083,11 @@ re-engagement/inactive-107d
   total=1 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
   open=0 (0%)  click=0 (0%)  span=2026-05-08..2026-05-08
     1× [business], your next quote is waiting
+
+service-report-test
+  total=1 (30d=1)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=1 (100%)  click=0 (0%)  span=2026-08-07..2026-08-07
+    1× [TEST] Service report [id] — [customer]
 
 re-engagement/inactive-114d
   total=1 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
@@ -1124,6 +1199,11 @@ re-engagement/inactive-147d
   open=0 (0%)  click=0 (0%)  span=2026-06-21..2026-06-21
     1× [business], your next quote is waiting
 
+quote-accepted/square-ready
+  total=1 (30d=1)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  open=1 (100%)  click=1 (100%)  span=2026-08-02..2026-08-02
+    1× Quote #[id] accepted by [customer]
+
 re-engagement/inactive-23d
   total=1 (30d=0)  delivered=0  blocked=0  bounced=0  spam=0  unsub=0
   open=0 (0%)  click=0 (0%)  span=—..—
@@ -1210,7 +1290,7 @@ re-engagement/inactive-124d
     1× [business], your next quote is waiting
 
 re-engagement/inactive-42d
-  total=1 (30d=1)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
+  total=1 (30d=0)  delivered=1  blocked=0  bounced=0  spam=0  unsub=0
   open=0 (0%)  click=0 (0%)  span=2026-07-02..2026-07-02
     1× [business], your next quote is waiting
 
@@ -1220,8 +1300,6 @@ re-engagement/inactive-123d
     1× [business], your next quote is waiting
 
 === weekly volume (last 12 weeks) ===
-  2026-05-04: 288
-  2026-05-11: 246
   2026-05-18: 270
   2026-05-25: 256
   2026-06-01: 188
@@ -1231,21 +1309,23 @@ re-engagement/inactive-123d
   2026-06-29: 206
   2026-07-06: 228
   2026-07-13: 392
-  2026-07-20: 237
+  2026-07-20: 336
+  2026-07-27: 422
+  2026-08-03: 429
 
 === heaviest recipients (top 15) ===
-  283× tom@hansendev.com.au
-  226× thomas.andrew.hansen@gmail.com
-  143× user01@[business-domain]
-  45× user06@[freemail]
-  42× user03@[freemail]
-  20× user13@[freemail]
+  367× tom@hansendev.com.au
+  232× thomas.andrew.hansen@gmail.com
+  145× user01@[business-domain]
+  51× user04@[freemail]
+  46× user06@[freemail]
+  44× user03@[freemail]
+  32× user19@[freemail]
+  31× user10@[business-domain]
+  23× user23@[business-domain]
+  22× user13@[freemail]
+  22× user18@[apple-relay]
   20× user09@[freemail]
   18× user05@[freemail]
+  17× user11@[freemail]
   17× user08@[freemail]
-  15× user02@[freemail]
-  14× user16@[freemail]
-  14× user07@[freemail]
-  14× user21@[freemail]
-  14× user12@[freemail]
-  13× user15@[business-domain]
