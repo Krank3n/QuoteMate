@@ -29,7 +29,7 @@ import { exportDocumentPDF } from '../utils/pdfGenerator';
 import { canUseServiceReports } from '../utils/reportEntitlement';
 import { reportService } from '../services/reportService';
 import { resumableReportId, reportRowMeta } from './ServiceReport/reportDraft';
-import { ServiceReportRow } from '../components/ServiceReportRow';
+import { ServiceReportCard } from '../components/ServiceReportCard';
 import type { ServiceReport } from '../../shared/report/types';
 import { StageSheet } from '../components/StageSheet';
 import { JobStageSheet, stageMetaFor } from '../components/JobStageSheet';
@@ -229,14 +229,21 @@ export function ViewJobScreen() {
           special case with its own typography. */}
       <Text style={styles.secondaryDocsLabel}>Service reports</Text>
       {jobReports.map((report) => (
-        <ServiceReportRow
+        <ServiceReportCard
           key={report.id}
+          report={report}
           meta={reportRowMeta(report)}
-          onPress={() =>
+          businessSettings={businessSettings}
+          isPro={isPro}
+          customerName={job.customerName}
+          onOpen={() =>
             navigation.navigate('ServiceReport', {
               jobId: job.id,
               reportId: report.id,
             })
+          }
+          onPreviewError={(message) =>
+            showAlert({ type: 'error', title: 'Preview failed', message })
           }
         />
       ))}

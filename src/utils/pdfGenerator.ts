@@ -650,6 +650,33 @@ export async function generateReportPDF(
  * handling (web print window / mobile expo-print + share-or-email sheet)
  * with report-appropriate filename and copy.
  */
+/**
+ * Open a service report PDF to look at — no export, no share, no print
+ * dialog. The counterpart to previewDocumentPDF, which quotes and invoices
+ * have had all along: the job screen could show a report existed but gave no
+ * way to see what it actually says without opening the editor.
+ */
+export async function previewReportPDF(
+  report: ServiceReport,
+  businessSettings: BusinessSettings | null,
+  options?: ReportPdfOptions,
+): Promise<void> {
+  const reserved = options?.printWindow ?? reservePrintWindow();
+  try {
+    const html = await generateReportPDF(report, businessSettings, options);
+    if (Platform.OS === 'web') {
+      writeToPrintWindow(reserved, html, 'Service report', false);
+      return;
+    }
+    // iOS shows the AirPrint-style preview with zoom + share; Android's print
+    // bridge is the closest equivalent.
+    await Print.printAsync({ html });
+  } catch (error) {
+    reserved?.close();
+    throw error;
+  }
+}
+
 export async function exportReportPDF(
   report: ServiceReport,
   businessSettings: BusinessSettings | null,
