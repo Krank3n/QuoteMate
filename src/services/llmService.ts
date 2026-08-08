@@ -673,6 +673,69 @@ Guidelines:
 Return ONLY the email body text, no JSON wrapping or quotes.`;
 }
 
+/**
+ * Written email body for a service report, matching what quotes and invoices
+ * already get. Reports were the odd one out: the send flow handed the tradie
+ * an empty note box, so a report either went out bare or the tradie wrote the
+ * covering note themselves on a phone, on site.
+ *
+ * Grounded strictly in what they recorded on the visit — a report is a record
+ * of work done, and a covering note that embellishes it is worse than none.
+ */
+export async function generateReportEmail(params: {
+  businessName: string;
+  customerName: string;
+  serviceType: string;
+  workCarriedOut?: string;
+  recommendedWork?: string;
+  natureOfProblem?: string;
+}): Promise<string> {
+  const { businessName, customerName, serviceType } = params;
+  try {
+    return await generateEmailViaFirebaseFunction(createReportEmailPrompt(params));
+  } catch {
+    return getDefaultReportEmailBody(customerName, serviceType, businessName);
+  }
+}
+
+function createReportEmailPrompt(params: {
+  businessName: string;
+  customerName: string;
+  serviceType: string;
+  workCarriedOut?: string;
+  recommendedWork?: string;
+  natureOfProblem?: string;
+}): string {
+  const { businessName, customerName, serviceType, workCarriedOut, recommendedWork, natureOfProblem } = params;
+  return `You are writing a short email body for an Australian tradie sending a completed service report to their client. Write ONLY the email body text (no subject line, no greeting, no sign-off - those are added separately).
+
+Service: ${serviceType}
+Business: ${businessName}
+Client: ${customerName}
+${natureOfProblem ? `Reported problem: ${natureOfProblem}` : ''}
+${workCarriedOut ? `Work carried out: ${workCarriedOut}` : ''}
+${recommendedWork ? `Recommended follow-up: ${recommendedWork}` : ''}
+
+Guidelines:
+- 1-2 short paragraphs. The full detail is in the attached report, so summarise, don't repeat it
+- Plain Australian English, professional but not stiff
+- Be strictly factual — describe only work recorded above. Never state that something was tested, cleared or found safe unless it says so
+- If there is recommended follow-up, mention that it's noted in the report; do NOT quote a price or promise a timeframe
+- Do NOT include greetings or sign-offs (the template adds them)
+- Under 100 words
+
+Return ONLY the email body text, no JSON wrapping or quotes.`;
+}
+
+/** Plain template used when generation is unavailable. */
+export function getDefaultReportEmailBody(
+  customerName: string,
+  serviceType: string,
+  businessName: string,
+): string {
+  return `Please find attached the service report from our recent visit${serviceType ? ` for ${serviceType.toLowerCase()}` : ''}.\n\nIt covers what was checked and the work carried out on the day, along with anything we've recommended following up. If you have any questions about it, get in touch.`;
+}
+
 async function generateEmailViaFirebaseFunction(prompt: string): Promise<string> {
   const idToken = await auth.currentUser?.getIdToken();
   const response = await fetch(`${FIREBASE_FUNCTIONS_URL}/generateQuoteEmail`, {

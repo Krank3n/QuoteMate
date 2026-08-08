@@ -50,6 +50,11 @@ export interface SendServiceReportEmailInput {
   subject?: string;
   /** Attach the report photos as inline images in the PDF/email when true. */
   includePhotos?: boolean;
+  /**
+   * BCC the tradie so they keep the exact email the customer received. Same
+   * "Email me a copy" affordance quote and invoice sends already offer.
+   */
+  sendCopyToSelf?: boolean;
 }
 
 export interface SendServiceReportEmailResult {
@@ -259,6 +264,9 @@ export async function sendServiceReportEmail(
 
   const sent = await sendEmail({
     to: recipientEmail,
+    // replyEmail is already resolved to the business email, falling back to
+    // the account email — the same address the copy should land in.
+    ...(input.sendCopyToSelf && replyEmail ? { bcc: [{ email: replyEmail, name: tradieDisplayName }] } : {}),
     subject: baseSubject,
     htmlContent,
     category: 'transactional',
@@ -301,7 +309,8 @@ export const sendServiceReport = functions
       if (!decoded) return;
       const userId = decoded.uid;
 
-      const { reportId, recipientEmail, emailBody, subject, includePhotos } = req.body || {};
+      const { reportId, recipientEmail, emailBody, subject, includePhotos, sendCopyToSelf } =
+        req.body || {};
       if (!reportId || typeof reportId !== 'string') {
         res.status(400).json({ error: 'reportId required.' });
         return;
@@ -325,6 +334,7 @@ export const sendServiceReport = functions
           emailBody: typeof emailBody === 'string' ? emailBody : undefined,
           subject: typeof subject === 'string' ? subject : undefined,
           includePhotos: includePhotos !== false,
+          sendCopyToSelf: sendCopyToSelf === true,
         });
         if (!result.success) {
           res.status(502).json({ error: 'Report email could not be sent.' });

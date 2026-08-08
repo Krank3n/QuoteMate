@@ -51,6 +51,7 @@ import {
 import { trackEvent } from '../../services/analyticsService';
 import { reservePrintWindow, exportReportPDF } from '../../utils/pdfGenerator';
 import { SendReportDialog } from '../../components/SendReportDialog';
+import { auth } from '../../config/firebase';
 import { createQuoteFromRecommendedWork } from '../../utils/quoteFromReport';
 import type { QuotePhoto } from '../../types';
 import type { JobPhoto } from '../../../shared/job/types';
@@ -1244,6 +1245,13 @@ export function ServiceReportScreen() {
         customerName={context?.customerName || job.customerName}
         customerEmail={context?.customerEmail}
         businessName={businessSettings?.businessName}
+        // Business email first — that's where they want records — falling back
+        // to the account they signed in with.
+        ownerEmail={businessSettings?.email || auth.currentUser?.email || undefined}
+        serviceType={form.serviceType}
+        workCarriedOut={form.workCarriedOut}
+        recommendedWork={form.recommendedWork}
+        natureOfProblem={form.natureOfProblem}
         onShare={handleExport}
       />
 

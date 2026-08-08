@@ -22,6 +22,8 @@ export interface SendReportEmailInput {
   emailBody?: string;
   subject?: string;
   includePhotos?: boolean;
+  /** BCC the tradie so they keep the exact email the customer received. */
+  sendCopyToSelf?: boolean;
 }
 
 export async function sendServiceReportEmail(input: SendReportEmailInput): Promise<void> {
