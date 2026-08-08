@@ -466,11 +466,12 @@ export async function exportDocumentPDF(
       ],
     );
   } catch (error) {
-    // Alert.alert is a no-op on react-native-web, so a blocked or failed
-    // export used to vanish silently while the caller announced success.
-    // Close the reserved tab and rethrow — callers surface a real message.
+    // Rethrow rather than report here. Alert.alert is a no-op on
+    // react-native-web, so a blocked or failed export used to vanish silently
+    // while the caller went on to announce success. Alerting AND throwing
+    // would fix web but double up on native, where the alert does render and
+    // every caller already shows its own message — so leave it to them.
     reserved?.close();
-    Alert.alert('Error', 'Failed to export PDF. Please try again.');
     throw error;
   }
 }
@@ -756,11 +757,12 @@ export async function exportReportPDF(
       ],
     );
   } catch (error) {
-    // Alert.alert is a no-op on react-native-web, so a blocked or failed
-    // export used to vanish silently while the caller announced success.
-    // Close the reserved tab and rethrow — callers surface a real message.
+    // Rethrow rather than report here. Alert.alert is a no-op on
+    // react-native-web, so a blocked or failed export used to vanish silently
+    // while the caller went on to announce success. Alerting AND throwing
+    // would fix web but double up on native, where the alert does render and
+    // every caller already shows its own message — so leave it to them.
     reserved?.close();
-    Alert.alert('Error', 'Failed to export PDF. Please try again.');
     throw error;
   }
 }
