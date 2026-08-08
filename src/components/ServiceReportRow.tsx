@@ -24,19 +24,12 @@ import { selectionTap } from '../utils/haptics';
 import type { ReportRowMeta } from '../screens/ServiceReport/reportDraft';
 
 interface ServiceReportRowProps {
-  /**
-   * 'card' (default) draws its own surface — the standalone row.
-   * 'nested' drops the background, radius and outer margins so it can sit
-   * inside a parent card without stacking a surface on a surface, or
-   * indenting itself another 16px.
-   */
-  variant?: 'card' | 'nested';
   meta: ReportRowMeta;
   onPress: () => void;
 }
 
 /** Chip colours mirror the stage chips: draft is muted, done is green. */
-function statusChipColors(status: ReportRowMeta['status']): {
+export function statusChipColors(status: ReportRowMeta['status']): {
   color: string;
   bg: string;
   icon: string;
@@ -46,7 +39,7 @@ function statusChipColors(status: ReportRowMeta['status']): {
     : { color: colors.textMuted, bg: colors.surfaceGray3, icon: 'pencil-outline' };
 }
 
-export function ServiceReportRow({ meta, onPress, variant = 'card' }: ServiceReportRowProps) {
+export function ServiceReportRow({ meta, onPress }: ServiceReportRowProps) {
   const status = statusChipColors(meta.status);
 
   return (
@@ -55,11 +48,7 @@ export function ServiceReportRow({ meta, onPress, variant = 'card' }: ServiceRep
         selectionTap();
         onPress();
       }}
-      style={({ pressed }) => [
-        styles.row,
-        variant === 'nested' && styles.rowNested,
-        pressed && (variant === 'nested' ? styles.rowNestedPressed : styles.rowPressed),
-      ]}
+      style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
       accessibilityRole="button"
       accessibilityLabel={`${meta.title}, ${meta.statusLabel}`}
     >
@@ -152,17 +141,8 @@ const styles = StyleSheet.create({
     marginHorizontal: 16,
     marginBottom: 10,
   },
-  rowNested: {
-    backgroundColor: 'transparent',
-    marginHorizontal: 0,
-    marginBottom: 0,
-    padding: 2,
-  },
   rowPressed: {
     backgroundColor: colors.surfaceGray3,
-  },
-  rowNestedPressed: {
-    opacity: 0.7,
   },
   iconCircle: {
     width: 36,

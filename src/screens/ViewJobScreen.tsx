@@ -224,10 +224,8 @@ export function ViewJobScreen() {
   // row to resume a draft or open a sent report.
   const serviceReportRows = jobReports.length > 0 ? (
     <View style={styles.serviceReportsWrap}>
-      {/* Same section-label treatment as "Also on this job" below it —
-          reports are another list of things hanging off this job, not a
-          special case with its own typography. */}
-      <Text style={styles.secondaryDocsLabel}>Service reports</Text>
+      {/* No section label — each card carries its own header, the way the
+          quote card does, so the title sits with the thing it names. */}
       {jobReports.map((report) => (
         <ServiceReportCard
           key={report.id}
