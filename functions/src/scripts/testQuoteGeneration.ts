@@ -212,16 +212,17 @@ function buildSections(materials: ConvertedMaterial[], estimatedHours: number): 
   const sections: Section[] = [];
   sectionMultipliers.forEach((multiplier, sectionName) => {
     const perUnitHours = sectionLaborHours.get(sectionName) || fallbackPerUnitHours;
-    const useDays = perUnitHours >= 5;
-    const laborRate = useDays ? DEFAULT_LABOR_RATE * 8 : DEFAULT_LABOR_RATE;
-    const laborHoursValue = useDays ? perUnitHours / 8 : perUnitHours;
+    // Canonical hours, mirroring materialsPipeline. This harness used to split
+    // long sections into days at an ×8 rate like production once did; keeping
+    // that here would hand the next person the pattern that caused the Aug 2026
+    // inflated quotes. See shared/document/labourUnits.ts.
     sections.push({
       name: sectionName,
       multiplier,
-      laborHours: laborHoursValue,
-      laborUnit: useDays ? 'days' : 'hours',
-      laborRate,
-      laborTotal: laborHoursValue * laborRate * multiplier,
+      laborHours: perUnitHours,
+      laborUnit: 'hours',
+      laborRate: DEFAULT_LABOR_RATE,
+      laborTotal: perUnitHours * DEFAULT_LABOR_RATE * multiplier,
     });
   });
 

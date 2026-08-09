@@ -26,9 +26,29 @@ import {
 import { auth, db } from '../config/firebase';
 import type { Document } from '../types/document';
 import { documentToQuote, documentToInvoice } from '../types/documentAdapter';
+import { normaliseLabourToHours } from '../../shared/document/labourUnits';
 
 function getUserId(): string | null {
   return auth.currentUser?.uid || null;
+}
+
+/**
+ * Fires when a day-shaped document reaches the write path, which the type
+ * system says cannot happen. If this ever shows up in the logs, some writer
+ * is bypassing the canonical labour model — find it before it prices a job.
+ */
+function logLabourUnitCanary(doc: any): void {
+  const daySections = (doc?.sections || [])
+    .filter((s: any) => s?.laborUnit === 'days')
+    .map((s: any) => s?.name);
+  console.warn('[labour-units] non-canonical document reached saveDocument', {
+    id: doc?.id,
+    type: doc?.type,
+    stage: doc?.stage,
+    laborUnit: doc?.laborUnit,
+    laborRate: doc?.laborRate,
+    daySections,
+  });
 }
 
 /** Recursively strip undefined values (Firestore rejects them). */
@@ -119,7 +139,11 @@ function normaliseDocument(raw: any, id: string): Document {
   }
   out.paidTotal = Number(raw.paidTotal) || 0;
   out.balanceDue = Number(raw.balanceDue) || 0;
-  return out as Document;
+  // Canonicalise labour on the way in, so nothing downstream ever has to ask
+  // "is this number hours or days?". Records healed by healLabourUnits.ts are
+  // already canonical and pass through untouched; anything still day-shaped
+  // (written by an older build) is converted money-for-money here.
+  return normaliseLabourToHours(out) as Document;
 }
 
 class DocumentService {
@@ -184,9 +208,19 @@ class DocumentService {
    * trigger on the server also runs, but a direct write keeps reads fast and
    * prevents stale legacy data when older clients open the app.
    */
-  async saveDocument(document: Document): Promise<void> {
+  async saveDocument(rawDocument: Document): Promise<void> {
     const userId = getUserId();
     if (!userId) return;
+    // Last line of defence on the write path. The types already make a
+    // day-shaped document impossible to construct, so this should never
+    // convert anything — but a record can still reach here from an untyped
+    // source (a legacy import, an older cached draft), and writing two unit
+    // systems into one document is what produced the Aug 2026 inflated quotes.
+    // Canonicalise, and shout if it ever actually had work to do.
+    const document = normaliseLabourToHours(rawDocument) as Document;
+    if (document !== rawDocument) {
+      logLabourUnitCanary(rawDocument);
+    }
     const docRef = doc(db, 'users', userId, 'documents', document.id);
     const payload = stripUndefined({
       ...document,

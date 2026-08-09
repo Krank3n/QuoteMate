@@ -22,15 +22,18 @@ export interface PdfMaterial {
 
 export interface LaborSection {
   name: string;
-  // Per-unit labour hours/days for this section (matches QuoteSection.laborHours).
+  // Per-unit labour HOURS for this section (matches QuoteSection.laborHours).
   laborHours: number;
   // Multiplier applied to laborHours to get the section total. Optional for
   // legacy data; treat missing as 1.
   multiplier?: number;
-  // Total labour hours/days for the section (laborHours × multiplier). Prefer
+  // Total labour hours for the section (laborHours × multiplier). Prefer
   // this when displaying section duration in the PDF.
   laborHoursTotal?: number;
+  // Dollars per HOUR.
   laborRate: number;
+  // Legacy unit marker. Day-shaped legacy data is converted to hours before
+  // rendering; see normaliseLabourToHours in shared/document/labourUnits.ts.
   laborUnit?: 'hours' | 'days';
   laborTotal: number;
 }
@@ -45,9 +48,14 @@ export interface QuotePdfData {
   job: { name: string; description: string };
   materials: PdfMaterial[];
   materialsSubtotal: number;
+  // Canonical HOURS and dollars per HOUR.
   laborHours?: number;
   laborRate?: number;
+  // Legacy unit marker — see LaborSection.laborUnit.
   laborUnit?: 'hours' | 'days';
+  // How to present labour to the customer: 'days' renders quantities ÷ 8 and
+  // rates × 8. Display only — it never changes a stored figure.
+  labourDisplayUnit?: 'hours' | 'days';
   laborTotal: number;
   // Extra labour hours added on top of (or subtracted from) the sections sum.
   // Rendered as a "General Labour" row in the PDF when non-zero.

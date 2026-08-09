@@ -21,13 +21,26 @@
  *   - zero_priced_material:     material with price=0 and quantity>0
  *   - estimated_hours_drift:    JobSpec.estimatedHours diverges from section sum
  *                               (becomes a non-issue after updateDocumentCalculations runs)
+ *   - mixed_labour_units:       sections disagree with each other, or with the
+ *                               document, about hours vs days (QU-178621 — the
+ *                               state the ×8 rate bug grew out of)
+ *   - labour_rate_implausible:  effective $/hour is a multiple of the business's
+ *                               own rate (QU-178558 went to a customer at 8×)
  */
 
 import { validateAndRepairAiOutput } from '../ai/validateAiOutput';
+import { rateToHourly } from './labourUnits';
 
 const STANDARD_DAY_HOURS = 8;
 const DEFAULT_DOLLAR_TOLERANCE = 0.5;
 const ESTIMATED_HOURS_DRIFT_TOLERANCE_H = 2;
+/**
+ * How far above the business's configured hourly rate a document may bill
+ * before we call it a bug rather than a decision. A tradie legitimately
+ * charging 2× their default on a nasty job passes; the ×8 day-rate confusion
+ * does not.
+ */
+const RATE_IMPLAUSIBLE_MULTIPLE = 3;
 
 export interface IntegrityIssue {
   code: IntegrityCode;
@@ -47,11 +60,19 @@ export type IntegrityCode =
   | 'total_mismatch'
   | 'piece_good_bad_unit'
   | 'zero_priced_material'
-  | 'estimated_hours_drift';
+  | 'estimated_hours_drift'
+  | 'mixed_labour_units'
+  | 'labour_rate_implausible';
 
 export interface IntegrityCheckOptions {
   dollarTolerance?: number;
   estimatedHoursDriftToleranceH?: number;
+  /**
+   * The business's configured hourly rate (businessSettings.defaultLaborRate).
+   * Enables the labour_rate_implausible check — omit it and that check is
+   * skipped, since there is nothing to compare against.
+   */
+  businessHourlyRate?: number;
 }
 
 interface DocLike {
@@ -232,6 +253,51 @@ export function checkDocumentIntegrity(d: DocLike, opts: IntegrityCheckOptions =
         code: 'estimated_hours_drift',
         detail: `JobSpec.estimatedHours=${d.job.estimatedHours} but section sum=${expected} (drift ${drift}h)`,
         expected, actual: d.job.estimatedHours, diff: d.job.estimatedHours - expected,
+      });
+    }
+  }
+
+  // 10. One document, one unit. Stored labour is canonical hours; anything
+  //     still in days, or disagreeing section-to-section, is the shape the
+  //     ×8 rate bug grew out of (QU-178621) and must be normalised.
+  const sectionUnits = new Set(
+    (sections as any[])
+      .filter((s) => (Number(s.laborHours) || 0) > 0 || (Number(s.laborRate) || 0) > 0)
+      .map((s) => (s.laborUnit === 'days' ? 'days' : 'hours')),
+  );
+  const docUnit = d.laborUnit === 'days' ? 'days' : 'hours';
+  if (sectionUnits.size > 1) {
+    issues.push({
+      code: 'mixed_labour_units',
+      detail: `sections disagree on unit (${Array.from(sectionUnits).join(' + ')}) — labour must be stored in hours`,
+    });
+  } else if (sectionUnits.size === 1 && !sectionUnits.has(docUnit)) {
+    issues.push({
+      code: 'mixed_labour_units',
+      detail: `document unit=${docUnit} but sections are ${Array.from(sectionUnits)[0]} — labour must be stored in hours`,
+    });
+  } else if (sectionUnits.size === 0 && docUnit === 'days') {
+    issues.push({
+      code: 'mixed_labour_units',
+      detail: 'document labour stored in days — labour must be stored in hours',
+    });
+  }
+
+  // 11. Effective hourly rate vs what the business actually charges. Every
+  //     ×8/×64 document in the Aug 2026 audit passed checks 1-9 because a
+  //     doubled rate is still internally consistent — this is the check that
+  //     catches it before a customer does.
+  const businessRate = Number(opts.businessHourlyRate) || 0;
+  if (businessRate > 0) {
+    const rateSection = (sections as any[]).find((s) => (Number(s.laborRate) || 0) > 0);
+    const effective = rateSection
+      ? rateToHourly(rateSection.laborRate, rateSection.laborUnit)
+      : rateToHourly(d.laborRate, d.laborUnit);
+    if (effective > businessRate * RATE_IMPLAUSIBLE_MULTIPLE) {
+      issues.push({
+        code: 'labour_rate_implausible',
+        detail: `effective $${round2(effective)}/h is ${round2(effective / businessRate)}× the business rate of $${businessRate}/h`,
+        expected: businessRate, actual: round2(effective), diff: round2(effective - businessRate),
       });
     }
   }

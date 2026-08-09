@@ -279,21 +279,20 @@ async function generateMaterialsForQuoteInner(
   sectionMultipliers.forEach((multiplier, sectionName) => {
     if (existingSectionNames.has(sectionName)) return;
     const perUnitHours = sectionLaborHours.get(sectionName) || fallbackPerUnitHours;
-    // Only draft a section in days when a single unit is at least a full day
-    // of work. The old >= 5 threshold turned 5–7h units into fractional days
-    // ("0.625 days"), which reads worse than plain hours.
-    const useDays = perUnitHours >= 8;
-    const laborRate = useDays ? defaultRate * 8 : defaultRate;
-    const laborHoursValue = useDays ? perUnitHours / 8 : perUnitHours;
+    // Always emit canonical hours at the business's hourly rate. This used to
+    // draft long sections in days (value / 8, rate × 8), which left one quote
+    // holding two unit systems at once — the labour editor then had to guess
+    // which one it was reading and sometimes multiplied a day rate by 8 again.
+    // Days are a display choice now; see shared/document/labourUnits.ts.
     newSections.push({
       id: `section-${Date.now()}-${sectionName.replace(/\s/g, '')}`,
       name: sectionName,
       multiplier,
-      laborHours: laborHoursValue,
-      laborHoursTotal: Math.round(laborHoursValue * multiplier * 100) / 100,
-      laborRate,
-      laborUnit: useDays ? 'days' : 'hours',
-      laborTotal: laborHoursValue * laborRate * multiplier,
+      laborHours: perUnitHours,
+      laborHoursTotal: Math.round(perUnitHours * multiplier * 100) / 100,
+      laborRate: defaultRate,
+      laborUnit: 'hours',
+      laborTotal: perUnitHours * defaultRate * multiplier,
       sortOrder: existingSections.length + newSections.length,
     });
   });

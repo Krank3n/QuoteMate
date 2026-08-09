@@ -203,22 +203,36 @@ export interface FloorplanAnalysis {
 // Labor unit type for hours/days billing
 export type LaborUnit = 'hours' | 'days';
 
+/**
+ * The unit labour is STORED in — hours, and only hours. Days are a display
+ * choice (`labourDisplayUnit`), never a storage one.
+ *
+ * This is a distinct type from LaborUnit so the compiler refuses any attempt to
+ * write a day-shaped quote or invoice. Legacy records still arrive with
+ * `laborUnit: 'days'`; they are converted on read by normaliseLabourToHours,
+ * which takes a loose input shape precisely so it can accept them. If you find
+ * yourself wanting to widen this back to LaborUnit, read the header of
+ * shared/document/labourUnits.ts first — storing two units is what produced
+ * quotes at 8× and 64× the tradie's rate.
+ */
+export type StoredLabourUnit = 'hours';
+
 // Section within a quote/invoice with its own labor
 export interface QuoteSection {
   id: string;
   name: string;               // e.g. "Colorbond Fence Bay", "Pedestrian Gate"
   multiplier: number;          // How many units (e.g. 8 bays) — default 1
   sourceTemplateId?: string;   // Which template this came from (if any)
-  laborHours: number;          // Per-unit labor hours/days
-  // Total labor hours/days for the section (laborHours × multiplier).
+  laborHours: number;          // Per-unit labor HOURS (canonical — see shared/document/labourUnits.ts)
+  // Total labor hours for the section (laborHours × multiplier).
   // Persisted so consumers that don't know about multipliers (admin
   // dashboard, third-party integrations) can render the right number
   // without any math. The mobile app reads this for display; pricing
   // still derives from laborHours × multiplier × laborRate to match how
   // the editor adjusts per-unit values.
   laborHoursTotal?: number;
-  laborRate: number;           // $/hour or $/day
-  laborUnit: LaborUnit;        // 'hours' | 'days'
+  laborRate: number;           // $/HOUR (canonical)
+  laborUnit: StoredLabourUnit; // Always 'hours' — see StoredLabourUnit
   laborTotal: number;          // calculated: laborHours * laborRate * multiplier
   sortOrder: number;
 }
@@ -309,9 +323,10 @@ export interface Quote {
   jobAddress?: string;
   job: JobSpec;
   materials: Material[];
-  laborRate: number; // $/hour or $/day (depending on laborUnit)
-  laborHours: number; // quantity of hours or days
-  laborUnit?: LaborUnit; // 'hours' | 'days' — default 'hours' for backwards compat
+  laborRate: number; // $/HOUR (canonical — see shared/document/labourUnits.ts)
+  laborHours: number; // HOURS (canonical)
+  laborUnit?: StoredLabourUnit; // Always 'hours' — see StoredLabourUnit
+  labourDisplayUnit?: LaborUnit; // Display preference only — never multiplies stored values
   laborTotal: number;
   // Extra labour hours added on top of (or subtracted from) the section sums.
   // Lets the user nudge total labour without rebalancing per-section values.
@@ -779,9 +794,10 @@ export interface Invoice {
   materials: Material[];
 
   // Pricing (same as Quote)
-  laborRate: number;
-  laborHours: number;
-  laborUnit?: LaborUnit;
+  laborRate: number; // $/HOUR (canonical)
+  laborHours: number; // HOURS (canonical)
+  laborUnit?: StoredLabourUnit; // Always 'hours' — see StoredLabourUnit
+  labourDisplayUnit?: LaborUnit; // Display preference only
   laborTotal: number;
   // Extra labour hours added on top of (or subtracted from) the section sums.
   // Mirrors Quote.laborExtraHours. Falls back to 0 for legacy invoices.

@@ -363,3 +363,31 @@ describe('gstRegistered snapshot round-trip', () => {
     expect(restored.gstRegistered).toBe(false);
   });
 });
+
+describe('labour units survive the legacy mirror', () => {
+  // The documents collection is mirrored into the legacy quotes/invoices
+  // collections on every save. If labourDisplayUnit were dropped there, a
+  // tradie's days preference would silently revert on the next read — and a
+  // day-shaped legacy record must come back with its money intact.
+  it('carries labourDisplayUnit through quote → document → quote', () => {
+    const quote = makeQuote({ labourDisplayUnit: 'days' } as Partial<Quote>);
+    const doc = quoteToDocument(quote);
+    expect(doc.labourDisplayUnit).toBe('days');
+    expect(documentToQuote(doc).labourDisplayUnit).toBe('days');
+  });
+
+  it('carries labourDisplayUnit through invoice → document → invoice', () => {
+    const invoice = { ...makeQuote(), invoiceNumber: 'INV-001', labourDisplayUnit: 'days' } as unknown as Invoice;
+    const doc = invoiceToDocument(invoice);
+    expect(doc.labourDisplayUnit).toBe('days');
+    expect(documentToInvoice(doc).labourDisplayUnit).toBe('days');
+  });
+
+  it('keeps canonical hours and the hourly rate intact both ways', () => {
+    const quote = makeQuote({ laborRate: 85, laborHours: 32, laborUnit: 'hours' });
+    const back = documentToQuote(quoteToDocument(quote));
+    expect(back.laborRate).toBe(85);
+    expect(back.laborHours).toBe(32);
+    expect(back.laborUnit).toBe('hours');
+  });
+});
