@@ -116,6 +116,7 @@ function projectShared(s: LegacyDocumentRecord, type: DocumentType): LegacyDocum
     laborRate: Number(s.laborRate ?? 0),
     laborHours: Number(s.laborHours ?? 0),
     laborUnit: s.laborUnit,
+    labourDisplayUnit: s.labourDisplayUnit,
     laborTotal: Number(s.laborTotal ?? 0),
     laborExtraHours: s.laborExtraHours,
     // Write the totalled hours into laborHoursTotal so PDFs/HTML can show
@@ -472,6 +473,7 @@ export function documentRecordToQuoteRecord(doc: DocumentRecord): LegacyDocument
     laborRate: doc.laborRate,
     laborHours: doc.laborHours,
     laborUnit: doc.laborUnit,
+    labourDisplayUnit: doc.labourDisplayUnit,
     laborTotal: doc.laborTotal,
     laborExtraHours: doc.laborExtraHours,
     materialsSubtotal: doc.materialsSubtotal,
@@ -580,6 +582,7 @@ export function documentRecordToInvoiceRecord(doc: DocumentRecord): LegacyDocume
     laborRate: doc.laborRate,
     laborHours: doc.laborHours,
     laborUnit: doc.laborUnit,
+    labourDisplayUnit: doc.labourDisplayUnit,
     laborTotal: doc.laborTotal,
     laborExtraHours: doc.laborExtraHours,
     materialsSubtotal: doc.materialsSubtotal,

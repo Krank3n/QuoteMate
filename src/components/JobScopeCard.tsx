@@ -32,6 +32,7 @@ import type { Document } from '../types/document';
 import type { Invoice, PaymentTerms } from '../types';
 import { colors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
+import { hoursForDisplay, rateForDisplay, valueToHours, rateToHourly } from '../../shared/document/labourUnits';
 import { calculateDueDate, formatPaymentTerms } from '../utils/invoiceCalculator';
 import { STAGE_META } from './StageSheet';
 import { PaymentChip } from './PaymentChip';
@@ -112,9 +113,11 @@ function stageAgoLabel(doc: Document): string | null {
 }
 
 function laborSummary(doc: Document): string {
-  const hours = Number(doc.laborHours ?? 0);
-  const rate = Number(doc.laborRate ?? 0);
-  const unit = doc.laborUnit === 'days' ? 'd' : 'h';
+  // Stored labour is canonical hours; days is a presentation choice.
+  const displayUnit = doc.labourDisplayUnit === 'days' ? 'days' : 'hours';
+  const hours = Math.round(hoursForDisplay(valueToHours(doc.laborHours ?? 0, doc.laborUnit), displayUnit) * 100) / 100;
+  const rate = Math.round(rateForDisplay(rateToHourly(doc.laborRate ?? 0, doc.laborUnit), displayUnit) * 100) / 100;
+  const unit = displayUnit === 'days' ? 'd' : 'h';
   const parts: string[] = [];
   if (hours > 0) parts.push(`${hours}${unit}`);
   if (rate > 0) parts.push(`$${rate}/${unit}`);
@@ -416,6 +419,7 @@ function ExpandedSections({
         laborRate={Number(doc.laborRate ?? 0)}
         laborTotal={Number(doc.laborTotal ?? 0)}
         laborUnit={doc.laborUnit}
+        labourDisplayUnit={doc.labourDisplayUnit}
         sections={doc.sections}
         // Editor view — always surface hours × rate to the tradie even
         // when the customer-facing PDF setting hides them.

@@ -259,6 +259,7 @@ export async function generateDocumentPDF(
       laborHours: doc.laborHours,
       laborRate: doc.laborRate,
       laborUnit: doc.laborUnit,
+      labourDisplayUnit: doc.labourDisplayUnit,
       laborTotal: doc.laborTotal,
       laborExtraHours: doc.laborExtraHours,
       sections: doc.sections?.map(s => ({
@@ -321,6 +322,7 @@ export async function generateDocumentPDF(
     laborHours: doc.laborHours,
     laborRate: doc.laborRate,
     laborUnit: doc.laborUnit,
+    labourDisplayUnit: doc.labourDisplayUnit,
     laborTotal: doc.laborTotal,
     laborExtraHours: doc.laborExtraHours,
     sections: doc.sections?.map(s => ({

@@ -682,6 +682,7 @@ export function JobPreviewScreen() {
           laborRate={workingDoc.laborRate}
           laborTotal={workingDoc.laborTotal}
           laborUnit={workingDoc.laborUnit}
+          labourDisplayUnit={workingDoc.labourDisplayUnit}
           sections={workingDoc.sections}
           showLaborHours={businessSettings?.showLaborHours}
           onEdit={() => navigation.navigate('LaborMarkup')}

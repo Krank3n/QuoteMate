@@ -19,6 +19,7 @@ import type {
   TcAcceptance,
   XeroSyncStatus,
   LaborUnit,
+  StoredLabourUnit,
 } from './index';
 
 export type {
@@ -58,10 +59,21 @@ export interface Document {
 
   // ===== Materials, labor, sections =====
   materials: Material[];
+  /** Canonical: dollars per HOUR. See shared/document/labourUnits.ts. */
   laborRate: number;
+  /** Canonical: HOURS. */
   laborHours: number;
-  laborUnit?: LaborUnit;
+  /**
+   * Always 'hours'. Kept in the schema so older clients read the record
+   * correctly; the type refuses 'days' so no writer can reintroduce the
+   * two-unit state. To change how labour is *displayed*, use
+   * labourDisplayUnit.
+   */
+  laborUnit?: StoredLabourUnit;
+  /** Display preference only — never multiplies stored values. */
+  labourDisplayUnit?: LaborUnit;
   laborTotal: number;
+  /** Canonical: HOURS. */
   laborExtraHours?: number;
   sections?: QuoteSection[];
 

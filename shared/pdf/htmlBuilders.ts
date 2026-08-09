@@ -8,6 +8,12 @@ import { formatCurrency } from './formatCurrency';
 import { printMediaCSS, getTemplateCSS } from './templates';
 import { PASSTHROUGH_SURCHARGE_PCT } from './squareFees';
 import { resolveGstMode, NO_GST_NOTE } from '../document/gstMode';
+import {
+  normaliseLabourToHours,
+  hoursForDisplay,
+  rateForDisplay,
+  type LabourUnit,
+} from '../document/labourUnits';
 import { pathHasInk } from './signatureInk';
 
 const escapeHtml = (s: string) =>
@@ -415,7 +421,18 @@ export function generatePaymentMethodsHTML(
  * and an optional "General Labour" row for any extra hours added on top of
  * the section sums (laborExtraHours).
  */
-function buildLaborHTML(data: QuotePdfData): string {
+function buildLaborHTML(rawData: QuotePdfData): string {
+  // Canonicalise first: every quantity below is HOURS and every rate is
+  // $/hour, whatever shape the record arrived in. Days are then applied once,
+  // at render, from the tradie's display preference — so a day rate can never
+  // be mistaken for an hourly one (see shared/document/labourUnits.ts).
+  const data = normaliseLabourToHours(rawData) as QuotePdfData;
+  const displayUnit: LabourUnit = data.labourDisplayUnit === 'days' ? 'days' : 'hours';
+  const unitLabel = displayUnit === 'days' ? 'days' : 'hours';
+  const rateLabel = displayUnit === 'days' ? '/day' : '/hr';
+  const qty = (hours: number) => Math.round(hoursForDisplay(hours, displayUnit) * 100) / 100;
+  const perUnitRate = (hourly: number) => rateForDisplay(hourly, displayUnit);
+
   const hasSections = !!(data.sections && data.sections.length > 0);
   // When the user has hidden the breakdown, collapse sections to a single
   // "Labour" row showing only the total — no per-section rows.
@@ -425,16 +442,13 @@ function buildLaborHTML(data: QuotePdfData): string {
   // opted into showing markup as a separate line on the document.
   const rollLaborMarkup = data.showMarkup !== true;
   const laborMul = rollLaborMarkup ? 1 + ((data.laborMarkup || 0) / 100) : 1;
-  // Use the section's rate (or top-level fallback) for the extra row's per-hour math.
+  // Use the section's rate (or top-level fallback) for the extra row's math.
   const extraRate = (hasSections && data.sections && data.sections[0]?.laborRate) || data.laborRate || 0;
-  const extraUnit = (hasSections && data.sections && data.sections[0]?.laborUnit) || data.laborUnit || 'hours';
-  const extraUnitLabel = extraUnit === 'days' ? 'days' : 'hours';
-  const extraRateLabel = extraUnit === 'days' ? '/day' : '/hr';
   // Positive extra renders as "General Labour"; negative as "Labour Adjustment"
   // so the customer-facing label still reads sensibly.
   const extraLabel = extra >= 0 ? 'General Labour' : 'Labour Adjustment';
   const extraDetails = data.showLaborHours
-    ? ` (${extra > 0 ? '+' : ''}${extra} ${extraUnitLabel} @ ${formatCurrency(extraRate * laborMul)}${extraRateLabel})`
+    ? ` (${extra > 0 ? '+' : ''}${qty(extra)} ${unitLabel} @ ${formatCurrency(perUnitRate(extraRate) * laborMul)}${rateLabel})`
     : '';
   const displayLaborTotal = data.laborTotal * laborMul;
 
@@ -460,19 +474,16 @@ function buildLaborHTML(data: QuotePdfData): string {
         <table>
           <tbody>
             ${hasSections ? data.sections!.map(s => {
-              const sUnit = s.laborUnit || 'hours';
-              const sLabel = sUnit === 'days' ? 'days' : 'hours';
-              const sRate = sUnit === 'days' ? '/day' : '/hr';
-              const sTotalUnits =
+              const sTotalHours =
                 typeof s.laborHoursTotal === 'number'
                   ? s.laborHoursTotal
-                  : Math.round((s.laborHours || 0) * (s.multiplier || 1) * 100) / 100;
+                  : (s.laborHours || 0) * (s.multiplier || 1);
               return `<tr>
-                <td>${data.showLaborHours ? `${s.name} (${sTotalUnits} ${sLabel} @ ${formatCurrency(s.laborRate * laborMul)}${sRate})` : s.name}</td>
+                <td>${data.showLaborHours ? `${s.name} (${qty(sTotalHours)} ${unitLabel} @ ${formatCurrency(perUnitRate(s.laborRate) * laborMul)}${rateLabel})` : s.name}</td>
                 <td style="text-align: right;">${formatCurrency(s.laborTotal * laborMul)}</td>
               </tr>`;
             }).join('') : `<tr>
-              <td>${data.showLaborHours && data.laborHours && data.laborRate ? `Labour (${data.laborHours} ${(data.laborUnit || 'hours') === 'days' ? 'days' : 'hours'} @ ${formatCurrency(data.laborRate * laborMul)}${(data.laborUnit || 'hours') === 'days' ? '/day' : '/hr'})` : 'Labour'}</td>
+              <td>${data.showLaborHours && data.laborHours && data.laborRate ? `Labour (${qty(data.laborHours)} ${unitLabel} @ ${formatCurrency(perUnitRate(data.laborRate) * laborMul)}${rateLabel})` : 'Labour'}</td>
               <td style="text-align: right;">${formatCurrency(displayLaborTotal)}</td>
             </tr>`}
             ${hasSections && extra !== 0 ? `<tr>

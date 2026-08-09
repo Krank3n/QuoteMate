@@ -25,6 +25,7 @@ import {
 import { reviewQuoteMaterials, isFlaggedRow, QuoteReview } from '../utils/quoteReview';
 import { loadTemplates } from '../services/sectionTemplateService';
 import { updateQuoteCalculations, healBrokenLabourSections } from '../utils/quoteCalculator';
+import { normaliseLabourToHours } from '../../shared/document/labourUnits';
 import { calculateDueDate } from '../utils/invoiceCalculator';
 import { reconcileNextNumber, resolveNextQuoteNumber } from '../utils/nextNumber';
 import { preserveSnapshotIdentity } from '../utils/snapshotIdentity';
@@ -1047,8 +1048,11 @@ export const useStore = create<AppState>((set, get) => ({
         const cloudQuotes = await firestoreService.loadQuotes();
         if (cloudQuotes.length > 0) {
           // Backfill laborMarkup from material markup for legacy quotes
+          // Backfill laborMarkup, and canonicalise labour units — the legacy
+          // `quotes` collection predates the documents collection's read-path
+          // normalisation, so day-shaped records still arrive here.
           const backfilled = cloudQuotes.map((q) =>
-            q.laborMarkup === undefined ? { ...q, laborMarkup: q.markup } : q
+            normaliseLabourToHours(q.laborMarkup === undefined ? { ...q, laborMarkup: q.markup } : q)
           );
           // Save to local storage for offline access
           await AsyncStorage.setItem(
@@ -1078,7 +1082,7 @@ export const useStore = create<AppState>((set, get) => ({
         });
         // Backfill laborMarkup from material markup for legacy quotes
         const quotes = parsed.map((q) =>
-          q.laborMarkup === undefined ? { ...q, laborMarkup: q.markup } : q
+          normaliseLabourToHours(q.laborMarkup === undefined ? { ...q, laborMarkup: q.markup } : q)
         );
         const reconciledNextNumber = reconcileNextNumber({
           items: quotes,
@@ -1529,6 +1533,7 @@ export const useStore = create<AppState>((set, get) => ({
       laborRate: quote.laborRate,
       laborHours: quote.laborHours,
       laborUnit: quote.laborUnit,
+      labourDisplayUnit: quote.labourDisplayUnit,
       laborTotal: quote.laborTotal,
       sections: quote.sections,
       materialsSubtotal: quote.materialsSubtotal,
@@ -1775,7 +1780,7 @@ export const useStore = create<AppState>((set, get) => ({
         if (cloudInvoices.length > 0) {
           // Backfill laborMarkup from material markup for legacy invoices
           const backfilled = cloudInvoices.map((i) =>
-            i.laborMarkup === undefined ? { ...i, laborMarkup: i.markup } : i
+            normaliseLabourToHours(i.laborMarkup === undefined ? { ...i, laborMarkup: i.markup } : i)
           );
           // Save to local storage for offline access
           await AsyncStorage.setItem(
@@ -1811,7 +1816,7 @@ export const useStore = create<AppState>((set, get) => ({
         });
         // Backfill laborMarkup from material markup for legacy invoices
         const invoices = parsed.map((i) =>
-          i.laborMarkup === undefined ? { ...i, laborMarkup: i.markup } : i
+          normaliseLabourToHours(i.laborMarkup === undefined ? { ...i, laborMarkup: i.markup } : i)
         );
         const reconciledNextNumber = reconcileNextNumber({
           items: invoices,

@@ -44,7 +44,7 @@ import { Material, QuoteSection, LaborUnit, SectionTemplate, FavoriteProductMapp
 import { loadTemplates, saveTemplate, matchTemplatesByKeywords, extractQuantityForKeyword, suggestKeywordsFromName } from '../../services/sectionTemplateService';
 import { colors } from '../../theme';
 import { formatCurrency, updateMaterialTotalPrice, supplierPriceForGstMode } from '../../utils/quoteCalculator';
-import { keepSupplierPriceInclusive } from '../../../shared/document';
+import { keepSupplierPriceInclusive, normaliseTemplateToHours } from '../../../shared/document';
 import { parsePackInfo } from '../../utils/parsePackInfo';
 import { applyPackAwarePricing } from '../../utils/packAwarePricing';
 import {
@@ -701,14 +701,18 @@ export function MaterialsListScreen() {
   const loadSelectedTemplatesIntoQuote = () => {
     if (!currentQuote) return;
 
-    const HOURS_PER_DAY = 8;
     let newMaterials: Material[] = [];
     let newSections: QuoteSection[] = [...(currentQuote.sections || [])];
     let additionalLaborHours = 0;
     let laborRate = currentQuote.laborRate;
     const isDefaultRate = laborRate === (businessSettings?.defaultLaborRate || 85) && currentQuote.laborHours === 0;
 
-    const selectedTemplates = allTemplates.filter(t => checkedTemplateIds.has(t.id));
+    // Templates are the one place a day-shaped record still lives on disk (a
+    // tradie authors "1.5 days @ $680/day"). Convert to canonical hours the
+    // moment a template becomes quote data.
+    const selectedTemplates = allTemplates
+      .filter(t => checkedTemplateIds.has(t.id))
+      .map(normaliseTemplateToHours);
 
     selectedTemplates.forEach(template => {
       const qty = templateQuantities[template.id] || 1;
@@ -738,22 +742,18 @@ export function MaterialsListScreen() {
         sourceTemplateId: template.id,
         laborHours: template.laborHours,
         laborRate: template.laborRate,
-        laborUnit: template.laborUnit,
+        // normaliseTemplateToHours above guarantees hours + $/hour.
+        laborUnit: 'hours',
         laborTotal: template.laborHours * template.laborRate * qty,
         sortOrder: newSections.length,
       });
 
-      // Accumulate labor (convert to hours)
-      const templateHours = template.laborUnit === 'days'
-        ? template.laborHours * HOURS_PER_DAY * qty
-        : template.laborHours * qty;
-      additionalLaborHours += templateHours;
+      // Accumulate labour — already canonical hours after normalisation.
+      additionalLaborHours += template.laborHours * qty;
 
       // Use first template's rate if quote has no labor set
       if (isDefaultRate && template.laborRate > 0) {
-        laborRate = template.laborUnit === 'days'
-          ? template.laborRate / HOURS_PER_DAY
-          : template.laborRate;
+        laborRate = template.laborRate;
       }
     });
 
@@ -1403,7 +1403,7 @@ export function MaterialsListScreen() {
       multiplier: 1,
       laborHours: hours,
       laborRate: defaultRate,
-      laborUnit: 'hours' as LaborUnit,
+      laborUnit: 'hours',
       laborTotal: hours * defaultRate,
       sortOrder: existingSections.length,
     };
@@ -1496,8 +1496,10 @@ export function MaterialsListScreen() {
     setTemplatePickerVisible(true);
   };
 
-  const handleConfirmLoadTemplate = (template: SectionTemplate) => {
+  const handleConfirmLoadTemplate = (rawTemplate: SectionTemplate) => {
     if (!currentQuote) return;
+    // Canonical hours before this becomes a section — see labourUnits.ts.
+    const template = normaliseTemplateToHours(rawTemplate);
     const sectionName = getUniqueSectionName(template.name);
     const newMaterials: Material[] = template.materials.map((m) => withOrigin({
       ...m,
@@ -1516,25 +1518,21 @@ export function MaterialsListScreen() {
       sourceTemplateId: template.id,
       laborHours: template.laborHours,
       laborRate: template.laborRate,
-      laborUnit: template.laborUnit,
+      // normaliseTemplateToHours above guarantees hours + $/hour.
+      laborUnit: 'hours',
       laborTotal: template.laborHours * template.laborRate,
       sortOrder: existingSections.length,
     };
 
-    const HOURS_PER_DAY = 8;
-    const templateLaborInHours = template.laborUnit === 'days'
-      ? template.laborHours * HOURS_PER_DAY
-      : template.laborHours;
-
     const newLaborRate = currentQuote.laborHours === 0 && currentQuote.laborRate === (businessSettings?.defaultLaborRate || 85)
-      ? (template.laborUnit === 'days' ? template.laborRate / HOURS_PER_DAY : template.laborRate)
+      ? template.laborRate
       : currentQuote.laborRate;
 
     updateQuote({
       ...currentQuote,
       materials: [...currentQuote.materials, ...newMaterials],
       sections: [...existingSections, newSection],
-      laborHours: currentQuote.laborHours + templateLaborInHours,
+      laborHours: currentQuote.laborHours + template.laborHours,
       laborRate: newLaborRate,
     });
     setTemplatePickerVisible(false);

@@ -10,6 +10,24 @@ export type {
   LegacyDocumentRecord,
 } from './types';
 
+export type { LabourUnit } from './labourUnits';
+export {
+  HOURS_PER_DAY,
+  valueToHours,
+  rateToHourly,
+  hoursForDisplay,
+  rateForDisplay,
+  hoursFromDisplay,
+  hourlyRateFromDisplay,
+  isCanonicalLabour,
+  normaliseSectionToHours,
+  normaliseLabourToHours,
+  normaliseTemplateToHours,
+  resolveDisplayUnit,
+  totalLabourHours,
+  effectiveHourlyRate,
+} from './labourUnits';
+
 export type { GstMode } from './gstMode';
 export { resolveGstMode, keepSupplierPriceInclusive, NO_GST_NOTE } from './gstMode';
 

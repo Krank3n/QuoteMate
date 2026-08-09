@@ -5,13 +5,17 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { colors } from '../../theme';
 import { formatCurrency } from '../../utils/quoteCalculator';
 import { LaborUnit, QuoteSection } from '../../types';
+import { hoursForDisplay, rateForDisplay, valueToHours, rateToHourly } from '../../../shared/document/labourUnits';
 import { documentStyles as styles } from './documentStyles';
 
 interface LaborSectionProps {
   laborHours: number;
   laborRate: number;
   laborTotal: number;
+  /** Legacy unit of the passed values — day-shaped input is converted here. */
   laborUnit?: LaborUnit;
+  /** How to present labour. Display only; never changes a dollar figure. */
+  labourDisplayUnit?: LaborUnit;
   sections?: QuoteSection[];
   showLaborHours?: boolean;
   onEdit?: () => void;
@@ -33,6 +37,7 @@ export function LaborSection({
   laborRate,
   laborTotal,
   laborUnit,
+  labourDisplayUnit,
   sections,
   showLaborHours,
   onEdit,
@@ -42,14 +47,19 @@ export function LaborSection({
   alwaysShowMarkupNote = false,
   style,
 }: LaborSectionProps) {
-  const unit = laborUnit || 'hours';
-  const unitLabel = unit === 'days' ? 'days' : 'hours';
-  const rateLabel = unit === 'days' ? '/day' : '/hr';
+  // Canonical hours in, chosen unit out — the conversion happens once, here,
+  // rather than being inferred from whatever unit each value claims to be in.
+  const displayUnit: LaborUnit = labourDisplayUnit === 'days' ? 'days' : 'hours';
+  const unitLabel = displayUnit === 'days' ? 'days' : 'hours';
+  const rateLabel = displayUnit === 'days' ? '/day' : '/hr';
+  const qty = (hours: number) => Math.round(hoursForDisplay(hours, displayUnit) * 100) / 100;
   const hasSections = sections && sections.length > 0;
   const laborMultiplier =
     rollMarkupIntoLabor && laborMarkupPercent > 0 ? 1 + laborMarkupPercent / 100 : 1;
-  const displayLaborRate = laborRate * laborMultiplier;
+  const hourlyRate = rateToHourly(laborRate, laborUnit);
+  const displayLaborRate = rateForDisplay(hourlyRate, displayUnit) * laborMultiplier;
   const displayLaborTotal = laborTotal * laborMultiplier;
+  const extraHours = valueToHours(laborExtraHours, laborUnit);
   const markupRolledIn = rollMarkupIntoLabor && laborMarkupPercent > 0;
   const showMarkupNote =
     laborMarkupPercent > 0 && (markupRolledIn || alwaysShowMarkupNote);
@@ -73,24 +83,22 @@ export function LaborSection({
       {hasSections ? (
         <>
           {sections.map((section) => {
-            const sUnit = section.laborUnit || 'hours';
-            const sUnitLabel = sUnit === 'days' ? 'days' : 'hours';
-            const sRateLabel = sUnit === 'days' ? '/day' : '/hr';
-            const sDisplayRate = section.laborRate * laborMultiplier;
+            const sDisplayRate =
+              rateForDisplay(rateToHourly(section.laborRate, section.laborUnit), displayUnit) * laborMultiplier;
             const sDisplayTotal = section.laborTotal * laborMultiplier;
             // Show TOTAL hours/days for the section, not the per-unit value.
             // Per-unit was confusing: a 50 m² deck section with 0.076 days/m²
             // displays "0.076 days × $800/day = $3,040" which doesn't reconcile.
             // Total = laborHours × multiplier rounds to a sane number.
             const sMultiplier = section.multiplier || 1;
-            const sTotalUnits = Math.round(section.laborHours * sMultiplier * 100) / 100;
+            const sTotalUnits = qty(valueToHours(section.laborHours * sMultiplier, section.laborUnit));
             return (
               <View key={section.id} style={styles.itemRow}>
                 <View style={styles.itemInfo}>
                   <Text style={styles.itemName}>{section.name}</Text>
                   {showLaborHours && (
                     <Text style={styles.itemDetails}>
-                      {sTotalUnits} {sUnitLabel} × {formatCurrency(sDisplayRate)}{sRateLabel}
+                      {sTotalUnits} {unitLabel} × {formatCurrency(sDisplayRate)}{rateLabel}
                     </Text>
                   )}
                 </View>
@@ -107,12 +115,12 @@ export function LaborSection({
                 {showLaborHours && (
                   <Text style={styles.itemDetails}>
                     {laborExtraHours > 0 ? '+' : ''}
-                    {laborExtraHours} {unitLabel} × {formatCurrency(displayLaborRate)}{rateLabel}
+                    {qty(extraHours)} {unitLabel} × {formatCurrency(displayLaborRate)}{rateLabel}
                   </Text>
                 )}
               </View>
               <Text style={styles.itemTotal}>
-                {formatCurrency(laborExtraHours * displayLaborRate)}
+                {formatCurrency(extraHours * hourlyRate * laborMultiplier)}
               </Text>
             </View>
           )}
@@ -128,7 +136,7 @@ export function LaborSection({
             <Text style={styles.itemName}>Labour</Text>
             {showLaborHours && (
               <Text style={styles.itemDetails}>
-                {laborHours} {unitLabel} × {formatCurrency(displayLaborRate)}{rateLabel}
+                {qty(valueToHours(laborHours, laborUnit))} {unitLabel} × {formatCurrency(displayLaborRate)}{rateLabel}
               </Text>
             )}
           </View>

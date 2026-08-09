@@ -20,6 +20,13 @@ import { useCurrentDocument, useDocumentMode, usePersistDocument, getPreviewScre
 import { LaborUnit } from '../../types';
 
 import { colors } from '../../theme';
+import {
+  hoursForDisplay,
+  hoursFromDisplay,
+  rateForDisplay,
+  hourlyRateFromDisplay,
+} from '../../../shared/document/labourUnits';
+import { hydrateLabourEditor, applyLabourEditor } from '../../utils/labourEditor';
 import { formatCurrency, calculateQuote } from '../../utils/quoteCalculator';
 import { estimateFuelCost, DEFAULT_FUEL_PRICE } from '../../utils/travelCalculator';
 import { QuoteSentBanner } from '../../components/QuoteSentBanner';
@@ -43,14 +50,17 @@ export function LaborMarkupScreen() {
   // Get the appropriate preview screen based on mode
   const previewScreenName = getPreviewScreenName(mode);
 
+  // All three of these hold DISPLAY-space values, in whatever `laborUnit` is
+  // currently showing. Canonical hours / $-per-hour are derived on save via
+  // hoursFromDisplay + hourlyRateFromDisplay, never accumulated in state.
   const [laborHours, setLaborHours] = useState('');
   const [laborRate, setLaborRate] = useState('');
   const [laborUnit, setLaborUnit] = useState<LaborUnit>('hours');
-  // Per-section displayed total hours (= section.laborHours × multiplier),
-  // keyed by section.id. The user edits these directly via per-section steppers.
-  // The estimated-total input above the Labour Total mirrors sumSections + extra,
-  // where extra = (input value − sumSections) is derived and persisted as
-  // quote.laborExtraHours on save.
+  // Per-section displayed totals (= section.laborHours × multiplier, converted
+  // to the display unit), keyed by section.id. The user edits these directly
+  // via per-section steppers. The estimated-total input above the Labour Total
+  // mirrors sumSections + extra, where extra = (input value − sumSections) is
+  // derived and persisted as quote.laborExtraHours on save.
   const [sectionTotalHoursMap, setSectionTotalHoursMap] = useState<Record<string, string>>({});
   const [markup, setMarkup] = useState('');
   const [laborMarkup, setLaborMarkup] = useState('');
@@ -61,96 +71,36 @@ export function LaborMarkupScreen() {
   const [warningDialogVisible, setWarningDialogVisible] = useState(false);
   const [warningMessage, setWarningMessage] = useState('');
 
-  const HOURS_PER_DAY = 8;
-
-  // Tracks which quote ID has already been hydrated into local state. We
-  // intentionally do NOT re-hydrate on every currentQuote change — the
-  // LaborMarkupScreen stays mounted in the React Navigation stack while the
-  // user dives into MaterialsListScreen to edit prices. If this effect
-  // re-fired on each material price tweak it would re-run the auto-default
-  // "convert to days" branch (or simply stomp the user's in-progress edits),
-  // which is the source of the "hours and day rate both ×8 after editing
-  // materials" bug. Re-hydration is therefore keyed on the quote id only,
-  // so it runs exactly once per quote (and again only if the screen is
-  // shown a fresh quote, e.g. after creating a new draft).
-  const hydratedQuoteIdRef = useRef<string | null>(null);
+  // Tracks what has already been hydrated into local state. We intentionally
+  // do NOT re-hydrate on every currentQuote change — the LaborMarkupScreen
+  // stays mounted in the React Navigation stack while the user dives into
+  // MaterialsListScreen to edit prices, and re-firing this effect on each
+  // price tweak would stomp edits the user has in progress.
+  //
+  // The key includes the section IDs, so adding or removing a section over in
+  // the materials screen DOES re-hydrate. Without that, the per-section map
+  // here would not know about the new section and the save below would treat
+  // its hours as a negative "extra" buffer — cancelling out the labour the
+  // user just added. Price tweaks don't change the key, so in-progress edits
+  // still survive.
+  const hydratedKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!currentQuote) return;
-    if (hydratedQuoteIdRef.current === currentQuote.id) return;
-    hydratedQuoteIdRef.current = currentQuote.id;
+    const hydrationKey = `${currentQuote.id}::${(currentQuote.sections || []).map((s) => s.id).join(',')}`;
+    if (hydratedKeyRef.current === hydrationKey) return;
+    hydratedKeyRef.current = hydrationKey;
 
-    const hasSections = !!(currentQuote.sections && currentQuote.sections.length > 0);
-
-    // Compute the section totals (in stored units — usually hours) and the
-    // overall labour total = sum + laborExtraHours. The extra preserves any
-    // buffer the user added on top of the per-section labour.
-    let sectionsSumStored = 0;
-    let totalStored: number;
-    let rateForInput: number;
-    const sectionMap: Record<string, string> = {};
-
-    if (hasSections && currentQuote.sections) {
-      for (const s of currentQuote.sections) {
-        const sectionTotal = (s.laborHours || 0) * (s.multiplier || 1);
-        sectionsSumStored += sectionTotal;
-        sectionMap[s.id] = sectionTotal.toString();
-      }
-      const firstNonZeroRate = currentQuote.sections.find((s) => (s.laborRate || 0) > 0)?.laborRate;
-      rateForInput = firstNonZeroRate || currentQuote.laborRate || 0;
-      totalStored = sectionsSumStored + (currentQuote.laborExtraHours || 0);
-    } else {
-      totalStored = currentQuote.laborHours;
-      rateForInput = currentQuote.laborRate;
-    }
-
-    // What unit is the stored data ACTUALLY in? Look at top-level laborUnit
-    // first; if it's missing (legacy quotes, or freshly-built quotes from
-    // materialsPipeline that only set per-section units), fall back to the
-    // first non-zero section's laborUnit. Without this, a quote whose
-    // sections were generated in days but whose top-level laborUnit was
-    // never written would be treated as "hours" and the auto-default would
-    // multiply the (already daily) rate by 8 again — sending it to
-    // 5,120 / 40,960 / etc.
-    const storedUnit: LaborUnit =
-      currentQuote.laborUnit
-      ?? (hasSections
-        ? (currentQuote.sections!.find((s) => (s.laborRate || 0) > 0)?.laborUnit
-          || currentQuote.sections!.find((s) => (s.laborHours || 0) > 0)?.laborUnit
-          || 'hours')
-        : 'hours');
-    const alreadyInDays = storedUnit === 'days';
-
-    // Auto-default to days only for legacy/hours-stored quotes that are
-    // genuinely multi-day (>= 2 full days). Below that, hours read far better
-    // than awkward fractions: a 7h job rendered as "0.9 days" — and its
-    // sections as "0.4 days" / "0.52 days" — was the source of the confusing
-    // day values reported on the admin docs view and customer PDFs.
-    // Stored-in-days quotes pass through untouched.
-    if (!alreadyInDays && totalStored >= HOURS_PER_DAY * 2) {
-      setLaborUnit('days');
-      setLaborHours((Math.round((totalStored / HOURS_PER_DAY) * 10) / 10).toString());
-      setLaborRate((rateForInput * HOURS_PER_DAY).toString());
-      if (hasSections) {
-        const daysMap: Record<string, string> = {};
-        for (const [id, val] of Object.entries(sectionMap)) {
-          const num = parseFloat(val) || 0;
-          daysMap[id] = (Math.round((num / HOURS_PER_DAY) * 10) / 10).toString();
-        }
-        setSectionTotalHoursMap(daysMap);
-      }
-    } else {
-      setLaborUnit(storedUnit);
-      setLaborHours((Math.round(totalStored * 10) / 10).toString());
-      setLaborRate(rateForInput.toString());
-      if (hasSections) {
-        const tidyMap: Record<string, string> = {};
-        for (const [id, val] of Object.entries(sectionMap)) {
-          const num = parseFloat(val) || 0;
-          tidyMap[id] = (Math.round(num * 10) / 10).toString();
-        }
-        setSectionTotalHoursMap(tidyMap);
-      }
+    // Days vs hours is purely how we render. Because the displayed rate is
+    // always derived from the canonical hourly rate rather than from whatever
+    // was last on screen, re-hydrating is idempotent: entering this screen ten
+    // times cannot move the price. See labourEditor.test.ts.
+    const editorState = hydrateLabourEditor(currentQuote);
+    setLaborUnit(editorState.displayUnit);
+    setLaborHours(editorState.totalInput);
+    setLaborRate(editorState.rateInput);
+    if (currentQuote.sections && currentQuote.sections.length > 0) {
+      setSectionTotalHoursMap(editorState.sectionTotals);
     }
 
     setMarkup(currentQuote.markup.toString());
@@ -162,23 +112,28 @@ export function LaborMarkupScreen() {
     setLastTravelValue(ta);
   }, [currentQuote]);
 
-  // Convert values when toggling between hours/days
+  // Re-render the same labour in the other unit. Every value goes back to
+  // canonical hours / $-per-hour and out again, so the toggle is a pure
+  // change of presentation — the price the customer sees never moves.
   const handleToggleUnit = (newUnit: LaborUnit) => {
     if (newUnit === laborUnit) return;
     const currentValue = parseFloat(laborHours) || 0;
     const currentRate = parseFloat(laborRate) || 0;
-    const factor = newUnit === 'days' ? 1 / HOURS_PER_DAY : HOURS_PER_DAY;
-    const rateFactor = newUnit === 'days' ? HOURS_PER_DAY : 1 / HOURS_PER_DAY;
+    const reDisplay = (v: number) => hoursForDisplay(hoursFromDisplay(v, laborUnit), newUnit);
 
-    setLaborHours(currentValue > 0 ? (Math.round(currentValue * factor * 10) / 10).toString() : '');
-    setLaborRate(currentRate > 0 ? (currentRate * rateFactor).toString() : '');
+    setLaborHours(currentValue > 0 ? (Math.round(reDisplay(currentValue) * 10) / 10).toString() : '');
+    setLaborRate(
+      currentRate > 0
+        ? String(rateForDisplay(hourlyRateFromDisplay(currentRate, laborUnit), newUnit))
+        : '',
+    );
 
     // Convert per-section displayed totals so they stay in the new unit.
     setSectionTotalHoursMap((prev) => {
       const next: Record<string, string> = {};
       for (const [id, val] of Object.entries(prev)) {
         const num = parseFloat(val) || 0;
-        next[id] = num > 0 ? (Math.round(num * factor * 10) / 10).toString() : '';
+        next[id] = num > 0 ? (Math.round(reDisplay(num) * 10) / 10).toString() : '';
       }
       return next;
     });
@@ -213,72 +168,46 @@ export function LaborMarkupScreen() {
     setLaborHours((Math.round(newTotal * 10) / 10).toString());
   };
 
-  // Save changes when navigating back
-  useEffect(() => {
-    const unsubscribe = navigation.addListener('beforeRemove', () => {
-      if (!currentQuote) return;
+  /**
+   * Turn the display-space editor state back into a canonical document:
+   * quantities in hours, rate in $/hour, `laborUnit: 'hours'`, and the days
+   * preference recorded separately in `labourDisplayUnit`.
+   *
+   * Every exit from this screen (gesture-back, Save, Next) goes through here,
+   * so there is no path that writes labour in one shape and another path that
+   * reads it in a different one.
+   */
+  const buildCanonicalUpdate = React.useCallback(() => {
+    if (!currentQuote) return null;
 
-      const hasSections = !!(currentQuote.sections && currentQuote.sections.length > 0);
-      const rate = parseFloat(laborRate) || 0;
-      const unit = laborUnit;
-      const hours = parseFloat(laborHours) || 0;
+    const patch = applyLabourEditor(currentQuote, {
+      displayUnit: laborUnit,
+      totalInput: laborHours,
+      rateInput: laborRate,
+      sectionTotals: sectionTotalHoursMap,
+    });
 
-      // Build updated sections from the per-section state. Round per-unit
-      // laborHours to 2dp on save so persisted data is reasonable, and
-      // recompute laborTotal so it stays consistent with the rounded value.
-      let sectionsSumLocal = 0;
-      const editedSectionsLocal = hasSections && currentQuote.sections
-        ? currentQuote.sections.map((s) => {
-            const sectionTotalDisplayed = parseFloat(sectionTotalHoursMap[s.id] ?? '0') || 0;
-            sectionsSumLocal += sectionTotalDisplayed;
-            const mul = s.multiplier || 1;
-            const perUnitHoursRounded = mul > 0
-              ? Math.round((sectionTotalDisplayed / mul) * 100) / 100
-              : 0;
-            return {
-              ...s,
-              laborHours: perUnitHoursRounded,
-              laborHoursTotal: Math.round(perUnitHoursRounded * mul * 100) / 100,
-              laborRate: rate,
-              laborUnit: unit,
-              laborTotal: Math.round(perUnitHoursRounded * rate * mul * 100) / 100,
-            };
-          })
-        : undefined;
+    const markupPercent = parseFloat(markup) || 0;
+    const laborMarkupPercent = parseFloat(laborMarkup) || 0;
+    const travelPct = travelDismissed ? 0 : (parseFloat(travelAdjustment) || 0);
 
-      // Extra is the buffer between the user-entered total and the section sum.
-      const extraHoursLocal = hasSections
-        ? Math.round((hours - sectionsSumLocal) * 10) / 10
-        : 0;
+    const calculation = calculateQuote(
+      currentQuote.materials,
+      patch.laborRate,
+      patch.laborHours,
+      markupPercent,
+      travelPct,
+      patch.sections ?? currentQuote.sections,
+      laborMarkupPercent,
+      patch.laborExtraHours,
+      currentQuote.pricesIncludeGst === true,
+      currentQuote.gstRegistered !== false,
+    );
 
-      const markupPercent = parseFloat(markup) || 0;
-      const laborMarkupPercent = parseFloat(laborMarkup) || 0;
-      const travelPct = travelDismissed ? 0 : (parseFloat(travelAdjustment) || 0);
-
-      const calculation = calculateQuote(
-        currentQuote.materials,
-        rate,
-        hours,
-        markupPercent,
-        travelPct,
-        editedSectionsLocal ?? currentQuote.sections,
-        laborMarkupPercent,
-        extraHoursLocal,
-        currentQuote.pricesIncludeGst === true,
-        currentQuote.gstRegistered !== false,
-      );
-
-      // Save labor and calculated values before leaving. Both updateQuote
-      // (sync, in-memory) and saveDraft (persists) are needed — gesture-back
-      // without saveDraft would leave the edit only in currentQuote and risk
-      // losing it to a stale snapshot or app quit.
-      const updatedQuote = {
+    return {
+      update: {
         ...currentQuote,
-        ...(editedSectionsLocal ? { sections: editedSectionsLocal } : {}),
-        laborHours: hours,
-        laborRate: rate,
-        laborUnit: unit,
-        laborExtraHours: extraHoursLocal,
+        ...patch,
         markup: markupPercent,
         laborMarkup: laborMarkupPercent,
         showLaborBreakdown,
@@ -289,72 +218,51 @@ export function LaborMarkupScreen() {
         markupAmount: calculation.markupAmount,
         gst: calculation.gst,
         total: calculation.total,
-      };
-      updateQuote(updatedQuote);
-      persistDocument(updatedQuote);
+      },
+      calculation,
+      travelPct,
+      markupPercent,
+      laborMarkupPercent,
+    };
+  }, [currentQuote, laborHours, laborRate, laborUnit, sectionTotalHoursMap, markup, laborMarkup, showLaborBreakdown, travelAdjustment, travelDismissed]);
+
+  // Save changes when navigating back
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('beforeRemove', () => {
+      // Save labor and calculated values before leaving. Both updateQuote
+      // (sync, in-memory) and saveDraft (persists) are needed — gesture-back
+      // without saveDraft would leave the edit only in currentQuote and risk
+      // losing it to a stale snapshot or app quit.
+      const built = buildCanonicalUpdate();
+      if (!built) return;
+      updateQuote(built.update);
+      persistDocument(built.update);
     });
 
     return unsubscribe;
-  }, [navigation, currentQuote, laborHours, laborRate, laborUnit, sectionTotalHoursMap, markup, laborMarkup, showLaborBreakdown, travelAdjustment, travelDismissed, updateQuote, persistDocument]);
+  }, [navigation, buildCanonicalUpdate, updateQuote, persistDocument]);
 
   if (!currentQuote) {
     return null;
   }
 
-  // Calculate totals in real-time. In sections mode the user edits each
-  // section's total hours via per-section steppers; the input above the
-  // Labour Total mirrors sumSections + extra. Extra is derived from the
-  // input value − sumSections and persisted as quote.laborExtraHours.
+  // Live totals for the screen. The editor state is display-space, so the
+  // canonical builder is the single place that converts back to hours — the
+  // preview below and every save path read from the same object, which is
+  // what stops the displayed price and the saved price from diverging.
   const hasSectionsMode = !!(currentQuote.sections && currentQuote.sections.length > 0);
   const rate = parseFloat(laborRate) || 0;
-  const effectiveLaborUnit = laborUnit;
   const totalHoursInput = parseFloat(laborHours) || 0;
+  const built = buildCanonicalUpdate()!;
+  const canonicalUpdate = built.update;
+  const calculation = built.calculation;
+  const travelPct = built.travelPct;
 
-  // Build edited sections from the per-section state. laborHours per unit is
-  // derived from displayedTotal / multiplier — kept precise for accurate calc.
-  const editedSections = hasSectionsMode && currentQuote.sections
-    ? currentQuote.sections.map((s) => {
-        const sectionTotalHours = parseFloat(sectionTotalHoursMap[s.id] ?? '0') || 0;
-        const mul = s.multiplier || 1;
-        const perUnitHours = mul > 0 ? sectionTotalHours / mul : 0;
-        return {
-          ...s,
-          laborHours: perUnitHours,
-          laborHoursTotal: Math.round(perUnitHours * mul * 100) / 100,
-          laborRate: rate,
-          laborUnit: effectiveLaborUnit,
-          laborTotal: perUnitHours * rate * mul,
-        };
-      })
-    : undefined;
-
-  // Sum of section displayed totals (in current unit) and the derived extra.
-  const sectionsSumDisplayed = editedSections
-    ? editedSections.reduce((sum, s) => sum + s.laborHours * (s.multiplier || 1), 0)
-    : 0;
-  const extraHoursDerived = hasSectionsMode
-    ? Math.round((totalHoursInput - sectionsSumDisplayed) * 10) / 10
-    : 0;
-
-  // Top-level hours mirror the input value for legacy consumers.
-  const hours = totalHoursInput;
-
-  const markupPercent = parseFloat(markup) || 0;
-  const laborMarkupPercent = parseFloat(laborMarkup) || 0;
-  const travelPct = travelDismissed ? 0 : (parseFloat(travelAdjustment) || 0);
-
-  const calculation = calculateQuote(
-    currentQuote.materials,
-    rate,
-    hours,
-    markupPercent,
-    travelPct,
-    editedSections ?? currentQuote.sections,
-    laborMarkupPercent,
-    extraHoursDerived,
-    currentQuote.pricesIncludeGst === true,
-    currentQuote.gstRegistered !== false,
-  );
+  // Extra buffer, expressed in the unit on screen so the label matches the
+  // inputs the user is looking at.
+  const extraHoursDerived = Math.round(
+    hoursForDisplay(canonicalUpdate.laborExtraHours ?? 0, laborUnit) * 10,
+  ) / 10;
 
   // Helper: unit labels
   const unitLabel = laborUnit === 'days' ? 'days' : 'hrs';
@@ -368,25 +276,8 @@ export function LaborMarkupScreen() {
   const geocodeFailed = !!currentQuote.travelGeocodeFailed;
 
   const handleSaveAndReturn = () => {
-    if (!currentQuote) return;
-    const updatedQuote = {
-      ...currentQuote,
-      ...(editedSections ? { sections: editedSections } : {}),
-      laborHours: hours,
-      laborRate: rate,
-      laborUnit: effectiveLaborUnit,
-      laborExtraHours: extraHoursDerived,
-      markup: markupPercent,
-      laborMarkup: laborMarkupPercent,
-      showLaborBreakdown,
-      travelAdjustment: travelPct,
-      laborTotal: calculation.laborTotal,
-      materialsSubtotal: calculation.materialsSubtotal,
-      subtotal: calculation.subtotal,
-      markupAmount: calculation.markupAmount,
-      gst: calculation.gst,
-      total: calculation.total,
-    };
+    const updatedQuote = canonicalUpdate;
+    if (!updatedQuote) return;
     updateQuote(updatedQuote);
     persistDocument(updatedQuote);
     navigation.goBack();
@@ -399,7 +290,7 @@ export function LaborMarkupScreen() {
     // doesn't trip the "Zero Labor Cost" warning.
     const zeroLabour = hasSectionsMode
       ? calculation.laborTotal === 0
-      : (hours === 0 || rate === 0);
+      : (totalHoursInput === 0 || rate === 0);
     if (zeroLabour) {
       const docType = mode === 'invoice' ? 'invoice' : 'quote';
       setWarningMessage(
@@ -414,23 +305,9 @@ export function LaborMarkupScreen() {
 
   const proceedToPreview = () => {
     // Update quote with labor details
+    if (!canonicalUpdate) return;
     const updatedQuote = {
-      ...currentQuote,
-      ...(editedSections ? { sections: editedSections } : {}),
-      laborHours: hours,
-      laborRate: rate,
-      laborUnit: effectiveLaborUnit,
-      laborExtraHours: extraHoursDerived,
-      markup: markupPercent,
-      laborMarkup: laborMarkupPercent,
-      showLaborBreakdown,
-      travelAdjustment: travelPct,
-      laborTotal: calculation.laborTotal,
-      materialsSubtotal: calculation.materialsSubtotal,
-      subtotal: calculation.subtotal,
-      markupAmount: calculation.markupAmount,
-      gst: calculation.gst,
-      total: calculation.total,
+      ...canonicalUpdate,
       draftStep: previewScreenName,
     };
 
@@ -508,7 +385,13 @@ export function LaborMarkupScreen() {
             </Text>
             {currentQuote.sections.map((s) => {
               const sectionTotalHours = parseFloat(sectionTotalHoursMap[s.id] ?? '0') || 0;
-              const sectionDollars = sectionTotalHours * rate;
+              // Read the dollars from the same object the save writes, rather
+              // than re-deriving them from the rate box: a section carrying its
+              // own rate (a template applied at a different price) would
+              // otherwise show a figure the save never produces.
+              const sectionDollars =
+                canonicalUpdate.sections?.find((x) => x.id === s.id)?.laborTotal
+                ?? sectionTotalHours * rate;
               const canDecrement = sectionTotalHours > 0;
               return (
                 <View

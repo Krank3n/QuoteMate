@@ -465,3 +465,81 @@ describe('checkDocumentIntegrity — not GST-registered', () => {
     expect(codes(checkDocumentIntegrity(buildClean({ total: 300 })))).toContain('total_mismatch');
   });
 });
+
+// Labour units ----------------------------------------------------------------
+
+describe('checkDocumentIntegrity — labour units and rate sanity', () => {
+  // The state that produced the Aug 2026 ×8 inflation: one document holding
+  // two unit systems. Every damaged quote passed checks 1-9 because a doubled
+  // rate is still internally consistent — these are the checks that catch it.
+  const sectioned = (sections: any[], over: Partial<any> = {}) => buildClean({
+    laborHours: 0,
+    laborTotal: sections.reduce((s, x) => s + x.laborTotal, 0),
+    subtotal: 100 + sections.reduce((s, x) => s + x.laborTotal, 0),
+    gst: (100 + sections.reduce((s, x) => s + x.laborTotal, 0)) * 0.1,
+    total: (100 + sections.reduce((s, x) => s + x.laborTotal, 0)) * 1.1,
+    sections,
+    job: { estimatedHours: Math.round(sections.reduce((s, x) => s + x.laborHours * (x.multiplier || 1) * (x.laborUnit === 'days' ? 8 : 1), 0)) },
+    ...over,
+  });
+
+  it('flags sections that disagree with each other about the unit', () => {
+    const issues = checkDocumentIntegrity(sectioned([
+      { name: 'A', multiplier: 1, laborHours: 2, laborRate: 100, laborUnit: 'hours', laborTotal: 200 },
+      { name: 'B', multiplier: 1, laborHours: 1, laborRate: 800, laborUnit: 'days', laborTotal: 800 },
+    ]));
+    expect(codes(issues)).toContain('mixed_labour_units');
+  });
+
+  it('flags a document whose unit disagrees with its sections', () => {
+    const issues = checkDocumentIntegrity(sectioned([
+      { name: 'A', multiplier: 1, laborHours: 1, laborRate: 800, laborUnit: 'days', laborTotal: 800 },
+    ]));
+    expect(codes(issues)).toContain('mixed_labour_units');
+  });
+
+  it('flags labour stored in days with no sections', () => {
+    const issues = checkDocumentIntegrity(buildClean({
+      laborUnit: 'days', laborRate: 800, laborHours: 0.25, laborTotal: 200,
+    }));
+    expect(codes(issues)).toContain('mixed_labour_units');
+  });
+
+  it('passes a canonical hours document', () => {
+    expect(codes(checkDocumentIntegrity(sectioned([
+      { name: 'A', multiplier: 1, laborHours: 2, laborRate: 100, laborUnit: 'hours', laborTotal: 200 },
+    ])))).not.toContain('mixed_labour_units');
+  });
+
+  it('flags an effective rate 8× the business rate (QU-178558 shape)', () => {
+    const issues = checkDocumentIntegrity(sectioned([
+      { name: 'Roof Tiles', multiplier: 1, laborHours: 5, laborRate: 680, laborUnit: 'hours', laborTotal: 3400 },
+    ]), { businessHourlyRate: 85 });
+    const hit = issues.find((i) => i.code === 'labour_rate_implausible');
+    expect(hit).toBeTruthy();
+    expect(hit!.actual).toBe(680);
+    expect(hit!.expected).toBe(85);
+  });
+
+  it('sees through a day rate when judging plausibility', () => {
+    // $5,440/day is $680/h — the same bug wearing the other unit.
+    const issues = checkDocumentIntegrity(sectioned([
+      { name: 'Bay', multiplier: 21, laborHours: 0.19, laborRate: 5440, laborUnit: 'days', laborTotal: 21705.6 },
+    ]), { businessHourlyRate: 85 });
+    expect(codes(issues)).toContain('labour_rate_implausible');
+  });
+
+  it('leaves a tradie charging a genuine premium alone', () => {
+    const issues = checkDocumentIntegrity(sectioned([
+      { name: 'A', multiplier: 1, laborHours: 2, laborRate: 170, laborUnit: 'hours', laborTotal: 340 },
+    ]), { businessHourlyRate: 85 });
+    expect(codes(issues)).not.toContain('labour_rate_implausible');
+  });
+
+  it('skips the rate check when the business rate is unknown', () => {
+    const issues = checkDocumentIntegrity(sectioned([
+      { name: 'A', multiplier: 1, laborHours: 5, laborRate: 680, laborUnit: 'hours', laborTotal: 3400 },
+    ]));
+    expect(codes(issues)).not.toContain('labour_rate_implausible');
+  });
+});
