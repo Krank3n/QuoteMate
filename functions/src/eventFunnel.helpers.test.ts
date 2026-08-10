@@ -10,6 +10,7 @@ import {
   furthestStage,
   isMonetized,
   parseSendMethod,
+  sumSquarePayments,
   rollupEventFunnel,
   rollupSendFlow,
   summariseWaits,
@@ -471,5 +472,32 @@ describe('docHasSquarePayment', () => {
     expect(docHasSquarePayment({ payments: [] })).toBe(false);
     expect(docHasSquarePayment({})).toBe(false);
     expect(docHasSquarePayment(null)).toBe(false);
+  });
+});
+
+describe('sumSquarePayments', () => {
+  it('sums only the square-sourced entries', () => {
+    expect(sumSquarePayments({ payments: [{ method: 'square', amount: 100 }] })).toBe(100);
+    expect(sumSquarePayments({ payments: [{ squarePaymentId: 'sq-1', amount: 50 }] })).toBe(50);
+  });
+
+  it('excludes the manual slice of a mixed-method document', () => {
+    // Square deposit + bank-transfer balance: only the deposit monetises.
+    expect(
+      sumSquarePayments({
+        payments: [
+          { method: 'square', squarePaymentId: 'sq-1', amount: 200 },
+          { method: 'bank', kind: 'manual', amount: 578.32 },
+        ],
+      })
+    ).toBe(200);
+  });
+
+  it('returns 0 for manual-only, empty and malformed docs', () => {
+    expect(sumSquarePayments({ payments: [{ method: 'bank', amount: 578.32 }] })).toBe(0);
+    expect(sumSquarePayments({ payments: [] })).toBe(0);
+    expect(sumSquarePayments({})).toBe(0);
+    expect(sumSquarePayments(null)).toBe(0);
+    expect(sumSquarePayments({ payments: [{ method: 'square', amount: 'oops' }] })).toBe(0);
   });
 });

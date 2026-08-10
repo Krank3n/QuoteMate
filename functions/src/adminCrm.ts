@@ -37,6 +37,7 @@ import {
   rollupEventFunnel,
   foldEvent,
   docHasSquarePayment,
+  sumSquarePayments,
   isMonetized,
   type EventFunnelUserInput,
   type EventFunnelPayload,
@@ -1677,6 +1678,10 @@ export const adminListDocuments = functions
         const paidTotal = Number(doc.paidTotal) || 0;
         const depositPaid = Number(doc.depositPaid) || 0;
         const balanceDue = Number(doc.balanceDue) || Math.max(total - paidTotal - depositPaid, 0);
+        // Subset of paidTotal that ran through Square. `paidTotal` counts every
+        // recorded payment including manual cash/bank entries, which earn us
+        // nothing — keep the two apart so the dashboard can show the gap.
+        const squarePaidTotal = sumSquarePayments(doc);
 
         // "Stuck" heuristic — quote viewed but no response for >3 days, OR
         // invoice sent and overdue/unpaid for >14 days. Helps the admin spot
@@ -1731,6 +1736,7 @@ export const adminListDocuments = functions
           hasAcceptanceToken: !!doc.acceptanceToken,
           depositPaid,
           paidTotal,
+          squarePaidTotal,
           balanceDue,
           depositPaidAt,
           squarePaymentId: doc.depositSquarePaymentId || doc.squarePaymentId || null,
@@ -1769,8 +1775,14 @@ export const adminListDocuments = functions
       valueQuoteSent: sumByStage('quote_sent') + sumByStage('quote_accepted') + sumByStage('quote_rejected'),
       valueAccepted: sumByStage('quote_accepted'),
       valueInvoiced: sumByStage('invoice_sent') + sumByStage('partially_paid') + sumByStage('paid'),
+      // valuePaid/paidCount cover EVERY recorded payment — cash, bank transfer,
+      // cheque, Square. Only the *Square* slice earns QuoteMate a platform fee,
+      // so it's reported separately rather than conflated (the tile used to be
+      // labelled "Paid via Square" while summing all methods).
       valuePaid: rows.reduce((a, r) => a + Math.max(r.paidTotal, r.depositPaid), 0),
       paidCount: rows.filter((r) => r.paidTotal > 0 || r.depositPaid > 0).length,
+      valuePaidSquare: rows.reduce((a, r) => a + r.squarePaidTotal, 0),
+      paidCountSquare: rows.filter((r) => r.squarePaidTotal > 0).length,
     };
 
     return { documents: rows, totals };

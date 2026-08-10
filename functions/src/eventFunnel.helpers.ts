@@ -258,6 +258,15 @@ export function foldEvent(
 }
 
 /**
+ * True iff one payments[] entry came from Square rather than a manual "record
+ * payment" tap. The webhook writes both `method: 'square'` and a
+ * `squarePaymentId` (see documentHandlers.ts), so either alone is sufficient.
+ */
+function isSquarePayment(p: any): boolean {
+  return !!p && (p.method === 'square' || typeof p.squarePaymentId === 'string');
+}
+
+/**
  * True iff a document records at least one REAL Square payment (webhook-written
  * payments[] entry with method 'square'). Manual "record payment" entries
  * (cash/bank) don't monetise QuoteMate and must not count.
@@ -265,8 +274,21 @@ export function foldEvent(
 export function docHasSquarePayment(doc: { payments?: unknown } | null | undefined): boolean {
   const payments = doc?.payments;
   if (!Array.isArray(payments)) return false;
-  return payments.some(
-    (p: any) => p && (p.method === 'square' || typeof p.squarePaymentId === 'string')
+  return payments.some(isSquarePayment);
+}
+
+/**
+ * Dollars on a document that actually flowed through Square — the only slice
+ * QuoteMate earns a platform fee on. Deliberately NOT `paidTotal`: a doc can
+ * mix a Square deposit with a manually-recorded bank-transfer balance, and
+ * only the former monetises.
+ */
+export function sumSquarePayments(doc: { payments?: unknown } | null | undefined): number {
+  const payments = doc?.payments;
+  if (!Array.isArray(payments)) return 0;
+  return payments.reduce(
+    (acc: number, p: any) => (isSquarePayment(p) ? acc + (Number(p.amount) || 0) : acc),
+    0
   );
 }
 
