@@ -24,6 +24,7 @@ import {
   quoteRecordToDocumentRecord,
   invoiceRecordToDocumentRecord,
 } from './shared/document/adapter';
+import { normaliseLabourToHours } from './shared/document/labourUnits';
 import { isStageDowngrade } from './shared/document/stage';
 import type { DocumentStage, LegacyDocumentRecord } from './shared/document/types';
 
@@ -100,8 +101,16 @@ export function preserveFirstSend(existing: AnyData | null | undefined, toWrite:
 async function writeMirror(
   userId: string,
   mirrorId: string,
-  projection: AnyData,
+  rawProjection: AnyData,
 ): Promise<MirrorWriteResult> {
+  // Canonicalise labour on the way in. The legacy quotes/invoices collections
+  // still hold day-shaped records, and any client build that predates the
+  // canonical-hours fix will happily write more. Without this, such a write
+  // projects straight over a healed unified document and restores the old
+  // shape — which is exactly what undid 21 of the 161 migrated documents on
+  // 2026-08-10. Money is preserved (value × 8 paired with rate ÷ 8); see
+  // shared/document/labourUnits.ts.
+  const projection = normaliseLabourToHours(rawProjection as any) as AnyData;
   const ref = documentRef(userId, mirrorId);
   const existing = await ref.get();
   let toWrite: AnyData = projection;

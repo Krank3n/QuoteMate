@@ -161,6 +161,36 @@ export function syncEstimatedHours(d: any): any {
   return { ...d, job: { ...d.job, estimatedHours: hours } };
 }
 
+/**
+ * Apply the same canonical labour fields to the legacy quotes/invoices record
+ * this document mirrors. Only the labour + totals fields are touched, and only
+ * if the legacy record exists — everything else about the legacy shape is left
+ * exactly as the app wrote it.
+ */
+async function healLegacyCopy(uid: string, docId: string, next: any): Promise<void> {
+  const db = admin.firestore();
+  for (const collection of ['quotes', 'invoices']) {
+    const ref = db.doc(`users/${uid}/${collection}/${docId}`);
+    const snap = await ref.get();
+    if (!snap.exists) continue;
+    await ref.update({
+      ...(next.sections ? { sections: next.sections } : {}),
+      laborRate: next.laborRate,
+      laborHours: next.laborHours,
+      laborUnit: 'hours',
+      labourDisplayUnit: next.labourDisplayUnit ?? 'hours',
+      laborExtraHours: next.laborExtraHours ?? 0,
+      laborTotal: next.laborTotal,
+      materialsSubtotal: next.materialsSubtotal,
+      subtotal: next.subtotal,
+      markupAmount: next.markupAmount,
+      gst: next.gst,
+      total: next.total,
+      labourUnitsHealedAt: Date.now(),
+    });
+  }
+}
+
 async function healDoc(
   uid: string,
   business: string,
@@ -268,6 +298,15 @@ async function healDoc(
       ...(next.job ? { job: next.job } : {}),
       labourUnitsHealedAt: Date.now(),
     });
+
+    // Heal the LEGACY copy too. The unified document is a mirror of
+    // users/{uid}/quotes|invoices/{id}, and onQuoteWritten/onInvoiceWritten
+    // project that legacy record over the top whenever a client touches it.
+    // Healing only the unified side leaves a day-shaped original that a pre-fix
+    // client re-propagates — that is what reverted 21 of the 161 documents
+    // healed on 2026-08-10. The mirror now normalises defensively as well, but
+    // the stale source still has to go.
+    await healLegacyCopy(snap.ref.parent.parent!.id, snap.id, next);
   }
 
   return {

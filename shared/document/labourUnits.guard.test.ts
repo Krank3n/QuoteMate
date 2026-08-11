@@ -75,6 +75,20 @@ describe('canonical labour units — source guardrail', () => {
     ].join(' ')).toEqual([]);
   });
 
+  it('the legacy mirror canonicalises labour before projecting', () => {
+    // functions/src/documentMirror.ts projects the legacy quotes/invoices
+    // collections into the unified documents collection. Those legacy records
+    // are still day-shaped, and any pre-fix client keeps writing more, so the
+    // mirror MUST normalise — without it a stale client write projects straight
+    // over a healed document and restores the 8x shape. That is precisely what
+    // reverted 21 of the 161 migrated documents on 2026-08-10.
+    const mirror = readFileSync(join(REPO, 'functions/src/documentMirror.ts'), 'utf8');
+    expect(
+      /normaliseLabourToHours\s*\(/.test(withoutComments(mirror)),
+      'documentMirror.ts must call normaliseLabourToHours before writing a projection',
+    ).toBe(true);
+  });
+
   it('no source file derives a stored labour rate by multiplying by a day length', () => {
     // `laborRate: rate * 8` is how a day rate got into storage in the first
     // place. Display conversion goes through rateForDisplay instead.
