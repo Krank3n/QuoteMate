@@ -216,8 +216,20 @@ export function evaluateDocumentPaymentReceipt(
   const deltaCents = paidAfterCents - floorCents;
   if (deltaCents < 1) return null;
 
-  const paidAfter = paidAfterCents / 100;
-  const balanceDue = round2(Math.max(0, total - paidAfter));
+  // Balance is computed against NON-deposit money. `total` on an invoice
+  // converted from a quote is already net of the deposit credit (see
+  // convertDocumentToInvoice), while the deposit stays on the ledger and in
+  // `paidTotal` — the mirror even re-adds it as a `deposit-credit-*` payment.
+  // Subtracting the raw paidTotal from an already-net total would count the
+  // deposit twice: a $100 deposit on a $1,100 quote would tell the customer
+  // they owe $400 when they owe $500, and call a $1,000 invoice "paid in
+  // full" while $100 was still outstanding. The legacy receipt used
+  // `total − paidAmount`, which excluded the deposit; this keeps that.
+  const depositPaidCents = (Array.isArray(after.payments) ? after.payments : [])
+    .filter((p: any) => p?.kind === 'deposit')
+    .reduce((acc: number, p: any) => acc + toCents(p?.amount), 0);
+  const paidAgainstInvoice = Math.max(0, paidAfterCents - depositPaidCents) / 100;
+  const balanceDue = round2(Math.max(0, total - paidAgainstInvoice));
 
   // Attribute the receipt to the payments this write actually added, falling
   // back to the newest one on the ledger when the ids are unchanged (the
@@ -233,7 +245,11 @@ export function evaluateDocumentPaymentReceipt(
   return {
     customerEmail,
     amountReceived: round2(deltaCents / 100),
-    isFullyPaid: after.stage === 'paid' || balanceDue <= EPSILON,
+    // Deliberately NOT `stage === 'paid' || ...`: recordDocumentPayment sets
+    // that stage from the same deposit-double-counting arithmetic corrected
+    // above, so trusting it would tell a customer with an outstanding
+    // deposit balance that they're square. The money decides.
+    isFullyPaid: balanceDue <= EPSILON,
     balanceDue,
     paymentMethod: documentPaymentMethodToLegacy(source?.method),
     receiptedPaidCents: paidAfterCents,

@@ -10652,19 +10652,39 @@ export const onQuoteViewed = functions.firestore
 // -----------------------------------------------------------
 
 /**
- * True when the legacy invoice has a unified mirror document, i.e. when the
- * documents-collection triggers own its notifications. Uses the mirror's own
- * id rule so the two can't disagree.
+ * True when the legacy invoice has a mirror document that could ACTUALLY send
+ * the receipt itself — i.e. when the documents-collection trigger owns its
+ * notifications. Uses the mirror's own id rule so the two can't disagree.
+ *
+ * Existence alone is not enough, and getting this wrong is silent. Square
+ * reconciliation calls applyPaymentToDocument → setDocumentStage, which does
+ * a merge write of only {stage, payments, paidTotal, balanceDue, updatedAt}.
+ * When no mirror existed yet (loadDocument falls back to the legacy row
+ * rather than creating one), that write CREATES a stub carrying no `type`
+ * and no `customerEmail`. onDocumentPaymentReceived rejects it, so deferring
+ * on `snap.exists` would silence the receipt — permanently, since the stub
+ * then blocks every future payment on that invoice too. Require the fields
+ * the documents trigger needs before handing over.
  */
 async function legacyInvoiceHasMirror(
   userId: string,
   invoice: Record<string, any>,
   invoiceId: string,
+  // The two triggers need different things of the mirror: a receipt needs a
+  // customer email, the tradie's push does not. Handing the push over on the
+  // stricter test would double-push an invoice with no customer email (the
+  // legacy trigger would not defer, and the documents trigger pushes anyway).
+  need: 'receipt' | 'push',
 ): Promise<boolean> {
   try {
     const mirrorId = mirrorIdForInvoice(invoice, invoiceId);
     const snap = await db.doc(`users/${userId}/documents/${mirrorId}`).get();
-    return snap.exists;
+    if (!snap.exists) return false;
+    const mirror = snap.data() as Record<string, any>;
+    if (mirror?.type !== 'invoice') return false;
+    if (need === 'push') return true;
+    const email = typeof mirror?.customerEmail === 'string' ? mirror.customerEmail.trim() : '';
+    return email !== '';
   } catch (err: any) {
     // Read failure: assume no mirror and send. A missing receipt is the bug
     // we're fixing; a duplicate is worse, but a Firestore read failing here
@@ -10737,7 +10757,7 @@ export const onInvoiceStatusChanged = functions.firestore
 
     // Mirrored invoices are the documents trigger's job — otherwise the
     // tradie gets two "you've been paid" pushes for one payment.
-    if (await legacyInvoiceHasMirror(userId, after, invoiceId)) return;
+    if (await legacyInvoiceHasMirror(userId, after, invoiceId, 'push')) return;
 
     await sendAussiePush(userId, 'invoice_paid', {
       customer: after.customerName || 'A customer',
@@ -10764,7 +10784,7 @@ export const onInvoicePaymentReceived = functions.firestore
 
     // Single delivery: defer to onDocumentPaymentReceived when this invoice
     // is mirrored into the unified collection (the normal case today).
-    if (await legacyInvoiceHasMirror(userId, after, invoiceId)) return;
+    if (await legacyInvoiceHasMirror(userId, after, invoiceId, 'receipt')) return;
 
     try {
       await deliverPaymentReceipt({
@@ -10817,29 +10837,48 @@ export const onDocumentPaymentReceived = functions.firestore
         // email in flight. Firestore triggers are at-least-once, so without
         // this a redelivery would bill the customer's inbox twice.
         const ref = db.doc(`users/${userId}/documents/${docId}`);
+        let previousMark = 0;
         const claimed = await db.runTransaction(async (tx) => {
           const snap = await tx.get(ref);
           if (!snap.exists) return false;
-          if (!claimsReceipt(snap.data()?.receiptSentPaidCents, receipt.receiptedPaidCents)) {
-            return false;
-          }
+          const current = Number(snap.data()?.receiptSentPaidCents) || 0;
+          if (!claimsReceipt(current, receipt.receiptedPaidCents)) return false;
+          previousMark = current;
           tx.update(ref, { receiptSentPaidCents: receipt.receiptedPaidCents });
           return true;
         });
 
         if (claimed) {
-          await deliverPaymentReceipt({
-            userId,
-            receipt,
-            customerName: after.customerName,
-            invoiceNumber: receipt.invoiceNumber,
-            jobName: after.job?.name,
-            paidAt: new Date(receipt.paidAtMs),
-          });
+          try {
+            await deliverPaymentReceipt({
+              userId,
+              receipt,
+              customerName: after.customerName,
+              invoiceNumber: receipt.invoiceNumber,
+              jobName: after.job?.name,
+              paidAt: new Date(receipt.paidAtMs),
+            });
+          } catch (sendErr: any) {
+            // Claim-before-send is what makes redelivery safe, but a claim we
+            // never cashed would wedge this paid total shut forever — a
+            // transient Brevo 5xx would become a permanently missing receipt,
+            // the exact failure this trigger exists to fix. Release the claim
+            // so a retry or replay can take it, and shout: nothing else will.
+            await db.runTransaction(async (tx) => {
+              const snap = await tx.get(ref);
+              if (!snap.exists) return;
+              // Compare-and-set: only roll back OUR claim. A later payment
+              // may have already moved the mark past it.
+              if (Number(snap.data()?.receiptSentPaidCents) === receipt.receiptedPaidCents) {
+                tx.update(ref, { receiptSentPaidCents: previousMark });
+              }
+            }).catch(() => undefined);
+            throw sendErr;
+          }
         }
       } catch (err: any) {
         // Best-effort: a receipt failure must never block the payment write.
-        functions.logger.warn('payment_receipt_email_failed', {
+        functions.logger.error('payment_receipt_email_failed', {
           userId, docId, message: err?.message, collection: 'documents',
         });
       }

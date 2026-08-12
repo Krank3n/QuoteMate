@@ -73,8 +73,10 @@ describe.each(['onInvoicePaymentReceived', 'onInvoiceStatusChanged'])(
       expect(body).toContain("functions.firestore\n  .document('users/{userId}/invoices/{invoiceId}')");
     });
 
-    it('bails out when the invoice has a unified mirror document', () => {
-      expect(body).toContain('if (await legacyInvoiceHasMirror(userId, after, invoiceId)) return;');
+    it('bails out when the invoice has a mirror capable of doing the job itself', () => {
+      expect(body).toMatch(
+        /if \(await legacyInvoiceHasMirror\(userId, after, invoiceId, '(receipt|push)'\)\) return;/,
+      );
     });
 
     it('checks for the mirror BEFORE sending anything', () => {
@@ -97,5 +99,29 @@ describe('legacyInvoiceHasMirror — resolves the mirror id the mirror itself us
     expect(start).toBeGreaterThan(-1);
     expect(body).toContain('mirrorIdForInvoice(invoice, invoiceId)');
     expect(body).toContain('users/${userId}/documents/${mirrorId}');
+  });
+
+  it('requires a receipt-CAPABLE mirror, not bare existence', () => {
+    // applyPaymentToDocument can create a stub document carrying no `type`
+    // and no `customerEmail`; deferring to it silences the receipt forever.
+    const start = indexSrc.indexOf('async function legacyInvoiceHasMirror');
+    const body = indexSrc.slice(start, indexSrc.indexOf('\n}', start));
+    expect(body).toContain("mirror?.type !== 'invoice'");
+    expect(body).toContain('customerEmail');
+    expect(body).not.toMatch(/return snap\.exists;/);
+  });
+});
+
+describe('receipt claim is reversible — a failed send must not wedge the mark', () => {
+  const body = triggerBody('onDocumentPaymentReceived');
+
+  it('rolls the mark back when delivery throws, under compare-and-set', () => {
+    expect(body).toContain('previousMark');
+    expect(body).toContain('receiptSentPaidCents: previousMark');
+    expect(body).toContain('=== receipt.receiptedPaidCents');
+  });
+
+  it('logs a failed receipt at error level so it is alertable', () => {
+    expect(body).toContain("functions.logger.error('payment_receipt_email_failed'");
   });
 });

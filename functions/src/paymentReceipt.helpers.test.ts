@@ -254,6 +254,64 @@ describe('evaluateDocumentPaymentReceipt — receipts for document-collection in
     expect(r!.isFullyPaid).toBe(true);
   });
 
+  // A deposit paid against the source quote survives onto the invoice ledger,
+  // but the invoice `total` was already reduced by that deposit when the
+  // quote was converted. Subtracting the raw paidTotal would charge the
+  // deposit twice — against the customer, in an email they act on.
+  describe('deposit credit — total is already net of it, so the ledger must not subtract it twice', () => {
+    // $1,100 quote, $100 deposit paid → invoice total $1,000, ledger opens at 100.
+    const withDeposit = {
+      ...docBase,
+      total: 1000,
+      paidTotal: 100,
+      balanceDue: 900,
+      payments: [{ id: 'deposit-credit-q1', kind: 'deposit', amount: 100, paidAt: PAID_AT, method: 'square' }],
+    };
+
+    it('reports the true balance owing on a part payment, not one short by the deposit', () => {
+      const after = {
+        ...withDeposit,
+        stage: 'partially_paid',
+        paidTotal: 600,
+        payments: [...withDeposit.payments, manualPayment('pay-1', 500)],
+      };
+      const r = evaluateDocumentPaymentReceipt(withDeposit, after);
+      expect(r!.amountReceived).toBe(500);
+      expect(r!.balanceDue).toBe(500); // not $400 — the deposit is not owed twice
+      expect(r!.isFullyPaid).toBe(false);
+    });
+
+    it('does not claim "paid in full" while the deposit-sized remainder is outstanding', () => {
+      // paidTotal hits the invoice total, and recordDocumentPayment's own
+      // arithmetic flips stage to 'paid' — but $100 is genuinely still owed.
+      const after = {
+        ...withDeposit,
+        stage: 'paid',
+        paidTotal: 1000,
+        balanceDue: 0,
+        payments: [...withDeposit.payments, manualPayment('pay-1', 900)],
+      };
+      const r = evaluateDocumentPaymentReceipt(withDeposit, after);
+      expect(r!.amountReceived).toBe(900);
+      expect(r!.balanceDue).toBe(100);
+      expect(r!.isFullyPaid).toBe(false);
+    });
+
+    it('does flag paid in full once the real balance closes', () => {
+      const before = {
+        ...withDeposit, stage: 'partially_paid', paidTotal: 600,
+        payments: [...withDeposit.payments, manualPayment('pay-1', 500)],
+      };
+      const after = {
+        ...before, stage: 'paid', paidTotal: 1100,
+        payments: [...before.payments, manualPayment('pay-2', 500)],
+      };
+      const r = evaluateDocumentPaymentReceipt(before, after);
+      expect(r!.balanceDue).toBe(0);
+      expect(r!.isFullyPaid).toBe(true);
+    });
+  });
+
   it('skips a payment correction that lowers paidTotal', () => {
     const before = {
       ...docBase, stage: 'partially_paid', paidTotal: 400,
