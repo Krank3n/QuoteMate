@@ -126,6 +126,135 @@ export function evaluatePaymentReceipt(
   };
 }
 
+// ---------------------------------------------------------------------------
+// Customer payment receipt — unified `documents` shape
+// ---------------------------------------------------------------------------
+
+/**
+ * Stages an invoice-type Document can be in and still earn its customer a
+ * receipt. Deliberately the mirror image of the legacy `draft`/`cancelled`
+ * skip: an invoice the customer has never been sent (still `draft`, or one
+ * of the quote-side stages) must not produce an unsolicited receipt, and a
+ * cancelled one must not either. `stageToInvoiceStatus` collapses every
+ * excluded stage to legacy status 'draft' or 'cancelled', so the two shapes
+ * agree on which payments are receiptable.
+ */
+const RECEIPTABLE_DOCUMENT_STAGES = new Set(['invoice_sent', 'partially_paid', 'paid']);
+
+/** Dollars → whole cents. Cents keep the high-water mark float-noise free. */
+function toCents(amount: unknown): number {
+  return Math.round((Number(amount) || 0) * 100);
+}
+
+/**
+ * Map a unified `DocumentPayment.method` onto the legacy method vocabulary
+ * that `paymentMethodLabel` (and therefore the receipt email) speaks.
+ * 'other' has no label of its own, which correctly hides the row.
+ */
+export function documentPaymentMethodToLegacy(method?: unknown): string | undefined {
+  switch (method) {
+    case 'square': return 'card';
+    case 'bank': return 'bank_transfer';
+    case 'cash': return 'cash';
+    default: return undefined;
+  }
+}
+
+export interface DocumentPaymentReceiptEvaluation extends PaymentReceiptEvaluation {
+  /**
+   * `paidTotal` after this payment, in whole cents. Persisted back onto the
+   * document as `receiptSentPaidCents` once the receipt is away, so it
+   * becomes the high-water mark the next evaluation has to clear.
+   */
+  receiptedPaidCents: number;
+  /** ms epoch of the payment that triggered this receipt, for the date line. */
+  paidAtMs: number;
+  /** Invoice number as the unified doc spells it (`number`, not `invoiceNumber`). */
+  invoiceNumber?: string;
+}
+
+/**
+ * Decide whether a write to `users/{uid}/documents/{docId}` represents a
+ * customer payment that deserves a receipt email. The document analogue of
+ * `evaluatePaymentReceipt`, adapted to the unified shape: `paidTotal` instead
+ * of `paidAmount`, `stage` instead of `status`, `number` instead of
+ * `invoiceNumber`, and a `payments[]` ledger instead of a single payment.
+ *
+ * Single delivery rests on a monotonic high-water mark rather than a plain
+ * before→after delta. We only fire when `paidTotal` clears BOTH the previous
+ * value and `receiptSentPaidCents` (the paid total at the last receipt), so:
+ *   - a resync / no-op write sends nothing (no increase);
+ *   - the trigger's own write-back of the mark sends nothing (paidTotal
+ *     unchanged), which is what stops it looping on itself;
+ *   - an at-least-once redelivery of the same Firestore event sends nothing,
+ *     because the mark already sits at the post-payment total;
+ *   - the legacy→documents mirror re-deriving the same payments array sends
+ *     nothing, since the totals it projects are the ones already receipted.
+ * A genuine second part payment still clears the mark and gets its own
+ * receipt.
+ */
+export function evaluateDocumentPaymentReceipt(
+  before: Record<string, any>,
+  after: Record<string, any>,
+): DocumentPaymentReceiptEvaluation | null {
+  if (after.type !== 'invoice') return null;
+
+  const customerEmail = typeof after.customerEmail === 'string' ? after.customerEmail.trim() : '';
+  if (!customerEmail) return null;
+
+  // Judge "was this invoice ever sent?" on the BEFORE stage, matching the
+  // legacy helper — the paying write itself moves the stage to paid/partial.
+  if (!RECEIPTABLE_DOCUMENT_STAGES.has(String(before.stage))) return null;
+
+  const total = Number(after.total) || 0;
+  if (total <= 0) return null;
+
+  const paidBeforeCents = toCents(before.paidTotal);
+  const paidAfterCents = toCents(after.paidTotal);
+  const alreadyReceiptedCents = Number(after.receiptSentPaidCents) || 0;
+  const floorCents = Math.max(paidBeforeCents, alreadyReceiptedCents);
+  const deltaCents = paidAfterCents - floorCents;
+  if (deltaCents < 1) return null;
+
+  const paidAfter = paidAfterCents / 100;
+  const balanceDue = round2(Math.max(0, total - paidAfter));
+
+  // Attribute the receipt to the payments this write actually added, falling
+  // back to the newest one on the ledger when the ids are unchanged (the
+  // mirror rebuilds them with synthetic, stable ids — see
+  // shared/document/adapter.buildInvoicePayments).
+  const beforeIds = new Set(
+    (Array.isArray(before.payments) ? before.payments : []).map((p: any) => p?.id),
+  );
+  const afterPayments = Array.isArray(after.payments) ? after.payments : [];
+  const added = afterPayments.filter((p: any) => !beforeIds.has(p?.id));
+  const source = (added.length ? added : afterPayments).slice(-1)[0];
+
+  return {
+    customerEmail,
+    amountReceived: round2(deltaCents / 100),
+    isFullyPaid: after.stage === 'paid' || balanceDue <= EPSILON,
+    balanceDue,
+    paymentMethod: documentPaymentMethodToLegacy(source?.method),
+    receiptedPaidCents: paidAfterCents,
+    paidAtMs: Number(source?.paidAt) || Number(after.paidInFullAt) || Date.now(),
+    invoiceNumber: typeof after.number === 'string' ? after.number : undefined,
+  };
+}
+
+/**
+ * True when this document write is the moment an invoice became fully paid —
+ * the unified analogue of `onInvoiceStatusChanged`'s status → 'paid' edge,
+ * used to fire the tradie's `invoice_paid` push exactly once.
+ */
+export function shouldSendInvoicePaidPush(
+  before: Record<string, any>,
+  after: Record<string, any>,
+): boolean {
+  if (after.type !== 'invoice') return false;
+  return before.stage !== 'paid' && after.stage === 'paid';
+}
+
 /** Human label for the stored payment method; undefined hides the row. */
 export function paymentMethodLabel(method?: string): string | undefined {
   switch (method) {
