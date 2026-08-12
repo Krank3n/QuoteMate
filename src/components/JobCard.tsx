@@ -38,8 +38,10 @@ import { openJobPreview } from '../utils/openJobPreview';
 import {
   getJobSubStatus,
   isSlotReached,
+  jobStatusTimestamp,
   type JobSubStatusSlot,
 } from '../utils/jobTimeline';
+import { PaymentChip } from './PaymentChip';
 import type { Document } from '../types/document';
 
 // Small circular icon buttons for the contact quick-taps (call / text /
@@ -98,23 +100,28 @@ const STAGE_STATUS_LABELS: Record<JobStage, string> = {
   cancelled: 'Cancelled',
 };
 
-const STAGE_TIMESTAMP_KEY: Record<JobStage, keyof Job | null> = {
-  inquiry: null,
-  quoted: 'quotedAt',
-  accepted: 'acceptedAt',
-  scheduled: 'scheduledAt',
-  in_progress: 'inProgressAt',
-  completed: 'completedAt',
-  paid: 'paidAt',
-  closed: 'closedAt',
-  cancelled: 'cancelledAt',
-};
-
 function pickStageStatus(job: Job): { label: string; ms: number } {
-  const key = STAGE_TIMESTAMP_KEY[job.stage];
-  const stamped = key ? (job[key] as number | undefined) : undefined;
-  const ms = stamped || job.updatedAt || job.createdAt;
-  return { label: STAGE_STATUS_LABELS[job.stage] ?? STAGE_STATUS_LABELS.inquiry, ms };
+  // Timestamp comes from jobTimeline so the list can sort by the very
+  // value printed here — see jobStatusTimestamp.
+  return {
+    label: STAGE_STATUS_LABELS[job.stage] ?? STAGE_STATUS_LABELS.inquiry,
+    ms: jobStatusTimestamp(job),
+  };
+}
+
+/**
+ * Money state earns a spot on the card once there's an invoice to owe
+ * against, or once any money has actually landed.
+ *
+ * Deliberately silent on quotes: a "Draft"-heavy list would otherwise
+ * carry an "Unpaid" chip on every row, which says nothing about any of
+ * them. The chip has to mean "this one is about money" to be worth the
+ * pixels.
+ */
+export function shouldShowPaymentChip(doc?: Document | null): boolean {
+  if (!doc) return false;
+  if (doc.stage === 'cancelled') return false;
+  return doc.type === 'invoice' || (Number(doc.paidTotal) || 0) > 0;
 }
 
 export const JobCard = React.memo(function JobCard({ job, onPress, onStagePress, onMenuPress }: JobCardProps) {
@@ -227,6 +234,7 @@ export const JobCard = React.memo(function JobCard({ job, onPress, onStagePress,
       : scheduled
     : null;
   const status = pickStageStatus(job);
+  const showPaymentChip = shouldShowPaymentChip(primaryDoc);
   const terminal = job.stage === 'cancelled' || job.stage === 'closed';
   // The timeline's active pill now covers every non-terminal stage
   // (including inquiry → "Draft" and completed → "Completed"), so the
@@ -387,6 +395,11 @@ export const JobCard = React.memo(function JobCard({ job, onPress, onStagePress,
               color={themeColors.error}
               accessibilityLabel="Xero sync failed"
             />
+          ) : null}
+          {showPaymentChip ? (
+            <View style={styles.paymentChipSlot}>
+              <PaymentChip doc={primaryDoc as Document} />
+            </View>
           ) : null}
         </View>
 
@@ -695,6 +708,12 @@ const useStyles = makeStyles((t) => ({
     fontSize: 12,
     color: t.colors.textMuted,
     flexShrink: 1,
+  },
+  // Pushed to the far end of the meta row so money reads as its own
+  // column down the list rather than trailing whatever text precedes it.
+  paymentChipSlot: {
+    marginLeft: 'auto',
+    paddingLeft: 8,
   },
   timelineRow: {
     flexDirection: 'row',

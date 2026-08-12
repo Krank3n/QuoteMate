@@ -30,6 +30,7 @@ import { SkeletonCrossfade } from '../components/SkeletonCrossfade';
 import { useJobActionsSheet } from '../hooks/useJobActionsSheet';
 import { lightTap } from '../utils/haptics';
 import { applyJobStageChange } from '../utils/applyJobStageChange';
+import { sortJobsForList } from '../utils/jobTimeline';
 import { pickPrimaryDoc } from '../components/StickyJobActionBar';
 type FilterKind = 'all' | 'active' | 'scheduled' | 'completed' | 'archived';
 
@@ -98,7 +99,7 @@ export function JobsListScreen() {
   }, []);
 
   const filtered = useMemo(() => {
-    return jobs.filter((j) => {
+    const matches = jobs.filter((j) => {
       if (!matchesFilter(j, filter)) return false;
       if (searchQuery) {
         const q = searchQuery.toLowerCase();
@@ -110,6 +111,9 @@ export function JobsListScreen() {
       }
       return true;
     });
+    // Sort here rather than leaning on the query's updatedAt ordering —
+    // the cards are dated by their stage stamp, and the two disagreed.
+    return sortJobsForList(matches);
   }, [jobs, filter, searchQuery]);
 
   const handleRefresh = async () => {

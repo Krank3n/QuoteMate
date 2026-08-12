@@ -401,3 +401,54 @@ export function isSlotReached(job: Job, slot: JobSubStatusSlot): boolean {
   if (job[SLOT_STAMP[slot]]) return true;
   return STAGE_ORDINAL[job.stage] >= SLOT_MIN_STAGE_ORDINAL[slot];
 }
+
+/**
+ * The write-once stamp that dates each stage — "Quote sent" reads
+ * `quotedAt`, "Paid" reads `paidAt`, and so on. `inquiry` has no stamp of
+ * its own; a freshly created job is dated by the fallback chain below.
+ */
+const STAGE_TIMESTAMP_KEY: Record<JobStage, keyof Job | null> = {
+  inquiry: null,
+  quoted: 'quotedAt',
+  accepted: 'acceptedAt',
+  scheduled: 'scheduledAt',
+  in_progress: 'inProgressAt',
+  completed: 'completedAt',
+  paid: 'paidAt',
+  closed: 'closedAt',
+  cancelled: 'cancelledAt',
+};
+
+/**
+ * The timestamp the Jobs list actually PRINTS on a card ("Quote sent 6
+ * days ago"). Both JobCard and the list's sort read it from here.
+ *
+ * They have to agree. The list used to inherit Firestore's
+ * `orderBy('updatedAt','desc')` while each card was labelled with its
+ * stage stamp — so a row saying "Quote sent 6 days ago" could sit above
+ * one saying "Created 11 days ago" purely because a background write had
+ * touched `updatedAt`. The ordering rule was invisible on screen, which
+ * reads as no ordering at all.
+ */
+export function jobStatusTimestamp(job: Job): number {
+  const key = STAGE_TIMESTAMP_KEY[job.stage];
+  const stamped = key ? (job[key] as number | undefined) : undefined;
+  return Number(stamped) || Number(job.updatedAt) || Number(job.createdAt) || 0;
+}
+
+/**
+ * Newest-first by the date the card shows. Ties break on `updatedAt` then
+ * `id` so the order is total — an unstable tail would let rows swap places
+ * between renders, which looks like the list reshuffling on its own.
+ *
+ * Returns a new array; never sorts the caller's (the store's) in place.
+ */
+export function sortJobsForList<T extends Job>(jobs: T[]): T[] {
+  return [...jobs].sort((a, b) => {
+    const byStatus = jobStatusTimestamp(b) - jobStatusTimestamp(a);
+    if (byStatus !== 0) return byStatus;
+    const byUpdated = (Number(b.updatedAt) || 0) - (Number(a.updatedAt) || 0);
+    if (byUpdated !== 0) return byUpdated;
+    return String(a.id).localeCompare(String(b.id));
+  });
+}
