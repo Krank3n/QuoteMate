@@ -243,6 +243,19 @@ export function evaluateDocumentPaymentReceipt(
 }
 
 /**
+ * Pure core of the receipt claim the documents trigger runs inside a
+ * transaction: does this evaluation beat the mark already on the document?
+ * `>=` would be the wrong comparison — a redelivered event carries the mark's
+ * exact value and must NOT re-send, so only a strict advance claims.
+ */
+export function claimsReceipt(
+  storedReceiptSentPaidCents: unknown,
+  receiptedPaidCents: number,
+): boolean {
+  return (Number(storedReceiptSentPaidCents) || 0) < receiptedPaidCents;
+}
+
+/**
  * True when this document write is the moment an invoice became fully paid —
  * the unified analogue of `onInvoiceStatusChanged`'s status → 'paid' edge,
  * used to fire the tradie's `invoice_paid` push exactly once.

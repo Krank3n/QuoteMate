@@ -40,6 +40,7 @@ import {
   evaluatePaymentReceipt,
   evaluateDocumentPaymentReceipt,
   shouldSendInvoicePaidPush,
+  claimsReceipt,
   type PaymentReceiptEvaluation,
 } from './paymentReceipt.helpers';
 import { mirrorIdForInvoice } from './documentMirror';
@@ -10819,8 +10820,9 @@ export const onDocumentPaymentReceived = functions.firestore
         const claimed = await db.runTransaction(async (tx) => {
           const snap = await tx.get(ref);
           if (!snap.exists) return false;
-          const current = Number(snap.data()?.receiptSentPaidCents) || 0;
-          if (current >= receipt.receiptedPaidCents) return false;
+          if (!claimsReceipt(snap.data()?.receiptSentPaidCents, receipt.receiptedPaidCents)) {
+            return false;
+          }
           tx.update(ref, { receiptSentPaidCents: receipt.receiptedPaidCents });
           return true;
         });
