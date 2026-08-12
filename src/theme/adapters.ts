@@ -30,7 +30,16 @@ export function buildPaperTheme(theme: Theme) {
       onPrimary: c.alwaysLight,
       secondary: c.warning,
       onSecondary: c.onAccent,
-      background: c.bg,
+      // NOT `bg`. Paper overloads `background` the same way it overloads
+      // `primary`: it is the fill of an outlined TextInput (and the label notch
+      // that punches through the outline), not the app canvas. Pointing it at
+      // the canvas fills every outlined input with the cream ground, so on a
+      // white card the inputs read as dark grey-beige blocks, and on the canvas
+      // itself they vanish into it. The card colour is right on both grounds —
+      // it pops against the canvas, and on a card the outline does the work.
+      // Symmetric in dark, where inputs were rendering near-black on a lighter
+      // card for exactly the same reason.
+      background: c.surfaceRaised,
       surface: c.surfaceRaised,
       onSurface: c.text,
       onSurfaceVariant: c.textMuted,
