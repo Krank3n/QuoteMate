@@ -13,11 +13,18 @@
 import type { Job, JobStage } from '../../shared/job/types';
 import type { Document } from '../types/document';
 import { applyStageChange, type ApplyStageChangeHelpers } from './applyStageChange';
+import { resolvePaidTransition } from './paidTransition';
 
 export interface ApplyJobStageChangeOptions {
   job: Job;
   target: JobStage;
   primaryDoc?: Document | null;
+  /**
+   * Every document attached to this job. Required rather than optional so a
+   * new call site has to think about it — an optional list would let one
+   * silently skip the `paid` guard below and reopen the hole.
+   */
+  attachedDocs: Document[];
   saveJob: (job: Job) => Promise<void>;
   helpers: ApplyStageChangeHelpers;
 }
@@ -44,9 +51,24 @@ export async function applyJobStageChange({
   job,
   target,
   primaryDoc,
+  attachedDocs,
   saveJob,
   helpers,
 }: ApplyJobStageChangeOptions): Promise<void> {
+  // Marking a job paid while an invoice still owes money would write the
+  // claim into the tradie's records without a payment behind it. Send them
+  // to record the money instead — the document reaching 'paid' is what
+  // bumps the Job, server-side, via deriveJobStageBump.
+  if (target === 'paid') {
+    const decision = resolvePaidTransition(job, attachedDocs);
+    if (decision.kind === 'record_payment') {
+      helpers.navigation?.navigate('RecordPayment', {
+        invoiceId: decision.invoiceId,
+      });
+      return; // deliberately does NOT flip the stage
+    }
+  }
+
   // Propagate to the primary quote-doc when the target maps to a quote stage
   // and the doc hasn't crossed into invoice territory yet. Skipping the
   // propagation post-conversion means a Job stage change on a paid invoice

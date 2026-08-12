@@ -168,6 +168,7 @@ export function JobsListScreen() {
         job,
         target,
         primaryDoc,
+        attachedDocs: attached,
         saveJob,
         helpers: { saveQuote, saveInvoice, createInvoiceFromQuote, navigation },
       });

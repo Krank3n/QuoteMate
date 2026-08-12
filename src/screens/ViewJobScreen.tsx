@@ -276,6 +276,7 @@ export function ViewJobScreen() {
         job,
         target,
         primaryDoc: actionableDoc,
+        attachedDocs,
         saveJob,
         helpers: { saveQuote, saveInvoice, createInvoiceFromQuote, navigation },
       });

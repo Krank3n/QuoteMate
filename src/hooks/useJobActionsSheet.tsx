@@ -130,6 +130,10 @@ export function useJobActionsSheet(
         job,
         target,
         primaryDoc: primaryDocForJob(job),
+        // Read fresh rather than using the render-time `documents` — that
+        // selector is gated on the sheet being open, and this fires as it
+        // closes.
+        attachedDocs: useStore.getState().documents.filter((d) => d.jobId === job.id),
         saveJob,
         helpers: { saveQuote, saveInvoice, createInvoiceFromQuote, navigation },
       });

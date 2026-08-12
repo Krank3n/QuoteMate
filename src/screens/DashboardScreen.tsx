@@ -492,6 +492,7 @@ export function DashboardScreen() {
         job,
         target,
         primaryDoc,
+        attachedDocs: attached,
         saveJob,
         helpers: { saveQuote, saveInvoice, createInvoiceFromQuote, navigation },
       });
