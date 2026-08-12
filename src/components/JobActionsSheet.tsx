@@ -15,11 +15,13 @@ import { Platform, View, StyleSheet, Pressable } from 'react-native';
 import { Text } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
-import type { Job } from '../../shared/job/types';
+import type { Job, JobStage } from '../../shared/job/types';
 import type { Document } from '../types/document';
 import { makeStyles, useThemeColors } from '../theme';
 import { BottomSheet } from './BottomSheet';
 import { selectionTap, lightTap } from '../utils/haptics';
+import { legalStageTargets, shouldOfferSchedule } from '../utils/jobStageTargets';
+import { jobStageMetaFor } from './JobStageSheet';
 
 export type JobAction =
   | 'takePayment'
@@ -35,6 +37,24 @@ export type JobAction =
   | 'unarchive'
   | 'delete';
 
+/**
+ * The one row that doesn't report an action — it expands in place to
+ * reveal the legal next stages. Kept out of JobAction so a caller can't
+ * accidentally handle it as a normal side-effecting action.
+ */
+export const CHANGE_STATUS_ROW_ID = 'changeStatus' as const;
+
+/** Housekeeping rows. "Change status" is inserted above the first of these. */
+export const SECONDARY_ROW_IDS: ReadonlySet<JobAction> = new Set<JobAction>([
+  'duplicate',
+  'service_report',
+  'exportPdf',
+  'pushToXero',
+  'archive',
+  'unarchive',
+  'delete',
+]);
+
 interface JobActionsSheetProps {
   visible: boolean;
   onDismiss: () => void;
@@ -44,6 +64,20 @@ interface JobActionsSheetProps {
   primaryDoc?: Document | null;
   xeroConnected?: boolean;
   onSelect: (action: JobAction, job: Job) => void;
+  /**
+   * Applies a stage picked from the "Change status" submenu. Omit and the
+   * row doesn't render — there's no point expanding to a list that can't
+   * do anything.
+   */
+  onSelectStage?: (stage: JobStage, job: Job) => void;
+  /** Gates `accepted → quoted` in the shared state machine. */
+  depositPaid?: boolean;
+  /**
+   * Opens the date picker. When supplied, the submenu shows "Schedule…"
+   * instead of a bare `scheduled` flip, which would leave a job marked
+   * Scheduled with no date on it.
+   */
+  onSchedule?: (job: Job) => void;
 }
 
 interface RowCtx {
@@ -181,9 +215,22 @@ export function JobActionsSheet({
   primaryDoc,
   xeroConnected,
   onSelect,
+  onSelectStage,
+  depositPaid,
+  onSchedule,
 }: JobActionsSheetProps) {
   const styles = useStyles();
   const themeColors = useThemeColors();
+  const [statusExpanded, setStatusExpanded] = React.useState(false);
+  // Collapse whenever the sheet closes or swings to another job, so it
+  // never reopens mid-submenu on an unrelated job's stages.
+  React.useEffect(() => {
+    if (!visible) setStatusExpanded(false);
+  }, [visible]);
+  React.useEffect(() => {
+    setStatusExpanded(false);
+  }, [job?.id]);
+
   if (!job) return null;
   const ctx = {
     job,
@@ -191,6 +238,144 @@ export function JobActionsSheet({
     xeroConnected: !!xeroConnected,
   };
   const rows = ROWS.filter((r) => r.when(ctx));
+
+  const stageMeta = jobStageMetaFor(themeColors);
+  const showSchedule = !!onSchedule && shouldOfferSchedule(job);
+  const stageTargets = onSelectStage
+    ? legalStageTargets(job.stage, { depositPaid, excludeScheduled: showSchedule })
+    : [];
+  const showChangeStatus = !!onSelectStage && (stageTargets.length > 0 || showSchedule);
+  // Sits at the end of the everyday group, above the housekeeping rows —
+  // found by the first housekeeping row rather than a fixed index, so a
+  // row hidden by its `when` predicate doesn't strand it.
+  const firstSecondary = rows.findIndex((r) => SECONDARY_ROW_IDS.has(r.id));
+  const statusInsertIndex = firstSecondary === -1 ? rows.length : firstSecondary;
+
+  const renderRow = (row: RowDef) => {
+    const danger = row.tone === 'danger';
+    const label = resolve(row.label, ctx);
+    const sub = row.sub ? resolve(row.sub, ctx) : undefined;
+    const icon = resolve(row.icon, ctx);
+    return (
+      <Pressable
+        onPress={() => {
+          danger ? selectionTap() : lightTap();
+          onSelect(row.id, job);
+        }}
+        style={({ pressed }) => [
+          styles.row,
+          danger && styles.rowDanger,
+          pressed && styles.rowPressed,
+        ]}
+      >
+        <View
+          style={[
+            styles.rowIcon,
+            danger ? styles.rowIconDanger : styles.rowIconNormal,
+          ]}
+        >
+          <MaterialCommunityIcons
+            name={icon as any}
+            size={20}
+            color={danger ? themeColors.error : themeColors.accent}
+          />
+        </View>
+        <View style={styles.rowBody}>
+          <Text
+            style={[styles.rowLabel, danger && { color: themeColors.error }]}
+          >
+            {label}
+          </Text>
+          {sub ? <Text style={styles.rowSub}>{sub}</Text> : null}
+        </View>
+        <MaterialCommunityIcons
+          name={'chevron-right' as any}
+          size={20}
+          color={themeColors.textDisabled}
+        />
+      </Pressable>
+    );
+  };
+
+  const statusBlock = (
+    <View key={CHANGE_STATUS_ROW_ID}>
+      <Pressable
+        onPress={() => {
+          lightTap();
+          setStatusExpanded((v) => !v);
+        }}
+        style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: statusExpanded }}
+      >
+        <View style={[styles.rowIcon, styles.rowIconNormal]}>
+          <MaterialCommunityIcons
+            name={'progress-check' as any}
+            size={20}
+            color={themeColors.accentText}
+          />
+        </View>
+        <View style={styles.rowBody}>
+          <Text style={styles.rowLabel}>Change status</Text>
+          <Text style={styles.rowSub}>
+            Currently {stageMeta[job.stage]?.chipLabel ?? 'Inquiry'}
+          </Text>
+        </View>
+        <MaterialCommunityIcons
+          name={(statusExpanded ? 'chevron-up' : 'chevron-down') as any}
+          size={20}
+          color={themeColors.textDisabled}
+        />
+      </Pressable>
+
+      {statusExpanded ? (
+        <View style={styles.submenu}>
+          {showSchedule ? (
+            <Pressable
+              onPress={() => {
+                selectionTap();
+                onSchedule?.(job);
+              }}
+              style={({ pressed }) => [
+                styles.submenuRow,
+                pressed && styles.rowPressed,
+              ]}
+            >
+              <MaterialCommunityIcons
+                name={'calendar-clock-outline' as any}
+                size={18}
+                color={themeColors.info}
+              />
+              <Text style={styles.submenuLabel}>Schedule…</Text>
+            </Pressable>
+          ) : null}
+          {stageTargets.map((stage) => {
+            const meta = stageMeta[stage];
+            return (
+              <Pressable
+                key={stage}
+                onPress={() => {
+                  selectionTap();
+                  onSelectStage?.(stage, job);
+                }}
+                style={({ pressed }) => [
+                  styles.submenuRow,
+                  pressed && styles.rowPressed,
+                ]}
+              >
+                <MaterialCommunityIcons
+                  name={meta.icon as any}
+                  size={18}
+                  color={meta.color}
+                />
+                <Text style={styles.submenuLabel}>{meta.actionLabel}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      ) : null}
+    </View>
+  );
 
   return (
     <BottomSheet
@@ -201,55 +386,13 @@ export function JobActionsSheet({
       scrollable
     >
       <View style={styles.list}>
-        {rows.map((row) => {
-          const danger = row.tone === 'danger';
-          const label = resolve(row.label, ctx);
-          const sub = row.sub ? resolve(row.sub, ctx) : undefined;
-          const icon = resolve(row.icon, ctx);
-          return (
-            <Pressable
-              key={row.id}
-              onPress={() => {
-                danger ? selectionTap() : lightTap();
-                onSelect(row.id, job);
-              }}
-              style={({ pressed }) => [
-                styles.row,
-                danger && styles.rowDanger,
-                pressed && styles.rowPressed,
-              ]}
-            >
-              <View
-                style={[
-                  styles.rowIcon,
-                  danger ? styles.rowIconDanger : styles.rowIconNormal,
-                ]}
-              >
-                <MaterialCommunityIcons
-                  name={icon as any}
-                  size={20}
-                  color={danger ? themeColors.error : themeColors.accent}
-                />
-              </View>
-              <View style={styles.rowBody}>
-                <Text
-                  style={[
-                    styles.rowLabel,
-                    danger && { color: themeColors.error },
-                  ]}
-                >
-                  {label}
-                </Text>
-                {sub ? <Text style={styles.rowSub}>{sub}</Text> : null}
-              </View>
-              <MaterialCommunityIcons
-                name={'chevron-right' as any}
-                size={20}
-                color={themeColors.textDisabled}
-              />
-            </Pressable>
-          );
-        })}
+        {rows.map((row, idx) => (
+          <React.Fragment key={row.id}>
+            {showChangeStatus && idx === statusInsertIndex ? statusBlock : null}
+            {renderRow(row)}
+          </React.Fragment>
+        ))}
+        {showChangeStatus && statusInsertIndex >= rows.length ? statusBlock : null}
       </View>
     </BottomSheet>
   );
@@ -259,6 +402,28 @@ const useStyles = makeStyles((t) => ({
   list: {
     gap: 8,
     paddingBottom: 8,
+  },
+  // Indented and rail-marked so an expanded submenu reads as belonging to
+  // the row above rather than as more top-level actions.
+  submenu: {
+    marginTop: 8,
+    marginLeft: 22,
+    paddingLeft: 12,
+    borderLeftWidth: 2,
+    borderLeftColor: t.colors.border,
+    gap: 2,
+  },
+  submenuRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+  },
+  submenuLabel: {
+    fontSize: 15,
+    color: t.colors.text,
   },
   row: {
     flexDirection: 'row',

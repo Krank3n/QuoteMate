@@ -12,7 +12,7 @@ import React, { useCallback, useState } from 'react';
 import { Alert } from 'react-native';
 import { Snackbar } from 'react-native-paper';
 
-import type { Job } from '../../shared/job/types';
+import type { Job, JobStage } from '../../shared/job/types';
 import type { Document } from '../types/document';
 import { useJobStore } from '../store/useJobStore';
 import { useStore } from '../store/useStore';
@@ -41,6 +41,7 @@ import {
 import { cascadeDeleteJob, pickPaidDocs } from '../utils/deleteJobWithDocs';
 import { ensureSquareConnectedForPayment } from '../utils/quoteDeliveryGuard';
 import { applyStageChange } from '../utils/applyStageChange';
+import { applyJobStageChange } from '../utils/applyJobStageChange';
 import { useAlertModal } from './useAlertModal';
 
 interface UseJobActionsSheetOptions {
@@ -48,6 +49,21 @@ interface UseJobActionsSheetOptions {
    *  into the clone. Lets the caller decide whether to navigate. Default:
    *  navigate to ViewJob on the cloned job's id. */
   onDuplicated?: (cloneJobId: string) => void;
+  /**
+   * Opens the caller's date picker for a job. Supplied by screens that own
+   * a ScheduleJobSheet; without it the "Change status" submenu offers a
+   * bare `scheduled` flip, which marks a job Scheduled with no date.
+   */
+  onSchedule?: (job: Job) => void;
+}
+
+/** Any money against the quote's deposit — gates `accepted → quoted`. */
+function hasDepositPaid(doc: Document | null): boolean {
+  if (!doc) return false;
+  return (
+    Number(doc.depositPaid) > 0 ||
+    (doc.payments || []).some((p) => p.kind === 'deposit')
+  );
 }
 
 // Stable empty array so the gated selectors below return a constant while
@@ -100,6 +116,36 @@ export function useJobActionsSheet(
   const convertDocumentToInvoice = useStore((s) => s.convertDocumentToInvoice);
 
   const { showAlert, alertNode } = useAlertModal();
+
+  /**
+   * Stage picked from the kebab's "Change status" submenu. Routed through
+   * applyJobStageChange — the same entry point the timeline pill's
+   * JobStageSheet uses — so the linked quote doc moves with the job
+   * instead of drifting out of sync.
+   */
+  const handleStageSelect = async (target: JobStage, job: Job) => {
+    setActionsJob(null);
+    try {
+      await applyJobStageChange({
+        job,
+        target,
+        primaryDoc: primaryDocForJob(job),
+        saveJob,
+        helpers: { saveQuote, saveInvoice, createInvoiceFromQuote, navigation },
+      });
+    } catch {
+      showAlert({
+        type: 'error',
+        title: 'Stage not updated',
+        message: 'Failed to update stage. Please try again.',
+      });
+    }
+  };
+
+  const handleScheduleFromSheet = (job: Job) => {
+    setActionsJob(null);
+    options.onSchedule?.(job);
+  };
 
   const primaryDocForJob = (job: Job): Document | null => {
     if (job.primaryDocumentId) {
@@ -402,6 +448,9 @@ export function useJobActionsSheet(
         primaryDoc={actionsJob ? primaryDocForJob(actionsJob) : null}
         xeroConnected={!!xeroConnection}
         onSelect={handleActionSelect}
+        onSelectStage={handleStageSelect}
+        depositPaid={actionsJob ? hasDepositPaid(primaryDocForJob(actionsJob)) : undefined}
+        onSchedule={options.onSchedule ? handleScheduleFromSheet : undefined}
       />
 
       {sendDialogDoc ? (

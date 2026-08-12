@@ -11,7 +11,7 @@ import { Text } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
 import type { Job, JobStage } from '../../shared/job/types';
-import { canTransition } from '../../shared/job/stage';
+import { legalStageTargets, shouldOfferSchedule } from '../utils/jobStageTargets';
 import type { Tokens } from '../theme';
 import { makeStyles, useThemeColors } from '../theme';
 import { selectionTap } from '../utils/haptics';
@@ -128,27 +128,6 @@ export const jobStageMetaFor = (themeColors: Tokens): Record<JobStage, StageMeta
   },
 });
 
-const ALL_STAGES: JobStage[] = [
-  'inquiry',
-  'quoted',
-  'accepted',
-  'scheduled',
-  'in_progress',
-  'completed',
-  'paid',
-  'closed',
-  'cancelled',
-];
-
-// Stages where penciling in a date doesn't make sense — once the work
-// is done or the job is dead, hide "Schedule…".
-const SCHEDULE_HIDDEN_STAGES: ReadonlySet<JobStage> = new Set([
-  'completed',
-  'paid',
-  'closed',
-  'cancelled',
-]);
-
 export function JobStageSheet({
   visible,
   onDismiss,
@@ -161,22 +140,13 @@ export function JobStageSheet({
   const styles = useStyles();
   const themeColors = useThemeColors();
   const JOB_STAGE_META = jobStageMetaFor(themeColors);
-  const showSchedule = !!onSchedule && !SCHEDULE_HIDDEN_STAGES.has(job.stage);
+  const showSchedule = !!onSchedule && shouldOfferSchedule(job);
 
-  // Only offer legal transitions from the shared state machine. This
-  // changed in Phase-17 — the UI used to show every stage (trusting the
-  // server to reject illegal edges), but that meant tradies could tap a
-  // stage and hit a silent failure. Better to hide what you can't do.
-  // 'scheduled' is dropped here when the dedicated Schedule row is
-  // showing so the same action doesn't appear twice.
-  const targets = React.useMemo<JobStage[]>(() => {
-    return ALL_STAGES.filter(
-      (s) =>
-        s !== job.stage &&
-        canTransition(job.stage, s, { depositPaid }) &&
-        !(showSchedule && s === 'scheduled'),
-    );
-  }, [job.stage, depositPaid, showSchedule]);
+  // Shared with the kebab's "Change status" submenu — see legalStageTargets.
+  const targets = React.useMemo<JobStage[]>(
+    () => legalStageTargets(job.stage, { depositPaid, excludeScheduled: showSchedule }),
+    [job.stage, depositPaid, showSchedule],
+  );
 
   const totalRows = targets.length + (showSchedule ? 1 : 0);
   const anims = useStaggeredEntrance(totalRows, visible, 100, 40);

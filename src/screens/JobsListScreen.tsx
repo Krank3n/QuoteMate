@@ -86,7 +86,12 @@ export function JobsListScreen() {
 
   // Shared Actions sheet host (see useJobActionsSheet for the whole
   // menu → dispatcher wiring including linked dialogs/sheets).
-  const actionsSheet = useJobActionsSheet(navigation);
+  // onSchedule lets the kebab's "Change status" submenu route into the same
+  // date picker the stage sheet uses, rather than flipping a job to
+  // Scheduled with no date on it.
+  const actionsSheet = useJobActionsSheet(navigation, {
+    onSchedule: (job) => setScheduleSheetJob(job),
+  });
 
   useEffect(() => {
     if (!initialLoaded && jobs.length > 0) setInitialLoaded(true);
