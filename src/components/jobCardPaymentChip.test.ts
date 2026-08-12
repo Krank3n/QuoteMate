@@ -1,10 +1,12 @@
 /**
- * PaymentChip renders inside ViewJobScreen only, so the Jobs list could
+ * PaymentChip rendered inside ViewJobScreen only, so the Jobs list could
  * never show who owed money — a tradie had to open each job in turn to
  * find out. The chip now rides the card's meta row.
  *
  * The predicate is the interesting half: with most jobs sitting at Draft,
- * an unconditional chip would stamp "Unpaid" on every row and mean nothing.
+ * an unconditional chip would stamp "Unpaid" on every row and mean
+ * nothing. It's shared with the job screen so one quote can't show
+ * "Unpaid" on its detail view and nothing on its card.
  */
 import { describe, it, expect, vi } from 'vitest';
 
@@ -31,7 +33,8 @@ vi.mock('./ShimmerOverlay', () => ({ ShimmerOverlay: () => null }));
 // canRecordPaymentFor is exercised against the real derivePaymentState —
 // stubbing that out would leave the paid/unpaid call untested.
 
-import { shouldShowPaymentChip, canRecordPaymentFor } from './JobCard';
+import { shouldShowPaymentChip } from './PaymentChip';
+import { canRecordPaymentFor } from './JobCard';
 
 describe('shouldShowPaymentChip', () => {
   it('shows on an invoice — there is a balance to owe against', () => {
@@ -50,6 +53,53 @@ describe('shouldShowPaymentChip', () => {
     expect(
       shouldShowPaymentChip({ type: 'quote', stage: 'quote_accepted', paidTotal: 500 } as any),
     ).toBe(true);
+  });
+
+  // The chip is the way into TakePaymentSheet when StickyJobActionBar
+  // isn't offering "Take Deposit" — it only does when a deposit amount is
+  // configured, and never on iOS. Hiding it here would strand the
+  // pay-link route on a quote that is genuinely owed money.
+  it('shows on a quote with an outstanding deposit, so the deposit route survives', () => {
+    expect(
+      shouldShowPaymentChip({
+        type: 'quote',
+        stage: 'quote_sent',
+        depositAmount: 500,
+        depositPaid: 0,
+      } as any),
+    ).toBe(true);
+  });
+
+  it('shows while a deposit is only part-paid', () => {
+    expect(
+      shouldShowPaymentChip({
+        type: 'quote',
+        stage: 'quote_sent',
+        depositAmount: 500,
+        depositPaid: 200,
+      } as any),
+    ).toBe(true);
+  });
+
+  it('stays hidden once the deposit is settled and nothing else is owed', () => {
+    expect(
+      shouldShowPaymentChip({
+        type: 'quote',
+        stage: 'quote_accepted',
+        depositAmount: 500,
+        depositPaid: 500,
+        paidTotal: 0,
+      } as any),
+    ).toBe(false);
+  });
+
+  it('ignores a zero or absent deposit amount', () => {
+    expect(
+      shouldShowPaymentChip({ type: 'quote', stage: 'quote_sent', depositAmount: 0 } as any),
+    ).toBe(false);
+    expect(
+      shouldShowPaymentChip({ type: 'quote', stage: 'quote_sent', depositAmount: undefined } as any),
+    ).toBe(false);
   });
 
   it('stays hidden on a cancelled doc, whose balance is not owed', () => {

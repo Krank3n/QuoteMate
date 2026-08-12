@@ -41,7 +41,7 @@ import {
   jobStatusTimestamp,
   type JobSubStatusSlot,
 } from '../utils/jobTimeline';
-import { PaymentChip, derivePaymentState } from './PaymentChip';
+import { PaymentChip, derivePaymentState, shouldShowPaymentChip } from './PaymentChip';
 import type { Document } from '../types/document';
 
 // Small circular icon buttons for the contact quick-taps (call / text /
@@ -107,21 +107,6 @@ function pickStageStatus(job: Job): { label: string; ms: number } {
     label: STAGE_STATUS_LABELS[job.stage] ?? STAGE_STATUS_LABELS.inquiry,
     ms: jobStatusTimestamp(job),
   };
-}
-
-/**
- * Money state earns a spot on the card once there's an invoice to owe
- * against, or once any money has actually landed.
- *
- * Deliberately silent on quotes: a "Draft"-heavy list would otherwise
- * carry an "Unpaid" chip on every row, which says nothing about any of
- * them. The chip has to mean "this one is about money" to be worth the
- * pixels.
- */
-export function shouldShowPaymentChip(doc?: Document | null): boolean {
-  if (!doc) return false;
-  if (doc.stage === 'cancelled') return false;
-  return doc.type === 'invoice' || (Number(doc.paidTotal) || 0) > 0;
 }
 
 /**

@@ -17,7 +17,7 @@ import type { Document } from '../types/document';
 import type { Tokens } from '../theme';
 import { makeStyles, useThemeColors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
-import { PaymentChip } from './PaymentChip';
+import { PaymentChip, shouldShowPaymentChip } from './PaymentChip';
 import { stageMetaFor } from './StageSheet';
 import { selectionTap } from '../utils/haptics';
 
@@ -161,7 +161,9 @@ export function DocumentRow({
             )
           ) : null}
 
-          <PaymentChip doc={doc} onPress={onPaymentPress} />
+          {shouldShowPaymentChip(doc) ? (
+            <PaymentChip doc={doc} onPress={onPaymentPress} />
+          ) : null}
           <XeroSyncChip status={doc.xeroSyncStatus} />
         </View>
       </View>

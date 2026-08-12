@@ -35,7 +35,7 @@ import { formatCurrency } from '../utils/quoteCalculator';
 import { hoursForDisplay, rateForDisplay, valueToHours, rateToHourly } from '../../shared/document/labourUnits';
 import { calculateDueDate, formatPaymentTerms } from '../utils/invoiceCalculator';
 import { stageMetaFor } from './StageSheet';
-import { PaymentChip } from './PaymentChip';
+import { PaymentChip, shouldShowPaymentChip } from './PaymentChip';
 import { selectionTap } from '../utils/haptics';
 import { previewDocumentPDF } from '../utils/pdfGenerator';
 import { useStore } from '../store/useStore';
@@ -270,7 +270,9 @@ export function JobScopeCard({
               </Text>
             </Pressable>
           ) : null}
-          <PaymentChip doc={doc} onPress={onPaymentPress} />
+          {shouldShowPaymentChip(doc) ? (
+            <PaymentChip doc={doc} onPress={onPaymentPress} />
+          ) : null}
           <Pressable
             onPress={handleToggle}
             hitSlop={10}

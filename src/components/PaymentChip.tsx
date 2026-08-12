@@ -61,6 +61,33 @@ export function derivePaymentState(doc: Document): PaymentState {
   return 'unpaid';
 }
 
+/**
+ * Whether a doc has a money story worth putting a chip on.
+ *
+ * Every surface asks this same question, so it lives next to
+ * derivePaymentState rather than in any one caller. The Jobs list and the
+ * job screen used to disagree: the list gated on this, the job screen
+ * chipped everything, so one quote could show "Unpaid" on its detail
+ * screen and nothing on its card.
+ *
+ * A quote nobody has been asked to pay isn't "unpaid" — it's just a
+ * quote. But a quote with an outstanding deposit IS owed money, and its
+ * chip is the way into TakePaymentSheet when StickyJobActionBar isn't
+ * offering "Take Deposit" (it only does so when a deposit amount is
+ * configured, and never on iOS while Square is gated there). Dropping
+ * that case would strand the pay-link route on those quotes — mirrors
+ * depositOwed in StickyJobActionBar.
+ */
+export function shouldShowPaymentChip(doc?: Document | null): boolean {
+  if (!doc) return false;
+  if (doc.stage === 'cancelled') return false;
+  if (doc.type === 'invoice') return true;
+  if ((Number(doc.paidTotal) || 0) > 0) return true;
+  const depositRequired = Number(doc.depositAmount) || 0;
+  const depositPaid = Number(doc.depositPaid) || 0;
+  return depositRequired > 0 && depositPaid < depositRequired;
+}
+
 function formatProgress(doc: Document): string {
   const total = Number(doc.total) || 0;
   const paid = Number(doc.paidTotal) || 0;
