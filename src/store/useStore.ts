@@ -1469,8 +1469,12 @@ export const useStore = create<AppState>((set, get) => ({
     }
 
     // Phase-5: prefer the unified convertDocumentToInvoice path when a
-    // matching document exists (server canonicalises via setDocumentStage,
-    // mirror trigger projects to the legacy invoices collection).
+    // matching document exists (server canonicalises via setDocumentStage).
+    // Note: this mints a document-only invoice — the mirror triggers run
+    // legacy → documents, never the other way, so there is no legacy
+    // invoices row until a client-side saveDocument writes one. Anything
+    // that needs to react to these invoices (payment receipts, for one)
+    // has to trigger on users/{uid}/documents.
     //
     // Only fire `quote_started` once we know we're actually minting a new
     // invoice (idempotency below short-circuits if this quote has already
