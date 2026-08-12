@@ -41,7 +41,7 @@ import {
   jobStatusTimestamp,
   type JobSubStatusSlot,
 } from '../utils/jobTimeline';
-import { PaymentChip } from './PaymentChip';
+import { PaymentChip, derivePaymentState } from './PaymentChip';
 import type { Document } from '../types/document';
 
 // Small circular icon buttons for the contact quick-taps (call / text /
@@ -122,6 +122,22 @@ export function shouldShowPaymentChip(doc?: Document | null): boolean {
   if (!doc) return false;
   if (doc.stage === 'cancelled') return false;
   return doc.type === 'invoice' || (Number(doc.paidTotal) || 0) > 0;
+}
+
+/**
+ * Whether tapping the chip should open RecordPaymentScreen.
+ *
+ * Narrower than showing the chip, because that screen dead-ends on
+ * anything else: it rejects quotes outright ("That document is a quote,
+ * not an invoice"), and on a settled invoice it opens with a $0 balance
+ * that its own overpayment guard then refuses. A chip that opens a screen
+ * you can't act on is worse than one that doesn't move — so those stay
+ * plain labels.
+ */
+export function canRecordPaymentFor(doc?: Document | null): boolean {
+  if (!shouldShowPaymentChip(doc) || doc!.type !== 'invoice') return false;
+  const state = derivePaymentState(doc!);
+  return state === 'unpaid' || state === 'partially_paid';
 }
 
 export const JobCard = React.memo(function JobCard({ job, onPress, onStagePress, onMenuPress }: JobCardProps) {
@@ -235,6 +251,14 @@ export const JobCard = React.memo(function JobCard({ job, onPress, onStagePress,
     : null;
   const status = pickStageStatus(job);
   const showPaymentChip = shouldShowPaymentChip(primaryDoc);
+  const handlePaymentChipPress = (doc: Document, e?: any) => {
+    // stopPropagation so the chip records a payment instead of bubbling
+    // to Card.onPress and opening the job — same guard the headline
+    // price and the kebab use.
+    e?.stopPropagation?.();
+    selectionTap();
+    navigation.navigate('RecordPayment', { invoiceId: doc.id });
+  };
   const terminal = job.stage === 'cancelled' || job.stage === 'closed';
   // The timeline's active pill now covers every non-terminal stage
   // (including inquiry → "Draft" and completed → "Completed"), so the
@@ -398,7 +422,12 @@ export const JobCard = React.memo(function JobCard({ job, onPress, onStagePress,
           ) : null}
           {showPaymentChip ? (
             <View style={styles.paymentChipSlot}>
-              <PaymentChip doc={primaryDoc as Document} />
+              <PaymentChip
+                doc={primaryDoc as Document}
+                onPress={
+                  canRecordPaymentFor(primaryDoc) ? handlePaymentChipPress : undefined
+                }
+              />
             </View>
           ) : null}
         </View>

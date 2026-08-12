@@ -9,7 +9,7 @@
  */
 
 import React from 'react';
-import { View, StyleSheet, Pressable } from 'react-native';
+import { View, StyleSheet, Pressable, type GestureResponderEvent } from 'react-native';
 import { Text } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
@@ -28,7 +28,12 @@ export type PaymentState =
 
 interface PaymentChipProps {
   doc: Document;
-  onPress?: (doc: Document) => void;
+  /**
+   * The event is forwarded so a chip sitting inside a pressable row (the
+   * Jobs list card) can stop the tap bubbling up and opening the row
+   * instead. Handlers that don't care may ignore it.
+   */
+  onPress?: (doc: Document, event?: GestureResponderEvent) => void;
 }
 
 interface PaymentMeta {
@@ -122,9 +127,9 @@ export function PaymentChip({ doc, onPress }: PaymentChipProps) {
 
   return (
     <Pressable
-      onPress={() => {
+      onPress={(e) => {
         selectionTap();
-        onPress(doc);
+        onPress(doc, e);
       }}
       hitSlop={8}
       style={({ pressed }) => [pressed ? { opacity: 0.7 } : null]}
