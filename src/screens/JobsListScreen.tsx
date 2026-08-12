@@ -16,6 +16,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation, useScrollToTop } from '@react-navigation/native';
 
 import type { Job, JobStage } from '../../shared/job/types';
+import type { Document } from '../types/document';
 import { useJobStore } from '../store/useJobStore';
 import { useStore } from '../store/useStore';
 import { makeStyles, useThemeColors } from '../theme';
@@ -31,36 +32,21 @@ import { useJobActionsSheet } from '../hooks/useJobActionsSheet';
 import { lightTap } from '../utils/haptics';
 import { applyJobStageChange } from '../utils/applyJobStageChange';
 import { sortJobsForList } from '../utils/jobTimeline';
+import {
+  JOB_FILTERS,
+  bucketForJob,
+  type JobBucket,
+  type JobFilterKey,
+} from '../utils/jobBuckets';
 import { pickPrimaryDoc } from '../components/StickyJobActionBar';
-type FilterKind = 'all' | 'active' | 'scheduled' | 'completed' | 'archived';
-
-const FILTERS: { key: FilterKind; label: string }[] = [
-  { key: 'all', label: 'All' },
-  { key: 'active', label: 'Active' },
-  { key: 'scheduled', label: 'Scheduled' },
-  { key: 'completed', label: 'Completed' },
-  { key: 'archived', label: 'Archived' },
-];
-
-// Terminal stages = jobs you've parked (closed/cancelled). Active = anything
-// else that isn't finished-and-paid. "Active" intentionally includes inquiry,
-// quoted, accepted, scheduled, in_progress — the day-to-day feed.
-function matchesFilter(job: Job, filter: FilterKind): boolean {
-  switch (filter) {
-    case 'all':
-      return true;
-    case 'active':
-      return ['inquiry', 'quoted', 'accepted', 'scheduled', 'in_progress'].includes(job.stage);
-    case 'scheduled':
-      return job.stage === 'scheduled' || !!job.scheduledStartDate;
-    case 'completed':
-      return ['completed', 'paid'].includes(job.stage);
-    case 'archived':
-      return job.stage === 'closed' || job.stage === 'cancelled' || !!job.archivedAt;
-    default:
-      return true;
-  }
-}
+const EMPTY_COPY: Record<JobFilterKey, { title: string; body: string }> = {
+  all: { title: 'No jobs yet', body: 'Start your first job and it’ll show up here' },
+  to_send: { title: 'Nothing waiting on you', body: 'Drafts to send and finished work to invoice land here' },
+  waiting: { title: 'Nobody to chase', body: 'Quotes you’ve sent sit here until the customer answers' },
+  owed: { title: 'Nothing outstanding', body: 'Invoices with money still owing land here' },
+  scheduled: { title: 'Nothing on the calendar', body: 'Schedule a start date to see a job here' },
+  done: { title: 'Nothing in the rear-view', body: 'Paid, closed and archived jobs rest here' },
+};
 
 export function JobsListScreen() {
   const styles = useStyles();
@@ -78,7 +64,7 @@ export function JobsListScreen() {
   const createInvoiceFromQuote = useStore((s) => s.createInvoiceFromQuote);
 
   const [searchQuery, setSearchQuery] = useState('');
-  const [filter, setFilter] = useState<FilterKind>('active');
+  const [filter, setFilter] = useState<JobFilterKey>('all');
   const [refreshing, setRefreshing] = useState(false);
   const [initialLoaded, setInitialLoaded] = useState(jobsLoaded || jobs.length > 0);
   const [stageSheetJob, setStageSheetJob] = useState<Job | null>(null);
@@ -103,9 +89,33 @@ export function JobsListScreen() {
     }
   }, []);
 
+  // Bucket every job once per data change, rather than re-deriving it inside
+  // each chip's count — that was jobs × filters × a document scan on every
+  // keystroke in the search box.
+  const bucketByJob = useMemo(() => {
+    const docsByJob = new Map<string, Document[]>();
+    for (const d of documents) {
+      if (!d.jobId) continue;
+      const list = docsByJob.get(d.jobId);
+      if (list) list.push(d);
+      else docsByJob.set(d.jobId, [d]);
+    }
+    const map = new Map<string, JobBucket>();
+    for (const j of jobs) map.set(j.id, bucketForJob(j, docsByJob.get(j.id) ?? []));
+    return map;
+  }, [jobs, documents]);
+
+  const counts = useMemo(() => {
+    const tally = new Map<JobFilterKey, number>([['all', jobs.length]]);
+    for (const bucket of bucketByJob.values()) {
+      tally.set(bucket, (tally.get(bucket) ?? 0) + 1);
+    }
+    return tally;
+  }, [bucketByJob, jobs.length]);
+
   const filtered = useMemo(() => {
     const matches = jobs.filter((j) => {
-      if (!matchesFilter(j, filter)) return false;
+      if (filter !== 'all' && bucketByJob.get(j.id) !== filter) return false;
       if (searchQuery) {
         const q = searchQuery.toLowerCase();
         return (
@@ -119,7 +129,7 @@ export function JobsListScreen() {
     // Sort here rather than leaning on the query's updatedAt ordering —
     // the cards are dated by their stage stamp, and the two disagreed.
     return sortJobsForList(matches);
-  }, [jobs, filter, searchQuery]);
+  }, [jobs, bucketByJob, filter, searchQuery]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -204,9 +214,8 @@ export function JobsListScreen() {
         />
 
         <View style={styles.filterRow}>
-          {FILTERS.map(({ key, label }) => {
-            const count =
-              key === 'all' ? jobs.length : jobs.filter((j) => matchesFilter(j, key)).length;
+          {JOB_FILTERS.map(({ key, label }) => {
+            const count = counts.get(key) ?? 0;
             return (
               <Chip
                 key={key}
@@ -265,22 +274,8 @@ export function JobsListScreen() {
                     color={themeColors.accentText}
                   />
                 </View>
-                <Text style={styles.emptyTitle}>
-                  {filter === 'all' && 'No jobs yet'}
-                  {filter === 'active' && 'Nothing on the go'}
-                  {filter === 'scheduled' && 'Nothing on the calendar'}
-                  {filter === 'completed' && 'Nothing in the rear-view'}
-                  {filter === 'archived' && 'Archive is empty'}
-                </Text>
-                <Text style={styles.emptyText}>
-                  {filter === 'all' && 'Start your first job and it’ll show up here'}
-                  {filter === 'active' &&
-                    'Jobs you’re quoting or working on live here'}
-                  {filter === 'scheduled' && 'Schedule a start date to see a job here'}
-                  {filter === 'completed' && 'Wrapped-up jobs show up here'}
-                  {filter === 'archived' &&
-                    'Closed and cancelled jobs rest here'}
-                </Text>
+                <Text style={styles.emptyTitle}>{EMPTY_COPY[filter].title}</Text>
+                <Text style={styles.emptyText}>{EMPTY_COPY[filter].body}</Text>
                 <Text style={styles.emptySubtext}>
                   {filter === 'all'
                     ? 'Tap + to start a new job'
