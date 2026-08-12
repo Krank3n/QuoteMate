@@ -38,7 +38,7 @@ import {
   type ProcessedLogoVariants,
 } from '../../services/photoService';
 import { BrandImageEditor, type BrandImageValue } from '../../components/BrandImageEditor';
-import { colors } from '../../theme';
+import { makeStyles, useThemeColors } from '../../theme';
 import { WebContainer } from '../../components/WebContainer';
 import { FixedBottomButton } from '../../components/FixedBottomButton';
 import { AlertModal } from '../../components/AlertModal';
@@ -47,8 +47,11 @@ import { ProBadge } from '../../components/ProBadge';
 import { useUnsavedChangesGuard } from '../../hooks/useUnsavedChangesGuard';
 import { generateId } from '../../utils/generateId';
 import type { BusinessCredential } from '../../types';
+import { GridBackground } from '../../components/GridBackground';
 
 export function BusinessProfileScreen() {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const navigation = useNavigation<any>();
   const { businessSettings, setBusinessSettings, subscriptionStatus } = useStore();
   const isTrialActive = !!(subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired);
@@ -338,6 +341,7 @@ export function BusinessProfileScreen() {
 
   return (
     <View style={styles.container}>
+      <GridBackground />
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
@@ -450,7 +454,7 @@ export function BusinessProfileScreen() {
                   </Text>
                   <IconButton
                     icon="delete-outline"
-                    iconColor={colors.error}
+                    iconColor={themeColors.error}
                     size={21}
                     onPress={() => {
                       setCredentials((current) => current.filter((item) => item.id !== credential.id));
@@ -528,7 +532,7 @@ export function BusinessProfileScreen() {
             {brandColor ? (
               <View style={[styles.colorBanner, { backgroundColor: brandColor }]}>
                 <View style={styles.colorBannerInner}>
-                  <MaterialCommunityIcons name="palette" size={20} color="#FFFFFF" />
+                  <MaterialCommunityIcons name="palette" size={20} color={themeColors.alwaysLight} />
                   <Text style={styles.colorBannerText}>{brandColor.toUpperCase()}</Text>
                 </View>
                 <TouchableOpacity
@@ -539,12 +543,12 @@ export function BusinessProfileScreen() {
                   style={styles.colorBannerClear}
                   hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                 >
-                  <MaterialCommunityIcons name="close-circle" size={22} color="#FFFFFF" />
+                  <MaterialCommunityIcons name="close-circle" size={22} color={themeColors.alwaysLight} />
                 </TouchableOpacity>
               </View>
             ) : (
               <View style={styles.colorBannerEmpty}>
-                <MaterialCommunityIcons name="palette-outline" size={20} color={colors.onSurface} />
+                <MaterialCommunityIcons name="palette-outline" size={20} color={themeColors.textSecondary} />
                 <Text style={styles.colorBannerEmptyText}>No custom colour — using template default</Text>
               </View>
             )}
@@ -565,7 +569,7 @@ export function BusinessProfileScreen() {
             <View style={styles.hexRow}>
               <View style={[
                 styles.hexPreview,
-                { backgroundColor: hexInput && /^#[0-9A-Fa-f]{6}$/.test(hexInput) ? hexInput : (brandColor || colors.outline) },
+                { backgroundColor: hexInput && /^#[0-9A-Fa-f]{6}$/.test(hexInput) ? hexInput : (brandColor || themeColors.borderStrong) },
               ]} />
               <TextInput
                 mode="outlined"
@@ -582,7 +586,7 @@ export function BusinessProfileScreen() {
                 dense
               />
               <Button
-                mode="contained"
+                mode="contained" buttonColor={themeColors.accent} textColor={themeColors.onAccent}
                 onPress={() => {
                   if (/^#[0-9A-Fa-f]{6}$/.test(hexInput)) {
                     setBrandColor(hexInput);
@@ -630,10 +634,10 @@ export function BusinessProfileScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
   },
   scrollView: {
     flex: 1,
@@ -647,7 +651,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     borderRadius: 12,
     elevation: 2,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
   },
   sectionTitle: {
     fontSize: 18,
@@ -659,7 +663,7 @@ const styles = StyleSheet.create({
   },
   helperText: {
     fontSize: 14,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     marginBottom: 16,
   },
   sectionHeadingRow: {
@@ -673,11 +677,11 @@ const styles = StyleSheet.create({
   },
   credentialCard: {
     borderWidth: 1,
-    borderColor: colors.outline,
+    borderColor: t.colors.borderStrong,
     borderRadius: 10,
     padding: 12,
     marginBottom: 12,
-    backgroundColor: colors.surfaceLight,
+    backgroundColor: t.colors.surfaceOverlay,
   },
   credentialHeader: {
     flexDirection: 'row',
@@ -689,11 +693,11 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 14,
     fontWeight: '700',
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
   },
   credentialInput: {
     marginBottom: 10,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
   },
   credentialLogoRow: {
     flexDirection: 'row',
@@ -705,35 +709,35 @@ const styles = StyleSheet.create({
     width: 72,
     height: 44,
     borderRadius: 6,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
   },
   logoUploadBox: {
     borderWidth: 2,
-    borderColor: colors.primary,
+    borderColor: t.colors.accent,
     borderStyle: 'dashed',
     borderRadius: 8,
     padding: 32,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
   },
   logoUploadText: {
     fontSize: 16,
     fontWeight: '600',
-    color: colors.primary,
+    color: t.colors.accentText,
     marginTop: 12,
   },
   logoUploadHint: {
     fontSize: 12,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     marginTop: 4,
   },
   logoPreview: {
     borderWidth: 1,
-    borderColor: colors.outline,
+    borderColor: t.colors.borderStrong,
     borderRadius: 8,
     padding: 16,
-    backgroundColor: colors.surfaceLight,
+    backgroundColor: t.colors.surfaceOverlay,
   },
   logoImage: {
     width: '100%',
@@ -764,7 +768,7 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   colorBannerText: {
-    color: '#FFFFFF',
+    color: t.colors.alwaysLight,
     fontSize: 15,
     fontWeight: '700',
     letterSpacing: 0.5,
@@ -778,7 +782,7 @@ const styles = StyleSheet.create({
     gap: 10,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: colors.outline,
+    borderColor: t.colors.borderStrong,
     borderStyle: 'dashed',
     paddingVertical: 12,
     paddingHorizontal: 16,
@@ -786,7 +790,7 @@ const styles = StyleSheet.create({
   },
   colorBannerEmptyText: {
     fontSize: 13,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     fontStyle: 'italic',
   },
   pickerContainer: {
@@ -813,7 +817,7 @@ const styles = StyleSheet.create({
     height: 40,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: colors.outline,
+    borderColor: t.colors.borderStrong,
   },
   hexInput: {
     flex: 1,
@@ -835,11 +839,11 @@ const styles = StyleSheet.create({
   toggleTitle: {
     fontSize: 15,
     fontWeight: '600',
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
   },
   toggleDescription: {
     fontSize: 13,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginTop: 2,
   },
-});
+}));

@@ -19,7 +19,8 @@ import { View, StyleSheet, Pressable } from 'react-native';
 import { Text } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
-import { colors } from '../theme';
+import type { Tokens } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 import { selectionTap } from '../utils/haptics';
 import type { ReportRowMeta } from '../screens/ServiceReport/reportDraft';
 
@@ -29,18 +30,20 @@ interface ServiceReportRowProps {
 }
 
 /** Chip colours mirror the stage chips: draft is muted, done is green. */
-export function statusChipColors(status: ReportRowMeta['status']): {
+export function statusChipColors(status: ReportRowMeta['status'], themeColors: Tokens): {
   color: string;
   bg: string;
   icon: string;
 } {
   return status === 'sent'
-    ? { color: colors.success, bg: colors.successBg, icon: 'send-check' }
-    : { color: colors.textMuted, bg: colors.surfaceGray3, icon: 'pencil-outline' };
+    ? { color: themeColors.money, bg: themeColors.moneySubtle, icon: 'send-check' }
+    : { color: themeColors.textMuted, bg: themeColors.surfacePressed, icon: 'pencil-outline' };
 }
 
 export function ServiceReportRow({ meta, onPress }: ServiceReportRowProps) {
-  const status = statusChipColors(meta.status);
+  const styles = useStyles();
+  const themeColors = useThemeColors();
+  const status = statusChipColors(meta.status, themeColors);
 
   return (
     <Pressable
@@ -56,7 +59,7 @@ export function ServiceReportRow({ meta, onPress }: ServiceReportRowProps) {
         <MaterialCommunityIcons
           name={'clipboard-check-outline' as any}
           size={18}
-          color={colors.primary}
+          color={themeColors.accentText}
         />
       </View>
 
@@ -99,7 +102,7 @@ export function ServiceReportRow({ meta, onPress }: ServiceReportRowProps) {
               <MaterialCommunityIcons
                 name={'image-outline' as any}
                 size={12}
-                color={colors.textMuted}
+                color={themeColors.textMuted}
               />
               <Text style={styles.metaChipLabel}>{meta.photoCount}</Text>
             </View>
@@ -109,7 +112,7 @@ export function ServiceReportRow({ meta, onPress }: ServiceReportRowProps) {
               <MaterialCommunityIcons
                 name={'draw-pen' as any}
                 size={12}
-                color={colors.textMuted}
+                color={themeColors.textMuted}
               />
               <Text style={styles.metaChipLabel}>Signed</Text>
             </View>
@@ -122,7 +125,7 @@ export function ServiceReportRow({ meta, onPress }: ServiceReportRowProps) {
       <MaterialCommunityIcons
         name={'chevron-right' as any}
         size={20}
-        color={colors.inactive}
+        color={themeColors.textDisabled}
       />
     </Pressable>
   );
@@ -130,25 +133,25 @@ export function ServiceReportRow({ meta, onPress }: ServiceReportRowProps) {
 
 // Metrics copied from DocumentRow rather than re-picked, so a report row and
 // a document row line up pixel-for-pixel when they stack on the same job.
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
     padding: 14,
     borderRadius: 14,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     marginHorizontal: 16,
     marginBottom: 10,
   },
   rowPressed: {
-    backgroundColor: colors.surfaceGray3,
+    backgroundColor: t.colors.surfacePressed,
   },
   iconCircle: {
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: colors.primaryBg,
+    backgroundColor: t.colors.accentSubtle,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -165,13 +168,13 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 14,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
     flex: 1,
   },
   visit: {
     fontSize: 14,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
   },
   chipRow: {
     flexDirection: 'row',
@@ -195,7 +198,7 @@ const styles = StyleSheet.create({
   number: {
     fontSize: 12,
     fontWeight: '600',
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
   metaChip: {
     flexDirection: 'row',
@@ -205,10 +208,10 @@ const styles = StyleSheet.create({
   metaChipLabel: {
     fontSize: 12,
     fontWeight: '600',
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
   detail: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
-});
+}));

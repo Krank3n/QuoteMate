@@ -33,7 +33,7 @@ import {
 } from 'react-native';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
-import { colors } from '../theme';
+import { makeStyles, useThemeColors} from '../theme';
 import {
   appendTranscript,
   commitSegment,
@@ -103,6 +103,9 @@ export function DictationButton({
   variant = 'inline',
   label = 'Talk instead of type',
 }: DictationButtonProps) {
+  const themeColors = useThemeColors();
+  const styles = useStyles();
+
   const [isRecording, setIsRecording] = useState(false);
   const isRecordingRef = useRef(false);
   const [isRequestingPermission, setIsRequestingPermission] = useState(false);
@@ -326,7 +329,7 @@ export function DictationButton({
           <MaterialCommunityIcons
             name={isRecording ? 'stop' : 'microphone'}
             size={36}
-            color="#FFFFFF"
+            color={themeColors.onAccent}
           />
         </TouchableOpacity>
 
@@ -356,7 +359,7 @@ export function DictationButton({
         <MaterialCommunityIcons
           name={isRecording ? 'stop' : 'microphone'}
           size={20}
-          color="#FFFFFF"
+          color={themeColors.onAccent}
         />
       </TouchableOpacity>
 
@@ -371,7 +374,7 @@ export function DictationButton({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -381,20 +384,20 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: colors.primary,
+    backgroundColor: t.colors.accent,
     alignItems: 'center',
     justifyContent: 'center',
   },
   micButtonActive: {
-    backgroundColor: colors.error,
+    backgroundColor: t.colors.error,
   },
   hintText: {
     flex: 1,
     fontSize: 13,
-    color: colors.textSecondary,
+    color: t.colors.textMuted,
   },
   hintTextActive: {
-    color: colors.success,
+    color: t.colors.money,
     fontWeight: '600',
   },
   // Hero variant — mirrors the record button on NewQuote/JobDetailsScreen
@@ -411,20 +414,20 @@ const styles = StyleSheet.create({
     width: 88,
     height: 88,
     borderRadius: 44,
-    backgroundColor: colors.primary,
+    backgroundColor: t.colors.accent,
     justifyContent: 'center',
     alignItems: 'center',
     elevation: 8,
-    shadowColor: colors.primary,
+    shadowColor: t.colors.accent,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
     borderWidth: 3,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
+    borderColor: t.colors.border,
   },
   heroButtonActive: {
-    backgroundColor: colors.success,
-    shadowColor: colors.success,
+    backgroundColor: t.colors.money,
+    shadowColor: t.colors.money,
     shadowOpacity: 0.6,
     elevation: 16,
   },
@@ -433,16 +436,16 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     textAlign: 'center',
     marginTop: 8,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
   },
   heroLabelActive: {
-    color: colors.success,
+    color: t.colors.money,
   },
   heroHint: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     textAlign: 'center',
     marginTop: 4,
     lineHeight: 16,
   },
-});
+}));

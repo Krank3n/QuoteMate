@@ -18,7 +18,7 @@ import { formatDistanceToNow } from 'date-fns';
 import type { Job, JobStage } from '../../shared/job/types';
 import { useJobStore } from '../store/useJobStore';
 import { useStore } from '../store/useStore';
-import { colors } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
 import { WebContainer } from '../components/WebContainer';
 import { DocumentRow } from '../components/DocumentRow';
@@ -63,8 +63,11 @@ import { cascadeDeleteJob, pickPaidDocs } from '../utils/deleteJobWithDocs';
 import { formatScheduledDateLong } from '../utils/formatSchedule';
 import { selectionTap, lightTap } from '../utils/haptics';
 import { useAlertModal } from '../hooks/useAlertModal';
+import { GridBackground } from '../components/GridBackground';
 
 export function ViewJobScreen() {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const jobId: string = route.params?.jobId;
@@ -181,20 +184,20 @@ export function ViewJobScreen() {
         <MaterialCommunityIcons
           name={'briefcase-off-outline' as any}
           size={48}
-          color={colors.textMuted}
+          color={themeColors.textMuted}
         />
         <Text style={styles.missingTitle}>Job not found</Text>
         <Text style={styles.missingText}>
           It may have been deleted or hasn’t synced yet.
         </Text>
-        <Button mode="contained" style={{ marginTop: 20 }} onPress={() => navigation.goBack()}>
+        <Button mode="contained" buttonColor={themeColors.accent} textColor={themeColors.onAccent} style={{ marginTop: 20 }} onPress={() => navigation.goBack()}>
           Back
         </Button>
       </View>
     );
   }
 
-  const meta = stageMetaFor(job.stage);
+  const meta = stageMetaFor(job.stage, themeColors);
   // Duration comes from the primary attached doc's labour rather than
   // duplicate fields on the Job itself. Prefer the explicitly-linked
   // primaryDocumentId when it's still on the job; otherwise fall back to
@@ -256,14 +259,14 @@ export function ViewJobScreen() {
         onPress={() => navigation.navigate('ReeceOrder', { docId: primaryDoc?.id })}
         activeOpacity={0.7}
       >
-        <MaterialCommunityIcons name="cart-outline" size={20} color={colors.primary} />
+        <MaterialCommunityIcons name="cart-outline" size={20} color={themeColors.accentText} />
         <View style={{ flex: 1, marginLeft: 12 }}>
           <Text style={styles.reeceOrderButtonTitle}>Order from Reece</Text>
           <Text style={styles.reeceOrderButtonSubtitle}>
             Place this list against your trade account — Reece bills you, no money through QuoteMate.
           </Text>
         </View>
-        <MaterialCommunityIcons name="chevron-right" size={22} color={colors.textMuted} />
+        <MaterialCommunityIcons name="chevron-right" size={22} color={themeColors.textMuted} />
       </TouchableOpacity>
     ) : null;
 
@@ -866,6 +869,7 @@ export function ViewJobScreen() {
 
   return (
     <View style={styles.container}>
+      <GridBackground />
       {/* NestableScrollContainer lets the JobChecklist's DraggableFlatList
           sit inline without fighting the outer scroll on native. On web
           it behaves as a regular scroll view. */}
@@ -1056,6 +1060,8 @@ export function ViewJobScreen() {
 
 
 function SectionTitle({ label }: { label: string }) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   return (
     <Text style={styles.sectionTitle}>{label}</Text>
   );
@@ -1082,6 +1088,8 @@ function ScopeBlock({
   onConvertToInvoice,
   extra,
 }: ScopeBlockProps) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   if (!primaryDoc) {
     // No doc yet — the sticky bar already offers "Create Quote". Render
     // an empty-state stub so the section doesn't just vanish. `extra`
@@ -1094,7 +1102,7 @@ function ScopeBlock({
             <MaterialCommunityIcons
               name={'file-plus-outline' as any}
               size={28}
-              color={colors.textMuted}
+              color={themeColors.textMuted}
             />
             <Text style={styles.emptyDocsText}>
               No quote yet. Create one to set scope and pricing.
@@ -1135,8 +1143,8 @@ function ScopeBlock({
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
+const useStyles = makeStyles((t) => ({
+  container: { flex: 1, backgroundColor: t.colors.bg },
   // Extra bottom pad clears the pinned StickyJobActionBar so the last
   // section (danger zone) isn't hidden behind it.
   scrollContent: { paddingBottom: 160 },
@@ -1149,12 +1157,12 @@ const styles = StyleSheet.create({
   missingTitle: {
     fontSize: 18,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
     marginTop: 12,
   },
   missingText: {
     fontSize: 14,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     textAlign: 'center',
   },
   notesAddButton: {
@@ -1165,27 +1173,27 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     padding: 14,
     borderRadius: 14,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderWidth: 1,
     borderStyle: 'dashed',
-    borderColor: colors.border,
+    borderColor: t.colors.border,
   },
   notesAddLabel: {
     fontSize: 13,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     fontWeight: '500',
   },
   sectionTitle: {
     fontSize: 15,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
     marginHorizontal: 16,
     marginBottom: 8,
   },
   emptyDocsCard: {
     marginHorizontal: 16,
     marginBottom: 12,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderRadius: 16,
   },
   emptyDocs: {
@@ -1195,7 +1203,7 @@ const styles = StyleSheet.create({
   },
   emptyDocsText: {
     fontSize: 13,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
   secondaryDocsWrap: {
     marginTop: 4,
@@ -1208,29 +1216,29 @@ const styles = StyleSheet.create({
   reeceOrderButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderRadius: 12,
     padding: 14,
     marginHorizontal: 16,
     marginTop: 8,
     borderWidth: 1,
-    borderColor: colors.primary,
+    borderColor: t.colors.accent,
   },
   reeceOrderButtonTitle: {
     fontSize: 15,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
   },
   reeceOrderButtonSubtitle: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginTop: 2,
     lineHeight: 16,
   },
   secondaryDocsLabel: {
     fontSize: 11,
     fontWeight: '700',
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
     marginHorizontal: 20,
@@ -1241,12 +1249,12 @@ const styles = StyleSheet.create({
     marginHorizontal: 16,
     marginBottom: 12,
     padding: 12,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderRadius: 16,
     gap: 12,
   },
   notesInput: {
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     minHeight: 80,
   },
   notesSave: {
@@ -1267,4 +1275,4 @@ const styles = StyleSheet.create({
   deleteButton: {
     borderRadius: 12,
   },
-});
+}));

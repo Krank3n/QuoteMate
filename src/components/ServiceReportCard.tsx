@@ -19,7 +19,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
 import { statusChipColors } from './ServiceReportRow';
 import type { ReportRowMeta } from '../screens/ServiceReport/reportDraft';
-import { colors } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 import { previewReportPDF } from '../utils/pdfGenerator';
 import { selectionTap } from '../utils/haptics';
 import type { BusinessSettings } from '../types';
@@ -45,8 +45,10 @@ export function ServiceReportCard({
   onOpen,
   onPreviewError,
 }: ServiceReportCardProps) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const [previewing, setPreviewing] = useState(false);
-  const status = statusChipColors(meta.status);
+  const status = statusChipColors(meta.status, themeColors);
 
   const handlePreview = async () => {
     selectionTap();
@@ -69,7 +71,7 @@ export function ServiceReportCard({
             <MaterialCommunityIcons
               name={'clipboard-check-outline' as any}
               size={16}
-              color={colors.primary}
+              color={themeColors.accentText}
             />
           </View>
           <View style={styles.headerTextBlock}>
@@ -100,7 +102,7 @@ export function ServiceReportCard({
           <MaterialCommunityIcons
             name={'text-box-outline' as any}
             size={16}
-            color={colors.primary}
+            color={themeColors.accentText}
           />
         </View>
         <View style={styles.rowBody}>
@@ -113,7 +115,7 @@ export function ServiceReportCard({
             </Text>
           )}
         </View>
-        <MaterialCommunityIcons name="chevron-right" size={20} color={colors.textMuted} />
+        <MaterialCommunityIcons name="chevron-right" size={20} color={themeColors.textMuted} />
       </Pressable>
 
       <Pressable
@@ -128,9 +130,9 @@ export function ServiceReportCard({
         accessibilityLabel="Preview report PDF"
       >
         {previewing ? (
-          <ActivityIndicator size="small" color={colors.primary} />
+          <ActivityIndicator size="small" color={themeColors.accentText} />
         ) : (
-          <MaterialCommunityIcons name={'file-eye-outline' as any} size={16} color={colors.primary} />
+          <MaterialCommunityIcons name={'file-eye-outline' as any} size={16} color={themeColors.accentText} />
         )}
         <Text style={styles.previewLabel}>Preview PDF</Text>
       </Pressable>
@@ -139,13 +141,13 @@ export function ServiceReportCard({
 }
 
 // Metrics copied from JobScopeCard so a report and a quote line up exactly.
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   card: {
     marginHorizontal: 16,
     marginBottom: 12,
     padding: 12,
     borderRadius: 16,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     gap: 8,
   },
   header: {
@@ -157,7 +159,7 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
     minHeight: 56,
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    borderBottomColor: t.colors.border,
   },
   headerLeft: {
     flexDirection: 'row',
@@ -170,7 +172,7 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: colors.primaryBg,
+    backgroundColor: t.colors.accentSubtle,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -181,14 +183,14 @@ const styles = StyleSheet.create({
   typeLabel: {
     fontSize: 10,
     fontWeight: '800',
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     textTransform: 'uppercase',
     letterSpacing: 0.6,
   },
   docNumber: {
     fontSize: 14,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
   },
   chip: {
     flexDirection: 'row',
@@ -209,7 +211,7 @@ const styles = StyleSheet.create({
     gap: 12,
     padding: 10,
     borderRadius: 12,
-    backgroundColor: colors.surfaceGray3,
+    backgroundColor: t.colors.surfacePressed,
   },
   rowPressed: {
     opacity: 0.85,
@@ -218,7 +220,7 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: colors.primaryBg,
+    backgroundColor: t.colors.accentSubtle,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -230,11 +232,11 @@ const styles = StyleSheet.create({
   rowTitle: {
     fontSize: 13,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
   },
   rowDetail: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
   previewButton: {
     flexDirection: 'row',
@@ -243,9 +245,9 @@ const styles = StyleSheet.create({
     gap: 6,
     paddingVertical: 10,
     borderRadius: 10,
-    backgroundColor: colors.primaryBg,
+    backgroundColor: t.colors.accentSubtle,
     borderWidth: 1,
-    borderColor: colors.primary + '33',
+    borderColor: t.colors.accentSubtle,
     marginTop: 4,
   },
   previewButtonPressed: {
@@ -257,6 +259,6 @@ const styles = StyleSheet.create({
   previewLabel: {
     fontSize: 13,
     fontWeight: '700',
-    color: colors.primary,
+    color: t.colors.accentText,
   },
-});
+}));

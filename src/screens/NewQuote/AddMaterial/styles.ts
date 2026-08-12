@@ -1,18 +1,18 @@
 import { StyleSheet } from 'react-native';
-import { colors } from '../../../theme';
+import { makeStyles } from '../../../theme';
 
-export const styles = StyleSheet.create({
+export const useAddMaterialStyles = makeStyles((t) => ({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
   },
   tabBar: {
     paddingHorizontal: 16,
     paddingTop: 12,
     paddingBottom: 8,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    borderBottomColor: t.colors.border,
   },
   tabContent: {
     flex: 1,
@@ -21,7 +21,7 @@ export const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 3,
-    backgroundColor: colors.primary + '1A',
+    backgroundColor: t.colors.accentSubtle,
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 6,
@@ -30,7 +30,7 @@ export const styles = StyleSheet.create({
   syncedBadgeText: {
     fontSize: 10,
     fontWeight: '600',
-    color: colors.primary,
+    color: t.colors.accentText,
   },
   discoverCard: {
     flexDirection: 'row',
@@ -39,13 +39,13 @@ export const styles = StyleSheet.create({
     marginBottom: 4,
     paddingVertical: 10,
     paddingHorizontal: 14,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderRadius: 10,
   },
   discoverCardText: {
     flex: 1,
     fontSize: 14,
-    color: colors.text,
+    color: t.colors.text,
     fontWeight: '500',
   },
   importCard: {
@@ -56,16 +56,16 @@ export const styles = StyleSheet.create({
     marginBottom: 12,
     paddingVertical: 14,
     paddingHorizontal: 14,
-    backgroundColor: colors.primary + '14',
+    backgroundColor: t.colors.accentSubtle,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: colors.primary + '38',
+    borderColor: t.colors.accentSubtle,
   },
   importCardIconWrap: {
     width: 48,
     height: 48,
     borderRadius: 12,
-    backgroundColor: colors.primary + '22',
+    backgroundColor: t.colors.accentSubtle,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
@@ -76,12 +76,12 @@ export const styles = StyleSheet.create({
   importCardTitle: {
     fontSize: 16,
     fontWeight: '700',
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
   },
   importCardSubtitle: {
     marginTop: 2,
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
   importCardChevron: {
     marginLeft: 4,
@@ -96,7 +96,7 @@ export const styles = StyleSheet.create({
   },
   addManuallyLinkText: {
     marginLeft: 6,
-    color: colors.primary,
+    color: t.colors.accentText,
     fontSize: 13,
     fontWeight: '600',
   },
@@ -108,21 +108,21 @@ export const styles = StyleSheet.create({
   },
   advancedToggleText: {
     marginLeft: 4,
-    color: colors.primary,
+    color: t.colors.accentText,
     fontSize: 13,
     fontWeight: '600',
   },
   coverageHelper: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginBottom: 8,
     lineHeight: 16,
   },
   linkedBanner: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.primary + '14',
-    borderColor: colors.primary + '38',
+    backgroundColor: t.colors.accentSubtle,
+    borderColor: t.colors.accentSubtle,
     borderWidth: 1,
     borderRadius: 10,
     paddingHorizontal: 12,
@@ -133,7 +133,7 @@ export const styles = StyleSheet.create({
     flex: 1,
     marginLeft: 8,
     fontSize: 12,
-    color: colors.text,
+    color: t.colors.text,
     fontWeight: '500',
   },
   // Pill toggle — same shape as the Hours/Days control on the labor screen.
@@ -141,7 +141,7 @@ export const styles = StyleSheet.create({
     flexDirection: 'row',
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
     overflow: 'hidden',
   },
   pillToggleBtn: {
@@ -150,21 +150,21 @@ export const styles = StyleSheet.create({
     paddingVertical: 10,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
   },
   pillToggleIcon: {
     marginRight: 6,
   },
   pillToggleBtnActive: {
-    backgroundColor: colors.primary,
+    backgroundColor: t.colors.accent,
   },
   pillToggleText: {
     fontSize: 14,
     fontWeight: '600',
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
   pillToggleTextActive: {
-    color: '#FFFFFF',
+    color: t.colors.onAccent,
   },
   // Supplier section header — modeled on the materials-list section card header
   supplierHeader: {
@@ -172,7 +172,7 @@ export const styles = StyleSheet.create({
     paddingVertical: 12,
     marginTop: 12,
     marginBottom: 8,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderRadius: 12,
   },
   supplierHeaderTopRow: {
@@ -183,7 +183,7 @@ export const styles = StyleSheet.create({
     marginTop: 10,
     paddingTop: 10,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.border,
+    borderTopColor: t.colors.border,
   },
   supplierHeaderChevron: {
     width: 28,
@@ -197,11 +197,11 @@ export const styles = StyleSheet.create({
   supplierHeaderName: {
     fontSize: 15,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
   },
   supplierHeaderCount: {
     fontSize: 11,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginTop: 2,
   },
   supplierHeaderActions: {
@@ -230,7 +230,7 @@ export const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
     marginBottom: 12,
   },
   manualEntryHeader: {
@@ -242,12 +242,12 @@ export const styles = StyleSheet.create({
   manualEntryDividerLine: {
     flex: 1,
     height: 1,
-    backgroundColor: colors.border,
+    backgroundColor: t.colors.border,
   },
   manualEntryHeaderText: {
     fontSize: 13,
     fontWeight: '500',
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
@@ -257,9 +257,9 @@ export const styles = StyleSheet.create({
     gap: 8,
   },
   proSearchPrompt: {
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
     borderRadius: 8,
     padding: 16,
     alignItems: 'center',
@@ -267,13 +267,13 @@ export const styles = StyleSheet.create({
   },
   proSearchPromptText: {
     fontSize: 14,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     textAlign: 'center',
   },
   proSearchPromptCta: {
     fontSize: 14,
     fontWeight: '600',
-    color: colors.primary,
+    color: t.colors.accentText,
   },
   searchInput: {
     marginBottom: 16,
@@ -286,10 +286,10 @@ export const styles = StyleSheet.create({
   searchBarInputWrap: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
     paddingLeft: 12,
     paddingRight: 0,
     overflow: 'hidden',
@@ -312,13 +312,13 @@ export const styles = StyleSheet.create({
     borderBottomRightRadius: 11,
   },
   searchBarButtonIdle: {
-    backgroundColor: colors.primary + '1F',
+    backgroundColor: t.colors.accentSubtle,
   },
   searchBarButtonActive: {
-    backgroundColor: colors.primary,
+    backgroundColor: t.colors.accent,
   },
   searchBarButtonCancel: {
-    backgroundColor: colors.textMuted,
+    backgroundColor: t.colors.textMuted,
   },
   supplierChipsRow: {
     flexDirection: 'row',
@@ -330,21 +330,21 @@ export const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
+    borderColor: t.colors.border,
+    backgroundColor: t.colors.surfaceRaised,
     marginRight: 8,
   },
   supplierChipActive: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
+    backgroundColor: t.colors.accent,
+    borderColor: t.colors.accent,
   },
   supplierChipText: {
     fontSize: 13,
     fontWeight: '500',
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
   supplierChipTextActive: {
-    color: '#FFFFFF',
+    color: t.colors.onAccent,
   },
   loadingContainer: {
     flexDirection: 'row',
@@ -355,7 +355,7 @@ export const styles = StyleSheet.create({
   loadingText: {
     marginLeft: 12,
     fontSize: 14,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
   },
   resultsContainer: {
     marginTop: 8,
@@ -364,7 +364,7 @@ export const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     marginBottom: 12,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
   },
   resultItem: {
     flexDirection: 'row',
@@ -376,9 +376,9 @@ export const styles = StyleSheet.create({
     height: 60,
     marginRight: 12,
     borderRadius: 8,
-    backgroundColor: colors.surfaceLight,
+    backgroundColor: t.colors.surfaceOverlay,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
   },
   resultInfo: {
     flex: 1,
@@ -387,17 +387,17 @@ export const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '500',
     marginBottom: 4,
-    color: colors.text,
+    color: t.colors.text,
   },
   resultDetails: {
     fontSize: 12,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     marginBottom: 4,
   },
   resultPrice: {
     fontSize: 14,
     fontWeight: '600',
-    color: colors.primary,
+    color: t.colors.money,
     marginBottom: 4,
   },
   aiChip: {
@@ -415,9 +415,9 @@ export const styles = StyleSheet.create({
   recentChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
     borderRadius: 20,
     paddingVertical: 8,
     paddingHorizontal: 14,
@@ -425,13 +425,13 @@ export const styles = StyleSheet.create({
   },
   recentChipName: {
     fontSize: 13,
-    color: colors.text,
+    color: t.colors.text,
     maxWidth: 150,
   },
   recentChipPrice: {
     fontSize: 12,
     fontWeight: '600',
-    color: colors.primary,
+    color: t.colors.money,
   },
   divider: {
     marginVertical: 8,
@@ -451,7 +451,7 @@ export const styles = StyleSheet.create({
   },
   quantityLabel: {
     fontSize: 12,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     marginBottom: 6,
     marginLeft: 4,
   },
@@ -459,9 +459,9 @@ export const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
     borderRadius: 8,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     height: 48,
   },
   stepperButton: {
@@ -486,7 +486,7 @@ export const styles = StyleSheet.create({
   },
   unitLabel: {
     fontSize: 12,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     marginBottom: 8,
     marginLeft: 4,
   },
@@ -502,9 +502,9 @@ export const styles = StyleSheet.create({
   categoryButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
     borderRadius: 8,
     padding: 12,
     gap: 8,
@@ -512,13 +512,13 @@ export const styles = StyleSheet.create({
   categoryButtonText: {
     flex: 1,
     fontSize: 14,
-    color: colors.text,
+    color: t.colors.text,
   },
   categoryList: {
     marginTop: 8,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
     borderRadius: 8,
     maxHeight: 250,
     overflow: 'hidden',
@@ -529,18 +529,18 @@ export const styles = StyleSheet.create({
     padding: 12,
     gap: 10,
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    borderBottomColor: t.colors.border,
   },
   categoryItemSelected: {
-    backgroundColor: colors.primaryBg,
+    backgroundColor: t.colors.accentSubtle,
   },
   categoryItemText: {
     flex: 1,
     fontSize: 14,
-    color: colors.text,
+    color: t.colors.text,
   },
   categoryItemTextSelected: {
-    color: colors.primary,
+    color: t.colors.accentText,
     fontWeight: '600',
   },
   toggleRow: {
@@ -552,7 +552,7 @@ export const styles = StyleSheet.create({
   },
   toggleLabel: {
     fontSize: 14,
-    color: colors.text,
+    color: t.colors.text,
     flex: 1,
     marginRight: 12,
   },
@@ -563,7 +563,7 @@ export const styles = StyleSheet.create({
   savedItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     marginBottom: 8,
     borderRadius: 8,
     overflow: 'hidden',
@@ -578,9 +578,9 @@ export const styles = StyleSheet.create({
     height: 50,
     marginRight: 12,
     borderRadius: 8,
-    backgroundColor: colors.surfaceLight,
+    backgroundColor: t.colors.surfaceOverlay,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
   },
   savedInfo: {
     flex: 1,
@@ -594,17 +594,17 @@ export const styles = StyleSheet.create({
   savedName: {
     fontSize: 15,
     fontWeight: '500',
-    color: colors.text,
+    color: t.colors.text,
     flexShrink: 1,
   },
   myRateChip: {
-    backgroundColor: colors.primary,
+    backgroundColor: t.colors.accent,
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: 10,
   },
   myRateChipText: {
-    color: colors.surface,
+    color: t.colors.onAccent,
     fontSize: 11,
     fontWeight: '600',
   },
@@ -612,25 +612,25 @@ export const styles = StyleSheet.create({
     marginTop: 4,
     marginBottom: 8,
     padding: 12,
-    backgroundColor: colors.surfaceLight,
+    backgroundColor: t.colors.surfaceOverlay,
     borderRadius: 8,
     gap: 8,
   },
   personalRateHelper: {
     fontSize: 12,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     marginBottom: 4,
     lineHeight: 16,
   },
   savedDetails: {
     fontSize: 12,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     marginBottom: 2,
   },
   savedPrice: {
     fontSize: 13,
     fontWeight: '600',
-    color: colors.primary,
+    color: t.colors.money,
   },
   emptyState: {
     flex: 1,
@@ -641,13 +641,13 @@ export const styles = StyleSheet.create({
   emptyStateTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
     marginTop: 16,
     marginBottom: 8,
   },
   emptyStateText: {
     fontSize: 14,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     textAlign: 'center',
     lineHeight: 20,
   },
@@ -661,7 +661,7 @@ export const styles = StyleSheet.create({
   },
   cantFindItText: {
     marginLeft: 8,
-    color: colors.primary,
+    color: t.colors.accentText,
     fontSize: 14,
     fontWeight: '600',
   },
@@ -684,13 +684,13 @@ export const styles = StyleSheet.create({
     paddingHorizontal: 10,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
+    borderColor: t.colors.border,
+    backgroundColor: t.colors.surfaceRaised,
   },
   searchActionLabel: {
     fontSize: 13,
     fontWeight: '600',
-    color: colors.primary,
+    color: t.colors.accentText,
   },
   manualSheetFooter: {
     paddingHorizontal: 16,
@@ -703,4 +703,4 @@ export const styles = StyleSheet.create({
   manualSheetButtonContent: {
     paddingVertical: 6,
   },
-});
+}));

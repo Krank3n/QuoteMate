@@ -20,7 +20,7 @@ import {
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { format } from 'date-fns';
 
-import { colors } from '../../theme';
+import { makeStyles, useThemeColors } from '../../theme';
 import { WebContainer } from '../../components/WebContainer';
 import { AlertModal } from '../../components/AlertModal';
 import {
@@ -33,6 +33,7 @@ import {
   type ReecePriceFileStatus,
 } from '../../services/reeceApi';
 import { runReeceConnectFlow, runReecePriceFileEnableFlow } from '../../services/reeceConnect';
+import { GridBackground } from '../../components/GridBackground';
 
 function formatRelativeAge(generatedAt: number | null): string {
   if (!generatedAt) return 'never';
@@ -47,6 +48,8 @@ function formatRelativeAge(generatedAt: number | null): string {
 }
 
 export function ReeceIntegrationScreen() {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const [connection, setConnection] = useState<ReeceConnectionStatus | null>(null);
   const [loading, setLoading] = useState(false);
   const [checkingConnection, setCheckingConnection] = useState(true);
@@ -207,7 +210,7 @@ export function ReeceIntegrationScreen() {
   if (checkingConnection) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" color={colors.primary} />
+        <ActivityIndicator size="large" color={themeColors.accentText} />
         <Text style={styles.loadingText}>Checking Reece connection...</Text>
       </View>
     );
@@ -215,7 +218,9 @@ export function ReeceIntegrationScreen() {
 
   return (
     <>
-      <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      <View style={styles.gridHost}>
+    <GridBackground />
+    <ScrollView style={styles.scroller} contentContainerStyle={styles.content}>
         <WebContainer>
           {/* Header */}
           <Surface style={styles.card}>
@@ -224,7 +229,7 @@ export function ReeceIntegrationScreen() {
                 <MaterialCommunityIcons
                   name="pipe"
                   size={32}
-                  color={colors.primary}
+                  color={themeColors.accentText}
                 />
               </View>
               <View style={styles.headerText}>
@@ -246,7 +251,7 @@ export function ReeceIntegrationScreen() {
                   <MaterialCommunityIcons
                     name="check-circle"
                     size={20}
-                    color={colors.success}
+                    color={themeColors.money}
                   />
                   <Text style={styles.connectedText}>Connected</Text>
                 </View>
@@ -287,7 +292,7 @@ export function ReeceIntegrationScreen() {
                   mode="outlined"
                   onPress={handleDisconnect}
                   loading={loading}
-                  textColor={colors.error}
+                  textColor={themeColors.error}
                   style={styles.disconnectButton}
                 >
                   Disconnect Reece
@@ -304,7 +309,7 @@ export function ReeceIntegrationScreen() {
                   loading={loading}
                   disabled={loading}
                   style={styles.connectButton}
-                  buttonColor={colors.primary}
+                  buttonColor={themeColors.accent}
                 >
                   Connect to Reece
                 </Button>
@@ -337,7 +342,7 @@ export function ReeceIntegrationScreen() {
                   {priceFileStatus.lastError ? (
                     <View style={styles.detailRow}>
                       <Text style={styles.detailLabel}>Last error</Text>
-                      <Text style={[styles.detailValue, { color: colors.error }]}>
+                      <Text style={[styles.detailValue, { color: themeColors.error }]}>
                         {priceFileStatus.lastError}
                       </Text>
                     </View>
@@ -349,7 +354,7 @@ export function ReeceIntegrationScreen() {
                     loading={priceFileBusy === 'refresh'}
                     disabled={priceFileBusy !== null}
                     style={styles.connectButton}
-                    buttonColor={colors.primary}
+                    buttonColor={themeColors.accent}
                   >
                     Refresh now
                   </Button>
@@ -358,7 +363,7 @@ export function ReeceIntegrationScreen() {
                     onPress={handleDisablePriceFile}
                     loading={priceFileBusy === 'disable'}
                     disabled={priceFileBusy !== null}
-                    textColor={colors.error}
+                    textColor={themeColors.error}
                     style={[styles.disconnectButton, { marginTop: 8 }]}
                   >
                     Disable catalogue sync
@@ -371,7 +376,7 @@ export function ReeceIntegrationScreen() {
                   loading={priceFileBusy === 'enable'}
                   disabled={priceFileBusy !== null}
                   style={styles.connectButton}
-                  buttonColor={colors.primary}
+                  buttonColor={themeColors.accent}
                 >
                   Enable catalogue sync
                 </Button>
@@ -387,7 +392,7 @@ export function ReeceIntegrationScreen() {
               <MaterialCommunityIcons
                 name="numeric-1-circle"
                 size={24}
-                color={colors.primary}
+                color={themeColors.accentText}
               />
               <Text style={styles.howItWorksText}>
                 Tap connect — you’ll be sent to reece.com.au to sign in to maX.
@@ -397,7 +402,7 @@ export function ReeceIntegrationScreen() {
               <MaterialCommunityIcons
                 name="numeric-2-circle"
                 size={24}
-                color={colors.primary}
+                color={themeColors.accentText}
               />
               <Text style={styles.howItWorksText}>
                 Approve QuoteMate on the maX consent page, then close the tab.
@@ -407,7 +412,7 @@ export function ReeceIntegrationScreen() {
               <MaterialCommunityIcons
                 name="numeric-3-circle"
                 size={24}
-                color={colors.primary}
+                color={themeColors.accentText}
               />
               <Text style={styles.howItWorksText}>
                 Add materials to a quote — Reece prices flow in at your trade rate.
@@ -418,6 +423,7 @@ export function ReeceIntegrationScreen() {
           <View style={styles.bottomPadding} />
         </WebContainer>
       </ScrollView>
+    </View>
 
       <AlertModal
         visible={alertModal.visible}
@@ -456,19 +462,21 @@ export function ReeceIntegrationScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
+const useStyles = makeStyles((t) => ({
+  gridHost: { flex: 1, backgroundColor: t.colors.bg },
+  scroller: { flex: 1, backgroundColor: 'transparent' },
+  container: { flex: 1, backgroundColor: t.colors.bg },
   content: { padding: 16 },
   centered: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 40,
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
   },
-  loadingText: { marginTop: 12, color: colors.textMuted, fontSize: 14 },
+  loadingText: { marginTop: 12, color: t.colors.textMuted, fontSize: 14 },
   card: {
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderRadius: 14,
     padding: 20,
     marginBottom: 12,
@@ -479,18 +487,18 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 12,
-    backgroundColor: colors.primaryBg,
+    backgroundColor: t.colors.accentSubtle,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 16,
   },
   headerText: { flex: 1 },
-  title: { fontSize: 20, fontWeight: '700', color: colors.text },
-  subtitle: { fontSize: 14, color: colors.textMuted, marginTop: 2 },
+  title: { fontSize: 20, fontWeight: '700', color: t.colors.text },
+  subtitle: { fontSize: 14, color: t.colors.textMuted, marginTop: 2 },
   sectionTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
     marginBottom: 12,
   },
   statusRow: {
@@ -501,7 +509,7 @@ const styles = StyleSheet.create({
   connectedText: {
     fontSize: 15,
     fontWeight: '600',
-    color: colors.success,
+    color: t.colors.money,
     marginLeft: 8,
   },
   detailRow: {
@@ -509,20 +517,20 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingVertical: 8,
   },
-  detailLabel: { fontSize: 14, color: colors.textMuted },
+  detailLabel: { fontSize: 14, color: t.colors.textMuted },
   detailValue: {
     fontSize: 14,
     fontWeight: '500',
-    color: colors.text,
+    color: t.colors.text,
     flexShrink: 1,
     textAlign: 'right',
     marginLeft: 12,
   },
-  divider: { marginVertical: 16, backgroundColor: colors.border },
-  disconnectButton: { borderColor: colors.error },
+  divider: { marginVertical: 16, backgroundColor: t.colors.border },
+  disconnectButton: { borderColor: t.colors.error },
   disconnectedText: {
     fontSize: 14,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     lineHeight: 20,
     marginBottom: 16,
   },
@@ -534,10 +542,10 @@ const styles = StyleSheet.create({
   },
   howItWorksText: {
     fontSize: 14,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     marginLeft: 12,
     flex: 1,
     lineHeight: 20,
   },
   bottomPadding: { height: 40 },
-});
+}));

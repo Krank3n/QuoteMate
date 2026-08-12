@@ -17,7 +17,8 @@ import { format } from 'date-fns';
 
 import type { Job } from '../../shared/job/types';
 import { useStore } from '../store/useStore';
-import { colors } from '../theme';
+import type { Tokens } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 import { BottomSheet } from './BottomSheet';
 import { useJobStore } from '../store/useJobStore';
 import {
@@ -38,24 +39,24 @@ interface ScheduleJobSheetProps {
   job: Job;
 }
 
-const CALENDAR_THEME = {
+const calendarThemeFor = (themeColors: Tokens) => ({
   backgroundColor: 'transparent',
   calendarBackground: 'transparent',
-  textSectionTitleColor: colors.textMuted,
-  dayTextColor: colors.text,
-  todayTextColor: colors.primary,
-  selectedDayTextColor: colors.white,
-  selectedDayBackgroundColor: colors.primary,
-  monthTextColor: colors.text,
-  arrowColor: colors.primary,
-  textDisabledColor: colors.inactive,
+  textSectionTitleColor: themeColors.textMuted,
+  dayTextColor: themeColors.text,
+  todayTextColor: themeColors.accent,
+  selectedDayTextColor: themeColors.alwaysLight,
+  selectedDayBackgroundColor: themeColors.accent,
+  monthTextColor: themeColors.text,
+  arrowColor: themeColors.accent,
+  textDisabledColor: themeColors.textDisabled,
   textMonthFontWeight: '700' as const,
   textDayFontWeight: '500' as const,
   textDayHeaderFontWeight: '600' as const,
   textMonthFontSize: 16,
   textDayFontSize: 14,
   textDayHeaderFontSize: 11,
-};
+});
 
 function toIsoDay(ms?: number): string | undefined {
   if (!ms) return undefined;
@@ -67,6 +68,9 @@ function toIsoDay(ms?: number): string | undefined {
 }
 
 export function ScheduleJobSheet({ visible, onDismiss, job }: ScheduleJobSheetProps) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
+  const CALENDAR_THEME = calendarThemeFor(themeColors);
   const saveJob = useJobStore((s) => s.saveJob);
   // Look up the job's primary attached document so we can derive the GCal
   // event duration from quoted labor instead of asking the tradie again.
@@ -109,8 +113,8 @@ export function ScheduleJobSheet({ visible, onDismiss, job }: ScheduleJobSheetPr
     return {
       [pendingDay]: {
         selected: true,
-        selectedColor: colors.primary,
-        selectedTextColor: colors.white,
+        selectedColor: themeColors.accent,
+        selectedTextColor: themeColors.alwaysLight,
       },
     };
   }, [pendingDay]);
@@ -255,12 +259,12 @@ export function ScheduleJobSheet({ visible, onDismiss, job }: ScheduleJobSheetPr
           <MaterialCommunityIcons
             name={'calendar-clock' as any}
             size={16}
-            color={pendingDay ? colors.primary : colors.textMuted}
+            color={pendingDay ? themeColors.accent : themeColors.textMuted}
           />
           <Text
             style={[
               styles.summaryText,
-              pendingDay && { color: colors.text, fontWeight: '700' },
+              pendingDay && { color: themeColors.text, fontWeight: '700' },
             ]}
           >
             {pendingSummary}
@@ -288,7 +292,7 @@ export function ScheduleJobSheet({ visible, onDismiss, job }: ScheduleJobSheetPr
             <MaterialCommunityIcons
               name={'timer-sand' as any}
               size={14}
-              color={colors.textMuted}
+              color={themeColors.textMuted}
             />
             <Text style={styles.derivedText}>{durationLabel}</Text>
           </View>
@@ -296,7 +300,7 @@ export function ScheduleJobSheet({ visible, onDismiss, job }: ScheduleJobSheetPr
 
         <View style={styles.buttonStack}>
           <Button
-            mode="contained"
+            mode="contained" buttonColor={themeColors.accent} textColor={themeColors.onAccent}
             onPress={handleSaveAndClose}
             disabled={!pendingDay || !dirty || saving}
             loading={saving}
@@ -311,7 +315,7 @@ export function ScheduleJobSheet({ visible, onDismiss, job }: ScheduleJobSheetPr
               <MaterialCommunityIcons
                 name={'calendar-check' as any}
                 size={14}
-                color={colors.success}
+                color={themeColors.money}
               />
               <Text style={styles.gcalSyncedLabel}>
                 Auto-syncs to your Google Calendar
@@ -334,7 +338,7 @@ export function ScheduleJobSheet({ visible, onDismiss, job }: ScheduleJobSheetPr
               mode="text"
               onPress={handleClear}
               icon={'calendar-remove-outline' as any}
-              textColor={colors.error}
+              textColor={themeColors.error}
               disabled={saving}
             >
               Clear date
@@ -361,7 +365,7 @@ export function ScheduleJobSheet({ visible, onDismiss, job }: ScheduleJobSheetPr
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   content: {
     paddingVertical: 4,
     gap: 12,
@@ -373,17 +377,17 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 14,
     borderRadius: 12,
-    backgroundColor: colors.surfaceGray3,
+    backgroundColor: t.colors.surfacePressed,
     alignSelf: 'stretch',
   },
   summaryText: {
     fontSize: 14,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
   calendarCard: {
     borderRadius: 16,
     overflow: 'hidden',
-    backgroundColor: colors.surfaceDark,
+    backgroundColor: t.colors.surface,
     paddingVertical: 4,
   },
   section: {
@@ -391,7 +395,7 @@ const styles = StyleSheet.create({
   },
   sectionLabel: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     fontWeight: '600',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
@@ -405,7 +409,7 @@ const styles = StyleSheet.create({
   },
   derivedText: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
   buttonStack: {
     gap: 8,
@@ -419,7 +423,7 @@ const styles = StyleSheet.create({
   },
   gcalButton: {
     borderRadius: 12,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
   },
   gcalSyncedRow: {
     flexDirection: 'row',
@@ -431,6 +435,6 @@ const styles = StyleSheet.create({
   gcalSyncedLabel: {
     fontSize: 12,
     fontWeight: '600',
-    color: colors.success,
+    color: t.colors.money,
   },
-});
+}));

@@ -14,7 +14,8 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
 import type { Document, DocumentStage } from '../types/document';
 import { canTransition } from '../../shared/document/stage';
-import { colors } from '../theme';
+import type { Tokens } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 import { selectionTap } from '../utils/haptics';
 import { BottomSheet, useStaggeredEntrance } from './BottomSheet';
 
@@ -37,34 +38,36 @@ interface StageMeta {
   bgColor: string;
 }
 
-export const STAGE_META: Record<DocumentStage, StageMeta> = {
+export const stageMetaFor = (themeColors: Tokens): Record<DocumentStage, StageMeta> => ({
   draft: {
     chipLabel: 'Draft',
     actionLabel: 'Mark as Draft',
     icon: 'file-document-edit-outline',
-    color: colors.info,
-    bgColor: colors.infoBg,
+    // Neutral, not info: a draft means nothing has happened yet. Reserving a
+    // real colour for it competes with the stages that HAVE happened.
+    color: themeColors.neutral,
+    bgColor: themeColors.neutralSubtle,
   },
   quote_sent: {
     chipLabel: 'Quote sent',
     actionLabel: 'Mark as Sent',
     icon: 'send-outline',
-    color: colors.warning,
-    bgColor: colors.warningBg,
+    color: themeColors.warning,
+    bgColor: themeColors.warningSubtle,
   },
   quote_accepted: {
     chipLabel: 'Accepted',
     actionLabel: 'Mark as Accepted',
     icon: 'check-circle-outline',
-    color: colors.success,
-    bgColor: colors.successBg,
+    color: themeColors.money,
+    bgColor: themeColors.moneySubtle,
   },
   quote_rejected: {
     chipLabel: 'Rejected',
     actionLabel: 'Mark as Rejected',
     icon: 'close-circle-outline',
-    color: colors.error,
-    bgColor: colors.errorBg,
+    color: themeColors.error,
+    bgColor: themeColors.errorSubtle,
   },
   invoice_sent: {
     // actionLabel phrased as "Convert to Invoice" because that's what
@@ -73,31 +76,31 @@ export const STAGE_META: Record<DocumentStage, StageMeta> = {
     chipLabel: 'Invoice sent',
     actionLabel: 'Convert to Invoice',
     icon: 'file-swap-outline',
-    color: colors.primary,
-    bgColor: colors.primaryBg,
+    color: themeColors.accentText,
+    bgColor: themeColors.accentSubtle,
   },
   partially_paid: {
     chipLabel: 'Part paid',
     actionLabel: 'Mark as Partially Paid',
     icon: 'progress-check',
-    color: colors.info,
-    bgColor: colors.infoBg,
+    color: themeColors.info,
+    bgColor: themeColors.infoSubtle,
   },
   paid: {
     chipLabel: 'Paid',
     actionLabel: 'Mark as Paid',
     icon: 'cash-check',
-    color: colors.success,
-    bgColor: colors.successBg,
+    color: themeColors.money,
+    bgColor: themeColors.moneySubtle,
   },
   cancelled: {
     chipLabel: 'Cancelled',
     actionLabel: 'Cancel',
     icon: 'close-octagon-outline',
-    color: colors.error,
-    bgColor: colors.errorBg,
+    color: themeColors.error,
+    bgColor: themeColors.errorSubtle,
   },
-};
+});
 
 const ALL_STAGES: DocumentStage[] = [
   'draft',
@@ -117,6 +120,9 @@ export function StageSheet({
   onSelect,
   title = 'Update Stage',
 }: StageSheetProps) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
+  const STAGE_META = stageMetaFor(themeColors);
   const targets = React.useMemo<DocumentStage[]>(() => {
     return ALL_STAGES.filter((s) => s !== doc.stage && canTransition(doc.stage, s));
   }, [doc.stage]);
@@ -168,7 +174,7 @@ export function StageSheet({
                 <MaterialCommunityIcons
                   name="chevron-right"
                   size={20}
-                  color={colors.inactive}
+                  color={themeColors.textDisabled}
                 />
               </Pressable>
             </Animated.View>
@@ -179,7 +185,7 @@ export function StageSheet({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   optionsContainer: {
     gap: 10,
   },
@@ -189,12 +195,12 @@ const styles = StyleSheet.create({
     padding: 14,
     paddingHorizontal: 16,
     borderRadius: 16,
-    backgroundColor: colors.surfaceGray3,
+    backgroundColor: t.colors.surfacePressed,
     borderWidth: 1.5,
     borderColor: 'transparent',
   },
   optionPressed: {
-    backgroundColor: colors.surfaceGray2,
+    backgroundColor: t.colors.surfaceOverlay,
     transform: [{ scale: 0.98 }],
   },
   iconCircle: {
@@ -211,6 +217,6 @@ const styles = StyleSheet.create({
   optionLabel: {
     fontSize: 16,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
   },
-});
+}));

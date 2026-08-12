@@ -15,7 +15,7 @@ import { Text, Surface } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
 import type { Document } from '../types/document';
-import { colors } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 
 interface DocumentSentBannerProps {
   doc: Document | null | undefined;
@@ -38,6 +38,8 @@ function describeSent(doc: Document): string {
 }
 
 export function DocumentSentBanner({ doc }: DocumentSentBannerProps) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   if (!doc || !hasBeenSent(doc)) return null;
 
   // invoicedAt is the most reliable "sent" timestamp post-conversion; fall
@@ -58,7 +60,7 @@ export function DocumentSentBanner({ doc }: DocumentSentBannerProps) {
       <MaterialCommunityIcons
         name="email-check-outline"
         size={22}
-        color={colors.info}
+        color={themeColors.info}
         style={styles.icon}
       />
       <View style={styles.body}>
@@ -73,16 +75,16 @@ export function DocumentSentBanner({ doc }: DocumentSentBannerProps) {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   banner: {
     flexDirection: 'row',
     alignItems: 'center',
     padding: 12,
     marginBottom: 12,
     borderRadius: 10,
-    backgroundColor: colors.infoBg ?? '#E0F2FE',
+    backgroundColor: t.colors.infoSubtle ?? '#E0F2FE',
     borderLeftWidth: 3,
-    borderLeftColor: colors.info,
+    borderLeftColor: t.colors.info,
   },
   icon: {
     marginRight: 10,
@@ -93,12 +95,12 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 14,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
     marginBottom: 2,
   },
   subtitle: {
     fontSize: 13,
-    color: colors.textSecondary,
+    color: t.colors.textMuted,
     lineHeight: 18,
   },
-});
+}));

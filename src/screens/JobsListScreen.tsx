@@ -18,8 +18,9 @@ import { useNavigation, useScrollToTop } from '@react-navigation/native';
 import type { Job, JobStage } from '../../shared/job/types';
 import { useJobStore } from '../store/useJobStore';
 import { useStore } from '../store/useStore';
-import { colors } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 import { WebContainer } from '../components/WebContainer';
+import { GridBackground } from '../components/GridBackground';
 import { JobCard } from '../components/JobCard';
 import { JobStageSheet } from '../components/JobStageSheet';
 import { ScheduleJobSheet } from '../components/ScheduleJobSheet';
@@ -61,6 +62,8 @@ function matchesFilter(job: Job, filter: FilterKind): boolean {
 }
 
 export function JobsListScreen() {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const listRef = useRef<FlatList>(null);
   useScrollToTop(listRef);
 
@@ -181,6 +184,7 @@ export function JobsListScreen() {
 
   return (
     <View style={styles.container}>
+      <GridBackground />
       <WebContainer>
         <Searchbar
           placeholder="Search jobs..."
@@ -201,7 +205,9 @@ export function JobsListScreen() {
                   lightTap();
                   setFilter(key);
                 }}
-                style={styles.filterChip}
+                style={[styles.filterChip, filter === key && styles.filterChipActive]}
+                textStyle={filter === key ? styles.filterChipTextActive : styles.filterChipText}
+                showSelectedCheck={false}
               >
                 {label}
                 {count > 0 ? ` (${count})` : ''}
@@ -236,8 +242,8 @@ export function JobsListScreen() {
               <RefreshControl
                 refreshing={refreshing}
                 onRefresh={handleRefresh}
-                tintColor={colors.primary}
-                colors={[colors.primary]}
+                tintColor={themeColors.accent}
+                colors={[themeColors.accent]}
               />
             }
             ListEmptyComponent={
@@ -246,7 +252,7 @@ export function JobsListScreen() {
                   <MaterialCommunityIcons
                     name={'briefcase-outline' as any}
                     size={36}
-                    color={colors.primary}
+                    color={themeColors.accentText}
                   />
                 </View>
                 <Text style={styles.emptyTitle}>
@@ -280,7 +286,7 @@ export function JobsListScreen() {
         icon="plus"
         style={styles.fab}
         onPress={handleNew}
-        color={colors.white}
+        color={themeColors.onAccent}
         accessibilityLabel="Create new job"
       />
 
@@ -312,12 +318,12 @@ export function JobsListScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
+const useStyles = makeStyles((t) => ({
+  container: { flex: 1, backgroundColor: t.colors.bg },
   searchBar: {
     margin: 16,
     elevation: 2,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
   },
   filterRow: {
     flexDirection: 'row',
@@ -326,7 +332,17 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 8,
   },
-  filterChip: { backgroundColor: colors.surface },
+  filterChip: {
+    backgroundColor: t.colors.surfaceRaised,
+    borderWidth: 1,
+    borderColor: t.colors.border,
+  },
+  filterChipActive: {
+    backgroundColor: t.colors.accent,
+    borderColor: t.colors.accentBorder,
+  },
+  filterChipText: { color: t.colors.textMuted, fontFamily: 'Archivo-SemiBold' },
+  filterChipTextActive: { color: t.colors.onAccent, fontFamily: 'Archivo-Bold' },
   listContainer: { flex: 1 },
   flatList: { flex: 1 },
   listContent: { padding: 16, paddingBottom: 100 },
@@ -339,7 +355,7 @@ const styles = StyleSheet.create({
     width: 72,
     height: 72,
     borderRadius: 36,
-    backgroundColor: colors.primary + '15',
+    backgroundColor: t.colors.accentSubtle,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 16,
@@ -347,18 +363,18 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 22,
     fontWeight: '800',
-    color: colors.text,
+    color: t.colors.text,
     marginBottom: 8,
   },
   emptyText: {
     fontSize: 16,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     textAlign: 'center',
     lineHeight: 22,
   },
   emptySubtext: {
     fontSize: 14,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     textAlign: 'center',
     marginTop: 8,
     lineHeight: 20,
@@ -367,6 +383,6 @@ const styles = StyleSheet.create({
     position: 'absolute',
     right: 16,
     bottom: 96,
-    backgroundColor: colors.primary,
+    backgroundColor: t.colors.accent,
   },
-});
+}));

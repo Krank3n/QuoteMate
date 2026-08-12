@@ -2,10 +2,10 @@ import React from 'react';
 import { View, TouchableOpacity } from 'react-native';
 import { Text, Title, Surface, Divider } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { colors } from '../../theme';
+import { useThemeColors} from '../../theme';
 import { Material } from '../../types';
 import { formatCurrency } from '../../utils/quoteCalculator';
-import { documentStyles as styles } from './documentStyles';
+import { useDocumentStyles } from './documentStyles';
 
 interface MaterialsSectionProps {
   materials: Material[];
@@ -26,6 +26,8 @@ export function MaterialsSection({
   rollMarkupIntoMaterials = false,
   style,
 }: MaterialsSectionProps) {
+  const styles = useDocumentStyles();
+  const themeColors = useThemeColors();
   const multiplier = rollMarkupIntoMaterials && markupPercent > 0 ? (1 + markupPercent / 100) : 1;
   const showMarkedUp = multiplier > 1;
   const displaySubtotal = materialsSubtotal * multiplier;
@@ -34,14 +36,14 @@ export function MaterialsSection({
     <Surface style={[styles.section, style]}>
       <View style={styles.sectionHeader}>
         <View style={styles.sectionHeaderLeft}>
-          <View style={[styles.sectionIconCircle, { backgroundColor: colors.primaryBg }]}>
-            <MaterialCommunityIcons name="package-variant" size={18} color={colors.primary} />
+          <View style={[styles.sectionIconCircle, { backgroundColor: themeColors.accentSubtle }]}>
+            <MaterialCommunityIcons name="package-variant" size={18} color={themeColors.accentText} />
           </View>
           <Title style={styles.sectionTitle}>Materials ({materials.length})</Title>
         </View>
         {onEdit && (
           <View style={styles.editButton}>
-            <MaterialCommunityIcons name="pencil" size={16} color={colors.primary} />
+            <MaterialCommunityIcons name="pencil" size={16} color={themeColors.accentText} />
           </View>
         )}
       </View>
@@ -55,7 +57,7 @@ export function MaterialsSection({
               {showMarkedUp ? (
                 <Text style={styles.itemDetails}>
                   {material.quantity} {material.unit} ×{' '}
-                  <Text style={{ textDecorationLine: 'line-through', color: colors.textMuted }}>
+                  <Text style={{ textDecorationLine: 'line-through', color: themeColors.textMuted }}>
                     {formatCurrency(material.price)}
                   </Text>
                   {' → '}
@@ -79,7 +81,7 @@ export function MaterialsSection({
         <Text style={styles.summaryValue}>{formatCurrency(displaySubtotal)}</Text>
       </View>
       {showMarkedUp && (
-        <Text style={{ fontSize: 11, color: colors.textMuted, textAlign: 'right', marginTop: 2 }}>
+        <Text style={{ fontSize: 11, color: themeColors.textMuted, textAlign: 'right', marginTop: 2 }}>
           (incl. {markupPercent}% markup)
         </Text>
       )}

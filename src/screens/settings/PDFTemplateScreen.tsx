@@ -23,7 +23,7 @@ import * as Print from 'expo-print';
 
 import { useNavigation } from '@react-navigation/native';
 import { useStore } from '../../store/useStore';
-import { colors } from '../../theme';
+import { makeStyles, useThemeColors } from '../../theme';
 import { WebContainer } from '../../components/WebContainer';
 import { FixedBottomButton } from '../../components/FixedBottomButton';
 import { AlertModal } from '../../components/AlertModal';
@@ -32,6 +32,7 @@ import { useUnsavedChangesGuard } from '../../hooks/useUnsavedChangesGuard';
 import { PDF_TEMPLATES, printMediaCSS, getTemplateCSS, PdfTemplateId, buildTermsHTML } from '../../../shared/pdf';
 import { resolveGstMode, GstMode, NO_GST_NOTE } from '../../../shared/document';
 import { prepareLogoHtml } from '../../utils/pdfGenerator';
+import { GridBackground } from '../../components/GridBackground';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const PREVIEW_WIDTH = Math.min(SCREEN_WIDTH - 64, 340);
@@ -44,11 +45,15 @@ function Line({ width, height = 3, color = '#D1D5DB', style }: {
   color?: string;
   style?: object;
 }) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   return <View style={[{ width: width as any, height, backgroundColor: color, borderRadius: 1 }, style]} />;
 }
 
 /** Full-width detailed native document preview */
 function TemplatePreview({ templateId, businessName, groupBySection, brandColor, gstMode }: { templateId: PdfTemplateId; businessName: string; groupBySection: boolean; brandColor?: string; gstMode: GstMode }) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const configs: Record<PdfTemplateId, {
     pageBg: string;
     headerBg: string;
@@ -439,6 +444,8 @@ function TemplatePreview({ templateId, businessName, groupBySection, brandColor,
 }
 
 export function PDFTemplateScreen() {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const navigation = useNavigation<any>();
   const { businessSettings, setBusinessSettings, subscriptionStatus } = useStore();
   const isTrialActive = !!(subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired);
@@ -719,6 +726,7 @@ export function PDFTemplateScreen() {
 
   return (
     <View style={styles.container}>
+      <GridBackground />
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
@@ -753,11 +761,11 @@ export function PDFTemplateScreen() {
                   <View style={styles.cardHeader}>
                     <View style={styles.cardHeaderLeft}>
                       {isLocked ? (
-                        <MaterialCommunityIcons name="lock-outline" size={24} color={colors.textMuted} />
+                        <MaterialCommunityIcons name="lock-outline" size={24} color={themeColors.textMuted} />
                       ) : isSelected ? (
-                        <MaterialCommunityIcons name="check-circle" size={24} color={colors.primary} />
+                        <MaterialCommunityIcons name="check-circle" size={24} color={themeColors.accentText} />
                       ) : (
-                        <MaterialCommunityIcons name="circle-outline" size={24} color={colors.onSurface + '60'} />
+                        <MaterialCommunityIcons name="circle-outline" size={24} color={themeColors.textMuted} />
                       )}
                       <View style={styles.cardHeaderText}>
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -784,7 +792,7 @@ export function PDFTemplateScreen() {
                     <MaterialCommunityIcons
                       name={isPreviewing ? 'loading' : 'eye-outline'}
                       size={16}
-                      color={colors.primary}
+                      color={themeColors.accentText}
                     />
                     <Text style={styles.previewButtonText}>
                       {isPreviewing ? 'Generating...' : 'Preview Full PDF'}
@@ -806,8 +814,8 @@ export function PDFTemplateScreen() {
               <Switch
                 value={showLaborHours}
                 onValueChange={setShowLaborHours}
-                trackColor={{ false: '#D1D5DB', true: colors.primary + '60' }}
-                thumbColor={showLaborHours ? colors.primary : '#F3F4F6'}
+                trackColor={{ false: '#D1D5DB', true: themeColors.accentSubtle }}
+                thumbColor={showLaborHours ? themeColors.accent : '#F3F4F6'}
               />
             </View>
 
@@ -821,8 +829,8 @@ export function PDFTemplateScreen() {
               <Switch
                 value={groupMaterialsBySection}
                 onValueChange={setGroupMaterialsBySection}
-                trackColor={{ false: '#D1D5DB', true: colors.primary + '60' }}
-                thumbColor={groupMaterialsBySection ? colors.primary : '#F3F4F6'}
+                trackColor={{ false: '#D1D5DB', true: themeColors.accentSubtle }}
+                thumbColor={groupMaterialsBySection ? themeColors.accent : '#F3F4F6'}
               />
             </View>
           </Surface>
@@ -858,10 +866,10 @@ export function PDFTemplateScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
   },
   scrollContent: {
     padding: 16,
@@ -869,20 +877,20 @@ const styles = StyleSheet.create({
   },
   helperText: {
     fontSize: 14,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     marginBottom: 16,
   },
   card: {
     marginBottom: 16,
     borderRadius: 12,
     elevation: 2,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderWidth: 2,
     borderColor: 'transparent',
     overflow: 'hidden',
   },
   cardSelected: {
-    borderColor: colors.primary,
+    borderColor: t.colors.accent,
   },
   cardLocked: {
     opacity: 0.6,
@@ -907,12 +915,12 @@ const styles = StyleSheet.create({
   templateName: {
     fontSize: 17,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
     marginBottom: 2,
   },
   templateDescription: {
     fontSize: 13,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     lineHeight: 18,
   },
   previewWrapper: {
@@ -971,20 +979,20 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: 10,
     borderTopWidth: 1,
-    borderTopColor: colors.outline + '25',
+    borderTopColor: t.colors.border,
     gap: 6,
   },
   previewButtonText: {
     fontSize: 13,
     fontWeight: '600',
-    color: colors.primary,
+    color: t.colors.accentText,
   },
   toggleCard: {
     padding: 20,
     marginBottom: 16,
     borderRadius: 12,
     elevation: 2,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
   },
   toggleSectionTitle: {
     fontSize: 18,
@@ -1003,16 +1011,16 @@ const styles = StyleSheet.create({
   toggleTitle: {
     fontSize: 15,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
     marginBottom: 2,
   },
   toggleSubtitle: {
     fontSize: 13,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
   },
   toggleDivider: {
     height: 1,
-    backgroundColor: colors.outline + '30',
+    backgroundColor: t.colors.border,
     marginVertical: 14,
   },
-});
+}));

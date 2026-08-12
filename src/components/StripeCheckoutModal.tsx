@@ -10,7 +10,7 @@ import { Elements } from '@stripe/react-stripe-js';
 import { loadStripe } from '@stripe/stripe-js';
 import { StripeCheckoutForm } from './StripeCheckoutForm';
 import { stripeConfig } from '../config/stripeConfig';
-import { colors } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 
 interface StripeCheckoutModalProps {
   visible: boolean;
@@ -31,6 +31,8 @@ export function StripeCheckoutModal({
   planName,
   amount,
 }: StripeCheckoutModalProps) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const [clientSecret, setClientSecret] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -90,7 +92,7 @@ export function StripeCheckoutModal({
             >
               {loading && (
                 <View style={styles.loadingContainer}>
-                  <ActivityIndicator size="large" color={colors.primary} />
+                  <ActivityIndicator size="large" color={themeColors.accentText} />
                   <Text style={styles.loadingText}>Preparing checkout...</Text>
                 </View>
               )}
@@ -109,33 +111,33 @@ export function StripeCheckoutModal({
                     appearance: {
                       theme: 'night',
                       variables: {
-                        colorPrimary: colors.primary,
-                        colorBackground: colors.surface,
-                        colorText: colors.text,
-                        colorDanger: colors.error,
+                        colorPrimary: themeColors.accent,
+                        colorBackground: themeColors.surfaceRaised,
+                        colorText: themeColors.text,
+                        colorDanger: themeColors.error,
                         fontFamily: 'system-ui, -apple-system, sans-serif',
                         spacingUnit: '4px',
                         borderRadius: '8px',
-                        colorTextSecondary: colors.textMuted,
-                        colorTextPlaceholder: colors.placeholder,
+                        colorTextSecondary: themeColors.textMuted,
+                        colorTextPlaceholder: themeColors.textDisabled,
                       },
                       rules: {
                         '.Input': {
-                          backgroundColor: colors.background,
-                          border: `1px solid ${colors.border}`,
-                          color: colors.text,
+                          backgroundColor: themeColors.bg,
+                          border: `1px solid ${themeColors.border}`,
+                          color: themeColors.text,
                         },
                         '.Input:focus': {
-                          border: `2px solid ${colors.primary}`,
+                          border: `2px solid ${themeColors.accent}`,
                           boxShadow: 'none',
                         },
                         '.Label': {
-                          color: colors.text,
+                          color: themeColors.text,
                           fontSize: '14px',
                           fontWeight: '500',
                         },
                         '.Error': {
-                          color: colors.error,
+                          color: themeColors.error,
                         },
                       },
                     },
@@ -157,10 +159,10 @@ export function StripeCheckoutModal({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   overlay: {
     flex: 1,
-    backgroundColor: colors.backdrop,
+    backgroundColor: t.colors.backdrop,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
@@ -171,7 +173,7 @@ const styles = StyleSheet.create({
     maxHeight: '90%',
     borderRadius: 12,
     overflow: 'hidden',
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     display: 'flex',
     flexDirection: 'column',
   },
@@ -182,8 +184,8 @@ const styles = StyleSheet.create({
     padding: 16,
     paddingBottom: 8,
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-    backgroundColor: colors.surface,
+    borderBottomColor: t.colors.border,
+    backgroundColor: t.colors.surfaceRaised,
   },
   scrollView: {
     flex: 1,
@@ -194,7 +196,7 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: colors.text,
+    color: t.colors.text,
   },
   loadingContainer: {
     padding: 40,
@@ -202,18 +204,18 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     marginTop: 16,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
   errorContainer: {
     padding: 20,
     margin: 20,
-    backgroundColor: colors.errorBg,
+    backgroundColor: t.colors.errorSubtle,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: colors.error,
+    borderColor: t.colors.error,
   },
   errorText: {
-    color: colors.error,
+    color: t.colors.error,
     textAlign: 'center',
   },
-});
+}));

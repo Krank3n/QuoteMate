@@ -18,7 +18,7 @@ import React, { useState } from 'react';
 import { View, StyleSheet, Image, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { Text, Button, IconButton } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { colors } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 
 /** Matches the tradesman template's paper in shared/pdf/templates.ts. */
 const PAPER = '#FDFCF8';
@@ -57,6 +57,8 @@ export function LogoPreviewCard({
   disabled,
   loading,
 }: LogoPreviewCardProps) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const [surface, setSurface] = useState<'paper' | 'dark'>('paper');
   const backdrop = surface === 'paper' ? PAPER : DARK_HEADER;
   const canChoose = !!noBackgroundUri;
@@ -83,7 +85,7 @@ export function LogoPreviewCard({
 
       {loading ? (
         <View style={[styles.single, { backgroundColor: backdrop }]}>
-          <ActivityIndicator color={colors.primary} />
+          <ActivityIndicator color={themeColors.accentText} />
         </View>
       ) : canChoose ? (
         <View style={styles.choiceRow}>
@@ -122,7 +124,7 @@ export function LogoPreviewCard({
           <Image source={{ uri: originalUri }} style={styles.singleImage} resizeMode="contain" />
           {!!onRecropLogo && (
             <View style={styles.editBadge}>
-              <MaterialCommunityIcons name="crop" size={13} color={colors.onPrimary} />
+              <MaterialCommunityIcons name="crop" size={13} color={themeColors.onAccent} />
               <Text style={styles.editBadgeText}>Edit</Text>
             </View>
           )}
@@ -162,7 +164,7 @@ export function LogoPreviewCard({
         </Button>
         <IconButton
           icon="delete-outline"
-          iconColor={colors.error}
+          iconColor={themeColors.error}
           size={22}
           onPress={onRemoveLogo}
           disabled={disabled}
@@ -215,6 +217,8 @@ function ChoiceCard({
   onEdit?: () => void;
   disabled?: boolean;
 }) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   return (
     <TouchableOpacity
       style={[styles.choice, selected && styles.choiceSelected]}
@@ -228,7 +232,7 @@ function ChoiceCard({
         <Image source={{ uri }} style={styles.choiceImage} resizeMode="contain" />
         {selected && !!onEdit && (
           <View style={styles.editBadge}>
-            <MaterialCommunityIcons name="crop" size={12} color={colors.onPrimary} />
+            <MaterialCommunityIcons name="crop" size={12} color={themeColors.onAccent} />
             <Text style={styles.editBadgeText}>Edit</Text>
           </View>
         )}
@@ -237,7 +241,7 @@ function ChoiceCard({
         <MaterialCommunityIcons
           name={selected ? 'radiobox-marked' : 'radiobox-blank'}
           size={16}
-          color={selected ? colors.primary : colors.textMuted}
+          color={selected ? themeColors.accent : themeColors.textMuted}
         />
         <Text style={[styles.choiceLabel, selected && styles.choiceLabelSelected]} numberOfLines={1}>
           {label}
@@ -258,6 +262,8 @@ function Pill({
   onPress: () => void;
   disabled?: boolean;
 }) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   return (
     <TouchableOpacity
       onPress={onPress}
@@ -271,7 +277,7 @@ function Pill({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   surfaceRow: {
     marginTop: 10,
     marginBottom: 10,
@@ -280,7 +286,7 @@ const styles = StyleSheet.create({
     fontSize: 11,
     letterSpacing: 0.6,
     textTransform: 'uppercase',
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginBottom: 6,
   },
   pills: {
@@ -292,18 +298,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
   },
   pillActive: {
-    backgroundColor: colors.primaryBg,
-    borderColor: colors.primary,
+    backgroundColor: t.colors.accentSubtle,
+    borderColor: t.colors.accent,
   },
   pillText: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
   pillTextActive: {
-    color: colors.primary,
+    color: t.colors.accentText,
     fontWeight: '600',
   },
   choiceRow: {
@@ -316,10 +322,10 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: 'transparent',
     overflow: 'hidden',
-    backgroundColor: colors.surfaceDark,
+    backgroundColor: t.colors.surface,
   },
   choiceSelected: {
-    borderColor: colors.primary,
+    borderColor: t.colors.accent,
   },
   choicePreview: {
     height: 96,
@@ -327,7 +333,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: 10,
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    borderBottomColor: t.colors.border,
   },
   choiceImage: {
     width: '100%',
@@ -343,10 +349,10 @@ const styles = StyleSheet.create({
   choiceLabel: {
     flex: 1,
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
   choiceLabelSelected: {
-    color: colors.text,
+    color: t.colors.text,
     fontWeight: '600',
   },
   editBadge: {
@@ -359,12 +365,12 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     paddingHorizontal: 9,
     borderRadius: 12,
-    backgroundColor: colors.primary,
+    backgroundColor: t.colors.accent,
   },
   editBadgeText: {
     fontSize: 11,
     fontWeight: '600',
-    color: colors.onPrimary,
+    color: t.colors.onAccent,
   },
   single: {
     height: 130,
@@ -376,7 +382,7 @@ const styles = StyleSheet.create({
     // so without an outline the preview has no visible edge and the logo just
     // floats. The border shows where the "paper" actually ends.
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
   },
   singleImage: {
     width: '100%',
@@ -384,7 +390,7 @@ const styles = StyleSheet.create({
   },
   hint: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginTop: 10,
     lineHeight: 17,
   },
@@ -397,4 +403,4 @@ const styles = StyleSheet.create({
   button: {
     flex: 1,
   },
-});
+}));

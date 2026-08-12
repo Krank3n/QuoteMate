@@ -2,7 +2,7 @@ import React from 'react';
 import { View, StyleSheet, Platform } from 'react-native';
 import { Title, Text, IconButton } from 'react-native-paper';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { colors } from '../../theme';
+import { makeStyles, useThemeColors } from '../../theme';
 
 interface DocumentHeaderProps {
   title: string;
@@ -21,6 +21,8 @@ export function DocumentHeader({
   onRightPress,
   rightDisabled,
 }: DocumentHeaderProps) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const insets = useSafeAreaInsets();
 
   return (
@@ -28,7 +30,7 @@ export function DocumentHeader({
       <IconButton
         icon="arrow-left"
         size={24}
-        iconColor={colors.white}
+        iconColor={themeColors.onAccent}
         onPress={onBackPress}
       />
       <View style={styles.titleContainer}>
@@ -40,7 +42,7 @@ export function DocumentHeader({
       <IconButton
         icon={rightIcon}
         size={24}
-        iconColor={colors.white}
+        iconColor={themeColors.onAccent}
         onPress={onRightPress}
         disabled={rightDisabled}
       />
@@ -48,25 +50,25 @@ export function DocumentHeader({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 8,
     paddingBottom: 12,
-    backgroundColor: colors.primary,
+    backgroundColor: t.colors.accent,
   },
   titleContainer: {
     alignItems: 'center',
   },
   title: {
-    color: colors.white,
+    color: t.colors.onAccent,
     fontWeight: 'bold',
   },
   subtitle: {
     fontSize: 12,
-    color: 'rgba(255,255,255,0.8)',
+    color: t.colors.onAccent,
     fontWeight: '600',
   },
-});
+}));

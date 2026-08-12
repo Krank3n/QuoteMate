@@ -25,7 +25,7 @@ import { Text, Button } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { maybeRequestReview } from '../services/storeReviewService';
 
-import { colors } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
 import * as squareService from '../services/squareService';
 import { takeInAppPayment } from '../services/squarePayments';
@@ -127,6 +127,8 @@ export function TakePaymentSheet({
   onRecordManualPayment,
   ensureSquareConnected,
 }: TakePaymentSheetProps) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const [sharing, setSharing] = useState(false);
   const [chargingCard, setChargingCard] = useState(false);
   const [quoteMode, setQuoteMode] = useState<QuotePaymentMode>('deposit');
@@ -362,7 +364,7 @@ export function TakePaymentSheet({
                 <MaterialCommunityIcons
                   name="file-document-outline"
                   size={18}
-                  color={colors.primary}
+                  color={themeColors.accentText}
                 />
                 <Text style={styles.termsHeaderText}>
                   Terms for this {target.kind === 'invoice' ? 'invoice' : 'quote'}
@@ -384,7 +386,7 @@ export function TakePaymentSheet({
                     <MaterialCommunityIcons
                       name="check"
                       size={14}
-                      color={colors.onPrimary}
+                      color={themeColors.onAccent}
                     />
                   )}
                 </View>
@@ -491,6 +493,8 @@ function TermsPreviewModal({
   onAccept,
   alreadyAccepted,
 }: TermsPreviewModalProps) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   return (
     <Modal
       transparent
@@ -509,7 +513,7 @@ function TermsPreviewModal({
               onPress={onClose}
               hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
             >
-              <MaterialCommunityIcons name="close" size={22} color={colors.onSurface} />
+              <MaterialCommunityIcons name="close" size={22} color={themeColors.textSecondary} />
             </TouchableOpacity>
           </View>
           <ScrollView
@@ -523,7 +527,7 @@ function TermsPreviewModal({
               Close
             </Button>
             <Button
-              mode="contained"
+              mode="contained" buttonColor={themeColors.accent} textColor={themeColors.onAccent}
               onPress={onAccept}
               disabled={alreadyAccepted}
               icon={alreadyAccepted ? 'check' : undefined}
@@ -555,6 +559,8 @@ function MethodRow({
   loading,
   disabled,
 }: MethodRowProps) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   return (
     <TouchableOpacity
       style={[styles.methodRow, disabled && styles.methodRowDisabled]}
@@ -565,7 +571,7 @@ function MethodRow({
         <MaterialCommunityIcons
           name={icon as any}
           size={24}
-          color={disabled ? colors.textMuted : colors.primary}
+          color={disabled ? themeColors.textMuted : themeColors.accent}
         />
       </View>
       <View style={styles.methodText}>
@@ -580,19 +586,19 @@ function MethodRow({
         <Text style={styles.methodSubtitle}>{subtitle}</Text>
       </View>
       {loading ? (
-        <ActivityIndicator size="small" color={colors.primary} />
+        <ActivityIndicator size="small" color={themeColors.accentText} />
       ) : (
         <MaterialCommunityIcons
           name="chevron-right"
           size={20}
-          color={disabled ? colors.textMuted : colors.onSurface}
+          color={disabled ? themeColors.textMuted : themeColors.textSecondary}
         />
       )}
     </TouchableOpacity>
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   backdrop: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.55)',
@@ -602,7 +608,7 @@ const styles = StyleSheet.create({
     }),
   },
   sheet: {
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     padding: 20,
@@ -616,19 +622,19 @@ const styles = StyleSheet.create({
     width: 40,
     height: 4,
     borderRadius: 2,
-    backgroundColor: colors.border,
+    backgroundColor: t.colors.border,
     alignSelf: 'center',
     marginBottom: 16,
   },
   title: {
     fontSize: 20,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
     textAlign: 'center',
   },
   subtitle: {
     fontSize: 13,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     textAlign: 'center',
     marginTop: 4,
     marginBottom: 16,
@@ -636,7 +642,7 @@ const styles = StyleSheet.create({
   modeSwitcher: {
     flexDirection: 'row',
     alignSelf: 'center',
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
     borderRadius: 999,
     padding: 4,
     marginBottom: 16,
@@ -648,20 +654,20 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
   modePillActive: {
-    backgroundColor: colors.primary,
+    backgroundColor: t.colors.accent,
   },
   modePillText: {
     fontSize: 13,
     fontWeight: '600',
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
   modePillTextActive: {
-    color: colors.onPrimary,
+    color: t.colors.onAccent,
   },
   amountsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
     borderRadius: 12,
     padding: 16,
     marginBottom: 20,
@@ -673,25 +679,25 @@ const styles = StyleSheet.create({
   amountDivider: {
     width: 1,
     height: 32,
-    backgroundColor: colors.border,
+    backgroundColor: t.colors.border,
   },
   amountLabel: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginBottom: 4,
   },
   amountValue: {
     fontSize: 18,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
   },
   amountValueDue: {
-    color: colors.primary,
+    color: t.colors.money,
   },
   methodRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
     borderRadius: 12,
     padding: 14,
     marginBottom: 10,
@@ -703,26 +709,26 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 10,
-    backgroundColor: colors.primaryBg,
+    backgroundColor: t.colors.accentSubtle,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
   },
   methodIconDisabled: {
-    backgroundColor: colors.border,
+    backgroundColor: t.colors.border,
   },
   methodText: { flex: 1 },
   methodTitle: {
     fontSize: 15,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
   },
   methodTitleDisabled: {
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
   methodSubtitle: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginTop: 2,
   },
   cancelButton: {
@@ -740,32 +746,32 @@ const styles = StyleSheet.create({
     height: 20,
     borderRadius: 5,
     borderWidth: 1.5,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
+    borderColor: t.colors.border,
+    backgroundColor: t.colors.surfaceRaised,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 10,
   },
   ackCheckboxActive: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
+    backgroundColor: t.colors.accent,
+    borderColor: t.colors.accent,
   },
   ackText: {
     flex: 1,
     fontSize: 13,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     lineHeight: 18,
   },
   surchargeNote: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     textAlign: 'center',
     marginTop: -8,
     marginBottom: 12,
     fontStyle: 'italic',
   },
   termsCard: {
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
     borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 4,
@@ -781,12 +787,12 @@ const styles = StyleSheet.create({
     marginLeft: 10,
     fontSize: 14,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
   },
   termsViewLink: {
     fontSize: 13,
     fontWeight: '600',
-    color: colors.primary,
+    color: t.colors.accentText,
   },
   termsBackdrop: {
     flex: 1,
@@ -799,7 +805,7 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 480,
     maxHeight: '85%',
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderRadius: 16,
     overflow: 'hidden',
   },
@@ -810,16 +816,16 @@ const styles = StyleSheet.create({
     paddingTop: 18,
     paddingBottom: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
+    borderBottomColor: t.colors.border,
   },
   termsModalTitle: {
     fontSize: 18,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
   },
   termsModalSubtitle: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginTop: 2,
   },
   termsModalBody: {
@@ -832,7 +838,7 @@ const styles = StyleSheet.create({
   termsModalText: {
     fontSize: 14,
     lineHeight: 22,
-    color: colors.text,
+    color: t.colors.text,
   },
   termsModalFooter: {
     flexDirection: 'row',
@@ -841,6 +847,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 12,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.border,
+    borderTopColor: t.colors.border,
   },
-});
+}));

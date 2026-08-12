@@ -13,10 +13,13 @@ import { Text, Button, Surface, ActivityIndicator } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { format, formatDistanceToNow } from 'date-fns';
 
-import { colors } from '../../theme';
+import { makeStyles, useThemeColors } from '../../theme';
 import { useGoogleCalendarAuth } from '../../services/googleCalendarAuth';
+import { GridBackground } from '../../components/GridBackground';
 
 export function GoogleCalendarIntegrationScreen() {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const { ready, pending, lastError, connection, connect, disconnect } =
     useGoogleCalendarAuth();
   const isConnected = !!connection;
@@ -33,7 +36,9 @@ export function GoogleCalendarIntegrationScreen() {
   };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <View style={styles.gridHost}>
+    <GridBackground />
+    <ScrollView style={styles.scroller} contentContainerStyle={styles.content}>
       <Surface style={styles.heroCard}>
         <View
           style={[
@@ -44,7 +49,7 @@ export function GoogleCalendarIntegrationScreen() {
           <MaterialCommunityIcons
             name={(isConnected ? 'calendar-check' : 'calendar-sync') as any}
             size={28}
-            color={isConnected ? colors.success : colors.primary}
+            color={isConnected ? themeColors.money : themeColors.accent}
           />
         </View>
         <Text style={styles.heroTitle}>
@@ -68,7 +73,7 @@ export function GoogleCalendarIntegrationScreen() {
             <MaterialCommunityIcons
               name={'alert-circle' as any}
               size={16}
-              color={colors.error}
+              color={themeColors.error}
             />
             <Text style={styles.errorText} numberOfLines={3}>
               Last sync failed: {connection.lastSyncError.message}
@@ -85,7 +90,7 @@ export function GoogleCalendarIntegrationScreen() {
             <MaterialCommunityIcons
               name={'alert-circle' as any}
               size={16}
-              color={colors.error}
+              color={themeColors.error}
             />
             <Text style={styles.errorText}>{lastError}</Text>
           </View>
@@ -93,7 +98,7 @@ export function GoogleCalendarIntegrationScreen() {
 
         {!isConnected ? (
           <Button
-            mode="contained"
+            mode="contained" buttonColor={themeColors.accent} textColor={themeColors.onAccent}
             icon={'google' as any}
             onPress={connect}
             disabled={!ready || pending}
@@ -110,8 +115,8 @@ export function GoogleCalendarIntegrationScreen() {
             onPress={handleDisconnect}
             disabled={pending}
             loading={pending}
-            textColor={colors.error}
-            style={[styles.secondaryButton, { borderColor: colors.error + '66' }]}
+            textColor={themeColors.error}
+            style={[styles.secondaryButton, { borderColor: themeColors.errorSubtle }]}
           >
             Disconnect
           </Button>
@@ -119,7 +124,7 @@ export function GoogleCalendarIntegrationScreen() {
 
         {!ready && !connection ? (
           <View style={styles.initRow}>
-            <ActivityIndicator size="small" color={colors.textMuted} />
+            <ActivityIndicator size="small" color={themeColors.textMuted} />
             <Text style={styles.initLabel}>Loading…</Text>
           </View>
         ) : null}
@@ -149,6 +154,7 @@ export function GoogleCalendarIntegrationScreen() {
         (calendar.events). We can’t read events you didn’t create with us.
       </Text>
     </ScrollView>
+    </View>
   );
 }
 
@@ -161,10 +167,12 @@ function InfoRow({
   title: string;
   body: string;
 }) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   return (
     <View style={styles.infoRow}>
       <View style={styles.infoIcon}>
-        <MaterialCommunityIcons name={icon as any} size={18} color={colors.primary} />
+        <MaterialCommunityIcons name={icon as any} size={18} color={themeColors.accentText} />
       </View>
       <View style={styles.infoBody}>
         <Text style={styles.infoRowTitle}>{title}</Text>
@@ -174,10 +182,12 @@ function InfoRow({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
+  gridHost: { flex: 1, backgroundColor: t.colors.bg },
+  scroller: { flex: 1, backgroundColor: 'transparent' },
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
   },
   content: {
     padding: 16,
@@ -187,7 +197,7 @@ const styles = StyleSheet.create({
   heroCard: {
     padding: 18,
     borderRadius: 16,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     alignItems: 'center',
     gap: 8,
   },
@@ -200,19 +210,19 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   heroIconIdle: {
-    backgroundColor: colors.primaryBg,
+    backgroundColor: t.colors.accentSubtle,
   },
   heroIconConnected: {
-    backgroundColor: colors.successBg,
+    backgroundColor: t.colors.moneySubtle,
   },
   heroTitle: {
     fontSize: 18,
     fontWeight: '800',
-    color: colors.text,
+    color: t.colors.text,
   },
   heroSubtitle: {
     fontSize: 13,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     textAlign: 'center',
     lineHeight: 18,
     marginBottom: 8,
@@ -238,7 +248,7 @@ const styles = StyleSheet.create({
   },
   initLabel: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
   errorBanner: {
     flexDirection: 'row',
@@ -246,25 +256,25 @@ const styles = StyleSheet.create({
     gap: 6,
     padding: 10,
     borderRadius: 10,
-    backgroundColor: colors.errorBg,
+    backgroundColor: t.colors.errorSubtle,
     alignSelf: 'stretch',
   },
   errorText: {
     flex: 1,
     fontSize: 12,
-    color: colors.error,
+    color: t.colors.error,
     lineHeight: 16,
   },
   infoCard: {
     padding: 16,
     borderRadius: 16,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     gap: 12,
   },
   infoTitle: {
     fontSize: 14,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
   },
   infoRow: {
     flexDirection: 'row',
@@ -274,7 +284,7 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: colors.primaryBg,
+    backgroundColor: t.colors.accentSubtle,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -285,18 +295,18 @@ const styles = StyleSheet.create({
   infoRowTitle: {
     fontSize: 13,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
   },
   infoRowBody: {
     fontSize: 12,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     lineHeight: 17,
   },
   footnote: {
     fontSize: 11,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     textAlign: 'center',
     paddingHorizontal: 12,
     lineHeight: 15,
   },
-});
+}));

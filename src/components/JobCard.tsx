@@ -22,7 +22,8 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { formatDistanceToNow } from 'date-fns';
 
 import type { Job, JobStage } from '../../shared/job/types';
-import { colors } from '../theme';
+import type { Tokens } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 import { useStore } from '../store/useStore';
 import { formatCurrency } from '../utils/quoteCalculator';
 import { formatScheduledDateTime, formatScheduledDuration } from '../utils/formatSchedule';
@@ -117,7 +118,9 @@ function pickStageStatus(job: Job): { label: string; ms: number } {
 }
 
 export const JobCard = React.memo(function JobCard({ job, onPress, onStagePress, onMenuPress }: JobCardProps) {
-  const meta = stageMetaFor(job.stage);
+  const styles = useStyles();
+  const themeColors = useThemeColors();
+  const meta = stageMetaFor(job.stage, themeColors);
   // Live-derive the headline price from attached docs so a draft quote
   // shows its running total here without waiting on the server-side
   // syncJobAggregates trigger. Mirrors the precedence used on
@@ -251,7 +254,7 @@ export const JobCard = React.memo(function JobCard({ job, onPress, onStagePress,
           onPress(job.id);
         }}
       >
-        <ShimmerOverlay tint={meta.color} intensity={0.12} />
+        <ShimmerOverlay tint={meta.color} intensity={0.05} />
         <View style={styles.cardContent}>
         <View style={styles.topRow}>
           <View style={styles.titleBlock}>
@@ -341,7 +344,7 @@ export const JobCard = React.memo(function JobCard({ job, onPress, onStagePress,
               <MaterialCommunityIcons
                 name={'dots-vertical' as any}
                 size={24}
-                color={colors.textMuted}
+                color={themeColors.textMuted}
               />
             </Pressable>
           ) : null}
@@ -349,14 +352,14 @@ export const JobCard = React.memo(function JobCard({ job, onPress, onStagePress,
 
         {job.jobAddress ? (
           <View style={styles.inlineRow}>
-            <MaterialCommunityIcons name="map-marker-outline" size={14} color={colors.textMuted} />
+            <MaterialCommunityIcons name="map-marker-outline" size={14} color={themeColors.textMuted} />
             <Text style={styles.inlineText} numberOfLines={1}>{job.jobAddress}</Text>
           </View>
         ) : null}
 
         {scheduledLine ? (
           <View style={styles.inlineRow}>
-            <MaterialCommunityIcons name="calendar-clock-outline" size={14} color={colors.textMuted} />
+            <MaterialCommunityIcons name="calendar-clock-outline" size={14} color={themeColors.textMuted} />
             <Text style={styles.inlineText} numberOfLines={1}>{scheduledLine}</Text>
           </View>
         ) : null}
@@ -365,7 +368,7 @@ export const JobCard = React.memo(function JobCard({ job, onPress, onStagePress,
           <MaterialCommunityIcons
             name="clock-outline"
             size={14}
-            color={colors.textMuted}
+            color={themeColors.textMuted}
           />
           <Text style={styles.metaText} numberOfLines={1}>
             {status.label} {formatUpdatedAt(status.ms)}
@@ -374,14 +377,14 @@ export const JobCard = React.memo(function JobCard({ job, onPress, onStagePress,
             <MaterialCommunityIcons
               name="cloud-check"
               size={14}
-              color={colors.success}
+              color={themeColors.money}
               accessibilityLabel="Synced to Xero"
             />
           ) : xeroSyncStatus === 'error' ? (
             <MaterialCommunityIcons
               name="cloud-alert"
               size={14}
-              color={colors.error}
+              color={themeColors.error}
               accessibilityLabel="Xero sync failed"
             />
           ) : null}
@@ -409,6 +412,8 @@ function InlineContactActions({
   email?: string;
   address?: string;
 }) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const hasPhone = !!(phone && phone.trim());
   const hasEmail = !!(email && email.trim());
   const hasAddress = !!(address && address.trim());
@@ -445,16 +450,16 @@ function InlineContactActions({
   return (
     <View style={styles.inlineActions}>
       {hasPhone ? (
-        <InlineIcon icon="phone" color={colors.success} onPress={stop(call)} />
+        <InlineIcon icon="phone" color={themeColors.money} onPress={stop(call)} />
       ) : null}
       {hasPhone ? (
-        <InlineIcon icon="message-text" color={colors.info} onPress={stop(text)} />
+        <InlineIcon icon="message-text" color={themeColors.info} onPress={stop(text)} />
       ) : null}
       {hasEmail ? (
-        <InlineIcon icon="email" color={colors.warning} onPress={stop(mail)} />
+        <InlineIcon icon="email" color={themeColors.warning} onPress={stop(mail)} />
       ) : null}
       {hasAddress ? (
-        <InlineIcon icon="map-marker" color={colors.primary} onPress={stop(map)} />
+        <InlineIcon icon="map-marker" color={themeColors.accentText} onPress={stop(map)} />
       ) : null}
     </View>
   );
@@ -470,6 +475,8 @@ function InlineIcon({
   bg?: string;
   onPress: (e: any) => void;
 }) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   return (
     <Pressable
       onPress={onPress}
@@ -493,7 +500,10 @@ function JobStageTimeline({
   primaryDoc?: Document | null;
   onActivePress?: (job: Job) => void;
 }) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const subStatus = getJobSubStatus(job, primaryDoc);
+  const meta = stageMetaFor(job.stage, themeColors);
   return (
     <View style={styles.timelineRow}>
       {TIMELINE_SLOTS.map((step, i) => {
@@ -515,26 +525,27 @@ function JobStageTimeline({
                   hitSlop={6}
                   style={({ pressed }) => [
                     styles.timelineActivePill,
+                    { borderColor: meta.color },
                     pressed && { opacity: 0.7 },
                   ]}
                 >
                   <MaterialCommunityIcons
                     name={subStatus.icon as any}
                     size={14}
-                    color={colors.success}
+                    color={meta.color}
                   />
-                  <Text style={styles.timelineActiveLabel} numberOfLines={1}>
+                  <Text style={[styles.timelineActiveLabel, { color: meta.color }]} numberOfLines={1}>
                     {subStatus.label}
                   </Text>
                 </Pressable>
               ) : (
-                <View style={styles.timelineActivePill}>
+                <View style={[styles.timelineActivePill, { borderColor: meta.color }]}>
                   <MaterialCommunityIcons
                     name={subStatus.icon as any}
                     size={14}
-                    color={colors.success}
+                    color={meta.color}
                   />
-                  <Text style={styles.timelineActiveLabel} numberOfLines={1}>
+                  <Text style={[styles.timelineActiveLabel, { color: meta.color }]} numberOfLines={1}>
                     {subStatus.label}
                   </Text>
                 </View>
@@ -564,10 +575,10 @@ function JobStageTimeline({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   card: {
     marginBottom: 12,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderRadius: 16,
     // Required so the ShimmerOverlay's sweep stays clipped inside the
     // card's rounded corners.
@@ -589,13 +600,13 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 14,
     fontWeight: '500',
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
   },
   customer: {
     flex: 1,
     fontSize: 17,
-    fontWeight: '800',
-    color: colors.text,
+    fontFamily: 'Archivo-Bold',
+    color: t.colors.text,
   },
   titleHeadRow: {
     flexDirection: 'row',
@@ -613,8 +624,9 @@ const styles = StyleSheet.create({
   },
   headlinePrice: {
     fontSize: 17,
-    fontWeight: '800',
-    color: colors.success,
+    fontFamily: 'Archivo-ExtraBold',
+    fontVariant: ['tabular-nums'],
+    color: t.colors.money,
     textAlign: 'right',
   },
   inlineActions: {
@@ -633,7 +645,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: colors.white + '33',
+    borderColor: t.colors.overlayPressed,
     backgroundColor: 'transparent',
   },
   stageChip: {
@@ -657,11 +669,11 @@ const styles = StyleSheet.create({
     marginRight: -6, // pull back so the touch target doesn't push the chip
   },
   menuButtonPressed: {
-    backgroundColor: colors.surfaceGray3,
+    backgroundColor: t.colors.surfacePressed,
   },
   stageLabel: {
     fontSize: 12,
-    fontWeight: '600',
+    fontFamily: 'Archivo-SemiBold',
   },
   inlineRow: {
     flexDirection: 'row',
@@ -670,7 +682,7 @@ const styles = StyleSheet.create({
   },
   inlineText: {
     fontSize: 13,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     flexShrink: 1,
   },
   metaRow: {
@@ -681,7 +693,7 @@ const styles = StyleSheet.create({
   },
   metaText: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     flexShrink: 1,
   },
   timelineRow: {
@@ -705,14 +717,14 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
     borderRadius: 999,
     borderWidth: 2,
-    borderColor: colors.success,
+    borderColor: t.colors.money,
     backgroundColor: 'transparent',
     flexShrink: 0,
   },
   timelineActiveLabel: {
     fontSize: 11,
-    color: colors.success,
-    fontWeight: '700',
+    color: t.colors.money,
+    fontFamily: 'Archivo-Bold',
     letterSpacing: 0.2,
   },
   timelineMicroSlot: {
@@ -729,24 +741,24 @@ const styles = StyleSheet.create({
     height: 8,
     borderRadius: 4,
     // Lifted off the dark slate background so future steps are still
-    // legible in glaring sunlight — colors.border was nearly invisible.
-    backgroundColor: colors.inactive,
+    // legible in glaring sunlight — t.colors.border was nearly invisible.
+    backgroundColor: t.colors.textDisabled,
     borderWidth: 0,
   },
   timelineMicroDotReached: {
-    backgroundColor: colors.success,
+    backgroundColor: t.colors.money,
   },
   timelineConnector: {
     flex: 1,
     height: 2,
-    backgroundColor: colors.inactive,
+    backgroundColor: t.colors.textDisabled,
     marginHorizontal: 2,
     borderRadius: 1,
   },
   timelineConnectorReached: {
-    // Subtler than the solid colors.success — matches the muted
+    // Subtler than the solid t.colors.money — matches the muted
     // reached pip style so the connecting line doesn't outshout
     // the dots it's joining.
-    backgroundColor: colors.success + '88',
+    backgroundColor: t.colors.moneySubtle,
   },
-});
+}));

@@ -7,7 +7,7 @@ import React, { useState } from 'react';
 import { View, StyleSheet, Platform } from 'react-native';
 import { Button, Text, ActivityIndicator } from 'react-native-paper';
 import { PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js';
-import { colors } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 
 interface StripeCheckoutFormProps {
   onSuccess: () => void;
@@ -22,6 +22,8 @@ export function StripeCheckoutForm({
   amount,
   planName,
 }: StripeCheckoutFormProps) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const stripe = useStripe();
   const elements = useElements();
   const [isProcessing, setIsProcessing] = useState(false);
@@ -96,7 +98,7 @@ export function StripeCheckoutForm({
           </Button>
 
           <Button
-            mode="contained"
+            mode="contained" buttonColor={themeColors.accent} textColor={themeColors.onAccent}
             onPress={handleSubmit as any}
             disabled={!stripe || isProcessing}
             loading={isProcessing}
@@ -109,18 +111,18 @@ export function StripeCheckoutForm({
 
       {isProcessing && (
         <View style={styles.loadingOverlay}>
-          <ActivityIndicator size="large" color={colors.primary} />
+          <ActivityIndicator size="large" color={themeColors.accentText} />
         </View>
       )}
     </View>
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   container: {
     width: '100%',
     padding: 20,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderRadius: 8,
   },
   header: {
@@ -130,13 +132,13 @@ const styles = StyleSheet.create({
   planName: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: colors.text,
+    color: t.colors.text,
     marginBottom: 8,
   },
   amount: {
     fontSize: 32,
     fontWeight: 'bold',
-    color: colors.primary,
+    color: t.colors.money,
   },
   paymentElement: {
     marginBottom: 24,
@@ -154,20 +156,20 @@ const styles = StyleSheet.create({
   },
   errorContainer: {
     padding: 12,
-    backgroundColor: colors.errorBg,
+    backgroundColor: t.colors.errorSubtle,
     borderRadius: 8,
     marginTop: 12,
     borderWidth: 1,
-    borderColor: colors.error,
+    borderColor: t.colors.error,
   },
   errorText: {
-    color: colors.error,
+    color: t.colors.error,
     fontSize: 14,
   },
   loadingOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(15, 23, 42, 0.9)',
+    backgroundColor: t.colors.backdrop,
     justifyContent: 'center',
     alignItems: 'center',
   },
-});
+}));

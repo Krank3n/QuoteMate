@@ -9,7 +9,7 @@
 import React, { useRef, useState } from 'react';
 import { View, StyleSheet, PanResponder, type LayoutChangeEvent } from 'react-native';
 
-import { colors } from '../theme';
+import { makeStyles } from '../theme';
 
 const THUMB_SIZE = 26;
 
@@ -22,6 +22,8 @@ interface RangeSliderProps {
 }
 
 export function RangeSlider({ min, max, step = 1, value, onChange }: RangeSliderProps) {
+  const styles = useStyles();
+
   const [width, setWidth] = useState(0);
 
   // The PanResponder is created once, so it reads the latest props/width
@@ -61,7 +63,7 @@ export function RangeSlider({ min, max, step = 1, value, onChange }: RangeSlider
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   container: {
     height: 40,
     justifyContent: 'center',
@@ -69,26 +71,26 @@ const styles = StyleSheet.create({
   track: {
     height: 6,
     borderRadius: 3,
-    backgroundColor: colors.surfaceLight,
+    backgroundColor: t.colors.surfaceOverlay,
   },
   fill: {
     position: 'absolute',
     height: 6,
     borderRadius: 3,
-    backgroundColor: colors.primary,
+    backgroundColor: t.colors.accent,
   },
   thumb: {
     position: 'absolute',
     width: THUMB_SIZE,
     height: THUMB_SIZE,
     borderRadius: THUMB_SIZE / 2,
-    backgroundColor: colors.white,
+    backgroundColor: t.colors.alwaysLight,
     borderWidth: 3,
-    borderColor: colors.primary,
+    borderColor: t.colors.accent,
     elevation: 3,
     shadowColor: '#000',
     shadowOpacity: 0.25,
     shadowRadius: 3,
     shadowOffset: { width: 0, height: 1 },
   },
-});
+}));

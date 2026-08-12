@@ -25,8 +25,10 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { colors } from '../theme';
+import type { Tokens } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 import { useStore } from '../store/useStore';
+import { GridBackground } from '../components/GridBackground';
 import { BottomSheet } from '../components/BottomSheet';
 import { WebContainer } from '../components/WebContainer';
 import { FooterButton } from '../components/FooterButton';
@@ -73,24 +75,24 @@ function shortDateLabel(iso: string): string {
 
 // Calendar theme — matches DueDateSheet / ScheduleJobSheet so the date
 // picker on this screen feels like the rest of the app.
-const CALENDAR_THEME = {
+const calendarThemeFor = (themeColors: Tokens) => ({
   backgroundColor: 'transparent',
   calendarBackground: 'transparent',
-  textSectionTitleColor: colors.textMuted,
-  dayTextColor: colors.text,
-  todayTextColor: colors.primary,
-  selectedDayTextColor: colors.white,
-  selectedDayBackgroundColor: colors.primary,
-  monthTextColor: colors.text,
-  arrowColor: colors.primary,
-  textDisabledColor: colors.inactive,
+  textSectionTitleColor: themeColors.textMuted,
+  dayTextColor: themeColors.text,
+  todayTextColor: themeColors.accent,
+  selectedDayTextColor: themeColors.alwaysLight,
+  selectedDayBackgroundColor: themeColors.accent,
+  monthTextColor: themeColors.text,
+  arrowColor: themeColors.accent,
+  textDisabledColor: themeColors.textDisabled,
   textMonthFontWeight: '700' as const,
   textDayFontWeight: '500' as const,
   textDayHeaderFontWeight: '600' as const,
   textMonthFontSize: 15,
   textDayFontSize: 13,
   textDayHeaderFontSize: 11,
-};
+});
 
 function isoDayFromIsoLocal(iso: string): string {
   // requiredByIso is "yyyy-MM-ddTHH:mm:ss" — strip the time portion to
@@ -143,6 +145,11 @@ function parseAddress(raw?: string): { addressLine1: string; suburb?: string; st
 }
 
 export function ReeceOrderScreen() {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
+  const CALENDAR_THEME = calendarThemeFor(themeColors);
+  const branchPickerStyles = branchPickerStylesFor(themeColors);
+  const dateSheetStyles = dateSheetStylesFor(themeColors);
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const insets = useSafeAreaInsets();
@@ -405,8 +412,8 @@ export function ReeceOrderScreen() {
     () => ({
       [selectedIsoDay]: {
         selected: true,
-        selectedColor: colors.primary,
-        selectedTextColor: colors.white,
+        selectedColor: themeColors.accent,
+        selectedTextColor: themeColors.alwaysLight,
       },
     }),
     [selectedIsoDay],
@@ -427,7 +434,7 @@ export function ReeceOrderScreen() {
   const renderHeader = () => (
     <View style={styles.headerCard}>
       <View style={styles.reeceIconWrap}>
-        <MaterialCommunityIcons name="pipe" size={28} color={colors.primary} />
+        <MaterialCommunityIcons name="pipe" size={28} color={themeColors.accentText} />
       </View>
       <View style={{ flex: 1 }}>
         <Text style={styles.title}>Order from Reece</Text>
@@ -442,7 +449,7 @@ export function ReeceOrderScreen() {
 
   const renderCardHeader = (icon: string, title: string, trailing?: React.ReactNode) => (
     <View style={styles.cardHeader}>
-      <MaterialCommunityIcons name={icon as any} size={18} color={colors.primary} />
+      <MaterialCommunityIcons name={icon as any} size={18} color={themeColors.accentText} />
       <Text style={styles.cardTitle}>{title}</Text>
       {trailing ? <View style={styles.cardHeaderTrailing}>{trailing}</View> : null}
     </View>
@@ -451,7 +458,7 @@ export function ReeceOrderScreen() {
   const renderViolations = () =>
     violations.length > 0 ? (
       <View style={styles.violationsBox}>
-        <MaterialCommunityIcons name="alert-circle-outline" size={18} color={colors.error} />
+        <MaterialCommunityIcons name="alert-circle-outline" size={18} color={themeColors.error} />
         <View style={{ flex: 1, marginLeft: 8 }}>
           {violations.map((v, i) => (
             <Text key={i} style={styles.violationText}>{v}</Text>
@@ -463,14 +470,15 @@ export function ReeceOrderScreen() {
   if (status.kind === 'placed') {
     return (
       <View style={styles.screen}>
+      <GridBackground />
         <WebContainer style={styles.flexFill}>
           <View style={styles.placedContainer}>
-            <MaterialCommunityIcons name="check-circle" size={64} color={colors.success} />
+            <MaterialCommunityIcons name="check-circle" size={64} color={themeColors.money} />
             <Text style={styles.placedTitle}>Order placed</Text>
             <Text style={styles.placedSubtitle}>
               Reece order #{status.reeceOrderNumber}. Reece will email you a confirmation and bill on your trade account.
             </Text>
-            <Button mode="contained" buttonColor={colors.primary} onPress={handleClose} style={styles.placedDoneButton}>
+            <Button mode="contained" buttonColor={themeColors.accent} onPress={handleClose} style={styles.placedDoneButton}>
               Done
             </Button>
           </View>
@@ -484,10 +492,10 @@ export function ReeceOrderScreen() {
       <View style={styles.screen}>
         <WebContainer style={styles.flexFill}>
           <View style={styles.placedContainer}>
-            <MaterialCommunityIcons name="alert-circle" size={64} color={colors.error} />
+            <MaterialCommunityIcons name="alert-circle" size={64} color={themeColors.error} />
             <Text style={styles.placedTitle}>Couldn’t open order</Text>
             <Text style={styles.placedSubtitle}>{status.message}</Text>
-            <Button mode="contained" buttonColor={colors.primary} onPress={handleClose} style={styles.placedDoneButton}>
+            <Button mode="contained" buttonColor={themeColors.accent} onPress={handleClose} style={styles.placedDoneButton}>
               Close
             </Button>
           </View>
@@ -589,13 +597,13 @@ export function ReeceOrderScreen() {
                     }}
                     style={styles.addressLinkRow}
                   >
-                    <MaterialCommunityIcons name="magnify" size={16} color={colors.primary} />
+                    <MaterialCommunityIcons name="magnify" size={16} color={themeColors.accentText} />
                     <Text style={styles.addressLinkText}>Use address search instead</Text>
                   </TouchableOpacity>
                 </>
               ) : selectedFormattedAddress ? (
                 <View style={styles.selectedAddressCard}>
-                  <MaterialCommunityIcons name="map-marker-check" size={20} color={colors.success} />
+                  <MaterialCommunityIcons name="map-marker-check" size={20} color={themeColors.money} />
                   <Text style={styles.selectedAddressText} numberOfLines={2}>
                     {selectedFormattedAddress}
                   </Text>
@@ -628,7 +636,7 @@ export function ReeceOrderScreen() {
                     onPress={() => setAddressManual(true)}
                     style={styles.addressLinkRow}
                   >
-                    <MaterialCommunityIcons name="pencil-outline" size={16} color={colors.primary} />
+                    <MaterialCommunityIcons name="pencil-outline" size={16} color={themeColors.accentText} />
                     <Text style={styles.addressLinkText}>Can't find it? Enter manually</Text>
                   </TouchableOpacity>
                 </>
@@ -732,7 +740,7 @@ export function ReeceOrderScreen() {
             </View>
           ) : status.kind === 'previewing' ? (
             <View style={styles.previewingBox}>
-              <ActivityIndicator size="small" color={colors.primary} />
+              <ActivityIndicator size="small" color={themeColors.accentText} />
               <Text style={styles.previewingText}>Refreshing total from Reece...</Text>
             </View>
           ) : null}
@@ -793,7 +801,7 @@ export function ReeceOrderScreen() {
             <MaterialCommunityIcons
               name={'calendar-clock' as any}
               size={16}
-              color={colors.primary}
+              color={themeColors.accentText}
             />
             <Text style={dateSheetStyles.summaryText}>
               {shortDateLabel(requiredByIso)}
@@ -877,6 +885,11 @@ function BranchPicker({
   homeBranchNumber: string | null;
   onSelect: (branchNumber: string) => void;
 }) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
+  const CALENDAR_THEME = calendarThemeFor(themeColors);
+  const branchPickerStyles = branchPickerStylesFor(themeColors);
+  const dateSheetStyles = dateSheetStylesFor(themeColors);
   const [query, setQuery] = useState('');
 
   // Reset search when sheet opens — feels stale otherwise on second open.
@@ -924,7 +937,7 @@ function BranchPicker({
       />
       {loading ? (
         <View style={branchPickerStyles.loadingWrap}>
-          <ActivityIndicator size="small" color={colors.primary} />
+          <ActivityIndicator size="small" color={themeColors.accentText} />
           <Text style={branchPickerStyles.loadingText}>Loading branches…</Text>
         </View>
       ) : filtered.length === 0 ? (
@@ -960,7 +973,7 @@ function BranchPicker({
                   {suburb ? <Text style={branchPickerStyles.rowMeta}>{suburb}</Text> : null}
                 </View>
                 {isSelected ? (
-                  <MaterialCommunityIcons name="check" size={20} color={colors.primary} />
+                  <MaterialCommunityIcons name="check" size={20} color={themeColors.accentText} />
                 ) : null}
               </TouchableOpacity>
             );
@@ -971,10 +984,10 @@ function BranchPicker({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   screen: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
   },
   flexFill: {
     flex: 1,
@@ -986,7 +999,7 @@ const styles = StyleSheet.create({
   headerCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderRadius: 16,
     padding: 16,
     marginBottom: 14,
@@ -996,15 +1009,15 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 12,
-    backgroundColor: colors.primaryBg,
+    backgroundColor: t.colors.accentSubtle,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 14,
   },
-  title: { fontSize: 20, fontWeight: '700', color: colors.text },
-  subtitle: { fontSize: 13, color: colors.textMuted, marginTop: 2 },
+  title: { fontSize: 20, fontWeight: '700', color: t.colors.text },
+  subtitle: { fontSize: 13, color: t.colors.textMuted, marginTop: 2 },
   card: {
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderRadius: 16,
     padding: 16,
     marginBottom: 14,
@@ -1019,7 +1032,7 @@ const styles = StyleSheet.create({
   cardTitle: {
     fontSize: 15,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
     flex: 1,
   },
   cardHeaderTrailing: {
@@ -1030,7 +1043,7 @@ const styles = StyleSheet.create({
   },
   fieldLabel: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginBottom: 6,
     fontWeight: '600',
     textTransform: 'uppercase',
@@ -1041,36 +1054,36 @@ const styles = StyleSheet.create({
     height: 22,
     paddingHorizontal: 8,
     borderRadius: 11,
-    backgroundColor: colors.primaryBg,
+    backgroundColor: t.colors.accentSubtle,
     alignItems: 'center',
     justifyContent: 'center',
   },
   countChipText: {
     fontSize: 12,
     fontWeight: '700',
-    color: colors.primary,
+    color: t.colors.accentText,
   },
-  pickerButton: { borderColor: colors.border },
-  input: { marginBottom: 8, backgroundColor: colors.surface },
+  pickerButton: { borderColor: t.colors.border },
+  input: { marginBottom: 8, backgroundColor: t.colors.surfaceRaised },
   lineRow: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
+    borderBottomColor: t.colors.border,
   },
   lineRowLast: {
     borderBottomWidth: 0,
   },
-  lineName: { fontSize: 14, color: colors.text, fontWeight: '500' },
-  lineMeta: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
-  lineTotal: { fontSize: 14, color: colors.text, fontWeight: '600', marginLeft: 12 },
-  emptyHint: { fontSize: 13, color: colors.textMuted, lineHeight: 18, fontStyle: 'italic' },
-  deliveryHint: { fontSize: 12, color: colors.textMuted, lineHeight: 16, marginBottom: 8 },
+  lineName: { fontSize: 14, color: t.colors.text, fontWeight: '500' },
+  lineMeta: { fontSize: 12, color: t.colors.textMuted, marginTop: 2 },
+  lineTotal: { fontSize: 14, color: t.colors.text, fontWeight: '600', marginLeft: 12 },
+  emptyHint: { fontSize: 13, color: t.colors.textMuted, lineHeight: 18, fontStyle: 'italic' },
+  deliveryHint: { fontSize: 12, color: t.colors.textMuted, lineHeight: 16, marginBottom: 8 },
   selectedAddressCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.surfaceGray3,
+    backgroundColor: t.colors.surfacePressed,
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 12,
@@ -1080,7 +1093,7 @@ const styles = StyleSheet.create({
   selectedAddressText: {
     flex: 1,
     fontSize: 14,
-    color: colors.text,
+    color: t.colors.text,
     fontWeight: '500',
   },
   addressLinkRow: {
@@ -1091,7 +1104,7 @@ const styles = StyleSheet.create({
   },
   addressLinkText: {
     fontSize: 13,
-    color: colors.primary,
+    color: t.colors.accentText,
     fontWeight: '600',
   },
   totalsBox: {
@@ -1100,29 +1113,29 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingBottom: 8,
     borderRadius: 12,
-    backgroundColor: colors.primaryBg,
+    backgroundColor: t.colors.accentSubtle,
   },
   totalRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4 },
   totalRowGrand: {
     marginTop: 6,
     paddingTop: 10,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.primary + '55',
+    borderTopColor: t.colors.accentSubtle,
   },
-  totalLabel: { fontSize: 13, color: colors.textMuted },
-  totalLabelStrong: { fontSize: 14, color: colors.text, fontWeight: '700' },
-  totalValue: { fontSize: 13, color: colors.text },
-  totalValueStrong: { fontSize: 18, color: colors.primary, fontWeight: '800' },
+  totalLabel: { fontSize: 13, color: t.colors.textMuted },
+  totalLabelStrong: { fontSize: 14, color: t.colors.text, fontWeight: '700' },
+  totalValue: { fontSize: 13, color: t.colors.text },
+  totalValueStrong: { fontSize: 18, color: t.colors.money, fontWeight: '800' },
   previewingBox: { flexDirection: 'row', alignItems: 'center', marginTop: 14 },
-  previewingText: { marginLeft: 8, fontSize: 12, color: colors.textMuted },
+  previewingText: { marginLeft: 8, fontSize: 12, color: t.colors.textMuted },
   violationsBox: {
     flexDirection: 'row',
-    backgroundColor: colors.error + '15',
+    backgroundColor: t.colors.errorSubtle,
     borderRadius: 8,
     padding: 10,
     marginTop: 12,
   },
-  violationText: { fontSize: 12, color: colors.error, lineHeight: 16 },
+  violationText: { fontSize: 12, color: t.colors.error, lineHeight: 16 },
   footerBar: {
     position: 'absolute',
     left: 0,
@@ -1130,9 +1143,9 @@ const styles = StyleSheet.create({
     bottom: 0,
     paddingTop: 10,
     paddingHorizontal: 16,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderTopWidth: 1,
-    borderTopColor: colors.border,
+    borderTopColor: t.colors.border,
     ...Platform.select({
       ios: {
         shadowColor: '#000',
@@ -1162,10 +1175,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  placedTitle: { fontSize: 22, fontWeight: '700', color: colors.text, marginTop: 14 },
-  placedSubtitle: { fontSize: 14, color: colors.textMuted, textAlign: 'center', marginTop: 8, lineHeight: 20 },
+  placedTitle: { fontSize: 22, fontWeight: '700', color: t.colors.text, marginTop: 14 },
+  placedSubtitle: { fontSize: 14, color: t.colors.textMuted, textAlign: 'center', marginTop: 8, lineHeight: 20 },
   placedDoneButton: { marginTop: 24, alignSelf: 'stretch' },
-});
+}));
 
 // BottomSheet's content area takes its natural size in non-scrollable mode,
 // so a long branch list would push the footer past the sheet's maxHeight
@@ -1173,9 +1186,9 @@ const styles = StyleSheet.create({
 // the screen leaves room for handle + title + search + footer + safe area.
 const SCREEN_HEIGHT = Dimensions.get('window').height;
 
-const branchPickerStyles = StyleSheet.create({
+const branchPickerStylesFor = (themeColors: Tokens) => (StyleSheet.create({
   search: {
-    backgroundColor: colors.surface,
+    backgroundColor: themeColors.surfaceRaised,
     marginBottom: 8,
   },
   list: {
@@ -1188,11 +1201,11 @@ const branchPickerStyles = StyleSheet.create({
   },
   loadingText: {
     fontSize: 13,
-    color: colors.textMuted,
+    color: themeColors.textMuted,
   },
   empty: {
     fontSize: 13,
-    color: colors.textMuted,
+    color: themeColors.textMuted,
     fontStyle: 'italic',
     paddingVertical: 24,
     textAlign: 'center',
@@ -1203,10 +1216,10 @@ const branchPickerStyles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 4,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
+    borderBottomColor: themeColors.border,
   },
   rowSelected: {
-    backgroundColor: colors.primaryBg,
+    backgroundColor: themeColors.accentSubtle,
     borderRadius: 8,
   },
   rowHeader: {
@@ -1217,19 +1230,19 @@ const branchPickerStyles = StyleSheet.create({
   rowName: {
     fontSize: 14,
     fontWeight: '600',
-    color: colors.text,
+    color: themeColors.text,
     flexShrink: 1,
   },
   rowMeta: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: themeColors.textMuted,
     marginTop: 2,
   },
   homeChip: {
     fontSize: 10,
     fontWeight: '700',
-    color: colors.primary,
-    backgroundColor: colors.primaryBg,
+    color: themeColors.accentText,
+    backgroundColor: themeColors.accentSubtle,
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 4,
@@ -1241,9 +1254,9 @@ const branchPickerStyles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 8,
   },
-});
+}));
 
-const dateSheetStyles = StyleSheet.create({
+const dateSheetStylesFor = (themeColors: Tokens) => (StyleSheet.create({
   content: {
     paddingVertical: 4,
     gap: 14,
@@ -1255,12 +1268,12 @@ const dateSheetStyles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 14,
     borderRadius: 12,
-    backgroundColor: colors.surfaceGray3,
+    backgroundColor: themeColors.surfacePressed,
     alignSelf: 'stretch',
   },
   summaryText: {
     fontSize: 14,
-    color: colors.text,
+    color: themeColors.text,
     fontWeight: '700',
   },
   chipsRow: {
@@ -1274,34 +1287,34 @@ const dateSheetStyles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 12,
     borderRadius: 12,
-    backgroundColor: colors.surfaceDark,
+    backgroundColor: themeColors.surface,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: themeColors.border,
   },
   chipSelected: {
-    backgroundColor: colors.primaryBg,
-    borderColor: colors.primary,
+    backgroundColor: themeColors.accentSubtle,
+    borderColor: themeColors.accent,
   },
   chipLabel: {
     fontSize: 14,
     fontWeight: '700',
-    color: colors.text,
+    color: themeColors.text,
   },
   chipLabelSelected: {
-    color: colors.primary,
+    color: themeColors.accentText,
   },
   chipSublabel: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: themeColors.textMuted,
     marginTop: 2,
   },
   chipSublabelSelected: {
-    color: colors.primary,
+    color: themeColors.accentText,
   },
   calendarCard: {
     borderRadius: 16,
     overflow: 'hidden',
-    backgroundColor: colors.surfaceDark,
+    backgroundColor: themeColors.surface,
     paddingVertical: 4,
   },
-});
+}));

@@ -7,7 +7,7 @@ import React, { useEffect, useRef } from 'react';
 import { View, StyleSheet, Animated, Dimensions, TouchableOpacity } from 'react-native';
 import { Text } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { colors } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 
 const { width, height } = Dimensions.get('window');
 
@@ -22,6 +22,8 @@ export function CelebrationAnimation({
   onComplete,
   message = 'Quote Saved Successfully!',
 }: CelebrationAnimationProps) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(0)).current;
   const checkmarkScale = useRef(new Animated.Value(0)).current;
@@ -141,8 +143,8 @@ export function CelebrationAnimation({
       >
       {/* Confetti particles */}
       {confettiAnims.map((anim, index) => {
-        const colors = ['#009868', '#cfa153', '#00C897', '#E6B872', '#5AB9EA'];
-        const color = colors[index % colors.length];
+        const confettiColors = [themeColors.accent, themeColors.warning, themeColors.money, themeColors.warning, themeColors.info];
+        const color = confettiColors[index % confettiColors.length];
         const size = 8 + Math.random() * 8;
 
         return (
@@ -188,7 +190,7 @@ export function CelebrationAnimation({
           <MaterialCommunityIcons
             name="check-circle"
             size={120}
-            color={colors.success}
+            color={themeColors.money}
           />
         </Animated.View>
       </Animated.View>
@@ -218,14 +220,14 @@ export function CelebrationAnimation({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   container: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(15, 23, 42, 0.95)', // Semi-transparent dark background
+    backgroundColor: t.colors.backdrop, // Semi-transparent dark background
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 9999,
@@ -238,11 +240,11 @@ const styles = StyleSheet.create({
     width: 140,
     height: 140,
     borderRadius: 70,
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
     justifyContent: 'center',
     alignItems: 'center',
     elevation: 8,
-    shadowColor: colors.success,
+    shadowColor: t.colors.money,
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.5,
     shadowRadius: 20,
@@ -254,14 +256,14 @@ const styles = StyleSheet.create({
   message: {
     fontSize: 24,
     fontWeight: '700',
-    color: colors.success,
+    color: t.colors.money,
     textAlign: 'center',
   },
   tapHint: {
     fontSize: 14,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     textAlign: 'center',
     marginTop: 12,
     opacity: 0.7,
   },
-});
+}));

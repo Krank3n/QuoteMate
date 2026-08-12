@@ -24,7 +24,7 @@ import {
 } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
-import { colors } from '../../theme';
+import { makeStyles, useThemeColors } from '../../theme';
 import { successTap, lightTap, errorTap } from '../../utils/haptics';
 import { useSupplierListImport } from '../../hooks/useSupplierListImport';
 import { SupplierListCaptureModal } from '../../components/SupplierListCaptureModal';
@@ -45,6 +45,8 @@ interface Props {
 }
 
 export function SuppliersStep({ addedSuppliers, onSupplierAdded }: Props) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const [uploadSheetVisible, setUploadSheetVisible] = useState(false);
 
   const importer = useSupplierListImport({
@@ -97,7 +99,7 @@ export function SuppliersStep({ addedSuppliers, onSupplierAdded }: Props) {
 
   const renderExtractingOverlay = () => (
     <Surface style={[styles.card, styles.loadingCard]}>
-      <ActivityIndicator size="large" color={colors.primary} />
+      <ActivityIndicator size="large" color={themeColors.accentText} />
       <Text style={styles.loadingTitle}>{importer.loadingLabel}</Text>
       <Text style={styles.loadingSubtitle}>This usually takes 5–10 seconds.</Text>
     </Surface>
@@ -108,7 +110,7 @@ export function SuppliersStep({ addedSuppliers, onSupplierAdded }: Props) {
     return (
       <Surface style={[styles.card, styles.savedCard]}>
         <View style={styles.savedHeader}>
-          <MaterialCommunityIcons name="check-circle" size={22} color={colors.success} />
+          <MaterialCommunityIcons name="check-circle" size={22} color={themeColors.money} />
           <Text style={styles.savedHeaderText}>
             {addedSuppliers.length === 1 ? 'Supplier saved' : `${addedSuppliers.length} suppliers saved`}
           </Text>
@@ -152,7 +154,7 @@ export function SuppliersStep({ addedSuppliers, onSupplierAdded }: Props) {
         <MaterialCommunityIcons
           name="truck-delivery"
           size={64}
-          color={colors.primary}
+          color={themeColors.accentText}
           style={styles.stepIcon}
         />
         <Title style={styles.stepTitle}>Real prices, in seconds</Title>
@@ -172,13 +174,13 @@ export function SuppliersStep({ addedSuppliers, onSupplierAdded }: Props) {
             activeOpacity={0.85}
           >
             <View style={styles.primaryIconCircle}>
-              <MaterialCommunityIcons name="camera" size={28} color={colors.primary} />
+              <MaterialCommunityIcons name="camera" size={28} color={themeColors.accentText} />
             </View>
             <View style={styles.actionText}>
               <Text style={styles.actionTitle}>Snap a recent receipt</Text>
               <Text style={styles.actionSubtitle}>Photo of a paid invoice or docket</Text>
             </View>
-            <MaterialCommunityIcons name="chevron-right" size={24} color={colors.textMuted} />
+            <MaterialCommunityIcons name="chevron-right" size={24} color={themeColors.textMuted} />
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -188,13 +190,13 @@ export function SuppliersStep({ addedSuppliers, onSupplierAdded }: Props) {
             activeOpacity={0.85}
           >
             <View style={styles.secondaryIconCircle}>
-              <MaterialCommunityIcons name="file-upload-outline" size={26} color={colors.text} />
+              <MaterialCommunityIcons name="file-upload-outline" size={26} color={themeColors.text} />
             </View>
             <View style={styles.actionText}>
               <Text style={styles.actionTitle}>Upload a price list</Text>
               <Text style={styles.actionSubtitle}>PDF or photo from your supplier</Text>
             </View>
-            <MaterialCommunityIcons name="chevron-right" size={24} color={colors.textMuted} />
+            <MaterialCommunityIcons name="chevron-right" size={24} color={themeColors.textMuted} />
           </TouchableOpacity>
         </>
       )}
@@ -202,7 +204,7 @@ export function SuppliersStep({ addedSuppliers, onSupplierAdded }: Props) {
       {importer.errorMessage ? (
         <Surface style={styles.errorCard}>
           <View style={styles.errorRow}>
-            <MaterialCommunityIcons name="alert-circle-outline" size={20} color={colors.error} />
+            <MaterialCommunityIcons name="alert-circle-outline" size={20} color={themeColors.error} />
             <Text style={styles.errorText}>{importer.errorMessage}</Text>
           </View>
           <Button
@@ -262,7 +264,7 @@ export function SuppliersStep({ addedSuppliers, onSupplierAdded }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   stepContainer: {
     padding: 20,
   },
@@ -276,43 +278,43 @@ const styles = StyleSheet.create({
   stepTitle: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: colors.text,
+    color: t.colors.text,
     textAlign: 'center',
     marginBottom: 8,
   },
   stepDescription: {
     fontSize: 16,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     textAlign: 'center',
     paddingHorizontal: 16,
   },
   primaryAction: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderRadius: 12,
     padding: 16,
     marginBottom: 12,
     elevation: 2,
     borderWidth: 2,
-    borderColor: colors.primary,
+    borderColor: t.colors.accent,
   },
   secondaryAction: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderRadius: 12,
     padding: 16,
     marginBottom: 16,
     elevation: 2,
     borderWidth: 1,
-    borderColor: colors.outline,
+    borderColor: t.colors.borderStrong,
   },
   primaryIconCircle: {
     width: 52,
     height: 52,
     borderRadius: 26,
-    backgroundColor: colors.primary + '20',
+    backgroundColor: t.colors.accentSubtle,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 14,
@@ -321,7 +323,7 @@ const styles = StyleSheet.create({
     width: 52,
     height: 52,
     borderRadius: 26,
-    backgroundColor: colors.surfaceLight,
+    backgroundColor: t.colors.surfaceOverlay,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 14,
@@ -332,19 +334,19 @@ const styles = StyleSheet.create({
   actionTitle: {
     fontSize: 16,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
     marginBottom: 2,
   },
   actionSubtitle: {
     fontSize: 13,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
   card: {
     padding: 16,
     marginBottom: 16,
     borderRadius: 12,
     elevation: 2,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
   },
   loadingCard: {
     alignItems: 'center',
@@ -353,18 +355,18 @@ const styles = StyleSheet.create({
   loadingTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
     marginTop: 16,
   },
   loadingSubtitle: {
     fontSize: 13,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginTop: 6,
   },
   savedCard: {
-    backgroundColor: colors.successBg,
+    backgroundColor: t.colors.moneySubtle,
     borderWidth: 1,
-    borderColor: colors.success + '60',
+    borderColor: t.colors.moneySubtle,
   },
   savedHeader: {
     flexDirection: 'row',
@@ -375,26 +377,26 @@ const styles = StyleSheet.create({
   savedHeaderText: {
     fontSize: 15,
     fontWeight: '700',
-    color: colors.success,
+    color: t.colors.money,
   },
   savedRow: {
     paddingVertical: 8,
     borderTopWidth: 1,
-    borderTopColor: colors.success + '30',
+    borderTopColor: t.colors.moneySubtle,
   },
   savedRowTitle: {
     fontSize: 15,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
   },
   savedRowMeta: {
     fontSize: 13,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginTop: 2,
   },
   savedRowSample: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginTop: 4,
     fontStyle: 'italic',
   },
@@ -406,9 +408,9 @@ const styles = StyleSheet.create({
     padding: 12,
     marginBottom: 16,
     borderRadius: 10,
-    backgroundColor: colors.errorBg,
+    backgroundColor: t.colors.errorSubtle,
     borderWidth: 1,
-    borderColor: colors.error + '60',
+    borderColor: t.colors.errorSubtle,
   },
   errorRow: {
     flexDirection: 'row',
@@ -419,7 +421,7 @@ const styles = StyleSheet.create({
   errorText: {
     flex: 1,
     fontSize: 13,
-    color: colors.error,
+    color: t.colors.error,
     lineHeight: 18,
   },
-});
+}));

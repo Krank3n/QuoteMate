@@ -8,7 +8,7 @@ import React from 'react';
 import { View, StyleSheet, TouchableOpacity, Linking, Platform } from 'react-native';
 import { Text, Surface } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { colors } from '../../theme';
+import { makeStyles, useThemeColors } from '../../theme';
 
 interface ContactActionsBarProps {
   phone?: string;
@@ -27,6 +27,8 @@ interface ActionItem {
 }
 
 export function ContactActionsBar({ phone, email, website, compact = false }: ContactActionsBarProps) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const actions: ActionItem[] = [];
 
   if (phone) {
@@ -34,15 +36,15 @@ export function ContactActionsBar({ phone, email, website, compact = false }: Co
     actions.push({
       icon: 'phone',
       label: 'Call',
-      color: colors.success,
-      bgColor: colors.successBg,
+      color: themeColors.money,
+      bgColor: themeColors.moneySubtle,
       onPress: () => Linking.openURL(`tel:${cleanPhone}`),
     });
     actions.push({
       icon: 'message-text',
       label: 'Text',
-      color: colors.info,
-      bgColor: colors.infoBg,
+      color: themeColors.info,
+      bgColor: themeColors.infoSubtle,
       onPress: () => {
         const url = Platform.OS === 'ios'
           ? `sms:${cleanPhone}`
@@ -56,8 +58,8 @@ export function ContactActionsBar({ phone, email, website, compact = false }: Co
     actions.push({
       icon: 'email-outline',
       label: 'Email',
-      color: colors.warning,
-      bgColor: colors.warningBg,
+      color: themeColors.warning,
+      bgColor: themeColors.warningSubtle,
       onPress: () => Linking.openURL(`mailto:${email}`),
     });
   }
@@ -67,8 +69,8 @@ export function ContactActionsBar({ phone, email, website, compact = false }: Co
     actions.push({
       icon: 'web',
       label: 'Web',
-      color: colors.primary,
-      bgColor: colors.primaryBg,
+      color: themeColors.accentText,
+      bgColor: themeColors.accentSubtle,
       onPress: () => Linking.openURL(url),
     });
   }
@@ -123,14 +125,14 @@ export function ContactActionsBar({ phone, email, website, compact = false }: Co
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   container: {
     marginBottom: 12,
     paddingVertical: 14,
     paddingHorizontal: 16,
     borderRadius: 14,
     elevation: 2,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     overflow: 'hidden',
   },
   actionsRow: {
@@ -168,4 +170,4 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-});
+}));

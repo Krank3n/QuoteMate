@@ -5,6 +5,7 @@
  */
 
 import React, { useCallback, useRef, useState } from 'react';
+import { useThemeColors } from '../theme';
 import {
   Animated,
   GestureResponderEvent,
@@ -40,7 +41,7 @@ interface TapRippleProps extends Omit<PressableProps, 'onPressIn' | 'onPressOut'
 let nextId = 0;
 
 export function TapRipple({
-  rippleColor = 'rgba(255,255,255,0.18)',
+  rippleColor,
   rippleRadius,
   duration = 500,
   children,
@@ -50,6 +51,7 @@ export function TapRipple({
   style,
   ...rest
 }: TapRippleProps) {
+  const themeColors = useThemeColors();
   const [ripples, setRipples] = useState<Ripple[]>([]);
   const layoutRef = useRef({ width: 0, height: 0 });
 
@@ -113,7 +115,7 @@ export function TapRipple({
             style={[
               styles.rippleCircle,
               {
-                backgroundColor: rippleColor,
+                backgroundColor: rippleColor ?? themeColors.overlayPressed,
                 left: ripple.x - 50,
                 top: ripple.y - 50,
                 transform: [{ scale: ripple.scale }],

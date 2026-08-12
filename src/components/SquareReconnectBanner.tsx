@@ -14,7 +14,7 @@ import { Text } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation } from '@react-navigation/native';
 
-import { colors } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 
 interface Props {
   reason?: string | null;
@@ -36,6 +36,8 @@ function humanise(reason?: string | null): string {
 }
 
 export function SquareReconnectBanner({ reason, contextMessage }: Props) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const navigation = useNavigation<any>();
   if (!reason) return null;
 
@@ -48,7 +50,7 @@ export function SquareReconnectBanner({ reason, contextMessage }: Props) {
       accessibilityLabel="Reconnect Square"
     >
       <View style={styles.iconWrap}>
-        <MaterialCommunityIcons name="alert" size={20} color={colors.warning} />
+        <MaterialCommunityIcons name="alert" size={20} color={themeColors.warning} />
       </View>
       <View style={styles.textWrap}>
         <Text style={styles.title}>
@@ -56,18 +58,18 @@ export function SquareReconnectBanner({ reason, contextMessage }: Props) {
         </Text>
         <Text style={styles.body}>{humanise(reason)}</Text>
       </View>
-      <MaterialCommunityIcons name="chevron-right" size={22} color={colors.warning} />
+      <MaterialCommunityIcons name="chevron-right" size={22} color={themeColors.warning} />
     </TouchableOpacity>
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   banner: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.warningBg,
+    backgroundColor: t.colors.warningSubtle,
     borderLeftWidth: 4,
-    borderLeftColor: colors.warning,
+    borderLeftColor: t.colors.warning,
     paddingHorizontal: 14,
     paddingVertical: 12,
     borderRadius: 8,
@@ -83,12 +85,12 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 14,
     fontWeight: '700',
-    color: colors.warning,
+    color: t.colors.warning,
     marginBottom: 2,
   },
   body: {
     fontSize: 12,
-    color: colors.warning,
+    color: t.colors.warning,
     lineHeight: 16,
   },
-});
+}));

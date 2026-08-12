@@ -25,7 +25,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import Constants from 'expo-constants';
 import { LinearGradient } from 'expo-linear-gradient';
 
-import { colors } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 import { APP_STORE_URL, PLAY_STORE_URL } from '../config/storeLinks';
 import type { AppUpdateInfo } from '../services/appUpdateService';
 
@@ -47,6 +47,8 @@ interface Props {
 }
 
 export function AppUpdateSheet({ visible, onDismiss, info }: Props) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const insets = useSafeAreaInsets();
   const slideAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
   const backdropAnim = useRef(new Animated.Value(0)).current;
@@ -144,7 +146,7 @@ export function AppUpdateSheet({ visible, onDismiss, info }: Props) {
               ]}
             >
               <LinearGradient
-                colors={['#00C897', '#009868']}
+                colors={[themeColors.accent, themeColors.accentText]}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
                 style={styles.iconGradient}
@@ -152,7 +154,7 @@ export function AppUpdateSheet({ visible, onDismiss, info }: Props) {
                 <MaterialCommunityIcons
                   name="rocket-launch"
                   size={36}
-                  color="#fff"
+                  color={themeColors.onAccent}
                 />
               </LinearGradient>
             </Animated.View>
@@ -176,7 +178,7 @@ export function AppUpdateSheet({ visible, onDismiss, info }: Props) {
             <MaterialCommunityIcons
               name="arrow-right"
               size={18}
-              color={colors.inactive}
+              color={themeColors.textDisabled}
               style={styles.arrow}
             />
             <View style={[styles.versionBadge, styles.versionBadgeNew]}>
@@ -196,7 +198,7 @@ export function AppUpdateSheet({ visible, onDismiss, info }: Props) {
                 <MaterialCommunityIcons
                   name="star-four-points"
                   size={14}
-                  color={colors.secondary}
+                  color={themeColors.warning}
                 />
                 <Text style={styles.whatsNewTitle}>What's new</Text>
               </View>
@@ -210,7 +212,7 @@ export function AppUpdateSheet({ visible, onDismiss, info }: Props) {
               <MaterialCommunityIcons
                 name="shield-alert-outline"
                 size={16}
-                color={colors.warning}
+                color={themeColors.warning}
               />
               <Text style={styles.forceText}>
                 This update is required to keep using QuoteMate.
@@ -222,7 +224,7 @@ export function AppUpdateSheet({ visible, onDismiss, info }: Props) {
         {/* Footer */}
         <View style={styles.footer}>
           <Button
-            mode="contained"
+            mode="contained" buttonColor={themeColors.accent} textColor={themeColors.onAccent}
             onPress={handleUpdate}
             style={styles.updateButton}
             contentStyle={styles.updateButtonContent}
@@ -251,7 +253,7 @@ export function AppUpdateSheet({ visible, onDismiss, info }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   overlay: {
     ...StyleSheet.absoluteFillObject,
     zIndex: 9999,
@@ -265,11 +267,11 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: '#141C2B',
+    backgroundColor: t.colors.surfaceRaised,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.06)',
+    borderTopColor: t.colors.border,
     ...Platform.select({
       ios: {
         shadowColor: '#000',
@@ -291,7 +293,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 4,
     borderRadius: 2,
-    backgroundColor: colors.surfaceGray,
+    backgroundColor: t.colors.surfaceOverlay,
     opacity: 0.6,
   },
 
@@ -324,7 +326,7 @@ const styles = StyleSheet.create({
     height: 100,
     borderRadius: 50,
     borderWidth: 1.5,
-    borderColor: 'rgba(0, 200, 151, 0.15)',
+    borderColor: t.colors.moneySubtle,
     zIndex: -1,
   },
 
@@ -332,7 +334,7 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 22,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
     textAlign: 'center',
     marginBottom: 20,
   },
@@ -344,36 +346,36 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   versionBadge: {
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderRadius: 12,
     paddingVertical: 10,
     paddingHorizontal: 18,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
   },
   versionBadgeNew: {
-    backgroundColor: colors.primaryBg,
-    borderColor: 'rgba(0, 200, 151, 0.25)',
+    backgroundColor: t.colors.accentSubtle,
+    borderColor: t.colors.money,
   },
   versionLabel: {
     fontSize: 11,
     fontWeight: '600',
-    color: colors.inactive,
+    color: t.colors.textDisabled,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
     marginBottom: 2,
   },
   versionLabelNew: {
-    color: colors.success,
+    color: t.colors.money,
   },
   versionValue: {
     fontSize: 16,
     fontWeight: '700',
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
   versionValueNew: {
-    color: colors.success,
+    color: t.colors.money,
   },
   arrow: {
     marginHorizontal: 12,
@@ -381,12 +383,12 @@ const styles = StyleSheet.create({
 
   /* ── What's new card ──────────────────────────── */
   whatsNewCard: {
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderRadius: 12,
     padding: 14,
     width: '100%',
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
     marginBottom: 16,
   },
   whatsNewHeader: {
@@ -398,13 +400,13 @@ const styles = StyleSheet.create({
   whatsNewTitle: {
     fontSize: 13,
     fontWeight: '700',
-    color: colors.secondary,
+    color: t.colors.warning,
     textTransform: 'uppercase',
     letterSpacing: 0.3,
   },
   whatsNewBody: {
     fontSize: 14,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     lineHeight: 20,
   },
 
@@ -412,7 +414,7 @@ const styles = StyleSheet.create({
   forceNotice: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.warningBg,
+    backgroundColor: t.colors.warningSubtle,
     borderRadius: 10,
     paddingVertical: 10,
     paddingHorizontal: 14,
@@ -422,7 +424,7 @@ const styles = StyleSheet.create({
   },
   forceText: {
     fontSize: 13,
-    color: colors.warning,
+    color: t.colors.warning,
     flex: 1,
     lineHeight: 18,
   },
@@ -434,7 +436,7 @@ const styles = StyleSheet.create({
   },
   updateButton: {
     borderRadius: 14,
-    backgroundColor: colors.primary,
+    backgroundColor: t.colors.accent,
   },
   updateButtonContent: {
     paddingVertical: 6,
@@ -442,13 +444,13 @@ const styles = StyleSheet.create({
   updateButtonLabel: {
     fontSize: 16,
     fontWeight: '700',
-    color: '#fff',
+    color: t.colors.onAccent,
   },
   laterButton: {
     marginTop: 4,
   },
   laterLabel: {
     fontSize: 14,
-    color: colors.inactive,
+    color: t.colors.textDisabled,
   },
-});
+}));

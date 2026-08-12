@@ -30,11 +30,11 @@ import { formatDistanceToNowStrict } from 'date-fns';
 
 import type { Document } from '../types/document';
 import type { Invoice, PaymentTerms } from '../types';
-import { colors } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
 import { hoursForDisplay, rateForDisplay, valueToHours, rateToHourly } from '../../shared/document/labourUnits';
 import { calculateDueDate, formatPaymentTerms } from '../utils/invoiceCalculator';
-import { STAGE_META } from './StageSheet';
+import { stageMetaFor } from './StageSheet';
 import { PaymentChip } from './PaymentChip';
 import { selectionTap } from '../utils/haptics';
 import { previewDocumentPDF } from '../utils/pdfGenerator';
@@ -143,7 +143,9 @@ export function JobScopeCard({
   onStagePress,
   onPaymentPress,
 }: JobScopeCardProps) {
-  const meta = STAGE_META[doc.stage];
+  const styles = useStyles();
+  const themeColors = useThemeColors();
+  const meta = stageMetaFor(themeColors)[doc.stage];
   const showStageChip = shouldShowStageChip(doc);
   const isInvoice = doc.type === 'invoice';
   const typeLabel = isInvoice ? 'Invoice' : 'Quote';
@@ -230,7 +232,7 @@ export function JobScopeCard({
             <MaterialCommunityIcons
               name={(isInvoice ? 'receipt' : 'file-document-outline') as any}
               size={16}
-              color={colors.primary}
+              color={themeColors.accentText}
             />
           </View>
           <View style={styles.headerTextBlock}>
@@ -281,7 +283,7 @@ export function JobScopeCard({
             <MaterialCommunityIcons
               name={(expanded ? 'chevron-up' : 'chevron-down') as any}
               size={20}
-              color={colors.textMuted}
+              color={themeColors.textMuted}
             />
           </Pressable>
         </View>
@@ -363,12 +365,12 @@ export function JobScopeCard({
         ]}
       >
         {previewing ? (
-          <ActivityIndicator size="small" color={colors.primary} />
+          <ActivityIndicator size="small" color={themeColors.accentText} />
         ) : (
           <MaterialCommunityIcons
             name={'file-eye-outline' as any}
             size={16}
-            color={colors.primary}
+            color={themeColors.accentText}
           />
         )}
         <Text style={styles.actionLabel}>Preview PDF</Text>
@@ -386,6 +388,8 @@ function ExpandedSections({
   doc: Document;
   onEdit: (doc: Document, step: ScopeStep) => void;
 }) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const businessSettings = useStore((s) => s.businessSettings);
   const showMarkupRow = doc.showMarkup === true;
   const laborMarkupPercent = doc.laborMarkup ?? doc.markup ?? 0;
@@ -395,7 +399,7 @@ function ExpandedSections({
 
   // Match the collapsed scope rows so the card looks the same on
   // expand/collapse — same surface, same icon palette, same row bg.
-  const sectionOverride = { backgroundColor: colors.surfaceGray3 };
+  const sectionOverride = { backgroundColor: themeColors.surfacePressed };
 
   return (
     <View style={styles.expanded}>
@@ -457,6 +461,8 @@ function PaymentTermsRow({
   invoice: Invoice;
   onChange: (next: Invoice) => void;
 }) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const [menuVisible, setMenuVisible] = useState(false);
   const currentTerms: PaymentTerms = invoice.paymentTerms || 'net_14';
   const customDays = invoice.customPaymentDays;
@@ -508,7 +514,7 @@ function PaymentTermsRow({
             <MaterialCommunityIcons
               name={'clock-outline' as any}
               size={18}
-              color={colors.primary}
+              color={themeColors.accentText}
             />
           </View>
           <View style={styles.rowBody}>
@@ -520,7 +526,7 @@ function PaymentTermsRow({
           <MaterialCommunityIcons
             name={'chevron-down' as any}
             size={18}
-            color={colors.inactive}
+            color={themeColors.textDisabled}
           />
         </TouchableOpacity>
       }
@@ -548,6 +554,8 @@ function ScopeRow({
   muted?: boolean;
   onPress: () => void;
 }) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   return (
     <Pressable
       onPress={() => {
@@ -560,7 +568,7 @@ function ScopeRow({
         <MaterialCommunityIcons
           name={icon as any}
           size={18}
-          color={colors.primary}
+          color={themeColors.accentText}
         />
       </View>
       <View style={styles.rowBody}>
@@ -578,19 +586,19 @@ function ScopeRow({
       <MaterialCommunityIcons
         name={'chevron-right' as any}
         size={18}
-        color={colors.inactive}
+        color={themeColors.textDisabled}
       />
     </Pressable>
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   card: {
     marginHorizontal: 16,
     marginBottom: 12,
     padding: 12,
     borderRadius: 16,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     gap: 8,
   },
   header: {
@@ -603,7 +611,7 @@ const styles = StyleSheet.create({
     minHeight: 56, // breathing room so the chip + kebab read at a
                    // standard touch-target size
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    borderBottomColor: t.colors.border,
   },
   headerLeft: {
     flexDirection: 'row',
@@ -622,7 +630,7 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: colors.primaryBg,
+    backgroundColor: t.colors.accentSubtle,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -633,14 +641,14 @@ const styles = StyleSheet.create({
   typeLabel: {
     fontSize: 10,
     fontWeight: '800',
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     textTransform: 'uppercase',
     letterSpacing: 0.6,
   },
   docNumber: {
     fontSize: 14,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
   },
   expandButton: {
     width: 36,
@@ -650,7 +658,7 @@ const styles = StyleSheet.create({
     borderRadius: 18,
   },
   expandButtonPressed: {
-    backgroundColor: colors.surfaceGray3,
+    backgroundColor: t.colors.surfacePressed,
   },
   stageChip: {
     flexDirection: 'row',
@@ -674,7 +682,7 @@ const styles = StyleSheet.create({
     gap: 12,
     padding: 10,
     borderRadius: 12,
-    backgroundColor: colors.surfaceGray3,
+    backgroundColor: t.colors.surfacePressed,
   },
   rowPressed: {
     opacity: 0.85,
@@ -683,7 +691,7 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: colors.primaryBg,
+    backgroundColor: t.colors.accentSubtle,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -694,23 +702,23 @@ const styles = StyleSheet.create({
   rowLabel: {
     fontSize: 11,
     fontWeight: '700',
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     textTransform: 'uppercase',
     letterSpacing: 0.4,
   },
   rowBodyText: {
     fontSize: 13,
-    color: colors.text,
+    color: t.colors.text,
     lineHeight: 18,
   },
   rowBodyMuted: {
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     fontStyle: 'italic',
   },
   rowRight: {
     fontSize: 13,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
   },
   previewButton: {
     flexDirection: 'row',
@@ -719,9 +727,9 @@ const styles = StyleSheet.create({
     gap: 6,
     paddingVertical: 10,
     borderRadius: 10,
-    backgroundColor: colors.primaryBg,
+    backgroundColor: t.colors.accentSubtle,
     borderWidth: 1,
-    borderColor: colors.primary + '33',
+    borderColor: t.colors.accentSubtle,
     marginTop: 4,
   },
   actionButtonPressed: {
@@ -733,7 +741,7 @@ const styles = StyleSheet.create({
   actionLabel: {
     fontSize: 13,
     fontWeight: '700',
-    color: colors.primary,
+    color: t.colors.accentText,
   },
   expanded: {
     marginTop: 4,
@@ -743,4 +751,4 @@ const styles = StyleSheet.create({
     // Sits in the card's `gap: 8` flow — no extra margin needed so the
     // row spaces the same as Materials / Labour above it.
   },
-});
+}));

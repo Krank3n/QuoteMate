@@ -39,7 +39,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useSafeAreaInsets, initialWindowMetrics } from 'react-native-safe-area-context';
 import { format } from 'date-fns';
 import { LinearGradient } from 'expo-linear-gradient';
-import { colors } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 import { BusinessSettings } from '../types';
 import { Document } from '../types/document';
 import { documentToQuote, documentToInvoice } from '../types/documentAdapter';
@@ -58,9 +58,11 @@ import { isEmailAddress, isSelfSend } from '../utils/sendFlow';
  * on JobPreview this state usually never renders at all.
  */
 function EmailGeneratingState() {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   return (
     <View style={styles.generatingContainer}>
-      <ActivityIndicator size="small" color={colors.primary} />
+      <ActivityIndicator size="small" color={themeColors.accentText} />
       <Text style={styles.generatingTitle}>Writing your email…</Text>
     </View>
   );
@@ -107,6 +109,8 @@ export function DocumentEmailPreviewModal({
   isPro,
   isRegenerating,
 }: Props) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const insets = useSafeAreaInsets();
   // RN's <Modal> renders in its own native view hierarchy, so the root
   // SafeAreaProvider doesn't reach inside — useSafeAreaInsets().bottom
@@ -479,13 +483,13 @@ export function DocumentEmailPreviewModal({
     >
       {/* Header */}
       <LinearGradient
-        colors={['#00785a', colors.primary, '#00b07a']}
+        colors={[themeColors.accentText, themeColors.accent, themeColors.accentText]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 0 }}
         style={[styles.header, { paddingTop: insets.top + 12 }]}
       >
         <TouchableOpacity onPress={handleDismiss} style={styles.headerButton}>
-          <MaterialCommunityIcons name="chevron-left" size={26} color={colors.white} />
+          <MaterialCommunityIcons name="chevron-left" size={26} color={themeColors.onAccent} />
           <Text style={styles.backText}>Back</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>{headerTitle}</Text>
@@ -510,25 +514,25 @@ export function DocumentEmailPreviewModal({
             activeOpacity={0.7}
           >
             <View style={styles.collapsedBarContent}>
-              <MaterialCommunityIcons name="account-outline" size={14} color={colors.textMuted} />
+              <MaterialCommunityIcons name="account-outline" size={14} color={themeColors.textMuted} />
               <Text style={styles.collapsedBarText} numberOfLines={1}>
                 {recipientEmail || 'No recipient'}
               </Text>
               <Text style={styles.collapsedBarDivider}>|</Text>
-              <MaterialCommunityIcons name="tag-outline" size={14} color={colors.textMuted} />
+              <MaterialCommunityIcons name="tag-outline" size={14} color={themeColors.textMuted} />
               <Text style={styles.collapsedBarText} numberOfLines={1}>
                 {subject || 'No subject'}
               </Text>
             </View>
-            <MaterialCommunityIcons name="chevron-down" size={18} color={colors.textMuted} />
+            <MaterialCommunityIcons name="chevron-down" size={18} color={themeColors.textMuted} />
           </TouchableOpacity>
         ) : (
           <>
             {/* Recipient Card */}
             <View style={styles.sectionCard}>
               <View style={styles.sectionHeader}>
-                <View style={[styles.sectionIconCircle, { backgroundColor: colors.infoBg }]}>
-                  <MaterialCommunityIcons name="account-outline" size={18} color={colors.info} />
+                <View style={[styles.sectionIconCircle, { backgroundColor: themeColors.infoSubtle }]}>
+                  <MaterialCommunityIcons name="account-outline" size={18} color={themeColors.info} />
                 </View>
                 <Text style={styles.sectionTitle}>Recipient</Text>
               </View>
@@ -541,7 +545,7 @@ export function DocumentEmailPreviewModal({
                 keyboardType="email-address"
                 autoCapitalize="none"
                 placeholder="client@email.com"
-                placeholderTextColor={colors.textMuted}
+                placeholderTextColor={themeColors.textMuted}
                 error={emailTouched && !!emailError}
               />
               {emailTouched && !!emailError && (
@@ -552,8 +556,8 @@ export function DocumentEmailPreviewModal({
             {/* Subject Card */}
             <View style={styles.sectionCard}>
               <View style={styles.sectionHeader}>
-                <View style={[styles.sectionIconCircle, { backgroundColor: colors.warningBg }]}>
-                  <MaterialCommunityIcons name="tag-outline" size={18} color={colors.secondary} />
+                <View style={[styles.sectionIconCircle, { backgroundColor: themeColors.accentSubtle }]}>
+                  <MaterialCommunityIcons name="tag-outline" size={18} color={themeColors.accentText} />
                 </View>
                 <Text style={styles.sectionTitle}>Subject</Text>
               </View>
@@ -570,8 +574,8 @@ export function DocumentEmailPreviewModal({
         {/* Email Body Card */}
         <View style={[styles.sectionCard, isEditingBody && styles.sectionCardEditing]}>
           <View style={styles.sectionHeader}>
-            <View style={[styles.sectionIconCircle, { backgroundColor: colors.primaryBg }]}>
-              <MaterialCommunityIcons name="email-edit-outline" size={18} color={colors.primary} />
+            <View style={[styles.sectionIconCircle, { backgroundColor: themeColors.accentSubtle }]}>
+              <MaterialCommunityIcons name="email-edit-outline" size={18} color={themeColors.accentText} />
             </View>
             <Text style={[styles.sectionTitle, { flex: 1 }]}>Email Body</Text>
             {/* Regenerate belongs to authoring, so it lives inside edit mode
@@ -581,13 +585,13 @@ export function DocumentEmailPreviewModal({
                 onPress={onRegenerate}
                 style={styles.regenerateButton}
               >
-                <MaterialCommunityIcons name="refresh" size={16} color={colors.primary} />
+                <MaterialCommunityIcons name="refresh" size={16} color={themeColors.accentText} />
                 <Text style={styles.regenerateText}>Regenerate</Text>
               </TouchableOpacity>
             )}
             {!isEditingBody && !isRegenerating && (
               <TouchableOpacity onPress={startEditingBody} style={styles.regenerateButton}>
-                <MaterialCommunityIcons name="pencil-outline" size={16} color={colors.primary} />
+                <MaterialCommunityIcons name="pencil-outline" size={16} color={themeColors.accentText} />
                 <Text style={styles.regenerateText}>Edit email</Text>
               </TouchableOpacity>
             )}
@@ -602,7 +606,7 @@ export function DocumentEmailPreviewModal({
                   <Text style={styles.formatButtonBold}>B</Text>
                 </TouchableOpacity>
                 <TouchableOpacity onPress={applyBullet} style={styles.formatButton} accessibilityLabel="Bullet list">
-                  <MaterialCommunityIcons name="format-list-bulleted" size={18} color={colors.text} />
+                  <MaterialCommunityIcons name="format-list-bulleted" size={18} color={themeColors.text} />
                 </TouchableOpacity>
                 <Text style={styles.formatHint}>**bold**  •  - bullet</Text>
               </View>
@@ -643,8 +647,8 @@ export function DocumentEmailPreviewModal({
           <View style={styles.sectionCard}>
             <View style={styles.toggleRow}>
               <View style={styles.toggleLeft}>
-                <View style={[styles.sectionIconCircle, { backgroundColor: colors.successBg }]}>
-                  <MaterialCommunityIcons name="image-multiple-outline" size={18} color={colors.success} />
+                <View style={[styles.sectionIconCircle, { backgroundColor: themeColors.moneySubtle }]}>
+                  <MaterialCommunityIcons name="image-multiple-outline" size={18} color={themeColors.money} />
                 </View>
                 <View style={styles.toggleTextContainer}>
                   <Text style={styles.sectionTitle}>Attach Job Photos</Text>
@@ -654,7 +658,7 @@ export function DocumentEmailPreviewModal({
               <Switch
                 value={includePhotos}
                 onValueChange={setIncludePhotos}
-                color={colors.primary}
+                color={themeColors.accentText}
               />
             </View>
           </View>
@@ -665,8 +669,8 @@ export function DocumentEmailPreviewModal({
           <View style={styles.sectionCard}>
             <View style={styles.toggleRow}>
               <View style={styles.toggleLeft}>
-                <View style={[styles.sectionIconCircle, { backgroundColor: colors.infoBg }]}>
-                  <MaterialCommunityIcons name="email-sync-outline" size={18} color={colors.info} />
+                <View style={[styles.sectionIconCircle, { backgroundColor: themeColors.infoSubtle }]}>
+                  <MaterialCommunityIcons name="email-sync-outline" size={18} color={themeColors.info} />
                 </View>
                 <View style={styles.toggleTextContainer}>
                   <Text style={styles.sectionTitle}>Email me a copy</Text>
@@ -678,7 +682,7 @@ export function DocumentEmailPreviewModal({
               <Switch
                 value={sendCopyToSelf}
                 onValueChange={setSendCopyToSelf}
-                color={colors.primary}
+                color={themeColors.accentText}
               />
             </View>
           </View>
@@ -687,7 +691,7 @@ export function DocumentEmailPreviewModal({
         {/* Info note - hidden when editing body */}
         {!isEditingBody && (
           <View style={styles.infoNote}>
-            <MaterialCommunityIcons name="information-outline" size={16} color={colors.textMuted} />
+            <MaterialCommunityIcons name="information-outline" size={16} color={themeColors.textMuted} />
             <Text style={styles.infoText}>{infoNote}</Text>
           </View>
         )}
@@ -707,7 +711,7 @@ export function DocumentEmailPreviewModal({
       ) : !isKeyboardVisible ? (
         <View style={[styles.footer, { paddingBottom: bottomInset }]}>
           <Button
-            mode="contained"
+            mode="contained" buttonColor={themeColors.accent} textColor={themeColors.onAccent}
             onPress={handleSend}
             loading={sending}
             disabled={sending || sendingTest || !emailBody.trim() || !!validateEmail(recipientEmail) || isRegenerating}
@@ -807,10 +811,10 @@ export function DocumentEmailPreviewModal({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
   },
   header: {
     flexDirection: 'row',
@@ -818,7 +822,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingBottom: 14,
-    backgroundColor: colors.primary,
+    backgroundColor: t.colors.accent,
   },
   headerButton: {
     minWidth: 60,
@@ -827,14 +831,14 @@ const styles = StyleSheet.create({
   },
   backText: {
     fontSize: 16,
-    color: colors.white,
+    color: t.colors.onAccent,
     fontWeight: '600',
     marginLeft: -2,
   },
   headerTitle: {
     fontSize: 17,
     fontWeight: '700',
-    color: colors.white,
+    color: t.colors.onAccent,
   },
   scrollView: {
     flex: 1,
@@ -846,7 +850,7 @@ const styles = StyleSheet.create({
     flexGrow: 1,
   },
   sectionCard: {
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderRadius: 14,
     padding: 16,
     marginBottom: 12,
@@ -868,17 +872,17 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 15,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
   },
   recipientInput: {
     backgroundColor: 'transparent',
     marginBottom: 0,
     fontSize: 15,
-    color: colors.text,
+    color: t.colors.text,
   },
   emailErrorText: {
     fontSize: 12,
-    color: colors.error,
+    color: t.colors.error,
     marginTop: 4,
     marginLeft: 4,
   },
@@ -891,21 +895,21 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: colors.primary + '15',
+    backgroundColor: t.colors.accentSubtle,
     paddingVertical: 6,
     paddingHorizontal: 10,
     borderRadius: 8,
   },
   regenerateText: {
     fontSize: 13,
-    color: colors.primary,
+    color: t.colors.accentText,
     fontWeight: '600',
   },
   sectionCardEditing: {
     flex: 1,
   },
   bodyCard: {
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
     borderRadius: 10,
     overflow: 'hidden',
   },
@@ -916,7 +920,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
     paddingVertical: 6,
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    borderBottomColor: t.colors.border,
   },
   formatButton: {
     width: 32,
@@ -924,16 +928,16 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
   },
   formatButtonBold: {
     fontSize: 15,
     fontWeight: '800',
-    color: colors.text,
+    color: t.colors.text,
   },
   formatHint: {
     fontSize: 11,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginLeft: 'auto',
     paddingRight: 6,
   },
@@ -953,7 +957,7 @@ const styles = StyleSheet.create({
     minHeight: undefined,
   },
   bodyPreview: {
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 12,
@@ -961,7 +965,7 @@ const styles = StyleSheet.create({
   bodyPreviewText: {
     fontSize: 15,
     lineHeight: 24,
-    color: colors.text,
+    color: t.colors.text,
   },
   generatingContainer: {
     alignItems: 'center',
@@ -969,14 +973,14 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingVertical: 40,
     paddingHorizontal: 20,
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
     borderRadius: 10,
     minHeight: 140,
   },
   generatingTitle: {
     fontSize: 15,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
     textAlign: 'center',
   },
   toggleRow: {
@@ -995,14 +999,14 @@ const styles = StyleSheet.create({
   },
   toggleSubtext: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginTop: 2,
   },
   infoNote: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: 8,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     padding: 14,
     borderRadius: 14,
     marginBottom: 16,
@@ -1010,7 +1014,7 @@ const styles = StyleSheet.create({
   infoText: {
     flex: 1,
     fontSize: 13,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     lineHeight: 18,
   },
   footer: {
@@ -1020,8 +1024,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 14,
     borderTopWidth: 1,
-    borderTopColor: colors.border,
-    backgroundColor: colors.surface,
+    borderTopColor: t.colors.border,
+    backgroundColor: t.colors.surfaceRaised,
     ...Platform.select({
       ios: {
         shadowColor: '#000',
@@ -1049,13 +1053,13 @@ const styles = StyleSheet.create({
   },
   footerLinkText: {
     fontSize: 13,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     fontWeight: '600',
   },
   collapsedBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderRadius: 10,
     paddingVertical: 10,
     paddingHorizontal: 14,
@@ -1070,12 +1074,12 @@ const styles = StyleSheet.create({
   },
   collapsedBarText: {
     fontSize: 13,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     flexShrink: 1,
   },
   collapsedBarDivider: {
     fontSize: 13,
-    color: colors.border,
+    color: t.colors.border,
     marginHorizontal: 2,
   },
   doneBar: {
@@ -1084,8 +1088,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderTopWidth: 1,
-    borderTopColor: colors.border,
-    backgroundColor: colors.surface,
+    borderTopColor: t.colors.border,
+    backgroundColor: t.colors.surfaceRaised,
   },
   doneButton: {
     // 44pt minimum. This is the only way back to the send buttons from edit
@@ -1098,6 +1102,6 @@ const styles = StyleSheet.create({
   doneButtonText: {
     fontSize: 16,
     fontWeight: '600',
-    color: colors.primary,
+    color: t.colors.accentText,
   },
-});
+}));

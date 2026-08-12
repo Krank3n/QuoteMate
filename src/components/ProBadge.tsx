@@ -6,13 +6,15 @@
 import React from 'react';
 import { View, StyleSheet } from 'react-native';
 import { Text } from 'react-native-paper';
-import { colors } from '../theme';
+import { makeStyles } from '../theme';
 
 interface ProBadgeProps {
   size?: 'small' | 'default';
 }
 
 export function ProBadge({ size = 'default' }: ProBadgeProps) {
+  const styles = useStyles();
+
   return (
     <View style={[styles.badge, size === 'small' && styles.badgeSmall]}>
       <Text style={[styles.text, size === 'small' && styles.textSmall]}>PRO</Text>
@@ -20,14 +22,14 @@ export function ProBadge({ size = 'default' }: ProBadgeProps) {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   badge: {
-    backgroundColor: colors.warningBg,
+    backgroundColor: t.colors.warningSubtle,
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: 6,
     borderWidth: 1,
-    borderColor: colors.warning,
+    borderColor: t.colors.warning,
   },
   badgeSmall: {
     paddingHorizontal: 5,
@@ -37,10 +39,10 @@ const styles = StyleSheet.create({
   text: {
     fontSize: 10,
     fontWeight: '800',
-    color: colors.warning,
+    color: t.colors.warning,
     letterSpacing: 0.5,
   },
   textSmall: {
     fontSize: 8,
   },
-});
+}));

@@ -10,7 +10,7 @@ import React from 'react';
 import { View, StyleSheet, Pressable, type StyleProp, type ViewStyle } from 'react-native';
 import { Text } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { colors } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 import { selectionTap } from '../utils/haptics';
 
 export interface PillToggleOption<T extends string> {
@@ -35,6 +35,8 @@ export function PillToggle<T extends string>({
   fullWidth,
   style,
 }: PillToggleProps<T>) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   return (
     <View style={[styles.row, fullWidth && styles.rowFull, style]}>
       {options.map((opt) => {
@@ -60,7 +62,7 @@ export function PillToggle<T extends string>({
               <MaterialCommunityIcons
                 name={opt.icon as any}
                 size={14}
-                color={active ? colors.white : disabled ? colors.inactive : colors.text}
+                color={active ? themeColors.onAccent : disabled ? themeColors.textDisabled : themeColors.text}
               />
             ) : null}
             <Text
@@ -79,13 +81,13 @@ export function PillToggle<T extends string>({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     padding: 3,
     borderRadius: 999,
-    backgroundColor: colors.surfaceGray3,
+    backgroundColor: t.colors.surfacePressed,
     gap: 2,
     alignSelf: 'flex-start',
   },
@@ -105,20 +107,20 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   pillActive: {
-    backgroundColor: colors.primary,
+    backgroundColor: t.colors.accent,
   },
   pillDisabled: {
     opacity: 0.5,
   },
   label: {
     fontSize: 12,
-    fontWeight: '600',
-    color: colors.text,
+    fontFamily: 'Archivo-SemiBold',
+    color: t.colors.text,
   },
   labelActive: {
-    color: colors.white,
+    color: t.colors.onAccent,
   },
   labelDisabled: {
-    color: colors.inactive,
+    color: t.colors.textDisabled,
   },
-});
+}));

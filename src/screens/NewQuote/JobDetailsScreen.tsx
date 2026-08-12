@@ -41,6 +41,7 @@ try {
 }
 
 import { useStore } from '../../store/useStore';
+import { GridBackground } from '../../components/GridBackground';
 import { useCurrentDocument, useDocumentMode, usePersistDocument } from '../../utils/documentMode';
 import { JOB_TEMPLATES } from '../../data/jobTemplates';
 import { NICHE_TEMPLATES, getTemplatesForNiche, getNicheTemplateById, NicheJobTemplate, getDescriptionPlaceholder, getVoicePromptHint } from '../../data/nicheTemplates';
@@ -49,7 +50,7 @@ import { ListeningPills } from '../../components/ListeningPills';
 import { usePillMatcher, PillState } from '../../hooks/usePillMatcher';
 import { getTradeCategoryById, getTradeNicheById, PRICING_METHODS } from '../../constants/tradeCategories';
 import { createJobFromTemplate } from '../../utils/materialsEstimator';
-import { colors } from '../../theme';
+import { makeStyles, useThemeColors } from '../../theme';
 import { JobTemplate, Material, QuotePhoto } from '../../types';
 import type { TemplateMatchInput } from '../../services/llmService';
 import { withPreservedCorrections } from '../../services/floorplanTakeoff';
@@ -75,6 +76,8 @@ import { buildJobDictationContext } from '../../utils/jobDictationContext';
 const CUSTOM_CHIP_ID = 'custom';
 
 export function JobDetailsScreen() {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const isEditFromPreview = route.params?.editing === true;
@@ -1082,6 +1085,7 @@ export function JobDetailsScreen() {
         behavior="padding"
         keyboardVerticalOffset={Platform.OS === 'ios' ? -48 : 0}
       >
+        <GridBackground />
         <ScrollView
           ref={scrollRef}
           style={styles.scrollView}
@@ -1095,8 +1099,8 @@ export function JobDetailsScreen() {
       {availableTemplates.length > 0 && !isEditingExisting && (
         <Surface style={[styles.paramsSection, styles.firstSection, styles.templateSection]}>
           <View style={styles.sectionTitleContainer}>
-            <View style={[styles.sectionIconCircle, { backgroundColor: colors.warningBg }]}>
-              <MaterialCommunityIcons name="briefcase-outline" size={20} color={colors.secondary} />
+            <View style={[styles.sectionIconCircle, { backgroundColor: themeColors.accentSubtle }]}>
+              <MaterialCommunityIcons name="briefcase-outline" size={20} color={themeColors.accentText} />
             </View>
             <Title style={styles.sectionTitle}>{screenHeaderTitle}</Title>
           </View>
@@ -1111,7 +1115,7 @@ export function JobDetailsScreen() {
               {chipItems.map((item) => {
                 const isCustom = item.id === CUSTOM_CHIP_ID;
                 const isSelected = isCustom ? selectedTemplate === null : selectedTemplate?.id === item.id;
-                const iconColor = isSelected ? colors.surface : colors.onSurface;
+                const iconColor = isSelected ? themeColors.surfaceRaised : themeColors.textSecondary;
                 const iconName = isCustom ? null : ((item as NicheJobTemplate).icon as any);
                 const label = isCustom ? 'Custom' : (item as NicheJobTemplate).name;
                 return (
@@ -1135,7 +1139,7 @@ export function JobDetailsScreen() {
                 Fades to the surface charcoal so chips dissolve into the card. */}
             <LinearGradient
               pointerEvents="none"
-              colors={['rgba(30,41,59,0)', colors.surface]}
+              colors={['transparent', themeColors.surfaceRaised]}
               start={{ x: 0, y: 0.5 }}
               end={{ x: 1, y: 0.5 }}
               style={styles.chipFadeRight}
@@ -1154,8 +1158,8 @@ export function JobDetailsScreen() {
         }}
       >
         <View style={styles.sectionTitleContainer}>
-          <View style={[styles.sectionIconCircle, { backgroundColor: colors.warningBg }]}>
-            <MaterialCommunityIcons name="hammer-wrench" size={20} color={colors.secondary} />
+          <View style={[styles.sectionIconCircle, { backgroundColor: themeColors.accentSubtle }]}>
+            <MaterialCommunityIcons name="hammer-wrench" size={20} color={themeColors.accentText} />
           </View>
           <Title style={styles.sectionTitle}>Job Description</Title>
         </View>
@@ -1257,7 +1261,7 @@ export function JobDetailsScreen() {
                     <MaterialCommunityIcons
                       name={isRecording ? 'stop' : 'microphone'}
                       size={36}
-                      color="#FFFFFF"
+                      color={themeColors.onAccent}
                     />
                   </Animated.View>
                 </Animated.View>
@@ -1273,7 +1277,7 @@ export function JobDetailsScreen() {
                   <MaterialCommunityIcons
                     name="close-circle"
                     size={20}
-                    color={colors.onSurface}
+                    color={themeColors.textSecondary}
                   />
                   <Text style={styles.clearButtonText}>Clear</Text>
                 </TouchableOpacity>
@@ -1282,7 +1286,7 @@ export function JobDetailsScreen() {
 
             <Text style={[
               styles.recordButtonLabel,
-              { color: isRecording ? colors.success : colors.onSurface }
+              { color: isRecording ? themeColors.money : themeColors.textSecondary }
             ]}>
               {isRequestingPermission
                 ? 'Requesting microphone permission...'
@@ -1294,7 +1298,7 @@ export function JobDetailsScreen() {
             {/* Loading Indicator - only show for permission requests */}
             {isRequestingPermission && (
               <View style={styles.loadingContainer}>
-                <ActivityIndicator size="small" color={colors.primary} />
+                <ActivityIndicator size="small" color={themeColors.accentText} />
                 <Text style={styles.loadingText}>Requesting permission...</Text>
               </View>
             )}
@@ -1336,7 +1340,7 @@ export function JobDetailsScreen() {
               <MaterialCommunityIcons
                 name="undo-variant"
                 size={13}
-                color={colors.onSurface}
+                color={themeColors.textSecondary}
               />
               <Text style={styles.undoCleanupChipText}>Undo</Text>
             </TouchableOpacity>
@@ -1357,7 +1361,7 @@ export function JobDetailsScreen() {
           >
             {isProcessingVoice ? (
               <>
-                <ActivityIndicator size="small" color={colors.primary} />
+                <ActivityIndicator size="small" color={themeColors.accentText} />
                 <Text style={styles.cleanupButtonBelowText}>Cleaning...</Text>
               </>
             ) : (
@@ -1365,7 +1369,7 @@ export function JobDetailsScreen() {
                 <MaterialCommunityIcons
                   name="auto-fix"
                   size={18}
-                  color={colors.primary}
+                  color={themeColors.accentText}
                 />
                 <Text style={styles.cleanupButtonBelowText}>Clean-up & Generate Title</Text>
               </>
@@ -1408,9 +1412,9 @@ export function JobDetailsScreen() {
                 <MaterialCommunityIcons
                   name={includePhotosInAi ? 'checkbox-marked' : 'checkbox-blank-outline'}
                   size={20}
-                  color={includePhotosInAi ? colors.primary : colors.textMuted}
+                  color={includePhotosInAi ? themeColors.accent : themeColors.textMuted}
                 />
-                <Text style={[styles.aiPhotoToggleText, includePhotosInAi && { color: colors.text }]}>
+                <Text style={[styles.aiPhotoToggleText, includePhotosInAi && { color: themeColors.text }]}>
                   Include photos in AI analysis
                 </Text>
                 {!isPro && <ProBadge size="small" />}
@@ -1454,10 +1458,10 @@ function getTemplateIcon(templateId: string): keyof typeof MaterialCommunityIcon
   }
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
     ...(Platform.OS === 'web' && {
       display: 'flex' as any,
       flexDirection: 'column' as any,
@@ -1533,20 +1537,20 @@ const styles = StyleSheet.create({
     width: 88,
     height: 88,
     borderRadius: 44,
-    backgroundColor: colors.primary,
+    backgroundColor: t.colors.accent,
     justifyContent: 'center',
     alignItems: 'center',
     elevation: 8,
-    shadowColor: colors.primary,
+    shadowColor: t.colors.accent,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
     borderWidth: 3,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
+    borderColor: t.colors.border,
   },
   recordButtonActive: {
-    backgroundColor: '#00C897', // Brighter green when recording
-    shadowColor: '#00C897',
+    backgroundColor: t.colors.money, // Brighter green when recording
+    shadowColor: t.colors.money,
     shadowOpacity: 0.6,
     elevation: 16,
   },
@@ -1556,7 +1560,7 @@ const styles = StyleSheet.create({
     height: 88,
     borderRadius: 44,
     borderWidth: 3,
-    borderColor: colors.primary,
+    borderColor: t.colors.accent,
     backgroundColor: 'transparent',
   },
   glowEffect: {
@@ -1564,8 +1568,8 @@ const styles = StyleSheet.create({
     width: 108,
     height: 108,
     borderRadius: 54,
-    backgroundColor: colors.primary,
-    shadowColor: colors.primary,
+    backgroundColor: t.colors.accent,
+    shadowColor: t.colors.accent,
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.8,
     shadowRadius: 20,
@@ -1583,7 +1587,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
     minWidth: 70,
     elevation: 2,
     shadowColor: '#000',
@@ -1606,13 +1610,13 @@ const styles = StyleSheet.create({
     marginTop: -8,
     marginBottom: 16,
     borderWidth: 1,
-    borderColor: colors.primary,
+    borderColor: t.colors.accent,
     backgroundColor: 'transparent',
   },
   cleanupButtonBelowText: {
     fontSize: 14,
     fontWeight: '600',
-    color: colors.primary,
+    color: t.colors.accentText,
     marginLeft: 6,
   },
   descriptionInputWrapper: {
@@ -1626,13 +1630,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 1,
     paddingHorizontal: 6,
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
     zIndex: 2,
   },
   undoCleanupChipText: {
     fontSize: 11,
     fontWeight: '500',
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     marginLeft: 3,
   },
   clearButton: {
@@ -1643,7 +1647,7 @@ const styles = StyleSheet.create({
   },
   clearButtonText: {
     fontSize: 13,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     marginLeft: 4,
   },
   recordButtonLabel: {
@@ -1659,7 +1663,7 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     fontSize: 14,
-    color: colors.primary,
+    color: t.colors.accentText,
     fontWeight: '500',
     marginLeft: 8,
   },
@@ -1667,13 +1671,13 @@ const styles = StyleSheet.create({
     marginTop: 16,
     padding: 12,
     borderRadius: 8,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     maxWidth: '100%',
     elevation: 2,
   },
   transcriptText: {
     fontSize: 14,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     fontStyle: 'italic',
     textAlign: 'center',
   },
@@ -1688,11 +1692,11 @@ const styles = StyleSheet.create({
   },
   templateCard: {
     minHeight: 140,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
   },
   selectedCard: {
     borderWidth: 2,
-    borderColor: colors.primary,
+    borderColor: t.colors.accent,
   },
   disabledCard: {
     opacity: 0.5,
@@ -1705,7 +1709,7 @@ const styles = StyleSheet.create({
   },
   templateDesc: {
     fontSize: 11,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
   },
   paramsSection: {
     marginHorizontal: 16,
@@ -1715,7 +1719,7 @@ const styles = StyleSheet.create({
     paddingTop: 16,
     borderRadius: 14,
     elevation: 2,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
   },
   firstSection: {
     marginTop: 20,
@@ -1734,17 +1738,17 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 16,
     fontWeight: '600',
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     marginLeft: 10,
   },
   changeIconButton: {
     padding: 6,
     borderRadius: 16,
-    backgroundColor: colors.primary + '15',
+    backgroundColor: t.colors.accentSubtle,
   },
   helperText: {
     fontSize: 13,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     marginBottom: 12,
   },
   chipScrollWrapper: {
@@ -1764,19 +1768,19 @@ const styles = StyleSheet.create({
   },
   jobTypeChip: {
     marginRight: 8,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderWidth: 1,
-    borderColor: colors.primary + '33',
+    borderColor: t.colors.accentSubtle,
   },
   jobTypeChipSelected: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
+    backgroundColor: t.colors.accent,
+    borderColor: t.colors.accent,
   },
   jobTypeChipText: {
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
   },
   jobTypeChipTextSelected: {
-    color: colors.surface,
+    color: t.colors.onAccent,
     fontWeight: '600',
   },
   analyzingContainer: {
@@ -1784,24 +1788,24 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: 12,
     padding: 12,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderRadius: 8,
   },
   analyzingText: {
     marginLeft: 12,
     fontSize: 14,
-    color: colors.primary,
+    color: t.colors.accentText,
   },
   debugInfo: {
     padding: 10,
     marginHorizontal: 20,
     marginBottom: 20,
-    backgroundColor: colors.surfaceGray3,
+    backgroundColor: t.colors.surfacePressed,
   },
   webSpeechHelper: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    backgroundColor: '#E3F2FD',
+    backgroundColor: t.colors.infoSubtle,
     padding: 12,
     borderRadius: 8,
     marginBottom: 16,
@@ -1810,7 +1814,7 @@ const styles = StyleSheet.create({
     flex: 1,
     marginLeft: 8,
     fontSize: 13,
-    color: '#1565C0',
+    color: t.colors.info,
     lineHeight: 18,
   },
   // Niche template styles
@@ -1819,12 +1823,12 @@ const styles = StyleSheet.create({
   },
   quickTemplateCard: {
     width: 160,
-    backgroundColor: colors.surfaceLight,
+    backgroundColor: t.colors.surfaceOverlay,
     borderRadius: 12,
     padding: 16,
     marginRight: 12,
     borderWidth: 1,
-    borderColor: colors.outline,
+    borderColor: t.colors.borderStrong,
   },
   quickTemplateHeader: {
     flexDirection: 'row',
@@ -1835,19 +1839,19 @@ const styles = StyleSheet.create({
   quickTemplateName: {
     fontSize: 15,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
     flex: 1,
   },
   quickTemplateDesc: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginBottom: 8,
     lineHeight: 16,
   },
   quickTemplateBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.secondary + '20',
+    backgroundColor: t.colors.accentSubtle,
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 4,
@@ -1856,19 +1860,19 @@ const styles = StyleSheet.create({
   quickTemplateBadgeText: {
     fontSize: 11,
     fontWeight: '600',
-    color: colors.secondary,
+    color: t.colors.accentText,
     marginLeft: 4,
   },
   pricingMethodInfo: {
     marginTop: 8,
     paddingTop: 16,
     borderTopWidth: 1,
-    borderTopColor: colors.outline,
+    borderTopColor: t.colors.borderStrong,
   },
   pricingMethodLabel: {
     fontSize: 13,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
     marginBottom: 8,
   },
   pricingMethodChips: {
@@ -1878,21 +1882,21 @@ const styles = StyleSheet.create({
   },
   pricingMethodChip: {
     height: 28,
-    backgroundColor: colors.primary + '15',
+    backgroundColor: t.colors.accentSubtle,
     marginRight: 0,
   },
   pricingMethodChipText: {
     fontSize: 12,
-    color: colors.primary,
+    color: t.colors.accentText,
     fontWeight: '600',
   },
   quickTemplateCardSelected: {
-    borderColor: colors.primary,
+    borderColor: t.colors.accent,
     borderWidth: 2,
-    backgroundColor: colors.primary + '10',
+    backgroundColor: t.colors.accentSubtle,
   },
   quickTemplateNameSelected: {
-    color: colors.primary,
+    color: t.colors.accentText,
   },
   quickTemplateCheck: {
     position: 'absolute',
@@ -1903,7 +1907,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   paramInput: {
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
   },
   switchModeButton: {
     marginTop: 16,
@@ -1917,7 +1921,7 @@ const styles = StyleSheet.create({
   },
   aiPhotoToggleText: {
     fontSize: 13,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     flex: 1,
   },
-});
+}));

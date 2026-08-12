@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity } from 'react-native';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { colors } from '../../theme';
+import { makeStyles, useThemeColors } from '../../theme';
 import { ChatMessage } from '../../types/assistant';
 import { useStore } from '../../store/useStore';
 import { useJobStore } from '../../store/useJobStore';
@@ -30,6 +30,8 @@ function InlineQuote({
   onOpen?: (quoteId: string) => void;
   onJobEdit?: (jobId: string) => void;
 }) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const quote = useStore((s) => s.quotes.find((q) => q.id === quoteId));
   const doc = useStore((s) => s.documents.find((d) => d.id === quoteId));
   const renderable: Document | null = doc || (quote ? quoteToDocument(quote) : null);
@@ -80,6 +82,8 @@ function MessageBubbleImpl({
   onInlineQuoteOpen,
   onInlineJobEdit,
 }: Props) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const isUser = message.role === 'user';
 
   // Inline quote — render the job header + scope card so the tradie can
@@ -109,10 +113,10 @@ function MessageBubbleImpl({
               <MaterialCommunityIcons
                 name={failed ? 'alert-circle' : 'check-circle'}
                 size={18}
-                color={failed ? colors.error : colors.success}
+                color={failed ? themeColors.error : themeColors.money}
               />
             ) : (
-              <ActivityIndicator size="small" color={colors.primary} />
+              <ActivityIndicator size="small" color={themeColors.accentText} />
             )}
             <Text style={[styles.text, styles.textAssistant, styles.workingStatus]}>
               {w.status}
@@ -146,7 +150,7 @@ function MessageBubbleImpl({
         {!!message.cta && (
           <TouchableOpacity style={styles.ctaButton} onPress={onCtaPress} accessibilityRole="button">
             <Text style={styles.ctaLabel}>{message.cta.label}</Text>
-            <MaterialCommunityIcons name="arrow-right" size={16} color={colors.primary} />
+            <MaterialCommunityIcons name="arrow-right" size={16} color={themeColors.accentText} />
           </TouchableOpacity>
         )}
       </View>
@@ -154,7 +158,7 @@ function MessageBubbleImpl({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   row: {
     flexDirection: 'row',
     paddingHorizontal: 12,
@@ -169,26 +173,26 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   bubbleUser: {
-    backgroundColor: colors.primary,
+    backgroundColor: t.colors.accent,
     borderTopRightRadius: 4,
   },
   bubbleAssistant: {
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderTopLeftRadius: 4,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
   },
   bubbleError: {
-    borderColor: colors.error,
+    borderColor: t.colors.error,
   },
   text: {
     fontSize: 15,
     lineHeight: 21,
   },
-  textUser: { color: colors.white },
-  textAssistant: { color: colors.text },
+  textUser: { color: t.colors.onAccent },
+  textAssistant: { color: t.colors.text },
   errorText: {
-    color: colors.error,
+    color: t.colors.error,
     fontSize: 13,
     marginTop: 4,
   },
@@ -209,7 +213,7 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
   workingDetail: {
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     fontSize: 12,
     marginTop: 4,
     fontStyle: 'italic',
@@ -224,30 +228,30 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   workingItemText: {
-    color: colors.text,
+    color: t.colors.text,
     fontSize: 12,
     flexShrink: 1,
   },
   workingItemDone: {
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
   workingItemFailed: {
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     textDecorationLine: 'line-through',
   },
   workingItemsMore: {
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     fontSize: 11,
     fontStyle: 'italic',
     marginTop: 2,
   },
   workingSummary: {
-    color: colors.text,
+    color: t.colors.text,
     fontSize: 13,
     marginTop: 6,
     paddingTop: 6,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.border,
+    borderTopColor: t.colors.border,
   },
   ctaButton: {
     flexDirection: 'row',
@@ -256,10 +260,10 @@ const styles = StyleSheet.create({
     marginTop: 10,
     paddingTop: 8,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.border,
+    borderTopColor: t.colors.border,
   },
   ctaLabel: {
-    color: colors.primary,
+    color: t.colors.accentText,
     fontSize: 14,
     fontWeight: '600',
   },
@@ -269,7 +273,7 @@ const styles = StyleSheet.create({
     // padding from the bubble row style.
     marginVertical: 4,
   },
-});
+}));
 
 // Compact rolling list of materials being searched in the current batch.
 // Renders at most ~6 rows: any items currently `searching`, plus the
@@ -281,6 +285,8 @@ function WorkingItems({
 }: {
   items: Array<{ name: string; status: 'pending' | 'searching' | 'done' | 'failed' }>;
 }) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   // Bucket by status so we can show "searching" rows first, then a tail
   // of just-completed rows, then a hint of what's still queued.
   const searching = items.filter((i) => i.status === 'searching');
@@ -312,12 +318,12 @@ function WorkingItems({
             : 'circle-small';
         const tint =
           item.status === 'done'
-            ? colors.success
+            ? themeColors.money
             : item.status === 'failed'
-            ? colors.error
+            ? themeColors.error
             : item.status === 'searching'
-            ? colors.primary
-            : colors.textMuted;
+            ? themeColors.accent
+            : themeColors.textMuted;
         return (
           <View key={`${item.name}-${idx}`} style={styles.workingItemRow}>
             <MaterialCommunityIcons name={icon as any} size={14} color={tint} />

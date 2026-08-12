@@ -13,7 +13,8 @@ import { Button } from 'react-native-paper';
 import { Calendar, DateData } from 'react-native-calendars';
 import { format } from 'date-fns';
 
-import { colors } from '../theme';
+import type { Tokens } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 import { BottomSheet } from './BottomSheet';
 
 interface DueDateSheetProps {
@@ -25,24 +26,24 @@ interface DueDateSheetProps {
   title?: string;
 }
 
-const CALENDAR_THEME = {
+const calendarThemeFor = (themeColors: Tokens) => ({
   backgroundColor: 'transparent',
   calendarBackground: 'transparent',
-  textSectionTitleColor: colors.textMuted,
-  dayTextColor: colors.text,
-  todayTextColor: colors.primary,
-  selectedDayTextColor: colors.white,
-  selectedDayBackgroundColor: colors.primary,
-  monthTextColor: colors.text,
-  arrowColor: colors.primary,
-  textDisabledColor: colors.inactive,
+  textSectionTitleColor: themeColors.textMuted,
+  dayTextColor: themeColors.text,
+  todayTextColor: themeColors.accent,
+  selectedDayTextColor: themeColors.alwaysLight,
+  selectedDayBackgroundColor: themeColors.accent,
+  monthTextColor: themeColors.text,
+  arrowColor: themeColors.accent,
+  textDisabledColor: themeColors.textDisabled,
   textMonthFontWeight: '700' as const,
   textDayFontWeight: '500' as const,
   textDayHeaderFontWeight: '600' as const,
   textMonthFontSize: 15,
   textDayFontSize: 13,
   textDayHeaderFontSize: 11,
-};
+});
 
 function toIsoDay(ms?: number): string | undefined {
   if (!ms) return undefined;
@@ -64,6 +65,9 @@ export function DueDateSheet({
   onChange,
   title = 'Due date',
 }: DueDateSheetProps) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
+  const CALENDAR_THEME = calendarThemeFor(themeColors);
   const selected = toIsoDay(value);
 
   const markedDates = useMemo(() => {
@@ -71,8 +75,8 @@ export function DueDateSheet({
     return {
       [selected]: {
         selected: true,
-        selectedColor: colors.primary,
-        selectedTextColor: colors.white,
+        selectedColor: themeColors.accent,
+        selectedTextColor: themeColors.alwaysLight,
       },
     };
   }, [selected]);
@@ -105,7 +109,7 @@ export function DueDateSheet({
           <Button
             mode="text"
             icon={'calendar-remove-outline' as any}
-            textColor={colors.error}
+            textColor={themeColors.error}
             onPress={handleClear}
             style={styles.clear}
           >
@@ -117,7 +121,7 @@ export function DueDateSheet({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   content: {
     paddingVertical: 4,
     gap: 8,
@@ -125,10 +129,10 @@ const styles = StyleSheet.create({
   calendarCard: {
     borderRadius: 12,
     overflow: 'hidden',
-    backgroundColor: colors.surfaceDark,
+    backgroundColor: t.colors.surface,
     paddingVertical: 4,
   },
   clear: {
     alignSelf: 'center',
   },
-});
+}));

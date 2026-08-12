@@ -19,7 +19,7 @@ import {
 } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
-import { colors } from '../../theme';
+import { makeStyles, useThemeColors } from '../../theme';
 import { formatCurrency } from '../../utils/quoteCalculator';
 import { SectionTemplate, LaborUnit, Material } from '../../types';
 import {
@@ -28,8 +28,11 @@ import {
 } from '../../services/sectionTemplateService';
 import { WebContainer } from '../../components/WebContainer';
 import { MaterialItemCard } from '../../components/MaterialItemCard';
+import { GridBackground } from '../../components/GridBackground';
 
 export function SectionTemplatesScreen() {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const navigation = useNavigation<any>();
   const [templates, setTemplates] = useState<SectionTemplate[]>([]);
   const [loading, setLoading] = useState(true);
@@ -69,11 +72,12 @@ export function SectionTemplatesScreen() {
 
   return (
     <View style={styles.container}>
+      <GridBackground />
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <WebContainer>
           {templates.length === 0 && !loading ? (
             <Surface style={styles.emptyCard}>
-              <MaterialCommunityIcons name="puzzle-outline" size={48} color={colors.textMuted} />
+              <MaterialCommunityIcons name="puzzle-outline" size={48} color={themeColors.textMuted} />
               <Text style={styles.emptyTitle}>No Job Templates Yet</Text>
               <Text style={styles.emptySubtitle}>
                 Create reusable templates for common jobs. Great for repeating work like fence bays, deck sections, etc.
@@ -95,16 +99,16 @@ export function SectionTemplatesScreen() {
                       <MaterialCommunityIcons
                         name={isExpanded ? 'chevron-down' : 'chevron-right'}
                         size={20}
-                        color={colors.textMuted}
+                        color={themeColors.textMuted}
                       />
                       <Text style={styles.templateName}>{template.name}</Text>
                     </View>
                     <View style={styles.templateActions}>
                       <TouchableOpacity onPress={() => navigation.navigate('JobTemplateEditor', { template })} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                        <MaterialCommunityIcons name="pencil-outline" size={20} color={colors.textMuted} />
+                        <MaterialCommunityIcons name="pencil-outline" size={20} color={themeColors.textMuted} />
                       </TouchableOpacity>
                       <TouchableOpacity onPress={() => handleDelete(template)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                        <MaterialCommunityIcons name="delete-outline" size={20} color={colors.textMuted} />
+                        <MaterialCommunityIcons name="delete-outline" size={20} color={themeColors.textMuted} />
                       </TouchableOpacity>
                     </View>
                   </View>
@@ -145,7 +149,7 @@ export function SectionTemplatesScreen() {
           )}
           {/* Create / Edit Template */}
           <TouchableOpacity style={styles.createBtn} onPress={() => navigation.navigate('JobTemplateEditor')}>
-            <MaterialCommunityIcons name="plus" size={20} color={colors.primary} />
+            <MaterialCommunityIcons name="plus" size={20} color={themeColors.accentText} />
             <Text style={styles.createBtnText}>Create Template</Text>
           </TouchableOpacity>
         </WebContainer>
@@ -154,10 +158,10 @@ export function SectionTemplatesScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
   },
   scrollContent: {
     padding: 16,
@@ -167,17 +171,17 @@ const styles = StyleSheet.create({
     padding: 32,
     borderRadius: 12,
     alignItems: 'center',
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     gap: 12,
   },
   emptyTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
   },
   emptySubtitle: {
     fontSize: 14,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     textAlign: 'center',
     lineHeight: 20,
   },
@@ -185,7 +189,7 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: 10,
     marginBottom: 12,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     elevation: 1,
   },
   templateHeader: {
@@ -200,12 +204,12 @@ const styles = StyleSheet.create({
   templateName: {
     fontSize: 16,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
     flex: 1,
   },
   templateDescription: {
     fontSize: 13,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginTop: 4,
   },
   divider: {
@@ -213,7 +217,7 @@ const styles = StyleSheet.create({
   },
   detailLabel: {
     fontSize: 13,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     marginTop: 2,
   },
   createBtn: {
@@ -225,12 +229,12 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     borderRadius: 12,
     borderWidth: 1.5,
-    borderColor: colors.primary,
+    borderColor: t.colors.accent,
     borderStyle: 'dashed',
   },
   createBtnText: {
     fontSize: 15,
     fontWeight: '600',
-    color: colors.primary,
+    color: t.colors.accentText,
   },
-});
+}));

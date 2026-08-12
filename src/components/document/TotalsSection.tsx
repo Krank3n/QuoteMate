@@ -1,10 +1,10 @@
 import React from 'react';
 import { View, StyleSheet } from 'react-native';
 import { Text, Surface, Divider } from 'react-native-paper';
-import { colors } from '../../theme';
+import { makeStyles, useThemeColors } from '../../theme';
 import { formatCurrency } from '../../utils/quoteCalculator';
 import { resolveGstMode, NO_GST_NOTE } from '../../../shared/document';
-import { documentStyles } from './documentStyles';
+import { useDocumentStyles } from './documentStyles';
 
 interface TotalsSectionProps {
   subtotal: number;
@@ -39,6 +39,9 @@ export function TotalsSection({
   gstRegistered,
   style,
 }: TotalsSectionProps) {
+  const styles = useStyles();
+  const documentStyles = useDocumentStyles();
+  const themeColors = useThemeColors();
   const showMarkup = hideMarkup ? false : (hideZeroMarkup ? markup > 0 : true);
   const showTravel = travelAdjustmentAmount > 0;
   const gstMode = resolveGstMode({ gstRegistered, pricesIncludeGst });
@@ -85,7 +88,7 @@ export function TotalsSection({
         <>
           <View style={[documentStyles.summaryRow, { marginTop: 8 }]}>
             <Text style={documentStyles.summaryLabel}>Amount Paid</Text>
-            <Text style={[documentStyles.summaryValue, { color: colors.success }]}>
+            <Text style={[documentStyles.summaryValue, { color: themeColors.money }]}>
               -{formatCurrency(paidAmount)}
             </Text>
           </View>
@@ -99,10 +102,10 @@ export function TotalsSection({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   noGstNote: {
     fontSize: 12,
-    color: colors.textSecondary,
+    color: t.colors.textMuted,
     marginTop: 4,
   },
   balanceRow: {
@@ -114,11 +117,11 @@ const styles = StyleSheet.create({
   balanceLabel: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: colors.warning,
+    color: t.colors.warning,
   },
   balanceValue: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: colors.warning,
+    color: t.colors.warning,
   },
-});
+}));

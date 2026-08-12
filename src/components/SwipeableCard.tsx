@@ -11,7 +11,7 @@ import { RectButton } from 'react-native-gesture-handler';
 import Swipeable from 'react-native-gesture-handler/Swipeable';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { Text } from 'react-native-paper';
-import { colors } from '../theme';
+import { makeStyles } from '../theme';
 import { mediumTap } from '../utils/haptics';
 
 interface SwipeAction {
@@ -33,6 +33,8 @@ interface SwipeableCardProps {
 const ACTION_WIDTH = 72;
 
 export function SwipeableCard({ children, leftActions, rightActions, swipeableRef: externalRef }: SwipeableCardProps) {
+  const styles = useStyles();
+
   const internalRef = useRef<Swipeable>(null);
   const swipeableRef = externalRef || internalRef;
 
@@ -150,7 +152,7 @@ export function SwipeableCard({ children, leftActions, rightActions, swipeableRe
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   actionsContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -182,8 +184,8 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   actionLabel: {
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     fontSize: 11,
     fontWeight: '600',
   },
-});
+}));

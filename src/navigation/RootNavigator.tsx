@@ -34,6 +34,7 @@ import { FeedbackScreen } from '../screens/settings/FeedbackScreen';
 import { PDFTemplateScreen } from '../screens/settings/PDFTemplateScreen';
 import { ReferralScreen } from '../screens/settings/ReferralScreen';
 import { NotificationPreferencesScreen } from '../screens/settings/NotificationPreferencesScreen';
+import { AppearanceScreen } from '../screens/settings/AppearanceScreen';
 import { XeroIntegrationScreen } from '../screens/settings/XeroIntegrationScreen';
 import { SquareIntegrationScreen } from '../screens/settings/SquareIntegrationScreen';
 import { ReeceIntegrationScreen } from '../screens/settings/ReeceIntegrationScreen';
@@ -54,7 +55,7 @@ import { JobPreviewScreen } from '../screens/NewQuote/JobPreviewScreen';
 import { ReeceOrderScreen } from '../screens/ReeceOrderScreen';
 import { ServiceReportScreen } from '../screens/ServiceReport/ServiceReportScreen';
 
-import { colors } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 
 // Type definitions for navigation
 export type RootTabParamList = {
@@ -89,11 +90,13 @@ const RootStack = createStackNavigator();
  * New Quote Flow - Stack Navigator
  */
 function NewQuoteNavigator() {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   return (
     <NewQuoteStack.Navigator
       screenOptions={{
         headerStyle: {
-          backgroundColor: colors.primary,
+          backgroundColor: themeColors.surface,
           elevation: 0,
           shadowOpacity: 0,
         },
@@ -102,19 +105,17 @@ function NewQuoteNavigator() {
             style={[
               StyleSheet.absoluteFill,
               {
-                backgroundColor: colors.primary,
+                backgroundColor: themeColors.surface,
               },
             ]}
           />
         ),
-        headerTintColor: colors.white,
-        headerTitleStyle: {
-          fontWeight: '700',
-        },
-        cardStyle: { backgroundColor: colors.background },
+        headerTintColor: themeColors.text,
+        headerTitleStyle: { fontFamily: 'Archivo-Bold' },
+        cardStyle: { backgroundColor: themeColors.bg },
         ...(Platform.OS === 'web' && {
           headerMode: 'float' as any,
-          contentStyle: { flex: 1, backgroundColor: colors.background },
+          contentStyle: { flex: 1, backgroundColor: themeColors.bg },
         })
       }}
     >
@@ -156,11 +157,13 @@ function NewQuoteNavigator() {
  * New Invoice Flow - Stack Navigator (reuses same screens as NewQuote)
  */
 function NewInvoiceNavigator() {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   return (
     <NewQuoteStack.Navigator
       screenOptions={{
         headerStyle: {
-          backgroundColor: colors.primary,
+          backgroundColor: themeColors.surface,
           elevation: 0,
           shadowOpacity: 0,
         },
@@ -169,19 +172,17 @@ function NewInvoiceNavigator() {
             style={[
               StyleSheet.absoluteFill,
               {
-                backgroundColor: colors.primary,
+                backgroundColor: themeColors.surface,
               },
             ]}
           />
         ),
-        headerTintColor: colors.white,
-        headerTitleStyle: {
-          fontWeight: '700',
-        },
-        cardStyle: { backgroundColor: colors.background },
+        headerTintColor: themeColors.text,
+        headerTitleStyle: { fontFamily: 'Archivo-Bold' },
+        cardStyle: { backgroundColor: themeColors.bg },
         ...(Platform.OS === 'web' && {
           headerMode: 'float' as any,
-          contentStyle: { flex: 1, backgroundColor: colors.background },
+          contentStyle: { flex: 1, backgroundColor: themeColors.bg },
         })
       }}
     >
@@ -237,6 +238,8 @@ const PILL_HEIGHT = 32;
 
 /** Custom tab bar with liquid-morphing pill indicator */
 function LiquidTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const insets = useSafeAreaInsets();
   const tabCount = state.routes.length;
 
@@ -325,10 +328,10 @@ function LiquidTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   return (
     <View style={[styles.tabBarOuter, { paddingBottom: insets.bottom + 8 }]}>
       <LinearGradient
-        colors={[colors.surface, '#1a2d42']}
+        colors={[themeColors.surface, themeColors.bg]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 0 }}
-        style={[StyleSheet.absoluteFill, { borderTopWidth: 1, borderTopColor: colors.border }]}
+        style={[StyleSheet.absoluteFill, { borderTopWidth: 1, borderTopColor: themeColors.border }]}
       />
 
       {/* Liquid pill indicator */}
@@ -354,7 +357,7 @@ function LiquidTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
           const isFocused = state.index === index;
           const label = options.title ?? route.name;
           const iconName = TAB_ICONS[route.name] || 'help-circle';
-          const tintColor = isFocused ? colors.primary : colors.inactive;
+          const tintColor = isFocused ? themeColors.accent : themeColors.textDisabled;
 
           const onPress = () => {
             const event = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
@@ -411,6 +414,8 @@ function LiquidTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
  * Main Tabs Navigator
  */
 function MainTabs() {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const insets = useSafeAreaInsets();
   // Capture-only — gated on the injected demo payload (never trips in
   // production). See src/demo/demoPlayback.ts → isDemoCaptureActive.
@@ -428,15 +433,13 @@ function MainTabs() {
             style={[
               StyleSheet.absoluteFill,
               {
-                backgroundColor: colors.primary,
+                backgroundColor: themeColors.surface,
               },
             ]}
           />
         ),
-        headerTintColor: colors.white,
-        headerTitleStyle: {
-          fontWeight: '700',
-        },
+        headerTintColor: themeColors.text,
+        headerTitleStyle: { fontFamily: 'Archivo-Bold' },
       }}
     >
       <Tab.Screen
@@ -467,23 +470,25 @@ function MainTabs() {
  * Root Navigator - Includes tabs and modal screens
  */
 export function RootNavigator() {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   return (
     <RootStack.Navigator
       screenOptions={{
         headerShown: false,
-        cardStyle: { backgroundColor: colors.background },
+        cardStyle: { backgroundColor: themeColors.bg },
         // On web, use float header mode so CardContent uses flex:1 instead of
         // minHeight:100% (pageOverflowEnabled=false), allowing ScrollViews to scroll
         ...(Platform.OS === 'web' && {
           headerMode: 'float' as any,
-          contentStyle: { flex: 1, backgroundColor: colors.background },
+          contentStyle: { flex: 1, backgroundColor: themeColors.bg },
         }),
         // Keep previous screen mounted during transitions to prevent remount glitches
         detachPreviousScreen: false,
         // Disable safe area for iOS to allow full height cards
         ...(Platform.OS === 'ios' && {
           safeAreaInsets: { top: 0, bottom: 0 },
-          contentStyle: { flex: 1, backgroundColor: colors.background },
+          contentStyle: { flex: 1, backgroundColor: themeColors.bg },
         })
       }}
     >
@@ -495,10 +500,10 @@ export function RootNavigator() {
           presentation: 'card',
           headerShown: true,
           headerStyle: {
-            backgroundColor: colors.primary,
+            backgroundColor: themeColors.surface,
           },
-          headerTintColor: colors.white,
-          headerTitleStyle: { fontWeight: '700' },
+          headerTintColor: themeColors.text,
+          headerTitleStyle: { fontFamily: 'Archivo-Bold' },
           title: 'Job',
         }}
       />
@@ -509,10 +514,10 @@ export function RootNavigator() {
           presentation: 'card',
           headerShown: true,
           headerStyle: {
-            backgroundColor: colors.primary,
+            backgroundColor: themeColors.surface,
           },
-          headerTintColor: colors.white,
-          headerTitleStyle: { fontWeight: '700' },
+          headerTintColor: themeColors.text,
+          headerTitleStyle: { fontFamily: 'Archivo-Bold' },
           title: 'Service Report',
         }}
       />
@@ -523,10 +528,10 @@ export function RootNavigator() {
           presentation: 'modal',
           headerShown: true,
           headerStyle: {
-            backgroundColor: colors.primary,
+            backgroundColor: themeColors.surface,
           },
-          headerTintColor: colors.white,
-          headerTitleStyle: { fontWeight: '700' },
+          headerTintColor: themeColors.text,
+          headerTitleStyle: { fontFamily: 'Archivo-Bold' },
           title: 'Record Payment',
         }}
       />
@@ -537,10 +542,10 @@ export function RootNavigator() {
           presentation: 'modal',
           headerShown: true,
           headerStyle: {
-            backgroundColor: colors.primary,
+            backgroundColor: themeColors.surface,
           },
-          headerTintColor: colors.white,
-          headerTitleStyle: { fontWeight: '700' },
+          headerTintColor: themeColors.text,
+          headerTitleStyle: { fontFamily: 'Archivo-Bold' },
           title: 'Order from Reece',
         }}
       />
@@ -551,10 +556,10 @@ export function RootNavigator() {
           presentation: 'card',
           headerShown: true,
           headerStyle: {
-            backgroundColor: colors.primary,
+            backgroundColor: themeColors.surface,
           },
-          headerTintColor: colors.white,
-          headerTitleStyle: { fontWeight: '700' },
+          headerTintColor: themeColors.text,
+          headerTitleStyle: { fontFamily: 'Archivo-Bold' },
           title: 'Insights',
         }}
       />
@@ -579,10 +584,10 @@ export function RootNavigator() {
           presentation: 'modal',
           headerShown: true,
           headerStyle: {
-            backgroundColor: colors.primary,
+            backgroundColor: themeColors.surface,
           },
-          headerTintColor: colors.white,
-          headerTitleStyle: { fontWeight: '700' },
+          headerTintColor: themeColors.text,
+          headerTitleStyle: { fontFamily: 'Archivo-Bold' },
           title: 'Upgrade to Pro',
           ...(Platform.OS === 'web' && {
             contentStyle: {
@@ -600,10 +605,10 @@ export function RootNavigator() {
           presentation: 'card',
           headerShown: true,
           headerStyle: {
-            backgroundColor: colors.primary,
+            backgroundColor: themeColors.surface,
           },
-          headerTintColor: colors.white,
-          headerTitleStyle: { fontWeight: '700' },
+          headerTintColor: themeColors.text,
+          headerTitleStyle: { fontFamily: 'Archivo-Bold' },
           title: 'Business Details',
         }}
       />
@@ -614,10 +619,10 @@ export function RootNavigator() {
           presentation: 'card',
           headerShown: true,
           headerStyle: {
-            backgroundColor: colors.primary,
+            backgroundColor: themeColors.surface,
           },
-          headerTintColor: colors.white,
-          headerTitleStyle: { fontWeight: '700' },
+          headerTintColor: themeColors.text,
+          headerTitleStyle: { fontFamily: 'Archivo-Bold' },
           title: 'Business Defaults',
         }}
       />
@@ -628,10 +633,10 @@ export function RootNavigator() {
           presentation: 'card',
           headerShown: true,
           headerStyle: {
-            backgroundColor: colors.primary,
+            backgroundColor: themeColors.surface,
           },
-          headerTintColor: colors.white,
-          headerTitleStyle: { fontWeight: '700' },
+          headerTintColor: themeColors.text,
+          headerTitleStyle: { fontFamily: 'Archivo-Bold' },
           title: 'Payment Methods',
         }}
       />
@@ -642,10 +647,10 @@ export function RootNavigator() {
           presentation: 'card',
           headerShown: true,
           headerStyle: {
-            backgroundColor: colors.primary,
+            backgroundColor: themeColors.surface,
           },
-          headerTintColor: colors.white,
-          headerTitleStyle: { fontWeight: '700' },
+          headerTintColor: themeColors.text,
+          headerTitleStyle: { fontFamily: 'Archivo-Bold' },
           title: 'Trade & Pricing',
         }}
       />
@@ -656,10 +661,10 @@ export function RootNavigator() {
           presentation: 'card',
           headerShown: true,
           headerStyle: {
-            backgroundColor: colors.primary,
+            backgroundColor: themeColors.surface,
           },
-          headerTintColor: colors.white,
-          headerTitleStyle: { fontWeight: '700' },
+          headerTintColor: themeColors.text,
+          headerTitleStyle: { fontFamily: 'Archivo-Bold' },
           title: 'Subscription',
         }}
       />
@@ -670,10 +675,10 @@ export function RootNavigator() {
           presentation: 'card',
           headerShown: true,
           headerStyle: {
-            backgroundColor: colors.primary,
+            backgroundColor: themeColors.surface,
           },
-          headerTintColor: colors.white,
-          headerTitleStyle: { fontWeight: '700' },
+          headerTintColor: themeColors.text,
+          headerTitleStyle: { fontFamily: 'Archivo-Bold' },
           title: 'Account',
         }}
       />
@@ -684,10 +689,10 @@ export function RootNavigator() {
           presentation: 'card',
           headerShown: true,
           headerStyle: {
-            backgroundColor: colors.primary,
+            backgroundColor: themeColors.surface,
           },
-          headerTintColor: colors.white,
-          headerTitleStyle: { fontWeight: '700' },
+          headerTintColor: themeColors.text,
+          headerTitleStyle: { fontFamily: 'Archivo-Bold' },
           title: 'PDF Templates',
         }}
       />
@@ -698,10 +703,10 @@ export function RootNavigator() {
           presentation: 'card',
           headerShown: true,
           headerStyle: {
-            backgroundColor: colors.primary,
+            backgroundColor: themeColors.surface,
           },
-          headerTintColor: colors.white,
-          headerTitleStyle: { fontWeight: '700' },
+          headerTintColor: themeColors.text,
+          headerTitleStyle: { fontFamily: 'Archivo-Bold' },
           title: 'Job Templates',
         }}
       />
@@ -712,10 +717,10 @@ export function RootNavigator() {
           presentation: 'card',
           headerShown: true,
           headerStyle: {
-            backgroundColor: colors.primary,
+            backgroundColor: themeColors.surface,
           },
-          headerTintColor: colors.white,
-          headerTitleStyle: { fontWeight: '700' },
+          headerTintColor: themeColors.text,
+          headerTitleStyle: { fontFamily: 'Archivo-Bold' },
           title: 'Job Template',
         }}
       />
@@ -726,10 +731,10 @@ export function RootNavigator() {
           presentation: 'card',
           headerShown: true,
           headerStyle: {
-            backgroundColor: colors.primary,
+            backgroundColor: themeColors.surface,
           },
-          headerTintColor: colors.white,
-          headerTitleStyle: { fontWeight: '700' },
+          headerTintColor: themeColors.text,
+          headerTitleStyle: { fontFamily: 'Archivo-Bold' },
           title: 'Add Material',
         }}
       />
@@ -740,10 +745,10 @@ export function RootNavigator() {
           presentation: 'card',
           headerShown: true,
           headerStyle: {
-            backgroundColor: colors.primary,
+            backgroundColor: themeColors.surface,
           },
-          headerTintColor: colors.white,
-          headerTitleStyle: { fontWeight: '700' },
+          headerTintColor: themeColors.text,
+          headerTitleStyle: { fontFamily: 'Archivo-Bold' },
           title: 'Edit Supplier',
         }}
       />
@@ -754,11 +759,25 @@ export function RootNavigator() {
           presentation: 'card',
           headerShown: true,
           headerStyle: {
-            backgroundColor: colors.primary,
+            backgroundColor: themeColors.surface,
           },
-          headerTintColor: colors.white,
-          headerTitleStyle: { fontWeight: '700' },
+          headerTintColor: themeColors.text,
+          headerTitleStyle: { fontFamily: 'Archivo-Bold' },
           title: 'Refer a Friend',
+        }}
+      />
+      <RootStack.Screen
+        name="Appearance"
+        component={AppearanceScreen}
+        options={{
+          presentation: 'card',
+          headerShown: true,
+          headerStyle: {
+            backgroundColor: themeColors.surface,
+          },
+          headerTintColor: themeColors.text,
+          headerTitleStyle: { fontFamily: 'Archivo-Bold' },
+          title: 'Appearance',
         }}
       />
       <RootStack.Screen
@@ -768,10 +787,10 @@ export function RootNavigator() {
           presentation: 'card',
           headerShown: true,
           headerStyle: {
-            backgroundColor: colors.primary,
+            backgroundColor: themeColors.surface,
           },
-          headerTintColor: colors.white,
-          headerTitleStyle: { fontWeight: '700' },
+          headerTintColor: themeColors.text,
+          headerTitleStyle: { fontFamily: 'Archivo-Bold' },
           title: 'Notifications',
         }}
       />
@@ -782,10 +801,10 @@ export function RootNavigator() {
           presentation: 'card',
           headerShown: true,
           headerStyle: {
-            backgroundColor: colors.primary,
+            backgroundColor: themeColors.surface,
           },
-          headerTintColor: colors.white,
-          headerTitleStyle: { fontWeight: '700' },
+          headerTintColor: themeColors.text,
+          headerTitleStyle: { fontFamily: 'Archivo-Bold' },
           title: 'Xero Integration',
         }}
       />
@@ -796,10 +815,10 @@ export function RootNavigator() {
           presentation: 'card',
           headerShown: true,
           headerStyle: {
-            backgroundColor: colors.primary,
+            backgroundColor: themeColors.surface,
           },
-          headerTintColor: colors.white,
-          headerTitleStyle: { fontWeight: '700' },
+          headerTintColor: themeColors.text,
+          headerTitleStyle: { fontFamily: 'Archivo-Bold' },
           title: 'Square Payments',
         }}
       />
@@ -810,10 +829,10 @@ export function RootNavigator() {
           presentation: 'card',
           headerShown: true,
           headerStyle: {
-            backgroundColor: colors.primary,
+            backgroundColor: themeColors.surface,
           },
-          headerTintColor: colors.white,
-          headerTitleStyle: { fontWeight: '700' },
+          headerTintColor: themeColors.text,
+          headerTitleStyle: { fontFamily: 'Archivo-Bold' },
           title: 'Reece Plumbing',
         }}
       />
@@ -824,10 +843,10 @@ export function RootNavigator() {
           presentation: 'card',
           headerShown: true,
           headerStyle: {
-            backgroundColor: colors.primary,
+            backgroundColor: themeColors.surface,
           },
-          headerTintColor: colors.white,
-          headerTitleStyle: { fontWeight: '700' },
+          headerTintColor: themeColors.text,
+          headerTitleStyle: { fontFamily: 'Archivo-Bold' },
           title: 'Google Calendar',
         }}
       />
@@ -838,10 +857,10 @@ export function RootNavigator() {
           presentation: 'card',
           headerShown: true,
           headerStyle: {
-            backgroundColor: colors.primary,
+            backgroundColor: themeColors.surface,
           },
-          headerTintColor: colors.white,
-          headerTitleStyle: { fontWeight: '700' },
+          headerTintColor: themeColors.text,
+          headerTitleStyle: { fontFamily: 'Archivo-Bold' },
           title: 'Never Miss a Call',
         }}
       />
@@ -852,10 +871,10 @@ export function RootNavigator() {
           presentation: 'card',
           headerShown: true,
           headerStyle: {
-            backgroundColor: colors.primary,
+            backgroundColor: themeColors.surface,
           },
-          headerTintColor: colors.white,
-          headerTitleStyle: { fontWeight: '700' },
+          headerTintColor: themeColors.text,
+          headerTitleStyle: { fontFamily: 'Archivo-Bold' },
           title: 'Feedback',
         }}
       />
@@ -866,10 +885,10 @@ export function RootNavigator() {
           presentation: 'card',
           headerShown: true,
           headerStyle: {
-            backgroundColor: colors.primary,
+            backgroundColor: themeColors.surface,
           },
-          headerTintColor: colors.white,
-          headerTitleStyle: { fontWeight: '700' },
+          headerTintColor: themeColors.text,
+          headerTitleStyle: { fontFamily: 'Archivo-Bold' },
           title: 'About',
         }}
       />
@@ -880,10 +899,10 @@ export function RootNavigator() {
           presentation: 'card',
           headerShown: true,
           headerStyle: {
-            backgroundColor: colors.primary,
+            backgroundColor: themeColors.surface,
           },
-          headerTintColor: colors.white,
-          headerTitleStyle: { fontWeight: '700' },
+          headerTintColor: themeColors.text,
+          headerTitleStyle: { fontFamily: 'Archivo-Bold' },
           title: 'Contacts',
         }}
       />
@@ -894,10 +913,10 @@ export function RootNavigator() {
           presentation: 'card',
           headerShown: true,
           headerStyle: {
-            backgroundColor: colors.primary,
+            backgroundColor: themeColors.surface,
           },
-          headerTintColor: colors.white,
-          headerTitleStyle: { fontWeight: '700' },
+          headerTintColor: themeColors.text,
+          headerTitleStyle: { fontFamily: 'Archivo-Bold' },
           title: 'Supplier Partners',
         }}
       />
@@ -905,7 +924,7 @@ export function RootNavigator() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   tabBarOuter: {
     position: 'absolute',
     bottom: 0,
@@ -933,7 +952,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: -7,
     right: -20,
-    backgroundColor: colors.primary,
+    backgroundColor: t.colors.accent,
     borderRadius: 6,
     paddingHorizontal: 4,
     paddingVertical: 1,
@@ -942,7 +961,7 @@ const styles = StyleSheet.create({
     fontSize: 7,
     fontWeight: '700',
     letterSpacing: 0.4,
-    color: colors.white,
+    color: t.colors.onAccent,
   },
   liquidPill: {
     position: 'absolute',
@@ -951,6 +970,6 @@ const styles = StyleSheet.create({
     width: PILL_WIDTH,
     height: PILL_HEIGHT,
     borderRadius: PILL_HEIGHT / 2,
-    backgroundColor: 'rgba(0, 152, 104, 0.18)',
+    backgroundColor: t.colors.accentSubtle,
   },
-});
+}));

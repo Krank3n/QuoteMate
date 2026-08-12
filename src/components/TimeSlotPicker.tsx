@@ -14,7 +14,7 @@ import { ScrollView, StyleSheet, Pressable, View } from 'react-native';
 import { Text } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
-import { colors } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 import { selectionTap } from '../utils/haptics';
 
 interface TimeSlotPickerProps {
@@ -62,6 +62,8 @@ export function TimeSlotPicker({
   endHour = 19,
   stepMinutes = 30,
 }: TimeSlotPickerProps) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const scrollRef = useRef<ScrollView>(null);
   const chipRefs = useRef<Record<number, { x: number; w: number }>>({});
 
@@ -101,7 +103,7 @@ export function TimeSlotPicker({
         <MaterialCommunityIcons
           name={'clock-outline' as any}
           size={14}
-          color={value === null ? colors.white : colors.textMuted}
+          color={value === null ? themeColors.alwaysLight : themeColors.textMuted}
         />
         <Text style={[styles.chipLabel, value === null && styles.chipLabelSelected]}>
           No time
@@ -141,7 +143,7 @@ export function TimeSlotPicker({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   row: {
     paddingHorizontal: 4,
     paddingVertical: 8,
@@ -152,7 +154,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 999,
-    backgroundColor: colors.surfaceGray3,
+    backgroundColor: t.colors.surfacePressed,
     borderWidth: 1,
     borderColor: 'transparent',
     minWidth: 62,
@@ -165,15 +167,15 @@ const styles = StyleSheet.create({
     minWidth: 92,
   },
   chipSelected: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
+    backgroundColor: t.colors.accent,
+    borderColor: t.colors.accent,
   },
   chipLabel: {
     fontSize: 13,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
   },
   chipLabelSelected: {
-    color: colors.white,
+    color: t.colors.onAccent,
   },
-});
+}));

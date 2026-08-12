@@ -21,7 +21,7 @@ import {
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 
 import { useStore } from '../../store/useStore';
-import { colors } from '../../theme';
+import { makeStyles, useThemeColors } from '../../theme';
 import { WebContainer } from '../../components/WebContainer';
 import { FixedBottomButton } from '../../components/FixedBottomButton';
 import { AlertModal } from '../../components/AlertModal';
@@ -30,6 +30,7 @@ import { checkSquareConnection } from '../../services/squareService';
 import { defaultAuTradieTerms, hashTerms, isUnmodifiedStarterTerms } from '../../../shared/pdf/terms/defaultAuTradie';
 import { PASSTHROUGH_SURCHARGE_PCT } from '../../../shared/pdf/squareFees';
 import { resolveGstMode, GstMode } from '../../../shared/document';
+import { GridBackground } from '../../components/GridBackground';
 
 const GST_MODE_DESCRIPTIONS: Record<GstMode, string> = {
   exclusive: 'Prices you enter are ex-GST. The quote adds 10% GST to the total.',
@@ -38,6 +39,8 @@ const GST_MODE_DESCRIPTIONS: Record<GstMode, string> = {
 };
 
 export function BusinessDefaultsScreen() {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const navigation = useNavigation<any>();
   const { businessSettings, setBusinessSettings } = useStore();
 
@@ -184,6 +187,7 @@ export function BusinessDefaultsScreen() {
 
   return (
     <View style={styles.container}>
+      <GridBackground />
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
@@ -237,7 +241,7 @@ export function BusinessDefaultsScreen() {
               <Switch
                 value={transportMarkupEnabled}
                 onValueChange={setTransportMarkupEnabled}
-                color={colors.primary}
+                color={themeColors.accentText}
               />
             </View>
 
@@ -285,7 +289,7 @@ export function BusinessDefaultsScreen() {
               <Switch
                 value={showMarkup}
                 onValueChange={setShowMarkup}
-                color={colors.primary}
+                color={themeColors.accentText}
               />
             </View>
 
@@ -299,7 +303,7 @@ export function BusinessDefaultsScreen() {
               <Switch
                 value={showMaterialCostsByDefault}
                 onValueChange={setShowMaterialCostsByDefault}
-                color={colors.primary}
+                color={themeColors.accentText}
               />
             </View>
 
@@ -313,7 +317,7 @@ export function BusinessDefaultsScreen() {
               <Switch
                 value={showLaborCostsByDefault}
                 onValueChange={setShowLaborCostsByDefault}
-                color={colors.primary}
+                color={themeColors.accentText}
               />
             </View>
           </Surface>
@@ -334,7 +338,7 @@ export function BusinessDefaultsScreen() {
               <Switch
                 value={autoCustomerFollowUp}
                 onValueChange={setAutoCustomerFollowUp}
-                color={colors.primary}
+                color={themeColors.accentText}
               />
             </View>
           </Surface>
@@ -355,7 +359,7 @@ export function BusinessDefaultsScreen() {
               <Switch
                 value={autoStartMic}
                 onValueChange={setAutoStartMic}
-                color={colors.primary}
+                color={themeColors.accentText}
               />
             </View>
           </Surface>
@@ -370,7 +374,7 @@ export function BusinessDefaultsScreen() {
 
             <View style={styles.toggleRow}>
               <View style={styles.toggleLabel}>
-                <Text style={[styles.toggleTitle, squareConnected === false && { color: colors.textMuted }]}>
+                <Text style={[styles.toggleTitle, squareConnected === false && { color: themeColors.textMuted }]}>
                   Require Deposit by Default
                 </Text>
                 <Text style={styles.toggleDescription}>
@@ -380,7 +384,7 @@ export function BusinessDefaultsScreen() {
               <Switch
                 value={requireDepositByDefault && squareConnected !== false}
                 onValueChange={setRequireDepositByDefault}
-                color={colors.primary}
+                color={themeColors.accentText}
                 disabled={squareConnected !== true}
               />
             </View>
@@ -409,7 +413,7 @@ export function BusinessDefaultsScreen() {
 
             <View style={styles.toggleRow}>
               <View style={styles.toggleLabel}>
-                <Text style={[styles.toggleTitle, squareConnected === false && { color: colors.textMuted }]}>
+                <Text style={[styles.toggleTitle, squareConnected === false && { color: themeColors.textMuted }]}>
                   Pass Card Fees to Customer
                 </Text>
                 <Text style={styles.toggleDescription}>
@@ -421,7 +425,7 @@ export function BusinessDefaultsScreen() {
               <Switch
                 value={surchargePaymentFees && squareConnected !== false}
                 onValueChange={setSurchargePaymentFees}
-                color={colors.primary}
+                color={themeColors.accentText}
                 disabled={squareConnected !== true}
               />
             </View>
@@ -528,8 +532,8 @@ export function BusinessDefaultsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
+const useStyles = makeStyles((t) => ({
+  container: { flex: 1, backgroundColor: t.colors.bg },
   scrollView: { flex: 1 },
   scrollContent: { paddingBottom: 120 },
   card: {
@@ -537,23 +541,23 @@ const styles = StyleSheet.create({
     marginTop: 16,
     padding: 16,
     borderRadius: 12,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     elevation: 1,
   },
   sectionTitle: {
     fontSize: 18,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
     marginBottom: 4,
   },
   helperText: {
     fontSize: 13,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginBottom: 12,
   },
   input: {
     marginBottom: 12,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
   },
   toggleRow: {
     flexDirection: 'row',
@@ -566,11 +570,11 @@ const styles = StyleSheet.create({
   toggleTitle: {
     fontSize: 15,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
   },
   toggleDescription: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginTop: 2,
   },
   connectSquareButton: {
@@ -578,13 +582,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 8,
-    backgroundColor: colors.primary,
+    backgroundColor: t.colors.accent,
     marginTop: 4,
     marginBottom: 8,
   },
   connectSquareText: {
-    color: '#FFFFFF',
+    color: t.colors.onAccent,
     fontSize: 13,
     fontWeight: '600',
   },
-});
+}));

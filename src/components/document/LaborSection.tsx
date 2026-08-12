@@ -2,11 +2,11 @@ import React from 'react';
 import { View, TouchableOpacity } from 'react-native';
 import { Text, Title, Surface, Divider } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { colors } from '../../theme';
+import { useThemeColors} from '../../theme';
 import { formatCurrency } from '../../utils/quoteCalculator';
 import { LaborUnit, QuoteSection } from '../../types';
 import { hoursForDisplay, rateForDisplay, valueToHours, rateToHourly } from '../../../shared/document/labourUnits';
-import { documentStyles as styles } from './documentStyles';
+import { useDocumentStyles } from './documentStyles';
 
 interface LaborSectionProps {
   laborHours: number;
@@ -47,6 +47,8 @@ export function LaborSection({
   alwaysShowMarkupNote = false,
   style,
 }: LaborSectionProps) {
+  const styles = useDocumentStyles();
+  const themeColors = useThemeColors();
   // Canonical hours in, chosen unit out — the conversion happens once, here,
   // rather than being inferred from whatever unit each value claims to be in.
   const displayUnit: LaborUnit = labourDisplayUnit === 'days' ? 'days' : 'hours';
@@ -68,14 +70,14 @@ export function LaborSection({
     <Surface style={[styles.section, style]}>
       <View style={styles.sectionHeader}>
         <View style={styles.sectionHeaderLeft}>
-          <View style={[styles.sectionIconCircle, { backgroundColor: colors.primaryBg }]}>
-            <MaterialCommunityIcons name="hammer-wrench" size={18} color={colors.primary} />
+          <View style={[styles.sectionIconCircle, { backgroundColor: themeColors.accentSubtle }]}>
+            <MaterialCommunityIcons name="hammer-wrench" size={18} color={themeColors.accentText} />
           </View>
           <Title style={styles.sectionTitle}>Labour & Markup</Title>
         </View>
         {onEdit && (
           <View style={styles.editButton}>
-            <MaterialCommunityIcons name="pencil" size={16} color={colors.primary} />
+            <MaterialCommunityIcons name="pencil" size={16} color={themeColors.accentText} />
           </View>
         )}
       </View>
@@ -148,7 +150,7 @@ export function LaborSection({
         <Text
           style={{
             fontSize: 11,
-            color: colors.textMuted,
+            color: themeColors.textMuted,
             textAlign: 'right',
             marginTop: 2,
           }}

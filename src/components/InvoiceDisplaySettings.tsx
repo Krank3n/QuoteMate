@@ -16,7 +16,7 @@ import { Text, TextInput, Surface, Divider } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 
-import { colors } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 import { checkSquareConnection } from '../services/squareService';
 import { formatCurrency } from '../utils/quoteCalculator';
 
@@ -101,6 +101,8 @@ function buildSummary({
 }
 
 export function InvoiceDisplaySettings(props: InvoiceDisplaySettingsProps) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const {
     mode,
     total,
@@ -234,7 +236,7 @@ export function InvoiceDisplaySettings(props: InvoiceDisplaySettingsProps) {
             <MaterialCommunityIcons
               name={'connection' as any}
               size={14}
-              color={'#FFFFFF'}
+              color={themeColors.onAccent}
             />
             <Text style={styles.connectSquareLabel}>Connect Square</Text>
           </TouchableOpacity>
@@ -306,7 +308,7 @@ export function InvoiceDisplaySettings(props: InvoiceDisplaySettingsProps) {
             <MaterialCommunityIcons
               name={'tune-variant' as any}
               size={18}
-              color={colors.primary}
+              color={themeColors.accentText}
             />
           </View>
           <View style={styles.collapsibleRowBody}>
@@ -318,7 +320,7 @@ export function InvoiceDisplaySettings(props: InvoiceDisplaySettingsProps) {
           <MaterialCommunityIcons
             name={(isExpanded ? 'chevron-up' : 'chevron-down') as any}
             size={18}
-            color={colors.inactive}
+            color={themeColors.textDisabled}
           />
         </Pressable>
         {isExpanded ? <View style={styles.collapsibleBody}>{body}</View> : null}
@@ -333,7 +335,7 @@ export function InvoiceDisplaySettings(props: InvoiceDisplaySettingsProps) {
           <MaterialCommunityIcons
             name={'tune-variant' as any}
             size={18}
-            color={colors.primary}
+            color={themeColors.accentText}
           />
         </View>
         <Text style={styles.title}>Display & deposit</Text>
@@ -358,13 +360,15 @@ function ToggleRow({
   disabled?: boolean;
   dense?: boolean;
 }) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   return (
     <View style={[styles.toggleRow, dense && styles.toggleRowDense]}>
       <View style={styles.toggleText}>
         <Text
           style={[
             styles.toggleTitle,
-            disabled ? { color: colors.textSecondary } : null,
+            disabled ? { color: themeColors.textMuted } : null,
           ]}
         >
           {title}
@@ -374,21 +378,21 @@ function ToggleRow({
       <Switch
         value={value}
         onValueChange={onValueChange}
-        trackColor={{ false: '#D1D5DB', true: colors.primary + '60' }}
-        thumbColor={value ? colors.primary : '#F3F4F6'}
+        trackColor={{ false: '#D1D5DB', true: themeColors.accentSubtle }}
+        thumbColor={value ? themeColors.accent : '#F3F4F6'}
         disabled={disabled}
       />
     </View>
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   surface: {
     marginBottom: 12,
     padding: 16,
     borderRadius: 14,
     elevation: 2,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     overflow: 'hidden',
   },
   embeddedRoot: {
@@ -409,12 +413,12 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.primaryBg,
+    backgroundColor: t.colors.accentSubtle,
   },
   title: {
     fontSize: 15,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
   },
   // Toggles — generous vertical rhythm so the row stays scannable on small
   // phones, and the subtitle never crowds the switch.
@@ -434,16 +438,16 @@ const styles = StyleSheet.create({
   toggleTitle: {
     fontSize: 14,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
     marginBottom: 4,
   },
   toggleSubtitle: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     lineHeight: 17,
   },
   rowDivider: {
-    backgroundColor: colors.border,
+    backgroundColor: t.colors.border,
     height: StyleSheet.hairlineWidth,
     opacity: 0.6,
   },
@@ -451,12 +455,12 @@ const styles = StyleSheet.create({
     marginTop: 18,
     paddingTop: 14,
     borderTopWidth: 1,
-    borderTopColor: colors.border,
+    borderTopColor: t.colors.border,
   },
   depositHeaderLabel: {
     fontSize: 11,
     fontWeight: '700',
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     textTransform: 'uppercase',
     letterSpacing: 0.8,
     marginBottom: 4,
@@ -469,11 +473,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 9,
     borderRadius: 10,
-    backgroundColor: colors.primary,
+    backgroundColor: t.colors.accent,
     marginTop: 10,
   },
   connectSquareLabel: {
-    color: '#FFFFFF',
+    color: t.colors.onAccent,
     fontSize: 13,
     fontWeight: '700',
     letterSpacing: 0.2,
@@ -491,23 +495,23 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 12,
     borderRadius: 10,
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
   },
   depositPreviewLabel: {
     fontSize: 14,
     fontWeight: '500',
-    color: colors.text,
+    color: t.colors.text,
   },
   depositPreviewValue: {
     fontSize: 16,
     fontWeight: '700',
-    color: colors.primary,
+    color: t.colors.money,
   },
   // Collapsible variant — matches ScopeRow exactly so it slots into the
   // JobScopeCard list without breaking the visual rhythm.
   collapsibleRoot: {
     borderRadius: 12,
-    backgroundColor: colors.surfaceGray3,
+    backgroundColor: t.colors.surfacePressed,
     overflow: 'hidden',
   },
   collapsibleRow: {
@@ -520,7 +524,7 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: colors.primaryBg,
+    backgroundColor: t.colors.accentSubtle,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -532,19 +536,19 @@ const styles = StyleSheet.create({
   collapsibleRowLabel: {
     fontSize: 11,
     fontWeight: '700',
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     textTransform: 'uppercase',
     letterSpacing: 0.4,
   },
   collapsibleRowBodyText: {
     fontSize: 13,
-    color: colors.text,
+    color: t.colors.text,
     lineHeight: 18,
   },
   collapsibleBody: {
     paddingHorizontal: 10,
     paddingBottom: 10,
     borderTopWidth: 1,
-    borderTopColor: colors.border,
+    borderTopColor: t.colors.border,
   },
-});
+}));

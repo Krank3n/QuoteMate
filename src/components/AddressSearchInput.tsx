@@ -14,7 +14,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, StyleSheet, Pressable, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { TextInput, Text } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { colors } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 import {
   fetchAddressDetails,
   newPlacesSessionToken,
@@ -49,6 +49,8 @@ export function AddressSearchInput({
   onChangeText,
   style,
 }: AddressSearchInputProps) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const isControlled = value !== undefined && typeof onChangeText === 'function';
   const [internalQuery, setInternalQuery] = useState('');
   const query = isControlled ? (value ?? '') : internalQuery;
@@ -150,7 +152,7 @@ export function AddressSearchInput({
       <View style={[styles.wrapper, style]}>
         {label ? <Text style={styles.cardLabel}>{label}</Text> : null}
         <View style={styles.selectedCard}>
-          <MaterialCommunityIcons name="map-marker-check" size={20} color={colors.success} />
+          <MaterialCommunityIcons name="map-marker-check" size={20} color={themeColors.money} />
           <Text style={styles.selectedText} numberOfLines={2}>
             {value}
           </Text>
@@ -177,7 +179,7 @@ export function AddressSearchInput({
         mode="outlined"
         right={
           resolving ? (
-            <TextInput.Icon icon={() => <ActivityIndicator size={16} color={colors.primary} />} />
+            <TextInput.Icon icon={() => <ActivityIndicator size={16} color={themeColors.accentText} />} />
           ) : query.length > 0 ? (
             <TextInput.Icon
               icon="close"
@@ -198,7 +200,7 @@ export function AddressSearchInput({
         <View style={styles.dropdown}>
           {searching && predictions.length === 0 ? (
             <View style={styles.dropdownItem}>
-              <ActivityIndicator size={14} color={colors.primary} />
+              <ActivityIndicator size={14} color={themeColors.accentText} />
               <Text style={styles.dropdownEmpty}>Searching…</Text>
             </View>
           ) : (
@@ -208,7 +210,7 @@ export function AddressSearchInput({
                 onPress={() => handleSelect(p)}
                 style={({ pressed }) => [styles.dropdownItem, pressed && styles.dropdownItemPressed]}
               >
-                <MaterialCommunityIcons name="map-marker-outline" size={18} color={colors.textMuted} />
+                <MaterialCommunityIcons name="map-marker-outline" size={18} color={themeColors.textMuted} />
                 <View style={{ flex: 1, marginLeft: 8 }}>
                   <Text style={styles.dropdownMain} numberOfLines={1}>
                     {p.mainText}
@@ -228,20 +230,20 @@ export function AddressSearchInput({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   wrapper: {
     position: 'relative',
   },
   cardLabel: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginBottom: 6,
     fontWeight: '600',
   },
   selectedCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.surfaceGray3,
+    backgroundColor: t.colors.surfacePressed,
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 12,
@@ -250,18 +252,18 @@ const styles = StyleSheet.create({
   selectedText: {
     flex: 1,
     fontSize: 14,
-    color: colors.text,
+    color: t.colors.text,
     fontWeight: '500',
   },
   changeLink: {
     fontSize: 13,
-    color: colors.primary,
+    color: t.colors.accentText,
     fontWeight: '600',
   },
   dropdown: {
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
     borderRadius: 8,
     marginTop: 4,
     overflow: 'hidden',
@@ -272,24 +274,24 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
+    borderBottomColor: t.colors.border,
   },
   dropdownItemPressed: {
-    backgroundColor: colors.surfaceGray3,
+    backgroundColor: t.colors.surfacePressed,
   },
   dropdownMain: {
     fontSize: 14,
-    color: colors.text,
+    color: t.colors.text,
     fontWeight: '500',
   },
   dropdownSecondary: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginTop: 2,
   },
   dropdownEmpty: {
     fontSize: 13,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginLeft: 8,
   },
-});
+}));

@@ -17,7 +17,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
 import type { Job } from '../../shared/job/types';
 import type { Document } from '../types/document';
-import { colors } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 import { BottomSheet } from './BottomSheet';
 import { selectionTap, lightTap } from '../utils/haptics';
 
@@ -182,6 +182,8 @@ export function JobActionsSheet({
   xeroConnected,
   onSelect,
 }: JobActionsSheetProps) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   if (!job) return null;
   const ctx = {
     job,
@@ -226,14 +228,14 @@ export function JobActionsSheet({
                 <MaterialCommunityIcons
                   name={icon as any}
                   size={20}
-                  color={danger ? colors.error : colors.primary}
+                  color={danger ? themeColors.error : themeColors.accent}
                 />
               </View>
               <View style={styles.rowBody}>
                 <Text
                   style={[
                     styles.rowLabel,
-                    danger && { color: colors.error },
+                    danger && { color: themeColors.error },
                   ]}
                 >
                   {label}
@@ -243,7 +245,7 @@ export function JobActionsSheet({
               <MaterialCommunityIcons
                 name={'chevron-right' as any}
                 size={20}
-                color={colors.inactive}
+                color={themeColors.textDisabled}
               />
             </Pressable>
           );
@@ -253,7 +255,7 @@ export function JobActionsSheet({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   list: {
     gap: 8,
     paddingBottom: 8,
@@ -264,12 +266,12 @@ const styles = StyleSheet.create({
     gap: 12,
     padding: 14,
     borderRadius: 12,
-    backgroundColor: colors.surfaceGray3,
+    backgroundColor: t.colors.surfacePressed,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
   },
   rowDanger: {
-    borderColor: colors.error + '44',
+    borderColor: t.colors.errorSubtle,
   },
   rowPressed: {
     opacity: 0.8,
@@ -282,10 +284,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   rowIconNormal: {
-    backgroundColor: colors.primaryBg,
+    backgroundColor: t.colors.accentSubtle,
   },
   rowIconDanger: {
-    backgroundColor: colors.errorBg,
+    backgroundColor: t.colors.errorSubtle,
   },
   rowBody: {
     flex: 1,
@@ -294,11 +296,11 @@ const styles = StyleSheet.create({
   rowLabel: {
     fontSize: 15,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
   },
   rowSub: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     lineHeight: 16,
   },
-});
+}));

@@ -58,7 +58,7 @@ vi.mock('./ActionSheet', () => ({
     ) : null,
 }));
 
-vi.mock('../theme', () => ({ colors: new Proxy({}, { get: () => '#000' }) }));
+vi.mock('../theme', async () => await import('../test/stubs/theme'));
 vi.mock('../services/analyticsService', () => ({ trackEvent: vi.fn() }));
 
 const sender = vi.hoisted(() => ({ sendServiceReportEmail: vi.fn(async () => {}) }));

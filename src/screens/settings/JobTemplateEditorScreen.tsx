@@ -21,7 +21,7 @@ import {
 } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
-import { colors } from '../../theme';
+import { makeStyles, useThemeColors } from '../../theme';
 import { formatCurrency } from '../../utils/quoteCalculator';
 import { SectionTemplate, LaborUnit, Material } from '../../types';
 import { saveTemplate, suggestKeywordsFromName } from '../../services/sectionTemplateService';
@@ -31,8 +31,11 @@ import { useStore } from '../../store/useStore';
 import { FixedBottomButton } from '../../components/FixedBottomButton';
 import { AlertModal } from '../../components/AlertModal';
 import { useUnsavedChangesGuard } from '../../hooks/useUnsavedChangesGuard';
+import { GridBackground } from '../../components/GridBackground';
 
 export function JobTemplateEditorScreen() {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const existingTemplate = route.params?.template as SectionTemplate | undefined;
@@ -155,6 +158,7 @@ export function JobTemplateEditorScreen() {
 
   return (
     <View style={styles.container}>
+      <GridBackground />
       <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
         <WebContainer>
           <TextInput
@@ -188,7 +192,7 @@ export function JobTemplateEditorScreen() {
                 <View key={i} style={styles.keywordChip}>
                   <Text style={styles.keywordChipText}>{kw}</Text>
                   <Pressable onPress={() => setKeywords(prev => prev.filter((_, idx) => idx !== i))} hitSlop={8}>
-                    <MaterialCommunityIcons name="close-circle" size={16} color={colors.textMuted} />
+                    <MaterialCommunityIcons name="close-circle" size={16} color={themeColors.textMuted} />
                   </Pressable>
                 </View>
               ))}
@@ -224,7 +228,7 @@ export function JobTemplateEditorScreen() {
                 if (suggested.length > 0) setKeywords(suggested);
               }}
             >
-              <MaterialCommunityIcons name="lightbulb-outline" size={16} color={colors.primary} />
+              <MaterialCommunityIcons name="lightbulb-outline" size={16} color={themeColors.accentText} />
               <Text style={styles.keywordSuggestText}>Suggest from name</Text>
             </TouchableOpacity>
           )}
@@ -269,7 +273,7 @@ export function JobTemplateEditorScreen() {
           })}
 
           <TouchableOpacity style={styles.addMaterialBtn} onPress={handleAddMaterial}>
-            <MaterialCommunityIcons name="plus" size={18} color={colors.primary} />
+            <MaterialCommunityIcons name="plus" size={18} color={themeColors.accentText} />
             <Text style={styles.addMaterialBtnText}>Add Material</Text>
           </TouchableOpacity>
 
@@ -353,10 +357,10 @@ export function JobTemplateEditorScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
   },
   scrollContent: {
     padding: 16,
@@ -375,12 +379,12 @@ const styles = StyleSheet.create({
   sectionLine: {
     flex: 1,
     height: 1,
-    backgroundColor: colors.border,
+    backgroundColor: t.colors.border,
   },
   sectionHeaderTitle: {
     fontSize: 13,
     fontWeight: '600',
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     textTransform: 'uppercase',
     letterSpacing: 0.8,
   },
@@ -393,13 +397,13 @@ const styles = StyleSheet.create({
     marginTop: 4,
     borderRadius: 10,
     borderWidth: 1.5,
-    borderColor: colors.primary,
+    borderColor: t.colors.accent,
     borderStyle: 'dashed',
   },
   addMaterialBtnText: {
     fontSize: 14,
     fontWeight: '600',
-    color: colors.primary,
+    color: t.colors.accentText,
   },
   subtotalRow: {
     flexDirection: 'row',
@@ -411,12 +415,12 @@ const styles = StyleSheet.create({
   subtotalLabel: {
     fontSize: 14,
     fontWeight: '600',
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
   subtotalValue: {
     fontSize: 16,
     fontWeight: '700',
-    color: colors.primary,
+    color: t.colors.money,
   },
   unitToggleRow: {
     flexDirection: 'row',
@@ -428,20 +432,20 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
+    borderColor: t.colors.border,
+    backgroundColor: t.colors.surfaceRaised,
   },
   unitBtnActive: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
+    backgroundColor: t.colors.accent,
+    borderColor: t.colors.accent,
   },
   unitBtnText: {
     fontSize: 14,
     fontWeight: '500',
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
   unitBtnTextActive: {
-    color: '#FFFFFF',
+    color: t.colors.onAccent,
   },
   laborRow: {
     flexDirection: 'row',
@@ -452,7 +456,7 @@ const styles = StyleSheet.create({
   },
   keywordHelpText: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginBottom: 8,
   },
   keywordChipsRow: {
@@ -468,14 +472,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 16,
-    backgroundColor: colors.surfaceDark,
+    backgroundColor: t.colors.surface,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
   },
   keywordChipText: {
     fontSize: 13,
     fontWeight: '500',
-    color: colors.text,
+    color: t.colors.text,
   },
   keywordSuggestBtn: {
     flexDirection: 'row',
@@ -488,6 +492,6 @@ const styles = StyleSheet.create({
   keywordSuggestText: {
     fontSize: 13,
     fontWeight: '500',
-    color: colors.primary,
+    color: t.colors.accentText,
   },
-});
+}));

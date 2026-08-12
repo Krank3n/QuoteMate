@@ -43,7 +43,14 @@ vi.mock('../store/useStore', () => ({
 }));
 
 import { JobCard } from './JobCard';
-import { stageMetaFor, JOB_STAGE_META } from './JobStageSheet';
+import { stageMetaFor, jobStageMetaFor } from './JobStageSheet';
+import type { Tokens } from '../theme';
+
+// The stage map is now built from the active theme's tokens rather than being
+// a module-scope constant, so these tests supply a palette. Colour values are
+// irrelevant here — the assertions are about stage lookup and fallback.
+const palette = new Proxy({}, { get: () => '#000000' }) as unknown as Tokens;
+const META = jobStageMetaFor(palette);
 
 // The exact shape the syncJobAggregates race left behind (copied from the
 // affected user's Firestore doc) — no id, stage, name, or createdAt.
@@ -57,16 +64,19 @@ const ghostJob = {
 } as unknown as Job;
 
 describe('stageMetaFor', () => {
+  // toEqual rather than toBe: each call builds a fresh map from the tokens,
+  // so identity no longer holds. The behaviour under test — which entry gets
+  // selected — is unchanged.
   it('falls back to inquiry meta for a missing stage', () => {
-    expect(stageMetaFor(undefined)).toBe(JOB_STAGE_META.inquiry);
+    expect(stageMetaFor(undefined, palette)).toEqual(META.inquiry);
   });
 
   it('falls back to inquiry meta for an unknown stage value', () => {
-    expect(stageMetaFor('bogus' as never)).toBe(JOB_STAGE_META.inquiry);
+    expect(stageMetaFor('bogus' as never, palette)).toEqual(META.inquiry);
   });
 
   it('returns the real meta for a known stage', () => {
-    expect(stageMetaFor('cancelled')).toBe(JOB_STAGE_META.cancelled);
+    expect(stageMetaFor('cancelled', palette)).toEqual(META.cancelled);
   });
 });
 

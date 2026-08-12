@@ -7,7 +7,7 @@ import React from 'react';
 import { View, StyleSheet, Animated, TouchableOpacity } from 'react-native';
 import { Text } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { colors } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 
 export interface OnboardingStep {
   id: number;
@@ -42,6 +42,8 @@ export function OnboardingProgress({
   onStepPress,
   isStepReachable,
 }: OnboardingProgressProps) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const progressPercentage = ((currentStep - 1) / (totalSteps - 1)) * 100;
 
   return (
@@ -99,7 +101,7 @@ export function OnboardingProgress({
                   <MaterialCommunityIcons
                     name="check"
                     size={16}
-                    color={colors.surface}
+                    color={themeColors.surfaceRaised}
                   />
                 ) : (
                   <MaterialCommunityIcons
@@ -107,10 +109,10 @@ export function OnboardingProgress({
                     size={16}
                     color={
                       isCurrent
-                        ? colors.surface
+                        ? themeColors.surfaceRaised
                         : isUpcoming
-                        ? colors.textMuted
-                        : colors.surface
+                        ? themeColors.textMuted
+                        : themeColors.surfaceRaised
                     }
                   />
                 )}
@@ -137,14 +139,14 @@ export function OnboardingProgress({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   container: {
     paddingVertical: 20,
     paddingHorizontal: 16,
   },
   progressBarContainer: {
     height: 4,
-    backgroundColor: colors.surfaceLight,
+    backgroundColor: t.colors.surfaceOverlay,
     borderRadius: 2,
     overflow: 'hidden',
     marginBottom: 20,
@@ -155,11 +157,11 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: colors.surfaceLight,
+    backgroundColor: t.colors.surfaceOverlay,
   },
   progressBarFill: {
     height: '100%',
-    backgroundColor: colors.primary,
+    backgroundColor: t.colors.accent,
     borderRadius: 2,
   },
   stepsContainer: {
@@ -180,38 +182,38 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   stepCircleComplete: {
-    backgroundColor: colors.primary,
+    backgroundColor: t.colors.accent,
   },
   stepCircleCurrent: {
-    backgroundColor: colors.primary,
-    shadowColor: colors.primary,
+    backgroundColor: t.colors.accent,
+    shadowColor: t.colors.accent,
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.4,
     shadowRadius: 8,
     elevation: 4,
   },
   stepCircleUpcoming: {
-    backgroundColor: colors.surfaceLight,
+    backgroundColor: t.colors.surfaceOverlay,
     borderWidth: 2,
-    borderColor: colors.outline,
+    borderColor: t.colors.borderStrong,
   },
   stepLabel: {
     fontSize: 11,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
     textAlign: 'center',
   },
   stepLabelCurrent: {
-    color: colors.primary,
+    color: t.colors.accentText,
     fontWeight: '700',
   },
   stepLabelUpcoming: {
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
   stepCounter: {
     fontSize: 13,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     textAlign: 'center',
     marginTop: 8,
   },
-});
+}));

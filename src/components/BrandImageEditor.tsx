@@ -17,7 +17,7 @@ import { View, StyleSheet, TouchableOpacity } from 'react-native';
 import { Text } from 'react-native-paper';
 import * as ImagePicker from 'expo-image-picker';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { colors } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 import { LogoCropper } from './LogoCropper';
 import { LogoPreviewCard } from './LogoPreviewCard';
 import {
@@ -63,6 +63,8 @@ export function BrandImageEditor({
   onLockedPress,
   disabled,
 }: BrandImageEditorProps) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const [pending, setPending] = useState<{ uri: string; mimeType?: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -200,7 +202,7 @@ export function BrandImageEditor({
           <MaterialCommunityIcons
             name={locked ? 'lock-outline' : 'image-plus'}
             size={40}
-            color={locked ? colors.textMuted : colors.primary}
+            color={locked ? themeColors.textMuted : themeColors.accent}
           />
           <Text style={styles.emptyTitle}>{emptyTitle}</Text>
           {!!emptyHint && <Text style={styles.emptyHint}>{emptyHint}</Text>}
@@ -219,11 +221,11 @@ export function BrandImageEditor({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   empty: {
     borderWidth: 1,
     borderStyle: 'dashed',
-    borderColor: colors.border,
+    borderColor: t.colors.border,
     borderRadius: 10,
     paddingVertical: 26,
     alignItems: 'center',
@@ -234,16 +236,16 @@ const styles = StyleSheet.create({
     marginTop: 8,
     fontSize: 14,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
   },
   emptyHint: {
     marginTop: 2,
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
   error: {
     marginTop: 8,
     fontSize: 12,
-    color: colors.error,
+    color: t.colors.error,
   },
-});
+}));

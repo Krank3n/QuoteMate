@@ -39,12 +39,15 @@ import * as Crypto from 'expo-crypto';
 
 import { useStore } from '../../store/useStore';
 import { auth, db } from '../../config/firebase';
-import { colors } from '../../theme';
+import { makeStyles, useThemeColors } from '../../theme';
 import { WebContainer } from '../../components/WebContainer';
 import { AlertModal } from '../../components/AlertModal';
 import { updateEmailPreferences } from '../../services/emailService';
+import { GridBackground } from '../../components/GridBackground';
 
 export function AccountSettingsScreen() {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const { clearAllData } = useStore();
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false);
@@ -310,6 +313,7 @@ export function AccountSettingsScreen() {
 
   return (
     <View style={styles.container}>
+      <GridBackground />
       <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.scrollContent}>
         <WebContainer>
           {currentUser && (
@@ -317,7 +321,7 @@ export function AccountSettingsScreen() {
               <Title style={styles.sectionTitle}>Account Details</Title>
 
               <View style={styles.userInfo}>
-                <MaterialCommunityIcons name="account-circle" size={56} color={colors.primary} />
+                <MaterialCommunityIcons name="account-circle" size={56} color={themeColors.accentText} />
                 <View style={styles.userDetails}>
                   <Text style={styles.userEmail}>{currentUser.email}</Text>
                   <Text style={styles.userIdText}>User ID: {currentUser.uid.slice(0, 12)}...</Text>
@@ -334,10 +338,10 @@ export function AccountSettingsScreen() {
                 <Text style={styles.prefTitle}>Transactional emails</Text>
                 <Text style={styles.prefDescription}>Quote responses, payment alerts, subscription updates</Text>
               </View>
-              <Switch value={true} disabled={true} trackColor={{ true: colors.primary + '80' }} />
+              <Switch value={true} disabled={true} trackColor={{ true: themeColors.accentSubtle }} />
             </View>
 
-            <View style={[styles.prefRow, { borderTopWidth: 1, borderTopColor: colors.outline + '20', paddingTop: 12 }]}>
+            <View style={[styles.prefRow, { borderTopWidth: 1, borderTopColor: themeColors.border, paddingTop: 12 }]}>
               <View style={styles.prefTextContainer}>
                 <Text style={styles.prefTitle}>Marketing emails</Text>
                 <Text style={styles.prefDescription}>Tips, feature updates, and re-engagement</Text>
@@ -346,8 +350,8 @@ export function AccountSettingsScreen() {
                 value={marketingEmails}
                 onValueChange={handleToggleMarketing}
                 disabled={emailPrefsLoading}
-                trackColor={{ false: colors.outline, true: colors.primary + '80' }}
-                thumbColor={marketingEmails ? colors.primary : '#f4f3f4'}
+                trackColor={{ false: themeColors.borderStrong, true: themeColors.accentSubtle }}
+                thumbColor={marketingEmails ? themeColors.accent : '#f4f3f4'}
               />
             </View>
           </Surface>
@@ -360,8 +364,8 @@ export function AccountSettingsScreen() {
               onPress={handleLogout}
               style={styles.logoutButton}
               icon="logout"
-              textColor={colors.error}
-              buttonColor={colors.surface}
+              textColor={themeColors.error}
+              buttonColor={themeColors.surfaceRaised}
             >
               Sign Out
             </Button>
@@ -376,7 +380,7 @@ export function AccountSettingsScreen() {
                 onPress={handleDeleteAccount}
                 style={styles.deleteAccountButton}
                 icon="delete-forever"
-                textColor={colors.error}
+                textColor={themeColors.error}
               >
                 Delete Account
               </Button>
@@ -448,7 +452,7 @@ export function AccountSettingsScreen() {
               onPress={submitPasswordReauth}
               loading={reauthLoading}
               disabled={reauthLoading}
-              buttonColor={colors.error}
+              buttonColor={themeColors.error}
             >
               Delete Account
             </Button>
@@ -473,10 +477,10 @@ export function AccountSettingsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
   },
   scrollContent: {
     padding: 16,
@@ -487,7 +491,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     borderRadius: 12,
     elevation: 2,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
   },
   sectionTitle: {
     fontSize: 18,
@@ -506,32 +510,32 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontWeight: '600',
     marginBottom: 4,
-    color: colors.text,
+    color: t.colors.text,
   },
   userIdText: {
     fontSize: 13,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
   },
   logoutButton: {
-    borderColor: colors.error,
+    borderColor: t.colors.error,
     borderWidth: 1.5,
     paddingVertical: 4,
     marginBottom: 24,
   },
   dangerZone: {
     borderTopWidth: 1,
-    borderTopColor: colors.outline + '30',
+    borderTopColor: t.colors.border,
     paddingTop: 20,
   },
   dangerTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: colors.error,
+    color: t.colors.error,
     marginBottom: 8,
   },
   dangerDescription: {
     fontSize: 14,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     marginBottom: 16,
     lineHeight: 20,
   },
@@ -551,16 +555,16 @@ const styles = StyleSheet.create({
   prefTitle: {
     fontSize: 15,
     fontWeight: '500',
-    color: colors.text,
+    color: t.colors.text,
     marginBottom: 2,
   },
   prefDescription: {
     fontSize: 13,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     lineHeight: 18,
   },
   passwordModal: {
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     marginHorizontal: 24,
     padding: 24,
     borderRadius: 12,
@@ -572,15 +576,15 @@ const styles = StyleSheet.create({
   },
   passwordModalMessage: {
     fontSize: 14,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     lineHeight: 20,
     marginBottom: 16,
   },
   passwordInput: {
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
   },
   passwordModalError: {
-    color: colors.error,
+    color: t.colors.error,
     fontSize: 13,
     marginTop: 8,
   },
@@ -590,4 +594,4 @@ const styles = StyleSheet.create({
     gap: 8,
     marginTop: 20,
   },
-});
+}));

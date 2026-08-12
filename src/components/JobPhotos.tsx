@@ -19,7 +19,7 @@ import {
 import { Text } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import * as ImagePicker from 'expo-image-picker';
-import { colors } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 import { QuotePhoto } from '../types';
 import { uploadQuotePhoto, deleteQuotePhoto } from '../services/photoService';
 import { detectIsPlan } from '../services/planDetection';
@@ -56,6 +56,8 @@ interface JobPhotosProps {
 }
 
 export function JobPhotos({ photos, onPhotosChange, hideHeader }: JobPhotosProps) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const [localPhotos, setLocalPhotos] = useState<LocalPhoto[]>([]);
   const [annotatingPhoto, setAnnotatingPhoto] = useState<LocalPhoto | null>(null);
   const [photoSheetVisible, setPhotoSheetVisible] = useState(false);
@@ -387,7 +389,7 @@ export function JobPhotos({ photos, onPhotosChange, hideHeader }: JobPhotosProps
             onPress={showAddOptions}
             disabled={hasAnyUploading}
           >
-            <MaterialCommunityIcons name="camera-plus" size={28} color={colors.textMuted} />
+            <MaterialCommunityIcons name="camera-plus" size={28} color={themeColors.textMuted} />
             <Text style={styles.addText}>Add</Text>
           </TouchableOpacity>
         )}
@@ -440,7 +442,7 @@ export function JobPhotos({ photos, onPhotosChange, hideHeader }: JobPhotosProps
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   container: {
     marginTop: 16,
     marginBottom: 8,
@@ -454,16 +456,16 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 14,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
   },
   optional: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     fontStyle: 'italic',
   },
   hint: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginBottom: 12,
   },
   grid: {
@@ -478,7 +480,7 @@ const styles = StyleSheet.create({
     width: 90,
     height: 90,
     borderRadius: 10,
-    backgroundColor: colors.surfaceLight,
+    backgroundColor: t.colors.surfaceOverlay,
   },
   uploadingOverlay: {
     ...StyleSheet.absoluteFillObject,
@@ -500,7 +502,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     bottom: 4,
     left: 4,
-    backgroundColor: colors.primary,
+    backgroundColor: t.colors.accent,
     borderRadius: 10,
     paddingHorizontal: 4,
     paddingVertical: 2,
@@ -509,7 +511,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: -6,
     right: -6,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderRadius: 11,
   },
   addButton: {
@@ -518,10 +520,10 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     borderWidth: 1.5,
     borderStyle: 'dashed',
-    borderColor: colors.surfaceLight,
+    borderColor: t.colors.surfaceOverlay,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
   },
   addButtonEmpty: {
     width: '100%',
@@ -529,7 +531,7 @@ const styles = StyleSheet.create({
   },
   addText: {
     fontSize: 11,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginTop: 4,
   },
-});
+}));

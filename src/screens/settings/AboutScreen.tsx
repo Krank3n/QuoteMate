@@ -20,8 +20,9 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import Constants from 'expo-constants';
 import { LinearGradient } from 'expo-linear-gradient';
 
-import { colors } from '../../theme';
+import { makeStyles, useThemeColors } from '../../theme';
 import { WebContainer } from '../../components/WebContainer';
+import { GridBackground } from '../../components/GridBackground';
 
 const features = [
   { icon: 'robot' as const, text: 'AI-powered job analysis' },
@@ -49,6 +50,8 @@ const supportLinks = [
 ];
 
 export function AboutScreen() {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const appVersion = Constants.expoConfig?.version || '1.0.0';
   const buildNumber = Constants.expoConfig?.ios?.buildNumber || Constants.expoConfig?.android?.versionCode || '1';
 
@@ -58,11 +61,12 @@ export function AboutScreen() {
 
   return (
     <View style={styles.container}>
+      <GridBackground />
       <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.scrollContent}>
         <WebContainer>
           {/* Hero Section */}
           <LinearGradient
-            colors={['#064E3B', '#0F172A']}
+            colors={[themeColors.surfaceRaised, themeColors.bg]}
             start={{ x: 0.5, y: 0 }}
             end={{ x: 0.5, y: 1 }}
             style={styles.heroGradient}
@@ -97,7 +101,7 @@ export function AboutScreen() {
                     <MaterialCommunityIcons
                       name={feature.icon}
                       size={22}
-                      color={colors.primary}
+                      color={themeColors.accentText}
                     />
                   </View>
                   <Text style={styles.featureText}>{feature.text}</Text>
@@ -124,14 +128,14 @@ export function AboutScreen() {
                   <MaterialCommunityIcons
                     name={link.icon}
                     size={18}
-                    color={colors.primary}
+                    color={themeColors.accentText}
                   />
                 </View>
                 <Text style={styles.linkText}>{link.text}</Text>
                 <MaterialCommunityIcons
                   name="chevron-right"
                   size={20}
-                  color={colors.placeholder}
+                  color={themeColors.textDisabled}
                 />
               </TouchableOpacity>
             ))}
@@ -152,10 +156,10 @@ export function AboutScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
   },
   scrollContent: {
     paddingBottom: 32,
@@ -180,36 +184,36 @@ const styles = StyleSheet.create({
   appName: {
     fontSize: 32,
     fontWeight: '800',
-    color: '#FFFFFF',
+    color: t.colors.text,
     letterSpacing: 0.5,
   },
   tagline: {
     fontSize: 15,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     marginTop: 4,
     letterSpacing: 0.3,
   },
   versionBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    backgroundColor: t.colors.surfaceOverlay,
     paddingHorizontal: 14,
     paddingVertical: 6,
     borderRadius: 20,
     marginTop: 20,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.06)',
+    borderColor: t.colors.border,
   },
   versionBadgeText: {
     fontSize: 13,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     fontWeight: '500',
   },
   versionDot: {
     width: 4,
     height: 4,
     borderRadius: 2,
-    backgroundColor: colors.primary,
+    backgroundColor: t.colors.accent,
     marginHorizontal: 8,
   },
 
@@ -220,17 +224,17 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     borderRadius: 16,
     elevation: 2,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
   },
   sectionTitle: {
     fontSize: 17,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
     marginBottom: 10,
   },
   description: {
     fontSize: 14,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     lineHeight: 21,
     marginBottom: 20,
   },
@@ -242,7 +246,7 @@ const styles = StyleSheet.create({
   featureCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.surfaceGray3,
+    backgroundColor: t.colors.surfacePressed,
     borderRadius: 12,
     padding: 14,
   },
@@ -250,7 +254,7 @@ const styles = StyleSheet.create({
     width: 38,
     height: 38,
     borderRadius: 10,
-    backgroundColor: colors.primaryBg,
+    backgroundColor: t.colors.accentSubtle,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
@@ -258,7 +262,7 @@ const styles = StyleSheet.create({
   featureText: {
     fontSize: 14,
     fontWeight: '500',
-    color: colors.text,
+    color: t.colors.text,
     flex: 1,
   },
 
@@ -268,7 +272,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 14,
     borderBottomWidth: 1,
-    borderBottomColor: colors.outline + '15',
+    borderBottomColor: t.colors.border,
   },
   linkRowLast: {
     borderBottomWidth: 0,
@@ -277,7 +281,7 @@ const styles = StyleSheet.create({
     width: 34,
     height: 34,
     borderRadius: 8,
-    backgroundColor: colors.primaryBg,
+    backgroundColor: t.colors.accentSubtle,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
@@ -285,7 +289,7 @@ const styles = StyleSheet.create({
   linkText: {
     flex: 1,
     fontSize: 15,
-    color: colors.text,
+    color: t.colors.text,
   },
 
   // Footer
@@ -296,10 +300,10 @@ const styles = StyleSheet.create({
   },
   madeWith: {
     fontSize: 13,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
   },
   copyright: {
     fontSize: 12,
-    color: colors.placeholder,
+    color: t.colors.textDisabled,
   },
-});
+}));

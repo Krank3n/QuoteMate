@@ -28,7 +28,7 @@ import { useStore } from '../../store/useStore';
 import { useDocumentMode } from '../../utils/documentMode';
 import { ensureSquareConnectedForPayment } from '../../utils/quoteDeliveryGuard';
 import { warmEmailDraft } from '../../utils/emailDraft';
-import { colors } from '../../theme';
+import { makeStyles, useThemeColors } from '../../theme';
 import { previewDocumentPDF } from '../../utils/pdfGenerator';
 // until the user actually requests a PDF preview.
 import { quoteToDocument, invoiceToDocument } from '../../types/documentAdapter';
@@ -49,7 +49,7 @@ import {
   MaterialsSection,
   LaborSection,
   TotalsSection,
-  documentStyles,
+  useDocumentStyles,
 } from '../../components/document';
 import {
   InvoiceDisplaySettings,
@@ -63,8 +63,12 @@ import {
 // finished a sendable quote, got a "done deal" celebration, and never sent.
 import { pickSuccessMessage } from './jobPreviewCopy';
 import { buildPreviewQuoteSave } from './previewQuoteSave';
+import { GridBackground } from '../../components/GridBackground';
 
 export function JobPreviewScreen() {
+  const styles = useStyles();
+  const documentStyles = useDocumentStyles();
+  const themeColors = useThemeColors();
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const mode = useDocumentMode();
@@ -470,8 +474,10 @@ export function JobPreviewScreen() {
       style={styles.outerContainer}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <ScrollView
-        style={styles.container}
+      <View style={styles.gridHost}>
+    <GridBackground />
+    <ScrollView
+        style={styles.scroller}
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
       >
@@ -508,18 +514,18 @@ export function JobPreviewScreen() {
                     <MaterialCommunityIcons
                       name={(liveIsInvoice ? 'receipt' : 'file-document-outline') as any}
                       size={14}
-                      color={colors.primary}
+                      color={themeColors.accentText}
                     />
                     <Text style={styles.quoteNumber}>
                       {refNumber || predictedRefNumber}
                     </Text>
                   </View>
-                  <MaterialCommunityIcons name="pencil-outline" size={12} color={colors.textMuted} />
+                  <MaterialCommunityIcons name="pencil-outline" size={12} color={themeColors.textMuted} />
                 </TouchableOpacity>
               )}
             </View>
             <View style={styles.headerDateBadge}>
-              <MaterialCommunityIcons name="calendar-outline" size={13} color={colors.textMuted} />
+              <MaterialCommunityIcons name="calendar-outline" size={13} color={themeColors.textMuted} />
               <Text style={styles.quoteDate}>
                 {new Date(workingDoc.createdAt).toLocaleDateString('en-AU', {
                   day: 'numeric',
@@ -544,7 +550,7 @@ export function JobPreviewScreen() {
                       <MaterialCommunityIcons
                         name={'clock-outline' as any}
                         size={14}
-                        color={colors.textMuted}
+                        color={themeColors.textMuted}
                       />
                       <Text style={styles.paymentTermsLabel}>Payment terms</Text>
                     </View>
@@ -558,7 +564,7 @@ export function JobPreviewScreen() {
                       <MaterialCommunityIcons
                         name="chevron-down"
                         size={16}
-                        color={colors.primary}
+                        color={themeColors.accentText}
                       />
                     </View>
                   </TouchableOpacity>
@@ -713,8 +719,8 @@ export function JobPreviewScreen() {
         <Surface style={documentStyles.section}>
           <View style={documentStyles.sectionHeader}>
             <View style={documentStyles.sectionHeaderLeft}>
-              <View style={[documentStyles.sectionIconCircle, { backgroundColor: colors.infoBg }]}>
-                <MaterialCommunityIcons name="note-text-outline" size={18} color={colors.info} />
+              <View style={[documentStyles.sectionIconCircle, { backgroundColor: themeColors.infoSubtle }]}>
+                <MaterialCommunityIcons name="note-text-outline" size={18} color={themeColors.info} />
               </View>
               <Title style={documentStyles.sectionTitle}>Notes (Optional)</Title>
             </View>
@@ -740,18 +746,19 @@ export function JobPreviewScreen() {
           ]}
         >
           {isPdfLoading ? (
-            <ActivityIndicator size="small" color={colors.primary} />
+            <ActivityIndicator size="small" color={themeColors.accentText} />
           ) : (
             <MaterialCommunityIcons
               name={'file-eye-outline' as any}
               size={16}
-              color={colors.primary}
+              color={themeColors.accentText}
             />
           )}
           <Text style={styles.previewButtonLabel}>Preview PDF</Text>
         </Pressable>
         </WebContainer>
       </ScrollView>
+    </View>
 
       <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
         <View style={styles.bottomButtonsRow}>
@@ -856,7 +863,7 @@ export function JobPreviewScreen() {
                   { transform: [{ scale: checkScale }] },
                 ]}
               >
-                <MaterialCommunityIcons name="check" size={36} color={colors.white} />
+                <MaterialCommunityIcons name="check" size={36} color={themeColors.onAccent} />
               </Animated.View>
               <Text style={styles.successBannerText}>{successMsg.title}</Text>
               <Animated.Text style={[styles.successSubtext, { opacity: subtitleOpacity }]}>
@@ -870,19 +877,21 @@ export function JobPreviewScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   outerContainer: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
     ...(Platform.OS === 'web' && {
       maxHeight: '100vh' as any,
       display: 'flex' as any,
       flexDirection: 'column' as any,
     }),
   },
+  gridHost: { flex: 1, backgroundColor: t.colors.bg },
+  scroller: { flex: 1, backgroundColor: 'transparent' },
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
   },
   scrollContent: {
     padding: 16,
@@ -911,31 +920,31 @@ const styles = StyleSheet.create({
     width: 72,
     height: 72,
     borderRadius: 36,
-    backgroundColor: colors.success,
+    backgroundColor: t.colors.money,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 16,
     ...Platform.select({
       android: { elevation: 8 },
       ios: {
-        shadowColor: colors.success,
+        shadowColor: t.colors.money,
         shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.4,
         shadowRadius: 12,
       },
-      web: { boxShadow: `0 4px 20px ${colors.success}66` },
+      web: { boxShadow: `0 4px 20px ${t.colors.money}66` },
     }),
   },
   successBannerText: {
     fontSize: 26,
     fontWeight: '800',
-    color: colors.white,
+    color: t.colors.alwaysLight,
     textAlign: 'center',
     letterSpacing: 0.5,
   },
   successSubtext: {
     fontSize: 15,
-    color: 'rgba(255,255,255,0.7)',
+    color: t.colors.alwaysLight,
     textAlign: 'center',
     marginTop: 6,
   },
@@ -944,11 +953,11 @@ const styles = StyleSheet.create({
     padding: 14,
     borderRadius: 14,
     elevation: 2,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
   },
   headerCardDivider: {
     height: 1,
-    backgroundColor: colors.border,
+    backgroundColor: t.colors.border,
     opacity: 0.6,
     marginTop: 14,
     marginBottom: 2,
@@ -966,7 +975,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: colors.primaryBg,
+    backgroundColor: t.colors.accentSubtle,
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 8,
@@ -975,7 +984,7 @@ const styles = StyleSheet.create({
   quoteNumber: {
     fontSize: 13,
     fontWeight: '700',
-    color: colors.primary,
+    color: t.colors.accentText,
   },
   quoteNumberTouchable: {
     flexDirection: 'row',
@@ -995,7 +1004,7 @@ const styles = StyleSheet.create({
   },
   quoteDate: {
     fontSize: 13,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
   notesInput: {
     textAlignVertical: 'top',
@@ -1005,7 +1014,7 @@ const styles = StyleSheet.create({
     marginTop: 10,
     paddingTop: 10,
     borderTopWidth: 1,
-    borderTopColor: colors.border,
+    borderTopColor: t.colors.border,
     gap: 8,
   },
   paymentTermsSelector: {
@@ -1021,13 +1030,13 @@ const styles = StyleSheet.create({
   },
   paymentTermsLabel: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     fontWeight: '600',
   },
   paymentTermsValue: {
     fontSize: 13,
     fontWeight: '700',
-    color: colors.primary,
+    color: t.colors.accentText,
   },
   customDaysInput: {
     marginTop: 4,
@@ -1039,10 +1048,10 @@ const styles = StyleSheet.create({
   },
   dateMeta: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
   dueDateMeta: {
-    color: colors.text,
+    color: t.colors.text,
     fontWeight: '600',
   },
   previewButton: {
@@ -1052,9 +1061,9 @@ const styles = StyleSheet.create({
     gap: 6,
     paddingVertical: 10,
     borderRadius: 10,
-    backgroundColor: colors.primaryBg,
+    backgroundColor: t.colors.accentSubtle,
     borderWidth: 1,
-    borderColor: colors.primary + '33',
+    borderColor: t.colors.accentSubtle,
     marginBottom: 16,
   },
   previewButtonPressed: {
@@ -1066,16 +1075,16 @@ const styles = StyleSheet.create({
   previewButtonLabel: {
     fontSize: 13,
     fontWeight: '700',
-    color: colors.primary,
+    color: t.colors.accentText,
   },
   bottomBar: {
     flexDirection: 'column',
     paddingHorizontal: 16,
     paddingTop: 10,
     gap: 8,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderTopWidth: 1,
-    borderTopColor: colors.border,
+    borderTopColor: t.colors.border,
     ...Platform.select({
       ios: {
         shadowColor: '#000',
@@ -1120,8 +1129,8 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   headerDoneLabel: {
-    color: colors.white,
+    color: t.colors.alwaysLight,
     fontSize: 16,
     fontWeight: '600',
   },
-});
+}));

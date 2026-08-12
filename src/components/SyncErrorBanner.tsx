@@ -14,9 +14,11 @@ import { Text, Surface } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
 import { useStore } from '../store/useStore';
-import { colors } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 
 export function SyncErrorBanner() {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const lastSyncError = useStore((s) => s.lastSyncError);
   const clearSyncError = useStore((s) => s.clearSyncError);
 
@@ -34,7 +36,7 @@ export function SyncErrorBanner() {
       <MaterialCommunityIcons
         name="cloud-off-outline"
         size={22}
-        color={colors.warning}
+        color={themeColors.warning}
         style={styles.icon}
       />
       <View style={styles.body}>
@@ -48,23 +50,23 @@ export function SyncErrorBanner() {
         accessibilityLabel="Dismiss sync warning"
         hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
       >
-        <MaterialCommunityIcons name="close" size={20} color={colors.textMuted} />
+        <MaterialCommunityIcons name="close" size={20} color={themeColors.textMuted} />
       </TouchableOpacity>
     </Surface>
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   banner: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.warningBg,
+    backgroundColor: t.colors.warningSubtle,
     borderRadius: 12,
     padding: 12,
     marginHorizontal: 16,
     marginBottom: 12,
     borderWidth: 1,
-    borderColor: colors.warning,
+    borderColor: t.colors.warning,
   },
   icon: {
     marginRight: 12,
@@ -74,13 +76,13 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   title: {
-    color: colors.text,
+    color: t.colors.text,
     fontSize: 14,
     fontWeight: '600',
     marginBottom: 2,
   },
   subtitle: {
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     fontSize: 12,
   },
-});
+}));

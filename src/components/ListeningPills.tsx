@@ -2,7 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { LayoutAnimation, Platform, ScrollView, StyleSheet, UIManager, View } from 'react-native';
 import { Text } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { colors } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 import { PillSpec } from '../data/nichePills';
 import { PillState } from '../hooks/usePillMatcher';
 
@@ -23,6 +23,8 @@ interface ListeningPillsProps {
  * remaining items keep their labels and stay readable without scrolling.
  */
 export function ListeningPills({ pills, state }: ListeningPillsProps) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   if (pills.length === 0) return null;
 
   return (
@@ -45,6 +47,8 @@ interface PillProps {
 }
 
 function Pill({ label, active }: PillProps) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const prevActive = useRef(active);
 
   useEffect(() => {
@@ -57,8 +61,8 @@ function Pill({ label, active }: PillProps) {
     );
   }, [active]);
 
-  const backgroundColor = active ? colors.primary : colors.surfaceGray2;
-  const borderColor = active ? colors.primary : colors.border;
+  const backgroundColor = active ? themeColors.accent : themeColors.surfaceOverlay;
+  const borderColor = active ? themeColors.accent : themeColors.border;
 
   return (
     <View
@@ -72,11 +76,11 @@ function Pill({ label, active }: PillProps) {
       <MaterialCommunityIcons
         name={active ? 'check-circle' : 'checkbox-blank-circle-outline'}
         size={12}
-        color={active ? colors.white : colors.textSecondary}
+        color={active ? themeColors.alwaysLight : themeColors.textMuted}
         style={!active && styles.iconWithLabel}
       />
       {!active && (
-        <Text style={[styles.label, { color: colors.textSecondary }]}>
+        <Text style={[styles.label, { color: themeColors.textMuted }]}>
           {label}
         </Text>
       )}
@@ -84,7 +88,7 @@ function Pill({ label, active }: PillProps) {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   scroll: {
     marginBottom: 8,
   },
@@ -113,4 +117,4 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     lineHeight: 14,
   },
-});
+}));

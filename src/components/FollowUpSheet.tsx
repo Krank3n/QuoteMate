@@ -22,7 +22,7 @@ import * as Clipboard from 'expo-clipboard';
 
 import type { Document } from '../types/document';
 import { documentToQuote, documentToInvoice } from '../types/documentAdapter';
-import { colors } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 import { BottomSheet } from './BottomSheet';
 import { selectionTap, lightTap } from '../utils/haptics';
 import { ensureCanDeliver } from '../utils/quoteDeliveryGuard';
@@ -103,6 +103,8 @@ export function FollowUpSheet({
   jobName,
   tone,
 }: FollowUpSheetProps) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const navigation = useNavigation<any>();
   const payLink = useMemo(() => resolvePayLink(doc), [doc]);
   const message = useMemo(
@@ -328,7 +330,7 @@ export function FollowUpSheet({
             <MaterialCommunityIcons
               name={(IS_WEB ? 'content-copy' : 'share-variant') as any}
               size={14}
-              color={colors.primary}
+              color={themeColors.accentText}
             />
             <Text style={styles.copyMessageLabel}>
               {IS_WEB ? 'Copy message' : 'Share message'}
@@ -392,6 +394,8 @@ function Row({
   disabled?: boolean;
   rightAccessory?: React.ReactNode;
 }) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   return (
     <Pressable
       onPress={onPress}
@@ -406,11 +410,11 @@ function Row({
         <MaterialCommunityIcons
           name={icon as any}
           size={20}
-          color={disabled ? colors.inactive : colors.primary}
+          color={disabled ? themeColors.textDisabled : themeColors.accent}
         />
       </View>
       <View style={styles.rowBody}>
-        <Text style={[styles.rowLabel, disabled && { color: colors.inactive }]}>{label}</Text>
+        <Text style={[styles.rowLabel, disabled && { color: themeColors.textDisabled }]}>{label}</Text>
         {sub ? <Text style={styles.rowSub}>{sub}</Text> : null}
       </View>
       {rightAccessory !== undefined ? (
@@ -419,14 +423,14 @@ function Row({
         <MaterialCommunityIcons
           name={'chevron-right' as any}
           size={20}
-          color={colors.inactive}
+          color={themeColors.textDisabled}
         />
       )}
     </Pressable>
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   container: {
     gap: 10,
     paddingBottom: 8,
@@ -434,21 +438,21 @@ const styles = StyleSheet.create({
   preview: {
     padding: 12,
     borderRadius: 12,
-    backgroundColor: colors.surfaceGray3,
+    backgroundColor: t.colors.surfacePressed,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
     gap: 6,
   },
   previewLabel: {
     fontSize: 11,
     fontWeight: '700',
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
   previewBody: {
     fontSize: 13,
-    color: colors.text,
+    color: t.colors.text,
     lineHeight: 18,
   },
   copyMessage: {
@@ -461,7 +465,7 @@ const styles = StyleSheet.create({
   copyMessageLabel: {
     fontSize: 12,
     fontWeight: '700',
-    color: colors.primary,
+    color: t.colors.accentText,
   },
   row: {
     flexDirection: 'row',
@@ -469,9 +473,9 @@ const styles = StyleSheet.create({
     gap: 12,
     padding: 14,
     borderRadius: 12,
-    backgroundColor: colors.surfaceGray3,
+    backgroundColor: t.colors.surfacePressed,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
   },
   rowDisabled: {
     opacity: 0.5,
@@ -483,7 +487,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: colors.primaryBg,
+    backgroundColor: t.colors.accentSubtle,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -494,10 +498,10 @@ const styles = StyleSheet.create({
   rowLabel: {
     fontSize: 14,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
   },
   rowSub: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
-});
+}));

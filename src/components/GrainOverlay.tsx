@@ -7,13 +7,15 @@
 
 import React, { useMemo } from 'react';
 import { StyleSheet, View } from 'react-native';
+import { useThemeColors } from '../theme';
 
 interface GrainOverlayProps {
   /** Number of grain specks (default 90) */
   density?: number;
   /** Peak opacity of individual specks (default 0.08) */
   intensity?: number;
-  /** Speck colour (default white) */
+  /** Speck colour. Defaults to the theme's text colour, so it is light specks
+   *  on a dark card and dark specks on a white one. */
   tint?: string;
   /** Border radius to match parent card (default 14) */
   borderRadius?: number;
@@ -34,9 +36,11 @@ let seedCounter = 0;
 export const GrainOverlay = React.memo(function GrainOverlay({
   density = 90,
   intensity = 0.08,
-  tint = '#ffffff',
+  tint,
   borderRadius = 14,
 }: GrainOverlayProps) {
+  const themeColors = useThemeColors();
+  const speckTint = tint ?? themeColors.text;
   const specks = useMemo(() => {
     const rand = mulberry32(seedCounter++);
     const arr = [];
@@ -70,7 +74,7 @@ export const GrainOverlay = React.memo(function GrainOverlay({
             width: s.width,
             height: s.height,
             borderRadius: s.borderRadius,
-            backgroundColor: tint,
+            backgroundColor: speckTint,
             opacity: s.opacity,
           }}
         />

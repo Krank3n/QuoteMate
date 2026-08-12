@@ -20,9 +20,10 @@ import { format, subDays, isToday, isYesterday } from 'date-fns';
 
 import { useStore } from '../store/useStore';
 import { PaymentMethod } from '../types';
-import { colors } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
 import { getAmountDue } from '../utils/invoiceCalculator';
+import { GridBackground } from '../components/GridBackground';
 
 const PAYMENT_METHODS: { value: PaymentMethod; label: string }[] = [
   { value: 'bank_transfer', label: 'Bank Transfer' },
@@ -33,6 +34,8 @@ const PAYMENT_METHODS: { value: PaymentMethod; label: string }[] = [
 ];
 
 export function RecordPaymentScreen() {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const invoiceId = route.params?.invoiceId;
@@ -147,6 +150,7 @@ export function RecordPaymentScreen() {
   if (!invoice) {
     return (
       <View style={styles.container}>
+      <GridBackground />
         <Text>Invoice not found</Text>
       </View>
     );
@@ -157,8 +161,8 @@ export function RecordPaymentScreen() {
       {/* Invoice Summary */}
       <Surface style={styles.summaryCard}>
         <View style={styles.sectionHeader}>
-          <View style={[styles.sectionIconCircle, { backgroundColor: colors.warningBg }]}>
-            <MaterialCommunityIcons name="file-document-outline" size={18} color={colors.secondary} />
+          <View style={[styles.sectionIconCircle, { backgroundColor: themeColors.accentSubtle }]}>
+            <MaterialCommunityIcons name="file-document-outline" size={18} color={themeColors.accentText} />
           </View>
           <Title style={styles.sectionTitle}>Invoice Summary</Title>
         </View>
@@ -178,7 +182,7 @@ export function RecordPaymentScreen() {
           <>
             <View style={styles.summaryRow}>
               <Text style={styles.summaryLabel}>Already Paid</Text>
-              <Text style={[styles.summaryValue, { color: colors.success }]}>
+              <Text style={[styles.summaryValue, { color: themeColors.money }]}>
                 {formatCurrency(invoice.paidAmount || 0)}
               </Text>
             </View>
@@ -187,7 +191,7 @@ export function RecordPaymentScreen() {
                 <MaterialCommunityIcons
                   name="credit-card-check-outline"
                   size={14}
-                  color={colors.textMuted}
+                  color={themeColors.textMuted}
                 />
                 <Text style={styles.squareNoteText}>
                   Paid via Square
@@ -208,8 +212,8 @@ export function RecordPaymentScreen() {
       {/* Payment Amount */}
       <Surface style={styles.section}>
         <View style={styles.sectionHeader}>
-          <View style={[styles.sectionIconCircle, { backgroundColor: colors.primaryBg }]}>
-            <MaterialCommunityIcons name="cash" size={18} color={colors.primary} />
+          <View style={[styles.sectionIconCircle, { backgroundColor: themeColors.accentSubtle }]}>
+            <MaterialCommunityIcons name="cash" size={18} color={themeColors.accentText} />
           </View>
           <Title style={styles.sectionTitle}>Payment Amount</Title>
         </View>
@@ -247,8 +251,8 @@ export function RecordPaymentScreen() {
       {/* Payment Method */}
       <Surface style={styles.section}>
         <View style={styles.sectionHeader}>
-          <View style={[styles.sectionIconCircle, { backgroundColor: colors.infoBg }]}>
-            <MaterialCommunityIcons name="credit-card-outline" size={18} color={colors.info} />
+          <View style={[styles.sectionIconCircle, { backgroundColor: themeColors.infoSubtle }]}>
+            <MaterialCommunityIcons name="credit-card-outline" size={18} color={themeColors.info} />
           </View>
           <Title style={styles.sectionTitle}>Payment Method</Title>
         </View>
@@ -271,8 +275,8 @@ export function RecordPaymentScreen() {
       {/* Payment Date */}
       <Surface style={styles.section}>
         <View style={styles.sectionHeader}>
-          <View style={[styles.sectionIconCircle, { backgroundColor: colors.successBg }]}>
-            <MaterialCommunityIcons name="calendar-check" size={18} color={colors.success} />
+          <View style={[styles.sectionIconCircle, { backgroundColor: themeColors.moneySubtle }]}>
+            <MaterialCommunityIcons name="calendar-check" size={18} color={themeColors.money} />
           </View>
           <Title style={styles.sectionTitle}>Payment Date</Title>
         </View>
@@ -327,8 +331,8 @@ export function RecordPaymentScreen() {
       {/* Notes */}
       <Surface style={styles.section}>
         <View style={styles.sectionHeader}>
-          <View style={[styles.sectionIconCircle, { backgroundColor: colors.infoBg }]}>
-            <MaterialCommunityIcons name="note-text-outline" size={18} color={colors.info} />
+          <View style={[styles.sectionIconCircle, { backgroundColor: themeColors.infoSubtle }]}>
+            <MaterialCommunityIcons name="note-text-outline" size={18} color={themeColors.info} />
           </View>
           <Title style={styles.sectionTitle}>Notes (Optional)</Title>
         </View>
@@ -346,7 +350,7 @@ export function RecordPaymentScreen() {
 
       {/* Submit Button */}
       <Button
-        mode="contained"
+        mode="contained" buttonColor={themeColors.accent} textColor={themeColors.onAccent}
         onPress={handleRecordPayment}
         style={styles.submitButton}
         loading={isSubmitting}
@@ -359,10 +363,10 @@ export function RecordPaymentScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
   },
   scrollContent: {
     padding: 16,
@@ -372,7 +376,7 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: 14,
     marginBottom: 12,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     elevation: 2,
   },
   summaryRow: {
@@ -382,7 +386,7 @@ const styles = StyleSheet.create({
   },
   summaryLabel: {
     fontSize: 14,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
   },
   summaryValue: {
     fontSize: 14,
@@ -398,30 +402,30 @@ const styles = StyleSheet.create({
   },
   squareNoteText: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     fontStyle: 'italic',
   },
   balanceRow: {
     marginTop: 8,
     paddingTop: 12,
     borderTopWidth: 1,
-    borderTopColor: colors.border,
+    borderTopColor: t.colors.border,
   },
   balanceLabel: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: colors.primary,
+    color: t.colors.text,
   },
   balanceValue: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: colors.primary,
+    color: t.colors.money,
   },
   section: {
     padding: 16,
     borderRadius: 14,
     marginBottom: 12,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     elevation: 2,
   },
   sectionHeader: {
@@ -444,7 +448,7 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   input: {
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
   },
   quickAmounts: {
     flexDirection: 'row',
@@ -452,7 +456,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   quickButton: {
-    borderColor: colors.primary,
+    borderColor: t.colors.accent,
   },
   radioItem: {
     paddingVertical: 4,
@@ -466,22 +470,22 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 16,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
     borderRadius: 10,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
   },
   dateText: {
     fontSize: 16,
     fontWeight: '500',
-    color: colors.text,
+    color: t.colors.text,
   },
   dateLabelText: {
     fontSize: 14,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginLeft: 8,
   },
   submitButton: {
     marginTop: 8,
     paddingVertical: 8,
   },
-});
+}));

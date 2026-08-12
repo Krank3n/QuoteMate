@@ -24,13 +24,16 @@ import { useNavigation } from '@react-navigation/native';
 
 import { useStore } from '../../store/useStore';
 import { PaymentMethodSettings } from '../../types';
-import { colors } from '../../theme';
+import { makeStyles, useThemeColors } from '../../theme';
 import { WebContainer } from '../../components/WebContainer';
 import { FixedBottomButton } from '../../components/FixedBottomButton';
 import { AlertModal } from '../../components/AlertModal';
 import { useUnsavedChangesGuard } from '../../hooks/useUnsavedChangesGuard';
+import { GridBackground } from '../../components/GridBackground';
 
 export function PaymentMethodsScreen() {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const { businessSettings, setBusinessSettings, getEffectivePlan } = useStore();
   const navigation = useNavigation<any>();
   const isFreeTier = getEffectivePlan() === 'free';
@@ -183,6 +186,7 @@ export function PaymentMethodsScreen() {
 
   return (
     <View style={styles.container}>
+      <GridBackground />
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
@@ -197,7 +201,7 @@ export function PaymentMethodsScreen() {
                 <MaterialCommunityIcons
                   name="lock-outline"
                   size={20}
-                  color={colors.primary}
+                  color={themeColors.accentText}
                   style={{ marginRight: 10 }}
                 />
                 <View style={{ flex: 1 }}>
@@ -206,7 +210,7 @@ export function PaymentMethodsScreen() {
                     On the free plan, only Square is shown on documents. Tap to upgrade and offer bank, PayID, BPAY, PayPal too.
                   </Text>
                 </View>
-                <MaterialCommunityIcons name="chevron-right" size={20} color={colors.onSurface} />
+                <MaterialCommunityIcons name="chevron-right" size={20} color={themeColors.textSecondary} />
               </Surface>
             </TouchableOpacity>
           )}
@@ -216,7 +220,7 @@ export function PaymentMethodsScreen() {
 
             <View style={styles.switchRow}>
               <View style={styles.switchLabel}>
-                <MaterialCommunityIcons name="credit-card-outline" size={24} color={colors.primary} />
+                <MaterialCommunityIcons name="credit-card-outline" size={24} color={themeColors.accentText} />
                 <View style={styles.switchTextContainer}>
                   <Text style={styles.switchTitle}>Show on Documents</Text>
                   <Text style={styles.switchDescription}>
@@ -229,7 +233,7 @@ export function PaymentMethodsScreen() {
               <Switch
                 value={isFreeTier ? false : showPaymentOnDocuments}
                 onValueChange={setShowPaymentOnDocuments}
-                color={colors.primary}
+                color={themeColors.accentText}
                 disabled={isFreeTier}
               />
             </View>
@@ -242,14 +246,14 @@ export function PaymentMethodsScreen() {
             <View style={styles.paymentMethodSection}>
               <View style={styles.paymentMethodHeaderWithToggle}>
                 <View style={styles.paymentMethodHeader}>
-                  <MaterialCommunityIcons name="bank" size={20} color={bankEnabled && !isFreeTier ? colors.primary : colors.onSurface} />
+                  <MaterialCommunityIcons name="bank" size={20} color={bankEnabled && !isFreeTier ? themeColors.accent : themeColors.textSecondary} />
                   <Text style={[styles.paymentMethodTitle, (!bankEnabled || isFreeTier) && styles.paymentMethodTitleDisabled]}>Bank Transfer</Text>
                   {isFreeTier && <Text style={styles.proBadge}>PRO</Text>}
                 </View>
                 <Switch
                   value={isFreeTier ? false : bankEnabled}
                   onValueChange={setBankEnabled}
-                  color={colors.primary}
+                  color={themeColors.accentText}
                   disabled={isFreeTier}
                 />
               </View>
@@ -294,14 +298,14 @@ export function PaymentMethodsScreen() {
             <View style={styles.paymentMethodSection}>
               <View style={styles.paymentMethodHeaderWithToggle}>
                 <View style={styles.paymentMethodHeader}>
-                  <MaterialCommunityIcons name="cellphone" size={20} color={payIdEnabled && !isFreeTier ? colors.primary : colors.onSurface} />
+                  <MaterialCommunityIcons name="cellphone" size={20} color={payIdEnabled && !isFreeTier ? themeColors.accent : themeColors.textSecondary} />
                   <Text style={[styles.paymentMethodTitle, (!payIdEnabled || isFreeTier) && styles.paymentMethodTitleDisabled]}>PayID</Text>
                   {isFreeTier && <Text style={styles.proBadge}>PRO</Text>}
                 </View>
                 <Switch
                   value={isFreeTier ? false : payIdEnabled}
                   onValueChange={setPayIdEnabled}
-                  color={colors.primary}
+                  color={themeColors.accentText}
                   disabled={isFreeTier}
                 />
               </View>
@@ -352,14 +356,14 @@ export function PaymentMethodsScreen() {
             <View style={styles.paymentMethodSection}>
               <View style={styles.paymentMethodHeaderWithToggle}>
                 <View style={styles.paymentMethodHeader}>
-                  <MaterialCommunityIcons name="barcode" size={20} color={bpayEnabled && !isFreeTier ? colors.primary : colors.onSurface} />
+                  <MaterialCommunityIcons name="barcode" size={20} color={bpayEnabled && !isFreeTier ? themeColors.accent : themeColors.textSecondary} />
                   <Text style={[styles.paymentMethodTitle, (!bpayEnabled || isFreeTier) && styles.paymentMethodTitleDisabled]}>BPAY</Text>
                   {isFreeTier && <Text style={styles.proBadge}>PRO</Text>}
                 </View>
                 <Switch
                   value={isFreeTier ? false : bpayEnabled}
                   onValueChange={setBpayEnabled}
-                  color={colors.primary}
+                  color={themeColors.accentText}
                   disabled={isFreeTier}
                 />
               </View>
@@ -393,14 +397,14 @@ export function PaymentMethodsScreen() {
             <View style={styles.paymentMethodSection}>
               <View style={styles.paymentMethodHeaderWithToggle}>
                 <View style={styles.paymentMethodHeader}>
-                  <MaterialCommunityIcons name="alpha-p-circle" size={20} color={paypalEnabled && !isFreeTier ? colors.primary : colors.onSurface} />
+                  <MaterialCommunityIcons name="alpha-p-circle" size={20} color={paypalEnabled && !isFreeTier ? themeColors.accent : themeColors.textSecondary} />
                   <Text style={[styles.paymentMethodTitle, (!paypalEnabled || isFreeTier) && styles.paymentMethodTitleDisabled]}>PayPal</Text>
                   {isFreeTier && <Text style={styles.proBadge}>PRO</Text>}
                 </View>
                 <Switch
                   value={isFreeTier ? false : paypalEnabled}
                   onValueChange={setPaypalEnabled}
-                  color={colors.primary}
+                  color={themeColors.accentText}
                   disabled={isFreeTier}
                 />
               </View>
@@ -424,14 +428,14 @@ export function PaymentMethodsScreen() {
             <View style={styles.paymentMethodSection}>
               <View style={styles.paymentMethodHeaderWithToggle}>
                 <View style={styles.paymentMethodHeader}>
-                  <MaterialCommunityIcons name="text-box-outline" size={20} color={otherEnabled && !isFreeTier ? colors.primary : colors.onSurface} />
+                  <MaterialCommunityIcons name="text-box-outline" size={20} color={otherEnabled && !isFreeTier ? themeColors.accent : themeColors.textSecondary} />
                   <Text style={[styles.paymentMethodTitle, (!otherEnabled || isFreeTier) && styles.paymentMethodTitleDisabled]}>Other</Text>
                   {isFreeTier && <Text style={styles.proBadge}>PRO</Text>}
                 </View>
                 <Switch
                   value={isFreeTier ? false : otherEnabled}
                   onValueChange={setOtherEnabled}
-                  color={colors.primary}
+                  color={themeColors.accentText}
                   disabled={isFreeTier}
                 />
               </View>
@@ -481,10 +485,10 @@ export function PaymentMethodsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
   },
   scrollContent: {
     padding: 16,
@@ -495,27 +499,27 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     borderRadius: 12,
     elevation: 2,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
   },
   freeTierBanner: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderRadius: 12,
     padding: 14,
     marginBottom: 16,
     borderWidth: 1,
-    borderColor: colors.primary + '40',
+    borderColor: t.colors.accentSubtle,
   },
   freeTierBannerTitle: {
     fontSize: 14,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
     marginBottom: 2,
   },
   freeTierBannerSubtitle: {
     fontSize: 12,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     lineHeight: 16,
   },
   sectionTitle: {
@@ -546,7 +550,7 @@ const styles = StyleSheet.create({
   },
   switchDescription: {
     fontSize: 13,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     lineHeight: 18,
   },
   paymentMethodSection: {
@@ -566,14 +570,14 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
     marginLeft: 8,
-    color: colors.text,
+    color: t.colors.text,
   },
   paymentMethodTitleDisabled: {
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
   },
   paymentInput: {
     marginBottom: 12,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
   },
   paymentDivider: {
     marginVertical: 16,
@@ -594,18 +598,18 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   payIdTypeChip: {
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
   },
   proBadge: {
     marginLeft: 8,
     fontSize: 10,
     fontWeight: '800',
     letterSpacing: 0.8,
-    color: colors.secondary,
-    backgroundColor: colors.secondary + '20',
+    color: t.colors.warning,
+    backgroundColor: t.colors.warningSubtle,
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 6,
     overflow: 'hidden',
   },
-});
+}));

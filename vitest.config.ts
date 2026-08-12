@@ -30,6 +30,11 @@ export default defineConfig({
       // @env is a react-native-dotenv babel virtual module — only exists in
       // the Metro build. Stub the keys so store-graph imports resolve.
       { find: /^@env$/, replacement: resolve(__dirname, 'src/test/stubs/env.ts') },
+      // Font files. Metro turns require('...ttf') into an asset-registry
+      // number; vite tries to parse the binary as JS and throws. Stubbing the
+      // extension keeps the font map in src/theme/typography.ts as one source
+      // of truth instead of a test-safe copy alongside a runtime copy.
+      { find: /^.*\.ttf$/, replacement: resolve(__dirname, 'src/test/stubs/fontAsset.ts') },
       // nativeGoogleSignIn ships only platform variants (.native.ts/.web.ts),
       // which Metro resolves but vite cannot. Tests run under react-native-web,
       // so point at the web stub — it's native-dependency-free by design.

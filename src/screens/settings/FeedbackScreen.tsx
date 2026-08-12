@@ -23,9 +23,10 @@ import {
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 
-import { colors } from '../../theme';
+import { makeStyles, useThemeColors } from '../../theme';
 import { WebContainer } from '../../components/WebContainer';
 import { AlertModal, AlertType } from '../../components/AlertModal';
+import { GridBackground } from '../../components/GridBackground';
 
 type FeedbackCategory = 'hate' | 'buggy' | 'missing' | 'confusing' | 'other';
 
@@ -38,6 +39,8 @@ const CATEGORIES: { id: FeedbackCategory; label: string; icon: string }[] = [
 ];
 
 export function FeedbackScreen() {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const [selectedCategory, setSelectedCategory] = useState<FeedbackCategory | null>(null);
   const [feedbackText, setFeedbackText] = useState('');
   const [sending, setSending] = useState(false);
@@ -75,6 +78,7 @@ export function FeedbackScreen() {
 
   return (
     <View style={styles.container}>
+      <GridBackground />
       <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.scrollContent}>
         <WebContainer>
           {/* WhatsApp quick feedback */}
@@ -97,14 +101,14 @@ export function FeedbackScreen() {
 
           {/* Hero / Call to action */}
           <Surface style={styles.heroCard}>
-            <MaterialCommunityIcons name="bullhorn" size={48} color={colors.primary} />
+            <MaterialCommunityIcons name="bullhorn" size={48} color={themeColors.accentText} />
             <Title style={styles.heroTitle}>We want your honest feedback</Title>
             <Text style={styles.heroText}>
               Don't hold back. Tell us what you hate, what's broken, or what's missing.
               We genuinely want to hear the stuff that frustrates you.
             </Text>
             <View style={styles.promiseBadge}>
-              <MaterialCommunityIcons name="lightning-bolt" size={18} color={colors.secondary} />
+              <MaterialCommunityIcons name="lightning-bolt" size={18} color={themeColors.warning} />
               <Text style={styles.promiseText}>
                 Good suggestions get shipped within 1 week
               </Text>
@@ -127,7 +131,7 @@ export function FeedbackScreen() {
                   <MaterialCommunityIcons
                     name={cat.icon as any}
                     size={20}
-                    color={selectedCategory === cat.id ? colors.white : colors.primary}
+                    color={selectedCategory === cat.id ? themeColors.alwaysLight : themeColors.accent}
                   />
                   <Text
                     style={[
@@ -151,7 +155,7 @@ export function FeedbackScreen() {
             <TextInput
               style={styles.textInput}
               placeholder="e.g. I hate that I can't... / It would be way better if... / This thing keeps breaking when..."
-              placeholderTextColor={colors.onSurface + '80'}
+              placeholderTextColor={themeColors.textMuted}
               multiline
               numberOfLines={6}
               textAlignVertical="top"
@@ -171,9 +175,9 @@ export function FeedbackScreen() {
             disabled={sending}
           >
             {sending ? (
-              <ActivityIndicator size="small" color={colors.white} />
+              <ActivityIndicator size="small" color={themeColors.onAccent} />
             ) : (
-              <MaterialCommunityIcons name="send" size={20} color={colors.white} />
+              <MaterialCommunityIcons name="send" size={20} color={themeColors.onAccent} />
             )}
             <Text style={styles.sendButtonText}>{sending ? 'Sending...' : 'Send Feedback'}</Text>
           </TouchableOpacity>
@@ -197,10 +201,10 @@ export function FeedbackScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
   },
   scrollContent: {
     padding: 16,
@@ -250,19 +254,19 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     borderRadius: 12,
     elevation: 2,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     alignItems: 'center',
   },
   heroTitle: {
     fontSize: 22,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
     textAlign: 'center',
     marginTop: 12,
   },
   heroText: {
     fontSize: 15,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     textAlign: 'center',
     lineHeight: 22,
     marginTop: 8,
@@ -270,7 +274,7 @@ const styles = StyleSheet.create({
   promiseBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.secondary + '15',
+    backgroundColor: t.colors.warningSubtle,
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 20,
@@ -279,7 +283,7 @@ const styles = StyleSheet.create({
   promiseText: {
     fontSize: 13,
     fontWeight: '700',
-    color: colors.secondary,
+    color: t.colors.warning,
     marginLeft: 6,
   },
   card: {
@@ -287,7 +291,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     borderRadius: 12,
     elevation: 2,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
   },
   sectionTitle: {
     fontSize: 18,
@@ -306,36 +310,36 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: 20,
     borderWidth: 1.5,
-    borderColor: colors.primary + '40',
-    backgroundColor: colors.primary + '08',
+    borderColor: t.colors.accentSubtle,
+    backgroundColor: t.colors.accentSubtle,
   },
   categoryChipSelected: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
+    backgroundColor: t.colors.accent,
+    borderColor: t.colors.accent,
   },
   categoryLabel: {
     fontSize: 13,
     fontWeight: '600',
-    color: colors.primary,
+    color: t.colors.accentText,
     marginLeft: 6,
   },
   categoryLabelSelected: {
-    color: colors.white,
+    color: t.colors.onAccent,
   },
   hint: {
     fontSize: 14,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     marginBottom: 12,
   },
   textInput: {
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
     borderRadius: 10,
     padding: 14,
     fontSize: 15,
-    color: colors.text,
+    color: t.colors.text,
     minHeight: 140,
     borderWidth: 1,
-    borderColor: colors.outline + '30',
+    borderColor: t.colors.border,
     ...(Platform.OS === 'web' && {
       outlineStyle: 'none' as any,
     }),
@@ -344,7 +348,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.primary,
+    backgroundColor: t.colors.accent,
     paddingVertical: 16,
     borderRadius: 12,
     marginBottom: 12,
@@ -356,13 +360,13 @@ const styles = StyleSheet.create({
   sendButtonText: {
     fontSize: 16,
     fontWeight: '700',
-    color: colors.white,
+    color: t.colors.onAccent,
   },
   footnote: {
     fontSize: 12,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     textAlign: 'center',
     lineHeight: 18,
     paddingHorizontal: 16,
   },
-});
+}));

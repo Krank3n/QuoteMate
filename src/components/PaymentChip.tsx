@@ -14,7 +14,8 @@ import { Text } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
 import type { Document } from '../types/document';
-import { colors } from '../theme';
+import type { Tokens } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
 import { selectionTap } from '../utils/haptics';
 
@@ -62,49 +63,51 @@ function formatProgress(doc: Document): string {
   return `${formatCurrency(paid)} / ${formatCurrency(total)}`;
 }
 
-function metaFor(doc: Document, state: PaymentState): PaymentMeta {
+function metaFor(doc: Document, state: PaymentState, themeColors: Tokens): PaymentMeta {
   switch (state) {
     case 'unpaid':
       return {
         label: 'Unpaid',
         icon: 'cash-remove',
-        color: colors.textMuted,
-        bgColor: colors.surfaceGray3,
+        color: themeColors.textMuted,
+        bgColor: themeColors.surfacePressed,
       };
     case 'deposit_paid':
       return {
         label: `Deposit ${formatCurrency(Number(doc.paidTotal) || 0)}`,
         icon: 'cash-plus',
-        color: colors.info,
-        bgColor: colors.infoBg,
+        color: themeColors.info,
+        bgColor: themeColors.infoSubtle,
       };
     case 'partially_paid':
       return {
         label: `Part paid ${formatProgress(doc)}`,
         icon: 'progress-check',
-        color: colors.warning,
-        bgColor: colors.warningBg,
+        color: themeColors.warning,
+        bgColor: themeColors.warningSubtle,
       };
     case 'paid':
       return {
         label: 'Paid',
         icon: 'cash-check',
-        color: colors.success,
-        bgColor: colors.successBg,
+        color: themeColors.money,
+        bgColor: themeColors.moneySubtle,
       };
     case 'overpaid':
       return {
         label: `Overpaid ${formatProgress(doc)}`,
         icon: 'cash-refund',
-        color: colors.warning,
-        bgColor: colors.warningBg,
+        color: themeColors.warning,
+        bgColor: themeColors.warningSubtle,
       };
   }
 }
 
 export function PaymentChip({ doc, onPress }: PaymentChipProps) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const state = derivePaymentState(doc);
-  const meta = metaFor(doc, state);
+  const meta = metaFor(doc, state, themeColors);
 
   const content = (
     <View style={[styles.chip, { backgroundColor: meta.bgColor, borderColor: meta.color + '44' }]}>
@@ -131,7 +134,7 @@ export function PaymentChip({ doc, onPress }: PaymentChipProps) {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   chip: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -146,4 +149,4 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
   },
-});
+}));

@@ -16,7 +16,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useStore } from '../store/useStore';
-import { colors } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 import { billingService, SUBSCRIPTION_SKUS } from '../services/billingService';
 import { useSubscriptionStore } from '../store/subscriptionStore';
 import { unifiedBillingService } from '../services/unifiedBillingService';
@@ -36,6 +36,7 @@ import { trackEvent } from '../services/analyticsService';
 import { resolvePurchaseAnalytics } from '../services/paywallAnalytics.helpers';
 import { ReceiptOutcome } from '../utils/purchaseValidation';
 import { validatePurchase, purchaseKey, claimPurchase, releasePurchase } from '../services/receiptEntitlement';
+import { GridBackground } from '../components/GridBackground';
 
 const PRO_NUDGES = [
   "Your quotes deserve the VIP treatment",
@@ -57,6 +58,8 @@ const MAYBE_LATER_QUIPS = [
 ];
 
 export function PaywallScreen() {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   // Which surface sent the user here. Only the three highest-signal entry
@@ -501,7 +504,7 @@ export function PaywallScreen() {
     return (
       <View style={[styles.container, styles.loadingContainer]}>
         <WebContainer>
-          <ActivityIndicator size="large" color={colors.primary} />
+          <ActivityIndicator size="large" color={themeColors.accentText} />
           <Text style={styles.loadingText}>Loading subscription options...</Text>
         </WebContainer>
       </View>
@@ -511,8 +514,10 @@ export function PaywallScreen() {
   // Show message if IAP is not available on this device
   if (iapNotAvailable && Platform.OS !== 'web') {
     return (
-      <ScrollView
-        style={styles.container}
+      <View style={styles.gridHost}>
+    <GridBackground />
+    <ScrollView
+        style={styles.scroller}
         contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 20 }]}
       >
         <WebContainer>
@@ -520,7 +525,7 @@ export function PaywallScreen() {
           <MaterialCommunityIcons
             name="alert-circle-outline"
             size={80}
-            color={colors.warning}
+            color={themeColors.accentText}
           />
           <Title style={styles.title}>Subscriptions Unavailable</Title>
           <Text style={styles.subtitle}>
@@ -529,7 +534,7 @@ export function PaywallScreen() {
         </View>
 
         <Button
-          mode="contained"
+          mode="contained" buttonColor={themeColors.accent} textColor={themeColors.onAccent}
           onPress={() => {
             setIapNotAvailable(false);
             loadProducts();
@@ -549,6 +554,7 @@ export function PaywallScreen() {
         </Button>
         </WebContainer>
       </ScrollView>
+    </View>
     );
   }
 
@@ -659,7 +665,7 @@ export function PaywallScreen() {
           <MaterialCommunityIcons
             name="crown"
             size={48}
-            color={colors.secondary}
+            color={themeColors.accentText}
           />
         </View>
         <Title style={styles.title}>{isPro ? 'Manage Subscription' : 'Upgrade to Pro'}</Title>
@@ -681,7 +687,7 @@ export function PaywallScreen() {
         <Surface style={styles.planCard}>
           <View style={styles.proStatusSection}>
             <View style={styles.proBadge}>
-              <MaterialCommunityIcons name="crown" size={32} color={colors.secondary} />
+              <MaterialCommunityIcons name="crown" size={32} color={themeColors.accentText} />
               <Text style={styles.proStatusTitle}>Pro Member</Text>
             </View>
             <Text style={styles.proStatusText}>
@@ -690,7 +696,7 @@ export function PaywallScreen() {
 
             {subscriptionStatus?.currentPeriodEnd && (
               <View style={styles.billingInfo}>
-                <MaterialCommunityIcons name="calendar-clock" size={20} color={colors.primary} />
+                <MaterialCommunityIcons name="calendar-clock" size={20} color={themeColors.accentText} />
                 <Text style={styles.billingText}>
                   Next billing date: {subscriptionStatus.currentPeriodEnd.toLocaleDateString('en-US', {
                     year: 'numeric',
@@ -703,15 +709,15 @@ export function PaywallScreen() {
 
             <View style={styles.proFeatures}>
               <View style={styles.proFeature}>
-                <MaterialCommunityIcons name="infinity" size={20} color={colors.primary} />
+                <MaterialCommunityIcons name="infinity" size={20} color={themeColors.accentText} />
                 <Text style={styles.proFeatureText}>Unlimited quote analyses</Text>
               </View>
               <View style={styles.proFeature}>
-                <MaterialCommunityIcons name="headset" size={20} color={colors.primary} />
+                <MaterialCommunityIcons name="headset" size={20} color={themeColors.accentText} />
                 <Text style={styles.proFeatureText}>Priority support</Text>
               </View>
               <View style={styles.proFeature}>
-                <MaterialCommunityIcons name="palette" size={20} color={colors.primary} />
+                <MaterialCommunityIcons name="palette" size={20} color={themeColors.accentText} />
                 <Text style={styles.proFeatureText}>Custom branding</Text>
               </View>
             </View>
@@ -720,7 +726,7 @@ export function PaywallScreen() {
               mode="outlined"
               onPress={handleCancelSubscription}
               style={styles.cancelButton}
-              textColor={colors.error}
+              textColor={themeColors.error}
             >
               Cancel Subscription
             </Button>
@@ -796,27 +802,27 @@ export function PaywallScreen() {
 
         <View style={styles.features}>
           <View style={styles.feature}>
-            <MaterialCommunityIcons name="check-circle" size={22} color={colors.success} />
+            <MaterialCommunityIcons name="check-circle" size={22} color={themeColors.money} />
             <Text style={styles.featureText}>Unlimited quotes and invoices</Text>
           </View>
 
           <View style={styles.feature}>
-            <MaterialCommunityIcons name="check-circle" size={22} color={colors.success} />
+            <MaterialCommunityIcons name="check-circle" size={22} color={themeColors.money} />
             <Text style={styles.featureText}>Any payment method — bank, PayID, PayPal, Square</Text>
           </View>
 
           <View style={styles.feature}>
-            <MaterialCommunityIcons name="check-circle" size={22} color={colors.success} />
+            <MaterialCommunityIcons name="check-circle" size={22} color={themeColors.money} />
             <Text style={styles.featureText}>Your business logo on quotes and invoices</Text>
           </View>
 
           <View style={styles.feature}>
-            <MaterialCommunityIcons name="check-circle" size={22} color={colors.success} />
+            <MaterialCommunityIcons name="check-circle" size={22} color={themeColors.money} />
             <Text style={styles.featureText}>Priority customer support</Text>
           </View>
 
           <View style={styles.feature}>
-            <MaterialCommunityIcons name="check-circle" size={22} color={colors.success} />
+            <MaterialCommunityIcons name="check-circle" size={22} color={themeColors.money} />
             <Text style={styles.featureText}>All future features included</Text>
           </View>
         </View>
@@ -824,7 +830,7 @@ export function PaywallScreen() {
         {/* Show non-blocking warning if products failed to load on iOS/Android */}
         {productsLoadError && Platform.OS !== 'web' && (
           <View style={styles.errorStateContainer}>
-            <MaterialCommunityIcons name="information-outline" size={20} color={colors.warning} />
+            <MaterialCommunityIcons name="information-outline" size={20} color={themeColors.accentText} />
             <Text style={styles.errorStateText}>
               Could not verify pricing from the {Platform.OS === 'ios' ? 'App Store' : 'Play Store'}. You can still subscribe below.
             </Text>
@@ -832,7 +838,7 @@ export function PaywallScreen() {
         )}
 
         <Button
-          mode="contained"
+          mode="contained" buttonColor={themeColors.accent} textColor={themeColors.onAccent}
           onPress={handleUpgrade}
           style={styles.upgradeButton}
           contentStyle={styles.upgradeButtonContent}
@@ -867,7 +873,7 @@ export function PaywallScreen() {
               navigation.goBack();
             }}
             style={styles.backButton}
-            textColor={colors.textMuted}
+            textColor={themeColors.textMuted}
           >
             Maybe Later
           </Button>
@@ -910,10 +916,12 @@ export function PaywallScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
+  gridHost: { flex: 1, backgroundColor: t.colors.bg },
+  scroller: { flex: 1, backgroundColor: 'transparent' },
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
   },
   scrollContent: {
     // paddingBottom is now dynamic using insets.bottom in the component
@@ -924,7 +932,7 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     marginTop: 16,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
   },
   header: {
     alignItems: 'center',
@@ -943,26 +951,26 @@ const styles = StyleSheet.create({
     width: 88,
     height: 88,
     borderRadius: 44,
-    backgroundColor: 'rgba(207, 161, 83, 0.12)',
+    backgroundColor: t.colors.accentSubtle,
     borderWidth: 1,
-    borderColor: 'rgba(207, 161, 83, 0.25)',
+    borderColor: t.colors.accentBorder,
   },
   title: {
     fontSize: 26,
     fontWeight: 'bold',
     marginTop: 12,
     marginBottom: 6,
-    color: colors.text,
+    color: t.colors.text,
   },
   subtitle: {
     fontSize: 15,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     textAlign: 'center',
   },
   proNudge: {
     fontSize: 13,
     fontStyle: 'italic',
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     textAlign: 'center',
     marginTop: 8,
     opacity: 0.85,
@@ -981,51 +989,51 @@ const styles = StyleSheet.create({
     paddingTop: 20,
     paddingHorizontal: 12,
     borderRadius: 14,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderWidth: 2,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
   },
   planOptionSelected: {
-    borderColor: colors.primary,
-    backgroundColor: colors.primaryBg,
+    borderColor: t.colors.accent,
+    backgroundColor: t.colors.accentSubtle,
   },
   planOptionLabel: {
     fontSize: 13,
     fontWeight: '600',
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginBottom: 4,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
   planOptionLabelSelected: {
-    color: colors.primary,
+    color: t.colors.accentText,
   },
   planOptionRegularPrice: {
     fontSize: 15,
     fontWeight: '600',
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     textDecorationLine: 'line-through',
     marginBottom: 1,
   },
   planOptionPrice: {
     fontSize: 30,
     fontWeight: 'bold',
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
   planOptionPriceSelected: {
-    color: colors.text,
+    color: t.colors.text,
   },
   planOptionPeriod: {
     fontSize: 13,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginTop: 2,
   },
   planOptionPeriodSelected: {
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
   },
   launchOffer: {
     textAlign: 'center',
-    color: colors.secondary,
+    color: t.colors.accentText,
     fontWeight: '700',
     fontSize: 13,
     marginHorizontal: 20,
@@ -1034,7 +1042,7 @@ const styles = StyleSheet.create({
   },
   foundingNote: {
     textAlign: 'center',
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     fontSize: 12,
     lineHeight: 17,
     marginHorizontal: 24,
@@ -1044,7 +1052,7 @@ const styles = StyleSheet.create({
   saveBadge: {
     position: 'absolute',
     top: -11,
-    backgroundColor: colors.secondary,
+    backgroundColor: t.colors.accent,
     paddingHorizontal: 10,
     paddingVertical: 3,
     borderRadius: 10,
@@ -1052,21 +1060,21 @@ const styles = StyleSheet.create({
   saveBadgeText: {
     fontSize: 11,
     fontWeight: '700',
-    color: '#1a1a1a',
+    color: t.colors.onAccent,
   },
   planCard: {
     marginHorizontal: 20,
     marginBottom: 0,
     padding: 20,
     borderRadius: 16,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
   },
   includesLabel: {
     fontSize: 14,
     fontWeight: '600',
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     marginBottom: 16,
   },
   features: {
@@ -1081,7 +1089,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
     marginLeft: 12,
     flex: 1,
-    color: colors.text,
+    color: t.colors.text,
   },
   upgradeButton: {
     marginBottom: 8,
@@ -1101,14 +1109,14 @@ const styles = StyleSheet.create({
   },
   disclaimer: {
     fontSize: 11,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     textAlign: 'center',
     lineHeight: 16,
   },
   maybeLaterQuip: {
     fontSize: 13,
     fontStyle: 'italic',
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     textAlign: 'center',
     marginBottom: 4,
     opacity: 0.7,
@@ -1122,7 +1130,7 @@ const styles = StyleSheet.create({
   proBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.warningBg,
+    backgroundColor: t.colors.accentSubtle,
     padding: 16,
     borderRadius: 12,
     marginBottom: 16,
@@ -1130,12 +1138,12 @@ const styles = StyleSheet.create({
   proStatusTitle: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: colors.secondary,
+    color: t.colors.accentText,
     marginLeft: 12,
   },
   proStatusText: {
     fontSize: 16,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     textAlign: 'center',
     marginBottom: 24,
   },
@@ -1143,7 +1151,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.primaryBg,
+    backgroundColor: t.colors.accentSubtle,
     padding: 12,
     borderRadius: 8,
     marginBottom: 24,
@@ -1151,7 +1159,7 @@ const styles = StyleSheet.create({
   },
   billingText: {
     fontSize: 14,
-    color: colors.primary,
+    color: t.colors.accentText,
     fontWeight: '500',
   },
   proFeatures: {
@@ -1166,22 +1174,22 @@ const styles = StyleSheet.create({
   proFeatureText: {
     fontSize: 14,
     marginLeft: 12,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
   },
   cancelButton: {
     marginBottom: 12,
-    borderColor: colors.error,
+    borderColor: t.colors.error,
   },
   cancelHint: {
     fontSize: 12,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     textAlign: 'center',
     fontStyle: 'italic',
   },
   errorStateContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.surfaceLight,
+    backgroundColor: t.colors.surfaceOverlay,
     padding: 12,
     borderRadius: 10,
     marginBottom: 16,
@@ -1189,7 +1197,7 @@ const styles = StyleSheet.create({
   },
   errorStateText: {
     fontSize: 13,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     flex: 1,
     lineHeight: 18,
   },
@@ -1201,15 +1209,15 @@ const styles = StyleSheet.create({
   },
   legalLink: {
     fontSize: 13,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     textDecorationLine: 'underline',
   },
   legalSeparator: {
     fontSize: 13,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginHorizontal: 8,
   },
   restoreButton: {
     marginTop: 4,
   },
-});
+}));

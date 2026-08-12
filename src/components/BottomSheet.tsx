@@ -25,7 +25,7 @@ import {
 } from 'react-native';
 import { Portal, Text } from 'react-native-paper';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { colors } from '../theme';
+import { makeStyles } from '../theme';
 import { useSheetBackHandler } from '../utils/useSheetBackHandler';
 
 const SCREEN_HEIGHT = Dimensions.get('window').height;
@@ -60,6 +60,8 @@ export function BottomSheet({
   footer,
   overlay,
 }: BottomSheetProps) {
+  const styles = useStyles();
+
   const safeInsets = useSafeAreaInsets();
   const slideAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
   const backdropAnim = useRef(new Animated.Value(0)).current;
@@ -227,7 +229,7 @@ export function useStaggeredEntrance(count: number, visible: boolean, delay = 10
   return anims.current;
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   backdrop: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0, 0, 0, 0.6)',
@@ -244,11 +246,11 @@ const styles = StyleSheet.create({
   sheet: {
     width: '100%',
     maxWidth: 480,
-    backgroundColor: '#141C2B',
+    backgroundColor: t.colors.surfaceRaised,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.06)',
+    borderTopColor: t.colors.border,
     overflow: 'hidden',
     ...Platform.select({
       ios: {
@@ -271,20 +273,20 @@ const styles = StyleSheet.create({
     width: 40,
     height: 4,
     borderRadius: 2,
-    backgroundColor: colors.surfaceGray,
+    backgroundColor: t.colors.surfaceOverlay,
     opacity: 0.6,
   },
   title: {
     fontSize: 18,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
     textAlign: 'center',
     paddingTop: 8,
     paddingBottom: 16,
   },
   subtitle: {
     fontSize: 13,
-    color: colors.inactive,
+    color: t.colors.textDisabled,
     textAlign: 'center',
     marginTop: -12,
     paddingBottom: 16,
@@ -302,4 +304,4 @@ const styles = StyleSheet.create({
   bottomPadding: {
     height: 16,
   },
-});
+}));

@@ -10,9 +10,9 @@ import { View, TouchableOpacity, TextInput as RNTextInput } from 'react-native';
 import { Text, TextInput, SegmentedButtons, Switch } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
-import { colors } from '../../../theme';
+import { useThemeColors} from '../../../theme';
 import { Material } from '../../../types';
-import { styles } from './styles';
+import { useAddMaterialStyles } from './styles';
 
 type CoverageUnit = 'm²' | 'm³' | 'm' | 'none';
 
@@ -91,11 +91,13 @@ export function ManualEntrySection({
   coverageUnit,
   setCoverageUnit,
 }: ManualEntrySectionProps) {
+  const styles = useAddMaterialStyles();
+  const themeColors = useThemeColors();
   return (
     <View style={styles.section}>
       {linkedToSupplierBook && (
         <View style={styles.linkedBanner}>
-          <MaterialCommunityIcons name="link-variant" size={16} color={colors.primary} />
+          <MaterialCommunityIcons name="link-variant" size={16} color={themeColors.accentText} />
           <Text style={styles.linkedBannerText}>
             Linked to your supplier book — changes save to both
           </Text>
@@ -144,7 +146,7 @@ export function ManualEntrySection({
                   if (current > 1) setManualQuantity((current - 1).toString());
                 }}
               >
-                <MaterialCommunityIcons name="minus" size={20} color={colors.primary} />
+                <MaterialCommunityIcons name="minus" size={20} color={themeColors.accentText} />
               </TouchableOpacity>
               <TextInput
                 value={manualQuantity}
@@ -162,7 +164,7 @@ export function ManualEntrySection({
                   setManualQuantity((current + 1).toString());
                 }}
               >
-                <MaterialCommunityIcons name="plus" size={20} color={colors.primary} />
+                <MaterialCommunityIcons name="plus" size={20} color={themeColors.accentText} />
               </TouchableOpacity>
             </View>
           </View>
@@ -216,14 +218,14 @@ export function ManualEntrySection({
             style={styles.categoryButton}
             onPress={() => setShowSectionPicker(!showSectionPicker)}
           >
-            <MaterialCommunityIcons name="folder-outline" size={20} color={colors.primary} />
+            <MaterialCommunityIcons name="folder-outline" size={20} color={themeColors.accentText} />
             <Text style={styles.categoryButtonText}>
               {selectedSection || 'No Section'}
             </Text>
             <MaterialCommunityIcons
               name={showSectionPicker ? 'chevron-up' : 'chevron-down'}
               size={20}
-              color={colors.onSurface}
+              color={themeColors.textSecondary}
             />
           </TouchableOpacity>
           {showSectionPicker && (
@@ -242,7 +244,7 @@ export function ManualEntrySection({
                 >
                   <Text style={[styles.categoryItemText, selectedSection === name && styles.categoryItemTextSelected]}>{name}</Text>
                   {selectedSection === name && (
-                    <MaterialCommunityIcons name="check" size={18} color={colors.primary} />
+                    <MaterialCommunityIcons name="check" size={18} color={themeColors.accentText} />
                   )}
                 </TouchableOpacity>
               ))}
@@ -260,7 +262,7 @@ export function ManualEntrySection({
           <Switch
             value={isPersonalRate}
             onValueChange={setIsPersonalRate}
-            color={colors.primary}
+            color={themeColors.accentText}
           />
         </View>
       )}
@@ -281,21 +283,21 @@ export function ManualEntrySection({
               onPress={() => setSupplierPickerOpen(!supplierPickerOpen)}
               activeOpacity={0.7}
             >
-              <MaterialCommunityIcons name="store-outline" size={20} color={colors.primary} />
+              <MaterialCommunityIcons name="store-outline" size={20} color={themeColors.accentText} />
               <Text style={styles.categoryButtonText}>
                 {supplierName || 'Choose or type a supplier'}
               </Text>
               <MaterialCommunityIcons
                 name={supplierPickerOpen ? 'chevron-up' : 'chevron-down'}
                 size={20}
-                color={colors.onSurface}
+                color={themeColors.textSecondary}
               />
             </TouchableOpacity>
             {supplierPickerOpen && (
               <View style={styles.categoryList}>
                 {savedItemSupplierOptions.length === 0 && (
                   <View style={styles.categoryItem}>
-                    <Text style={[styles.categoryItemText, { color: colors.textMuted }]}>
+                    <Text style={[styles.categoryItemText, { color: themeColors.textMuted }]}>
                       No saved suppliers yet — type a name below
                     </Text>
                   </View>
@@ -313,7 +315,7 @@ export function ManualEntrySection({
                       {name}
                     </Text>
                     {supplierName === name && (
-                      <MaterialCommunityIcons name="check" size={18} color={colors.primary} />
+                      <MaterialCommunityIcons name="check" size={18} color={themeColors.accentText} />
                     )}
                   </TouchableOpacity>
                 ))}
@@ -350,7 +352,7 @@ export function ManualEntrySection({
             <MaterialCommunityIcons
               name={showCoverageOptions ? 'chevron-up' : 'chevron-down'}
               size={18}
-              color={colors.primary}
+              color={themeColors.accentText}
             />
             <Text style={styles.advancedToggleText}>
               {showCoverageOptions ? 'Hide' : 'Show'} coverage settings

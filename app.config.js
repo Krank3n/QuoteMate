@@ -15,7 +15,7 @@ export default {
     version: "1.50",
     orientation: "portrait",
     icon: "./assets/icon.png",
-    userInterfaceStyle: "dark",
+    userInterfaceStyle: "automatic",
     newArchEnabled: true,
     // EAS Update (OTA): JS-only changes push over-the-air. runtimeVersion =
     // appVersion means an OTA only lands on a build of the SAME app version,
@@ -119,7 +119,7 @@ export default {
     splash: {
       image: "./assets/splash.png",
       resizeMode: "contain",
-      backgroundColor: "#1E293B"
+      backgroundColor: "#0A0E16"
     },
     assetBundlePatterns: [
       "**/*"
@@ -140,7 +140,7 @@ export default {
     android: {
       adaptiveIcon: {
         foregroundImage: "./assets/adaptive-icon-new.png",
-        backgroundColor: "#1E293B"  // Dark blue-gray to match app theme
+        backgroundColor: "#0A0E16"  // Dark blue-gray to match app theme
       },
       package: "com.quotemate.app",
       versionCode: 162,

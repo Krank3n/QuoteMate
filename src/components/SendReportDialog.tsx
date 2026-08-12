@@ -17,7 +17,7 @@ import { View, StyleSheet, ScrollView } from 'react-native';
 import { Modal, Portal, Text, TextInput, Button, Switch } from 'react-native-paper';
 
 import { ActionSheet } from './ActionSheet';
-import { colors } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 import { sendServiceReportEmail } from '../services/serviceReportSender';
 import { generateReportEmail, getDefaultReportEmailBody } from '../services/llmService';
 import { trackEvent } from '../services/analyticsService';
@@ -58,6 +58,8 @@ export function SendReportDialog({
   onShare,
   onSent,
 }: SendReportDialogProps) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const [composeVisible, setComposeVisible] = useState(false);
   const [to, setTo] = useState('');
   const [note, setNote] = useState('');
@@ -195,7 +197,7 @@ export function SendReportDialog({
                 <Text style={styles.doneBody}>
                   {`${reportNumber ? `${reportNumber} ` : ''}went to ${sentTo} with the PDF attached.`}
                 </Text>
-                <Button mode="contained" onPress={closeAll} style={styles.primary}>
+                <Button mode="contained" buttonColor={themeColors.accent} textColor={themeColors.onAccent} onPress={closeAll} style={styles.primary}>
                   Done
                 </Button>
               </View>
@@ -256,7 +258,7 @@ export function SendReportDialog({
                     <Switch
                       value={sendCopyToSelf}
                       onValueChange={setSendCopyToSelf}
-                      color={colors.primary}
+                      color={themeColors.accentText}
                       disabled={sending}
                     />
                   </View>
@@ -269,7 +271,7 @@ export function SendReportDialog({
                     Cancel
                   </Button>
                   <Button
-                    mode="contained"
+                    mode="contained" buttonColor={themeColors.accent} textColor={themeColors.onAccent}
                     onPress={handleSend}
                     loading={sending}
                     disabled={sending}
@@ -288,7 +290,7 @@ export function SendReportDialog({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   modalContainer: {
     flex: 1,
     alignItems: 'center',
@@ -301,25 +303,25 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 520,
     maxHeight: '86%',
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderRadius: 14,
     padding: 20,
   },
   title: {
     fontSize: 18,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
   },
   subtitle: {
     fontSize: 13,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginTop: 4,
     marginBottom: 14,
     lineHeight: 18,
   },
   input: {
     marginBottom: 12,
-    backgroundColor: colors.surfaceDark,
+    backgroundColor: t.colors.surface,
   },
   noteInput: {
     minHeight: 120,
@@ -332,7 +334,7 @@ const styles = StyleSheet.create({
   },
   noteLabel: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
   copyRow: {
     flexDirection: 'row',
@@ -347,15 +349,15 @@ const styles = StyleSheet.create({
   },
   copyTitle: {
     fontSize: 14,
-    color: colors.text,
+    color: t.colors.text,
   },
   copySubtitle: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginTop: 1,
   },
   error: {
-    color: colors.error,
+    color: t.colors.error,
     fontSize: 13,
     marginBottom: 8,
   },
@@ -376,14 +378,14 @@ const styles = StyleSheet.create({
   doneTitle: {
     fontSize: 18,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
   },
   doneBody: {
     fontSize: 14,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     textAlign: 'center',
     marginTop: 6,
     marginBottom: 18,
     lineHeight: 20,
   },
-});
+}));

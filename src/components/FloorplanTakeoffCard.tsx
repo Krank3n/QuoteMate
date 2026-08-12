@@ -17,7 +17,8 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
 import { FloorplanAnalysis } from '../types';
 import { resolvedTakeoff, TakeoffEditField } from '../services/floorplanTakeoff';
-import { colors } from '../theme';
+import type { Tokens } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 
 interface FloorplanTakeoffCardProps {
   analysis: FloorplanAnalysis;
@@ -27,14 +28,14 @@ interface FloorplanTakeoffCardProps {
   onScaleZones?: (areaFactor: number) => void;
 }
 
-const CONFIDENCE_META: Record<
+const confidenceMetaFor = (themeColors: Tokens): Record<
   FloorplanAnalysis['confidence'],
   { label: string; color: string; bg: string }
-> = {
-  high: { label: 'High confidence', color: colors.success, bg: colors.successBg },
-  medium: { label: 'Medium confidence', color: colors.warning, bg: colors.warningBg },
-  low: { label: 'Low confidence', color: colors.error, bg: colors.errorBg },
-};
+> => ({
+  high: { label: 'High confidence', color: themeColors.money, bg: themeColors.moneySubtle },
+  medium: { label: 'Medium confidence', color: themeColors.warning, bg: themeColors.warningSubtle },
+  low: { label: 'Low confidence', color: themeColors.error, bg: themeColors.errorSubtle },
+});
 
 function fmt(n: number): string {
   // Trim trailing zeros: 12.50 → "12.5", 12.00 → "12".
@@ -50,6 +51,9 @@ const CONFIDENCE_GUIDANCE: Record<FloorplanAnalysis['confidence'], string> = {
 };
 
 export function FloorplanTakeoffCard({ analysis, onEdit, onScaleZones }: FloorplanTakeoffCardProps) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
+  const CONFIDENCE_META = confidenceMetaFor(themeColors);
   const takeoff = resolvedTakeoff(analysis);
   const zones = (takeoff.zones ?? []).filter(
     (z) => typeof z.areaM2 === 'number' && z.areaM2 > 0,
@@ -124,7 +128,7 @@ export function FloorplanTakeoffCard({ analysis, onEdit, onScaleZones }: Floorpl
       return (
         <View style={styles.row}>
           <View style={styles.rowIcon}>
-            <MaterialCommunityIcons name={icon as any} size={18} color={colors.primary} />
+            <MaterialCommunityIcons name={icon as any} size={18} color={themeColors.accentText} />
           </View>
           <Text style={styles.rowLabel}>{label}</Text>
           <TextInput
@@ -152,7 +156,7 @@ export function FloorplanTakeoffCard({ analysis, onEdit, onScaleZones }: Floorpl
         accessibilityLabel={onEdit ? `${label} ${fmt(value)} ${unit}. Tap to correct.` : undefined}
       >
         <View style={styles.rowIcon}>
-          <MaterialCommunityIcons name={icon as any} size={18} color={colors.primary} />
+          <MaterialCommunityIcons name={icon as any} size={18} color={themeColors.accentText} />
         </View>
         <Text style={styles.rowLabel}>{label}</Text>
         <View style={styles.rowValueBlock}>
@@ -165,7 +169,7 @@ export function FloorplanTakeoffCard({ analysis, onEdit, onScaleZones }: Floorpl
           <MaterialCommunityIcons
             name={'pencil-outline' as any}
             size={15}
-            color={colors.textMuted}
+            color={themeColors.textMuted}
           />
         ) : null}
       </TouchableOpacity>
@@ -180,7 +184,7 @@ export function FloorplanTakeoffCard({ analysis, onEdit, onScaleZones }: Floorpl
             <MaterialCommunityIcons
               name={'ruler-square' as any}
               size={16}
-              color={colors.primary}
+              color={themeColors.accentText}
             />
           </View>
           <Text style={styles.title}>Measured from plan</Text>
@@ -249,13 +253,13 @@ export function FloorplanTakeoffCard({ analysis, onEdit, onScaleZones }: Floorpl
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   card: {
     marginHorizontal: 16,
     marginBottom: 12,
     padding: 12,
     borderRadius: 16,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     gap: 8,
   },
   header: {
@@ -264,7 +268,7 @@ const styles = StyleSheet.create({
     gap: 10,
     paddingBottom: 8,
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    borderBottomColor: t.colors.border,
   },
   headerLeft: {
     flexDirection: 'row',
@@ -277,14 +281,14 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: colors.primaryBg,
+    backgroundColor: t.colors.accentSubtle,
     alignItems: 'center',
     justifyContent: 'center',
   },
   title: {
     fontSize: 14,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
     flex: 1,
   },
   confChip: {
@@ -299,7 +303,7 @@ const styles = StyleSheet.create({
   },
   guidance: {
     fontSize: 12,
-    color: colors.textSecondary,
+    color: t.colors.textMuted,
   },
   row: {
     flexDirection: 'row',
@@ -307,20 +311,20 @@ const styles = StyleSheet.create({
     gap: 12,
     padding: 10,
     borderRadius: 12,
-    backgroundColor: colors.surfaceGray3,
+    backgroundColor: t.colors.surfacePressed,
   },
   rowIcon: {
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: colors.primaryBg,
+    backgroundColor: t.colors.accentSubtle,
     alignItems: 'center',
     justifyContent: 'center',
   },
   rowLabel: {
     flex: 1,
     fontSize: 13,
-    color: colors.text,
+    color: t.colors.text,
   },
   rowValueBlock: {
     alignItems: 'flex-end',
@@ -328,11 +332,11 @@ const styles = StyleSheet.create({
   rowValue: {
     fontSize: 14,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
   },
   rowMeasured: {
     fontSize: 11,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
   editInput: {
     minWidth: 72,
@@ -340,17 +344,17 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: colors.primary,
-    backgroundColor: colors.surface,
+    borderColor: t.colors.accent,
+    backgroundColor: t.colors.surfaceRaised,
     fontSize: 14,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
     textAlign: 'right',
   },
   editUnit: {
     fontSize: 13,
     fontWeight: '600',
-    color: colors.textSecondary,
+    color: t.colors.textMuted,
   },
   scalePrompt: {
     flexDirection: 'row',
@@ -358,31 +362,31 @@ const styles = StyleSheet.create({
     gap: 10,
     padding: 10,
     borderRadius: 12,
-    backgroundColor: colors.primaryBg,
+    backgroundColor: t.colors.accentSubtle,
     flexWrap: 'wrap',
   },
   scalePromptText: {
     flex: 1,
     fontSize: 12,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
     minWidth: 140,
   },
   scalePromptButton: {
     paddingHorizontal: 12,
     paddingVertical: 7,
     borderRadius: 999,
-    backgroundColor: colors.primary,
+    backgroundColor: t.colors.accent,
   },
   scalePromptButtonText: {
     fontSize: 12,
     fontWeight: '700',
-    color: colors.surface,
+    color: t.colors.onAccent,
   },
   scalePromptDismiss: {
     fontSize: 12,
     fontWeight: '600',
-    color: colors.textSecondary,
+    color: t.colors.textMuted,
   },
   zonesBlock: {
     gap: 6,
@@ -391,7 +395,7 @@ const styles = StyleSheet.create({
   zonesHeading: {
     fontSize: 11,
     fontWeight: '700',
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     textTransform: 'uppercase',
     letterSpacing: 0.4,
   },
@@ -404,32 +408,32 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 6,
-    backgroundColor: colors.surfaceGray3,
+    backgroundColor: t.colors.surfacePressed,
   },
   zoneChipText: {
     fontSize: 11,
     fontWeight: '700',
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
   zoneLabel: {
     flex: 1,
     fontSize: 13,
-    color: colors.text,
+    color: t.colors.text,
   },
   zoneEdge: {
     fontSize: 12,
-    color: colors.textSecondary,
+    color: t.colors.textMuted,
   },
   zoneValue: {
     fontSize: 13,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
   },
   assumptions: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     fontStyle: 'italic',
     lineHeight: 17,
     paddingTop: 2,
   },
-});
+}));

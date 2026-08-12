@@ -12,7 +12,8 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
 import type { Job, JobStage } from '../../shared/job/types';
 import { canTransition } from '../../shared/job/stage';
-import { colors } from '../theme';
+import type { Tokens } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 import { selectionTap } from '../utils/haptics';
 import { BottomSheet, useStaggeredEntrance } from './BottomSheet';
 
@@ -53,75 +54,79 @@ interface StageMeta {
  * syncJobAggregates), and JobCard renders whatever the listener delivers —
  * one malformed doc must never hard-crash every screen that shows jobs.
  */
-export function stageMetaFor(stage: JobStage | undefined): StageMeta {
-  return JOB_STAGE_META[stage as JobStage] ?? JOB_STAGE_META.inquiry;
+export function stageMetaFor(stage: JobStage | undefined, themeColors: Tokens): StageMeta {
+  const meta = jobStageMetaFor(themeColors);
+  return meta[stage as JobStage] ?? meta.inquiry;
 }
 
-export const JOB_STAGE_META: Record<JobStage, StageMeta> = {
+export const jobStageMetaFor = (themeColors: Tokens): Record<JobStage, StageMeta> => ({
   inquiry: {
     chipLabel: 'Inquiry',
     actionLabel: 'Mark as Inquiry',
     icon: 'help-circle-outline',
-    color: colors.info,
-    bgColor: colors.infoBg,
+    // Neutral for the same reason 'draft' is: nothing has happened on this job
+    // yet. Giving it a real colour makes an untouched job look as active as a
+    // sent one in the list.
+    color: themeColors.neutral,
+    bgColor: themeColors.neutralSubtle,
   },
   quoted: {
     chipLabel: 'Quoted',
     actionLabel: 'Mark as Quoted',
     icon: 'send-outline',
-    color: colors.warning,
-    bgColor: colors.warningBg,
+    color: themeColors.warning,
+    bgColor: themeColors.warningSubtle,
   },
   accepted: {
     chipLabel: 'Accepted',
     actionLabel: 'Mark as Accepted',
     icon: 'check-circle-outline',
-    color: colors.success,
-    bgColor: colors.successBg,
+    color: themeColors.money,
+    bgColor: themeColors.moneySubtle,
   },
   scheduled: {
     chipLabel: 'Scheduled',
     actionLabel: 'Schedule…',
     icon: 'calendar-clock-outline',
-    color: colors.info,
-    bgColor: colors.infoBg,
+    color: themeColors.info,
+    bgColor: themeColors.infoSubtle,
   },
   in_progress: {
     chipLabel: 'In Progress',
     actionLabel: 'Mark as In Progress',
     icon: 'hammer-wrench',
-    color: colors.warning,
-    bgColor: colors.warningBg,
+    color: themeColors.warning,
+    bgColor: themeColors.warningSubtle,
   },
   completed: {
     chipLabel: 'Completed',
     actionLabel: 'Mark as Completed',
     icon: 'flag-checkered',
-    color: colors.success,
-    bgColor: colors.successBg,
+    color: themeColors.money,
+    bgColor: themeColors.moneySubtle,
   },
   paid: {
     chipLabel: 'Paid',
     actionLabel: 'Mark as Paid',
     icon: 'cash-check',
-    color: colors.success,
-    bgColor: colors.successBg,
+    color: themeColors.money,
+    bgColor: themeColors.moneySubtle,
   },
   closed: {
     chipLabel: 'Closed',
     actionLabel: 'Archive',
     icon: 'archive-outline',
-    color: colors.inactive,
-    bgColor: colors.surfaceGray3,
+    color: themeColors.textDisabled,
+    bgColor: themeColors.surfacePressed,
   },
   cancelled: {
     chipLabel: 'Cancelled',
     actionLabel: 'Cancel Job',
     icon: 'close-octagon-outline',
-    color: colors.error,
-    bgColor: colors.errorBg,
+    color: themeColors.error,
+    bgColor: themeColors.errorSubtle,
   },
-};
+});
 
 const ALL_STAGES: JobStage[] = [
   'inquiry',
@@ -153,6 +158,9 @@ export function JobStageSheet({
   onSchedule,
   title = 'Update Stage',
 }: JobStageSheetProps) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
+  const JOB_STAGE_META = jobStageMetaFor(themeColors);
   const showSchedule = !!onSchedule && !SCHEDULE_HIDDEN_STAGES.has(job.stage);
 
   // Only offer legal transitions from the shared state machine. This
@@ -203,11 +211,11 @@ export function JobStageSheet({
               ]}
               onPress={handleSchedule}
             >
-              <View style={[styles.iconCircle, { backgroundColor: colors.infoBg }]}>
+              <View style={[styles.iconCircle, { backgroundColor: themeColors.infoSubtle }]}>
                 <MaterialCommunityIcons
                   name={'calendar-clock-outline' as any}
                   size={22}
-                  color={colors.info}
+                  color={themeColors.info}
                 />
               </View>
               <View style={styles.labelContainer}>
@@ -216,7 +224,7 @@ export function JobStageSheet({
               <MaterialCommunityIcons
                 name="chevron-right"
                 size={20}
-                color={colors.inactive}
+                color={themeColors.textDisabled}
               />
             </Pressable>
           </Animated.View>
@@ -259,7 +267,7 @@ export function JobStageSheet({
                 <MaterialCommunityIcons
                   name="chevron-right"
                   size={20}
-                  color={colors.inactive}
+                  color={themeColors.textDisabled}
                 />
               </Pressable>
             </Animated.View>
@@ -270,7 +278,7 @@ export function JobStageSheet({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   optionsContainer: {
     gap: 10,
   },
@@ -280,12 +288,12 @@ const styles = StyleSheet.create({
     padding: 14,
     paddingHorizontal: 16,
     borderRadius: 16,
-    backgroundColor: colors.surfaceGray3,
+    backgroundColor: t.colors.surfacePressed,
     borderWidth: 1.5,
     borderColor: 'transparent',
   },
   optionPressed: {
-    backgroundColor: colors.surfaceGray2,
+    backgroundColor: t.colors.surfaceOverlay,
     transform: [{ scale: 0.98 }],
   },
   iconCircle: {
@@ -302,6 +310,6 @@ const styles = StyleSheet.create({
   optionLabel: {
     fontSize: 16,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
   },
-});
+}));

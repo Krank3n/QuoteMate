@@ -27,7 +27,7 @@ import {
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
 import { useStore } from '../store/useStore';
-import { colors } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 import { Contact } from '../types';
 import {
   createContact,
@@ -39,6 +39,7 @@ import {
 import { SOURCE_COLORS } from '../hooks/useUnifiedContactSearch';
 import { ContactActionsBar } from '../components/document/ContactActionsBar';
 import { AlertModal, AlertType } from '../components/AlertModal';
+import { GridBackground } from '../components/GridBackground';
 
 type AlertConfig = {
   type: AlertType;
@@ -53,6 +54,8 @@ type AlertConfig = {
 type FilterType = 'all' | 'saved' | 'xero';
 
 export function ContactsScreen() {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const contacts = useStore((s) => s.contacts);
   const xeroContacts = useStore((s) => s.xeroContacts);
   const xeroConnection = useStore((s) => s.xeroConnection);
@@ -300,7 +303,7 @@ export function ContactsScreen() {
       <Surface style={styles.contactCard}>
         <View style={styles.contactRow}>
           <View style={styles.contactAvatar}>
-            <MaterialCommunityIcons name="account" size={24} color={colors.primary} />
+            <MaterialCommunityIcons name="account" size={24} color={themeColors.accentText} />
           </View>
           <View style={styles.contactInfo}>
             <View style={styles.contactNameRow}>
@@ -332,6 +335,7 @@ export function ContactsScreen() {
 
   return (
     <View style={styles.container}>
+      <GridBackground />
       <View style={styles.searchSection}>
         <Searchbar
           placeholder="Search contacts..."
@@ -363,14 +367,14 @@ export function ContactsScreen() {
           onPress={handlePhoneImport}
           disabled={phoneImporting}
         >
-          <MaterialCommunityIcons name="cellphone" size={18} color={colors.primary} />
+          <MaterialCommunityIcons name="cellphone" size={18} color={themeColors.accentText} />
           <Text style={styles.actionButtonText}>
             {phoneImporting ? 'Importing...' : 'Import from Phone'}
           </Text>
         </TouchableOpacity>
         {xeroConnection && (
           <TouchableOpacity style={styles.actionButton} onPress={handleXeroSync} disabled={xeroSyncing}>
-            <MaterialCommunityIcons name="cloud-sync" size={18} color={colors.primary} />
+            <MaterialCommunityIcons name="cloud-sync" size={18} color={themeColors.accentText} />
             <Text style={styles.actionButtonText}>{xeroSyncing ? 'Syncing...' : 'Sync Xero'}</Text>
           </TouchableOpacity>
         )}
@@ -393,7 +397,7 @@ export function ContactsScreen() {
                 }}
               >
                 <Text style={styles.xeroChipText}>{item.name}</Text>
-                <MaterialCommunityIcons name="plus" size={14} color={colors.primary} />
+                <MaterialCommunityIcons name="plus" size={14} color={themeColors.accentText} />
               </TouchableOpacity>
             )}
             showsHorizontalScrollIndicator={false}
@@ -413,7 +417,7 @@ export function ContactsScreen() {
         windowSize={7}
         ListEmptyComponent={
           <View style={styles.emptyState}>
-            <MaterialCommunityIcons name="account-group-outline" size={48} color={colors.onSurface} />
+            <MaterialCommunityIcons name="account-group-outline" size={48} color={themeColors.textSecondary} />
             <Text style={styles.emptyTitle}>No contacts yet</Text>
             <Text style={styles.emptySubtitle}>
               Start quoting and your customers will pile up here. Or tap + to chuck one in yourself.
@@ -426,7 +430,7 @@ export function ContactsScreen() {
         icon="plus"
         style={styles.fab}
         onPress={openAddModal}
-        color={colors.white}
+        color={themeColors.onAccent}
       />
 
       {/* Add/Edit Contact Modal */}
@@ -504,7 +508,7 @@ export function ContactsScreen() {
             {editingContact && (
               <Button
                 mode="text"
-                textColor={colors.error}
+                textColor={themeColors.error}
                 onPress={() => {
                   setEditModalVisible(false);
                   handleDelete(editingContact);
@@ -513,7 +517,7 @@ export function ContactsScreen() {
                 Delete
               </Button>
             )}
-            <Button mode="contained" onPress={handleSave} disabled={!formName.trim()}>
+            <Button mode="contained" buttonColor={themeColors.accent} textColor={themeColors.onAccent} onPress={handleSave} disabled={!formName.trim()}>
               Save
             </Button>
           </View>
@@ -535,10 +539,10 @@ export function ContactsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
   },
   searchSection: {
     paddingHorizontal: 16,
@@ -546,7 +550,7 @@ const styles = StyleSheet.create({
   },
   searchbar: {
     borderRadius: 12,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     elevation: 1,
   },
   searchInput: {
@@ -574,12 +578,12 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 12,
     borderRadius: 8,
-    backgroundColor: colors.primary + '15',
+    backgroundColor: t.colors.accentSubtle,
   },
   actionButtonText: {
     fontSize: 13,
     fontWeight: '600',
-    color: colors.primary,
+    color: t.colors.accentText,
   },
   xeroSection: {
     paddingHorizontal: 16,
@@ -588,11 +592,11 @@ const styles = StyleSheet.create({
   xeroSectionTitle: {
     fontSize: 13,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
   },
   xeroSectionSubtitle: {
     fontSize: 11,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     marginBottom: 6,
   },
   xeroChipsList: {
@@ -605,13 +609,13 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     paddingHorizontal: 10,
     borderRadius: 16,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderWidth: 1,
     borderColor: SOURCE_COLORS.xero + '40',
   },
   xeroChipText: {
     fontSize: 12,
-    color: colors.text,
+    color: t.colors.text,
   },
   listContent: {
     paddingHorizontal: 16,
@@ -622,7 +626,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 14,
     marginBottom: 8,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     elevation: 1,
   },
   contactRow: {
@@ -633,7 +637,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: colors.primary + '20',
+    backgroundColor: t.colors.accentSubtle,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
@@ -649,7 +653,7 @@ const styles = StyleSheet.create({
   contactName: {
     fontSize: 15,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
   },
   contactSource: {
     fontSize: 10,
@@ -658,13 +662,13 @@ const styles = StyleSheet.create({
   },
   contactBusiness: {
     fontSize: 12,
-    color: colors.primary,
+    color: t.colors.accentText,
     fontWeight: '500',
     marginTop: 1,
   },
   contactDetail: {
     fontSize: 12,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     marginTop: 1,
   },
   emptyState: {
@@ -675,12 +679,12 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 17,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
     marginTop: 12,
   },
   emptySubtitle: {
     fontSize: 13,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     textAlign: 'center',
     marginTop: 6,
     lineHeight: 18,
@@ -689,10 +693,10 @@ const styles = StyleSheet.create({
     position: 'absolute',
     right: 16,
     bottom: 24,
-    backgroundColor: colors.primary,
+    backgroundColor: t.colors.accent,
   },
   modalContainer: {
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     margin: 20,
     padding: 20,
     borderRadius: 16,
@@ -701,7 +705,7 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 18,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
     marginBottom: 16,
   },
   modalInput: {
@@ -713,4 +717,4 @@ const styles = StyleSheet.create({
     gap: 8,
     marginTop: 8,
   },
-});
+}));

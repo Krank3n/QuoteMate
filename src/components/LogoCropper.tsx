@@ -23,7 +23,7 @@ import {
 } from 'react-native';
 import { Text, Button } from 'react-native-paper';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
-import { colors } from '../theme';
+import { makeStyles, useThemeColors} from '../theme';
 import {
   fitImage,
   clampToImage,
@@ -44,6 +44,9 @@ const MIN_SIZE = 40;
 const HANDLE = 28;
 
 export function LogoCropper({ visible, uri, onCancel, onCropped }: LogoCropperProps) {
+  const themeColors = useThemeColors();
+  const styles = useStyles();
+
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
   const [frame, setFrame] = useState<{ w: number; h: number } | null>(null);
   const [box, setBox] = useState<Rect | null>(null);
@@ -206,7 +209,7 @@ export function LogoCropper({ visible, uri, onCancel, onCropped }: LogoCropperPr
             <Button mode="text" onPress={onCancel} disabled={busy}>
               Cancel
             </Button>
-            <Button mode="contained" onPress={apply} loading={busy} disabled={busy || !box}>
+            <Button mode="contained" buttonColor={themeColors.accent} textColor={themeColors.onAccent} onPress={apply} loading={busy} disabled={busy || !box}>
               Use this
             </Button>
           </View>
@@ -217,6 +220,8 @@ export function LogoCropper({ visible, uri, onCancel, onCropped }: LogoCropperPr
 }
 
 function Handle({ pan, style }: { pan: ReturnType<typeof PanResponder.create>; style: object }) {
+  const styles = useStyles();
+
   return (
     <View {...pan.panHandlers} style={[styles.handleHit, style]}>
       <View style={styles.handleDot} />
@@ -224,7 +229,7 @@ function Handle({ pan, style }: { pan: ReturnType<typeof PanResponder.create>; s
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   backdrop: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.6)',
@@ -235,18 +240,18 @@ const styles = StyleSheet.create({
   sheet: {
     width: '100%',
     maxWidth: 520,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderRadius: 12,
     padding: 16,
   },
   title: {
     fontSize: 18,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
   },
   subtitle: {
     fontSize: 13,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginTop: 4,
     marginBottom: 12,
   },
@@ -263,7 +268,7 @@ const styles = StyleSheet.create({
   box: {
     position: 'absolute',
     borderWidth: 2,
-    borderColor: colors.primary,
+    borderColor: t.colors.accent,
   },
   handleHit: {
     position: 'absolute',
@@ -276,9 +281,9 @@ const styles = StyleSheet.create({
     width: 14,
     height: 14,
     borderRadius: 7,
-    backgroundColor: colors.primary,
+    backgroundColor: t.colors.accent,
     borderWidth: 2,
-    borderColor: colors.onPrimary,
+    borderColor: t.colors.onAccent,
   },
   errorRow: {
     flexDirection: 'row',
@@ -289,7 +294,7 @@ const styles = StyleSheet.create({
   errorText: {
     flex: 1,
     fontSize: 12,
-    color: colors.error,
+    color: t.colors.error,
   },
   actions: {
     flexDirection: 'row',
@@ -299,4 +304,4 @@ const styles = StyleSheet.create({
   spacer: {
     flex: 1,
   },
-});
+}));

@@ -14,7 +14,7 @@ import {
   RadioButton,
   TextInput,
 } from 'react-native-paper';
-import { colors } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 
 interface CancellationReasonModalProps {
   visible: boolean;
@@ -40,6 +40,8 @@ export function CancellationReasonModal({
   isLoading = false,
   periodEndDate,
 }: CancellationReasonModalProps) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const [selectedReason, setSelectedReason] = useState<string>('');
   const [feedback, setFeedback] = useState<string>('');
 
@@ -98,7 +100,7 @@ export function CancellationReasonModal({
                       position="leading"
                       style={styles.radioButton}
                       labelStyle={styles.radioLabel}
-                      color={colors.primary}
+                      color={themeColors.accentText}
                     />
                   </View>
                 ))}
@@ -137,7 +139,7 @@ export function CancellationReasonModal({
                 onPress={handleConfirm}
                 disabled={!selectedReason || isLoading}
                 loading={isLoading}
-                buttonColor={colors.error}
+                buttonColor={themeColors.error}
                 style={styles.button}
               >
                 Cancel Subscription
@@ -150,7 +152,7 @@ export function CancellationReasonModal({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   modalContainer: {
     padding: 20,
     alignItems: 'center',
@@ -162,18 +164,18 @@ const styles = StyleSheet.create({
     maxHeight: '90%',
     padding: 24,
     borderRadius: 12,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
   },
   title: {
     fontSize: 24,
     fontWeight: 'bold',
     marginBottom: 12,
-    color: colors.text,
+    color: t.colors.text,
   },
   subtitle: {
     fontSize: 16,
     marginBottom: 24,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     lineHeight: 22,
   },
   reasonsContainer: {
@@ -193,7 +195,7 @@ const styles = StyleSheet.create({
   },
   notice: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginBottom: 24,
     fontStyle: 'italic',
     lineHeight: 18,
@@ -205,4 +207,4 @@ const styles = StyleSheet.create({
   button: {
     flex: 1,
   },
-});
+}));

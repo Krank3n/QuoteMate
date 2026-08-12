@@ -26,12 +26,15 @@ import * as WebBrowser from 'expo-web-browser';
 import { format } from 'date-fns';
 
 import { useStore } from '../../store/useStore';
-import { colors } from '../../theme';
+import { makeStyles, useThemeColors } from '../../theme';
 import { WebContainer } from '../../components/WebContainer';
 import { AlertModal } from '../../components/AlertModal';
 import * as xeroService from '../../services/xeroService';
+import { GridBackground } from '../../components/GridBackground';
 
 export function XeroIntegrationScreen() {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const {
     xeroConnection,
     setXeroConnection,
@@ -238,7 +241,7 @@ export function XeroIntegrationScreen() {
   if (checkingConnection) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" color={colors.primary} />
+        <ActivityIndicator size="large" color={themeColors.accentText} />
         <Text style={styles.loadingText}>Checking Xero connection...</Text>
       </View>
     );
@@ -246,13 +249,15 @@ export function XeroIntegrationScreen() {
 
   return (
     <>
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <View style={styles.gridHost}>
+    <GridBackground />
+    <ScrollView style={styles.scroller} contentContainerStyle={styles.content}>
       <WebContainer>
         {/* Xero Logo / Header */}
         <Surface style={styles.card}>
           <View style={styles.headerRow}>
             <View style={styles.xeroIcon}>
-              <MaterialCommunityIcons name="cloud-sync" size={32} color={colors.primary} />
+              <MaterialCommunityIcons name="cloud-sync" size={32} color={themeColors.accentText} />
             </View>
             <View style={styles.headerText}>
               <Title style={styles.title}>Xero Integration</Title>
@@ -270,7 +275,7 @@ export function XeroIntegrationScreen() {
           {xeroConnection ? (
             <View>
               <View style={styles.statusRow}>
-                <MaterialCommunityIcons name="check-circle" size={20} color={colors.success} />
+                <MaterialCommunityIcons name="check-circle" size={20} color={themeColors.money} />
                 <Text style={styles.connectedText}>Connected</Text>
               </View>
 
@@ -303,7 +308,7 @@ export function XeroIntegrationScreen() {
                 mode="outlined"
                 onPress={handleDisconnect}
                 loading={loading}
-                textColor={colors.error}
+                textColor={themeColors.error}
                 style={styles.disconnectButton}
               >
                 Disconnect Xero
@@ -317,7 +322,7 @@ export function XeroIntegrationScreen() {
 
               {!isPro && (
                 <View style={styles.proNotice}>
-                  <MaterialCommunityIcons name="crown" size={18} color={colors.warning} />
+                  <MaterialCommunityIcons name="crown" size={18} color={themeColors.warning} />
                   <Text style={styles.proNoticeText}>Pro feature — upgrade to connect</Text>
                 </View>
               )}
@@ -328,7 +333,7 @@ export function XeroIntegrationScreen() {
                 loading={loading}
                 disabled={loading}
                 style={styles.connectButton}
-                buttonColor={colors.primary}
+                buttonColor={themeColors.accent}
               >
                 Connect to Xero
               </Button>
@@ -350,13 +355,13 @@ export function XeroIntegrationScreen() {
                 <Text style={styles.syncStatLabel}>Synced</Text>
               </View>
               <View style={styles.syncStat}>
-                <Text style={[styles.syncStatNumber, totalUnsynced > 0 && { color: '#F59E0B' }]}>
+                <Text style={[styles.syncStatNumber, totalUnsynced > 0 && { color: themeColors.warning }]}>
                   {totalUnsynced}
                 </Text>
                 <Text style={styles.syncStatLabel}>Unsynced</Text>
               </View>
               <View style={styles.syncStat}>
-                <Text style={[styles.syncStatNumber, { color: '#d32f2f' }]}>
+                <Text style={[styles.syncStatNumber, { color: themeColors.error }]}>
                   {invoices.filter(i => i.xeroSyncStatus === 'error').length
                     + quotes.filter(q => q.xeroSyncStatus === 'error').length}
                 </Text>
@@ -372,7 +377,7 @@ export function XeroIntegrationScreen() {
                   loading={xeroLoading || bulkSyncing}
                   disabled={xeroLoading || bulkSyncing}
                   style={styles.syncButton}
-                  buttonColor={colors.primary}
+                  buttonColor={themeColors.accent}
                   icon="sync"
                 >
                   {`Sync ${totalUnsynced} item${totalUnsynced === 1 ? '' : 's'}`}
@@ -399,19 +404,19 @@ export function XeroIntegrationScreen() {
           <Text style={styles.sectionTitle}>How it works</Text>
 
           <View style={styles.howItWorksItem}>
-            <MaterialCommunityIcons name="numeric-1-circle" size={24} color={colors.primary} />
+            <MaterialCommunityIcons name="numeric-1-circle" size={24} color={themeColors.accentText} />
             <Text style={styles.howItWorksText}>
               Connect your Xero account above
             </Text>
           </View>
           <View style={styles.howItWorksItem}>
-            <MaterialCommunityIcons name="numeric-2-circle" size={24} color={colors.primary} />
+            <MaterialCommunityIcons name="numeric-2-circle" size={24} color={themeColors.accentText} />
             <Text style={styles.howItWorksText}>
               Accepted quotes auto-push to Xero. Invoices push when sent.
             </Text>
           </View>
           <View style={styles.howItWorksItem}>
-            <MaterialCommunityIcons name="numeric-3-circle" size={24} color={colors.primary} />
+            <MaterialCommunityIcons name="numeric-3-circle" size={24} color={themeColors.accentText} />
             <Text style={styles.howItWorksText}>
               Tap "Push to Xero" on any job to re-sync, or use the bulk button above.
             </Text>
@@ -421,6 +426,7 @@ export function XeroIntegrationScreen() {
         <View style={styles.bottomPadding} />
       </WebContainer>
     </ScrollView>
+    </View>
 
     <AlertModal
       visible={alertModal.visible}
@@ -451,13 +457,15 @@ export function XeroIntegrationScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
+const useStyles = makeStyles((t) => ({
+  gridHost: { flex: 1, backgroundColor: t.colors.bg },
+  scroller: { flex: 1, backgroundColor: 'transparent' },
+  container: { flex: 1, backgroundColor: t.colors.bg },
   content: { padding: 16 },
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 40, backgroundColor: colors.background },
-  loadingText: { marginTop: 12, color: colors.textMuted, fontSize: 14 },
+  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 40, backgroundColor: t.colors.bg },
+  loadingText: { marginTop: 12, color: t.colors.textMuted, fontSize: 14 },
   card: {
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderRadius: 14,
     padding: 20,
     marginBottom: 12,
@@ -468,18 +476,18 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 12,
-    backgroundColor: colors.primaryBg,
+    backgroundColor: t.colors.accentSubtle,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 16,
   },
   headerText: { flex: 1 },
-  title: { fontSize: 20, fontWeight: '700', color: colors.text },
-  subtitle: { fontSize: 14, color: colors.textMuted, marginTop: 2 },
+  title: { fontSize: 20, fontWeight: '700', color: t.colors.text },
+  subtitle: { fontSize: 14, color: t.colors.textMuted, marginTop: 2 },
   sectionTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
     marginBottom: 12,
   },
   statusRow: {
@@ -490,7 +498,7 @@ const styles = StyleSheet.create({
   connectedText: {
     fontSize: 15,
     fontWeight: '600',
-    color: colors.success,
+    color: t.colors.money,
     marginLeft: 8,
   },
   detailRow: {
@@ -498,20 +506,20 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingVertical: 8,
   },
-  detailLabel: { fontSize: 14, color: colors.textMuted },
-  detailValue: { fontSize: 14, fontWeight: '500', color: colors.text },
-  divider: { marginVertical: 16, backgroundColor: colors.border },
-  disconnectButton: { borderColor: colors.error },
-  disconnectedText: { fontSize: 14, color: colors.textMuted, lineHeight: 20, marginBottom: 16 },
+  detailLabel: { fontSize: 14, color: t.colors.textMuted },
+  detailValue: { fontSize: 14, fontWeight: '500', color: t.colors.text },
+  divider: { marginVertical: 16, backgroundColor: t.colors.border },
+  disconnectButton: { borderColor: t.colors.error },
+  disconnectedText: { fontSize: 14, color: t.colors.textMuted, lineHeight: 20, marginBottom: 16 },
   proNotice: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.warningBg,
+    backgroundColor: t.colors.warningSubtle,
     padding: 12,
     borderRadius: 8,
     marginBottom: 16,
   },
-  proNoticeText: { fontSize: 13, color: colors.warning, marginLeft: 8, fontWeight: '500' },
+  proNoticeText: { fontSize: 13, color: t.colors.warning, marginLeft: 8, fontWeight: '500' },
   connectButton: { marginTop: 4 },
   syncSummary: {
     flexDirection: 'row',
@@ -519,12 +527,12 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   syncStat: { alignItems: 'center' },
-  syncStatNumber: { fontSize: 24, fontWeight: '700', color: colors.text },
-  syncStatLabel: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
+  syncStatNumber: { fontSize: 24, fontWeight: '700', color: t.colors.text },
+  syncStatLabel: { fontSize: 12, color: t.colors.textMuted, marginTop: 2 },
   syncButton: { marginTop: 4 },
   syncBreakdown: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginTop: 6,
     textAlign: 'center',
   },
@@ -535,10 +543,10 @@ const styles = StyleSheet.create({
   },
   howItWorksText: {
     fontSize: 14,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     marginLeft: 12,
     flex: 1,
     lineHeight: 20,
   },
   bottomPadding: { height: 40 },
-});
+}));

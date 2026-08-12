@@ -25,7 +25,7 @@ import { Text, Button, IconButton, Divider } from 'react-native-paper';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
-import { colors } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 import type { ColumnMapping, ParsedSpreadsheet } from '../services/spreadsheetParser';
 
 interface FieldDef {
@@ -61,6 +61,8 @@ export function SpreadsheetColumnMapperModal({
   onCancel,
   onConfirm,
 }: Props) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const insets = useSafeAreaInsets();
   const [mapping, setMapping] = useState<Partial<ColumnMapping>>({});
 
@@ -142,7 +144,7 @@ export function SpreadsheetColumnMapperModal({
                 <MaterialCommunityIcons
                   name="file-alert-outline"
                   size={42}
-                  color={colors.textMuted}
+                  color={themeColors.textMuted}
                 />
                 <Text style={styles.emptyText}>
                   We couldn't read any column headers. Make sure the first row of your
@@ -215,7 +217,7 @@ export function SpreadsheetColumnMapperModal({
                   <MaterialCommunityIcons
                     name="information-outline"
                     size={18}
-                    color={colors.textMuted}
+                    color={themeColors.textMuted}
                   />
                   <Text style={styles.helpText}>
                     Tip: column headers should sit on the first row of the sheet. If your
@@ -232,7 +234,7 @@ export function SpreadsheetColumnMapperModal({
               Cancel
             </Button>
             <Button
-              mode="contained"
+              mode="contained" buttonColor={themeColors.accent} textColor={themeColors.onAccent}
               onPress={handleConfirm}
               disabled={!canConfirm}
               style={styles.confirmButton}
@@ -246,11 +248,11 @@ export function SpreadsheetColumnMapperModal({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   flex: { flex: 1 },
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
   },
   header: {
     flexDirection: 'row',
@@ -265,11 +267,11 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 20,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
   },
   subtitle: {
     fontSize: 13,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginTop: 2,
   },
   scroll: { flex: 1 },
@@ -282,7 +284,7 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     fontSize: 14,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     textAlign: 'center',
     lineHeight: 20,
   },
@@ -295,14 +297,14 @@ const styles = StyleSheet.create({
   fieldLabel: {
     fontSize: 15,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
   },
   required: {
-    color: colors.error,
+    color: t.colors.error,
   },
   fieldHint: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginTop: 2,
   },
   chipRow: {
@@ -315,43 +317,43 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: colors.outline,
-    backgroundColor: colors.surface,
+    borderColor: t.colors.borderStrong,
+    backgroundColor: t.colors.surfaceRaised,
     minWidth: 80,
     maxWidth: 200,
   },
   chipActive: {
-    borderColor: colors.primary,
-    backgroundColor: colors.primary + '15',
+    borderColor: t.colors.accent,
+    backgroundColor: t.colors.accentSubtle,
   },
   chipLabel: {
     fontSize: 13,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
   },
   chipLabelActive: {
-    color: colors.primary,
+    color: t.colors.accentText,
   },
   chipSample: {
     fontSize: 11,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginTop: 2,
   },
   chipSampleActive: {
-    color: colors.primary,
+    color: t.colors.accentText,
   },
   helpCard: {
     flexDirection: 'row',
     gap: 10,
     padding: 12,
     borderRadius: 10,
-    backgroundColor: colors.surfaceLight,
+    backgroundColor: t.colors.surfaceOverlay,
     marginTop: 8,
   },
   helpText: {
     flex: 1,
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     lineHeight: 17,
   },
   footer: {
@@ -361,9 +363,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 8,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.outline,
-    backgroundColor: colors.background,
+    borderTopColor: t.colors.borderStrong,
+    backgroundColor: t.colors.bg,
   },
   cancelButton: {},
   confirmButton: { minWidth: 120 },
-});
+}));

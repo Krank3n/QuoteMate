@@ -32,7 +32,8 @@ import {
   Divider,
 } from 'react-native-paper';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { colors } from '../theme';
+import type { Tokens } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
 import type { ExtractedItem } from '../services/supplierListImporter';
 import type { FavoriteProductMapping } from '../types';
@@ -83,10 +84,10 @@ function slugKey(name: string): string {
   return name.toLowerCase().trim().replace(/\s+/g, '_').replace(/\//g, '-');
 }
 
-function confidenceColor(c: ExtractedItem['confidence']): string {
-  if (c === 'high') return colors.success || '#22c55e';
-  if (c === 'low') return colors.error || '#ef4444';
-  return colors.warning || '#f59e0b';
+function confidenceColor(confidence: ExtractedItem['confidence'], themeColors: Tokens): string {
+  if (confidence === 'high') return themeColors.money || '#22c55e';
+  if (confidence === 'low') return themeColors.error || '#ef4444';
+  return themeColors.warning || '#f59e0b';
 }
 
 export function SupplierListReviewModal({
@@ -99,6 +100,8 @@ export function SupplierListReviewModal({
   onCancel,
   onSave,
 }: Props) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const safeInsets = useSafeAreaInsets();
   const [supplierName, setSupplierName] = useState(initialSupplierName);
   const [rows, setRows] = useState<ReviewItemState[]>([]);
@@ -280,8 +283,8 @@ export function SupplierListReviewModal({
                   <View style={styles.chipsRow}>
                     <Chip
                       compact
-                      style={[styles.confidenceChip, { backgroundColor: confidenceColor(row.confidence) + '22' }]}
-                      textStyle={{ color: confidenceColor(row.confidence), fontSize: 11 }}
+                      style={[styles.confidenceChip, { backgroundColor: confidenceColor(row.confidence, themeColors) + '22' }]}
+                      textStyle={{ color: confidenceColor(row.confidence, themeColors), fontSize: 11 }}
                     >
                       {row.confidence}
                     </Chip>
@@ -409,7 +412,7 @@ export function SupplierListReviewModal({
             Cancel
           </Button>
           <Button
-            mode="contained"
+            mode="contained" buttonColor={themeColors.accent} textColor={themeColors.onAccent}
             onPress={() => onSave(supplierName, rows)}
             disabled={saving || selectedCount === 0}
             loading={saving}
@@ -422,10 +425,10 @@ export function SupplierListReviewModal({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   fullScreen: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
   },
   header: {
     flexDirection: 'row',
@@ -434,7 +437,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingBottom: 12,
     borderBottomWidth: 1,
-    borderBottomColor: colors.surfaceLight,
+    borderBottomColor: t.colors.surfaceOverlay,
   },
   headerTextWrap: {
     flex: 1,
@@ -442,11 +445,11 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 18,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
   },
   subtitle: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginTop: 2,
   },
   body: {
@@ -465,7 +468,7 @@ const styles = StyleSheet.create({
   },
   row: {
     marginBottom: 4,
-    backgroundColor: colors.surfaceDark,
+    backgroundColor: t.colors.surface,
     borderRadius: 12,
     padding: 12,
   },
@@ -490,31 +493,31 @@ const styles = StyleSheet.create({
   },
   confidenceChip: {},
   newChip: {
-    backgroundColor: '#22c55e22',
+    backgroundColor: t.colors.moneySubtle,
   },
   newChipText: {
-    color: '#22c55e',
+    color: t.colors.money,
     fontSize: 11,
   },
   changedChip: {
-    backgroundColor: '#f59e0b22',
+    backgroundColor: t.colors.warningSubtle,
   },
   changedChipText: {
-    color: '#f59e0b',
+    color: t.colors.warning,
     fontSize: 11,
   },
   unchangedChip: {
-    backgroundColor: colors.surfaceLight,
+    backgroundColor: t.colors.surfaceOverlay,
   },
   unchangedChipText: {
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     fontSize: 11,
   },
   removedChip: {
-    backgroundColor: '#ef444422',
+    backgroundColor: t.colors.errorSubtle,
   },
   removedChipText: {
-    color: '#ef4444',
+    color: t.colors.error,
     fontSize: 11,
   },
   priceRow: {
@@ -538,21 +541,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 7,
     borderRadius: 20,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderWidth: 1,
-    borderColor: colors.surfaceLight,
+    borderColor: t.colors.surfaceOverlay,
   },
   unitBtnActive: {
-    backgroundColor: colors.primaryBg,
-    borderColor: colors.primary,
+    backgroundColor: t.colors.accentSubtle,
+    borderColor: t.colors.accent,
   },
   unitBtnText: {
     fontSize: 13,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     fontWeight: '500',
   },
   unitBtnTextActive: {
-    color: colors.primary,
+    color: t.colors.accentText,
     fontWeight: '600',
   },
   keywordsWrap: {
@@ -565,30 +568,30 @@ const styles = StyleSheet.create({
   keywordPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderRadius: 16,
     paddingLeft: 10,
     paddingRight: 4,
     paddingVertical: 4,
     borderWidth: 1,
-    borderColor: colors.surfaceLight,
+    borderColor: t.colors.surfaceOverlay,
   },
   keywordPillText: {
     fontSize: 12,
-    color: colors.text,
+    color: t.colors.text,
     marginRight: 4,
   },
   keywordPillClose: {
     width: 20,
     height: 20,
     borderRadius: 10,
-    backgroundColor: colors.surfaceLight,
+    backgroundColor: t.colors.surfaceOverlay,
     alignItems: 'center',
     justifyContent: 'center',
   },
   keywordPillCloseText: {
     fontSize: 10,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     fontWeight: '700',
   },
   keywordInput: {
@@ -599,14 +602,14 @@ const styles = StyleSheet.create({
   },
   rawLineWrap: {
     marginTop: 8,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderRadius: 6,
     paddingHorizontal: 8,
     paddingVertical: 5,
   },
   rawLine: {
     fontSize: 11,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     fontStyle: 'italic',
   },
   removedHint: {
@@ -624,6 +627,6 @@ const styles = StyleSheet.create({
     gap: 8,
     padding: 12,
     borderTopWidth: 1,
-    borderTopColor: colors.surfaceLight,
+    borderTopColor: t.colors.surfaceOverlay,
   },
-});
+}));

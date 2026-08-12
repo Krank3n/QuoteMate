@@ -29,13 +29,14 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import { useStore } from '../../store/useStore';
 import { useCurrentDocument, useDocumentMode, useDocumentList, usePersistDocument } from '../../utils/documentMode';
 import { calculateTravelAdjustment } from '../../utils/travelCalculator';
-import { colors } from '../../theme';
+import { makeStyles, useThemeColors } from '../../theme';
 import { WebContainer } from '../../components/WebContainer';
 import { FixedBottomButton } from '../../components/FixedBottomButton';
 import { useUnifiedContactSearch, SOURCE_COLORS } from '../../hooks/useUnifiedContactSearch';
 import { SearchableContact } from '../../types';
 import { AlertModal } from '../../components/AlertModal';
 import { AddressSearchInput } from '../../components/AddressSearchInput';
+import { GridBackground } from '../../components/GridBackground';
 
 const validateEmail = (email: string): string => {
   const trimmed = email.trim();
@@ -53,6 +54,8 @@ const validatePhone = (phone: string): string => {
 };
 
 export function CustomerDetailsScreen() {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const isEditFromPreview = route.params?.editing === true;
@@ -80,7 +83,7 @@ export function CustomerDetailsScreen() {
           onPress={() => navigation.navigate('Contacts')}
           style={{ marginRight: 12, padding: 4 }}
         >
-          <MaterialCommunityIcons name="account-group" size={22} color={colors.white} />
+          <MaterialCommunityIcons name="account-group" size={22} color={themeColors.text} />
         </TouchableOpacity>
       ),
     });
@@ -319,6 +322,7 @@ export function CustomerDetailsScreen() {
 
   return (
     <View style={styles.container}>
+      <GridBackground />
       <KeyboardAwareScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
@@ -335,7 +339,7 @@ export function CustomerDetailsScreen() {
                 <MaterialCommunityIcons
                   name="account"
                   size={20}
-                  color={colors.info}
+                  color={themeColors.info}
                 />
               </View>
               <Title style={styles.sectionTitle}>Customer Details</Title>
@@ -380,7 +384,7 @@ export function CustomerDetailsScreen() {
               right={
                 <TextInput.Icon
                   icon="magnify"
-                  color={colors.placeholder}
+                  color={themeColors.textDisabled}
                   size={20}
                   onPress={handleSearchIconPress}
                 />
@@ -404,7 +408,7 @@ export function CustomerDetailsScreen() {
                             <MaterialCommunityIcons
                               name="account"
                               size={20}
-                              color={colors.primary}
+                              color={themeColors.accentText}
                               style={styles.suggestionIcon}
                             />
                             <View style={styles.suggestionText}>
@@ -429,7 +433,7 @@ export function CustomerDetailsScreen() {
                             <MaterialCommunityIcons
                               name="chevron-right"
                               size={20}
-                              color={colors.onSurface}
+                              color={themeColors.textSecondary}
                             />
                           </View>
                         </View>
@@ -464,7 +468,7 @@ export function CustomerDetailsScreen() {
                           <MaterialCommunityIcons
                             name="chevron-right"
                             size={20}
-                            color={colors.onSurface}
+                            color={themeColors.textSecondary}
                           />
                         </View>
                       </TouchableOpacity>
@@ -549,12 +553,12 @@ export function CustomerDetailsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   container: {
     flex: 1,
     // height: "100%",
     // height: '100vh' as any,
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
     ...(Platform.OS === 'web' && {
       display: 'flex' as any,
       flexDirection: 'column' as any,
@@ -583,7 +587,7 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: 14,
     elevation: 2,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
   },
   sectionTitleContainer: {
     flexDirection: 'row',
@@ -595,7 +599,7 @@ const styles = StyleSheet.create({
     width: 34,
     height: 34,
     borderRadius: 10,
-    backgroundColor: colors.infoBg,
+    backgroundColor: t.colors.infoSubtle,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -606,7 +610,7 @@ const styles = StyleSheet.create({
   },
   helperText: {
     fontSize: 13,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     marginBottom: 16,
   },
   input: {
@@ -621,7 +625,7 @@ const styles = StyleSheet.create({
   },
   contactHint: {
     fontSize: 13,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     opacity: 0.7,
     marginBottom: 8,
   },
@@ -632,7 +636,7 @@ const styles = StyleSheet.create({
   recentLabel: {
     fontSize: 14,
     fontWeight: '600',
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     marginBottom: 8,
   },
   chipsContainer: {
@@ -649,7 +653,7 @@ const styles = StyleSheet.create({
     marginTop: -8,
     elevation: 4,
     borderRadius: 12,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
   },
   suggestionsContent: {
     padding: 0,
@@ -657,7 +661,7 @@ const styles = StyleSheet.create({
   suggestionsHeader: {
     fontSize: 12,
     fontWeight: '600',
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     marginBottom: 8,
     marginTop: 8,
     marginLeft: 8,
@@ -688,17 +692,17 @@ const styles = StyleSheet.create({
   suggestionName: {
     fontSize: 15,
     fontWeight: '500',
-    color: colors.text,
+    color: t.colors.text,
     marginBottom: 2,
   },
   suggestionBusiness: {
     fontSize: 12,
-    color: colors.primary,
+    color: t.colors.accentText,
     fontWeight: '500',
   },
   suggestionDetail: {
     fontSize: 12,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
   },
   sourceTagRow: {
     flexDirection: 'row',
@@ -710,4 +714,4 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     textTransform: 'uppercase',
   },
-});
+}));

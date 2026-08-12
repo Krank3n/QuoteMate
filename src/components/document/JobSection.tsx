@@ -2,9 +2,9 @@ import React from 'react';
 import { View, TouchableOpacity } from 'react-native';
 import { Text, Title, Surface, TextInput } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { colors } from '../../theme';
+import { useThemeColors} from '../../theme';
 import { JobSpec } from '../../types';
-import { documentStyles as styles } from './documentStyles';
+import { useDocumentStyles } from './documentStyles';
 
 interface JobSectionProps {
   job: JobSpec;
@@ -21,18 +21,20 @@ export function JobSection({
   onJobChange,
   style,
 }: JobSectionProps) {
+  const styles = useDocumentStyles();
+  const themeColors = useThemeColors();
   const content = (
     <Surface style={[styles.section, style]}>
       <View style={styles.sectionHeader}>
         <View style={styles.sectionHeaderLeft}>
-          <View style={[styles.sectionIconCircle, { backgroundColor: colors.primaryBg }]}>
-            <MaterialCommunityIcons name="text-long" size={18} color={colors.primary} />
+          <View style={[styles.sectionIconCircle, { backgroundColor: themeColors.accentSubtle }]}>
+            <MaterialCommunityIcons name="text-long" size={18} color={themeColors.accentText} />
           </View>
           <Title style={styles.sectionTitle}>Job</Title>
         </View>
         {onEdit && (
           <View style={styles.editButton}>
-            <MaterialCommunityIcons name={isEditing ? "check" : "pencil"} size={16} color={colors.primary} />
+            <MaterialCommunityIcons name={isEditing ? "check" : "pencil"} size={16} color={themeColors.accentText} />
           </View>
         )}
       </View>

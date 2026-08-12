@@ -8,6 +8,8 @@ import React, { useEffect, useRef, useMemo } from 'react';
 import { Animated, StyleSheet } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 
+import { useThemeColors } from '../theme';
+
 interface ShimmerOverlayProps {
   /** Duration of one full sweep in ms (default ~9000) */
   duration?: number;
@@ -17,7 +19,13 @@ interface ShimmerOverlayProps {
   delay?: number;
   /** Peak opacity of the highlight band (default 0.045) */
   intensity?: number;
-  /** Tint colour for the light band (default white) */
+  /**
+   * Band colour. Defaults to the theme's text colour — a light sheen on a dark
+   * card, a dark one on a white card. A hardcoded white sweep simply vanishes
+   * in light mode.
+   *
+   * MUST be a 6-digit hex: the gradient below appends a two-digit alpha to it.
+   */
   tint?: string;
 }
 
@@ -26,8 +34,10 @@ export function ShimmerOverlay({
   pause,
   delay,
   intensity = 0.045,
-  tint = '#ffffff',
+  tint,
 }: ShimmerOverlayProps) {
+  const themeColors = useThemeColors();
+  const bandTint = tint ?? themeColors.text;
   const progress = useRef(new Animated.Value(0)).current;
 
   const sweepMs = useRef(duration ?? 8000 + Math.random() * 4000).current;
@@ -53,10 +63,10 @@ export function ShimmerOverlay({
   }, []);
 
   const gradientColors = useMemo(() => {
-    const lo = `${tint}${Math.round(intensity * 255).toString(16).padStart(2, '0')}`;
-    const hi = `${tint}${Math.round(intensity * 1.5 * 255).toString(16).padStart(2, '0')}`;
+    const lo = `${bandTint}${Math.round(intensity * 255).toString(16).padStart(2, '0')}`;
+    const hi = `${bandTint}${Math.round(intensity * 1.5 * 255).toString(16).padStart(2, '0')}`;
     return ['transparent', lo, hi, lo, 'transparent'] as const;
-  }, [tint, intensity]);
+  }, [bandTint, intensity]);
 
   // Position: sweep left-to-right
   const translateX = progress.interpolate({

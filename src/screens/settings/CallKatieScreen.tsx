@@ -24,13 +24,14 @@ import {
 import { Text, Surface, Title, TextInput } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
-import { colors } from '../../theme';
+import { makeStyles, useThemeColors } from '../../theme';
 import { WebContainer } from '../../components/WebContainer';
 import { RangeSlider } from '../../components/RangeSlider';
 import { AlertModal, AlertType } from '../../components/AlertModal';
 import { useStore } from '../../store/useStore';
 import { submitLeadInterest } from '../../services/leadInterest';
 import { requestKatieDemoCall, getKatieSignupLink } from '../../services/callKatieDemo';
+import { GridBackground } from '../../components/GridBackground';
 
 // "Missed money" calculator defaults/bounds. Tuned for a typical tradie:
 // a handful of missed calls a week, a job worth a few hundred up to several
@@ -55,6 +56,8 @@ function formatMoney(n: number): string {
 type DemoState = 'idle' | 'calling' | 'called' | 'limit';
 
 export function CallKatieScreen() {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const businessSettings = useStore((s) => s.businessSettings);
 
   const [businessName, setBusinessName] = useState(businessSettings?.businessName || '');
@@ -162,6 +165,7 @@ export function CallKatieScreen() {
 
   return (
     <View style={styles.container}>
+      <GridBackground />
       <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.scrollContent}>
         <WebContainer>
           {/* Hero */}
@@ -186,7 +190,7 @@ export function CallKatieScreen() {
                 <MaterialCommunityIcons
                   name={demoState === 'called' ? 'phone-in-talk' : 'phone-check'}
                   size={28}
-                  color={colors.primary}
+                  color={themeColors.accentText}
                 />
               </View>
               {demoState === 'called' ? (
@@ -217,9 +221,9 @@ export function CallKatieScreen() {
                   disabled={openingTrial}
                 >
                   {openingTrial ? (
-                    <ActivityIndicator size="small" color={colors.white} />
+                    <ActivityIndicator size="small" color={themeColors.onAccent} />
                   ) : (
-                    <MaterialCommunityIcons name="rocket-launch" size={20} color={colors.white} />
+                    <MaterialCommunityIcons name="rocket-launch" size={20} color={themeColors.onAccent} />
                   )}
                   <Text style={styles.primaryButtonText}>
                     {openingTrial ? 'Opening…' : 'Start your 14-day trial'}
@@ -230,7 +234,7 @@ export function CallKatieScreen() {
           ) : (
             <Surface style={styles.demoCard}>
               <View style={styles.demoIcon}>
-                <MaterialCommunityIcons name="phone-ring" size={28} color={colors.primary} />
+                <MaterialCommunityIcons name="phone-ring" size={28} color={themeColors.accentText} />
               </View>
               <Title style={styles.demoTitle}>Hear it for yourself</Title>
               <Text style={styles.demoText}>
@@ -251,7 +255,7 @@ export function CallKatieScreen() {
 
               {!!website && (
                 <View style={styles.websiteRow}>
-                  <MaterialCommunityIcons name="web" size={16} color={colors.textSecondary} />
+                  <MaterialCommunityIcons name="web" size={16} color={themeColors.textMuted} />
                   <Text style={styles.websiteText}>
                     She’ll bone up on <Text style={styles.websiteStrong}>{website}</Text> so she
                     knows your business.
@@ -266,9 +270,9 @@ export function CallKatieScreen() {
                 disabled={demoState === 'calling'}
               >
                 {demoState === 'calling' ? (
-                  <ActivityIndicator size="small" color={colors.white} />
+                  <ActivityIndicator size="small" color={themeColors.onAccent} />
                 ) : (
-                  <MaterialCommunityIcons name="phone-plus" size={20} color={colors.white} />
+                  <MaterialCommunityIcons name="phone-plus" size={20} color={themeColors.onAccent} />
                 )}
                 <Text style={styles.primaryButtonText}>
                   {demoState === 'calling' ? 'Getting Katie on the line…' : 'Katie, call me in 30 seconds'}
@@ -300,7 +304,7 @@ export function CallKatieScreen() {
           {/* "Missed money" calculator — two sliders feed a live figure. */}
           <Surface style={styles.card}>
             <View style={styles.calcHeader}>
-              <MaterialCommunityIcons name="cash-multiple" size={18} color={colors.secondary} />
+              <MaterialCommunityIcons name="cash-multiple" size={18} color={themeColors.warning} />
               <Text style={styles.calcTitle}>What missed calls cost you</Text>
             </View>
 
@@ -352,7 +356,7 @@ export function CallKatieScreen() {
           {submitted ? (
             <Surface style={styles.doneCard}>
               <View style={styles.doneIcon}>
-                <MaterialCommunityIcons name="check-bold" size={28} color={colors.success} />
+                <MaterialCommunityIcons name="check-bold" size={28} color={themeColors.money} />
               </View>
               <Title style={styles.doneTitle}>You’re on the list!</Title>
               <Text style={styles.doneText}>
@@ -404,9 +408,9 @@ export function CallKatieScreen() {
                 disabled={sending}
               >
                 {sending ? (
-                  <ActivityIndicator size="small" color={colors.primary} />
+                  <ActivityIndicator size="small" color={themeColors.accentText} />
                 ) : (
-                  <MaterialCommunityIcons name="phone-plus" size={20} color={colors.primary} />
+                  <MaterialCommunityIcons name="phone-plus" size={20} color={themeColors.accentText} />
                 )}
                 <Text style={styles.secondaryButtonText}>{sending ? 'Sending…' : 'Register my interest'}</Text>
               </TouchableOpacity>
@@ -417,7 +421,7 @@ export function CallKatieScreen() {
               onPress={() => setShowInterest(true)}
               activeOpacity={0.7}
             >
-              <MaterialCommunityIcons name="account-voice" size={18} color={colors.primary} />
+              <MaterialCommunityIcons name="account-voice" size={18} color={themeColors.accentText} />
               <Text style={styles.talkLinkText}>Prefer to talk to Tom first?</Text>
             </TouchableOpacity>
           )}
@@ -441,10 +445,12 @@ export function CallKatieScreen() {
 }
 
 function InfoRow({ icon, title, body }: { icon: string; title: string; body: string }) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   return (
     <View style={styles.infoRow}>
       <View style={styles.infoRowIcon}>
-        <MaterialCommunityIcons name={icon as any} size={18} color={colors.primary} />
+        <MaterialCommunityIcons name={icon as any} size={18} color={themeColors.accentText} />
       </View>
       <View style={styles.infoRowBody}>
         <Text style={styles.infoRowTitle}>{title}</Text>
@@ -454,10 +460,10 @@ function InfoRow({ icon, title, body }: { icon: string; title: string; body: str
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
   },
   scrollContent: {
     padding: 16,
@@ -468,7 +474,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     borderRadius: 16,
     elevation: 2,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     alignItems: 'center',
   },
   heroLogo: {
@@ -480,20 +486,20 @@ const styles = StyleSheet.create({
   heroTitle: {
     fontSize: 22,
     fontWeight: '800',
-    color: colors.text,
+    color: t.colors.text,
     textAlign: 'center',
   },
   heroBrand: {
     fontSize: 12,
     fontWeight: '700',
-    color: colors.textSecondary,
+    color: t.colors.textMuted,
     letterSpacing: 0.5,
     textTransform: 'uppercase',
     marginTop: 4,
   },
   heroText: {
     fontSize: 15,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     textAlign: 'center',
     lineHeight: 22,
     marginTop: 8,
@@ -503,16 +509,16 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     borderRadius: 16,
     elevation: 2,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderWidth: 1,
-    borderColor: colors.primary + '33',
+    borderColor: t.colors.accentSubtle,
     alignItems: 'center',
   },
   demoIcon: {
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: colors.primaryBg,
+    backgroundColor: t.colors.accentSubtle,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 12,
@@ -520,12 +526,12 @@ const styles = StyleSheet.create({
   demoTitle: {
     fontSize: 20,
     fontWeight: '800',
-    color: colors.text,
+    color: t.colors.text,
     textAlign: 'center',
   },
   demoText: {
     fontSize: 14,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     textAlign: 'center',
     lineHeight: 21,
     marginTop: 6,
@@ -541,32 +547,32 @@ const styles = StyleSheet.create({
   websiteText: {
     flex: 1,
     fontSize: 13,
-    color: colors.textSecondary,
+    color: t.colors.textMuted,
     lineHeight: 18,
   },
   websiteStrong: {
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
   },
   convertPanel: {
     alignSelf: 'stretch',
     marginTop: 6,
     padding: 16,
     borderRadius: 12,
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
     borderWidth: 1,
-    borderColor: colors.outline + '30',
+    borderColor: t.colors.border,
     alignItems: 'center',
   },
   convertTitle: {
     fontSize: 16,
     fontWeight: '800',
-    color: colors.text,
+    color: t.colors.text,
     textAlign: 'center',
   },
   convertText: {
     fontSize: 13,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     textAlign: 'center',
     lineHeight: 19,
     marginTop: 4,
@@ -577,7 +583,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     alignSelf: 'stretch',
-    backgroundColor: colors.primary,
+    backgroundColor: t.colors.accent,
     paddingVertical: 16,
     borderRadius: 12,
     gap: 8,
@@ -585,7 +591,7 @@ const styles = StyleSheet.create({
   primaryButtonText: {
     fontSize: 16,
     fontWeight: '700',
-    color: colors.white,
+    color: t.colors.onAccent,
   },
   buttonDisabled: {
     opacity: 0.5,
@@ -595,13 +601,13 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     borderRadius: 16,
     elevation: 2,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     gap: 14,
   },
   infoTitle: {
     fontSize: 14,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
   },
   infoRow: {
     flexDirection: 'row',
@@ -611,7 +617,7 @@ const styles = StyleSheet.create({
     width: 34,
     height: 34,
     borderRadius: 17,
-    backgroundColor: colors.primaryBg,
+    backgroundColor: t.colors.accentSubtle,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -622,11 +628,11 @@ const styles = StyleSheet.create({
   infoRowTitle: {
     fontSize: 14,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
   },
   infoRowText: {
     fontSize: 13,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     lineHeight: 18,
   },
   card: {
@@ -634,23 +640,23 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     borderRadius: 16,
     elevation: 2,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
   },
   sectionTitle: {
     fontSize: 18,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
   },
   hint: {
     fontSize: 14,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     lineHeight: 20,
     marginTop: 4,
     marginBottom: 16,
   },
   input: {
     marginBottom: 16,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     alignSelf: 'stretch',
   },
   calcHeader: {
@@ -662,7 +668,7 @@ const styles = StyleSheet.create({
   calcTitle: {
     fontSize: 15,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
   },
   sliderRow: {
     marginTop: 14,
@@ -675,45 +681,45 @@ const styles = StyleSheet.create({
   sliderLabel: {
     fontSize: 13,
     fontWeight: '600',
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
   },
   sliderValue: {
     fontSize: 16,
     fontWeight: '800',
-    color: colors.primary,
+    color: t.colors.accentText,
   },
   resultPanel: {
     marginTop: 18,
     paddingVertical: 18,
     paddingHorizontal: 16,
     borderRadius: 12,
-    backgroundColor: colors.surfaceDark,
+    backgroundColor: t.colors.surface,
     borderWidth: 1,
-    borderColor: colors.secondary + '40',
+    borderColor: t.colors.warningSubtle,
     alignItems: 'center',
   },
   resultLabel: {
     fontSize: 13,
     fontWeight: '600',
-    color: colors.textSecondary,
+    color: t.colors.textMuted,
     textAlign: 'center',
   },
   resultAmount: {
     fontSize: 38,
     fontWeight: '800',
-    color: colors.secondary,
+    color: t.colors.warning,
     marginVertical: 2,
     letterSpacing: 0.5,
   },
   resultPer: {
     fontSize: 13,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     textAlign: 'center',
     lineHeight: 19,
   },
   calcCaption: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     lineHeight: 17,
     marginTop: 12,
   },
@@ -721,9 +727,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.primaryBg,
+    backgroundColor: t.colors.accentSubtle,
     borderWidth: 1,
-    borderColor: colors.primary + '55',
+    borderColor: t.colors.accentSubtle,
     paddingVertical: 15,
     borderRadius: 12,
     marginTop: 4,
@@ -732,7 +738,7 @@ const styles = StyleSheet.create({
   secondaryButtonText: {
     fontSize: 15,
     fontWeight: '700',
-    color: colors.primary,
+    color: t.colors.accentText,
   },
   talkLink: {
     flexDirection: 'row',
@@ -745,7 +751,7 @@ const styles = StyleSheet.create({
   talkLinkText: {
     fontSize: 14,
     fontWeight: '700',
-    color: colors.primary,
+    color: t.colors.accentText,
     textDecorationLine: 'underline',
   },
   doneCard: {
@@ -753,14 +759,14 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     borderRadius: 16,
     elevation: 2,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     alignItems: 'center',
   },
   doneIcon: {
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: colors.successBg,
+    backgroundColor: t.colors.moneySubtle,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 12,
@@ -768,21 +774,21 @@ const styles = StyleSheet.create({
   doneTitle: {
     fontSize: 20,
     fontWeight: '800',
-    color: colors.text,
+    color: t.colors.text,
     textAlign: 'center',
   },
   doneText: {
     fontSize: 14,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     textAlign: 'center',
     lineHeight: 21,
     marginTop: 6,
   },
   footnote: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     textAlign: 'center',
     lineHeight: 18,
     paddingHorizontal: 16,
   },
-});
+}));

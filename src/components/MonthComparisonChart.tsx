@@ -9,7 +9,7 @@ import { Text, Surface } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { subMonths, startOfMonth, endOfMonth, isWithinInterval } from 'date-fns';
 
-import { colors } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 import { Quote } from '../types';
 import { formatCurrency } from '../utils/quoteCalculator';
 import { AnimatedNumber } from './AnimatedNumber';
@@ -28,6 +28,8 @@ interface Metric {
 }
 
 export function MonthComparisonChart({ quotes }: MonthComparisonChartProps) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const metrics = useMemo((): Metric[] => {
     const now = new Date();
     const thisStart = startOfMonth(now);
@@ -63,21 +65,21 @@ export function MonthComparisonChart({ quotes }: MonthComparisonChartProps) {
       {
         label: 'Quotes\nCreated',
         icon: 'file-plus-outline',
-        iconColor: colors.info,
+        iconColor: themeColors.info,
         current: thisMonth.length,
         previous: lastMonth.length,
       },
       {
         label: 'Jobs\nWon',
         icon: 'handshake',
-        iconColor: colors.primary,
+        iconColor: themeColors.accent,
         current: thisAccepted.length,
         previous: lastAccepted.length,
       },
       {
         label: 'Revenue\nEarned',
         icon: 'cash-multiple',
-        iconColor: colors.secondary,
+        iconColor: themeColors.warning,
         current: thisRevenue,
         previous: lastRevenue,
         format: formatCurrency,
@@ -85,7 +87,7 @@ export function MonthComparisonChart({ quotes }: MonthComparisonChartProps) {
       {
         label: 'Avg Job\nValue',
         icon: 'tag-outline',
-        iconColor: colors.warning || colors.secondary,
+        iconColor: themeColors.warning || themeColors.warning,
         current: thisAvgJob,
         previous: lastAvgJob,
         format: formatCurrency,
@@ -102,7 +104,7 @@ export function MonthComparisonChart({ quotes }: MonthComparisonChartProps) {
           const diff = m.current - m.previous;
           const isUp = diff > 0;
           const isDown = diff < 0;
-          const changeColor = isUp ? colors.success : isDown ? colors.error : colors.onSurface;
+          const changeColor = isUp ? themeColors.money : isDown ? themeColors.error : themeColors.textSecondary;
 
           let changeText: string;
           if (m.format) {
@@ -147,18 +149,18 @@ export function MonthComparisonChart({ quotes }: MonthComparisonChartProps) {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   card: {
     padding: 20,
     borderRadius: 16,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     elevation: 2,
     marginBottom: 12,
   },
   title: {
     fontSize: 16,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
     marginBottom: 18,
   },
   metricsRow: {
@@ -170,7 +172,7 @@ const styles = StyleSheet.create({
     flexBasis: '47%',
     flexGrow: 1,
     alignItems: 'center',
-    backgroundColor: colors.surfaceGray3,
+    backgroundColor: t.colors.surfacePressed,
     borderRadius: 14,
     paddingVertical: 16,
     paddingHorizontal: 8,
@@ -178,13 +180,13 @@ const styles = StyleSheet.create({
   metricValue: {
     fontSize: 20,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
     marginTop: 8,
     marginBottom: 2,
   },
   metricLabel: {
     fontSize: 11,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     textAlign: 'center',
     lineHeight: 15,
     marginBottom: 8,
@@ -201,6 +203,6 @@ const styles = StyleSheet.create({
   },
   previousText: {
     fontSize: 10,
-    color: colors.disabled,
+    color: t.colors.textDisabled,
   },
-});
+}));

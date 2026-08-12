@@ -12,7 +12,8 @@ import { View, StyleSheet, TouchableOpacity } from 'react-native';
 import { Text, Surface } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
-import { colors } from '../theme';
+import type { Tokens } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 import { lightTap } from '../utils/haptics';
 import { trackEvent } from '../services/analyticsService';
 import type { FollowUpNudge, NudgeType } from '../utils/followUpNudge';
@@ -24,11 +25,11 @@ interface NudgeMeta {
   subtitle: (n: FollowUpNudge) => string;
 }
 
-const NUDGE_META: Record<NudgeType, NudgeMeta> = {
+const nudgeMetaFor = (themeColors: Tokens): Record<NudgeType, NudgeMeta> => ({
   invoice_overdue: {
     icon: 'alert-circle-outline',
-    accent: colors.error,
-    accentBg: colors.errorBg,
+    accent: themeColors.error,
+    accentBg: themeColors.errorSubtle,
     subtitle: (n) =>
       n.days === 0
         ? 'Invoice due today — worth a nudge'
@@ -36,14 +37,14 @@ const NUDGE_META: Record<NudgeType, NudgeMeta> = {
   },
   self_sent_quote: {
     icon: 'email-arrow-right-outline',
-    accent: colors.info,
-    accentBg: colors.infoBg,
+    accent: themeColors.info,
+    accentBg: themeColors.infoSubtle,
     subtitle: () => 'Only sent to your inbox — send it to your customer',
   },
   unsent_quote: {
     icon: 'send-outline',
-    accent: colors.primary,
-    accentBg: colors.primaryBg,
+    accent: themeColors.accent,
+    accentBg: themeColors.accentSubtle,
     subtitle: (n) =>
       n.testSent
         ? 'Happy with how it looks? Send it to your customer'
@@ -51,11 +52,11 @@ const NUDGE_META: Record<NudgeType, NudgeMeta> = {
   },
   quote_follow_up: {
     icon: 'bell-outline',
-    accent: colors.secondary,
-    accentBg: colors.warningBg,
+    accent: themeColors.warning,
+    accentBg: themeColors.warningSubtle,
     subtitle: (n) => `Sent ${n.days} day${n.days === 1 ? '' : 's'} ago, no reply — worth a follow-up`,
   },
-};
+});
 
 interface FollowUpNudgeBannerProps {
   nudge: FollowUpNudge;
@@ -64,6 +65,9 @@ interface FollowUpNudgeBannerProps {
 }
 
 export function FollowUpNudgeBanner({ nudge, onPress, onDismiss }: FollowUpNudgeBannerProps) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
+  const NUDGE_META = nudgeMetaFor(themeColors);
   const meta = NUDGE_META[nudge.type];
 
   // One impression event per surfaced item — key changes only when the
@@ -116,20 +120,20 @@ export function FollowUpNudgeBanner({ nudge, onPress, onDismiss }: FollowUpNudge
         accessibilityRole="button"
         accessibilityLabel="Dismiss reminder for a few days"
       >
-        <MaterialCommunityIcons name="close-circle" size={22} color={colors.textMuted} />
+        <MaterialCommunityIcons name="close-circle" size={22} color={themeColors.textMuted} />
       </TouchableOpacity>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   banner: {
     marginHorizontal: 20,
     marginBottom: 12,
     paddingHorizontal: 14,
     paddingVertical: 18,
     borderRadius: 12,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     elevation: 2,
     borderLeftWidth: 3,
   },
@@ -151,20 +155,20 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 14,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
   },
   subtitle: {
     fontSize: 12,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     marginTop: 2,
   },
   dismissButton: {
     position: 'absolute',
     top: -6,
     right: 14,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderRadius: 11,
     zIndex: 10,
     elevation: 10,
   },
-});
+}));

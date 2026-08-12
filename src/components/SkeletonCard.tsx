@@ -6,7 +6,7 @@
 import React, { useEffect, useRef } from 'react';
 import { View, StyleSheet, Animated } from 'react-native';
 import { Card, Divider } from 'react-native-paper';
-import { colors } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 
 const SHIMMER_DURATION = 1000;
 
@@ -16,6 +16,8 @@ function ShimmerBlock({ width, height = 12, borderRadius = 6, style }: {
   borderRadius?: number;
   style?: any;
 }) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const opacity = useRef(new Animated.Value(0.3)).current;
 
   useEffect(() => {
@@ -32,7 +34,7 @@ function ShimmerBlock({ width, height = 12, borderRadius = 6, style }: {
   return (
     <Animated.View
       style={[
-        { width: width as any, height, borderRadius, backgroundColor: colors.outline + '12', opacity },
+        { width: width as any, height, borderRadius, backgroundColor: themeColors.border, opacity },
         style,
       ]}
     />
@@ -40,6 +42,8 @@ function ShimmerBlock({ width, height = 12, borderRadius = 6, style }: {
 }
 
 export function SkeletonCard({ index = 0 }: { index?: number }) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -87,6 +91,8 @@ export function SkeletonCard({ index = 0 }: { index?: number }) {
 }
 
 export function SkeletonCardList({ count = 3 }: { count?: number }) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   return (
     <>
       {Array.from({ length: count }).map((_, i) => (
@@ -96,10 +102,10 @@ export function SkeletonCardList({ count = 3 }: { count?: number }) {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   card: {
     marginBottom: 12,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
   },
   cardContent: {
     paddingTop: 16,
@@ -128,4 +134,4 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
-});
+}));

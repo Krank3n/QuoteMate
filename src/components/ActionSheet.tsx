@@ -8,7 +8,8 @@ import React from 'react';
 import { View, StyleSheet, Pressable, Animated } from 'react-native';
 import { Text } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { colors } from '../theme';
+import type { Tokens } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 import { selectionTap } from '../utils/haptics';
 import { GrainOverlay } from './GrainOverlay';
 import { BottomSheet, useStaggeredEntrance } from './BottomSheet';
@@ -24,31 +25,31 @@ export interface ActionSheetOption {
 }
 
 /** Default colour per icon name — gives each action a distinct tint */
-const ICON_COLOR_MAP: Record<string, { color: string; bg: string }> = {
-  'pencil':                  { color: colors.info, bg: colors.infoBg },
-  'email-outline':           { color: colors.warning, bg: colors.warningBg },
-  'send-outline':            { color: colors.warning, bg: colors.warningBg },
+const iconColorMapFor = (themeColors: Tokens): Record<string, { color: string; bg: string }> => ({
+  'pencil':                  { color: themeColors.info, bg: themeColors.infoSubtle },
+  'email-outline':           { color: themeColors.warning, bg: themeColors.warningSubtle },
+  'send-outline':            { color: themeColors.warning, bg: themeColors.warningSubtle },
   'content-copy':            { color: '#8B5CF6', bg: '#2E1065' },      // violet
-  'share-variant':           { color: colors.info, bg: colors.infoBg },
+  'share-variant':           { color: themeColors.info, bg: themeColors.infoSubtle },
   'file-pdf-box':            { color: '#F97316', bg: '#431407' },       // orange
-  'file-replace':            { color: colors.primary, bg: colors.primaryBg },
-  'cash':                    { color: colors.success, bg: colors.successBg },
-  'delete-outline':          { color: colors.error, bg: colors.errorBg },
-  'file-document-edit-outline': { color: colors.info, bg: colors.infoBg },
-  'check-circle-outline':    { color: colors.success, bg: colors.successBg },
-  'close-circle-outline':    { color: colors.error, bg: colors.errorBg },
-  'camera':                  { color: colors.info, bg: colors.infoBg },
+  'file-replace':            { color: themeColors.accentText, bg: themeColors.accentSubtle },
+  'cash':                    { color: themeColors.money, bg: themeColors.moneySubtle },
+  'delete-outline':          { color: themeColors.error, bg: themeColors.errorSubtle },
+  'file-document-edit-outline': { color: themeColors.info, bg: themeColors.infoSubtle },
+  'check-circle-outline':    { color: themeColors.money, bg: themeColors.moneySubtle },
+  'close-circle-outline':    { color: themeColors.error, bg: themeColors.errorSubtle },
+  'camera':                  { color: themeColors.info, bg: themeColors.infoSubtle },
   'image-multiple':          { color: '#8B5CF6', bg: '#2E1065' },      // violet
-};
+});
 
-function getIconStyle(icon: string, explicitColor?: string) {
-  if (explicitColor === colors.error) {
-    return { color: colors.error, bg: colors.errorBg };
+function getIconStyle(icon: string, themeColors: Tokens, explicitColor?: string) {
+  if (explicitColor === themeColors.error) {
+    return { color: themeColors.error, bg: themeColors.errorSubtle };
   }
   if (explicitColor) {
     return { color: explicitColor, bg: `${explicitColor}18` };
   }
-  return ICON_COLOR_MAP[icon] || { color: colors.text, bg: `${colors.text}15` };
+  return iconColorMapFor(themeColors)[icon] || { color: themeColors.text, bg: `${themeColors.text}15` };
 }
 
 interface ActionSheetProps {
@@ -77,6 +78,9 @@ export function ActionSheet({
   options,
   dismissOnSelect = true,
 }: ActionSheetProps) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
+  const ICON_COLOR_MAP = iconColorMapFor(themeColors);
   const optionAnims = useStaggeredEntrance(options.length, visible, 80, 35);
 
   const handleSelect = (option: ActionSheetOption) => {
@@ -120,8 +124,8 @@ export function ActionSheet({
       <View style={styles.optionsContainer}>
         {options.map((option, index) => {
           const anim = optionAnims[index];
-          const { color: iconColor, bg: iconBg } = getIconStyle(option.icon, option.color);
-          const isDestructive = option.color === colors.error;
+          const { color: iconColor, bg: iconBg } = getIconStyle(option.icon, themeColors, option.color);
+          const isDestructive = option.color === themeColors.error;
 
           return (
             <React.Fragment key={`${option.label}-${index}`}>
@@ -167,7 +171,7 @@ export function ActionSheet({
                   <Text
                     style={[
                       styles.optionLabel,
-                      isDestructive && { color: colors.error },
+                      isDestructive && { color: themeColors.error },
                     ]}
                   >
                     {option.label}
@@ -175,7 +179,7 @@ export function ActionSheet({
                   <MaterialCommunityIcons
                     name="chevron-right"
                     size={18}
-                    color={colors.inactive}
+                    color={themeColors.textDisabled}
                   />
                 </Pressable>
               </Animated.View>
@@ -187,7 +191,7 @@ export function ActionSheet({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   optionsContainer: {
     gap: 6,
   },
@@ -197,10 +201,10 @@ const styles = StyleSheet.create({
     padding: 13,
     paddingHorizontal: 14,
     borderRadius: 14,
-    backgroundColor: 'rgba(255,255,255,0.04)',
+    backgroundColor: t.colors.surfaceOverlay,
   },
   optionPressed: {
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: t.colors.surfacePressed,
     transform: [{ scale: 0.98 }],
   },
   iconCircle: {
@@ -215,11 +219,11 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 15,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
   },
   divider: {
     height: 1,
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: t.colors.surfaceOverlay,
     marginVertical: 4,
     marginHorizontal: 8,
   },
@@ -230,16 +234,16 @@ const styles = StyleSheet.create({
   cancelButton: {
     padding: 14,
     borderRadius: 14,
-    backgroundColor: 'rgba(255,255,255,0.04)',
+    backgroundColor: t.colors.surfaceOverlay,
     alignItems: 'center',
   },
   cancelPressed: {
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: t.colors.surfacePressed,
     transform: [{ scale: 0.98 }],
   },
   cancelText: {
     fontSize: 15,
     fontWeight: '600',
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
-});
+}));

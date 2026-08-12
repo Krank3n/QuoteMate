@@ -13,11 +13,13 @@ import { Text, Surface } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 
-import { colors } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 import { lightTap } from '../utils/haptics';
 import { shouldShowPromo, dismissPromo } from '../services/leadInterest';
 
 export function LeadsPromoCard() {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const navigation = useNavigation<any>();
   const [visible, setVisible] = useState(false);
 
@@ -58,7 +60,7 @@ export function LeadsPromoCard() {
       >
         <Surface style={styles.card}>
           <View style={styles.iconCircle}>
-            <MaterialCommunityIcons name="phone-in-talk" size={22} color={colors.primary} />
+            <MaterialCommunityIcons name="phone-in-talk" size={22} color={themeColors.accentText} />
           </View>
           <View style={styles.text}>
             <Text style={styles.title}>Never miss a call</Text>
@@ -66,7 +68,7 @@ export function LeadsPromoCard() {
               Hear it for yourself — Katie can call you in about 30 seconds, answering as your business.
             </Text>
           </View>
-          <MaterialCommunityIcons name="chevron-right" size={24} color={colors.primary} />
+          <MaterialCommunityIcons name="chevron-right" size={24} color={themeColors.accentText} />
         </Surface>
       </TouchableOpacity>
       <TouchableOpacity
@@ -75,13 +77,13 @@ export function LeadsPromoCard() {
         hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         accessibilityLabel="Dismiss"
       >
-        <MaterialCommunityIcons name="close-circle" size={22} color={colors.onSurface} />
+        <MaterialCommunityIcons name="close-circle" size={22} color={themeColors.textSecondary} />
       </TouchableOpacity>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   wrapper: {
     marginHorizontal: 20,
     marginBottom: 24,
@@ -91,18 +93,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 14,
     paddingVertical: 16,
-    borderRadius: 12,
-    backgroundColor: colors.primary + '0E',
+    borderRadius: t.radius.md,
+    backgroundColor: t.colors.surfaceRaised,
     borderWidth: 1,
-    borderColor: colors.primary + '33',
-    elevation: 1,
+    borderColor: t.colors.border,
+    borderLeftWidth: 3,
+    borderLeftColor: t.colors.accent,
+    ...t.elevation[1],
     gap: 12,
   },
   iconCircle: {
     width: 40,
     height: 40,
     borderRadius: 12,
-    backgroundColor: colors.primaryBg,
+    backgroundColor: t.colors.accentSubtle,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -111,22 +115,22 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 15,
-    fontWeight: '700',
-    color: colors.text,
+    fontFamily: 'Archivo-Bold',
+    color: t.colors.text,
     marginBottom: 2,
   },
   subtitle: {
     fontSize: 12,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     lineHeight: 17,
   },
   dismiss: {
     position: 'absolute',
     top: -6,
     right: 8,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderRadius: 11,
     zIndex: 10,
     elevation: 10,
   },
-});
+}));

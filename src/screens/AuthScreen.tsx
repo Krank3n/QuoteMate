@@ -12,7 +12,7 @@ import * as AppleAuthentication from 'expo-apple-authentication';
 import * as Crypto from 'expo-crypto';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
-import { colors } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 import { WebContainer } from '../components/WebContainer';
 import { lightTap, errorTap } from '../utils/haptics';
 import { trackWebEvent } from '../utils/webAnalytics';
@@ -23,6 +23,7 @@ import {
   messageForGoogleSignInError,
 } from '../services/googleSignInCore';
 import { requestPasswordReset } from '../services/passwordResetCore';
+import { GridBackground } from '../components/GridBackground';
 
 // Detect in-app browsers (Facebook Messenger, Instagram, etc.) that block popups
 function isInAppBrowser(): boolean {
@@ -84,6 +85,8 @@ async function saveRegistrationPlatform(result: UserCredential, method: 'email' 
 }
 
 export function AuthScreen() {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -463,7 +466,7 @@ export function AuthScreen() {
             resizeMode="contain"
           />
         </Animated.View>
-        <ActivityIndicator size="large" color={colors.primary} style={styles.loadingSpinner} />
+        <ActivityIndicator size="large" color={themeColors.accentText} style={styles.loadingSpinner} />
         <Text style={styles.loadingText}>Signing you in...</Text>
       </View>
     );
@@ -474,6 +477,7 @@ export function AuthScreen() {
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
+      <GridBackground />
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
@@ -508,13 +512,13 @@ export function AuthScreen() {
               {/* Error / notice messages */}
               {error ? (
                 <View style={styles.errorContainer}>
-                  <MaterialCommunityIcons name="alert-circle-outline" size={18} color={colors.error} />
+                  <MaterialCommunityIcons name="alert-circle-outline" size={18} color={themeColors.error} />
                   <Text style={styles.errorText}>{error}</Text>
                 </View>
               ) : null}
               {notice ? (
                 <View style={styles.noticeContainer}>
-                  <MaterialCommunityIcons name="email-check-outline" size={18} color={colors.success} />
+                  <MaterialCommunityIcons name="email-check-outline" size={18} color={themeColors.money} />
                   <Text style={styles.noticeText}>{notice}</Text>
                 </View>
               ) : null}
@@ -577,7 +581,7 @@ export function AuthScreen() {
                   style={styles.input}
                   outlineStyle={styles.inputOutline}
                   disabled={loading}
-                  left={<TextInput.Icon icon="email-outline" color={colors.placeholder} size={20} />}
+                  left={<TextInput.Icon icon="email-outline" color={themeColors.textDisabled} size={20} />}
                 />
 
                 <TextInput
@@ -603,8 +607,8 @@ export function AuthScreen() {
                   style={styles.input}
                   outlineStyle={styles.inputOutline}
                   disabled={loading}
-                  left={<TextInput.Icon icon="lock-outline" color={colors.placeholder} size={20} />}
-                  right={<TextInput.Icon icon={showPassword ? 'eye-off' : 'eye'} color={colors.placeholder} size={20} onPress={() => setShowPassword(!showPassword)} />}
+                  left={<TextInput.Icon icon="lock-outline" color={themeColors.textDisabled} size={20} />}
+                  right={<TextInput.Icon icon={showPassword ? 'eye-off' : 'eye'} color={themeColors.textDisabled} size={20} onPress={() => setShowPassword(!showPassword)} />}
                 />
 
                 {isSignUp && (
@@ -625,8 +629,8 @@ export function AuthScreen() {
                     style={styles.input}
                     outlineStyle={styles.inputOutline}
                     disabled={loading}
-                    left={<TextInput.Icon icon="lock-check-outline" color={colors.placeholder} size={20} />}
-                    right={<TextInput.Icon icon={showConfirmPassword ? 'eye-off' : 'eye'} color={colors.placeholder} size={20} onPress={() => setShowConfirmPassword(!showConfirmPassword)} />}
+                    left={<TextInput.Icon icon="lock-check-outline" color={themeColors.textDisabled} size={20} />}
+                    right={<TextInput.Icon icon={showConfirmPassword ? 'eye-off' : 'eye'} color={themeColors.textDisabled} size={20} onPress={() => setShowConfirmPassword(!showConfirmPassword)} />}
                   />
                 )}
 
@@ -645,7 +649,7 @@ export function AuthScreen() {
                 )}
 
                 <Button
-                  mode="contained"
+                  mode="contained" buttonColor={themeColors.accent} textColor={themeColors.onAccent}
                   onPress={isSignUp ? handleSignUp : handleSignIn}
                   style={styles.primaryButton}
                   contentStyle={styles.primaryButtonContent}
@@ -684,14 +688,14 @@ export function AuthScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
   },
   scrollView: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
   },
   scrollContent: {
     flexGrow: 1,
@@ -706,7 +710,7 @@ const styles = StyleSheet.create({
   },
   loadingContainer: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
@@ -724,7 +728,7 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     fontSize: 16,
-    color: colors.text,
+    color: t.colors.text,
     marginTop: 16,
   },
   animatedContent: {
@@ -748,20 +752,20 @@ const styles = StyleSheet.create({
     fontSize: 26,
     fontWeight: '700',
     marginBottom: 8,
-    color: '#FFFFFF',
+    color: t.colors.text,
     textAlign: 'center',
     letterSpacing: -0.3,
   },
   subtitle: {
     fontSize: 15,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     textAlign: 'center',
     lineHeight: 22,
   },
   errorContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.errorBg,
+    backgroundColor: t.colors.errorSubtle,
     borderRadius: 10,
     paddingHorizontal: 14,
     paddingVertical: 10,
@@ -769,17 +773,17 @@ const styles = StyleSheet.create({
     width: '100%',
     gap: 10,
     borderWidth: 1,
-    borderColor: 'rgba(239, 68, 68, 0.3)',
+    borderColor: t.colors.error,
   },
   errorText: {
-    color: '#FCA5A5',
+    color: t.colors.error,
     fontSize: 13,
     flex: 1,
   },
   noticeContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(34, 197, 94, 0.12)',
+    backgroundColor: t.colors.moneySubtle,
     borderRadius: 10,
     paddingHorizontal: 14,
     paddingVertical: 10,
@@ -787,10 +791,10 @@ const styles = StyleSheet.create({
     width: '100%',
     gap: 10,
     borderWidth: 1,
-    borderColor: 'rgba(34, 197, 94, 0.3)',
+    borderColor: t.colors.money,
   },
   noticeText: {
-    color: colors.success,
+    color: t.colors.money,
     fontSize: 13,
     flex: 1,
   },
@@ -824,11 +828,11 @@ const styles = StyleSheet.create({
   dividerLine: {
     flex: 1,
     height: 1,
-    backgroundColor: colors.border,
+    backgroundColor: t.colors.border,
   },
   dividerText: {
     marginHorizontal: 14,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     fontSize: 13,
     textTransform: 'lowercase',
   },
@@ -838,11 +842,11 @@ const styles = StyleSheet.create({
   },
   input: {
     marginBottom: 12,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
   },
   inputOutline: {
     borderRadius: 10,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
   },
   primaryButton: {
     marginTop: 8,
@@ -864,7 +868,7 @@ const styles = StyleSheet.create({
     marginTop: -4,
   },
   forgotButtonLabel: {
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     fontSize: 13,
     fontWeight: '600',
   },
@@ -875,12 +879,12 @@ const styles = StyleSheet.create({
     marginTop: 24,
   },
   switchText: {
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     fontSize: 14,
   },
   switchButtonLabel: {
-    color: colors.primary,
+    color: t.colors.accentText,
     fontSize: 14,
     fontWeight: '700',
   },
-});
+}));

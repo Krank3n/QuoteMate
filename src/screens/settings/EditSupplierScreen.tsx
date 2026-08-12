@@ -21,7 +21,7 @@ import {
 import { Text, Surface, TextInput, ActivityIndicator } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { colors } from '../../theme';
+import { makeStyles, useThemeColors } from '../../theme';
 import { SupplierGroup } from '../../types';
 import {
   loadGroups,
@@ -31,6 +31,7 @@ import {
 } from '../../services/supplierGroupService';
 import { renameStoreOnFavorites } from '../../services/materialFavorites';
 import { WebContainer } from '../../components/WebContainer';
+import { GridBackground } from '../../components/GridBackground';
 
 function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).substr(2, 9);
@@ -46,6 +47,8 @@ interface SupplierPrefill {
 }
 
 export function EditSupplierScreen() {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const navigation = useNavigation();
   const route = useRoute();
   const params = (route.params as
@@ -212,13 +215,14 @@ export function EditSupplierScreen() {
   if (loading) {
     return (
       <View style={[styles.container, styles.loadingContainer]}>
-        <ActivityIndicator size="large" color={colors.primary} />
+        <ActivityIndicator size="large" color={themeColors.accentText} />
       </View>
     );
   }
 
   return (
     <View style={styles.container}>
+      <GridBackground />
       <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
         <WebContainer>
           <Surface style={styles.formCard}>
@@ -302,7 +306,7 @@ export function EditSupplierScreen() {
 
           {isEditing && original && !original.isDefault && (
             <TouchableOpacity style={styles.deleteBtn} onPress={handleDelete}>
-              <MaterialCommunityIcons name="delete-outline" size={18} color={colors.error} />
+              <MaterialCommunityIcons name="delete-outline" size={18} color={themeColors.error} />
               <Text style={styles.deleteBtnText}>Delete supplier</Text>
             </TouchableOpacity>
           )}
@@ -312,10 +316,10 @@ export function EditSupplierScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
   },
   loadingContainer: {
     alignItems: 'center',
@@ -329,7 +333,7 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: 12,
     marginBottom: 16,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     elevation: 1,
   },
   input: {
@@ -343,27 +347,27 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: 14,
     borderRadius: 10,
-    backgroundColor: colors.primary,
+    backgroundColor: t.colors.accent,
     alignItems: 'center',
   },
   saveBtnText: {
     fontSize: 15,
     fontWeight: '700',
-    color: '#FFFFFF',
+    color: t.colors.onAccent,
   },
   cancelBtn: {
     flex: 1,
     paddingVertical: 14,
     borderRadius: 10,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
     alignItems: 'center',
   },
   cancelBtnText: {
     fontSize: 15,
     fontWeight: '600',
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
   btnDisabled: {
     opacity: 0.6,
@@ -379,6 +383,6 @@ const styles = StyleSheet.create({
   deleteBtnText: {
     fontSize: 14,
     fontWeight: '600',
-    color: colors.error,
+    color: t.colors.error,
   },
-});
+}));

@@ -49,13 +49,14 @@ import QRCode from 'react-native-qrcode-svg';
 import * as Clipboard from 'expo-clipboard';
 import { useRoute } from '@react-navigation/native';
 
-import { colors } from '../../theme';
+import { makeStyles, useThemeColors } from '../../theme';
 import { WebContainer } from '../../components/WebContainer';
 import { AlertModal, AlertType } from '../../components/AlertModal';
 import { ReferralInfo, AffiliateEarning } from '../../types';
 import { firestoreService } from '../../services/firestoreService';
 import { auth } from '../../config/firebase';
 import { useStore } from '../../store/useStore';
+import { GridBackground } from '../../components/GridBackground';
 import {
   applyCodeEligibility,
   buildSharePayload,
@@ -71,6 +72,8 @@ import {
 const SUPPORT_EMAIL = 'support@quotemateapp.au';
 
 export function ReferralScreen() {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const [referralInfo, setReferralInfo] = useState<ReferralInfo | null>(null);
   const [earnings, setEarnings] = useState<AffiliateEarning[]>([]);
   const [loading, setLoading] = useState(true);
@@ -278,11 +281,11 @@ export function ReferralScreen() {
   };
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'pending': return colors.secondary;
-      case 'confirmed': return colors.primary;
-      case 'paid': return colors.success;
-      case 'cancelled': return colors.error;
-      default: return colors.onSurface;
+      case 'pending': return themeColors.warning;
+      case 'confirmed': return themeColors.accent;
+      case 'paid': return themeColors.money;
+      case 'cancelled': return themeColors.error;
+      default: return themeColors.textSecondary;
     }
   };
 
@@ -291,7 +294,7 @@ export function ReferralScreen() {
   if (loading) {
     return (
       <View style={[styles.container, styles.centered]}>
-        <ActivityIndicator size="large" color={colors.primary} />
+        <ActivityIndicator size="large" color={themeColors.accentText} />
       </View>
     );
   }
@@ -307,9 +310,9 @@ export function ReferralScreen() {
       accessibilityLabel="Get my referral code"
     >
       {generatingCode ? (
-        <ActivityIndicator size="small" color={colors.white} />
+        <ActivityIndicator size="small" color={themeColors.onAccent} />
       ) : (
-        <MaterialCommunityIcons name="qrcode" size={20} color={colors.white} />
+        <MaterialCommunityIcons name="qrcode" size={20} color={themeColors.onAccent} />
       )}
       <Text style={styles.generateButtonText}>
         {generatingCode ? 'Generating...' : 'Get My Referral Code'}
@@ -339,7 +342,7 @@ export function ReferralScreen() {
           accessibilityRole="button"
           accessibilityLabel="Share your referral link"
         >
-          <MaterialCommunityIcons name="share-variant" size={20} color={colors.white} />
+          <MaterialCommunityIcons name="share-variant" size={20} color={themeColors.onAccent} />
           <Text style={styles.shareButtonText}>Share Link</Text>
         </TouchableOpacity>
         <TouchableOpacity
@@ -350,9 +353,9 @@ export function ReferralScreen() {
         >
           <MaterialCommunityIcons
             name={copied ? 'check' : 'content-copy'} size={20}
-            color={copied ? colors.success : colors.primary}
+            color={copied ? themeColors.money : themeColors.accent}
           />
-          <Text style={[styles.codeToggleText, copied && { color: colors.success }]}>
+          <Text style={[styles.codeToggleText, copied && { color: themeColors.money }]}>
             {copied ? 'Copied!' : 'Copy'}
           </Text>
         </TouchableOpacity>
@@ -375,7 +378,7 @@ export function ReferralScreen() {
         { icon: 'wifi-off' as const, label: 'Offline' },
       ].map((feature, index) => (
         <View key={index} style={styles.adFeaturePill}>
-          <MaterialCommunityIcons name={feature.icon} size={14} color={colors.primary} />
+          <MaterialCommunityIcons name={feature.icon} size={14} color={themeColors.accentText} />
           <Text style={styles.adFeaturePillText}>{feature.label}</Text>
         </View>
       ))}
@@ -389,7 +392,7 @@ export function ReferralScreen() {
         return (
           <Surface style={styles.card}>
             <View style={styles.referredByRow}>
-              <MaterialCommunityIcons name="check-circle" size={20} color={colors.success} />
+              <MaterialCommunityIcons name="check-circle" size={20} color={themeColors.money} />
               <Text style={styles.referredByText}>You were referred by a mate</Text>
             </View>
           </Surface>
@@ -411,7 +414,7 @@ export function ReferralScreen() {
           <TextInput
             style={styles.textInput}
             placeholder="QM-AB2CD3"
-            placeholderTextColor={colors.onSurface + '80'}
+            placeholderTextColor={themeColors.textMuted}
             value={codeInput}
             onChangeText={setCodeInput}
             autoCapitalize="characters"
@@ -433,7 +436,7 @@ export function ReferralScreen() {
             accessibilityLabel="Apply referral code"
           >
             {applyingCode
-              ? <ActivityIndicator size="small" color={colors.white} />
+              ? <ActivityIndicator size="small" color={themeColors.onAccent} />
               : <Text style={styles.applyButtonText}>Apply</Text>}
           </TouchableOpacity>
         </View>
@@ -451,11 +454,12 @@ export function ReferralScreen() {
   if (referralInfo?.isAffiliate) {
     return (
       <View style={styles.container}>
+      <GridBackground />
         <ScrollView
           style={{ flex: 1 }}
           contentContainerStyle={styles.scrollContent}
           refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={colors.primary} />
+            <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={themeColors.accent} />
           }
         >
           <WebContainer>
@@ -469,19 +473,19 @@ export function ReferralScreen() {
                   <Title style={styles.sectionTitle}>Your Earnings</Title>
                   <View style={styles.earningsGrid}>
                     <View style={styles.earningBox}>
-                      <Text style={[styles.earningValue, { color: colors.success }]}>
+                      <Text style={[styles.earningValue, { color: themeColors.money }]}>
                         {formatCurrency(referralInfo.totalEarnings)}
                       </Text>
                       <Text style={styles.earningLabel}>Earned</Text>
                     </View>
                     <View style={styles.earningBox}>
-                      <Text style={[styles.earningValue, { color: colors.secondary }]}>
+                      <Text style={[styles.earningValue, { color: themeColors.warning }]}>
                         {formatCurrency(referralInfo.pendingEarnings)}
                       </Text>
                       <Text style={styles.earningLabel}>Awaiting Payout</Text>
                     </View>
                     <View style={styles.earningBox}>
-                      <Text style={[styles.earningValue, { color: colors.primary }]}>
+                      <Text style={[styles.earningValue, { color: themeColors.accentText }]}>
                         {formatCurrency(referralInfo.paidEarnings)}
                       </Text>
                       <Text style={styles.earningLabel}>Paid Out</Text>
@@ -502,7 +506,7 @@ export function ReferralScreen() {
                       <>
                         <View style={styles.affiliateStatDivider} />
                         <View style={styles.affiliateStatItem}>
-                          <Text style={[styles.affiliateStatValue, { color: colors.primary }]}>
+                          <Text style={[styles.affiliateStatValue, { color: themeColors.accentText }]}>
                             {commissionPercent}%
                           </Text>
                           <Text style={styles.affiliateStatLabel}>Your Cut</Text>
@@ -533,12 +537,12 @@ export function ReferralScreen() {
 
                     <View style={styles.rateRow}>
                       <View style={styles.rateItem}>
-                        <MaterialCommunityIcons name="apple" size={18} color={colors.onSurface} />
+                        <MaterialCommunityIcons name="apple" size={18} color={themeColors.textSecondary} />
                         <Text style={styles.rateLabel}>App Store</Text>
                         <Text style={styles.rateValue}>{formatCurrency(perUserIos)}/mo</Text>
                       </View>
                       <View style={styles.rateItem}>
-                        <MaterialCommunityIcons name="web" size={18} color={colors.onSurface} />
+                        <MaterialCommunityIcons name="web" size={18} color={themeColors.textSecondary} />
                         <Text style={styles.rateLabel}>Web</Text>
                         <Text style={styles.rateValue}>{formatCurrency(perUserWeb)}/mo</Text>
                       </View>
@@ -588,7 +592,7 @@ export function ReferralScreen() {
                   ].map((item, index) => (
                     <View key={index} style={styles.gameplanStep}>
                       <View style={styles.gameplanIcon}>
-                        <MaterialCommunityIcons name={item.icon} size={22} color={colors.primary} />
+                        <MaterialCommunityIcons name={item.icon} size={22} color={themeColors.accentText} />
                       </View>
                       <View style={styles.gameplanContent}>
                         <Text style={styles.gameplanStepTitle}>{item.title}</Text>
@@ -602,7 +606,7 @@ export function ReferralScreen() {
                 <Surface style={styles.card}>
                   <Title style={styles.sectionTitle}>Recent Earnings</Title>
                   {loadingEarnings ? (
-                    <ActivityIndicator size="small" color={colors.primary} />
+                    <ActivityIndicator size="small" color={themeColors.accentText} />
                   ) : earnings.length === 0 ? (
                     <Text style={styles.hint}>
                       No commission yet. Earnings appear here once someone who used your code
@@ -612,7 +616,7 @@ export function ReferralScreen() {
                     earnings.slice(0, 15).map((earning) => (
                       <View key={earning.id} style={styles.earningRow}>
                         <View style={styles.earningRowLeft}>
-                          <MaterialCommunityIcons name={getPlatformIcon(earning.platform)} size={20} color={colors.onSurface} />
+                          <MaterialCommunityIcons name={getPlatformIcon(earning.platform)} size={20} color={themeColors.textSecondary} />
                           <View style={styles.earningRowInfo}>
                             <Text style={styles.earningRowEmail}>{earning.referredUserEmail}</Text>
                             <Text style={styles.earningRowPeriod}>{earning.billingPeriod}</Text>
@@ -639,7 +643,7 @@ export function ReferralScreen() {
                   accessibilityRole="button"
                   accessibilityLabel="Email support about the affiliate program"
                 >
-                  <MaterialCommunityIcons name="email-outline" size={20} color={colors.primary} />
+                  <MaterialCommunityIcons name="email-outline" size={20} color={themeColors.accentText} />
                   <Text style={styles.supportButtonText}>Questions about payouts? Email us</Text>
                 </TouchableOpacity>
               </>
@@ -675,7 +679,7 @@ export function ReferralScreen() {
         style={{ flex: 1 }}
         contentContainerStyle={styles.scrollContent}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={colors.primary} />
+          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={themeColors.accent} />
         }
       >
         <WebContainer>
@@ -683,7 +687,7 @@ export function ReferralScreen() {
             <>
               {renderQrCard(
                 <View style={styles.regularQrSubtext}>
-                  <MaterialCommunityIcons name="account-plus" size={18} color={colors.primary} />
+                  <MaterialCommunityIcons name="account-plus" size={18} color={themeColors.accentText} />
                   <Text style={styles.regularQrSubtextText}>
                     Help your mates find QuoteMate
                   </Text>
@@ -693,7 +697,7 @@ export function ReferralScreen() {
             </>
           ) : (
             <Surface style={styles.heroCard}>
-              <MaterialCommunityIcons name="account-plus" size={48} color={colors.primary} />
+              <MaterialCommunityIcons name="account-plus" size={48} color={themeColors.accentText} />
               <Title style={styles.heroTitle}>Refer a Mate</Title>
               <Text style={styles.heroText}>
                 Create your referral code and share QuoteMate with other tradies.
@@ -751,10 +755,10 @@ export function ReferralScreen() {
 // STYLES
 // ════════════════════════════════════════
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
   },
   centered: {
     justifyContent: 'center',
@@ -771,7 +775,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     borderRadius: 12,
     elevation: 2,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
   },
   sectionTitle: {
     fontSize: 18,
@@ -782,7 +786,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.primary,
+    backgroundColor: t.colors.accent,
     paddingVertical: 14,
     borderRadius: 10,
     gap: 8,
@@ -791,17 +795,17 @@ const styles = StyleSheet.create({
   generateButtonText: {
     fontSize: 16,
     fontWeight: '700',
-    color: colors.white,
+    color: t.colors.onAccent,
   },
   hint: {
     fontSize: 14,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     marginBottom: 12,
     lineHeight: 20,
   },
   disclaimer: {
     fontSize: 12,
-    color: colors.onSurface + 'B0',
+    color: t.colors.textMuted,
     lineHeight: 18,
     marginTop: 14,
   },
@@ -811,24 +815,24 @@ const styles = StyleSheet.create({
   },
   inputHelp: {
     fontSize: 12,
-    color: colors.secondary,
+    color: t.colors.warning,
     marginTop: 8,
   },
   textInput: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
     borderRadius: 10,
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 16,
-    color: colors.text,
+    color: t.colors.text,
     borderWidth: 1,
-    borderColor: colors.outline + '30',
+    borderColor: t.colors.border,
     letterSpacing: 1,
     ...(Platform.OS === 'web' && { outlineStyle: 'none' as any }),
   },
   applyButton: {
-    backgroundColor: colors.primary,
+    backgroundColor: t.colors.accent,
     paddingHorizontal: 20,
     borderRadius: 10,
     alignItems: 'center',
@@ -841,7 +845,7 @@ const styles = StyleSheet.create({
   applyButtonText: {
     fontSize: 15,
     fontWeight: '700',
-    color: colors.white,
+    color: t.colors.onAccent,
   },
   referredByRow: {
     flexDirection: 'row',
@@ -850,7 +854,7 @@ const styles = StyleSheet.create({
   },
   referredByText: {
     fontSize: 15,
-    color: colors.success,
+    color: t.colors.money,
     fontWeight: '600',
   },
   stepRow: {
@@ -863,18 +867,18 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: colors.primary + '20',
+    backgroundColor: t.colors.accentSubtle,
     alignItems: 'center',
     justifyContent: 'center',
   },
   stepNumber: {
     fontSize: 14,
     fontWeight: '700',
-    color: colors.primary,
+    color: t.colors.accentText,
   },
   stepText: {
     fontSize: 14,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     flex: 1,
   },
 
@@ -884,19 +888,19 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     borderRadius: 12,
     elevation: 2,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     alignItems: 'center',
   },
   heroTitle: {
     fontSize: 22,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
     textAlign: 'center',
     marginTop: 12,
   },
   heroText: {
     fontSize: 15,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     textAlign: 'center',
     lineHeight: 22,
     marginTop: 8,
@@ -905,7 +909,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-around',
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderRadius: 12,
     padding: 20,
     marginBottom: 16,
@@ -918,11 +922,11 @@ const styles = StyleSheet.create({
   statValue: {
     fontSize: 28,
     fontWeight: '800',
-    color: colors.text,
+    color: t.colors.text,
   },
   statLabel: {
     fontSize: 12,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     marginTop: 4,
   },
 
@@ -932,7 +936,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     borderRadius: 12,
     elevation: 2,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     alignItems: 'center',
   },
   adLogo: {
@@ -944,7 +948,7 @@ const styles = StyleSheet.create({
   adScanText: {
     fontSize: 14,
     fontWeight: '600',
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     textAlign: 'center',
     marginTop: 14,
     marginBottom: 4,
@@ -959,7 +963,7 @@ const styles = StyleSheet.create({
   adFeaturePill: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     paddingVertical: 8,
     paddingHorizontal: 12,
     borderRadius: 20,
@@ -969,7 +973,7 @@ const styles = StyleSheet.create({
   adFeaturePillText: {
     fontSize: 12,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
   },
   regularQrSubtext: {
     flexDirection: 'row',
@@ -982,7 +986,7 @@ const styles = StyleSheet.create({
   regularQrSubtextText: {
     fontSize: 14,
     fontWeight: '600',
-    color: colors.secondary,
+    color: t.colors.warning,
     textAlign: 'center',
   },
   qrContainer: {
@@ -1003,7 +1007,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.primary,
+    backgroundColor: t.colors.accent,
     paddingVertical: 14,
     borderRadius: 10,
     gap: 8,
@@ -1011,13 +1015,13 @@ const styles = StyleSheet.create({
   shareButtonText: {
     fontSize: 16,
     fontWeight: '700',
-    color: colors.white,
+    color: t.colors.onAccent,
   },
   codeToggleButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.primary + '15',
+    backgroundColor: t.colors.accentSubtle,
     paddingVertical: 14,
     paddingHorizontal: 20,
     borderRadius: 10,
@@ -1026,18 +1030,18 @@ const styles = StyleSheet.create({
   codeToggleText: {
     fontSize: 16,
     fontWeight: '700',
-    color: colors.primary,
+    color: t.colors.accentText,
   },
   codeBox: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
     borderRadius: 10,
     padding: 14,
     marginTop: 12,
     borderWidth: 2,
-    borderColor: colors.primary + '40',
+    borderColor: t.colors.accentSubtle,
     borderStyle: 'dashed',
     gap: 10,
     width: '100%',
@@ -1045,7 +1049,7 @@ const styles = StyleSheet.create({
   codeText: {
     fontSize: 22,
     fontWeight: '800',
-    color: colors.primary,
+    color: t.colors.accentText,
     letterSpacing: 2,
   },
 
@@ -1057,14 +1061,14 @@ const styles = StyleSheet.create({
   },
   earningBox: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
     borderRadius: 10,
     padding: 14,
     alignItems: 'center',
   },
   earningLabel: {
     fontSize: 11,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     marginTop: 4,
     fontWeight: '500',
     textAlign: 'center',
@@ -1080,7 +1084,7 @@ const styles = StyleSheet.create({
     marginTop: 16,
     paddingTop: 16,
     borderTopWidth: 1,
-    borderTopColor: colors.outline + '20',
+    borderTopColor: t.colors.border,
   },
   affiliateStatItem: {
     alignItems: 'center',
@@ -1089,22 +1093,22 @@ const styles = StyleSheet.create({
   affiliateStatValue: {
     fontSize: 24,
     fontWeight: '800',
-    color: colors.text,
+    color: t.colors.text,
   },
   affiliateStatLabel: {
     fontSize: 11,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     marginTop: 2,
     fontWeight: '500',
   },
   affiliateStatDivider: {
     width: 1,
     height: 32,
-    backgroundColor: colors.outline + '30',
+    backgroundColor: t.colors.border,
   },
   payoutNote: {
     fontSize: 12,
-    color: colors.onSurface + 'B0',
+    color: t.colors.textMuted,
     marginTop: 12,
     textAlign: 'center',
   },
@@ -1116,7 +1120,7 @@ const styles = StyleSheet.create({
   },
   rateItem: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
     borderRadius: 10,
     padding: 14,
     alignItems: 'center',
@@ -1124,19 +1128,19 @@ const styles = StyleSheet.create({
   },
   rateLabel: {
     fontSize: 12,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     fontWeight: '500',
   },
   rateValue: {
     fontSize: 17,
     fontWeight: '800',
-    color: colors.success,
+    color: t.colors.money,
   },
 
   // ── Projection chart ──
   projectionSubtext: {
     fontSize: 13,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     marginBottom: 20,
     lineHeight: 19,
   },
@@ -1156,23 +1160,23 @@ const styles = StyleSheet.create({
   chartBarAmount: {
     fontSize: 10,
     fontWeight: '700',
-    color: colors.success,
+    color: t.colors.money,
     marginBottom: 4,
   },
   chartBar: {
     width: 30,
     borderRadius: 6,
-    backgroundColor: colors.primary,
+    backgroundColor: t.colors.accent,
   },
   chartBarLabel: {
     fontSize: 12,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     marginTop: 6,
     fontWeight: '600',
   },
   chartFooter: {
     fontSize: 11,
-    color: colors.onSurface + '80',
+    color: t.colors.textMuted,
     textAlign: 'center',
     marginTop: 4,
   },
@@ -1180,7 +1184,7 @@ const styles = StyleSheet.create({
   // ── Sharing tips ──
   gameplanIntro: {
     fontSize: 14,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     lineHeight: 21,
     marginBottom: 16,
   },
@@ -1193,7 +1197,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 12,
-    backgroundColor: colors.primary + '15',
+    backgroundColor: t.colors.accentSubtle,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1203,12 +1207,12 @@ const styles = StyleSheet.create({
   gameplanStepTitle: {
     fontSize: 16,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
     marginBottom: 3,
   },
   gameplanStepText: {
     fontSize: 14,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     lineHeight: 20,
   },
 
@@ -1217,7 +1221,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.primary + '15',
+    backgroundColor: t.colors.accentSubtle,
     paddingVertical: 14,
     paddingHorizontal: 16,
     borderRadius: 10,
@@ -1227,7 +1231,7 @@ const styles = StyleSheet.create({
   supportButtonText: {
     fontSize: 14,
     fontWeight: '700',
-    color: colors.primary,
+    color: t.colors.accentText,
   },
 
   // ── Earnings list ──
@@ -1237,7 +1241,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: colors.outline + '20',
+    borderBottomColor: t.colors.border,
   },
   earningRowLeft: {
     flexDirection: 'row',
@@ -1250,12 +1254,12 @@ const styles = StyleSheet.create({
   },
   earningRowEmail: {
     fontSize: 14,
-    color: colors.text,
+    color: t.colors.text,
     fontWeight: '500',
   },
   earningRowPeriod: {
     fontSize: 12,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     marginTop: 2,
   },
   earningRowRight: {
@@ -1264,7 +1268,7 @@ const styles = StyleSheet.create({
   earningRowAmount: {
     fontSize: 16,
     fontWeight: '700',
-    color: colors.success,
+    color: t.colors.money,
   },
   earningRowStatus: {
     fontSize: 11,
@@ -1272,4 +1276,4 @@ const styles = StyleSheet.create({
     textTransform: 'capitalize',
     marginTop: 2,
   },
-});
+}));

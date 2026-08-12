@@ -16,7 +16,7 @@ import { format } from 'date-fns';
 
 import type { Document } from '../types/document';
 import type { DocumentPayment } from '../../shared/document/types';
-import { colors } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
 import { BottomSheet } from './BottomSheet';
 
@@ -54,6 +54,8 @@ function formatPaidAt(ms: number): string {
 }
 
 export function PaymentSheet({ visible, onDismiss, doc, onRecordPayment }: PaymentSheetProps) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const payments = (doc.payments || []).slice().sort(
     (a, b) => (b.paidAt || 0) - (a.paidAt || 0),
   );
@@ -80,7 +82,7 @@ export function PaymentSheet({ visible, onDismiss, doc, onRecordPayment }: Payme
           <MaterialCommunityIcons
             name={'cash-multiple' as any}
             size={28}
-            color={colors.textMuted}
+            color={themeColors.textMuted}
           />
           <Text style={styles.emptyText}>No payments recorded yet.</Text>
         </View>
@@ -100,7 +102,7 @@ export function PaymentSheet({ visible, onDismiss, doc, onRecordPayment }: Payme
                           : ('cash-multiple' as any)
                   }
                   size={20}
-                  color={colors.primary}
+                  color={themeColors.accentText}
                 />
               </View>
               <View style={styles.rowMain}>
@@ -120,7 +122,7 @@ export function PaymentSheet({ visible, onDismiss, doc, onRecordPayment }: Payme
 
       {doc.type === 'invoice' && onRecordPayment ? (
         <Button
-          mode="contained"
+          mode="contained" buttonColor={themeColors.accent} textColor={themeColors.onAccent}
           icon={'plus' as any}
           onPress={() => {
             onDismiss();
@@ -144,17 +146,19 @@ function SummaryCell({
   value: string;
   accent?: boolean;
 }) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   return (
     <View style={styles.summaryCell}>
       <Text style={styles.summaryLabel}>{label}</Text>
-      <Text style={[styles.summaryValue, accent ? { color: colors.warning } : undefined]}>
+      <Text style={[styles.summaryValue, accent ? { color: themeColors.warning } : undefined]}>
         {value}
       </Text>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   summaryRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -164,19 +168,19 @@ const styles = StyleSheet.create({
   summaryCell: { flex: 1 },
   summaryLabel: {
     fontSize: 10,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
   summaryValue: {
     fontSize: 16,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
     marginTop: 2,
   },
   divider: {
     marginVertical: 12,
-    backgroundColor: colors.border,
+    backgroundColor: t.colors.border,
   },
   empty: {
     alignItems: 'center',
@@ -185,7 +189,7 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     fontSize: 13,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
   list: {
     maxHeight: 320,
@@ -204,7 +208,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: colors.primaryBg,
+    backgroundColor: t.colors.accentSubtle,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -214,25 +218,25 @@ const styles = StyleSheet.create({
   rowTitle: {
     fontSize: 14,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
   },
   rowMeta: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginTop: 1,
   },
   rowNotes: {
     fontSize: 12,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     marginTop: 2,
   },
   rowAmount: {
     fontSize: 14,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
   },
   recordButton: {
     marginTop: 16,
     borderRadius: 12,
   },
-});
+}));

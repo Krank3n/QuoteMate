@@ -42,7 +42,8 @@ import { useStore } from '../../store/useStore';
 import { useCurrentDocument, useDocumentMode, usePersistDocument, UnifiedDocument } from '../../utils/documentMode';
 import { Material, QuoteSection, LaborUnit, SectionTemplate, FavoriteProductMapping, SupplierGroup } from '../../types';
 import { loadTemplates, saveTemplate, matchTemplatesByKeywords, extractQuantityForKeyword, suggestKeywordsFromName } from '../../services/sectionTemplateService';
-import { colors } from '../../theme';
+import type { Tokens } from '../../theme';
+import { makeStyles, useThemeColors } from '../../theme';
 import { formatCurrency, updateMaterialTotalPrice, supplierPriceForGstMode } from '../../utils/quoteCalculator';
 import { keepSupplierPriceInclusive, normaliseTemplateToHours } from '../../../shared/document';
 import { parsePackInfo } from '../../utils/parsePackInfo';
@@ -86,27 +87,27 @@ type FlatItem =
   | { type: 'footer'; key: string; sectionName: string; subtotal: number };
 
 // Helper to get section display info
-function getSectionInfo(sectionName: string | undefined): { name: string; color: string } {
+function getSectionInfo(sectionName: string | undefined, themeColors: Tokens): { name: string; color: string } {
   if (!sectionName) {
-    return { name: 'General', color: colors.onSurface };
+    return { name: 'General', color: themeColors.textSecondary };
   }
-  return { name: sectionName, color: colors.primary };
+  return { name: sectionName, color: themeColors.accentText };
 }
 
 // Legacy helper for trade category grouping
-function getCategoryInfo(categoryId: string | undefined): { name: string; color: string } {
+function getCategoryInfo(categoryId: string | undefined, themeColors: Tokens): { name: string; color: string } {
   if (!categoryId) {
-    return { name: 'General', color: colors.onSurface };
+    return { name: 'General', color: themeColors.textSecondary };
   }
   const category = TRADE_CATEGORIES.find(c => c.id === categoryId);
   if (category) {
     return { name: category.name, color: category.color };
   }
-  return { name: 'General', color: colors.onSurface };
+  return { name: 'General', color: themeColors.textSecondary };
 }
 
 // Helper to group materials by section (preferred) or category (fallback)
-function groupMaterialsByCategory(materials: Material[]): Map<string, { info: { name: string; color: string }; materials: Material[] }> {
+function groupMaterialsByCategory(materials: Material[], themeColors: Tokens): Map<string, { info: { name: string; color: string }; materials: Material[] }> {
   // Determine if we should group by section or category
   const hasAnySections = materials.some(m => m.section);
 
@@ -131,7 +132,7 @@ function groupMaterialsByCategory(materials: Material[]): Map<string, { info: { 
 
   const result = new Map<string, { info: { name: string; color: string }; materials: Material[] }>();
   sortedKeys.forEach(key => {
-    const info = hasAnySections ? getSectionInfo(key) : getCategoryInfo(key);
+    const info = hasAnySections ? getSectionInfo(key, themeColors) : getCategoryInfo(key, themeColors);
     result.set(key, { info, materials: grouped.get(key)! });
   });
 
@@ -161,6 +162,7 @@ import { FixedBottomButton } from '../../components/FixedBottomButton';
 import { WebContainer } from '../../components/WebContainer';
 import { AlertModal } from '../../components/AlertModal';
 import { ProBadge } from '../../components/ProBadge';
+import { GridBackground } from '../../components/GridBackground';
 
 /**
  * Recompute material qty/total from a priced product, dividing by pack size
@@ -194,6 +196,8 @@ const VISIBLE_STEPS = 3;
 const STEP_INTERVAL = 2500;
 
 function AiAnalyzingState() {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const animationRef = React.useRef<LottieView>(null);
   const [currentStep, setCurrentStep] = React.useState(0);
   const scrollAnim = React.useRef(new Animated.Value(0)).current;
@@ -279,7 +283,7 @@ function AiAnalyzingState() {
               <MaterialCommunityIcons
                 name={index < currentStep ? 'check-circle' as any : step.icon as any}
                 size={16}
-                color={index < currentStep ? colors.success : index === currentStep ? colors.primary : colors.textMuted}
+                color={index < currentStep ? themeColors.money : index === currentStep ? themeColors.accent : themeColors.textMuted}
               />
               <Text
                 style={[
@@ -370,6 +374,8 @@ const EMPTY_MATERIALS_MESSAGES = [
 ];
 
 export function MaterialsListScreen() {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const emptyMessage = useMemo(() => EMPTY_MATERIALS_MESSAGES[Math.floor(Math.random() * EMPTY_MATERIALS_MESSAGES.length)], []);
   const chasingTitle = useMemo(() => CHASING_TITLES[Math.floor(Math.random() * CHASING_TITLES.length)], []);
   const chasingSubtitle = useMemo(() => CHASING_SUBTITLES[Math.floor(Math.random() * CHASING_SUBTITLES.length)], []);
@@ -796,7 +802,7 @@ export function MaterialsListScreen() {
   // memoizing the data alone is the safe, high-leverage win.
   const quoteSections = currentQuote?.sections;
   const flatData: FlatItem[] = React.useMemo(() => {
-    const groupedMaterials = groupMaterialsByCategory(materials);
+    const groupedMaterials = groupMaterialsByCategory(materials, themeColors);
 
     const sectionedGroups = Array.from(groupedMaterials.entries()).filter(([key]) => key !== '');
     const unsectionedGroup = groupedMaterials.get('');
@@ -804,7 +810,7 @@ export function MaterialsListScreen() {
     if (quoteSections) {
       quoteSections.forEach(s => {
         if (!existingSectionNames.has(s.name)) {
-          sectionedGroups.push([s.name, { info: { name: s.name, color: colors.primary }, materials: [] }]);
+          sectionedGroups.push([s.name, { info: { name: s.name, color: themeColors.accentText }, materials: [] }]);
         }
       });
     }
@@ -1831,7 +1837,7 @@ export function MaterialsListScreen() {
             isCollapsed && styles.sectionCardHeaderCollapsed,
           ]}>
             <TouchableOpacity onPress={() => toggleSectionCollapsed(item.sectionName)} hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }} style={{ marginRight: 8 }}>
-              <MaterialCommunityIcons name={isCollapsed ? 'chevron-right' : 'chevron-down'} size={22} color={colors.textMuted} />
+              <MaterialCommunityIcons name={isCollapsed ? 'chevron-right' : 'chevron-down'} size={22} color={themeColors.textMuted} />
             </TouchableOpacity>
             {renamingSectionKey === item.sectionName ? (
               <RNTextInput
@@ -1850,20 +1856,20 @@ export function MaterialsListScreen() {
             {showMultiplier && (
               <View style={styles.multiplierStepper}>
                 <Pressable style={({ pressed }) => [styles.multiplierBtn, pressed && { opacity: 0.6 }]} onPress={() => handleSectionMultiplierChange(item.sectionName, (sd?.multiplier || 1) - 1)}>
-                  <MaterialCommunityIcons name="minus" size={14} color={colors.text} />
+                  <MaterialCommunityIcons name="minus" size={14} color={themeColors.text} />
                 </Pressable>
                 <Text style={styles.multiplierValue}>{sd?.multiplier || 1}</Text>
                 <Pressable style={({ pressed }) => [styles.multiplierBtn, pressed && { opacity: 0.6 }]} onPress={() => handleSectionMultiplierChange(item.sectionName, (sd?.multiplier || 1) + 1)}>
-                  <MaterialCommunityIcons name="plus" size={14} color={colors.text} />
+                  <MaterialCommunityIcons name="plus" size={14} color={themeColors.text} />
                 </Pressable>
               </View>
             )}
             <View style={styles.sectionCardActions}>
               <TouchableOpacity onPress={() => handleSaveSectionAsTemplate(item.sectionName)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                <MaterialCommunityIcons name="content-save-outline" size={18} color={colors.textMuted} />
+                <MaterialCommunityIcons name="content-save-outline" size={18} color={themeColors.textMuted} />
               </TouchableOpacity>
               <TouchableOpacity onPress={() => handleDeleteSection(item.sectionName)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                <MaterialCommunityIcons name="delete-outline" size={18} color={colors.textMuted} />
+                <MaterialCommunityIcons name="delete-outline" size={18} color={themeColors.textMuted} />
               </TouchableOpacity>
             </View>
           </View>
@@ -2000,7 +2006,7 @@ export function MaterialsListScreen() {
       onPress={() => navigation.navigate('ReeceIntegration' as never)}
       activeOpacity={0.7}
     >
-      <MaterialCommunityIcons name="link-variant-off" size={20} color={colors.primary} />
+      <MaterialCommunityIcons name="link-variant-off" size={20} color={themeColors.accentText} />
       <View style={styles.reeceBannerText}>
         <Text style={styles.reeceBannerTitle}>
           {reeceReauthNeeded ? 'Reconnect Reece' : 'Connect your Reece account'}
@@ -2011,7 +2017,7 @@ export function MaterialsListScreen() {
             : 'Get your real Reece trade prices flowing into every quote.'}
         </Text>
       </View>
-      <MaterialCommunityIcons name="chevron-right" size={20} color={colors.textMuted} />
+      <MaterialCommunityIcons name="chevron-right" size={20} color={themeColors.textMuted} />
     </TouchableOpacity>
   ) : null;
 
@@ -2080,7 +2086,7 @@ export function MaterialsListScreen() {
         <AiAnalyzingState />
       ) : materials.length === 0 && !templatesLoaded ? (
         <View style={styles.emptyState}>
-          <ActivityIndicator size="small" color={colors.primary} style={{ marginVertical: 40 }} />
+          <ActivityIndicator size="small" color={themeColors.accentText} style={{ marginVertical: 40 }} />
         </View>
       ) : materials.length === 0 ? (
         <View style={styles.emptyState}>
@@ -2095,7 +2101,7 @@ export function MaterialsListScreen() {
             >
               <View style={styles.heroTopRow}>
                 <View style={styles.heroIconWrap}>
-                  <MaterialCommunityIcons name="auto-fix" size={26} color={colors.onPrimary} />
+                  <MaterialCommunityIcons name="auto-fix" size={26} color={themeColors.onAccent} />
                 </View>
                 <View style={styles.heroContent}>
                   <View style={styles.heroTitleRow}>
@@ -2107,7 +2113,7 @@ export function MaterialsListScreen() {
               </View>
               <View style={styles.heroCta}>
                 <Text style={styles.heroCtaText}>{emptyContent.hero.ctaLabel}</Text>
-                <MaterialCommunityIcons name="arrow-right" size={18} color={colors.onPrimary} />
+                <MaterialCommunityIcons name="arrow-right" size={18} color={themeColors.onAccent} />
               </View>
               {/* Default white tint — a primary-green sweep is invisible on
                   the dark-green card; white reads like the dashboard cards. */}
@@ -2118,13 +2124,13 @@ export function MaterialsListScreen() {
           <AnimatedListItem index={1} style={styles.emptyItemWrap}>
             <TouchableOpacity style={styles.manualRow} onPress={handleStartManualBuild} activeOpacity={0.7}>
               <View style={styles.manualIconWrap}>
-                <MaterialCommunityIcons name="plus" size={20} color={colors.onSurface} />
+                <MaterialCommunityIcons name="plus" size={20} color={themeColors.textSecondary} />
               </View>
               <View style={styles.heroContent}>
                 <Text style={styles.manualTitle}>{emptyContent.manual.title}</Text>
                 <Text style={styles.manualSubtitle}>{emptyContent.manual.subtitle}</Text>
               </View>
-              <MaterialCommunityIcons name="chevron-right" size={22} color={colors.textMuted} />
+              <MaterialCommunityIcons name="chevron-right" size={22} color={themeColors.textMuted} />
             </TouchableOpacity>
           </AnimatedListItem>
 
@@ -2136,7 +2142,7 @@ export function MaterialsListScreen() {
               hitSlop={{ top: 8, bottom: 8, left: 12, right: 12 }}
             >
               <Text style={styles.skipMaterialsText}>{emptyContent.skipLabel}</Text>
-              <MaterialCommunityIcons name="arrow-right" size={16} color={colors.primary} />
+              <MaterialCommunityIcons name="arrow-right" size={16} color={themeColors.accentText} />
             </TouchableOpacity>
           </AnimatedListItem>
         </View>
@@ -2176,11 +2182,11 @@ export function MaterialsListScreen() {
           </View>
           <View style={styles.materialsActionHalfRow}>
             <TouchableOpacity style={styles.addMaterialButtonHalf} onPress={() => { lightTap(); handleLoadTemplate(); }}>
-              <MaterialCommunityIcons name="puzzle-outline" size={18} color={colors.primary} />
+              <MaterialCommunityIcons name="puzzle-outline" size={18} color={themeColors.accentText} />
               <Text style={styles.addMaterialButtonText}>Load Template</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.addMaterialButtonHalf} onPress={() => { lightTap(); setNewSectionName(''); setShowNewSectionModal(true); }}>
-              <MaterialCommunityIcons name="folder-plus-outline" size={18} color={colors.primary} />
+              <MaterialCommunityIcons name="folder-plus-outline" size={18} color={themeColors.accentText} />
               <Text style={styles.addMaterialButtonText}>New Section</Text>
             </TouchableOpacity>
           </View>
@@ -2194,6 +2200,7 @@ export function MaterialsListScreen() {
 
   return (
     <View style={styles.container}>
+      <GridBackground />
       <FlatList
           data={showMaterialsList ? flatData : []}
           keyExtractor={(item) => item.key}
@@ -2214,8 +2221,8 @@ export function MaterialsListScreen() {
         label={isAiAnalyzing ? "Cancel" : (isEditFromPreview ? "Save" : "Next: Labor & Markup")}
         onPress={isAiAnalyzing ? handleCancelGeneration : (isEditFromPreview ? handleSaveAndReturn : handleNext)}
         mode={isAiAnalyzing ? "outlined" : "contained"}
-        buttonStyle={isAiAnalyzing ? { borderColor: colors.error, borderWidth: 2 } : undefined}
-        labelStyle={isAiAnalyzing ? { color: colors.error } : undefined}
+        buttonStyle={isAiAnalyzing ? { borderColor: themeColors.error, borderWidth: 2 } : undefined}
+        labelStyle={isAiAnalyzing ? { color: themeColors.error } : undefined}
         secondaryLabel={materials.length > 0 && !isAiAnalyzing ? "Fetch Prices" : undefined}
         secondaryOnPress={materials.length > 0 && !isAiAnalyzing ? handleFetchPrices : undefined}
         secondaryLoading={isFetchingPrices}
@@ -2415,7 +2422,7 @@ export function MaterialsListScreen() {
           <View style={styles.fetchEstimateCard}>
             <IconButton
               icon="truck-fast-outline"
-              iconColor={colors.primary}
+              iconColor={themeColors.accent}
               size={48}
               style={styles.fetchEstimateIcon}
             />
@@ -2461,13 +2468,13 @@ export function MaterialsListScreen() {
                     Array.from(batchItemStatuses.entries()).map(([term, status], index) => (
                       <View key={index} style={styles.fetchItemRow}>
                         {status === 'searching' ? (
-                          <ActivityIndicator size={14} color={colors.primary} />
+                          <ActivityIndicator size={14} color={themeColors.accentText} />
                         ) : status === 'done' ? (
-                          <MaterialCommunityIcons name={'check-circle' as any} size={16} color={colors.success} />
+                          <MaterialCommunityIcons name={'check-circle' as any} size={16} color={themeColors.money} />
                         ) : status === 'failed' ? (
-                          <MaterialCommunityIcons name={'close-circle' as any} size={16} color={colors.error} />
+                          <MaterialCommunityIcons name={'close-circle' as any} size={16} color={themeColors.error} />
                         ) : (
-                          <MaterialCommunityIcons name={'clock-outline' as any} size={16} color={colors.textMuted} />
+                          <MaterialCommunityIcons name={'clock-outline' as any} size={16} color={themeColors.textMuted} />
                         )}
                         <Text
                           style={[
@@ -2475,7 +2482,7 @@ export function MaterialsListScreen() {
                             status === 'searching' ? styles.fetchItemActive :
                             status === 'done' ? styles.fetchItemDone :
                             status === 'failed' ? styles.fetchItemFailed :
-                            { color: colors.textMuted },
+                            { color: themeColors.textMuted },
                           ]}
                           numberOfLines={1}
                         >
@@ -2490,7 +2497,7 @@ export function MaterialsListScreen() {
                           <MaterialCommunityIcons
                             name={item.success ? 'check-circle' as any : 'close-circle' as any}
                             size={16}
-                            color={item.success ? colors.success : colors.error}
+                            color={item.success ? themeColors.money : themeColors.error}
                           />
                           <Text
                             style={[
@@ -2505,7 +2512,7 @@ export function MaterialsListScreen() {
                       ))}
                       {currentFetchingName ? (
                         <View style={styles.fetchItemRow}>
-                          <ActivityIndicator size={14} color={colors.primary} />
+                          <ActivityIndicator size={14} color={themeColors.accentText} />
                           <Text style={[styles.fetchItemText, styles.fetchItemActive]} numberOfLines={1}>
                             {currentFetchingName}
                           </Text>
@@ -2525,14 +2532,14 @@ export function MaterialsListScreen() {
                   setFetchMinimized(true);
                 }}
                 style={[styles.fetchEstimateCloseButton, { flex: 1 }]}
-                textColor={colors.textMuted}
+                textColor={themeColors.textMuted}
                 icon="chevron-down"
               >
                 Minimize
               </Button>
             </View>
             <Button
-              mode="contained"
+              mode="contained" textColor={themeColors.onAccent}
               onPress={() => {
                 notifyWhenDoneRef.current = true;
                 setNotifyWhenDone(true);
@@ -2540,7 +2547,7 @@ export function MaterialsListScreen() {
                 setFetchMinimized(true);
               }}
               style={[styles.fetchEstimateCloseButton, { width: '100%', marginTop: 10 }]}
-              buttonColor={colors.primary}
+              buttonColor={themeColors.accent}
               icon="bell-ring-outline"
             >
               Notify When Done
@@ -2560,7 +2567,7 @@ export function MaterialsListScreen() {
           }}
           activeOpacity={0.8}
         >
-          <ActivityIndicator size={14} color={colors.primary} />
+          <ActivityIndicator size={14} color={themeColors.accentText} />
           <Text style={styles.fetchMinimizedText} numberOfLines={1}>
             {fetchPhase === 'batch'
               ? `${fetchProgress.current}/${fetchProgress.total}`
@@ -2575,8 +2582,8 @@ export function MaterialsListScreen() {
                 : '0%',
             }]} />
           </View>
-          {notifyWhenDone && <MaterialCommunityIcons name="bell-ring-outline" size={14} color={colors.primary} />}
-          <MaterialCommunityIcons name="chevron-up" size={18} color={colors.textMuted} />
+          {notifyWhenDone && <MaterialCommunityIcons name="bell-ring-outline" size={14} color={themeColors.accentText} />}
+          <MaterialCommunityIcons name="chevron-up" size={18} color={themeColors.textMuted} />
         </TouchableOpacity>
       )}
 
@@ -2589,7 +2596,7 @@ export function MaterialsListScreen() {
           contentContainerStyle={styles.newSectionModal}
         >
           <Text style={styles.newSectionModalTitle}>Save as Template</Text>
-          <Text style={{ color: colors.textMuted, fontSize: 13, marginBottom: 16 }}>
+          <Text style={{ color: themeColors.textMuted, fontSize: 13, marginBottom: 16 }}>
             Save this section so you can chuck it on future quotes, no worries.
           </Text>
           <TextInput
@@ -2609,16 +2616,16 @@ export function MaterialsListScreen() {
             style={{ marginBottom: 12 }}
             placeholder="e.g. 2.5"
           />
-          <Text style={{ color: colors.textMuted, fontSize: 12, marginBottom: 6 }}>
+          <Text style={{ color: themeColors.textMuted, fontSize: 12, marginBottom: 6 }}>
             Keywords (for matching to job descriptions)
           </Text>
           {saveTemplateKeywords.length > 0 && (
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
               {saveTemplateKeywords.map((kw, i) => (
-                <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, backgroundColor: colors.surfaceDark, borderWidth: 1, borderColor: colors.border }}>
-                  <Text style={{ fontSize: 12, color: colors.text }}>{kw}</Text>
+                <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, backgroundColor: themeColors.surface, borderWidth: 1, borderColor: themeColors.border }}>
+                  <Text style={{ fontSize: 12, color: themeColors.text }}>{kw}</Text>
                   <Pressable onPress={() => setSaveTemplateKeywords(prev => prev.filter((_, idx) => idx !== i))} hitSlop={6}>
-                    <MaterialCommunityIcons name="close-circle" size={14} color={colors.textMuted} />
+                    <MaterialCommunityIcons name="close-circle" size={14} color={themeColors.textMuted} />
                   </Pressable>
                 </View>
               ))}
@@ -2738,10 +2745,10 @@ export function MaterialsListScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
     ...(Platform.OS === 'web' && {
       display: 'flex' as any,
       flexDirection: 'column' as any,
@@ -2777,16 +2784,16 @@ const styles = StyleSheet.create({
   listView: {
   },
   listItem: {
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     marginHorizontal: 12,
     marginBottom: 10,
     borderRadius: 12,
     overflow: 'hidden',
   },
   listItemFetching: {
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderLeftWidth: 3,
-    borderLeftColor: colors.primary,
+    borderLeftColor: t.colors.accent,
   },
   categoryHeader: {
     flexDirection: 'row',
@@ -2799,18 +2806,18 @@ const styles = StyleSheet.create({
   sectionLine: {
     flex: 1,
     height: 1,
-    backgroundColor: colors.border,
+    backgroundColor: t.colors.border,
   },
   categoryTitle: {
     fontSize: 13,
     fontWeight: '600',
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     textTransform: 'uppercase',
     letterSpacing: 0.8,
   },
   categoryCount: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
   itemTopRow: {
     flexDirection: 'row',
@@ -2830,12 +2837,12 @@ const styles = StyleSheet.create({
   itemName: {
     fontSize: 15,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
     lineHeight: 20,
   },
   itemUnitPrice: {
     fontSize: 13,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginTop: 2,
   },
   itemPriceWrap: {
@@ -2845,7 +2852,7 @@ const styles = StyleSheet.create({
   itemTotal: {
     fontSize: 16,
     fontWeight: '700',
-    color: colors.primary,
+    color: t.colors.money,
   },
   itemBottomRow: {
     flexDirection: 'row',
@@ -2862,10 +2869,10 @@ const styles = StyleSheet.create({
   qtyStepper: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
   },
   qtyBtn: {
     paddingHorizontal: 10,
@@ -2873,24 +2880,24 @@ const styles = StyleSheet.create({
     borderRadius: 6,
   },
   qtyBtnPressed: {
-    backgroundColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: t.colors.surfaceOverlay,
     transform: [{ scale: 0.9 }],
   },
   qtyInput: {
     fontSize: 15,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
     minWidth: 36,
     textAlign: 'center',
     paddingVertical: 4,
     paddingHorizontal: 2,
     borderLeftWidth: 1,
     borderRightWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
   },
   qtyUnit: {
     fontSize: 13,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginLeft: 8,
   },
   itemActions: {
@@ -2912,13 +2919,13 @@ const styles = StyleSheet.create({
   emptyText: {
     fontSize: 20,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
     marginBottom: 6,
     marginTop: 16,
   },
   emptySubtext: {
     fontSize: 14,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     textAlign: 'center',
     marginBottom: 28,
   },
@@ -2927,10 +2934,10 @@ const styles = StyleSheet.create({
   },
   heroCard: {
     width: '100%',
-    backgroundColor: colors.primaryBg,
+    backgroundColor: t.colors.accentSubtle,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: colors.primary,
+    borderColor: t.colors.accent,
     padding: 18,
     marginBottom: 14,
     overflow: 'hidden',
@@ -2943,7 +2950,7 @@ const styles = StyleSheet.create({
     width: 52,
     height: 52,
     borderRadius: 16,
-    backgroundColor: colors.primary,
+    backgroundColor: t.colors.accent,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 14,
@@ -2959,12 +2966,12 @@ const styles = StyleSheet.create({
   heroTitle: {
     fontSize: 17,
     fontWeight: '700',
-    color: colors.textDark,
+    color: t.colors.text,
     marginBottom: 4,
   },
   heroSubtitle: {
     fontSize: 13,
-    color: colors.text,
+    color: t.colors.text,
     opacity: 0.85,
     lineHeight: 19,
   },
@@ -2973,7 +2980,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    backgroundColor: colors.primary,
+    backgroundColor: t.colors.accent,
     borderRadius: 12,
     paddingVertical: 13,
     marginTop: 16,
@@ -2981,17 +2988,17 @@ const styles = StyleSheet.create({
   heroCtaText: {
     fontSize: 15,
     fontWeight: '700',
-    color: colors.onPrimary,
+    color: t.colors.onAccent,
     letterSpacing: 0.2,
   },
   manualRow: {
     flexDirection: 'row',
     alignItems: 'center',
     width: '100%',
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
     paddingVertical: 12,
     paddingHorizontal: 14,
     marginBottom: 12,
@@ -3000,7 +3007,7 @@ const styles = StyleSheet.create({
     width: 38,
     height: 38,
     borderRadius: 12,
-    backgroundColor: colors.surfaceLight,
+    backgroundColor: t.colors.surfaceOverlay,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
@@ -3008,24 +3015,24 @@ const styles = StyleSheet.create({
   manualTitle: {
     fontSize: 15,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
     marginBottom: 2,
   },
   manualSubtitle: {
     fontSize: 12.5,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     lineHeight: 17,
   },
   reeceBanner: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    backgroundColor: colors.primaryBg,
+    backgroundColor: t.colors.accentSubtle,
     borderRadius: 12,
     padding: 14,
     marginBottom: 12,
     borderWidth: 1,
-    borderColor: colors.primary,
+    borderColor: t.colors.accent,
   },
   reeceBannerText: {
     flex: 1,
@@ -3033,11 +3040,11 @@ const styles = StyleSheet.create({
   reeceBannerTitle: {
     fontSize: 14,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
   },
   reeceBannerSubtitle: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginTop: 2,
   },
   skipMaterialsButton: {
@@ -3052,7 +3059,7 @@ const styles = StyleSheet.create({
   },
   skipMaterialsText: {
     fontSize: 14,
-    color: colors.primary,
+    color: t.colors.accentText,
     fontWeight: '600',
     letterSpacing: 0.2,
   },
@@ -3063,7 +3070,7 @@ const styles = StyleSheet.create({
   suggestionsTitle: {
     fontSize: 16,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
     marginBottom: 12,
     alignSelf: 'flex-start',
   },
@@ -3071,13 +3078,13 @@ const styles = StyleSheet.create({
     width: '100%',
     borderRadius: 12,
     marginBottom: 8,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderWidth: 1.5,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
     overflow: 'hidden',
   },
   suggestionCardChecked: {
-    borderColor: colors.primary,
+    borderColor: t.colors.accent,
   },
   suggestionCardInner: {
     flexDirection: 'row',
@@ -3091,16 +3098,16 @@ const styles = StyleSheet.create({
   suggestionName: {
     fontSize: 15,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
   },
   suggestionMeta: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginTop: 2,
   },
   suggestionReasoning: {
     fontSize: 11,
-    color: colors.primary,
+    color: t.colors.accentText,
     fontStyle: 'italic',
     marginTop: 3,
   },
@@ -3112,16 +3119,16 @@ const styles = StyleSheet.create({
   suggestionQtyBadge: {
     fontSize: 13,
     fontWeight: '700',
-    color: colors.primary,
+    color: t.colors.accentText,
   },
   suggestionUnitCost: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginLeft: 'auto',
   },
   suggestionMatchHint: {
     fontSize: 11,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginTop: 2,
   },
   fillGapsToggle: {
@@ -3134,7 +3141,7 @@ const styles = StyleSheet.create({
   fillGapsToggleText: {
     fontSize: 13,
     fontWeight: '500',
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
   secondaryActionsRow: {
     flexDirection: 'row',
@@ -3151,7 +3158,7 @@ const styles = StyleSheet.create({
   secondaryActionText: {
     fontSize: 13,
     fontWeight: '500',
-    color: colors.primary,
+    color: t.colors.accentText,
   },
   suggestionQtyRow: {
     flexDirection: 'row',
@@ -3164,15 +3171,15 @@ const styles = StyleSheet.create({
   suggestionQtyLabel: {
     fontSize: 13,
     fontWeight: '500',
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
   suggestionStepper: {
     flexDirection: 'row',
     alignItems: 'center',
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.background,
+    borderColor: t.colors.border,
+    backgroundColor: t.colors.bg,
   },
   suggestionStepperBtn: {
     paddingHorizontal: 10,
@@ -3181,18 +3188,18 @@ const styles = StyleSheet.create({
   suggestionStepperValue: {
     fontSize: 15,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
     minWidth: 30,
     textAlign: 'center',
     paddingVertical: 4,
     borderLeftWidth: 1,
     borderRightWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
   },
   suggestionQtyTotal: {
     fontSize: 14,
     fontWeight: '600',
-    color: colors.primary,
+    color: t.colors.accentText,
     marginLeft: 'auto',
   },
   suggestionActions: {
@@ -3208,24 +3215,24 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingVertical: 14,
     borderRadius: 12,
-    backgroundColor: colors.primary,
+    backgroundColor: t.colors.accent,
   },
   loadAndFillBtnText: {
     fontSize: 15,
     fontWeight: '700',
-    color: '#FFFFFF',
+    color: t.colors.onAccent,
   },
   loadOnlyBtn: {
     alignItems: 'center',
     paddingVertical: 12,
     borderRadius: 12,
     borderWidth: 1.5,
-    borderColor: colors.primary,
+    borderColor: t.colors.accent,
   },
   loadOnlyBtnText: {
     fontSize: 14,
     fontWeight: '600',
-    color: colors.primary,
+    color: t.colors.accentText,
   },
   orDivider: {
     flexDirection: 'row',
@@ -3237,21 +3244,26 @@ const styles = StyleSheet.create({
   orDividerLine: {
     flex: 1,
     height: 1,
-    backgroundColor: colors.border,
+    backgroundColor: t.colors.border,
   },
   orDividerText: {
     fontSize: 13,
     fontWeight: '600',
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
   // Section Card styles
   sectionCard: {
-    borderRadius: 12,
+    borderRadius: t.radius.md,
     marginHorizontal: 4,
     marginBottom: 16,
-    backgroundColor: colors.surfaceDark,
+    backgroundColor: t.colors.surface,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
+    // The header and footer inside carry their own tinted background. Without
+    // this they render square and poke past the card's rounded corners.
+    // Safe here: the card uses a border rather than elevation, so there is no
+    // shadow for the clip to eat.
+    overflow: 'hidden',
   },
   sectionCardHeaderStandalone: {
     flexDirection: 'row',
@@ -3263,11 +3275,11 @@ const styles = StyleSheet.create({
     marginTop: 16,
     // No marginBottom — material rows below share the same section tint and
     // sit flush against the header, so the whole section reads as one block.
-    backgroundColor: colors.surfaceDark,
+    backgroundColor: t.colors.surface,
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    borderBottomColor: t.colors.border,
   },
   sectionCardHeaderCollapsed: {
     borderBottomWidth: 0,
@@ -3276,7 +3288,7 @@ const styles = StyleSheet.create({
     marginHorizontal: 4,
     marginBottom: 8,
     paddingTop: 4,
-    backgroundColor: colors.surfaceDark,
+    backgroundColor: t.colors.surface,
     borderBottomLeftRadius: 16,
     borderBottomRightRadius: 16,
   },
@@ -3292,9 +3304,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     marginBottom: 10,
-    backgroundColor: colors.primary + '18',
+    backgroundColor: t.colors.accentSubtle,
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    borderBottomColor: t.colors.border,
+    borderTopLeftRadius: t.radius.md,
+    borderTopRightRadius: t.radius.md,
   },
   sectionCardNameRow: {
     flex: 1,
@@ -3305,27 +3319,27 @@ const styles = StyleSheet.create({
   sectionCardName: {
     fontSize: 16,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
   },
   sectionCardNameInput: {
     flex: 1,
     fontSize: 16,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
     paddingVertical: 2,
     paddingHorizontal: 4,
     borderWidth: 1,
-    borderColor: colors.primary,
+    borderColor: t.colors.accent,
     borderRadius: 6,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
   },
   multiplierStepper: {
     flexDirection: 'row',
     alignItems: 'center',
     borderRadius: 6,
     borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.background,
+    borderColor: t.colors.border,
+    backgroundColor: t.colors.bg,
     marginHorizontal: 8,
   },
   multiplierBtn: {
@@ -3335,13 +3349,13 @@ const styles = StyleSheet.create({
   multiplierValue: {
     fontSize: 14,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
     minWidth: 24,
     textAlign: 'center',
     paddingVertical: 3,
     borderLeftWidth: 1,
     borderRightWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
   },
   sectionCardActions: {
     flexDirection: 'row',
@@ -3368,12 +3382,12 @@ const styles = StyleSheet.create({
     marginHorizontal: 12,
     marginBottom: 10,
   },
-  // Wraps each material row inside a section. Shares colors.surfaceDark
+  // Wraps each material row inside a section. Shares t.colors.surface
   // with the section header/footer so the whole group reads as a single
   // rounded container instead of cards floating on the dark screen.
   materialItemWrap: {
     marginHorizontal: 4,
-    backgroundColor: colors.surfaceDark,
+    backgroundColor: t.colors.surface,
   },
   // First material in a section — listItem has no marginTop, so without
   // this the card sits flush against the header's bottom divider.
@@ -3395,13 +3409,13 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: colors.primary,
+    borderColor: t.colors.accent,
     borderStyle: 'dashed',
   },
   sectionAddMaterialText: {
     fontSize: 13,
     fontWeight: '600',
-    color: colors.primary,
+    color: t.colors.accentText,
   },
   sectionCardFooter: {
     flexDirection: 'row',
@@ -3410,18 +3424,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 10,
     borderTopWidth: 1,
-    borderTopColor: colors.border,
-    backgroundColor: colors.primary + '0A',
+    borderTopColor: t.colors.border,
+    backgroundColor: t.colors.accentSubtle,
+    borderBottomLeftRadius: t.radius.md,
+    borderBottomRightRadius: t.radius.md,
   },
   sectionCardFooterLabel: {
     fontSize: 14,
     fontWeight: '600',
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
   sectionCardFooterValue: {
     fontSize: 16,
     fontWeight: '700',
-    color: colors.primary,
+    color: t.colors.money,
   },
   materialsActionRow: {
     gap: 8,
@@ -3440,7 +3456,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderRadius: 10,
     borderWidth: 1.5,
-    borderColor: colors.primary,
+    borderColor: t.colors.accent,
     borderStyle: 'dashed',
   },
   addMaterialButtonHalf: {
@@ -3452,7 +3468,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: 10,
     borderWidth: 1.5,
-    borderColor: colors.primary,
+    borderColor: t.colors.accent,
     borderStyle: 'dashed',
   },
   addMaterialButton: {
@@ -3464,37 +3480,37 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     borderRadius: 10,
     borderWidth: 1.5,
-    borderColor: colors.primary,
+    borderColor: t.colors.accent,
     borderStyle: 'dashed',
   },
   addMaterialButtonText: {
     fontSize: 13,
     fontWeight: '600',
-    color: colors.primary,
+    color: t.colors.accentText,
   },
   sectionRenameInput: {
     flex: 1,
     fontSize: 13,
     fontWeight: '600',
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     textTransform: 'uppercase',
     letterSpacing: 0.8,
     paddingVertical: 4,
     paddingHorizontal: 8,
     borderWidth: 1,
-    borderColor: colors.primary,
+    borderColor: t.colors.accent,
     borderRadius: 6,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
   },
   newSectionModal: {
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     margin: 20,
     padding: 20,
     borderRadius: 12,
   },
   // Template picker
   templatePickerModal: {
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     margin: 16,
     padding: 20,
     borderRadius: 12,
@@ -3503,30 +3519,30 @@ const styles = StyleSheet.create({
   templatePickerTitle: {
     fontSize: 18,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
     marginBottom: 12,
   },
   templatePickerDesc: {
     fontSize: 13,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginBottom: 12,
   },
   templatePickerCard: {
     padding: 14,
     borderRadius: 10,
     marginBottom: 8,
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
   },
   templatePickerCardName: {
     fontSize: 15,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
   },
   templatePickerCardInfo: {
     fontSize: 13,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginTop: 2,
   },
   templatePreviewRow: {
@@ -3534,22 +3550,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 6,
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    borderBottomColor: t.colors.border,
   },
   templatePreviewQty: {
     width: 60,
     fontSize: 13,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
   templatePreviewName: {
     flex: 1,
     fontSize: 14,
-    color: colors.text,
+    color: t.colors.text,
   },
   templatePreviewPrice: {
     fontSize: 14,
     fontWeight: '500',
-    color: colors.text,
+    color: t.colors.text,
     marginLeft: 8,
   },
   templatePreviewLabor: {
@@ -3559,21 +3575,21 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     marginTop: 8,
     borderTopWidth: 1,
-    borderTopColor: colors.border,
+    borderTopColor: t.colors.border,
   },
   templatePreviewLaborText: {
     fontSize: 13,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
   templatePreviewLaborTotal: {
     fontSize: 14,
     fontWeight: '600',
-    color: colors.primary,
+    color: t.colors.money,
   },
   newSectionModalTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
     marginBottom: 16,
   },
   newSectionCancelBtn: {
@@ -3584,18 +3600,18 @@ const styles = StyleSheet.create({
   newSectionCancelText: {
     fontSize: 14,
     fontWeight: '500',
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
   newSectionSaveBtn: {
     paddingVertical: 10,
     paddingHorizontal: 20,
     borderRadius: 8,
-    backgroundColor: colors.primary,
+    backgroundColor: t.colors.accent,
   },
   newSectionSaveText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#FFFFFF',
+    color: t.colors.onAccent,
   },
   summary: {
     flexDirection: 'row',
@@ -3608,10 +3624,10 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     paddingHorizontal: 16,
     paddingVertical: 14,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
   },
   summaryLabel: {
     fontSize: 16,
@@ -3620,38 +3636,38 @@ const styles = StyleSheet.create({
   summaryValue: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: colors.primary,
+    color: t.colors.money,
   },
   materialDescription: {
     fontSize: 13,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
   aiEstimateLabel: {
     fontSize: 10,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     fontStyle: 'italic',
     opacity: 0.4,
     marginTop: 2,
   },
   searchingLabel: {
     fontSize: 13,
-    color: colors.primary,
+    color: t.colors.accentText,
     fontStyle: 'italic',
   },
   searchingPrice: {
     fontSize: 16,
     fontWeight: '600',
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
   itemTotalSuccess: {
-    color: colors.success,
+    color: t.colors.money,
   },
   expandedContent: {
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderTopWidth: 1,
-    borderTopColor: colors.border,
+    borderTopColor: t.colors.border,
   },
   detailsContainer: {
     flexDirection: 'row',
@@ -3663,9 +3679,9 @@ const styles = StyleSheet.create({
     width: Platform.OS === 'web' ? 100 : 80,
     height: Platform.OS === 'web' ? 100 : 80,
     borderRadius: 8,
-    backgroundColor: colors.surfaceLight,
+    backgroundColor: t.colors.surfaceOverlay,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
   },
   detailsColumn: {
     flex: 1,
@@ -3678,14 +3694,14 @@ const styles = StyleSheet.create({
   detailLabel: {
     fontSize: 12,
     fontWeight: '500',
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginRight: 8,
     minWidth: 80,
   },
   detailValue: {
     fontSize: 13,
     fontWeight: '500',
-    color: colors.text,
+    color: t.colors.text,
     flex: 1,
   },
   // AI Analyzing State with Lottie
@@ -3714,13 +3730,13 @@ const styles = StyleSheet.create({
   aiAnalyzingTitle: {
     fontSize: 20,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
     marginBottom: 8,
     textAlign: 'center',
   },
   aiAnalyzingSubtitle: {
     fontSize: 14,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     textAlign: 'center',
     marginBottom: 24,
   },
@@ -3742,14 +3758,14 @@ const styles = StyleSheet.create({
   },
   stepText: {
     fontSize: 14,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
   stepTextActive: {
-    color: colors.primary,
+    color: t.colors.accentText,
     fontWeight: '600',
   },
   stepTextDone: {
-    color: colors.success,
+    color: t.colors.money,
   },
   // Fetch Time Estimate Modal
   fetchEstimateModalContainer: {
@@ -3761,7 +3777,7 @@ const styles = StyleSheet.create({
   fetchEstimateCard: {
     width: '100%',
     maxWidth: 340,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderRadius: 20,
     padding: 32,
     alignItems: 'center',
@@ -3782,13 +3798,13 @@ const styles = StyleSheet.create({
   fetchEstimateTitle: {
     fontSize: 22,
     fontWeight: 'bold',
-    color: colors.text,
+    color: t.colors.text,
     marginBottom: 16,
   },
   fetchEstimateTime: {
     fontSize: 48,
     fontWeight: '700',
-    color: colors.primary,
+    color: t.colors.accentText,
     fontVariant: ['tabular-nums'],
     marginBottom: 4,
   },
@@ -3798,20 +3814,20 @@ const styles = StyleSheet.create({
   },
   fetchEstimateSubtext: {
     fontSize: 14,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginBottom: 4,
   },
   fetchCurrentItem: {
     fontSize: 13,
     fontWeight: '600',
-    color: colors.primary,
+    color: t.colors.accentText,
     marginBottom: 4,
     textAlign: 'center',
   },
   fetchFunFact: {
     fontSize: 12,
     fontStyle: 'italic',
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginBottom: 12,
     textAlign: 'center',
     opacity: 0.8,
@@ -3819,14 +3835,14 @@ const styles = StyleSheet.create({
   progressBarContainer: {
     width: '100%',
     height: 6,
-    backgroundColor: colors.border,
+    backgroundColor: t.colors.border,
     borderRadius: 3,
     marginBottom: 10,
     overflow: 'hidden' as const,
   },
   progressBarFill: {
     height: '100%',
-    backgroundColor: colors.primary,
+    backgroundColor: t.colors.accent,
     borderRadius: 3,
   },
   progressBarIndeterminate: {
@@ -3838,9 +3854,9 @@ const styles = StyleSheet.create({
     maxHeight: 100,
     marginBottom: 20,
     borderRadius: 10,
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
     overflow: 'hidden',
   },
   fetchItemsScroll: {
@@ -3861,13 +3877,13 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   fetchItemDone: {
-    color: colors.success,
+    color: t.colors.money,
   },
   fetchItemFailed: {
-    color: colors.error,
+    color: t.colors.error,
   },
   fetchItemActive: {
-    color: colors.primary,
+    color: t.colors.accentText,
     fontWeight: '600',
   },
   fetchEstimateButtonRow: {
@@ -3876,7 +3892,7 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   fetchEstimateCloseButton: {
-    borderColor: colors.border,
+    borderColor: t.colors.border,
   },
   fetchMinimizedPill: {
     position: 'absolute',
@@ -3886,13 +3902,13 @@ const styles = StyleSheet.create({
     zIndex: 10,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderRadius: 24,
     paddingVertical: 10,
     paddingHorizontal: 16,
     gap: 10,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
     elevation: 6,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
@@ -3902,18 +3918,18 @@ const styles = StyleSheet.create({
   fetchMinimizedText: {
     fontSize: 13,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
   },
   fetchMinimizedProgressBg: {
     flex: 1,
     height: 4,
-    backgroundColor: colors.border,
+    backgroundColor: t.colors.border,
     borderRadius: 2,
     overflow: 'hidden',
   },
   fetchMinimizedProgressFill: {
     height: '100%',
-    backgroundColor: colors.primary,
+    backgroundColor: t.colors.accent,
     borderRadius: 2,
   },
-});
+}));

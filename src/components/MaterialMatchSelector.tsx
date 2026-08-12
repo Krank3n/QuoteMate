@@ -18,6 +18,7 @@ import {
   Linking,
 } from 'react-native';
 import { ProductMatch, QuantityAdjustment } from '../services/webScrapingPricing';
+import { makeStyles, useThemeColors } from '../theme';
 
 interface Props {
   visible: boolean;
@@ -36,6 +37,8 @@ export default function MaterialMatchSelector({
   onSelect,
   onCancel,
 }: Props) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const [selectedMatch, setSelectedMatch] = useState<ProductMatch | null>(null);
   const [saveAsFavorite, setSaveAsFavorite] = useState(true);
 
@@ -50,23 +53,23 @@ export default function MaterialMatchSelector({
   const getStockColor = (stockLevel?: ProductMatch['stockLevel']) => {
     switch (stockLevel) {
       case 'in-stock':
-        return '#22C55E';
+        return themeColors.money;
       case 'low-stock':
-        return '#F59E0B';
+        return themeColors.warning;
       case 'out-of-stock':
-        return '#EF4444';
+        return themeColors.error;
       default:
-        return '#94A3B8';
+        return themeColors.textMuted;
     }
   };
 
   const getConfidenceBadge = (confidence: 'high' | 'medium' | 'low') => {
-    const colors = {
-      high: { bg: '#DCFCE7', text: '#16A34A' },
-      medium: { bg: '#FEF3C7', text: '#D97706' },
-      low: { bg: '#FEE2E2', text: '#DC2626' },
+    const badge = {
+      high: { bg: themeColors.moneySubtle, text: themeColors.money },
+      medium: { bg: themeColors.warningSubtle, text: themeColors.warning },
+      low: { bg: themeColors.errorSubtle, text: themeColors.error },
     };
-    return colors[confidence];
+    return badge[confidence];
   };
 
   return (
@@ -231,43 +234,43 @@ export default function MaterialMatchSelector({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    backgroundColor: t.colors.backdrop,
     justifyContent: 'center',
     alignItems: 'center',
   },
   container: {
     width: '90%',
     maxHeight: '85%',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: t.colors.surfaceRaised,
     borderRadius: 16,
     overflow: 'hidden',
   },
   header: {
     padding: 20,
     borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
+    borderBottomColor: t.colors.border,
   },
   title: {
     fontSize: 20,
     fontWeight: '700',
-    color: '#111827',
+    color: t.colors.text,
     marginBottom: 4,
   },
   subtitle: {
     fontSize: 14,
-    color: '#6B7280',
+    color: t.colors.textMuted,
   },
   adjustmentNotice: {
     flexDirection: 'row',
-    backgroundColor: '#FEF3C7',
+    backgroundColor: t.colors.warningSubtle,
     padding: 16,
     margin: 16,
     borderRadius: 8,
     borderLeftWidth: 4,
-    borderLeftColor: '#F59E0B',
+    borderLeftColor: t.colors.warning,
   },
   adjustmentIcon: {
     fontSize: 20,
@@ -279,12 +282,12 @@ const styles = StyleSheet.create({
   adjustmentTitle: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#92400E',
+    color: t.colors.warning,
     marginBottom: 4,
   },
   adjustmentReason: {
     fontSize: 13,
-    color: '#78350F',
+    color: t.colors.warning,
     lineHeight: 18,
   },
   scrollView: {
@@ -292,17 +295,17 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   productCard: {
-    backgroundColor: '#F9FAFB',
+    backgroundColor: t.colors.surface,
     borderRadius: 12,
     padding: 16,
     marginBottom: 12,
     borderWidth: 2,
-    borderColor: '#E5E7EB',
+    borderColor: t.colors.border,
     position: 'relative',
   },
   productCardSelected: {
-    borderColor: '#3B82F6',
-    backgroundColor: '#EFF6FF',
+    borderColor: t.colors.accent,
+    backgroundColor: t.colors.accentSubtle,
   },
   productHeader: {
     flexDirection: 'row',
@@ -314,7 +317,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 16,
     fontWeight: '600',
-    color: '#111827',
+    color: t.colors.text,
     marginRight: 8,
   },
   confidenceBadge: {
@@ -328,7 +331,7 @@ const styles = StyleSheet.create({
   },
   productDescription: {
     fontSize: 13,
-    color: '#6B7280',
+    color: t.colors.textMuted,
     marginBottom: 12,
     lineHeight: 18,
   },
@@ -343,23 +346,23 @@ const styles = StyleSheet.create({
   },
   detailLabel: {
     fontSize: 11,
-    color: '#9CA3AF',
+    color: t.colors.textDisabled,
     textTransform: 'uppercase',
     marginBottom: 2,
   },
   detailValue: {
     fontSize: 14,
-    color: '#111827',
+    color: t.colors.text,
     fontWeight: '500',
   },
   priceValue: {
     fontSize: 18,
-    color: '#059669',
+    color: t.colors.money,
     fontWeight: '700',
   },
   pricePerUnit: {
     fontSize: 11,
-    color: '#6B7280',
+    color: t.colors.textMuted,
     marginTop: 2,
   },
   footer: {
@@ -368,7 +371,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingTop: 12,
     borderTopWidth: 1,
-    borderTopColor: '#E5E7EB',
+    borderTopColor: t.colors.border,
   },
   stockBadge: {
     flexDirection: 'row',
@@ -382,19 +385,19 @@ const styles = StyleSheet.create({
   },
   stockText: {
     fontSize: 11,
-    color: '#6B7280',
+    color: t.colors.textMuted,
     fontWeight: '600',
   },
   storeText: {
     fontSize: 12,
-    color: '#9CA3AF',
+    color: t.colors.textDisabled,
   },
   linkButton: {
     marginTop: 8,
   },
   linkText: {
     fontSize: 13,
-    color: '#3B82F6',
+    color: t.colors.accentText,
     fontWeight: '600',
   },
   selectedIndicator: {
@@ -404,12 +407,12 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: '#3B82F6',
+    backgroundColor: t.colors.accent,
     justifyContent: 'center',
     alignItems: 'center',
   },
   checkmark: {
-    color: '#FFFFFF',
+    color: t.colors.onAccent,
     fontSize: 18,
     fontWeight: '700',
   },
@@ -418,9 +421,9 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     padding: 16,
-    backgroundColor: '#F9FAFB',
+    backgroundColor: t.colors.surface,
     borderTopWidth: 1,
-    borderTopColor: '#E5E7EB',
+    borderTopColor: t.colors.border,
   },
   favoriteLabel: {
     flex: 1,
@@ -429,12 +432,12 @@ const styles = StyleSheet.create({
   favoriteText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#111827',
+    color: t.colors.text,
     marginBottom: 2,
   },
   favoriteSubtext: {
     fontSize: 12,
-    color: '#6B7280',
+    color: t.colors.textMuted,
   },
   actions: {
     flexDirection: 'row',
@@ -445,27 +448,27 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: 14,
     borderRadius: 8,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: t.colors.surfacePressed,
     alignItems: 'center',
   },
   cancelButtonText: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#6B7280',
+    color: t.colors.textMuted,
   },
   confirmButton: {
     flex: 2,
     padding: 14,
     borderRadius: 8,
-    backgroundColor: '#3B82F6',
+    backgroundColor: t.colors.accent,
     alignItems: 'center',
   },
   confirmButtonDisabled: {
-    backgroundColor: '#D1D5DB',
+    backgroundColor: t.colors.textDisabled,
   },
   confirmButtonText: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#FFFFFF',
+    color: t.colors.onAccent,
   },
-});
+}));

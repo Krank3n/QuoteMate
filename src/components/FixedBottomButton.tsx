@@ -9,7 +9,7 @@ import { View, StyleSheet, Platform, Animated, Easing, TouchableOpacity } from '
 import { Text } from 'react-native-paper';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { KeyboardStickyView } from 'react-native-keyboard-controller';
-import { colors } from '../theme';
+import { makeStyles } from '../theme';
 import { FooterButton } from './FooterButton';
 import { lightTap } from '../utils/haptics';
 
@@ -54,6 +54,7 @@ interface FixedBottomButtonProps {
  * Animated pulsing border wrapper for the loading button
  */
 function PulsingBorderButton({ children, loadingText, onPress }: { children: React.ReactNode; loadingText?: string; onPress?: () => void }) {
+  const styles = useStyles();
   const pulseAnim = useRef(new Animated.Value(0)).current;
   const glowAnim = useRef(new Animated.Value(0)).current;
   const textAnim = useRef(new Animated.Value(0)).current;
@@ -201,6 +202,7 @@ export function FixedBottomButton({
   disableSolidBackground = false,
   disableKeyboardSticky = false,
 }: FixedBottomButtonProps) {
+  const styles = useStyles();
   const insets = useSafeAreaInsets();
 
   const handlePrimaryPress = () => {
@@ -270,30 +272,30 @@ export function FixedBottomButton({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   solidBackground: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
     height: 60, // Covers button area + safe area
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     zIndex: 1,
   },
   bottomActions: {
     paddingTop: 10,
     paddingHorizontal: 16,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderTopWidth: 1,
     position: "absolute",
     bottom: 0,
     width: '100%',
     alignItems: 'center',
-    borderColor: colors.border,
+    borderColor: t.colors.border,
     zIndex: 2, // Above the solid background
     ...(Platform.OS === 'android' && {
       elevation: 8, // Add shadow/elevation for Android
-      backgroundColor: colors.surface, // Ensure solid background
+      backgroundColor: t.colors.surfaceRaised, // Ensure solid background
     }),
     ...(Platform.OS === 'web' && {
       flexShrink: 0,
@@ -316,7 +318,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     borderRadius: 100,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     height: '100%',
     flex: 1,
   },
@@ -328,7 +330,7 @@ const styles = StyleSheet.create({
     bottom: 0,
     borderRadius: 24,
     borderWidth: 2,
-    borderColor: colors.primary,
+    borderColor: t.colors.accent,
   },
   buttonContentWrapper: {
     paddingVertical: 16,
@@ -343,13 +345,13 @@ const styles = StyleSheet.create({
     fontSize: 15,
     width: '100%',
     fontWeight: '600',
-    color: colors.primary,
+    color: t.colors.accentText,
     textAlign: 'center',
   },
   cancelHint: {
     fontSize: 11,
-    color: colors.onSurfaceVariant,
+    color: t.colors.textMuted,
     textAlign: 'center',
     marginTop: 2,
   },
-});
+}));

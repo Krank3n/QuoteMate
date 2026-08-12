@@ -8,22 +8,26 @@ import { View, StyleSheet } from 'react-native';
 import { Text, Surface } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
-import { colors } from '../theme';
+import type { Tokens } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 import { Quote } from '../types';
 
 interface QuotePipelineChartProps {
   quotes: Quote[];
 }
 
-const STATUS_CONFIG = [
-  { key: 'draft' as const, label: 'Draft', color: colors.surfaceGray, icon: 'file-edit-outline' as const },
-  { key: 'sent' as const, label: 'Sent', color: colors.info, icon: 'send' as const },
-  { key: 'accepted' as const, label: 'Accepted', color: colors.success, icon: 'check-circle-outline' as const },
-  { key: 'completed' as const, label: 'Completed', color: colors.primary, icon: 'check-decagram' as const },
-  { key: 'rejected' as const, label: 'Rejected', color: colors.error, icon: 'close-circle-outline' as const },
+const status_configFor = (themeColors: Tokens) => [
+  { key: 'draft' as const, label: 'Draft', color: themeColors.surfaceOverlay, icon: 'file-edit-outline' as const },
+  { key: 'sent' as const, label: 'Sent', color: themeColors.info, icon: 'send' as const },
+  { key: 'accepted' as const, label: 'Accepted', color: themeColors.money, icon: 'check-circle-outline' as const },
+  { key: 'completed' as const, label: 'Completed', color: themeColors.accentText, icon: 'check-decagram' as const },
+  { key: 'rejected' as const, label: 'Rejected', color: themeColors.error, icon: 'close-circle-outline' as const },
 ];
 
 export function QuotePipelineChart({ quotes }: QuotePipelineChartProps) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
+  const STATUS_CONFIG = status_configFor(themeColors);
   const statusData = useMemo(() => {
     const total = Math.max(quotes.length, 1);
     return STATUS_CONFIG.map(({ key, label, color, icon }) => {
@@ -58,7 +62,7 @@ export function QuotePipelineChart({ quotes }: QuotePipelineChartProps) {
           <Text style={styles.subtitle}>{quotes.length} total quotes</Text>
         </View>
         <View style={styles.winRateBadge}>
-          <MaterialCommunityIcons name="trophy-outline" size={14} color={colors.secondary} />
+          <MaterialCommunityIcons name="trophy-outline" size={14} color={themeColors.warning} />
           <Text style={styles.winRateText}>{winRate}% win rate</Text>
         </View>
       </View>
@@ -84,11 +88,11 @@ export function QuotePipelineChart({ quotes }: QuotePipelineChartProps) {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   card: {
     padding: 20,
     borderRadius: 16,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     elevation: 2,
     marginBottom: 12,
   },
@@ -101,18 +105,18 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 16,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
   },
   subtitle: {
     fontSize: 12,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     marginTop: 2,
   },
   winRateBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
-    backgroundColor: colors.warningBg,
+    backgroundColor: t.colors.warningSubtle,
     paddingHorizontal: 10,
     paddingVertical: 5,
     borderRadius: 10,
@@ -120,7 +124,7 @@ const styles = StyleSheet.create({
   winRateText: {
     fontSize: 12,
     fontWeight: '700',
-    color: colors.secondary,
+    color: t.colors.warning,
   },
   row: {
     flexDirection: 'row',
@@ -135,12 +139,12 @@ const styles = StyleSheet.create({
   },
   rowLabelText: {
     fontSize: 13,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
   },
   barTrack: {
     flex: 1,
     height: 22,
-    backgroundColor: colors.surfaceGray3,
+    backgroundColor: t.colors.surfacePressed,
     borderRadius: 6,
     overflow: 'hidden',
     marginHorizontal: 10,
@@ -153,8 +157,8 @@ const styles = StyleSheet.create({
   rowCount: {
     fontSize: 14,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
     width: 28,
     textAlign: 'right',
   },
-});
+}));

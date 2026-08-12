@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useRoute, useNavigation } from '@react-navigation/native';
-import { colors } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 import type { SupplierPartner } from '../types';
 import {
   fetchActiveSuppliers,
@@ -21,8 +21,11 @@ import {
 } from '../services/supplierDiscoveryService';
 import { haversineDistance } from '../utils/travelCalculator';
 import { useStore } from '../store/useStore';
+import { GridBackground } from '../components/GridBackground';
 
 export function DiscoverSuppliersScreen() {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const route = useRoute();
   const navigation = useNavigation();
   const [suppliers, setSuppliers] = useState<SupplierPartner[]>([]);
@@ -178,12 +181,12 @@ export function DiscoverSuppliersScreen() {
               )}
               <View style={styles.meta}>
                 <View style={styles.metaBadge}>
-                  <MaterialCommunityIcons name="package-variant" size={13} color={colors.textMuted} />
+                  <MaterialCommunityIcons name="package-variant" size={13} color={themeColors.textMuted} />
                   <Text style={styles.metaText}>{item.itemCount} items</Text>
                 </View>
                 {distance && (
                   <View style={styles.metaBadge}>
-                    <MaterialCommunityIcons name="map-marker-distance" size={13} color={colors.textMuted} />
+                    <MaterialCommunityIcons name="map-marker-distance" size={13} color={themeColors.textMuted} />
                     <Text style={styles.metaText}>{distance}</Text>
                   </View>
                 )}
@@ -199,7 +202,7 @@ export function DiscoverSuppliersScreen() {
               ]}
             >
               {isToggling ? (
-                <ActivityIndicator size="small" color={isSubscribed ? colors.primary : '#fff'} />
+                <ActivityIndicator size="small" color={isSubscribed ? themeColors.accent : '#fff'} />
               ) : (
                 <Text
                   style={[
@@ -221,20 +224,21 @@ export function DiscoverSuppliersScreen() {
   if (loading) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" color={colors.primary} />
+        <ActivityIndicator size="large" color={themeColors.accentText} />
       </View>
     );
   }
 
   return (
     <View style={styles.container}>
+      <GridBackground />
       <View style={styles.searchContainer}>
-        <MaterialCommunityIcons name="magnify" size={20} color={colors.placeholder} style={styles.searchIcon} />
+        <MaterialCommunityIcons name="magnify" size={20} color={themeColors.textDisabled} style={styles.searchIcon} />
         <TextInput
           value={search}
           onChangeText={setSearch}
           placeholder="Search suppliers..."
-          placeholderTextColor={colors.placeholder}
+          placeholderTextColor={themeColors.textDisabled}
           style={styles.searchInput}
         />
       </View>
@@ -250,7 +254,7 @@ export function DiscoverSuppliersScreen() {
         windowSize={7}
         ListEmptyComponent={
           <View style={styles.centered}>
-            <MaterialCommunityIcons name="store-search-outline" size={48} color={colors.placeholder} />
+            <MaterialCommunityIcons name="store-search-outline" size={48} color={themeColors.textDisabled} />
             <Text style={styles.emptyText}>
               {search ? 'No suppliers match your search' : 'No supplier partners yet'}
             </Text>
@@ -261,10 +265,10 @@ export function DiscoverSuppliersScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
   },
   centered: {
     flex: 1,
@@ -275,7 +279,7 @@ const styles = StyleSheet.create({
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderRadius: 12,
     margin: 16,
     marginBottom: 8,
@@ -286,7 +290,7 @@ const styles = StyleSheet.create({
   },
   searchInput: {
     flex: 1,
-    color: colors.text,
+    color: t.colors.text,
     fontSize: 15,
     paddingVertical: 12,
   },
@@ -295,7 +299,7 @@ const styles = StyleSheet.create({
     paddingBottom: 32,
   },
   card: {
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderRadius: 12,
     marginBottom: 10,
     padding: 16,
@@ -311,12 +315,12 @@ const styles = StyleSheet.create({
   supplierName: {
     fontSize: 16,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
     marginBottom: 3,
   },
   supplierAddress: {
     fontSize: 13,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginBottom: 6,
   },
   meta: {
@@ -330,7 +334,7 @@ const styles = StyleSheet.create({
   },
   metaText: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
   subButton: {
     paddingHorizontal: 16,
@@ -340,25 +344,25 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   subButtonInactive: {
-    backgroundColor: colors.primary,
+    backgroundColor: t.colors.accent,
   },
   subButtonActive: {
     backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: colors.primary,
+    borderColor: t.colors.accent,
   },
   subButtonText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#fff',
+    color: t.colors.onAccent,
   },
   subButtonTextActive: {
-    color: colors.primary,
+    color: t.colors.accentText,
   },
   emptyText: {
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     fontSize: 15,
     marginTop: 12,
     textAlign: 'center',
   },
-});
+}));

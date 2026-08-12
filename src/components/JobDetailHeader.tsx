@@ -32,7 +32,7 @@ import { useNavigation } from '@react-navigation/native';
 import type { Job, JobDocument } from '../../shared/job/types';
 import type { Document } from '../types/document';
 import { computeJobAggregates } from '../../shared/job/aggregate';
-import { colors } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
 import { selectionTap, lightTap } from '../utils/haptics';
 import { JobTimeline } from './JobTimeline';
@@ -93,6 +93,8 @@ export function JobDetailHeader({
   onStagePress,
   onJobEdit,
 }: JobDetailHeaderProps) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const [activityOpen, setActivityOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const isTerminal = job.stage === 'cancelled' || job.stage === 'closed';
@@ -182,7 +184,7 @@ export function JobDetailHeader({
                   <MaterialCommunityIcons
                     name={'account-plus-outline' as any}
                     size={14}
-                    color={colors.primary}
+                    color={themeColors.accentText}
                   />
                   <Text style={styles.assignCustomerLabel}>
                     Add customer details
@@ -259,7 +261,7 @@ export function JobDetailHeader({
                     <MaterialCommunityIcons
                       name={'phone-outline' as any}
                       size={13}
-                      color={colors.textMuted}
+                      color={themeColors.textMuted}
                     />
                     <Text style={styles.contactStringText} selectable>
                       {job.customerPhone}
@@ -271,7 +273,7 @@ export function JobDetailHeader({
                     <MaterialCommunityIcons
                       name={'email-outline' as any}
                       size={13}
-                      color={colors.textMuted}
+                      color={themeColors.textMuted}
                     />
                     <Text
                       style={styles.contactStringText}
@@ -302,7 +304,7 @@ export function JobDetailHeader({
                 <MaterialCommunityIcons
                   name={(detailsOpen ? 'chevron-up' : 'chevron-down') as any}
                   size={16}
-                  color={colors.primary}
+                  color={themeColors.accentText}
                 />
               </Pressable>
             ) : null}
@@ -323,7 +325,7 @@ export function JobDetailHeader({
             <MaterialCommunityIcons
               name={'dots-vertical' as any}
               size={26}
-              color={colors.textMuted}
+              color={themeColors.textMuted}
             />
           </Pressable>
         </View>
@@ -346,7 +348,7 @@ export function JobDetailHeader({
             <MaterialCommunityIcons
               name="map-marker-outline"
               size={14}
-              color={colors.textMuted}
+              color={themeColors.textMuted}
             />
             <Text style={styles.inlineText} numberOfLines={2}>
               {job.jobAddress}
@@ -359,7 +361,7 @@ export function JobDetailHeader({
             <MaterialCommunityIcons
               name="flag-checkered"
               size={12}
-              color={colors.success}
+              color={themeColors.money}
             />
             <Text style={styles.completedText}>Completed {completedAt}</Text>
           </View>
@@ -407,7 +409,7 @@ export function JobDetailHeader({
             <MaterialCommunityIcons
               name={(activityOpen ? 'chevron-up' : 'chevron-down') as any}
               size={16}
-              color={colors.textMuted}
+              color={themeColors.textMuted}
             />
           </Pressable>
         </View>
@@ -425,6 +427,8 @@ function InlineContactActions({
   email?: string;
   address?: string;
 }) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const hasPhone = !!(phone && phone.trim());
   const hasEmail = !!(email && email.trim());
   const hasAddress = !!(address && address.trim());
@@ -475,7 +479,7 @@ function InlineContactActions({
       {hasPhone ? (
         <InlineIcon
           icon="phone"
-          color={colors.success}
+          color={themeColors.money}
           onPress={tap(call)}
           onLongPress={() => copyToClipboard(phone!, 'Phone')}
         />
@@ -483,7 +487,7 @@ function InlineContactActions({
       {hasPhone ? (
         <InlineIcon
           icon="message-text"
-          color={colors.info}
+          color={themeColors.info}
           onPress={tap(sms)}
           onLongPress={() => copyToClipboard(phone!, 'Phone')}
         />
@@ -491,7 +495,7 @@ function InlineContactActions({
       {hasEmail ? (
         <InlineIcon
           icon="email"
-          color={colors.warning}
+          color={themeColors.warning}
           onPress={tap(mail)}
           onLongPress={() => copyToClipboard(email!, 'Email')}
         />
@@ -499,7 +503,7 @@ function InlineContactActions({
       {hasAddress ? (
         <InlineIcon
           icon="map-marker"
-          color={colors.primary}
+          color={themeColors.accentText}
           onPress={tap(map)}
           onLongPress={() => copyToClipboard(address!, 'Address')}
         />
@@ -519,6 +523,8 @@ function InlineIcon({
   onPress: () => void;
   onLongPress?: () => void;
 }) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   return (
     <Pressable
       onPress={onPress}
@@ -544,6 +550,8 @@ function JobStageTimeline({
   primaryDoc?: Document | null;
   onActivePress?: () => void;
 }) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const subStatus = getJobSubStatus(job, primaryDoc);
   return (
     <View style={styles.timelineRow}>
@@ -571,7 +579,7 @@ function JobStageTimeline({
                   <MaterialCommunityIcons
                     name={subStatus.icon as any}
                     size={14}
-                    color={colors.success}
+                    color={themeColors.money}
                   />
                   <Text style={styles.timelineActiveLabel} numberOfLines={1}>
                     {subStatus.label}
@@ -582,7 +590,7 @@ function JobStageTimeline({
                   <MaterialCommunityIcons
                     name={subStatus.icon as any}
                     size={14}
-                    color={colors.success}
+                    color={themeColors.money}
                   />
                   <Text style={styles.timelineActiveLabel} numberOfLines={1}>
                     {subStatus.label}
@@ -614,10 +622,10 @@ function JobStageTimeline({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   card: {
     margin: 16,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderRadius: 16,
     overflow: 'hidden',
   },
@@ -641,12 +649,12 @@ const styles = StyleSheet.create({
   jobName: {
     fontSize: 15,
     fontWeight: '500',
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
   },
   description: {
     fontSize: 13,
     lineHeight: 18,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginTop: 4,
   },
   detailsToggle: {
@@ -660,7 +668,7 @@ const styles = StyleSheet.create({
   detailsToggleLabel: {
     fontSize: 12,
     fontWeight: '600',
-    color: colors.primary,
+    color: t.colors.accentText,
   },
   contactStringsBlock: {
     marginTop: 6,
@@ -673,7 +681,7 @@ const styles = StyleSheet.create({
   },
   contactStringText: {
     fontSize: 13,
-    color: colors.text,
+    color: t.colors.text,
     flexShrink: 1,
   },
   titleHeadRow: {
@@ -694,7 +702,7 @@ const styles = StyleSheet.create({
   customer: {
     fontSize: 20,
     fontWeight: '800',
-    color: colors.text,
+    color: t.colors.text,
   },
   headlinePricePress: {
     marginLeft: 'auto',
@@ -702,7 +710,7 @@ const styles = StyleSheet.create({
   headlinePrice: {
     fontSize: 20,
     fontWeight: '800',
-    color: colors.success,
+    color: t.colors.money,
     textAlign: 'right',
   },
   assignCustomer: {
@@ -712,7 +720,7 @@ const styles = StyleSheet.create({
   },
   assignCustomerLabel: {
     fontSize: 15,
-    color: colors.primary,
+    color: t.colors.accentText,
     fontWeight: '700',
   },
   inlineActions: {
@@ -731,7 +739,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: colors.white + '33',
+    borderColor: t.colors.overlayPressed,
     backgroundColor: 'transparent',
   },
   menuButton: {
@@ -743,7 +751,7 @@ const styles = StyleSheet.create({
     marginRight: -6,
   },
   menuButtonPressed: {
-    backgroundColor: colors.surfaceGray3,
+    backgroundColor: t.colors.surfacePressed,
   },
   inlineRow: {
     flexDirection: 'row',
@@ -752,7 +760,7 @@ const styles = StyleSheet.create({
   },
   inlineText: {
     fontSize: 13,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     flexShrink: 1,
   },
   completedRow: {
@@ -763,7 +771,7 @@ const styles = StyleSheet.create({
   },
   completedText: {
     fontSize: 11,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     fontStyle: 'italic',
   },
   // Timeline styles mirror JobCard so the visual language matches
@@ -784,13 +792,13 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
     borderRadius: 999,
     borderWidth: 2,
-    borderColor: colors.success,
+    borderColor: t.colors.money,
     backgroundColor: 'transparent',
     flexShrink: 0,
   },
   timelineActiveLabel: {
     fontSize: 11,
-    color: colors.success,
+    color: t.colors.money,
     fontWeight: '700',
     letterSpacing: 0.2,
   },
@@ -804,20 +812,20 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: colors.inactive,
+    backgroundColor: t.colors.textDisabled,
   },
   timelineMicroDotReached: {
-    backgroundColor: colors.success,
+    backgroundColor: t.colors.money,
   },
   timelineConnector: {
     flex: 1,
     height: 2,
-    backgroundColor: colors.inactive,
+    backgroundColor: t.colors.textDisabled,
     marginHorizontal: 2,
     borderRadius: 1,
   },
   timelineConnectorReached: {
-    backgroundColor: colors.success + '88',
+    backgroundColor: t.colors.moneySubtle,
   },
   activityWrap: {
     marginTop: 4,
@@ -839,6 +847,6 @@ const styles = StyleSheet.create({
   activityToggleLabel: {
     fontSize: 11,
     fontWeight: '600',
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
-});
+}));

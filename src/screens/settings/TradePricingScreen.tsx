@@ -27,7 +27,7 @@ import {
 } from 'react-native-draggable-flatlist';
 
 import { useStore } from '../../store/useStore';
-import { colors } from '../../theme';
+import { makeStyles, useThemeColors } from '../../theme';
 import { WebContainer } from '../../components/WebContainer';
 import { FixedBottomButton } from '../../components/FixedBottomButton';
 import { AlertModal } from '../../components/AlertModal';
@@ -40,8 +40,11 @@ import { getReeceConnectionStatus } from '../../services/reeceApi';
 import { loadGroups } from '../../services/supplierGroupService';
 import { composeSupplierList, type SupplierEntry } from '../../services/supplierPriority';
 import type { SupplierGroup } from '../../types';
+import { GridBackground } from '../../components/GridBackground';
 
 export function TradePricingScreen() {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const { businessSettings, setBusinessSettings } = useStore();
 
   const navigation = useNavigation<any>();
@@ -216,9 +219,9 @@ export function TradePricingScreen() {
       : item.kind === 'reece' ? 'pipe'
       : 'storefront-outline';
     const iconColor =
-      item.kind === 'reece' ? colors.success
-      : item.kind === 'bunnings' ? colors.warning
-      : colors.primary;
+      item.kind === 'reece' ? themeColors.money
+      : item.kind === 'bunnings' ? themeColors.warning
+      : themeColors.accent;
 
     const tapAction = () => {
       if (item.kind === 'reece' && !reeceConnected) {
@@ -244,7 +247,7 @@ export function TradePricingScreen() {
             style={styles.supplierDragHandle}
             hitSlop={6}
           >
-            <MaterialCommunityIcons name="drag-vertical" size={20} color={colors.textMuted} />
+            <MaterialCommunityIcons name="drag-vertical" size={20} color={themeColors.textMuted} />
           </Pressable>
         ) : null}
         <MaterialCommunityIcons name={iconName} size={22} color={iconColor} style={{ marginRight: 12 }} />
@@ -277,6 +280,7 @@ export function TradePricingScreen() {
 
   return (
     <View style={styles.container}>
+      <GridBackground />
       <ScrollContainer
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
@@ -303,14 +307,14 @@ export function TradePricingScreen() {
                   >
                     {isSelected && (
                       <View style={styles.categoryCheckmark}>
-                        <MaterialCommunityIcons name="check-circle" size={20} color={colors.primary} />
+                        <MaterialCommunityIcons name="check-circle" size={20} color={themeColors.accentText} />
                       </View>
                     )}
                     <View style={[styles.categoryIconContainer, { backgroundColor: category.color + '20' }]}>
                       <MaterialCommunityIcons
                         name={category.icon as any}
                         size={28}
-                        color={isSelected ? colors.primary : category.color}
+                        color={isSelected ? themeColors.accent : category.color}
                       />
                     </View>
                     <View style={styles.categoryNameContainer}>
@@ -353,14 +357,14 @@ export function TradePricingScreen() {
                       ]}
                       textStyle={[
                         isSelected && styles.nichePillTextSelected,
-                        isSelected && { color: colors.surface }
+                        isSelected && { color: themeColors.surfaceRaised }
                       ]}
                       mode={isSelected ? 'flat' : 'outlined'}
                       icon={({ size }) => (
                         <MaterialCommunityIcons
                           name={niche.icon as any}
                           size={size}
-                          color={isSelected ? colors.surface : colors.primary}
+                          color={isSelected ? themeColors.surfaceRaised : themeColors.accent}
                         />
                       )}
                     >
@@ -386,14 +390,14 @@ export function TradePricingScreen() {
               onPress={() => navigation.navigate('AddMaterialStandalone', { supplierBookOnly: true })}
               activeOpacity={0.7}
             >
-              <MaterialCommunityIcons name="plus-circle-outline" size={20} color={colors.primary} />
+              <MaterialCommunityIcons name="plus-circle-outline" size={20} color={themeColors.accentText} />
               <View style={{ flex: 1, marginLeft: 12 }}>
                 <Text style={styles.addSupplierTitle}>Add another supplier</Text>
                 <Text style={styles.addSupplierSubtitle}>
                   Drop in your own price list — opens the Supplier Book.
                 </Text>
               </View>
-              <MaterialCommunityIcons name="chevron-right" size={20} color={colors.textMuted} />
+              <MaterialCommunityIcons name="chevron-right" size={20} color={themeColors.textMuted} />
             </TouchableOpacity>
 
             {Platform.OS !== 'web' ? (
@@ -447,10 +451,10 @@ export function TradePricingScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
   },
   scrollContent: {
     padding: 16,
@@ -461,7 +465,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     borderRadius: 12,
     elevation: 2,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
   },
   sectionTitle: {
     fontSize: 18,
@@ -470,7 +474,7 @@ const styles = StyleSheet.create({
   },
   helperText: {
     fontSize: 14,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     marginBottom: 16,
   },
   categoryGrid: {
@@ -480,7 +484,7 @@ const styles = StyleSheet.create({
   },
   categoryCard: {
     width: Platform.OS === 'web' ? 'calc(25% - 9px)' as any : '30.5%',
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderRadius: 12,
     padding: 8,
     paddingTop: 12,
@@ -489,14 +493,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 2,
-    borderColor: colors.outline + '30',
+    borderColor: t.colors.border,
     height: 120,
     flexDirection: 'column',
   },
   categoryCardSelected: {
-    borderColor: colors.primary,
+    borderColor: t.colors.accent,
     borderWidth: 2,
-    backgroundColor: colors.primary + '10',
+    backgroundColor: t.colors.accentSubtle,
   },
   categoryCheckmark: {
     position: 'absolute',
@@ -523,13 +527,13 @@ const styles = StyleSheet.create({
   categoryName: {
     fontSize: 10,
     textAlign: 'center',
-    color: colors.text,
+    color: t.colors.text,
     lineHeight: 13,
     flexShrink: 1,
   },
   categoryNameSelected: {
     fontWeight: '600',
-    color: colors.primary,
+    color: t.colors.accentText,
   },
   pillContainer: {
     flexDirection: 'row',
@@ -541,10 +545,10 @@ const styles = StyleSheet.create({
     marginBottom: 0,
   },
   nichePillSelected: {
-    backgroundColor: colors.primary,
+    backgroundColor: t.colors.accent,
   },
   nichePillTextSelected: {
-    color: colors.surface,
+    color: t.colors.onAccent,
     fontWeight: '600',
   },
   storeCategory: {
@@ -560,11 +564,11 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     marginLeft: 8,
-    color: colors.text,
+    color: t.colors.text,
   },
   storeCategoryDescription: {
     fontSize: 13,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     marginBottom: 12,
     marginLeft: 28,
   },
@@ -576,17 +580,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     borderRadius: 8,
     borderWidth: 2,
-    borderColor: colors.outline + '30',
+    borderColor: t.colors.border,
     marginBottom: 8,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
   },
   storeRadioOptionSelected: {
-    borderColor: colors.primary,
-    backgroundColor: colors.primary + '10',
+    borderColor: t.colors.accent,
+    backgroundColor: t.colors.accentSubtle,
   },
   storeRadioOptionDisabled: {
     opacity: 0.5,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
   },
   storeRadioLeft: {
     flexDirection: 'row',
@@ -598,25 +602,25 @@ const styles = StyleSheet.create({
     height: 24,
     borderRadius: 12,
     borderWidth: 2,
-    borderColor: colors.outline,
+    borderColor: t.colors.borderStrong,
     marginRight: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
   radioButtonSelected: {
-    borderColor: colors.primary,
+    borderColor: t.colors.accent,
   },
   radioButtonInner: {
     width: 12,
     height: 12,
     borderRadius: 6,
-    backgroundColor: colors.primary,
+    backgroundColor: t.colors.accent,
   },
   radioButtonDisabled: {
     width: 12,
     height: 12,
     borderRadius: 6,
-    backgroundColor: colors.outline,
+    backgroundColor: t.colors.borderStrong,
   },
   storeInfo: {
     flex: 1,
@@ -624,18 +628,18 @@ const styles = StyleSheet.create({
   storeName: {
     fontSize: 16,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
     marginBottom: 2,
   },
   storeNameDisabled: {
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
   },
   storeMethod: {
     fontSize: 12,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
   },
   comingSoonBadge: {
-    backgroundColor: colors.primary + '20',
+    backgroundColor: t.colors.accentSubtle,
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 4,
@@ -643,10 +647,10 @@ const styles = StyleSheet.create({
   comingSoonText: {
     fontSize: 11,
     fontWeight: '600',
-    color: colors.primary,
+    color: t.colors.accentText,
   },
   connectBadge: {
-    backgroundColor: colors.primary,
+    backgroundColor: t.colors.accent,
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 4,
@@ -654,7 +658,7 @@ const styles = StyleSheet.create({
   connectBadgeText: {
     fontSize: 11,
     fontWeight: '700',
-    color: colors.surface,
+    color: t.colors.onAccent,
     letterSpacing: 0.4,
   },
   addSupplierButton: {
@@ -664,16 +668,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
     borderStyle: 'dashed',
   },
   supplierRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
     paddingVertical: 12,
     paddingLeft: 4,
     paddingRight: 12,
@@ -685,7 +689,7 @@ const styles = StyleSheet.create({
     marginRight: 4,
   },
   supplierRowActive: {
-    borderColor: colors.primary,
+    borderColor: t.colors.accent,
     elevation: 4,
     shadowColor: '#000',
     shadowOpacity: 0.2,
@@ -695,27 +699,27 @@ const styles = StyleSheet.create({
   supplierName: {
     fontSize: 14,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
   },
   supplierSubtitle: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginTop: 2,
   },
   addSupplierTitle: {
     fontSize: 14,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
   },
   addSupplierSubtitle: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginTop: 2,
     lineHeight: 16,
   },
   infoBox: {
     flexDirection: 'row',
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     padding: 12,
     borderRadius: 8,
     marginTop: 8,
@@ -724,7 +728,7 @@ const styles = StyleSheet.create({
     flex: 1,
     marginLeft: 8,
     fontSize: 13,
-    color: colors.text,
+    color: t.colors.text,
     lineHeight: 18,
   },
-});
+}));

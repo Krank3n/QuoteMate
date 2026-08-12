@@ -25,7 +25,7 @@ import { Text } from 'react-native-paper';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { colors } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 
 const DEFAULT_MAX_PHOTOS = 10;
 
@@ -67,6 +67,8 @@ export function SupplierListCaptureModal({
   counterLabel = 'pages',
   tips,
 }: Props) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const tipList = tips && tips.length ? tips : TIPS;
   const cameraRef = useRef<CameraView>(null);
   const [permission, requestPermission] = useCameraPermissions();
@@ -151,7 +153,7 @@ export function SupplierListCaptureModal({
     >
       {permissionDenied ? (
         <View style={styles.permissionWrap}>
-          <MaterialCommunityIcons name="camera-off-outline" size={64} color={colors.textMuted} />
+          <MaterialCommunityIcons name="camera-off-outline" size={64} color={themeColors.textMuted} />
           <Text style={styles.permissionTitle}>Camera access needed</Text>
           <Text style={styles.permissionBody}>
             Enable camera access to snap your supplier price list.
@@ -244,7 +246,7 @@ export function SupplierListCaptureModal({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   root: {
     flex: 1,
     backgroundColor: '#000',
@@ -371,7 +373,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingVertical: 10,
     borderRadius: 22,
-    backgroundColor: colors.primary,
+    backgroundColor: t.colors.accent,
   },
   doneBtnDisabled: {
     backgroundColor: 'rgba(255,255,255,0.18)',
@@ -402,17 +404,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 32,
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
   },
   permissionTitle: {
     fontSize: 18,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
     marginTop: 16,
   },
   permissionBody: {
     fontSize: 14,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     textAlign: 'center',
     marginTop: 8,
     marginBottom: 24,
@@ -421,7 +423,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingVertical: 12,
     borderRadius: 22,
-    backgroundColor: colors.primary,
+    backgroundColor: t.colors.accent,
   },
   permissionBtnText: {
     color: '#fff',
@@ -431,7 +433,7 @@ const styles = StyleSheet.create({
     marginTop: 16,
   },
   permissionCancelText: {
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     fontWeight: '600',
   },
-});
+}));

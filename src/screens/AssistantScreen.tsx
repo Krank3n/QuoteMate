@@ -27,7 +27,7 @@ import Svg, { Path, Defs, LinearGradient, Stop } from 'react-native-svg';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { NavigationProp } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { colors } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 import { useStore, NavigateHint } from '../store/useStore';
 import { useDemoPlayback } from '../demo/demoPlayback';
 import { sendAssistantTurn } from '../services/assistantService';
@@ -72,6 +72,7 @@ import {
 import { MessageBubble } from '../components/assistant/MessageBubble';
 import { ProposalCard } from '../components/assistant/ProposalCard';
 import { WebContainer } from '../components/WebContainer';
+import { GridBackground } from '../components/GridBackground';
 
 type VoiceState = 'idle' | 'connecting' | 'listening' | 'thinking';
 
@@ -210,6 +211,7 @@ const VoiceWave = React.memo(function VoiceWave({
   level: Animated.Value;
   accent: string;
 }) {
+  const styles = useStyles();
   const [d, setD] = useState(() => buildWavePath(0, WAVE_LEVEL_FLOOR));
 
   useEffect(() => {
@@ -275,6 +277,8 @@ const VoiceWave = React.memo(function VoiceWave({
 // active. Two rings on offset loops so the effect never has a "dead"
 // moment between pulses.
 function MicPulse({ active, color }: { active: boolean; color: string }) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const a = useRef(new Animated.Value(0)).current;
   const b = useRef(new Animated.Value(0.5)).current;
 
@@ -340,6 +344,9 @@ function HeroRecordButton({
   onPress: () => void;
   accent: string;
 }) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
+  const heroStyles = useHeroStyles();
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const glowAnim = useRef(new Animated.Value(0)).current;
   const rippleAnim = useRef(new Animated.Value(0)).current;
@@ -437,12 +444,12 @@ function HeroRecordButton({
         ]}
       >
         {pending ? (
-          <ActivityIndicator size="large" color={colors.white} />
+          <ActivityIndicator size="large" color={themeColors.onAccent} />
         ) : (
           <MaterialCommunityIcons
             name={active ? 'stop' : 'microphone'}
             size={56}
-            color={colors.white}
+            color={themeColors.onAccent}
           />
         )}
       </Animated.View>
@@ -450,7 +457,7 @@ function HeroRecordButton({
   );
 }
 
-const heroStyles = StyleSheet.create({
+const useHeroStyles = makeStyles((t) => ({
   touchable: {
     width: 128,
     height: 128,
@@ -464,7 +471,7 @@ const heroStyles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 4,
-    borderColor: 'rgba(255,255,255,0.22)',
+    borderColor: t.colors.border,
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.45,
     shadowRadius: 16,
@@ -480,7 +487,7 @@ const heroStyles = StyleSheet.create({
     shadowRadius: 28,
     elevation: 18,
   },
-});
+}));
 
 // Empty-state intro under the mic button. Two lines:
 //   primary — one short sentence, context-aware (unfinished draft > time of day).
@@ -529,6 +536,8 @@ function isLeakedPromptTag(text: string): boolean {
 }
 
 export function AssistantScreen() {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<NavigationProp<any>>();
   const conversations = useStore((s) => s.conversations);
@@ -1307,8 +1316,8 @@ export function AssistantScreen() {
           accessibilityLabel="New chat"
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
-          <MaterialCommunityIcons name="square-edit-outline" size={22} color={colors.white} />
-          <Text style={{ color: colors.white, fontSize: 15, fontWeight: '600', marginLeft: 5 }}>
+          <MaterialCommunityIcons name="square-edit-outline" size={22} color={themeColors.text} />
+          <Text style={{ color: themeColors.text, fontSize: 15, fontWeight: '600', marginLeft: 5 }}>
             New
           </Text>
         </TouchableOpacity>
@@ -1996,7 +2005,7 @@ export function AssistantScreen() {
   const renderItem = ChatRow;
 
   const voiceActive = voiceState !== 'idle';
-  const voiceAccent = voiceState === 'thinking' ? colors.primary : colors.error;
+  const voiceAccent = voiceState === 'thinking' ? themeColors.accent : themeColors.error;
   const voiceLabel =
     voiceState === 'connecting'
       ? 'Connecting…'
@@ -2012,6 +2021,7 @@ export function AssistantScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
     >
+      <GridBackground />
       <WebContainer style={styles.webBody}>
         {isEmpty ? (
           // Hero empty state — big record button front and centre. Keeps the
@@ -2024,17 +2034,17 @@ export function AssistantScreen() {
                 onPress={handleVoiceToggle}
                 accent={
                   voiceState === 'listening'
-                    ? colors.error
+                    ? themeColors.error
                     : voiceState === 'thinking'
-                      ? colors.primary
-                      : colors.primary
+                      ? themeColors.accent
+                      : themeColors.accent
                 }
               />
               <Text
                 style={[
                   styles.heroStatus,
-                  voiceState === 'listening' && { color: colors.error },
-                  voiceState === 'thinking' && { color: colors.primary },
+                  voiceState === 'listening' && { color: themeColors.error },
+                  voiceState === 'thinking' && { color: themeColors.accentText },
                 ]}
               >
                 {voiceState === 'connecting'
@@ -2078,7 +2088,7 @@ export function AssistantScreen() {
 
         {sending && (
           <View style={styles.typingRow}>
-            <ActivityIndicator size="small" color={colors.textMuted} />
+            <ActivityIndicator size="small" color={themeColors.textMuted} />
             <Text style={styles.typing}>Mate is thinking…</Text>
           </View>
         )}
@@ -2107,7 +2117,7 @@ export function AssistantScreen() {
                 value={input}
                 onChangeText={setInput}
                 placeholder="Ask Mate…"
-                placeholderTextColor={colors.placeholder}
+                placeholderTextColor={themeColors.textDisabled}
                 editable={!sending}
                 multiline
                 returnKeyType="send"
@@ -2133,7 +2143,7 @@ export function AssistantScreen() {
                 being held) to keep the active row uncluttered. */}
             {voiceMode !== 'ptt' && (
               <View style={styles.voiceBtnWrap}>
-                <MicPulse active={voiceMode === 'sticky' && voiceState === 'listening'} color={colors.error} />
+                <MicPulse active={voiceMode === 'sticky' && voiceState === 'listening'} color={themeColors.error} />
                 <TouchableOpacity
                   style={[
                     styles.voiceBtn,
@@ -2146,12 +2156,12 @@ export function AssistantScreen() {
                   hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 >
                   {voiceState === 'connecting' && voiceMode === 'sticky' ? (
-                    <ActivityIndicator size="small" color={colors.white} />
+                    <ActivityIndicator size="small" color={themeColors.onAccent} />
                   ) : (
                     <MaterialCommunityIcons
                       name={voiceMode === 'sticky' ? 'stop' : 'microphone-outline'}
                       size={22}
-                      color={colors.white}
+                      color={themeColors.onAccent}
                     />
                   )}
                 </TouchableOpacity>
@@ -2192,7 +2202,7 @@ export function AssistantScreen() {
                 <MaterialCommunityIcons
                   name={voiceMode === 'ptt' ? 'record-circle-outline' : 'arrow-up'}
                   size={22}
-                  color={colors.white}
+                  color={themeColors.onAccent}
                 />
               </Pressable>
             )}
@@ -2203,10 +2213,10 @@ export function AssistantScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
   },
   webBody: {
     flex: 1,
@@ -2231,7 +2241,7 @@ const styles = StyleSheet.create({
     paddingTop: 4,
   },
   heroBrand: {
-    color: colors.text,
+    color: t.colors.text,
     fontSize: 28,
     fontWeight: '800',
     letterSpacing: 0.5,
@@ -2247,13 +2257,13 @@ const styles = StyleSheet.create({
     marginTop: 28,
     fontSize: 17,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
     letterSpacing: 0.2,
     textAlign: 'center',
   },
   heroBlurb: {
     marginTop: 14,
-    color: colors.text,
+    color: t.colors.text,
     fontSize: 15,
     lineHeight: 22,
     fontWeight: '500',
@@ -2263,7 +2273,7 @@ const styles = StyleSheet.create({
   },
   heroHint: {
     marginTop: 8,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     fontSize: 12,
     lineHeight: 17,
     textAlign: 'center',
@@ -2272,13 +2282,13 @@ const styles = StyleSheet.create({
     maxWidth: 360,
   },
   introTitle: {
-    color: colors.text,
+    color: t.colors.text,
     fontSize: 22,
     fontWeight: '700',
     marginTop: 6,
   },
   introSubtitle: {
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     fontSize: 14,
     textAlign: 'center',
     marginTop: 6,
@@ -2304,7 +2314,7 @@ const styles = StyleSheet.create({
     maxWidth: 800,
     alignSelf: 'center',
   },
-  typing: { color: colors.textMuted, fontSize: 13 },
+  typing: { color: t.colors.textMuted, fontSize: 13 },
   composerWrap: {
     paddingHorizontal: 8,
     width: '100%',
@@ -2315,16 +2325,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-end',
     gap: 6,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderRadius: 24,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
     paddingHorizontal: 12,
     paddingVertical: 6,
   },
   input: {
     flex: 1,
-    color: colors.text,
+    color: t.colors.text,
     fontSize: 15,
     paddingVertical: Platform.OS === 'ios' ? 8 : 4,
     maxHeight: 120,
@@ -2351,7 +2361,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   sendBtn: {
-    backgroundColor: colors.primary,
+    backgroundColor: t.colors.accent,
     width: 40,
     height: 40,
     borderRadius: 20,
@@ -2365,7 +2375,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   voiceBtn: {
-    backgroundColor: colors.primary,
+    backgroundColor: t.colors.accent,
     width: 40,
     height: 40,
     borderRadius: 20,
@@ -2373,26 +2383,26 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   voiceBtnActive: {
-    backgroundColor: colors.error,
+    backgroundColor: t.colors.error,
   },
   composerActive: {
-    borderColor: colors.error,
-    shadowColor: colors.error,
+    borderColor: t.colors.error,
+    shadowColor: t.colors.error,
     shadowOpacity: 0.35,
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 0 },
   },
   composerThinking: {
-    borderColor: colors.primary,
-    shadowColor: colors.primary,
+    borderColor: t.colors.accent,
+    shadowColor: t.colors.accent,
   },
   sendBtnRecording: {
-    backgroundColor: colors.error,
+    backgroundColor: t.colors.error,
   },
   sendBtnPressed: {
     opacity: 0.8,
   },
   sendBtnDisabled: {
-    backgroundColor: colors.surfaceGray,
+    backgroundColor: t.colors.surfaceOverlay,
   },
-});
+}));

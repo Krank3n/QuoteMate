@@ -41,7 +41,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { useStore } from '../store/useStore';
 import { BusinessSettings } from '../types';
-import { colors } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 import { OnboardingProgress, OnboardingStep } from '../components/OnboardingProgress';
 import { CelebrationAnimation } from '../components/CelebrationAnimation';
 import { AlertModal } from '../components/AlertModal';
@@ -64,6 +64,7 @@ import { getReeceConnectionStatus } from '../services/reeceApi';
 import { uploadBusinessLogo } from '../services/photoService';
 import { lightTap, successTap, errorTap, selectionTap } from '../utils/haptics';
 import { SuppliersStep, type AddedSupplier } from './onboarding/SuppliersStep';
+import { GridBackground } from '../components/GridBackground';
 
 const STORAGE_KEY = 'onboarding:draft';
 
@@ -88,6 +89,8 @@ const BASE_STEPS: Array<Omit<OnboardingStep, 'id'> & { key: string }> = [
 ];
 
 export function NewOnboardingScreen() {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
     const { setBusinessSettings, setOnboarded } = useStore();
     const insets = useSafeAreaInsets();
 
@@ -644,7 +647,7 @@ export function NewOnboardingScreen() {
                 <MaterialCommunityIcons
                     name="pipe"
                     size={64}
-                    color={colors.primary}
+                    color={themeColors.accentText}
                     style={styles.stepIcon}
                 />
                 <Title style={styles.stepTitle}>Real Reece trade prices</Title>
@@ -659,7 +662,7 @@ export function NewOnboardingScreen() {
                         <MaterialCommunityIcons
                             name="check-circle"
                             size={56}
-                            color={colors.success}
+                            color={themeColors.money}
                         />
                         <Text style={styles.squareConnectedTitle}>Reece connected</Text>
                         <Text style={styles.squareConnectedSubtitle}>
@@ -669,27 +672,27 @@ export function NewOnboardingScreen() {
                 ) : (
                     <>
                         <View style={styles.squareFeatureRow}>
-                            <MaterialCommunityIcons name="cash-multiple" size={22} color={colors.primary} />
+                            <MaterialCommunityIcons name="cash-multiple" size={22} color={themeColors.accentText} />
                             <Text style={styles.squareFeatureText}>Quotes pull your real maX trade-discounted price for each item</Text>
                         </View>
                         <View style={styles.squareFeatureRow}>
-                            <MaterialCommunityIcons name="lock-outline" size={22} color={colors.primary} />
+                            <MaterialCommunityIcons name="lock-outline" size={22} color={themeColors.accentText} />
                             <Text style={styles.squareFeatureText}>Sign in directly with Reece — we never see your maX password</Text>
                         </View>
                         <View style={styles.squareFeatureRow}>
-                            <MaterialCommunityIcons name="clock-fast" size={22} color={colors.primary} />
+                            <MaterialCommunityIcons name="clock-fast" size={22} color={themeColors.accentText} />
                             <Text style={styles.squareFeatureText}>Takes about a minute. You can also skip and connect later from Settings</Text>
                         </View>
 
                         {reeceError ? (
                             <View style={styles.errorBox}>
-                                <MaterialCommunityIcons name="alert-circle-outline" size={18} color={colors.error} />
+                                <MaterialCommunityIcons name="alert-circle-outline" size={18} color={themeColors.error} />
                                 <Text style={styles.errorText}>{reeceError}</Text>
                             </View>
                         ) : null}
 
                         <Button
-                            mode="contained"
+                            mode="contained" buttonColor={themeColors.accent} textColor={themeColors.onAccent}
                             onPress={handleConnectReece}
                             style={styles.connectSquareButton}
                             loading={reeceConnecting}
@@ -715,7 +718,7 @@ export function NewOnboardingScreen() {
                 <MaterialCommunityIcons
                     name="office-building"
                     size={64}
-                    color={colors.primary}
+                    color={themeColors.accentText}
                     style={styles.stepIcon}
                 />
                 <Title style={styles.stepTitle}>What's your company name?</Title>
@@ -756,7 +759,7 @@ export function NewOnboardingScreen() {
                 <MaterialCommunityIcons
                     name="hammer-wrench"
                     size={64}
-                    color={colors.primary}
+                    color={themeColors.accentText}
                     style={styles.stepIcon}
                 />
                 <Title style={styles.stepTitle}>What's your trade?</Title>
@@ -805,7 +808,7 @@ export function NewOnboardingScreen() {
                                 <MaterialCommunityIcons
                                     name="check-circle"
                                     size={24}
-                                    color={colors.success}
+                                    color={themeColors.money}
                                     style={styles.categoryCheck}
                                 />
                             )}
@@ -823,7 +826,7 @@ export function NewOnboardingScreen() {
                 <MaterialCommunityIcons
                     name="card-account-details"
                     size={64}
-                    color={colors.primary}
+                    color={themeColors.accentText}
                     style={styles.stepIcon}
                 />
                 <Title style={styles.stepTitle}>How can customers reach you?</Title>
@@ -883,7 +886,7 @@ export function NewOnboardingScreen() {
                         <MaterialCommunityIcons
                             name="information-outline"
                             size={16}
-                            color={colors.textMuted}
+                            color={themeColors.textMuted}
                         />
                     </TouchableOpacity>
                 </View>
@@ -903,7 +906,7 @@ export function NewOnboardingScreen() {
                 <MaterialCommunityIcons
                     name="palette"
                     size={64}
-                    color={colors.primary}
+                    color={themeColors.accentText}
                     style={styles.stepIcon}
                 />
                 <Title style={styles.stepTitle}>Make your quotes yours</Title>
@@ -924,7 +927,7 @@ export function NewOnboardingScreen() {
                 />
                 {logoPickError && (
                     <View style={styles.errorBox}>
-                        <MaterialCommunityIcons name="alert-circle-outline" size={16} color={colors.error} />
+                        <MaterialCommunityIcons name="alert-circle-outline" size={16} color={themeColors.error} />
                         <Text style={styles.errorText}>{logoPickError}</Text>
                     </View>
                 )}
@@ -940,7 +943,7 @@ export function NewOnboardingScreen() {
                         <MaterialCommunityIcons
                             name="information-outline"
                             size={18}
-                            color={colors.textMuted}
+                            color={themeColors.textMuted}
                         />
                     </TouchableOpacity>
                 </View>
@@ -953,7 +956,7 @@ export function NewOnboardingScreen() {
                 {brandColor ? (
                     <View style={[styles.colorBanner, { backgroundColor: brandColor }]}>
                         <View style={styles.colorBannerInner}>
-                            <MaterialCommunityIcons name="palette" size={20} color="#FFFFFF" />
+                            <MaterialCommunityIcons name="palette" size={20} color={themeColors.alwaysLight} />
                             <Text style={styles.colorBannerText}>{brandColor.toUpperCase()}</Text>
                         </View>
                         <TouchableOpacity
@@ -964,12 +967,12 @@ export function NewOnboardingScreen() {
                             style={styles.colorBannerClear}
                             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                         >
-                            <MaterialCommunityIcons name="close-circle" size={22} color="#FFFFFF" />
+                            <MaterialCommunityIcons name="close-circle" size={22} color={themeColors.alwaysLight} />
                         </TouchableOpacity>
                     </View>
                 ) : (
                     <View style={styles.colorBannerEmpty}>
-                        <MaterialCommunityIcons name="palette-outline" size={20} color={colors.onSurface} />
+                        <MaterialCommunityIcons name="palette-outline" size={20} color={themeColors.textSecondary} />
                         <Text style={styles.colorBannerEmptyText}>No custom colour — using template default</Text>
                     </View>
                 )}
@@ -993,7 +996,7 @@ export function NewOnboardingScreen() {
                                 backgroundColor:
                                     hexInput && /^#[0-9A-Fa-f]{6}$/.test(hexInput)
                                         ? hexInput
-                                        : brandColor || colors.outline,
+                                        : brandColor || themeColors.borderStrong,
                             },
                         ]}
                     />
@@ -1012,7 +1015,7 @@ export function NewOnboardingScreen() {
                         dense
                     />
                     <Button
-                        mode="contained"
+                        mode="contained" buttonColor={themeColors.accent} textColor={themeColors.onAccent}
                         onPress={() => {
                             if (/^#[0-9A-Fa-f]{6}$/.test(hexInput)) {
                                 selectionTap();
@@ -1037,7 +1040,7 @@ export function NewOnboardingScreen() {
                 <MaterialCommunityIcons
                     name="currency-usd"
                     size={64}
-                    color={colors.primary}
+                    color={themeColors.accentText}
                     style={styles.stepIcon}
                 />
                 <Title style={styles.stepTitle}>Set your default rates</Title>
@@ -1088,7 +1091,7 @@ export function NewOnboardingScreen() {
                 <MaterialCommunityIcons
                     name="credit-card-outline"
                     size={64}
-                    color={colors.primary}
+                    color={themeColors.accentText}
                     style={styles.stepIcon}
                 />
                 <Title style={styles.stepTitle}>Get paid faster</Title>
@@ -1103,7 +1106,7 @@ export function NewOnboardingScreen() {
                         <MaterialCommunityIcons
                             name="check-circle"
                             size={56}
-                            color={colors.success}
+                            color={themeColors.money}
                         />
                         <Text style={styles.squareConnectedTitle}>Square connected</Text>
                         <Text style={styles.squareConnectedSubtitle}>
@@ -1113,27 +1116,27 @@ export function NewOnboardingScreen() {
                 ) : (
                     <>
                         <View style={styles.squareFeatureRow}>
-                            <MaterialCommunityIcons name="credit-card-check-outline" size={22} color={colors.primary} />
+                            <MaterialCommunityIcons name="credit-card-check-outline" size={22} color={themeColors.accentText} />
                             <Text style={styles.squareFeatureText}>Customers tap-to-pay or scan a QR on your quote</Text>
                         </View>
                         <View style={styles.squareFeatureRow}>
-                            <MaterialCommunityIcons name="bank-outline" size={22} color={colors.primary} />
+                            <MaterialCommunityIcons name="bank-outline" size={22} color={themeColors.accentText} />
                             <Text style={styles.squareFeatureText}>Funds settle to your Square account in 1-2 business days</Text>
                         </View>
                         <View style={styles.squareFeatureRow}>
-                            <MaterialCommunityIcons name="shield-check-outline" size={22} color={colors.primary} />
+                            <MaterialCommunityIcons name="shield-check-outline" size={22} color={themeColors.accentText} />
                             <Text style={styles.squareFeatureText}>Processed by Square — no card details touch your device</Text>
                         </View>
 
                         {squareError && (
                             <View style={styles.errorBox}>
-                                <MaterialCommunityIcons name="alert-circle-outline" size={18} color={colors.error} />
+                                <MaterialCommunityIcons name="alert-circle-outline" size={18} color={themeColors.error} />
                                 <Text style={styles.errorText}>{squareError}</Text>
                             </View>
                         )}
 
                         <Button
-                            mode="contained"
+                            mode="contained" buttonColor={themeColors.accent} textColor={themeColors.onAccent}
                             onPress={handleConnectSquare}
                             style={styles.connectSquareButton}
                             loading={squareConnecting}
@@ -1163,6 +1166,7 @@ export function NewOnboardingScreen() {
             behavior={Platform.OS === 'ios' ? 'padding' : undefined}
             keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top : 0}
         >
+      <GridBackground />
             {/* Progress Indicator */}
             <WebContainer maxWidth={ONBOARDING_MAX_WIDTH}>
                 <OnboardingProgress
@@ -1211,7 +1215,7 @@ export function NewOnboardingScreen() {
                             </Button>
                         )}
                         <Button
-                            mode="contained"
+                            mode="contained" buttonColor={themeColors.accent} textColor={themeColors.onAccent}
                             onPress={handleNext}
                             style={styles.nextButton}
                             loading={isLoading}
@@ -1260,10 +1264,10 @@ export function NewOnboardingScreen() {
     );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
     container: {
         flex: 1,
-        backgroundColor: colors.background,
+        backgroundColor: t.colors.bg,
     },
     scrollView: {
         flex: 1,
@@ -1285,13 +1289,13 @@ const styles = StyleSheet.create({
     stepTitle: {
         fontSize: 24,
         fontWeight: 'bold',
-        color: colors.text,
+        color: t.colors.text,
         textAlign: 'center',
         marginBottom: 8,
     },
     stepDescription: {
         fontSize: 16,
-        color: colors.textMuted,
+        color: t.colors.textMuted,
         textAlign: 'center',
         paddingHorizontal: 20,
         marginBottom: 16,
@@ -1301,7 +1305,7 @@ const styles = StyleSheet.create({
         marginBottom: 16,
         borderRadius: 12,
         elevation: 2,
-        backgroundColor: colors.surface,
+        backgroundColor: t.colors.surfaceRaised,
     },
     cardTitle: {
         fontSize: 18,
@@ -1319,7 +1323,7 @@ const styles = StyleSheet.create({
     },
     helperText: {
         fontSize: 13,
-        color: colors.textMuted,
+        color: t.colors.textMuted,
     },
     helperRow: {
         flexDirection: 'row',
@@ -1330,20 +1334,20 @@ const styles = StyleSheet.create({
     },
     tooltipText: {
         fontSize: 13,
-        color: colors.textMuted,
+        color: t.colors.textMuted,
         lineHeight: 18,
         marginTop: 4,
         marginBottom: 12,
         paddingHorizontal: 12,
         paddingVertical: 10,
-        backgroundColor: colors.surfaceLight,
+        backgroundColor: t.colors.surfaceOverlay,
         borderRadius: 8,
         borderLeftWidth: 3,
-        borderLeftColor: colors.primary,
+        borderLeftColor: t.colors.accent,
     },
     fieldError: {
         fontSize: 13,
-        color: colors.error,
+        color: t.colors.error,
         marginTop: 4,
     },
     gridContainer: {
@@ -1356,7 +1360,7 @@ const styles = StyleSheet.create({
     // another chunk of scrolling before they can get past it.
     categoryCard: {
         width: '48%',
-        backgroundColor: colors.surface,
+        backgroundColor: t.colors.surfaceRaised,
         borderRadius: 12,
         padding: 12,
         marginBottom: 10,
@@ -1365,8 +1369,8 @@ const styles = StyleSheet.create({
         elevation: 2,
     },
     categoryCardSelected: {
-        borderColor: colors.primary,
-        backgroundColor: colors.primary + '10',
+        borderColor: t.colors.accent,
+        backgroundColor: t.colors.accentSubtle,
     },
     categoryIconContainer: {
         width: 44,
@@ -1379,12 +1383,12 @@ const styles = StyleSheet.create({
     categoryName: {
         fontSize: 16,
         fontWeight: '700',
-        color: colors.text,
+        color: t.colors.text,
         marginBottom: 4,
     },
     categoryDescription: {
         fontSize: 12,
-        color: colors.textMuted,
+        color: t.colors.textMuted,
         lineHeight: 16,
     },
     categoryCheck: {
@@ -1395,31 +1399,31 @@ const styles = StyleSheet.create({
     // Branding — logo
     logoUploadBox: {
         borderWidth: 2,
-        borderColor: colors.primary,
+        borderColor: t.colors.accent,
         borderStyle: 'dashed',
         borderRadius: 8,
         padding: 32,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: colors.surface,
+        backgroundColor: t.colors.surfaceRaised,
     },
     logoUploadText: {
         fontSize: 16,
         fontWeight: '600',
-        color: colors.primary,
+        color: t.colors.accentText,
         marginTop: 12,
     },
     logoUploadHint: {
         fontSize: 12,
-        color: colors.onSurface,
+        color: t.colors.textSecondary,
         marginTop: 4,
     },
     logoPreview: {
         borderWidth: 1,
-        borderColor: colors.outline,
+        borderColor: t.colors.borderStrong,
         borderRadius: 8,
         padding: 16,
-        backgroundColor: colors.surfaceLight,
+        backgroundColor: t.colors.surfaceOverlay,
     },
     logoImage: {
         width: '100%',
@@ -1451,7 +1455,7 @@ const styles = StyleSheet.create({
         gap: 10,
     },
     colorBannerText: {
-        color: '#FFFFFF',
+        color: t.colors.alwaysLight,
         fontSize: 15,
         fontWeight: '700',
         letterSpacing: 0.5,
@@ -1465,7 +1469,7 @@ const styles = StyleSheet.create({
         gap: 10,
         borderRadius: 10,
         borderWidth: 1,
-        borderColor: colors.outline,
+        borderColor: t.colors.borderStrong,
         borderStyle: 'dashed',
         paddingVertical: 12,
         paddingHorizontal: 16,
@@ -1473,7 +1477,7 @@ const styles = StyleSheet.create({
     },
     colorBannerEmptyText: {
         fontSize: 13,
-        color: colors.onSurface,
+        color: t.colors.textSecondary,
         fontStyle: 'italic',
     },
     pickerContainer: {
@@ -1500,7 +1504,7 @@ const styles = StyleSheet.create({
         height: 40,
         borderRadius: 8,
         borderWidth: 1,
-        borderColor: colors.outline,
+        borderColor: t.colors.borderStrong,
     },
     hexInput: {
         flex: 1,
@@ -1519,7 +1523,7 @@ const styles = StyleSheet.create({
     squareFeatureText: {
         flex: 1,
         fontSize: 14,
-        color: colors.text,
+        color: t.colors.text,
     },
     connectSquareButton: {
         marginTop: 8,
@@ -1527,7 +1531,7 @@ const styles = StyleSheet.create({
     },
     squareFinePrint: {
         fontSize: 12,
-        color: colors.textMuted,
+        color: t.colors.textMuted,
         textAlign: 'center',
     },
     squareConnectedContainer: {
@@ -1537,13 +1541,13 @@ const styles = StyleSheet.create({
     squareConnectedTitle: {
         fontSize: 18,
         fontWeight: '700',
-        color: colors.text,
+        color: t.colors.text,
         marginTop: 12,
         marginBottom: 6,
     },
     squareConnectedSubtitle: {
         fontSize: 14,
-        color: colors.textMuted,
+        color: t.colors.textMuted,
         textAlign: 'center',
         paddingHorizontal: 12,
     },
@@ -1553,15 +1557,15 @@ const styles = StyleSheet.create({
         gap: 8,
         padding: 10,
         borderRadius: 8,
-        backgroundColor: colors.error + '15',
+        backgroundColor: t.colors.errorSubtle,
         borderWidth: 1,
-        borderColor: colors.error + '40',
+        borderColor: t.colors.errorSubtle,
         marginBottom: 12,
     },
     errorText: {
         flex: 1,
         fontSize: 13,
-        color: colors.error,
+        color: t.colors.error,
         lineHeight: 18,
     },
     // Navigation
@@ -1569,8 +1573,8 @@ const styles = StyleSheet.create({
         paddingHorizontal: 20,
         paddingTop: 16,
         borderTopWidth: 1,
-        borderTopColor: colors.outline,
-        backgroundColor: colors.background,
+        borderTopColor: t.colors.borderStrong,
+        backgroundColor: t.colors.bg,
     },
     navigationInner: {
         flexDirection: 'row',
@@ -1594,4 +1598,4 @@ const styles = StyleSheet.create({
     nextButtonContent: {
         flexDirection: 'row-reverse',
     },
-});
+}));

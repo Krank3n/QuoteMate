@@ -24,7 +24,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import * as WebBrowser from 'expo-web-browser';
 import { format } from 'date-fns';
 
-import { colors } from '../../theme';
+import { makeStyles, useThemeColors } from '../../theme';
 import { WebContainer } from '../../components/WebContainer';
 import { AlertModal } from '../../components/AlertModal';
 import { SquareReconnectBanner } from '../../components/SquareReconnectBanner';
@@ -32,8 +32,11 @@ import * as squareService from '../../services/squareService';
 import type { SquareConnectionStatus } from '../../services/squareService';
 import { trackEvent } from '../../services/analyticsService';
 import { primeTapToPayOnDevice } from '../../services/squarePayments';
+import { GridBackground } from '../../components/GridBackground';
 
 export function SquareIntegrationScreen() {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const [connection, setConnection] = useState<SquareConnectionStatus | null>(null);
   const [loading, setLoading] = useState(false);
   const [checkingConnection, setCheckingConnection] = useState(true);
@@ -165,7 +168,7 @@ export function SquareIntegrationScreen() {
   if (checkingConnection) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" color={colors.primary} />
+        <ActivityIndicator size="large" color={themeColors.accentText} />
         <Text style={styles.loadingText}>Checking Square connection...</Text>
       </View>
     );
@@ -175,7 +178,9 @@ export function SquareIntegrationScreen() {
 
   return (
     <>
-      <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      <View style={styles.gridHost}>
+    <GridBackground />
+    <ScrollView style={styles.scroller} contentContainerStyle={styles.content}>
         <WebContainer>
           {/* Banner shown only when the backend has flagged this connection
               as disconnected (e.g. token refresh failed). Tapping re-runs the
@@ -191,7 +196,7 @@ export function SquareIntegrationScreen() {
                 <MaterialCommunityIcons
                   name="credit-card-outline"
                   size={32}
-                  color={colors.primary}
+                  color={themeColors.accentText}
                 />
               </View>
               <View style={styles.headerText}>
@@ -218,7 +223,7 @@ export function SquareIntegrationScreen() {
                   <MaterialCommunityIcons
                     name="check-circle"
                     size={20}
-                    color={colors.success}
+                    color={themeColors.money}
                   />
                   <Text style={styles.connectedText}>Connected</Text>
                   {isSandbox && (
@@ -254,12 +259,12 @@ export function SquareIntegrationScreen() {
                 <Divider style={styles.divider} />
 
                 <Button
-                  mode="contained"
+                  mode="contained" textColor={themeColors.onAccent}
                   onPress={() => setTapToPaySetupVisible(true)}
                   loading={primingTapToPay}
                   disabled={primingTapToPay}
                   icon="cellphone-nfc"
-                  buttonColor={colors.primary}
+                  buttonColor={themeColors.accent}
                   style={styles.tapToPayButton}
                 >
                   Set up Tap to Pay on this device
@@ -269,7 +274,7 @@ export function SquareIntegrationScreen() {
                   mode="outlined"
                   onPress={handleDisconnect}
                   loading={loading}
-                  textColor={colors.error}
+                  textColor={themeColors.error}
                   style={styles.disconnectButton}
                 >
                   Disconnect Square
@@ -287,7 +292,7 @@ export function SquareIntegrationScreen() {
                   loading={loading}
                   disabled={loading}
                   style={styles.connectButton}
-                  buttonColor={colors.primary}
+                  buttonColor={themeColors.accent}
                 >
                   Connect to Square
                 </Button>
@@ -303,7 +308,7 @@ export function SquareIntegrationScreen() {
               <MaterialCommunityIcons
                 name="numeric-1-circle"
                 size={24}
-                color={colors.primary}
+                color={themeColors.accentText}
               />
               <Text style={styles.howItWorksText}>
                 Connect your Square account above.
@@ -313,7 +318,7 @@ export function SquareIntegrationScreen() {
               <MaterialCommunityIcons
                 name="numeric-2-circle"
                 size={24}
-                color={colors.primary}
+                color={themeColors.accentText}
               />
               <Text style={styles.howItWorksText}>
                 Send an invoice — a Pay Now button appears automatically in the email.
@@ -323,7 +328,7 @@ export function SquareIntegrationScreen() {
               <MaterialCommunityIcons
                 name="numeric-3-circle"
                 size={24}
-                color={colors.primary}
+                color={themeColors.accentText}
               />
               <Text style={styles.howItWorksText}>
                 Customer pays by card; the invoice flips to Paid and (if connected) syncs to Xero.
@@ -334,6 +339,7 @@ export function SquareIntegrationScreen() {
           <View style={styles.bottomPadding} />
         </WebContainer>
       </ScrollView>
+    </View>
 
       <AlertModal
         visible={alertModal.visible}
@@ -386,19 +392,21 @@ export function SquareIntegrationScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
+const useStyles = makeStyles((t) => ({
+  gridHost: { flex: 1, backgroundColor: t.colors.bg },
+  scroller: { flex: 1, backgroundColor: 'transparent' },
+  container: { flex: 1, backgroundColor: t.colors.bg },
   content: { padding: 16 },
   centered: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 40,
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
   },
-  loadingText: { marginTop: 12, color: colors.textMuted, fontSize: 14 },
+  loadingText: { marginTop: 12, color: t.colors.textMuted, fontSize: 14 },
   card: {
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderRadius: 14,
     padding: 20,
     marginBottom: 12,
@@ -409,13 +417,13 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 12,
-    backgroundColor: colors.primaryBg,
+    backgroundColor: t.colors.accentSubtle,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 16,
   },
   headerText: { flex: 1 },
-  title: { fontSize: 20, fontWeight: '700', color: colors.text },
+  title: { fontSize: 20, fontWeight: '700', color: t.colors.text },
   titleRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -432,13 +440,13 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 0.6,
   },
-  pillBeta: { backgroundColor: colors.warningBg },
-  pillTextBeta: { color: colors.warning },
-  subtitle: { fontSize: 14, color: colors.textMuted, marginTop: 2 },
+  pillBeta: { backgroundColor: t.colors.warningSubtle },
+  pillTextBeta: { color: t.colors.warning },
+  subtitle: { fontSize: 14, color: t.colors.textMuted, marginTop: 2 },
   sectionTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
     marginBottom: 12,
   },
   statusRow: {
@@ -449,20 +457,20 @@ const styles = StyleSheet.create({
   connectedText: {
     fontSize: 15,
     fontWeight: '600',
-    color: colors.success,
+    color: t.colors.money,
     marginLeft: 8,
   },
   envBadge: {
     marginLeft: 10,
     paddingHorizontal: 8,
     paddingVertical: 2,
-    backgroundColor: colors.warningBg,
+    backgroundColor: t.colors.warningSubtle,
     borderRadius: 999,
   },
   envBadgeText: {
     fontSize: 11,
     fontWeight: '700',
-    color: colors.warning,
+    color: t.colors.warning,
     letterSpacing: 0.4,
   },
   detailRow: {
@@ -470,20 +478,20 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingVertical: 8,
   },
-  detailLabel: { fontSize: 14, color: colors.textMuted },
+  detailLabel: { fontSize: 14, color: t.colors.textMuted },
   detailValue: {
     fontSize: 14,
     fontWeight: '500',
-    color: colors.text,
+    color: t.colors.text,
     flexShrink: 1,
     textAlign: 'right',
     marginLeft: 12,
   },
-  divider: { marginVertical: 16, backgroundColor: colors.border },
-  disconnectButton: { borderColor: colors.error },
+  divider: { marginVertical: 16, backgroundColor: t.colors.border },
+  disconnectButton: { borderColor: t.colors.error },
   disconnectedText: {
     fontSize: 14,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     lineHeight: 20,
     marginBottom: 16,
   },
@@ -496,10 +504,10 @@ const styles = StyleSheet.create({
   },
   howItWorksText: {
     fontSize: 14,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     marginLeft: 12,
     flex: 1,
     lineHeight: 20,
   },
   bottomPadding: { height: 40 },
-});
+}));

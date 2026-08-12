@@ -20,12 +20,15 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation } from '@react-navigation/native';
 
 import { useStore } from '../../store/useStore';
-import { colors } from '../../theme';
+import { makeStyles, useThemeColors } from '../../theme';
 import { WebContainer } from '../../components/WebContainer';
 import { TrialBanner } from '../../components/TrialBanner';
 import { TRIAL_DAYS } from '../../utils/trialConfig';
+import { GridBackground } from '../../components/GridBackground';
 
 export function SubscriptionSettingsScreen() {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const navigation = useNavigation<any>();
   const { subscriptionStatus, quotes, getEffectivePlan } = useStore();
   const plan = getEffectivePlan();
@@ -33,7 +36,7 @@ export function SubscriptionSettingsScreen() {
   const renderPro = () => (
     <>
       <View style={styles.proBadge}>
-        <MaterialCommunityIcons name="crown" size={32} color={colors.secondary} />
+        <MaterialCommunityIcons name="crown" size={32} color={themeColors.accentText} />
         <Text style={styles.proText}>Pro Member</Text>
       </View>
       <Text style={styles.proStatusText}>
@@ -42,19 +45,19 @@ export function SubscriptionSettingsScreen() {
 
       <View style={styles.benefitsList}>
         <View style={styles.benefitItem}>
-          <MaterialCommunityIcons name="check-circle" size={20} color={colors.success} />
+          <MaterialCommunityIcons name="check-circle" size={20} color={themeColors.money} />
           <Text style={styles.benefitText}>1% Square platform fee (vs 1.7% on free)</Text>
         </View>
         <View style={styles.benefitItem}>
-          <MaterialCommunityIcons name="check-circle" size={20} color={colors.success} />
+          <MaterialCommunityIcons name="check-circle" size={20} color={themeColors.money} />
           <Text style={styles.benefitText}>All payment methods on quotes & invoices</Text>
         </View>
         <View style={styles.benefitItem}>
-          <MaterialCommunityIcons name="check-circle" size={20} color={colors.success} />
+          <MaterialCommunityIcons name="check-circle" size={20} color={themeColors.money} />
           <Text style={styles.benefitText}>Send without a Square pay link required</Text>
         </View>
         <View style={styles.benefitItem}>
-          <MaterialCommunityIcons name="check-circle" size={20} color={colors.success} />
+          <MaterialCommunityIcons name="check-circle" size={20} color={themeColors.money} />
           <Text style={styles.benefitText}>Priority support</Text>
         </View>
       </View>
@@ -64,7 +67,7 @@ export function SubscriptionSettingsScreen() {
         style={styles.manageSubscriptionButton}
       >
         <Text style={styles.manageSubscriptionText}>Manage Subscription</Text>
-        <MaterialCommunityIcons name="chevron-right" size={20} color={colors.primary} />
+        <MaterialCommunityIcons name="chevron-right" size={20} color={themeColors.accentText} />
       </TouchableOpacity>
     </>
   );
@@ -72,7 +75,7 @@ export function SubscriptionSettingsScreen() {
   const renderTrial = () => (
     <>
       <View style={styles.freeStatusContainer}>
-        <MaterialCommunityIcons name="clock-fast" size={32} color={colors.primary} />
+        <MaterialCommunityIcons name="clock-fast" size={32} color={themeColors.accentText} />
         <Text style={styles.freeStatusTitle}>Trial</Text>
       </View>
 
@@ -106,7 +109,7 @@ export function SubscriptionSettingsScreen() {
       </Text>
 
       <Button
-        mode="contained"
+        mode="contained" buttonColor={themeColors.accent} textColor={themeColors.onAccent}
         onPress={() => navigation.navigate('Paywall' as never, { source: 'subscription_settings' } as never)}
         style={styles.upgradeButton}
         contentStyle={styles.upgradeButtonContent}
@@ -120,21 +123,21 @@ export function SubscriptionSettingsScreen() {
   const renderFree = () => (
     <>
       <View style={styles.freeStatusContainer}>
-        <MaterialCommunityIcons name="account-outline" size={32} color={colors.onSurface} />
+        <MaterialCommunityIcons name="account-outline" size={32} color={themeColors.textSecondary} />
         <Text style={styles.freeStatusTitle}>Free Plan</Text>
       </View>
 
       <View style={styles.benefitsList}>
         <View style={styles.benefitItem}>
-          <MaterialCommunityIcons name="information-outline" size={20} color={colors.primary} />
+          <MaterialCommunityIcons name="information-outline" size={20} color={themeColors.accentText} />
           <Text style={styles.benefitText}>1.7% platform fee on Square payments</Text>
         </View>
         <View style={styles.benefitItem}>
-          <MaterialCommunityIcons name="information-outline" size={20} color={colors.primary} />
+          <MaterialCommunityIcons name="information-outline" size={20} color={themeColors.accentText} />
           <Text style={styles.benefitText}>Square is the only payment method shown to customers</Text>
         </View>
         <View style={styles.benefitItem}>
-          <MaterialCommunityIcons name="information-outline" size={20} color={colors.primary} />
+          <MaterialCommunityIcons name="information-outline" size={20} color={themeColors.accentText} />
           <Text style={styles.benefitText}>Square link required on every quote & invoice</Text>
         </View>
       </View>
@@ -146,7 +149,7 @@ export function SubscriptionSettingsScreen() {
       </Text>
 
       <Button
-        mode="contained"
+        mode="contained" buttonColor={themeColors.accent} textColor={themeColors.onAccent}
         onPress={() => navigation.navigate('Paywall' as never, { source: 'subscription_settings' } as never)}
         style={styles.upgradeButton}
         contentStyle={styles.upgradeButtonContent}
@@ -159,6 +162,7 @@ export function SubscriptionSettingsScreen() {
 
   return (
     <View style={styles.container}>
+      <GridBackground />
       <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.scrollContent}>
         <WebContainer>
           <Surface style={styles.card}>
@@ -174,10 +178,10 @@ export function SubscriptionSettingsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
   },
   scrollContent: {
     padding: 16,
@@ -188,7 +192,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     borderRadius: 12,
     elevation: 2,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
   },
   sectionTitle: {
     fontSize: 18,
@@ -201,7 +205,7 @@ const styles = StyleSheet.create({
   proBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.warningBg,
+    backgroundColor: t.colors.accentSubtle,
     padding: 16,
     borderRadius: 12,
     marginBottom: 16,
@@ -209,12 +213,12 @@ const styles = StyleSheet.create({
   proText: {
     fontSize: 22,
     fontWeight: '700',
-    color: colors.secondary,
+    color: t.colors.accentText,
     marginLeft: 12,
   },
   proStatusText: {
     fontSize: 15,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     marginBottom: 20,
     lineHeight: 22,
   },
@@ -228,7 +232,7 @@ const styles = StyleSheet.create({
   },
   benefitText: {
     fontSize: 15,
-    color: colors.text,
+    color: t.colors.text,
     marginLeft: 12,
   },
   manageSubscriptionButton: {
@@ -237,12 +241,12 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingVertical: 12,
     paddingHorizontal: 16,
-    backgroundColor: colors.primary + '10',
+    backgroundColor: t.colors.accentSubtle,
     borderRadius: 8,
   },
   manageSubscriptionText: {
     fontSize: 15,
-    color: colors.primary,
+    color: t.colors.accentText,
     fontWeight: '600',
   },
   freeStatusContainer: {
@@ -253,11 +257,11 @@ const styles = StyleSheet.create({
   freeStatusTitle: {
     fontSize: 22,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
     marginLeft: 12,
   },
   quotaInfo: {
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
     padding: 16,
     borderRadius: 8,
     marginBottom: 20,
@@ -269,18 +273,18 @@ const styles = StyleSheet.create({
   },
   progressBar: {
     height: 8,
-    backgroundColor: colors.outline + '30',
+    backgroundColor: t.colors.border,
     borderRadius: 4,
     overflow: 'hidden',
   },
   progressFill: {
     height: '100%',
-    backgroundColor: colors.primary,
+    backgroundColor: t.colors.accent,
     borderRadius: 4,
   },
   upgradeDescription: {
     fontSize: 15,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     marginBottom: 20,
     lineHeight: 22,
   },
@@ -290,4 +294,4 @@ const styles = StyleSheet.create({
   upgradeButtonContent: {
     paddingVertical: 8,
   },
-});
+}));

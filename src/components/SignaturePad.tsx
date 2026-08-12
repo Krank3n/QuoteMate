@@ -35,7 +35,7 @@ import {
 } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 
-import { colors } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 import { buildSvgPath, pathHasInk, type Point } from './signaturePath';
 
 const DEFAULT_HEIGHT = 180;
@@ -62,6 +62,8 @@ export function SignaturePad({
   onStrokeStart,
   onStrokeEnd,
 }: SignaturePadProps) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const [strokes, setStrokes] = useState<Point[][]>([]);
 
   // The PanResponder is created once, so it reaches the latest callbacks
@@ -157,7 +159,7 @@ export function SignaturePad({
           {hasInk && (
             <Path
               d={pathData}
-              stroke={colors.text}
+              stroke={themeColors.text}
               strokeWidth={2.5}
               fill="none"
               strokeLinecap="round"
@@ -182,12 +184,12 @@ export function SignaturePad({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   container: {
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
+    borderColor: t.colors.border,
+    backgroundColor: t.colors.surfaceRaised,
     overflow: 'hidden',
     position: 'relative',
   },
@@ -201,11 +203,11 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     paddingHorizontal: 10,
     borderRadius: 8,
-    backgroundColor: colors.surfaceLight,
+    backgroundColor: t.colors.surfaceOverlay,
   },
   clearText: {
     fontSize: 13,
     fontWeight: '600',
-    color: colors.textSecondary,
+    color: t.colors.textMuted,
   },
-});
+}));

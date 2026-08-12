@@ -33,7 +33,8 @@ import { formatDistanceToNow, format } from 'date-fns';
 
 import type { Job } from '../../shared/job/types';
 import type { Document } from '../types/document';
-import { colors } from '../theme';
+import type { Tokens } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 import {
   deriveTimelineEvents,
   formatEventAmount,
@@ -62,25 +63,25 @@ interface EventMeta {
   bgColor: string;
 }
 
-const META: Record<TimelineEventKind, EventMeta> = {
-  job_created:            { icon: 'briefcase-plus-outline',    color: colors.info,    bgColor: colors.infoBg },
-  quote_drafted:          { icon: 'file-document-edit-outline', color: colors.info,    bgColor: colors.infoBg },
-  quote_sent:             { icon: 'send-outline',               color: colors.warning, bgColor: colors.warningBg },
-  quote_accepted:         { icon: 'check-circle-outline',       color: colors.success, bgColor: colors.successBg },
-  quote_rejected:         { icon: 'close-circle-outline',       color: colors.error,   bgColor: colors.errorBg },
-  invoice_created:        { icon: 'file-swap-outline',          color: colors.primary, bgColor: colors.primaryBg },
-  invoice_sent:           { icon: 'send',                       color: colors.warning, bgColor: colors.warningBg },
-  payment_deposit:        { icon: 'cash-plus',                  color: colors.success, bgColor: colors.successBg },
-  payment_balance:        { icon: 'cash-check',                 color: colors.success, bgColor: colors.successBg },
-  payment_manual:         { icon: 'cash-multiple',              color: colors.success, bgColor: colors.successBg },
-  job_scheduled:          { icon: 'calendar-clock-outline',     color: colors.info,    bgColor: colors.infoBg },
-  job_in_progress:        { icon: 'hammer-wrench',              color: colors.warning, bgColor: colors.warningBg },
-  job_completed:          { icon: 'flag-checkered',             color: colors.success, bgColor: colors.successBg },
-  job_paid:               { icon: 'cash-check',                 color: colors.success, bgColor: colors.successBg },
-  job_closed:             { icon: 'archive-outline',            color: colors.inactive,bgColor: colors.surfaceGray3 },
-  job_cancelled:          { icon: 'close-octagon-outline',      color: colors.error,   bgColor: colors.errorBg },
-  job_scheduled_upcoming: { icon: 'timer-sand',                 color: colors.textMuted, bgColor: colors.surfaceGray3 },
-};
+const metaFor = (themeColors: Tokens): Record<TimelineEventKind, EventMeta> => ({
+  job_created:            { icon: 'briefcase-plus-outline',    color: themeColors.info,    bgColor: themeColors.infoSubtle },
+  quote_drafted:          { icon: 'file-document-edit-outline', color: themeColors.info,    bgColor: themeColors.infoSubtle },
+  quote_sent:             { icon: 'send-outline',               color: themeColors.warning, bgColor: themeColors.warningSubtle },
+  quote_accepted:         { icon: 'check-circle-outline',       color: themeColors.money, bgColor: themeColors.moneySubtle },
+  quote_rejected:         { icon: 'close-circle-outline',       color: themeColors.error,   bgColor: themeColors.errorSubtle },
+  invoice_created:        { icon: 'file-swap-outline',          color: themeColors.accentText, bgColor: themeColors.accentSubtle },
+  invoice_sent:           { icon: 'send',                       color: themeColors.warning, bgColor: themeColors.warningSubtle },
+  payment_deposit:        { icon: 'cash-plus',                  color: themeColors.money, bgColor: themeColors.moneySubtle },
+  payment_balance:        { icon: 'cash-check',                 color: themeColors.money, bgColor: themeColors.moneySubtle },
+  payment_manual:         { icon: 'cash-multiple',              color: themeColors.money, bgColor: themeColors.moneySubtle },
+  job_scheduled:          { icon: 'calendar-clock-outline',     color: themeColors.info,    bgColor: themeColors.infoSubtle },
+  job_in_progress:        { icon: 'hammer-wrench',              color: themeColors.warning, bgColor: themeColors.warningSubtle },
+  job_completed:          { icon: 'flag-checkered',             color: themeColors.money, bgColor: themeColors.moneySubtle },
+  job_paid:               { icon: 'cash-check',                 color: themeColors.money, bgColor: themeColors.moneySubtle },
+  job_closed:             { icon: 'archive-outline',            color: themeColors.textDisabled,bgColor: themeColors.surfacePressed },
+  job_cancelled:          { icon: 'close-octagon-outline',      color: themeColors.error,   bgColor: themeColors.errorSubtle },
+  job_scheduled_upcoming: { icon: 'timer-sand',                 color: themeColors.textMuted, bgColor: themeColors.surfacePressed },
+});
 
 function relativeLabel(ms: number): string {
   if (!ms) return '';
@@ -109,6 +110,9 @@ export function JobTimeline({
   documents,
   collapsedCount = 2,
 }: JobTimelineProps) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
+  const META = metaFor(themeColors);
   const [expanded, setExpanded] = useState(false);
   const chevronSpin = useRef(new Animated.Value(0)).current;
 
@@ -157,7 +161,7 @@ export function JobTimeline({
               <MaterialCommunityIcons
                 name={'chevron-down' as any}
                 size={18}
-                color={colors.primary}
+                color={themeColors.accentText}
               />
             </Animated.View>
           </Pressable>
@@ -196,6 +200,9 @@ function TimelineRow({
   isFirst: boolean;
   isLast: boolean;
 }) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
+  const META = metaFor(themeColors);
   const meta = META[event.kind];
   const amountLabel = formatEventAmount(event.amount);
   const dateLabel = relativeLabel(event.at);
@@ -262,7 +269,7 @@ function TimelineRow({
 const DOT_SIZE = 22;
 const RAIL_WIDTH = 32;
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   container: {
     // Embedded inside JobDetailHeader; no outer card chrome — the parent
     // already supplies the surface, padding, and border.
@@ -281,7 +288,7 @@ const styles = StyleSheet.create({
   toggleLabel: {
     fontSize: 12,
     fontWeight: '600',
-    color: colors.primary,
+    color: t.colors.accentText,
   },
   list: {
     paddingTop: 2,
@@ -297,12 +304,12 @@ const styles = StyleSheet.create({
   connectorTop: {
     width: 2,
     height: 8,
-    backgroundColor: colors.border,
+    backgroundColor: t.colors.border,
   },
   connectorBottom: {
     flex: 1,
     width: 2,
-    backgroundColor: colors.border,
+    backgroundColor: t.colors.border,
   },
   connectorSpacer: {
     height: 8,
@@ -335,18 +342,18 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 14,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
     flex: 1,
   },
   titleUpcoming: {
     fontStyle: 'italic',
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     fontWeight: '500',
   },
   amount: {
     fontSize: 13,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
   },
   metaRow: {
     flexDirection: 'row',
@@ -357,16 +364,16 @@ const styles = StyleSheet.create({
   },
   detail: {
     fontSize: 12,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     flexShrink: 1,
   },
   dotSep: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
   timestamp: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
   moreRow: {
     flexDirection: 'row',
@@ -378,13 +385,13 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: colors.primary,
+    backgroundColor: t.colors.accent,
     marginLeft: (RAIL_WIDTH - 6) / 2,
     marginRight: 6,
   },
   moreLabel: {
     fontSize: 12,
-    color: colors.primary,
+    color: t.colors.accentText,
     fontWeight: '600',
   },
-});
+}));

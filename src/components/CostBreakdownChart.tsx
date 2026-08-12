@@ -8,7 +8,8 @@ import { View, StyleSheet } from 'react-native';
 import { Text, Surface } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
-import { colors } from '../theme';
+import type { Tokens } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 import { Quote } from '../types';
 import { formatCurrency } from '../utils/quoteCalculator';
 
@@ -16,13 +17,16 @@ interface CostBreakdownChartProps {
   quotes: Quote[];
 }
 
-const SEGMENTS = [
-  { key: 'materials', label: 'Materials', color: colors.info, icon: 'package-variant' as const },
-  { key: 'labor', label: 'Labor', color: colors.secondary, icon: 'hammer-wrench' as const },
-  { key: 'markup', label: 'Markup', color: colors.primary, icon: 'percent-outline' as const },
+const segmentsFor = (themeColors: Tokens) => [
+  { key: 'materials', label: 'Materials', color: themeColors.info, icon: 'package-variant' as const },
+  { key: 'labor', label: 'Labor', color: themeColors.warning, icon: 'hammer-wrench' as const },
+  { key: 'markup', label: 'Markup', color: themeColors.accentText, icon: 'percent-outline' as const },
 ];
 
 export function CostBreakdownChart({ quotes }: CostBreakdownChartProps) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
+  const SEGMENTS = segmentsFor(themeColors);
   const breakdown = useMemo(() => {
     const accepted = quotes.filter((q) => q.status === 'accepted' || q.status === 'completed');
     const materials = accepted.reduce((sum, q) => sum + q.materialsSubtotal, 0);
@@ -91,11 +95,11 @@ export function CostBreakdownChart({ quotes }: CostBreakdownChartProps) {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   card: {
     padding: 20,
     borderRadius: 16,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     elevation: 2,
     marginBottom: 12,
   },
@@ -105,11 +109,11 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 16,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
   },
   subtitle: {
     fontSize: 12,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     marginTop: 2,
   },
   // Stacked bar
@@ -118,7 +122,7 @@ const styles = StyleSheet.create({
     height: 28,
     borderRadius: 8,
     overflow: 'hidden',
-    backgroundColor: colors.surfaceGray3,
+    backgroundColor: t.colors.surfacePressed,
     marginBottom: 20,
     gap: 2,
   },
@@ -140,7 +144,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.surfaceLight,
+    borderBottomColor: t.colors.surfaceOverlay,
   },
   legendLeft: {
     flexDirection: 'row',
@@ -154,7 +158,7 @@ const styles = StyleSheet.create({
   },
   legendLabel: {
     fontSize: 14,
-    color: colors.text,
+    color: t.colors.text,
   },
   legendRight: {
     flexDirection: 'row',
@@ -164,12 +168,12 @@ const styles = StyleSheet.create({
   legendAmount: {
     fontSize: 14,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
   },
   legendPercent: {
     fontSize: 12,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     width: 32,
     textAlign: 'right',
   },
-});
+}));

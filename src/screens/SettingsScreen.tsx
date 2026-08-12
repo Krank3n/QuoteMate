@@ -19,8 +19,9 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation } from '@react-navigation/native';
 
 import { useStore } from '../store/useStore';
-import { colors } from '../theme';
+import { LIGHT_MODE_ENABLED, makeStyles, useThemeColors } from '../theme';
 import { WebContainer } from '../components/WebContainer';
+import { GridBackground } from '../components/GridBackground';
 
 interface SettingsMenuItem {
   id: string;
@@ -39,6 +40,8 @@ interface SettingsSection {
 }
 
 export function SettingsScreen() {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const navigation = useNavigation<any>();
   const subscriptionStatus = useStore((s) => s.subscriptionStatus);
   // Only approved affiliates actually earn commission. Promising "rewards" to
@@ -97,7 +100,7 @@ export function SettingsScreen() {
           icon: 'credit-card-scan',
           screen: 'SquareIntegration',
           badge: 'NEW',
-          badgeColor: colors.primary,
+          badgeColor: themeColors.accent,
         },
         {
           id: 'reece',
@@ -106,7 +109,7 @@ export function SettingsScreen() {
           icon: 'pipe',
           screen: 'ReeceIntegration',
           badge: 'NEW',
-          badgeColor: colors.primary,
+          badgeColor: themeColors.accent,
         },
         {
           id: 'googleCalendar',
@@ -115,7 +118,7 @@ export function SettingsScreen() {
           icon: 'calendar-sync',
           screen: 'GoogleCalendarIntegration',
           badge: 'NEW',
-          badgeColor: colors.primary,
+          badgeColor: themeColors.accent,
         },
         {
           id: 'callKatie',
@@ -124,7 +127,7 @@ export function SettingsScreen() {
           icon: 'phone-in-talk',
           screen: 'CallKatie',
           badge: 'NEW',
-          badgeColor: colors.primary,
+          badgeColor: themeColors.accent,
         },
       ],
     },
@@ -182,6 +185,20 @@ export function SettingsScreen() {
     {
       title: 'App',
       items: [
+        // Hidden until the screens have migrated off the static palette —
+        // offering a light mode that only half the app honours is worse than
+        // not offering one. See src/theme/config.ts.
+        ...(LIGHT_MODE_ENABLED
+          ? [
+              {
+                id: 'appearance',
+                title: 'Appearance',
+                subtitle: 'Light, dark, or match your phone',
+                icon: 'theme-light-dark',
+                screen: 'Appearance',
+              } as SettingsMenuItem,
+            ]
+          : []),
         {
           id: 'referral',
           title: isAffiliate ? 'Affiliate Program' : 'Refer a Mate',
@@ -190,7 +207,7 @@ export function SettingsScreen() {
             : 'Share QuoteMate with other tradies',
           icon: 'gift',
           screen: 'Referral',
-          ...(isAffiliate ? { badge: 'EARN', badgeColor: colors.success } : {}),
+          ...(isAffiliate ? { badge: 'EARN', badgeColor: themeColors.money } : {}),
         },
         {
           id: 'subscription',
@@ -199,7 +216,7 @@ export function SettingsScreen() {
           icon: 'crown',
           screen: 'SubscriptionSettings',
           badge: subscriptionStatus?.isPro ? 'PRO' : undefined,
-          badgeColor: colors.secondary,
+          badgeColor: themeColors.warning,
         },
         {
           id: 'account',
@@ -215,7 +232,7 @@ export function SettingsScreen() {
           icon: 'bullhorn',
           screen: 'Feedback',
           badge: 'NEW',
-          badgeColor: colors.error,
+          badgeColor: themeColors.error,
         },
         {
           id: 'about',
@@ -238,6 +255,7 @@ export function SettingsScreen() {
 
   return (
     <View style={styles.container}>
+      <GridBackground />
       <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.scrollContent}>
         <WebContainer>
           {sections.map((section) => (
@@ -258,7 +276,7 @@ export function SettingsScreen() {
                         <MaterialCommunityIcons
                           name={item.icon as any}
                           size={24}
-                          color={colors.primary}
+                          color={themeColors.accentText}
                         />
                       </View>
                       <View style={styles.menuItemText}>
@@ -276,7 +294,7 @@ export function SettingsScreen() {
                     <MaterialCommunityIcons
                       name="chevron-right"
                       size={24}
-                      color={colors.onSurface}
+                      color={themeColors.textSecondary}
                     />
                   </TouchableOpacity>
                 ))}
@@ -289,10 +307,10 @@ export function SettingsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
   },
   scrollContent: {
     padding: 16,
@@ -309,7 +327,7 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 13,
     fontWeight: '600',
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     textTransform: 'uppercase',
     letterSpacing: 0.8,
     marginBottom: 8,
@@ -318,7 +336,7 @@ const styles = StyleSheet.create({
   card: {
     borderRadius: 12,
     elevation: 2,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     overflow: 'hidden',
   },
   menuItem: {
@@ -330,7 +348,7 @@ const styles = StyleSheet.create({
   },
   menuItemBorder: {
     borderBottomWidth: 1,
-    borderBottomColor: colors.outline + '20',
+    borderBottomColor: t.colors.border,
   },
   menuItemLeft: {
     flexDirection: 'row',
@@ -341,7 +359,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: colors.primary + '15',
+    backgroundColor: t.colors.accentSubtle,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 14,
@@ -356,12 +374,12 @@ const styles = StyleSheet.create({
   menuItemTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
     marginBottom: 2,
   },
   menuItemSubtitle: {
     fontSize: 13,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
   },
   badge: {
     marginLeft: 8,
@@ -372,6 +390,6 @@ const styles = StyleSheet.create({
   badgeText: {
     fontSize: 10,
     fontWeight: '700',
-    color: colors.surface,
+    color: t.colors.surfaceRaised,
   },
-});
+}));

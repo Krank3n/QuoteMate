@@ -35,7 +35,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { Job, JobStage } from '../../shared/job/types';
 import type { Document } from '../types/document';
-import { colors } from '../theme';
+import type { Tokens } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 import { selectionTap, lightTap } from '../utils/haptics';
 
 export type JobActionId =
@@ -339,6 +340,8 @@ export function StickyJobActionBar({
   onAction,
   pending,
 }: StickyJobActionBarProps) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const insets = useSafeAreaInsets();
   const actions = resolveJobActions(job.stage, primaryDoc);
 
@@ -349,7 +352,7 @@ export function StickyJobActionBar({
       <View style={styles.row}>
         {actions.map((action) => {
           const isPending = pending === action.id;
-          const palette = resolveToneStyle(action.tone);
+          const palette = resolveToneStyle(action.tone, themeColors);
           const tint = palette.tint;
           return (
             <Pressable
@@ -397,34 +400,34 @@ interface TonePalette {
   tint: string;
 }
 
-function resolveToneStyle(tone: ActionTone): TonePalette {
+function resolveToneStyle(tone: ActionTone, themeColors: Tokens): TonePalette {
   switch (tone) {
     case 'primary':
-      return { container: { backgroundColor: colors.primary }, tint: colors.white };
+      return { container: { backgroundColor: themeColors.accent }, tint: themeColors.alwaysLight };
     case 'warning':
       return {
         container: {
-          backgroundColor: colors.warningBg,
+          backgroundColor: themeColors.warningSubtle,
           borderWidth: 1,
-          borderColor: colors.warning + '66',
+          borderColor: themeColors.warningSubtle,
         },
-        tint: colors.warning,
+        tint: themeColors.warning,
       };
     case 'urgent':
-      return { container: { backgroundColor: colors.error }, tint: colors.white };
+      return { container: { backgroundColor: themeColors.error }, tint: themeColors.alwaysLight };
     default:
       return {
         container: {
-          backgroundColor: colors.surfaceGray3,
+          backgroundColor: themeColors.surfacePressed,
           borderWidth: 1,
-          borderColor: colors.border,
+          borderColor: themeColors.border,
         },
-        tint: colors.text,
+        tint: themeColors.text,
       };
   }
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   bar: {
     position: 'absolute',
     left: 0,
@@ -432,9 +435,9 @@ const styles = StyleSheet.create({
     bottom: 0,
     paddingTop: 10,
     paddingHorizontal: 16,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderTopWidth: 1,
-    borderTopColor: colors.border,
+    borderTopColor: t.colors.border,
     alignItems: 'center',
   },
   row: {
@@ -465,4 +468,4 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
   },
-});
+}));

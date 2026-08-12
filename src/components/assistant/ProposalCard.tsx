@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { colors } from '../../theme';
+import { makeStyles, useThemeColors } from '../../theme';
 import { Proposal, ProposalStatus } from '../../types/assistant';
 
 interface Props {
@@ -16,11 +16,13 @@ function formatCurrency(n: number): string {
 }
 
 function ProposalCardImpl({ proposal, status, onApply, onDismiss }: Props) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const isDestructive =
     proposal.type === 'propose_send_quote' ||
     proposal.type === 'propose_delete_line_item' ||
     proposal.type === 'propose_delete_quote';
-  const applyColor = isDestructive ? colors.error : colors.success;
+  const applyColor = isDestructive ? themeColors.error : themeColors.money;
   const applyLabel = labelFor(proposal);
   const applied = status === 'applied';
   const dismissed = status === 'dismissed';
@@ -29,7 +31,7 @@ function ProposalCardImpl({ proposal, status, onApply, onDismiss }: Props) {
   return (
     <View style={[styles.card, applied && styles.cardApplied, dismissed && styles.cardDismissed]}>
       <View style={styles.headerRow}>
-        <MaterialCommunityIcons name={iconFor(proposal)} size={18} color={colors.textMuted} />
+        <MaterialCommunityIcons name={iconFor(proposal)} size={18} color={themeColors.textMuted} />
         <Text style={styles.title}>{titleFor(proposal)}</Text>
       </View>
 
@@ -53,9 +55,9 @@ function ProposalCardImpl({ proposal, status, onApply, onDismiss }: Props) {
           <MaterialCommunityIcons
             name={applied ? 'check-circle' : failed ? 'alert-circle' : 'close-circle'}
             size={16}
-            color={applied ? colors.success : failed ? colors.error : colors.textMuted}
+            color={applied ? themeColors.money : failed ? themeColors.error : themeColors.textMuted}
           />
-          <Text style={[styles.statusText, failed && { color: colors.error }]}>
+          <Text style={[styles.statusText, failed && { color: themeColors.error }]}>
             {applied ? 'Applied' : failed ? 'Failed' : 'Dismissed'}
           </Text>
         </View>
@@ -112,6 +114,8 @@ function labelFor(p: Proposal): string {
 }
 
 function Body({ proposal }: { proposal: Proposal }) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   switch (proposal.type) {
     case 'propose_draft_quote':
       return (
@@ -297,18 +301,18 @@ function Body({ proposal }: { proposal: Proposal }) {
   }
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   card: {
-    backgroundColor: colors.surfaceDark,
+    backgroundColor: t.colors.surface,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
     padding: 12,
     marginVertical: 6,
     marginHorizontal: 12,
   },
   cardApplied: {
-    borderColor: colors.success,
+    borderColor: t.colors.money,
     opacity: 0.85,
   },
   cardDismissed: { opacity: 0.55 },
@@ -319,40 +323,40 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   title: {
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     fontSize: 12,
     fontWeight: '600',
     textTransform: 'uppercase',
     letterSpacing: 0.4,
   },
   summary: {
-    color: colors.text,
+    color: t.colors.text,
     fontSize: 15,
     fontWeight: '600',
     marginBottom: 2,
   },
   dim: {
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     fontSize: 13,
     marginTop: 2,
   },
   scope: {
-    color: colors.text,
+    color: t.colors.text,
     fontSize: 13,
     lineHeight: 19,
     marginTop: 6,
     paddingTop: 6,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.border,
+    borderTopColor: t.colors.border,
   },
   section: {
     marginTop: 6,
     paddingTop: 6,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.border,
+    borderTopColor: t.colors.border,
   },
   sectionName: {
-    color: colors.textDark,
+    color: t.colors.text,
     fontSize: 13,
     fontWeight: '600',
     marginBottom: 2,
@@ -365,7 +369,7 @@ const styles = StyleSheet.create({
   },
   lineName: {
     flex: 1,
-    color: colors.text,
+    color: t.colors.text,
     fontSize: 13,
     marginRight: 8,
   },
@@ -374,12 +378,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 4,
   },
-  priceText: { color: colors.textDark, fontSize: 13 },
+  priceText: { color: t.colors.text, fontSize: 13 },
   estimateBadge: {
-    color: colors.warning,
+    color: t.colors.warning,
     fontSize: 10,
     fontWeight: '700',
-    backgroundColor: colors.warningBg,
+    backgroundColor: t.colors.warningSubtle,
     paddingHorizontal: 4,
     paddingVertical: 1,
     borderRadius: 4,
@@ -391,12 +395,12 @@ const styles = StyleSheet.create({
     marginTop: 8,
     paddingTop: 6,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.border,
+    borderTopColor: t.colors.border,
   },
-  totalLabel: { color: colors.textMuted, fontSize: 13 },
-  totalValue: { color: colors.text, fontSize: 14, fontWeight: '700' },
+  totalLabel: { color: t.colors.textMuted, fontSize: 13 },
+  totalValue: { color: t.colors.text, fontSize: 14, fontWeight: '700' },
   warningBanner: {
-    color: colors.warning,
+    color: t.colors.warning,
     fontSize: 12,
     marginBottom: 6,
   },
@@ -405,11 +409,11 @@ const styles = StyleSheet.create({
     padding: 10,
     borderRadius: 8,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border,
-    backgroundColor: colors.background,
+    borderColor: t.colors.border,
+    backgroundColor: t.colors.bg,
   },
   emailLabel: {
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     fontSize: 11,
     fontWeight: '700',
     textTransform: 'uppercase',
@@ -417,12 +421,12 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   emailSubject: {
-    color: colors.text,
+    color: t.colors.text,
     fontSize: 14,
     fontWeight: '600',
   },
   emailBody: {
-    color: colors.text,
+    color: t.colors.text,
     fontSize: 13,
     lineHeight: 19,
   },
@@ -437,7 +441,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 8,
   },
-  dismissText: { color: colors.textMuted, fontSize: 14, fontWeight: '500' },
+  dismissText: { color: t.colors.textMuted, fontSize: 14, fontWeight: '500' },
   applyBtn: {
     paddingHorizontal: 16,
     paddingVertical: 8,
@@ -445,15 +449,15 @@ const styles = StyleSheet.create({
     minWidth: 80,
     alignItems: 'center',
   },
-  applyText: { color: colors.white, fontSize: 14, fontWeight: '700' },
+  applyText: { color: t.colors.alwaysLight, fontSize: 14, fontWeight: '700' },
   statusRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
     marginTop: 8,
   },
-  statusText: { color: colors.textMuted, fontSize: 12 },
-});
+  statusText: { color: t.colors.textMuted, fontSize: 12 },
+}));
 
 // Memoised: ProposalCard sits inside the chat FlatList renderItem, so without
 // this it would re-render for every keystroke / store update in

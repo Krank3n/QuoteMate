@@ -2,8 +2,9 @@ import React from 'react';
 import { View, TouchableOpacity, StyleSheet, Linking } from 'react-native';
 import { Text, Surface, TextInput, Divider } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { colors } from '../../theme';
-import { documentStyles as docStyles } from './documentStyles';
+import type { Tokens } from '../../theme';
+import { makeStyles, useThemeColors} from '../../theme';
+import { useDocumentStyles } from './documentStyles';
 
 interface CustomerSectionProps {
   customerName: string;
@@ -26,7 +27,7 @@ interface ActionItem {
   onPress: () => void;
 }
 
-function buildActions(phone?: string, email?: string, website?: string): ActionItem[] {
+function buildActions(themeColors: Tokens, phone?: string, email?: string, website?: string): ActionItem[] {
   const actions: ActionItem[] = [];
 
   if (phone) {
@@ -34,15 +35,15 @@ function buildActions(phone?: string, email?: string, website?: string): ActionI
     actions.push({
       icon: 'phone',
       label: 'Call',
-      color: colors.success,
-      bgColor: colors.successBg,
+      color: themeColors.money,
+      bgColor: themeColors.moneySubtle,
       onPress: () => Linking.openURL(`tel:${cleanPhone}`),
     });
     actions.push({
       icon: 'message-text',
       label: 'Text',
-      color: colors.info,
-      bgColor: colors.infoBg,
+      color: themeColors.info,
+      bgColor: themeColors.infoSubtle,
       onPress: () => Linking.openURL(`sms:${cleanPhone}`),
     });
   }
@@ -51,8 +52,8 @@ function buildActions(phone?: string, email?: string, website?: string): ActionI
     actions.push({
       icon: 'email-outline',
       label: 'Email',
-      color: colors.warning,
-      bgColor: colors.warningBg,
+      color: themeColors.warning,
+      bgColor: themeColors.warningSubtle,
       onPress: () => Linking.openURL(`mailto:${email}`),
     });
   }
@@ -62,8 +63,8 @@ function buildActions(phone?: string, email?: string, website?: string): ActionI
     actions.push({
       icon: 'web',
       label: 'Web',
-      color: colors.primary,
-      bgColor: colors.primaryBg,
+      color: themeColors.accentText,
+      bgColor: themeColors.accentSubtle,
       onPress: () => Linking.openURL(url),
     });
   }
@@ -82,8 +83,11 @@ export function CustomerSection({
   onFieldChange,
   showActions = false,
 }: CustomerSectionProps) {
+  const docStyles = useDocumentStyles();
+  const s = useLocalStyles();
+  const themeColors = useThemeColors();
   const actions = showActions && !isEditing
-    ? buildActions(customerPhone, customerEmail, website)
+    ? buildActions(themeColors, customerPhone, customerEmail, website)
     : [];
 
   // Editing mode — keep the old header + form style
@@ -92,8 +96,8 @@ export function CustomerSection({
       <Surface style={docStyles.section}>
         <View style={docStyles.sectionHeader}>
           <View style={docStyles.sectionHeaderLeft}>
-            <View style={[docStyles.sectionIconCircle, { backgroundColor: colors.infoBg }]}>
-              <MaterialCommunityIcons name="account" size={18} color={colors.info} />
+            <View style={[docStyles.sectionIconCircle, { backgroundColor: themeColors.infoSubtle }]}>
+              <MaterialCommunityIcons name="account" size={18} color={themeColors.info} />
             </View>
             <Text style={docStyles.sectionTitle}>Customer</Text>
           </View>
@@ -152,14 +156,14 @@ export function CustomerSection({
           <Text style={s.name} numberOfLines={1}>{customerName}</Text>
           {jobAddress ? (
             <View style={s.addressRow}>
-              <MaterialCommunityIcons name="map-marker-outline" size={13} color={colors.textMuted} />
+              <MaterialCommunityIcons name="map-marker-outline" size={13} color={themeColors.textMuted} />
               <Text style={s.addressText} numberOfLines={1}>{jobAddress}</Text>
             </View>
           ) : null}
         </View>
         {onEdit && (
           <View style={s.editButton}>
-            <MaterialCommunityIcons name="pencil" size={15} color={colors.primary} />
+            <MaterialCommunityIcons name="pencil" size={15} color={themeColors.accentText} />
           </View>
         )}
       </View>
@@ -169,13 +173,13 @@ export function CustomerSection({
         <View style={s.detailsRow}>
           {customerPhone ? (
             <View style={s.detailItem}>
-              <MaterialCommunityIcons name="phone-outline" size={14} color={colors.textMuted} />
+              <MaterialCommunityIcons name="phone-outline" size={14} color={themeColors.textMuted} />
               <Text style={s.detailText}>{customerPhone}</Text>
             </View>
           ) : null}
           {customerEmail ? (
             <View style={s.detailItem}>
-              <MaterialCommunityIcons name="email-outline" size={14} color={colors.textMuted} />
+              <MaterialCommunityIcons name="email-outline" size={14} color={themeColors.textMuted} />
               <Text style={s.detailText} numberOfLines={1}>{customerEmail}</Text>
             </View>
           ) : null}
@@ -223,13 +227,13 @@ export function CustomerSection({
   return card;
 }
 
-const s = StyleSheet.create({
+const useLocalStyles = makeStyles((t) => ({
   card: {
     marginBottom: 12,
     padding: 16,
     borderRadius: 14,
     elevation: 2,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     overflow: 'hidden',
   },
   // Profile header
@@ -242,14 +246,14 @@ const s = StyleSheet.create({
     width: 46,
     height: 46,
     borderRadius: 14,
-    backgroundColor: colors.primaryBg,
+    backgroundColor: t.colors.accentSubtle,
     alignItems: 'center',
     justifyContent: 'center',
   },
   avatarText: {
     fontSize: 17,
     fontWeight: '800',
-    color: colors.primary,
+    color: t.colors.accentText,
     letterSpacing: 1,
   },
   nameBlock: {
@@ -258,7 +262,7 @@ const s = StyleSheet.create({
   name: {
     fontSize: 16,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
     marginBottom: 2,
   },
   addressRow: {
@@ -268,14 +272,14 @@ const s = StyleSheet.create({
   },
   addressText: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     flex: 1,
   },
   editButton: {
     width: 32,
     height: 32,
     borderRadius: 8,
-    backgroundColor: colors.primary + '15',
+    backgroundColor: t.colors.accentSubtle,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -291,14 +295,14 @@ const s = StyleSheet.create({
   },
   detailText: {
     fontSize: 13,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     flex: 1,
   },
   // Actions
   divider: {
     marginTop: 14,
     marginBottom: 12,
-    backgroundColor: colors.border,
+    backgroundColor: t.colors.border,
   },
   actionsRow: {
     flexDirection: 'row',
@@ -322,4 +326,4 @@ const s = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 0.3,
   },
-});
+}));

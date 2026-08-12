@@ -20,7 +20,7 @@ import { Text } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import Svg, { Path, Line, Ellipse, G, Polygon, Text as SvgText, Rect } from 'react-native-svg';
 import { captureRef } from 'react-native-view-shot';
-import { colors } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 import { selectionTap, lightTap } from '../utils/haptics';
 
 // --- Types ---
@@ -121,6 +121,8 @@ function getArrowHeadPoints(endX: number, endY: number, startX: number, startY: 
 // --- Component ---
 
 export function PhotoAnnotator({ visible, imageUri, onSave, onCancel }: PhotoAnnotatorProps) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   // Tool & style state
   const [activeTool, setActiveTool] = useState<AnnotationTool>('draw');
   const [selectedColor, setSelectedColor] = useState(COLORS[0].value);
@@ -631,7 +633,7 @@ export function PhotoAnnotator({ visible, imageUri, onSave, onCancel }: PhotoAnn
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Annotate Photo</Text>
           <TouchableOpacity onPress={handleSave} style={styles.headerButton}>
-            <Text style={[styles.headerButtonText, { color: colors.primary }]}>Done</Text>
+            <Text style={[styles.headerButtonText, { color: themeColors.accentText }]}>Done</Text>
           </TouchableOpacity>
         </View>
 
@@ -778,7 +780,7 @@ export function PhotoAnnotator({ visible, imageUri, onSave, onCancel }: PhotoAnn
               <MaterialCommunityIcons
                 name="undo"
                 size={24}
-                color={hasAnnotations ? colors.text : 'rgba(255,255,255,0.2)'}
+                color={hasAnnotations ? themeColors.text : 'rgba(255,255,255,0.2)'}
               />
             </TouchableOpacity>
             <TouchableOpacity
@@ -789,7 +791,7 @@ export function PhotoAnnotator({ visible, imageUri, onSave, onCancel }: PhotoAnn
               <MaterialCommunityIcons
                 name="delete-outline"
                 size={24}
-                color={hasAnnotations ? colors.text : 'rgba(255,255,255,0.2)'}
+                color={hasAnnotations ? themeColors.text : 'rgba(255,255,255,0.2)'}
               />
             </TouchableOpacity>
           </View>
@@ -799,7 +801,7 @@ export function PhotoAnnotator({ visible, imageUri, onSave, onCancel }: PhotoAnn
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   container: {
     flex: 1,
     backgroundColor: '#000',
@@ -819,7 +821,7 @@ const styles = StyleSheet.create({
   },
   headerButtonText: {
     fontSize: 16,
-    color: colors.text,
+    color: t.colors.text,
   },
   headerTitle: {
     fontSize: 17,
@@ -940,4 +942,4 @@ const styles = StyleSheet.create({
   actionButton: {
     padding: 8,
   },
-});
+}));

@@ -27,7 +27,8 @@ import {
   Divider,
 } from 'react-native-paper';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { colors } from '../theme';
+import type { Tokens } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
 import type { ExtractedItem } from '../services/supplierListImporter';
 
@@ -57,10 +58,10 @@ const UNIT_OPTIONS = [
   { value: 'pack', label: 'pack' },
 ];
 
-function confidenceColor(c: ExtractedItem['confidence']): string {
-  if (c === 'high') return colors.success || '#22c55e';
-  if (c === 'low') return colors.error || '#ef4444';
-  return colors.warning || '#f59e0b';
+function confidenceColor(confidence: ExtractedItem['confidence'], themeColors: Tokens): string {
+  if (confidence === 'high') return themeColors.money || '#22c55e';
+  if (confidence === 'low') return themeColors.error || '#ef4444';
+  return themeColors.warning || '#f59e0b';
 }
 
 function clampQty(n: number): number {
@@ -77,6 +78,8 @@ export function InvoiceReviewModal({
   onCancel,
   onConfirm,
 }: Props) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const safeInsets = useSafeAreaInsets();
   const [supplierName, setSupplierName] = useState(initialSupplierName);
   const [rows, setRows] = useState<InvoiceReviewRow[]>([]);
@@ -183,9 +186,9 @@ export function InvoiceReviewModal({
                       compact
                       style={[
                         styles.confidenceChip,
-                        { backgroundColor: confidenceColor(row.confidence) + '22' },
+                        { backgroundColor: confidenceColor(row.confidence, themeColors) + '22' },
                       ]}
-                      textStyle={{ color: confidenceColor(row.confidence), fontSize: 11 }}
+                      textStyle={{ color: confidenceColor(row.confidence, themeColors), fontSize: 11 }}
                     >
                       {row.confidence}
                     </Chip>
@@ -265,7 +268,7 @@ export function InvoiceReviewModal({
               Cancel
             </Button>
             <Button
-              mode="contained"
+              mode="contained" buttonColor={themeColors.accent} textColor={themeColors.onAccent}
               onPress={() => onConfirm(supplierName, rows)}
               disabled={saving || selectedCount === 0}
               loading={saving}
@@ -279,10 +282,10 @@ export function InvoiceReviewModal({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   fullScreen: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
   },
   header: {
     flexDirection: 'row',
@@ -291,7 +294,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingBottom: 12,
     borderBottomWidth: 1,
-    borderBottomColor: colors.surfaceLight,
+    borderBottomColor: t.colors.surfaceOverlay,
   },
   headerTextWrap: {
     flex: 1,
@@ -299,11 +302,11 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 18,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
   },
   subtitle: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginTop: 2,
   },
   body: {
@@ -322,7 +325,7 @@ const styles = StyleSheet.create({
   },
   row: {
     marginBottom: 4,
-    backgroundColor: colors.surfaceDark,
+    backgroundColor: t.colors.surface,
     borderRadius: 12,
     padding: 12,
   },
@@ -365,14 +368,14 @@ const styles = StyleSheet.create({
   },
   lineTotalLabel: {
     fontSize: 10,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     textTransform: 'uppercase',
     letterSpacing: 0.4,
   },
   lineTotalValue: {
     fontSize: 14,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
     marginTop: 2,
   },
   unitPicker: {
@@ -385,33 +388,33 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 7,
     borderRadius: 20,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderWidth: 1,
-    borderColor: colors.surfaceLight,
+    borderColor: t.colors.surfaceOverlay,
   },
   unitBtnActive: {
-    backgroundColor: colors.primaryBg,
-    borderColor: colors.primary,
+    backgroundColor: t.colors.accentSubtle,
+    borderColor: t.colors.accent,
   },
   unitBtnText: {
     fontSize: 13,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     fontWeight: '500',
   },
   unitBtnTextActive: {
-    color: colors.primary,
+    color: t.colors.accentText,
     fontWeight: '600',
   },
   rawLineWrap: {
     marginTop: 8,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderRadius: 6,
     paddingHorizontal: 8,
     paddingVertical: 5,
   },
   rawLine: {
     fontSize: 11,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     fontStyle: 'italic',
   },
   rowDivider: {
@@ -423,7 +426,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 10,
     borderTopWidth: 1,
-    borderTopColor: colors.surfaceLight,
+    borderTopColor: t.colors.surfaceOverlay,
   },
   footerSummary: {
     flexDirection: 'row',
@@ -433,16 +436,16 @@ const styles = StyleSheet.create({
   },
   footerSummaryLabel: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
   footerSummaryTotal: {
     fontSize: 16,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
   },
   footerButtons: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
     gap: 8,
   },
-});
+}));

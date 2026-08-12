@@ -22,7 +22,7 @@ import { Text, ActivityIndicator } from 'react-native-paper';
 import type { Document } from '../types/document';
 import type { BusinessSettings, Quote } from '../types';
 import { useStore } from '../store/useStore';
-import { colors } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 import { SendDocumentButton } from './SendDocumentButton';
 import { AlertModal } from './AlertModal';
 import { PillToggle } from './PillToggle';
@@ -42,6 +42,8 @@ interface SendSwitcherProps extends SendTypePillProps {
 type SendMode = 'quote' | 'invoice';
 
 export function SendTypePill({ doc, style, fullWidth }: SendTypePillProps) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const convertDocumentToInvoice = useStore((s) => s.convertDocumentToInvoice);
   const createInvoiceFromQuote = useStore((s) => s.createInvoiceFromQuote);
   const quotes = useStore((s) => s.quotes);
@@ -103,7 +105,7 @@ export function SendTypePill({ doc, style, fullWidth }: SendTypePillProps) {
       />
       {converting ? (
         <View style={styles.converting}>
-          <ActivityIndicator size={12} color={colors.primary} />
+          <ActivityIndicator size={12} color={themeColors.accentText} />
           <Text style={styles.convertingLabel}>Converting…</Text>
         </View>
       ) : null}
@@ -147,6 +149,8 @@ export function SendTypePill({ doc, style, fullWidth }: SendTypePillProps) {
 }
 
 export function SendSwitcher({ doc, businessSettings, style }: SendSwitcherProps) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const mode: SendMode = doc.type;
   return (
     <View style={[styles.wrapper, style]}>
@@ -162,7 +166,7 @@ export function SendSwitcher({ doc, businessSettings, style }: SendSwitcherProps
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   wrapper: {
     gap: 8,
   },
@@ -181,6 +185,6 @@ const styles = StyleSheet.create({
   },
   convertingLabel: {
     fontSize: 11,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
-});
+}));

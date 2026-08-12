@@ -28,7 +28,7 @@ import {
 import { Text } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
-import { colors } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 import { Material, SupplierGroup, BusinessSettings, FavoriteProductMapping } from '../types';
 import { generateId } from '../utils/generateId';
 import { lightTap } from '../utils/haptics';
@@ -85,6 +85,8 @@ interface ResolvedAction {
  * or when the row is being used in 'edit' mode.
  */
 function InlineAddMaterialRowImpl(props: InlineAddMaterialRowProps) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const isEdit = props.mode === 'edit';
   const [expanded, setExpanded] = useState(isEdit);
 
@@ -151,10 +153,12 @@ function CollapsedAddPill({
   trailingActions?: ResolvedAction[];
   onExpand: () => void;
 }) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   return (
     <View style={styles.collapsedRow}>
       <TouchableOpacity style={styles.collapsedBtn} onPress={onExpand} activeOpacity={0.7}>
-        <MaterialCommunityIcons name="plus" size={16} color={colors.primary} />
+        <MaterialCommunityIcons name="plus" size={16} color={themeColors.accentText} />
         <Text style={styles.collapsedText}>Add Material</Text>
       </TouchableOpacity>
       {trailingActions && trailingActions.length > 0 && (
@@ -167,7 +171,7 @@ function CollapsedAddPill({
               accessibilityLabel={action.accessibilityLabel}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             >
-              <MaterialCommunityIcons name={action.icon} size={20} color={colors.primary} />
+              <MaterialCommunityIcons name={action.icon} size={20} color={themeColors.accentText} />
             </TouchableOpacity>
           ))}
         </View>
@@ -201,6 +205,8 @@ function InlineAddMaterialForm({
   onExitEdit,
   onRequestCollapse,
 }: InlineAddMaterialFormProps) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const isEdit = mode === 'edit';
   const [name, setName] = useState(initialMaterial?.name ?? '');
   const [qty, setQty] = useState(initialMaterial ? String(initialMaterial.quantity) : '1');
@@ -461,7 +467,7 @@ function InlineAddMaterialForm({
           onPress={action.onPress}
           accessibilityLabel={action.accessibilityLabel}
         >
-          <MaterialCommunityIcons name={action.icon} size={18} color={colors.primary} />
+          <MaterialCommunityIcons name={action.icon} size={18} color={themeColors.accentText} />
           <Text style={styles.expandedActionLabel} numberOfLines={1}>{action.label}</Text>
         </TouchableOpacity>
       ))}
@@ -487,7 +493,7 @@ function InlineAddMaterialForm({
           value={name}
           onChangeText={handleNameChange}
           placeholder="Material name"
-          placeholderTextColor={colors.textMuted}
+          placeholderTextColor={themeColors.textMuted}
           returnKeyType="search"
           onSubmitEditing={runFullSearch}
           autoFocus
@@ -503,12 +509,12 @@ function InlineAddMaterialForm({
           hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
         >
           {fullSearchActive ? (
-            <ActivityIndicator size="small" color="#FFFFFF" />
+            <ActivityIndicator size="small" color={themeColors.onAccent} />
           ) : (
             <MaterialCommunityIcons
               name="magnify"
               size={22}
-              color={name.trim() ? '#FFFFFF' : colors.primary}
+              color={name.trim() ? '#FFFFFF' : themeColors.accent}
             />
           )}
         </TouchableOpacity>
@@ -522,7 +528,7 @@ function InlineAddMaterialForm({
               onPress={handleSave}
               activeOpacity={0.7}
             >
-              <MaterialCommunityIcons name="plus-circle-outline" size={18} color={colors.primary} />
+              <MaterialCommunityIcons name="plus-circle-outline" size={18} color={themeColors.accentText} />
               <Text style={styles.resultRowTextCustom} numberOfLines={1}>
                 Add &quot;{name.trim()}&quot; as a custom item
               </Text>
@@ -546,7 +552,7 @@ function InlineAddMaterialForm({
                   <MaterialCommunityIcons
                     name={item.isAiEstimate ? 'robot' : (item.isLocalSource ? 'bookmark-outline' : 'magnify')}
                     size={18}
-                    color={colors.textMuted}
+                    color={themeColors.textMuted}
                   />
                 </View>
               )}
@@ -571,7 +577,7 @@ function InlineAddMaterialForm({
       <View style={styles.fieldsRow}>
         <View style={styles.qtyStepper}>
           <Pressable style={({ pressed }) => [styles.qtyBtn, pressed && styles.qtyBtnPressed]} onPress={decrementQty}>
-            <MaterialCommunityIcons name="minus" size={14} color={colors.text} />
+            <MaterialCommunityIcons name="minus" size={14} color={themeColors.text} />
           </Pressable>
           <RNTextInput
             style={styles.qtyInput}
@@ -581,13 +587,13 @@ function InlineAddMaterialForm({
             selectTextOnFocus
           />
           <Pressable style={({ pressed }) => [styles.qtyBtn, pressed && styles.qtyBtnPressed]} onPress={incrementQty}>
-            <MaterialCommunityIcons name="plus" size={14} color={colors.text} />
+            <MaterialCommunityIcons name="plus" size={14} color={themeColors.text} />
           </Pressable>
         </View>
 
         <TouchableOpacity style={styles.unitChip} onPress={() => setUnitSheetVisible(true)}>
           <Text style={styles.unitChipText}>{unit}</Text>
-          <MaterialCommunityIcons name="chevron-down" size={14} color={colors.textMuted} />
+          <MaterialCommunityIcons name="chevron-down" size={14} color={themeColors.textMuted} />
         </TouchableOpacity>
 
         <View style={styles.priceWrap}>
@@ -597,7 +603,7 @@ function InlineAddMaterialForm({
             value={price}
             onChangeText={setPrice}
             placeholder="0.00"
-            placeholderTextColor={colors.textMuted}
+            placeholderTextColor={themeColors.textMuted}
             keyboardType="decimal-pad"
           />
         </View>
@@ -605,7 +611,7 @@ function InlineAddMaterialForm({
 
       <View style={styles.actionsRow}>
         <TouchableOpacity style={styles.cancelBtn} onPress={collapse}>
-          <MaterialCommunityIcons name="close" size={16} color={colors.textMuted} />
+          <MaterialCommunityIcons name="close" size={16} color={themeColors.textMuted} />
           <Text style={styles.cancelText}>Cancel</Text>
         </TouchableOpacity>
         <TouchableOpacity
@@ -617,14 +623,14 @@ function InlineAddMaterialForm({
           <MaterialCommunityIcons
             name={saveToBook ? 'bookmark-check' : 'bookmark-outline'}
             size={16}
-            color={saveToBook ? colors.primary : colors.textMuted}
+            color={saveToBook ? themeColors.accent : themeColors.textMuted}
           />
           <Text style={[styles.saveToBookText, saveToBook && styles.saveToBookTextActive]} numberOfLines={1}>
             Save to book
           </Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.saveBtn} onPress={handleSave}>
-          <MaterialCommunityIcons name="check" size={16} color="#FFFFFF" />
+          <MaterialCommunityIcons name="check" size={16} color={themeColors.onAccent} />
           <Text style={styles.saveText}>Save</Text>
         </TouchableOpacity>
       </View>
@@ -641,7 +647,7 @@ function InlineAddMaterialForm({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   collapsedRow: {
     flexDirection: 'row',
     alignItems: 'stretch',
@@ -662,8 +668,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
+    borderColor: t.colors.border,
+    backgroundColor: t.colors.surfaceRaised,
   },
   expandedActionsStrip: {
     flexDirection: 'row',
@@ -680,13 +686,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
+    borderColor: t.colors.border,
+    backgroundColor: t.colors.surfaceRaised,
   },
   expandedActionLabel: {
     fontSize: 13,
     fontWeight: '600',
-    color: colors.primary,
+    color: t.colors.accentText,
   },
   collapsedBtn: {
     flex: 1,
@@ -697,41 +703,41 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: colors.primary,
+    borderColor: t.colors.accent,
     borderStyle: 'dashed',
   },
   collapsedText: {
     fontSize: 13,
     fontWeight: '600',
-    color: colors.primary,
+    color: t.colors.accentText,
   },
   expandedCard: {
     flex: 1,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
     padding: 12,
     gap: 8,
   },
   nameRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
     paddingLeft: 10,
     paddingRight: 0,
     overflow: 'hidden',
   },
   nameRowError: {
-    borderColor: colors.error,
+    borderColor: t.colors.error,
   },
   nameInputInner: {
     flex: 1,
     fontSize: 15,
-    color: colors.text,
+    color: t.colors.text,
     paddingVertical: 8,
   },
   searchIconBtn: {
@@ -749,16 +755,16 @@ const styles = StyleSheet.create({
   // tappable (just clearly inactive). Active state below takes over once the
   // user types something.
   searchIconBtnIdle: {
-    backgroundColor: colors.primary + '1F',
+    backgroundColor: t.colors.accentSubtle,
   },
   searchIconBtnActive: {
-    backgroundColor: colors.primary,
+    backgroundColor: t.colors.accent,
   },
   resultsList: {
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.background,
+    borderColor: t.colors.border,
+    backgroundColor: t.colors.bg,
     overflow: 'hidden',
   },
   resultRow: {
@@ -768,13 +774,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 8,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
+    borderBottomColor: t.colors.border,
   },
   resultRowThumb: {
     width: 36,
     height: 36,
     borderRadius: 6,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: t.colors.alwaysLight,
   },
   // Same footprint as the thumbnail so result rows don't shift when some
   // results have images and others (AI estimates / favourites) don't.
@@ -782,20 +788,20 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 6,
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
     alignItems: 'center',
     justifyContent: 'center',
   },
   resultRowCustom: {
-    backgroundColor: colors.primary + '14',
+    backgroundColor: t.colors.accentSubtle,
   },
   resultRowTextCustom: {
     flex: 1,
     fontSize: 13,
     fontWeight: '600',
-    color: colors.primary,
+    color: t.colors.accentText,
   },
   resultRowBody: {
     flex: 1,
@@ -803,16 +809,16 @@ const styles = StyleSheet.create({
   },
   resultRowName: {
     fontSize: 13,
-    color: colors.text,
+    color: t.colors.text,
   },
   resultRowMeta: {
     fontSize: 11,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
   resultRowPrice: {
     fontSize: 13,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
   },
   fieldsRow: {
     flexDirection: 'row',
@@ -822,10 +828,10 @@ const styles = StyleSheet.create({
   qtyStepper: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
   },
   qtyBtn: {
     paddingHorizontal: 10,
@@ -833,57 +839,57 @@ const styles = StyleSheet.create({
     borderRadius: 6,
   },
   qtyBtnPressed: {
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: t.colors.surfaceOverlay,
     transform: [{ scale: 0.92 }],
   },
   qtyInput: {
     fontSize: 14,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
     minWidth: 36,
     textAlign: 'center',
     paddingVertical: 4,
     paddingHorizontal: 2,
     borderLeftWidth: 1,
     borderRightWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
   },
   unitChip: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
     paddingHorizontal: 10,
     paddingVertical: 8,
   },
   unitChipText: {
     fontSize: 13,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
   },
   priceWrap: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
     paddingHorizontal: 10,
   },
   priceDollar: {
     fontSize: 14,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginRight: 4,
   },
   priceInput: {
     flex: 1,
     fontSize: 14,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
     paddingVertical: 8,
   },
   actionsRow: {
@@ -900,13 +906,13 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.background,
+    borderColor: t.colors.border,
+    backgroundColor: t.colors.bg,
   },
   cancelText: {
     fontSize: 13,
     fontWeight: '600',
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
   saveToBookChip: {
     flexDirection: 'row',
@@ -916,35 +922,35 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.background,
+    borderColor: t.colors.border,
+    backgroundColor: t.colors.bg,
   },
   saveToBookChipActive: {
-    borderColor: colors.primary,
-    backgroundColor: colors.primary + '18',
+    borderColor: t.colors.accent,
+    backgroundColor: t.colors.accentSubtle,
   },
   saveToBookText: {
     fontSize: 13,
     fontWeight: '600',
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
   saveToBookTextActive: {
-    color: colors.primary,
+    color: t.colors.accentText,
   },
   saveBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: colors.primary,
+    backgroundColor: t.colors.accent,
     paddingHorizontal: 14,
     paddingVertical: 9,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: colors.primary,
+    borderColor: t.colors.accent,
   },
   saveText: {
     fontSize: 13,
     fontWeight: '700',
-    color: '#FFFFFF',
+    color: t.colors.onAccent,
   },
-});
+}));

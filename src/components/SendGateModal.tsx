@@ -16,7 +16,7 @@ import { View, StyleSheet, Modal, TouchableOpacity } from 'react-native';
 import { Text, Surface, Button } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
-import { colors } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 
 interface SendGateModalProps {
   visible: boolean;
@@ -31,12 +31,14 @@ export function SendGateModal({
   onConnectSquare,
   onUpgrade,
 }: SendGateModalProps) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onDismiss}>
       <View style={styles.backdrop}>
         <Surface style={styles.card} elevation={4}>
           <TouchableOpacity style={styles.closeButton} onPress={onDismiss}>
-            <MaterialCommunityIcons name="close" size={20} color={colors.onSurface} />
+            <MaterialCommunityIcons name="close" size={20} color={themeColors.textSecondary} />
           </TouchableOpacity>
 
           <Text style={styles.title}>You're ready to send</Text>
@@ -44,8 +46,8 @@ export function SendGateModal({
 
           <Surface style={styles.option} elevation={1}>
             <View style={styles.optionHeader}>
-              <View style={[styles.iconCircle, { backgroundColor: colors.primary + '20' }]}>
-                <MaterialCommunityIcons name="bank-outline" size={20} color={colors.primary} />
+              <View style={[styles.iconCircle, { backgroundColor: themeColors.accentSubtle }]}>
+                <MaterialCommunityIcons name="bank-outline" size={20} color={themeColors.accentText} />
               </View>
               <View style={styles.optionHeaderText}>
                 <Text style={styles.optionTitle}>Send instantly</Text>
@@ -57,7 +59,7 @@ export function SendGateModal({
               A small platform fee (1.7%) is added to their bill on payment.
             </Text>
             <Button
-              mode="contained"
+              mode="contained" buttonColor={themeColors.accent} textColor={themeColors.onAccent}
               onPress={onConnectSquare}
               style={styles.optionButton}
               icon="bank-outline"
@@ -68,8 +70,8 @@ export function SendGateModal({
 
           <Surface style={styles.option} elevation={1}>
             <View style={styles.optionHeader}>
-              <View style={[styles.iconCircle, { backgroundColor: colors.secondary + '20' }]}>
-                <MaterialCommunityIcons name="crown-outline" size={20} color={colors.secondary} />
+              <View style={[styles.iconCircle, { backgroundColor: themeColors.accentSubtle }]}>
+                <MaterialCommunityIcons name="crown-outline" size={20} color={themeColors.accentText} />
               </View>
               <View style={styles.optionHeaderText}>
                 <Text style={styles.optionTitle}>Upgrade to Pro</Text>
@@ -95,7 +97,7 @@ export function SendGateModal({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   backdrop: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.55)',
@@ -106,7 +108,7 @@ const styles = StyleSheet.create({
   card: {
     width: '100%',
     maxWidth: 440,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderRadius: 16,
     padding: 20,
   },
@@ -124,17 +126,17 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 18,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
     marginBottom: 4,
     marginTop: 4,
   },
   subtitle: {
     fontSize: 13,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     marginBottom: 16,
   },
   option: {
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
     borderRadius: 12,
     padding: 14,
     marginBottom: 12,
@@ -161,13 +163,13 @@ const styles = StyleSheet.create({
   optionTitle: {
     fontSize: 15,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
   },
   optionBadge: {
     fontSize: 12,
     fontWeight: '700',
-    color: colors.primary,
-    backgroundColor: colors.primary + '15',
+    color: t.colors.accentText,
+    backgroundColor: t.colors.accentSubtle,
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: 10,
@@ -175,11 +177,11 @@ const styles = StyleSheet.create({
   },
   optionBody: {
     fontSize: 13,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     lineHeight: 18,
     marginBottom: 12,
   },
   optionButton: {
     width: '100%',
   },
-});
+}));

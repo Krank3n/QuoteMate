@@ -16,10 +16,11 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useStore } from '../../store/useStore';
+import { GridBackground } from '../../components/GridBackground';
 import { useCurrentDocument, useDocumentMode, usePersistDocument, getPreviewScreenName } from '../../utils/documentMode';
 import { LaborUnit } from '../../types';
 
-import { colors } from '../../theme';
+import { makeStyles, useThemeColors } from '../../theme';
 import {
   hoursForDisplay,
   hoursFromDisplay,
@@ -35,6 +36,8 @@ import { WebContainer } from '../../components/WebContainer';
 import { AlertModal } from '../../components/AlertModal';
 
 export function LaborMarkupScreen() {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const isEditFromPreview = route.params?.editing === true;
@@ -380,7 +383,7 @@ export function LaborMarkupScreen() {
             global input by the same amount so "extra" stays the same. */}
         {hasSectionsMode && currentQuote.sections && currentQuote.sections.length > 0 && (
           <View style={{ marginBottom: 12 }}>
-            <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+            <Text style={{ fontSize: 11, color: themeColors.textMuted, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 }}>
               Distribution across {currentQuote.sections.length} sections
             </Text>
             {currentQuote.sections.map((s) => {
@@ -402,7 +405,7 @@ export function LaborMarkupScreen() {
                     paddingVertical: 6,
                   }}
                 >
-                  <Text style={{ fontSize: 13, color: colors.text, flex: 1 }} numberOfLines={1}>
+                  <Text style={{ fontSize: 13, color: themeColors.text, flex: 1 }} numberOfLines={1}>
                     {s.name}
                   </Text>
                   <TouchableOpacity
@@ -410,7 +413,7 @@ export function LaborMarkupScreen() {
                       width: 28,
                       height: 28,
                       borderRadius: 6,
-                      backgroundColor: colors.primary + '15',
+                      backgroundColor: themeColors.accentSubtle,
                       alignItems: 'center',
                       justifyContent: 'center',
                       marginRight: 4,
@@ -421,10 +424,10 @@ export function LaborMarkupScreen() {
                     <MaterialCommunityIcons
                       name="minus"
                       size={16}
-                      color={canDecrement ? colors.primary : colors.textMuted}
+                      color={canDecrement ? themeColors.accent : themeColors.textMuted}
                     />
                   </TouchableOpacity>
-                  <Text style={{ fontSize: 12, color: colors.textMuted, minWidth: 56, textAlign: 'center' }}>
+                  <Text style={{ fontSize: 12, color: themeColors.textMuted, minWidth: 56, textAlign: 'center' }}>
                     {sectionTotalHours.toFixed(1)} {unitLabel}
                   </Text>
                   <TouchableOpacity
@@ -432,7 +435,7 @@ export function LaborMarkupScreen() {
                       width: 28,
                       height: 28,
                       borderRadius: 6,
-                      backgroundColor: colors.primary + '15',
+                      backgroundColor: themeColors.accentSubtle,
                       alignItems: 'center',
                       justifyContent: 'center',
                       marginLeft: 4,
@@ -440,9 +443,9 @@ export function LaborMarkupScreen() {
                     }}
                     onPress={() => handleStepSection(s.id, stepperIncrement)}
                   >
-                    <MaterialCommunityIcons name="plus" size={16} color={colors.primary} />
+                    <MaterialCommunityIcons name="plus" size={16} color={themeColors.accentText} />
                   </TouchableOpacity>
-                  <Text style={{ fontSize: 13, color: colors.text, fontWeight: '600', minWidth: 70, textAlign: 'right' }}>
+                  <Text style={{ fontSize: 13, color: themeColors.text, fontWeight: '600', minWidth: 70, textAlign: 'right' }}>
                     {formatCurrency(sectionDollars)}
                   </Text>
                 </View>
@@ -458,7 +461,7 @@ export function LaborMarkupScreen() {
           <Text
             style={{
               fontSize: 12,
-              color: extraHoursDerived > 0 ? colors.primary : colors.warning,
+              color: extraHoursDerived > 0 ? themeColors.accent : themeColors.warning,
               marginBottom: 8,
               fontWeight: '600',
             }}
@@ -475,7 +478,7 @@ export function LaborMarkupScreen() {
               width: 44,
               height: 44,
               borderRadius: 10,
-              backgroundColor: colors.primary + '15',
+              backgroundColor: themeColors.accentSubtle,
               alignItems: 'center',
               justifyContent: 'center',
             }}
@@ -485,7 +488,7 @@ export function LaborMarkupScreen() {
             <MaterialCommunityIcons
               name="minus"
               size={22}
-              color={(parseFloat(laborHours) || 0) <= 0 ? colors.textMuted : colors.primary}
+              color={(parseFloat(laborHours) || 0) <= 0 ? themeColors.textMuted : themeColors.accent}
             />
           </TouchableOpacity>
           <View style={{ flex: 1 }}>
@@ -504,13 +507,13 @@ export function LaborMarkupScreen() {
               width: 44,
               height: 44,
               borderRadius: 10,
-              backgroundColor: colors.primary + '15',
+              backgroundColor: themeColors.accentSubtle,
               alignItems: 'center',
               justifyContent: 'center',
             }}
             onPress={() => handleStepHours(stepperIncrement)}
           >
-            <MaterialCommunityIcons name="plus" size={22} color={colors.primary} />
+            <MaterialCommunityIcons name="plus" size={22} color={themeColors.accentText} />
           </TouchableOpacity>
         </View>
 
@@ -533,8 +536,8 @@ export function LaborMarkupScreen() {
             <Switch
               value={showLaborBreakdown}
               onValueChange={setShowLaborBreakdown}
-              trackColor={{ false: '#D1D5DB', true: colors.primary + '60' }}
-              thumbColor={showLaborBreakdown ? colors.primary : '#F3F4F6'}
+              trackColor={{ false: '#D1D5DB', true: themeColors.accentSubtle }}
+              thumbColor={showLaborBreakdown ? themeColors.accent : '#F3F4F6'}
             />
           </View>
         )}
@@ -590,7 +593,7 @@ export function LaborMarkupScreen() {
               <Surface style={styles.travelCard}>
                 <View style={styles.travelCardTop}>
                   <View style={styles.travelCardIcon}>
-                    <MaterialCommunityIcons name="map-marker-distance" size={20} color={colors.primary} />
+                    <MaterialCommunityIcons name="map-marker-distance" size={20} color={themeColors.accentText} />
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.travelDistance}>~{estimatedDistance}km from your business</Text>
@@ -614,7 +617,7 @@ export function LaborMarkupScreen() {
                       }}
                       hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                     >
-                      <MaterialCommunityIcons name="minus" size={16} color={colors.text} />
+                      <MaterialCommunityIcons name="minus" size={16} color={themeColors.text} />
                     </Pressable>
                     <RNTextInput
                       style={styles.travelStepperInput}
@@ -639,7 +642,7 @@ export function LaborMarkupScreen() {
                       }}
                       hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                     >
-                      <MaterialCommunityIcons name="plus" size={16} color={colors.text} />
+                      <MaterialCommunityIcons name="plus" size={16} color={themeColors.text} />
                     </Pressable>
                   </View>
                   <Text style={styles.travelStepperUnit}>%</Text>
@@ -650,7 +653,7 @@ export function LaborMarkupScreen() {
                     setTravelDismissed(true);
                   }}
                 >
-                  <MaterialCommunityIcons name="close" size={14} color="#ef4444" />
+                  <MaterialCommunityIcons name="close" size={14} color={themeColors.error} />
                   <Text style={styles.travelDismissText}>Dismiss</Text>
                 </TouchableOpacity>
               </View>
@@ -665,7 +668,7 @@ export function LaborMarkupScreen() {
                   setTravelAdjustment(lastTravelValue);
                 }}
               >
-                <MaterialCommunityIcons name="restore" size={14} color={colors.primary} />
+                <MaterialCommunityIcons name="restore" size={14} color={themeColors.accentText} />
                 <Text style={styles.travelUndoText}>Restore</Text>
               </TouchableOpacity>
             </View>
@@ -682,7 +685,7 @@ export function LaborMarkupScreen() {
                 style={styles.travelCtaButton}
                 onPress={() => navigation.navigate('BusinessProfile')}
               >
-                <MaterialCommunityIcons name="map-marker-plus" size={18} color={colors.primary} />
+                <MaterialCommunityIcons name="map-marker-plus" size={18} color={themeColors.accentText} />
                 <Text style={styles.travelCtaButtonText}>Set your business address</Text>
               </TouchableOpacity>
             </>
@@ -695,7 +698,7 @@ export function LaborMarkupScreen() {
                 style={styles.travelCtaButton}
                 onPress={() => navigation.navigate('CustomerDetails')}
               >
-                <MaterialCommunityIcons name="map-marker-plus" size={18} color={colors.primary} />
+                <MaterialCommunityIcons name="map-marker-plus" size={18} color={themeColors.accentText} />
                 <Text style={styles.travelCtaButtonText}>Add the job address</Text>
               </TouchableOpacity>
             </>
@@ -708,7 +711,7 @@ export function LaborMarkupScreen() {
                 style={styles.travelCtaButton}
                 onPress={() => navigation.navigate('CustomerDetails')}
               >
-                <MaterialCommunityIcons name="map-marker-alert" size={18} color={colors.primary} />
+                <MaterialCommunityIcons name="map-marker-alert" size={18} color={themeColors.accentText} />
                 <Text style={styles.travelCtaButtonText}>Fix the address</Text>
               </TouchableOpacity>
             </>
@@ -821,15 +824,16 @@ export function LaborMarkupScreen() {
       behavior="padding"
       keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
     >
+      <GridBackground />
       {scrollContent}
     </KeyboardAvoidingView>
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   outerContainer: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
     ...(Platform.OS === 'web' && {
       display: 'flex' as any,
       flexDirection: 'column' as any,
@@ -867,12 +871,12 @@ const styles = StyleSheet.create({
   sectionLine: {
     flex: 1,
     height: 1,
-    backgroundColor: colors.border,
+    backgroundColor: t.colors.border,
   },
   sectionHeaderTitle: {
     fontSize: 13,
     fontWeight: '600',
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     textTransform: 'uppercase',
     letterSpacing: 0.8,
   },
@@ -885,7 +889,7 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: 8,
     marginTop: 12,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
   },
   calculationLabel: {
     fontSize: 16,
@@ -894,14 +898,14 @@ const styles = StyleSheet.create({
   calculationValue: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: colors.primary,
+    color: t.colors.money,
   },
   summarySection: {
     margin: 20,
     padding: 20,
     borderRadius: 8,
     elevation: 3,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
   },
   summaryRow: {
     flexDirection: 'row',
@@ -910,7 +914,7 @@ const styles = StyleSheet.create({
   },
   summaryLabel: {
     fontSize: 14,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
   },
   summaryValue: {
     fontSize: 14,
@@ -931,12 +935,12 @@ const styles = StyleSheet.create({
   totalValue: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: colors.primary,
+    color: t.colors.money,
   },
   travelCard: {
     borderRadius: 8,
     padding: 14,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     marginBottom: 12,
   },
   travelCardTop: {
@@ -948,23 +952,23 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: 'rgba(16, 185, 129, 0.12)',
+    backgroundColor: t.colors.moneySubtle,
     justifyContent: 'center',
     alignItems: 'center',
   },
   travelDistance: {
     fontSize: 15,
     fontWeight: '500',
-    color: colors.text,
+    color: t.colors.text,
   },
   travelPercent: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: colors.primary,
+    color: t.colors.accentText,
   },
   travelFuelText: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginTop: 2,
   },
   travelButtonsRow: {
@@ -980,10 +984,10 @@ const styles = StyleSheet.create({
   travelStepper: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
   },
   travelStepperBtn: {
     paddingHorizontal: 10,
@@ -991,24 +995,24 @@ const styles = StyleSheet.create({
     borderRadius: 6,
   },
   travelStepperBtnPressed: {
-    backgroundColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: t.colors.surfaceOverlay,
     transform: [{ scale: 0.9 }],
   },
   travelStepperInput: {
     fontSize: 15,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
     minWidth: 36,
     textAlign: 'center',
     paddingVertical: 4,
     paddingHorizontal: 2,
     borderLeftWidth: 1,
     borderRightWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
   },
   travelStepperUnit: {
     fontSize: 13,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginLeft: 8,
   },
   travelDismissBtn: {
@@ -1018,12 +1022,12 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 14,
     borderRadius: 8,
-    backgroundColor: 'rgba(239, 68, 68, 0.12)',
+    backgroundColor: t.colors.errorSubtle,
   },
   travelDismissText: {
     fontSize: 13,
     fontWeight: '500',
-    color: '#ef4444',
+    color: t.colors.error,
   },
   travelDismissedRow: {
     flexDirection: 'row',
@@ -1032,7 +1036,7 @@ const styles = StyleSheet.create({
   },
   travelDismissedText: {
     fontSize: 14,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
   },
   travelUndoBtn: {
     flexDirection: 'row',
@@ -1041,21 +1045,21 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 14,
     borderRadius: 8,
-    backgroundColor: 'rgba(16, 185, 129, 0.12)',
+    backgroundColor: t.colors.moneySubtle,
   },
   travelUndoText: {
     fontSize: 13,
     fontWeight: '500',
-    color: colors.primary,
+    color: t.colors.accentText,
   },
   travelHintText: {
     fontSize: 13,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     fontStyle: 'italic',
   },
   travelCtaText: {
     fontSize: 14,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     marginBottom: 12,
     lineHeight: 20,
   },
@@ -1068,13 +1072,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: colors.primary,
-    backgroundColor: colors.surface,
+    borderColor: t.colors.accent,
+    backgroundColor: t.colors.surfaceRaised,
   },
   travelCtaButtonText: {
     fontSize: 14,
     fontWeight: '600',
-    color: colors.primary,
+    color: t.colors.accentText,
   },
   showMarkupToggle: {
     flexDirection: 'row',
@@ -1085,11 +1089,11 @@ const styles = StyleSheet.create({
   showMarkupTitle: {
     fontSize: 14,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
   },
   showMarkupSubtitle: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginTop: 2,
     lineHeight: 16,
   },
@@ -1099,24 +1103,24 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
     overflow: 'hidden',
   },
   unitToggleBtn: {
     flex: 1,
     paddingVertical: 10,
     alignItems: 'center',
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
   },
   unitToggleBtnActive: {
-    backgroundColor: colors.primary,
+    backgroundColor: t.colors.accent,
   },
   unitToggleText: {
     fontSize: 14,
     fontWeight: '600',
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
   unitToggleTextActive: {
-    color: '#FFFFFF',
+    color: t.colors.onAccent,
   },
-});
+}));

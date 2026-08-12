@@ -13,7 +13,8 @@ import {
   Button,
   IconButton,
 } from 'react-native-paper';
-import { colors } from '../theme';
+import type { Tokens } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 import { successTap, errorTap } from '../utils/haptics';
 
 export type AlertType = 'success' | 'warning' | 'error' | 'info';
@@ -46,31 +47,31 @@ interface ConfettiPiece {
 }
 
 // Get theme colors based on alert type
-function getThemeColors(type: AlertType) {
+function alertPalette(type: AlertType, themeColors: Tokens) {
   switch (type) {
     case 'success':
       return {
-        iconColor: colors.success,
-        iconBgColor: colors.successBg,
-        buttonColor: colors.success,
+        iconColor: themeColors.money,
+        iconBgColor: themeColors.moneySubtle,
+        buttonColor: themeColors.money,
       };
     case 'warning':
       return {
-        iconColor: colors.warning,
-        iconBgColor: colors.warningBg,
-        buttonColor: colors.warning,
+        iconColor: themeColors.warning,
+        iconBgColor: themeColors.warningSubtle,
+        buttonColor: themeColors.warning,
       };
     case 'error':
       return {
-        iconColor: colors.error,
-        iconBgColor: colors.errorBg,
-        buttonColor: colors.error,
+        iconColor: themeColors.error,
+        iconBgColor: themeColors.errorSubtle,
+        buttonColor: themeColors.error,
       };
     case 'info':
       return {
-        iconColor: colors.info,
-        iconBgColor: colors.infoBg,
-        buttonColor: colors.info,
+        iconColor: themeColors.info,
+        iconBgColor: themeColors.infoSubtle,
+        buttonColor: themeColors.info,
       };
   }
 }
@@ -105,6 +106,8 @@ export function AlertModal({
   secondaryButtonLoading = false,
   secondaryActionComponent,
 }: AlertModalProps) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const scaleAnim = useRef(new Animated.Value(0)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const checkScaleAnim = useRef(new Animated.Value(0)).current;
@@ -152,7 +155,7 @@ export function AlertModal({
       // Lazy-allocate confetti pieces + values the first time we show with
       // confetti enabled. Subsequent shows reuse the same arrays.
       if (enableConfetti && confetti.length === 0) {
-        const confettiColors = [colors.success, colors.secondary, colors.info, colors.primary];
+        const confettiColors = [themeColors.money, themeColors.warning, themeColors.info, themeColors.accent];
         const pieces: ConfettiPiece[] = Array.from({ length: 25 }, (_, i) => ({
           id: i,
           x: Math.random() * 100,
@@ -287,7 +290,7 @@ export function AlertModal({
     };
   }, [visible, enableConfetti, confetti]);
 
-  const themeColors = getThemeColors(type);
+  const alert = alertPalette(type, themeColors);
   const displayIcon = icon || getDefaultIcon(type);
 
   const handlePrimaryAction = () => {
@@ -353,7 +356,7 @@ export function AlertModal({
           <Animated.View
             style={[
               styles.iconContainer,
-              { backgroundColor: themeColors.iconBgColor },
+              { backgroundColor: alert.iconBgColor },
               {
                 transform: [
                   { scale: checkScaleAnim },
@@ -364,7 +367,7 @@ export function AlertModal({
           >
             <IconButton
               icon={displayIcon}
-              iconColor={themeColors.iconColor}
+              iconColor={alert.iconColor}
               size={60}
             />
           </Animated.View>
@@ -380,7 +383,7 @@ export function AlertModal({
                 mode="outlined"
                 onPress={secondaryButtonAction}
                 style={[styles.button, styles.secondaryButton]}
-                textColor={colors.primary}
+                textColor={themeColors.accent}
                 loading={secondaryButtonLoading}
                 disabled={secondaryButtonLoading}
               >
@@ -393,8 +396,8 @@ export function AlertModal({
               mode="contained"
               onPress={handlePrimaryAction}
               style={styles.button}
-              buttonColor={themeColors.buttonColor}
-              textColor={colors.white}
+              buttonColor={alert.buttonColor}
+              textColor={themeColors.onAccent}
               loading={primaryButtonLoading}
               disabled={primaryButtonLoading}
             >
@@ -407,7 +410,7 @@ export function AlertModal({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   modalContainer: {
     flex: 1,
     alignItems: 'center',
@@ -422,14 +425,14 @@ const styles = StyleSheet.create({
   card: {
     width: '100%',
     maxWidth: 400,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderRadius: 20,
     padding: 32,
     alignItems: 'center',
     ...Platform.select({
       android: {
         elevation: 8,
-        backgroundColor: colors.surface,
+        backgroundColor: t.colors.surfaceRaised,
       },
       ios: {
         shadowColor: '#000',
@@ -452,15 +455,15 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 26,
-    fontWeight: 'bold',
+    fontFamily: 'Archivo-Bold',
     marginBottom: 12,
-    color: colors.text,
+    color: t.colors.text,
     textAlign: 'center',
   },
   message: {
     fontSize: 16,
     marginBottom: 24,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     textAlign: 'center',
     lineHeight: 24,
   },
@@ -473,6 +476,6 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   secondaryButton: {
-    borderColor: colors.primary,
+    borderColor: t.colors.accent,
   },
-});
+}));

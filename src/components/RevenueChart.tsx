@@ -9,7 +9,7 @@ import { Text, Surface } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { format, subMonths, startOfMonth, endOfMonth, isWithinInterval } from 'date-fns';
 
-import { colors } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 import { Quote } from '../types';
 import { formatCurrency } from '../utils/quoteCalculator';
 
@@ -28,6 +28,8 @@ interface MonthData {
 }
 
 export function RevenueChart({ quotes, onMonthPress }: RevenueChartProps) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const [showBreakdown, setShowBreakdown] = useState(false);
 
   // Calculate monthly data for last 6 months
@@ -89,7 +91,7 @@ export function RevenueChart({ quotes, onMonthPress }: RevenueChartProps) {
               <View style={{
                 flexDirection: 'row',
                 alignItems: 'center',
-                backgroundColor: isTrendUp ? colors.successBg : colors.errorBg,
+                backgroundColor: isTrendUp ? themeColors.moneySubtle : themeColors.errorSubtle,
                 paddingHorizontal: 7,
                 paddingVertical: 3,
                 borderRadius: 8,
@@ -98,12 +100,12 @@ export function RevenueChart({ quotes, onMonthPress }: RevenueChartProps) {
                 <MaterialCommunityIcons
                   name={isTrendUp ? 'trending-up' : 'trending-down'}
                   size={13}
-                  color={isTrendUp ? colors.success : colors.error}
+                  color={isTrendUp ? themeColors.money : themeColors.error}
                 />
                 <Text style={{
                   fontSize: 11,
                   fontWeight: '700',
-                  color: isTrendUp ? colors.success : colors.error,
+                  color: isTrendUp ? themeColors.money : themeColors.error,
                 }}>
                   {isTrendUp ? '+' : ''}{trendPercent.toFixed(0)}%
                 </Text>
@@ -145,8 +147,8 @@ export function RevenueChart({ quotes, onMonthPress }: RevenueChartProps) {
                         {
                           height: heightPct,
                           backgroundColor: isCurrentMonth
-                            ? colors.primary
-                            : colors.surfaceLight,
+                            ? themeColors.accent
+                            : themeColors.surfaceOverlay,
                         },
                       ]}
                     >
@@ -181,7 +183,7 @@ export function RevenueChart({ quotes, onMonthPress }: RevenueChartProps) {
             <MaterialCommunityIcons
               name={showBreakdown ? 'chevron-up' : 'chevron-down'}
               size={18}
-              color={colors.onSurface}
+              color={themeColors.textSecondary}
             />
           </View>
         </TouchableOpacity>
@@ -199,7 +201,7 @@ export function RevenueChart({ quotes, onMonthPress }: RevenueChartProps) {
                         styles.breakdownDot,
                         {
                           backgroundColor:
-                            month === currentMonth ? colors.primary : colors.surfaceLight,
+                            month === currentMonth ? themeColors.accent : themeColors.surfaceOverlay,
                         },
                       ]}
                     />
@@ -222,13 +224,13 @@ export function RevenueChart({ quotes, onMonthPress }: RevenueChartProps) {
                 <MaterialCommunityIcons
                   name="chart-line"
                   size={16}
-                  color={colors.secondary}
+                  color={themeColors.warning}
                 />
-                <Text style={[styles.breakdownMonth, { color: colors.secondary, marginLeft: 8 }]}>
+                <Text style={[styles.breakdownMonth, { color: themeColors.warning, marginLeft: 8 }]}>
                   Monthly Average
                 </Text>
               </View>
-              <Text style={[styles.breakdownAmount, { color: colors.secondary }]}>
+              <Text style={[styles.breakdownAmount, { color: themeColors.warning }]}>
                 {formatCurrency(avgMonthly)}
               </Text>
             </View>
@@ -241,7 +243,7 @@ export function RevenueChart({ quotes, onMonthPress }: RevenueChartProps) {
 
 const CHART_HEIGHT = 160;
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   container: {
     marginBottom: 0,
   },
@@ -249,7 +251,7 @@ const styles = StyleSheet.create({
   chartCard: {
     padding: 20,
     borderRadius: 16,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     elevation: 2,
     marginBottom: 12,
   },
@@ -262,11 +264,11 @@ const styles = StyleSheet.create({
   chartTitle: {
     fontSize: 16,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
   },
   chartSubtitle: {
     fontSize: 12,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     marginTop: 2,
   },
   totalBadge: {
@@ -274,14 +276,14 @@ const styles = StyleSheet.create({
   },
   totalLabel: {
     fontSize: 11,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
   totalValue: {
     fontSize: 16,
     fontWeight: '700',
-    color: colors.primary,
+    color: t.colors.money,
     marginTop: 2,
   },
   // Chart Area
@@ -299,7 +301,7 @@ const styles = StyleSheet.create({
   },
   gridLine: {
     height: StyleSheet.hairlineWidth,
-    backgroundColor: colors.surfaceLight,
+    backgroundColor: t.colors.surfaceOverlay,
   },
   barsContainer: {
     flexDirection: 'row',
@@ -335,19 +337,19 @@ const styles = StyleSheet.create({
   },
   barLabel: {
     fontSize: 11,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     marginTop: 8,
     fontWeight: '500',
   },
   barLabelActive: {
-    color: colors.primary,
+    color: t.colors.accentText,
     fontWeight: '700',
   },
   // Breakdown Card
   breakdownCard: {
     padding: 20,
     borderRadius: 16,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     elevation: 2,
     marginBottom: 12,
   },
@@ -359,7 +361,7 @@ const styles = StyleSheet.create({
   breakdownTitle: {
     fontSize: 16,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
   },
   breakdownToggle: {
     flexDirection: 'row',
@@ -368,7 +370,7 @@ const styles = StyleSheet.create({
   },
   breakdownToggleText: {
     fontSize: 13,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     fontWeight: '500',
   },
   breakdownRow: {
@@ -377,7 +379,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.surfaceLight,
+    borderBottomColor: t.colors.surfaceOverlay,
   },
   breakdownLeft: {
     flexDirection: 'row',
@@ -391,7 +393,7 @@ const styles = StyleSheet.create({
   },
   breakdownMonth: {
     fontSize: 14,
-    color: colors.text,
+    color: t.colors.text,
   },
   breakdownRight: {
     alignItems: 'flex-end',
@@ -399,11 +401,11 @@ const styles = StyleSheet.create({
   breakdownAmount: {
     fontSize: 14,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
   },
   breakdownCount: {
     fontSize: 11,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     marginTop: 2,
   },
   averageRow: {
@@ -413,4 +415,4 @@ const styles = StyleSheet.create({
     paddingTop: 14,
     marginTop: 4,
   },
-});
+}));

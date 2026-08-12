@@ -34,7 +34,7 @@ import { format } from 'date-fns';
 
 import { useJobStore } from '../../store/useJobStore';
 import { useStore } from '../../store/useStore';
-import { colors } from '../../theme';
+import { makeStyles, useThemeColors } from '../../theme';
 import { WebContainer } from '../../components/WebContainer';
 import { FixedBottomButton } from '../../components/FixedBottomButton';
 import { JobPhotos } from '../../components/JobPhotos';
@@ -77,8 +77,11 @@ import {
   type WriteUpFields,
   type SiteMemory,
 } from './reportDraft';
+import { GridBackground } from '../../components/GridBackground';
 
 export function ServiceReportScreen() {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const jobId: string = route.params?.jobId;
@@ -342,12 +345,12 @@ export function ServiceReportScreen() {
             <MaterialCommunityIcons
               name={'file-alert-outline' as any}
               size={44}
-              color={colors.textMuted}
+              color={themeColors.textMuted}
             />
             <Text style={styles.missingText}>This job could not be found.</Text>
           </>
         ) : (
-          <ActivityIndicator color={colors.primary} />
+          <ActivityIndicator color={themeColors.accentText} />
         )}
       </View>
     );
@@ -804,6 +807,7 @@ export function ServiceReportScreen() {
       behavior="padding"
       keyboardVerticalOffset={Platform.OS === 'ios' ? -48 : 0}
     >
+      <GridBackground />
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
@@ -833,13 +837,13 @@ export function ServiceReportScreen() {
             <MaterialCommunityIcons
               name="calendar"
               size={20}
-              color={colors.primary}
+              color={themeColors.accentText}
             />
             <Text style={styles.dateText}>{visitDateLabel}</Text>
             <MaterialCommunityIcons
               name={showCalendar ? 'chevron-up' : 'chevron-down'}
               size={22}
-              color={colors.textMuted}
+              color={themeColors.textMuted}
             />
           </TouchableOpacity>
           {showCalendar && (
@@ -854,16 +858,16 @@ export function ServiceReportScreen() {
               markedDates={{
                 [format(new Date(form.visitDate), 'yyyy-MM-dd')]: {
                   selected: true,
-                  selectedColor: colors.primary,
+                  selectedColor: themeColors.accent,
                 },
               }}
               theme={{
-                calendarBackground: colors.surface,
-                dayTextColor: colors.text,
-                monthTextColor: colors.text,
-                textDisabledColor: colors.textMuted,
-                arrowColor: colors.primary,
-                todayTextColor: colors.primary,
+                calendarBackground: themeColors.surfaceRaised,
+                dayTextColor: themeColors.text,
+                monthTextColor: themeColors.text,
+                textDisabledColor: themeColors.textMuted,
+                arrowColor: themeColors.accent,
+                todayTextColor: themeColors.accent,
               }}
               style={styles.calendar}
             />
@@ -899,7 +903,7 @@ export function ServiceReportScreen() {
               <MaterialCommunityIcons
                 name="history"
                 size={18}
-                color={colors.primary}
+                color={themeColors.accentText}
               />
               <Text style={styles.carriedText}>
                 Filled in from your last visit here —{' '}
@@ -947,7 +951,7 @@ export function ServiceReportScreen() {
                 <MaterialCommunityIcons
                   name="close-circle"
                   size={22}
-                  color={colors.textMuted}
+                  color={themeColors.textMuted}
                 />
               </TouchableOpacity>
             </View>
@@ -988,7 +992,7 @@ export function ServiceReportScreen() {
                 <MaterialCommunityIcons
                   name={item.checked ? 'checkbox-marked' : 'checkbox-blank-outline'}
                   size={24}
-                  color={item.checked ? colors.primary : colors.textMuted}
+                  color={item.checked ? themeColors.accent : themeColors.textMuted}
                 />
               </TouchableOpacity>
               <TextInput
@@ -1010,7 +1014,7 @@ export function ServiceReportScreen() {
                 <MaterialCommunityIcons
                   name="close-circle"
                   size={22}
-                  color={colors.textMuted}
+                  color={themeColors.textMuted}
                 />
               </TouchableOpacity>
             </View>
@@ -1101,12 +1105,12 @@ export function ServiceReportScreen() {
               activeOpacity={0.8}
             >
               {quoting ? (
-                <ActivityIndicator size="small" color={colors.primary} />
+                <ActivityIndicator size="small" color={themeColors.accentText} />
               ) : (
                 <MaterialCommunityIcons
                   name="file-document-outline"
                   size={18}
-                  color={colors.primary}
+                  color={themeColors.accentText}
                 />
               )}
               <Text style={styles.quoteWorkText}>
@@ -1122,12 +1126,12 @@ export function ServiceReportScreen() {
             activeOpacity={0.8}
           >
             {composing ? (
-              <ActivityIndicator size="small" color={colors.primary} />
+              <ActivityIndicator size="small" color={themeColors.accentText} />
             ) : (
               <MaterialCommunityIcons
                 name="auto-fix"
                 size={18}
-                color={colors.primary}
+                color={themeColors.accentText}
               />
             )}
             <Text style={styles.writeUpText}>
@@ -1148,7 +1152,7 @@ export function ServiceReportScreen() {
               <MaterialCommunityIcons
                 name="undo-variant"
                 size={14}
-                color={colors.textSecondary}
+                color={themeColors.textMuted}
               />
               <Text style={styles.undoCleanupChipText}>
                 Cleaned up — undo and put my wording back
@@ -1271,6 +1275,8 @@ function SectionLabel({
   // rather than as another button in the body — the screen is long enough.
   action?: { label: string; onPress: () => void };
 }) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   return (
     <View style={styles.sectionLabelRow}>
       <Text style={styles.sectionLabel}>{text}</Text>
@@ -1310,6 +1316,8 @@ function SuggestionChips({
   onAdd: (text: string) => void;
   onClear: () => void;
 }) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   return (
     <View style={styles.suggestionBlock}>
       <View style={styles.suggestionHeader}>
@@ -1333,7 +1341,7 @@ function SuggestionChips({
             accessibilityRole="button"
             accessibilityLabel={`Add ${text}`}
           >
-            <MaterialCommunityIcons name="plus" size={14} color={colors.primary} />
+            <MaterialCommunityIcons name="plus" size={14} color={themeColors.accentText} />
             <Text style={styles.chipText}>{text}</Text>
           </TouchableOpacity>
         ))}
@@ -1343,32 +1351,34 @@ function SuggestionChips({
 }
 
 function AddRow({ label, onPress }: { label: string; onPress: () => void }) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   return (
     <TouchableOpacity style={styles.addRow} onPress={onPress} activeOpacity={0.7}>
-      <MaterialCommunityIcons name="plus-circle-outline" size={20} color={colors.primary} />
+      <MaterialCommunityIcons name="plus-circle-outline" size={20} color={themeColors.accentText} />
       <Text style={styles.addRowText}>{label}</Text>
     </TouchableOpacity>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
+const useStyles = makeStyles((t) => ({
+  container: { flex: 1, backgroundColor: t.colors.bg },
   scrollContent: { padding: 16, paddingBottom: 160 },
   centered: { justifyContent: 'center', alignItems: 'center', gap: 12, padding: 32 },
-  missingText: { fontSize: 15, color: colors.textMuted, textAlign: 'center' },
+  missingText: { fontSize: 15, color: t.colors.textMuted, textAlign: 'center' },
   headerCard: {
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderRadius: 16,
     padding: 16,
     marginBottom: 8,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
   },
-  customerName: { fontSize: 18, fontWeight: '700', color: colors.text },
-  customerMeta: { fontSize: 13, color: colors.textMuted, marginTop: 2 },
+  customerName: { fontSize: 18, fontWeight: '700', color: t.colors.text },
+  customerMeta: { fontSize: 13, color: t.colors.textMuted, marginTop: 2 },
   reportNumber: {
     fontSize: 12,
-    color: colors.textSecondary,
+    color: t.colors.textMuted,
     marginTop: 8,
     fontWeight: '600',
   },
@@ -1379,33 +1389,33 @@ const styles = StyleSheet.create({
     marginTop: 18,
     marginBottom: 6,
   },
-  sectionLabel: { fontSize: 14, fontWeight: '700', color: colors.text },
-  optional: { fontSize: 12, color: colors.textMuted, fontStyle: 'italic' },
+  sectionLabel: { fontSize: 14, fontWeight: '700', color: t.colors.text },
+  optional: { fontSize: 12, color: t.colors.textMuted, fontStyle: 'italic' },
   // Pushes a section action to the right-hand end of the heading row.
   sectionActionButton: { marginLeft: 'auto' },
-  sectionAction: { fontSize: 12, color: colors.primary, fontWeight: '600' },
-  input: { backgroundColor: colors.surface, marginBottom: 4 },
+  sectionAction: { fontSize: 12, color: t.colors.accentText, fontWeight: '600' },
+  input: { backgroundColor: t.colors.surfaceRaised, marginBottom: 4 },
   dateRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
     paddingHorizontal: 14,
     paddingVertical: 14,
   },
-  dateText: { flex: 1, fontSize: 15, color: colors.text, fontWeight: '600' },
+  dateText: { flex: 1, fontSize: 15, color: t.colors.text, fontWeight: '600' },
   calendar: {
     marginTop: 8,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
     overflow: 'hidden',
   },
   listRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
-  listInput: { flex: 1, backgroundColor: colors.surface },
+  listInput: { flex: 1, backgroundColor: t.colors.surfaceRaised },
   rowRemove: { padding: 2 },
   checkbox: { padding: 2 },
   addRow: {
@@ -1415,7 +1425,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     marginTop: 2,
   },
-  addRowText: { fontSize: 14, color: colors.primary, fontWeight: '600' },
+  addRowText: { fontSize: 14, color: t.colors.accentText, fontWeight: '600' },
   writeUpButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1425,13 +1435,13 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: colors.primary,
-    backgroundColor: colors.surface,
+    borderColor: t.colors.accent,
+    backgroundColor: t.colors.surfaceRaised,
   },
-  writeUpText: { fontSize: 14, fontWeight: '700', color: colors.primary },
+  writeUpText: { fontSize: 14, fontWeight: '700', color: t.colors.accentText },
   writeUpHint: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginTop: 6,
     lineHeight: 16,
   },
@@ -1446,7 +1456,7 @@ const styles = StyleSheet.create({
   undoCleanupChipText: {
     fontSize: 12,
     fontWeight: '600',
-    color: colors.textSecondary,
+    color: t.colors.textMuted,
   },
   // Only a nudge — the hero variant carries its own vertical rhythm, and
   // its size and centred label are what mark it as heading the block below
@@ -1461,15 +1471,15 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: colors.primary,
-    backgroundColor: colors.surface,
+    borderColor: t.colors.accent,
+    backgroundColor: t.colors.surfaceRaised,
   },
-  quoteWorkText: { fontSize: 14, fontWeight: '700', color: colors.primary },
+  quoteWorkText: { fontSize: 14, fontWeight: '700', color: t.colors.accentText },
   suggestionBlock: {
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
     padding: 12,
     marginTop: 4,
   },
@@ -1477,35 +1487,35 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
     paddingVertical: 10,
     paddingHorizontal: 12,
     marginTop: 12,
   },
-  carriedText: { flex: 1, fontSize: 12, color: colors.textMuted, lineHeight: 17 },
-  carriedUndo: { fontSize: 12, color: colors.primary, fontWeight: '600' },
+  carriedText: { flex: 1, fontSize: 12, color: t.colors.textMuted, lineHeight: 17 },
+  carriedUndo: { fontSize: 12, color: t.colors.accentText, fontWeight: '600' },
   suggestionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
     marginBottom: 8,
   },
-  suggestionLabel: { flex: 1, fontSize: 12, color: colors.textMuted },
-  suggestionClear: { fontSize: 12, color: colors.textSecondary, fontWeight: '600' },
+  suggestionLabel: { flex: 1, fontSize: 12, color: t.colors.textMuted },
+  suggestionClear: { fontSize: 12, color: t.colors.textMuted, fontWeight: '600' },
   chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
     borderWidth: 1,
-    borderColor: colors.primary,
+    borderColor: t.colors.accent,
     borderRadius: 16,
     paddingVertical: 6,
     paddingHorizontal: 10,
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
     // flexWrap on the row wraps BETWEEN chips, not inside one. Write-up
     // additions are whole sentences, so without these a long chip runs off
     // the side of the card instead of wrapping within it.
@@ -1514,8 +1524,10 @@ const styles = StyleSheet.create({
   },
   chipText: {
     fontSize: 13,
-    color: colors.primary,
+    // accentText, not accent: the fill colour is only 2.52:1 as TEXT on the
+    // light canvas. Fine in dark, unreadable in light.
+    color: t.colors.accentText,
     fontWeight: '600',
     flexShrink: 1,
   },
-});
+}));

@@ -14,10 +14,11 @@ import { Text } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
 import type { Document } from '../types/document';
-import { colors } from '../theme';
+import type { Tokens } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
 import { PaymentChip } from './PaymentChip';
-import { STAGE_META } from './StageSheet';
+import { stageMetaFor } from './StageSheet';
 import { selectionTap } from '../utils/haptics';
 
 interface DocumentRowProps {
@@ -36,11 +37,13 @@ interface DocumentRowProps {
   onConvertToInvoice?: (doc: Document) => void;
 }
 
-function stageShortLabel(stage: Document['stage']): string {
-  return STAGE_META[stage]?.chipLabel ?? stage;
+function stageShortLabel(stage: Document['stage'], themeColors: Tokens): string {
+  return stageMetaFor(themeColors)[stage]?.chipLabel ?? stage;
 }
 
 function XeroSyncChip({ status }: { status?: Document['xeroSyncStatus'] }) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   // Render only the states the tradie should notice. 'not_synced'/'syncing'
   // are transient or expected and would just add visual noise.
   if (status === 'synced') {
@@ -48,11 +51,11 @@ function XeroSyncChip({ status }: { status?: Document['xeroSyncStatus'] }) {
       <View
         style={[
           styles.xeroChip,
-          { backgroundColor: colors.successBg, borderColor: colors.success + '44' },
+          { backgroundColor: themeColors.moneySubtle, borderColor: themeColors.moneySubtle },
         ]}
       >
-        <MaterialCommunityIcons name={'cloud-check' as any} size={12} color={colors.success} />
-        <Text style={[styles.xeroLabel, { color: colors.success }]}>In Xero</Text>
+        <MaterialCommunityIcons name={'cloud-check' as any} size={12} color={themeColors.money} />
+        <Text style={[styles.xeroLabel, { color: themeColors.money }]}>In Xero</Text>
       </View>
     );
   }
@@ -61,11 +64,11 @@ function XeroSyncChip({ status }: { status?: Document['xeroSyncStatus'] }) {
       <View
         style={[
           styles.xeroChip,
-          { backgroundColor: colors.errorBg, borderColor: colors.error + '44' },
+          { backgroundColor: themeColors.errorSubtle, borderColor: themeColors.errorSubtle },
         ]}
       >
-        <MaterialCommunityIcons name={'cloud-alert' as any} size={12} color={colors.error} />
-        <Text style={[styles.xeroLabel, { color: colors.error }]}>Xero failed</Text>
+        <MaterialCommunityIcons name={'cloud-alert' as any} size={12} color={themeColors.error} />
+        <Text style={[styles.xeroLabel, { color: themeColors.error }]}>Xero failed</Text>
       </View>
     );
   }
@@ -81,8 +84,10 @@ export function DocumentRow({
   onTakePayment,
   onConvertToInvoice,
 }: DocumentRowProps) {
-  const meta = STAGE_META[doc.stage];
-  const label = stageShortLabel(doc.stage);
+  const styles = useStyles();
+  const themeColors = useThemeColors();
+  const meta = stageMetaFor(themeColors)[doc.stage];
+  const label = stageShortLabel(doc.stage, themeColors);
   // Convert-to-invoice is only legal on a quote that hasn't already been
   // invoiced and is sitting in a stage where conversion makes sense.
   const canConvert =
@@ -109,7 +114,7 @@ export function DocumentRow({
         <MaterialCommunityIcons
           name={(doc.type === 'invoice' ? 'receipt' : 'file-document-outline') as any}
           size={18}
-          color={colors.primary}
+          color={themeColors.accentText}
         />
       </View>
 
@@ -179,7 +184,7 @@ export function DocumentRow({
               <MaterialCommunityIcons
                 name={'email-send-outline' as any}
                 size={18}
-                color={colors.primary}
+                color={themeColors.accentText}
               />
             </Pressable>
           ) : null}
@@ -199,7 +204,7 @@ export function DocumentRow({
               <MaterialCommunityIcons
                 name={'credit-card-outline' as any}
                 size={18}
-                color={colors.primary}
+                color={themeColors.accentText}
               />
             </Pressable>
           ) : null}
@@ -219,7 +224,7 @@ export function DocumentRow({
               <MaterialCommunityIcons
                 name={'file-replace' as any}
                 size={18}
-                color={colors.primary}
+                color={themeColors.accentText}
               />
             </Pressable>
           ) : null}
@@ -228,32 +233,32 @@ export function DocumentRow({
         <MaterialCommunityIcons
           name={'chevron-right' as any}
           size={20}
-          color={colors.inactive}
+          color={themeColors.textDisabled}
         />
       )}
     </Pressable>
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
     padding: 14,
     borderRadius: 14,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     marginHorizontal: 16,
     marginBottom: 10,
   },
   rowPressed: {
-    backgroundColor: colors.surfaceGray3,
+    backgroundColor: t.colors.surfacePressed,
   },
   iconCircle: {
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: colors.primaryBg,
+    backgroundColor: t.colors.accentSubtle,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -270,13 +275,13 @@ const styles = StyleSheet.create({
   docNumber: {
     fontSize: 14,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
     flex: 1,
   },
   amount: {
     fontSize: 14,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
   },
   chipRow: {
     flexDirection: 'row',
@@ -318,13 +323,13 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: colors.primaryBg,
+    backgroundColor: t.colors.accentSubtle,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: colors.primary + '33',
+    borderColor: t.colors.accentSubtle,
   },
   actionButtonPressed: {
     opacity: 0.7,
   },
-});
+}));

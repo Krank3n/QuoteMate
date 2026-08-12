@@ -16,7 +16,7 @@ import {
   Linking,
   Keyboard,
 } from 'react-native';
-import { styles } from './AddMaterial/styles';
+import { useAddMaterialStyles } from './AddMaterial/styles';
 import { ManualEntrySection } from './AddMaterial/ManualEntrySection';
 import {
   Text,
@@ -39,7 +39,7 @@ import { withOrigin } from '../../utils/materialOrigin';
 import { useStore } from '../../store/useStore';
 import { useCurrentDocument, useDocumentMode } from '../../utils/documentMode';
 import { Material, FavoriteProductMapping } from '../../types';
-import { colors } from '../../theme';
+import { useThemeColors} from '../../theme';
 import { formatCurrency, supplierPriceForGstMode } from '../../utils/quoteCalculator';
 import { keepSupplierPriceInclusive } from '../../../shared/document';
 import { ProBadge } from '../../components/ProBadge';
@@ -72,6 +72,7 @@ import { loadGroups, deleteGroup } from '../../services/supplierGroupService';
 import { runMaterialSearch } from '../../services/materialSearch';
 import { ContactActionsBar } from '../../components/document/ContactActionsBar';
 import { useUnsavedChangesGuard } from '../../hooks/useUnsavedChangesGuard';
+import { GridBackground } from '../../components/GridBackground';
 
 type TabValue = 'search' | 'saved';
 
@@ -84,6 +85,7 @@ interface SearchResultRowProps {
 }
 
 const SearchResultRow = React.memo(function SearchResultRow({ item, onSelect }: SearchResultRowProps) {
+  const styles = useAddMaterialStyles();
   return (
     <TouchableOpacity
       style={styles.resultItem}
@@ -167,6 +169,8 @@ const SavedItemRow = React.memo(function SavedItemRow({
   onEdit,
   onDelete,
 }: SavedItemRowProps) {
+  const themeColors = useThemeColors();
+  const styles = useAddMaterialStyles();
   const synthetic: Material = useMemo(() => {
     const storeLower = (item.store || '').toLowerCase();
     const isReeceItem = storeLower.includes('reece');
@@ -197,8 +201,8 @@ const SavedItemRow = React.memo(function SavedItemRow({
         {
           icon: 'delete-outline',
           label: 'Delete',
-          color: colors.error,
-          bgColor: colors.error + '18',
+          color: themeColors.error,
+          bgColor: themeColors.errorSubtle,
           onPress: () => onDelete(item),
         },
       ]}
@@ -218,6 +222,8 @@ const SavedItemRow = React.memo(function SavedItemRow({
 });
 
 export function AddMaterialScreen() {
+  const styles = useAddMaterialStyles();
+  const themeColors = useThemeColors();
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const safeInsets = useSafeAreaInsets();
@@ -1334,7 +1340,7 @@ export function AddMaterialScreen() {
           style={styles.proSearchPrompt}
           onPress={() => navigation.navigate('Paywall' as never, { source: 'add_material' } as never)}
         >
-          <MaterialCommunityIcons name="lock-outline" size={20} color={colors.onSurface} />
+          <MaterialCommunityIcons name="lock-outline" size={20} color={themeColors.textSecondary} />
           <Text style={styles.proSearchPromptText}>
             Search real product prices from hardware stores
           </Text>
@@ -1348,7 +1354,7 @@ export function AddMaterialScreen() {
             onChangeText={setSearchQuery}
             mode="flat"
             placeholder={selectedSupplierGroup ? `Search ${supplierGroups.find(g => g.id === selectedSupplierGroup)?.name || 'supplier'}` : 'Material name'}
-            placeholderTextColor={colors.textMuted}
+            placeholderTextColor={themeColors.textMuted}
             style={styles.searchBarInput}
             contentStyle={styles.searchBarInputContent}
             underlineStyle={{ display: 'none' }}
@@ -1376,12 +1382,12 @@ export function AddMaterialScreen() {
             hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
           >
             {isSearching ? (
-              <ActivityIndicator size="small" color="#FFFFFF" />
+              <ActivityIndicator size="small" color={themeColors.onAccent} />
             ) : (
               <MaterialCommunityIcons
                 name="magnify"
                 size={22}
-                color={searchQuery.trim() ? '#FFFFFF' : colors.primary}
+                color={searchQuery.trim() ? '#FFFFFF' : themeColors.accent}
               />
             )}
           </TouchableOpacity>
@@ -1415,7 +1421,7 @@ export function AddMaterialScreen() {
           onPress={() => setManualEntrySheetVisible(true)}
           activeOpacity={0.7}
         >
-          <MaterialCommunityIcons name="plus-circle-outline" size={20} color={colors.primary} />
+          <MaterialCommunityIcons name="plus-circle-outline" size={20} color={themeColors.accentText} />
           <Text style={styles.cantFindItText}>Can't find it? Add manually</Text>
         </TouchableOpacity>
       )}
@@ -1519,7 +1525,7 @@ export function AddMaterialScreen() {
               activeOpacity={0.7}
               accessibilityLabel="Add manually"
             >
-              <MaterialCommunityIcons name="pencil-plus-outline" size={18} color={colors.primary} />
+              <MaterialCommunityIcons name="pencil-plus-outline" size={18} color={themeColors.accentText} />
               <Text style={styles.searchActionLabel} numberOfLines={1}>Add manually</Text>
             </TouchableOpacity>
             <TouchableOpacity
@@ -1530,9 +1536,9 @@ export function AddMaterialScreen() {
               accessibilityLabel="Add from invoice"
             >
               {invoiceImporter.phase === 'extracting' ? (
-                <ActivityIndicator size="small" color={colors.primary} />
+                <ActivityIndicator size="small" color={themeColors.accentText} />
               ) : (
-                <MaterialCommunityIcons name="receipt" size={18} color={colors.primary} />
+                <MaterialCommunityIcons name="receipt" size={18} color={themeColors.accentText} />
               )}
               <Text style={styles.searchActionLabel} numberOfLines={1}>
                 {invoiceImporter.phase === 'extracting'
@@ -1557,12 +1563,12 @@ export function AddMaterialScreen() {
     >
       <View style={styles.importCardIconWrap}>
         {importLoading ? (
-          <ActivityIndicator size="small" color={colors.primary} />
+          <ActivityIndicator size="small" color={themeColors.accentText} />
         ) : (
           <MaterialCommunityIcons
             name="cloud-upload-outline"
             size={28}
-            color={colors.primary}
+            color={themeColors.accentText}
           />
         )}
       </View>
@@ -1578,7 +1584,7 @@ export function AddMaterialScreen() {
         <MaterialCommunityIcons
           name="chevron-right"
           size={24}
-          color={colors.onSurface}
+          color={themeColors.textSecondary}
           style={styles.importCardChevron}
         />
       )}
@@ -1593,7 +1599,7 @@ export function AddMaterialScreen() {
       }
       activeOpacity={0.7}
     >
-      <MaterialCommunityIcons name="plus-circle-outline" size={18} color={colors.primary} />
+      <MaterialCommunityIcons name="plus-circle-outline" size={18} color={themeColors.accentText} />
       <Text style={styles.addManuallyLinkText}>Add an item manually</Text>
     </TouchableOpacity>
   );
@@ -1697,19 +1703,19 @@ export function AddMaterialScreen() {
         onPress={() => navigation.navigate('DiscoverSuppliers')}
         activeOpacity={0.85}
       >
-        <MaterialCommunityIcons name="store-search-outline" size={22} color={colors.primary} style={{ marginRight: 10 }} />
+        <MaterialCommunityIcons name="store-search-outline" size={22} color={themeColors.accentText} style={{ marginRight: 10 }} />
         <Text style={styles.discoverCardText}>Discover Supplier Partners</Text>
-        <MaterialCommunityIcons name="chevron-right" size={20} color={colors.onSurface} />
+        <MaterialCommunityIcons name="chevron-right" size={20} color={themeColors.textSecondary} />
       </TouchableOpacity>
       {renderAddManuallyLink()}
       {isLoadingSaved ? (
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={colors.primary} />
+          <ActivityIndicator size="large" color={themeColors.accentText} />
           <Text style={styles.loadingText}>Loading supplier book...</Text>
         </View>
       ) : savedItems.length === 0 && savedSections.length === 0 ? (
         <View style={styles.emptyState}>
-          <MaterialCommunityIcons name="format-list-bulleted" size={64} color={colors.onSurface} />
+          <MaterialCommunityIcons name="format-list-bulleted" size={64} color={themeColors.textSecondary} />
           <Text style={styles.emptyStateTitle}>Your supplier book is empty</Text>
           <Text style={styles.emptyStateText}>
             Snap a supplier's price sheet, or save items from the Search tab as you go — once it's stocked, every quote gets a head start.
@@ -1743,7 +1749,7 @@ export function AddMaterialScreen() {
                     <MaterialCommunityIcons
                       name={isCollapsed ? 'chevron-right' : 'chevron-down'}
                       size={22}
-                      color={colors.textMuted}
+                      color={themeColors.textMuted}
                     />
                   </TouchableOpacity>
                   <TouchableOpacity
@@ -1757,7 +1763,7 @@ export function AddMaterialScreen() {
                     </Text>
                     {sg?.id?.startsWith('partner_') && (
                       <View style={styles.syncedBadge}>
-                        <MaterialCommunityIcons name="sync" size={11} color={colors.primary} />
+                        <MaterialCommunityIcons name="sync" size={11} color={themeColors.accentText} />
                         <Text style={styles.syncedBadgeText}>synced</Text>
                       </View>
                     )}
@@ -1769,7 +1775,7 @@ export function AddMaterialScreen() {
                         hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                         style={styles.supplierHeaderActionBtn}
                       >
-                        <MaterialCommunityIcons name="camera-plus-outline" size={18} color={colors.textMuted} />
+                        <MaterialCommunityIcons name="camera-plus-outline" size={18} color={themeColors.textMuted} />
                       </TouchableOpacity>
                       <TouchableOpacity
                         onPress={() =>
@@ -1781,14 +1787,14 @@ export function AddMaterialScreen() {
                         hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                         style={styles.supplierHeaderActionBtn}
                       >
-                        <MaterialCommunityIcons name="pencil-outline" size={18} color={colors.textMuted} />
+                        <MaterialCommunityIcons name="pencil-outline" size={18} color={themeColors.textMuted} />
                       </TouchableOpacity>
                       <TouchableOpacity
                         onPress={() => handleDeleteSupplier(title, count)}
                         hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                         style={styles.supplierHeaderActionBtn}
                       >
-                        <MaterialCommunityIcons name="delete-outline" size={18} color={colors.textMuted} />
+                        <MaterialCommunityIcons name="delete-outline" size={18} color={themeColors.textMuted} />
                       </TouchableOpacity>
                     </View>
                   )}
@@ -1838,7 +1844,7 @@ export function AddMaterialScreen() {
               <MaterialCommunityIcons
                 name="account-plus-outline"
                 size={22}
-                color={colors.white}
+                color={themeColors.text}
               />
             </TouchableOpacity>
           )
@@ -1848,6 +1854,7 @@ export function AddMaterialScreen() {
 
   return (
     <View style={styles.container}>
+      <GridBackground />
       {/* Tab Selector - hidden in edit mode, saved-item modes, and supplier-book-only mode */}
       {!isEditMode && !isSavedItemMode && !supplierBookOnly && (
         <View style={styles.tabBar}>
@@ -1861,7 +1868,7 @@ export function AddMaterialScreen() {
                 <MaterialCommunityIcons
                   name="magnify"
                   size={16}
-                  color={activeTab === 'search' ? '#FFFFFF' : colors.textMuted}
+                  color={activeTab === 'search' ? '#FFFFFF' : themeColors.textMuted}
                   style={styles.pillToggleIcon}
                 />
                 <Text style={[styles.pillToggleText, activeTab === 'search' && styles.pillToggleTextActive]}>
@@ -1876,7 +1883,7 @@ export function AddMaterialScreen() {
                 <MaterialCommunityIcons
                   name="format-list-bulleted"
                   size={16}
-                  color={activeTab === 'saved' ? '#FFFFFF' : colors.textMuted}
+                  color={activeTab === 'saved' ? '#FFFFFF' : themeColors.textMuted}
                   style={styles.pillToggleIcon}
                 />
                 <Text style={[styles.pillToggleText, activeTab === 'saved' && styles.pillToggleTextActive]}>
@@ -1920,7 +1927,7 @@ export function AddMaterialScreen() {
         footer={
           <View style={styles.manualSheetFooter}>
             <Button
-              mode="contained"
+              mode="contained" buttonColor={themeColors.accent} textColor={themeColors.onAccent}
               onPress={async () => {
                 const success = await handleAddManually();
                 if (success) setManualEntrySheetVisible(false);

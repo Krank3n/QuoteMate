@@ -19,9 +19,10 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 
 import { auth, db } from '../../config/firebase';
-import { colors } from '../../theme';
+import { makeStyles, useThemeColors } from '../../theme';
 import { WebContainer } from '../../components/WebContainer';
 import { NotificationPreferences } from '../../types';
+import { GridBackground } from '../../components/GridBackground';
 
 const DEFAULT_PREFS: NotificationPreferences = {
   quoteUpdates: true,
@@ -72,6 +73,8 @@ const PREF_ITEMS: PrefItem[] = [
 ];
 
 export function NotificationPreferencesScreen() {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const [prefs, setPrefs] = useState<NotificationPreferences>(DEFAULT_PREFS);
   const [loading, setLoading] = useState(true);
 
@@ -117,13 +120,14 @@ export function NotificationPreferencesScreen() {
   if (loading) {
     return (
       <View style={[styles.container, styles.centered]}>
-        <ActivityIndicator size="large" color={colors.primary} />
+        <ActivityIndicator size="large" color={themeColors.accentText} />
       </View>
     );
   }
 
   return (
     <View style={styles.container}>
+      <GridBackground />
       <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.scrollContent}>
         <WebContainer>
           <Text style={styles.headerText}>
@@ -144,7 +148,7 @@ export function NotificationPreferencesScreen() {
                     <MaterialCommunityIcons
                       name={item.icon as any}
                       size={24}
-                      color={colors.primary}
+                      color={themeColors.accentText}
                     />
                   </View>
                   <View style={styles.prefText}>
@@ -155,8 +159,8 @@ export function NotificationPreferencesScreen() {
                 <Switch
                   value={prefs[item.key]}
                   onValueChange={() => togglePref(item.key)}
-                  trackColor={{ false: '#767577', true: colors.primary + '80' }}
-                  thumbColor={prefs[item.key] ? colors.primary : '#f4f3f4'}
+                  trackColor={{ false: '#767577', true: themeColors.accentSubtle }}
+                  thumbColor={prefs[item.key] ? themeColors.accent : '#f4f3f4'}
                 />
               </View>
             ))}
@@ -167,10 +171,10 @@ export function NotificationPreferencesScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
   },
   centered: {
     justifyContent: 'center',
@@ -182,7 +186,7 @@ const styles = StyleSheet.create({
   },
   headerText: {
     fontSize: 14,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginBottom: 16,
     lineHeight: 20,
   },
@@ -190,7 +194,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     overflow: 'hidden',
     elevation: 2,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
   },
   prefItem: {
     flexDirection: 'row',
@@ -200,7 +204,7 @@ const styles = StyleSheet.create({
   },
   prefItemBorder: {
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
+    borderBottomColor: t.colors.border,
   },
   prefLeft: {
     flexDirection: 'row',
@@ -212,7 +216,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: colors.primary + '15',
+    backgroundColor: t.colors.accentSubtle,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
@@ -223,11 +227,11 @@ const styles = StyleSheet.create({
   prefTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
   },
   prefSubtitle: {
     fontSize: 13,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginTop: 2,
   },
-});
+}));

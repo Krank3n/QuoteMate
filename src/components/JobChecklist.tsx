@@ -37,7 +37,7 @@ import {
 import { format } from 'date-fns';
 
 import type { Job, JobChecklistItem } from '../../shared/job/types';
-import { colors } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 import { useJobStore } from '../store/useJobStore';
 import { generateId } from '../utils/generateId';
 import { selectionTap, lightTap } from '../utils/haptics';
@@ -52,6 +52,8 @@ interface JobChecklistProps {
 }
 
 export function JobChecklist({ job }: JobChecklistProps) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const saveJob = useJobStore((s) => s.saveJob);
   const items = job.checklist ?? [];
   const [pendingText, setPendingText] = useState('');
@@ -126,7 +128,7 @@ export function JobChecklist({ job }: JobChecklistProps) {
         <MaterialCommunityIcons
           name={'checkbox-marked-circle-plus-outline' as any}
           size={18}
-          color={colors.textMuted}
+          color={themeColors.textMuted}
         />
         <Text style={styles.emptyAddLabel}>Add checklist</Text>
       </Pressable>
@@ -199,7 +201,7 @@ export function JobChecklist({ job }: JobChecklistProps) {
               <MaterialCommunityIcons
                 name={'plus' as any}
                 size={14}
-                color={colors.primary}
+                color={themeColors.accentText}
               />
             </View>
             <TextInput
@@ -215,7 +217,7 @@ export function JobChecklist({ job }: JobChecklistProps) {
               dense
               style={styles.addInput}
               underlineColor="transparent"
-              activeUnderlineColor={colors.primary}
+              activeUnderlineColor={themeColors.accent}
             />
           </View>
         ) : (
@@ -229,7 +231,7 @@ export function JobChecklist({ job }: JobChecklistProps) {
             <MaterialCommunityIcons
               name={'plus' as any}
               size={16}
-              color={colors.primary}
+              color={themeColors.accentText}
             />
             <Text style={styles.addCtaLabel}>Add step</Text>
           </Pressable>
@@ -273,6 +275,8 @@ function ChecklistRow({
   onNotesChange,
   onOpenDueSheet,
 }: ChecklistRowProps) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const [pressedDelete, setPressedDelete] = useState(false);
   const fadeAnim = React.useRef(new Animated.Value(item.done ? 0.55 : 1)).current;
 
@@ -308,7 +312,7 @@ function ChecklistRow({
             <MaterialCommunityIcons
               name={'drag-vertical' as any}
               size={18}
-              color={colors.inactive}
+              color={themeColors.textDisabled}
             />
           </Pressable>
         ) : null}
@@ -324,7 +328,7 @@ function ChecklistRow({
               <MaterialCommunityIcons
                 name={'check' as any}
                 size={14}
-                color={colors.white}
+                color={themeColors.onAccent}
               />
             ) : null}
           </View>
@@ -357,17 +361,17 @@ function ChecklistRow({
                     size={10}
                     color={
                       overdue
-                        ? colors.error
+                        ? themeColors.error
                         : dueToday
-                          ? colors.warning
-                          : colors.textMuted
+                          ? themeColors.warning
+                          : themeColors.textMuted
                     }
                   />
                   <Text
                     style={[
                       styles.dueChipLabel,
-                      overdue && { color: colors.error },
-                      dueToday && { color: colors.warning },
+                      overdue && { color: themeColors.error },
+                      dueToday && { color: themeColors.warning },
                     ]}
                   >
                     {dueLabel}
@@ -379,7 +383,7 @@ function ChecklistRow({
                   <MaterialCommunityIcons
                     name={'text-box-outline' as any}
                     size={10}
-                    color={colors.textMuted}
+                    color={themeColors.textMuted}
                   />
                   <Text style={styles.notesHintLabel}>Notes</Text>
                 </View>
@@ -398,7 +402,7 @@ function ChecklistRow({
           <MaterialCommunityIcons
             name={'close' as any}
             size={16}
-            color={pressedDelete ? colors.error : colors.textMuted}
+            color={pressedDelete ? themeColors.error : themeColors.textMuted}
           />
         </Pressable>
       </View>
@@ -409,13 +413,13 @@ function ChecklistRow({
             <MaterialCommunityIcons
               name={'calendar-clock-outline' as any}
               size={14}
-              color={item.dueAt ? colors.primary : colors.textMuted}
+              color={item.dueAt ? themeColors.accent : themeColors.textMuted}
             />
             <Text
               style={[
                 styles.dueButtonLabel,
                 item.dueAt
-                  ? { color: colors.text, fontWeight: '700' as const }
+                  ? { color: themeColors.text, fontWeight: '700' as const }
                   : null,
               ]}
             >
@@ -472,7 +476,7 @@ function formatDueLong(ms: number): string {
   }
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   emptyAdd: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -481,14 +485,14 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     padding: 14,
     borderRadius: 14,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderWidth: 1,
     borderStyle: 'dashed',
-    borderColor: colors.border,
+    borderColor: t.colors.border,
   },
   emptyAddLabel: {
     fontSize: 13,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     fontWeight: '500',
   },
   container: {
@@ -496,7 +500,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     padding: 14,
     borderRadius: 16,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
   },
   headerRow: {
     flexDirection: 'row',
@@ -507,12 +511,12 @@ const styles = StyleSheet.create({
   heading: {
     fontSize: 15,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
   },
   count: {
     fontSize: 12,
     fontWeight: '600',
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
   list: {
     gap: 4,
@@ -521,7 +525,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   rowActive: {
-    backgroundColor: colors.surfaceGray3,
+    backgroundColor: t.colors.surfacePressed,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.25,
@@ -547,26 +551,26 @@ const styles = StyleSheet.create({
     height: 20,
     borderRadius: 6,
     borderWidth: 2,
-    borderColor: colors.inactive,
+    borderColor: t.colors.textDisabled,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'transparent',
   },
   checkboxDone: {
-    backgroundColor: colors.success,
-    borderColor: colors.success,
+    backgroundColor: t.colors.money,
+    borderColor: t.colors.money,
   },
   textWrap: {
     flex: 1,
   },
   itemText: {
     fontSize: 14,
-    color: colors.text,
+    color: t.colors.text,
     lineHeight: 20,
   },
   itemTextDone: {
     textDecorationLine: 'line-through',
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
   metaRow: {
     flexDirection: 'row',
@@ -582,22 +586,22 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: 999,
-    backgroundColor: colors.surfaceGray3,
+    backgroundColor: t.colors.surfacePressed,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
   },
   dueChipOverdue: {
-    backgroundColor: colors.errorBg,
-    borderColor: colors.error + '55',
+    backgroundColor: t.colors.errorSubtle,
+    borderColor: t.colors.errorSubtle,
   },
   dueChipToday: {
-    backgroundColor: colors.warningBg,
-    borderColor: colors.warning + '55',
+    backgroundColor: t.colors.warningSubtle,
+    borderColor: t.colors.warningSubtle,
   },
   dueChipLabel: {
     fontSize: 11,
     fontWeight: '700',
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
   notesHintPill: {
     flexDirection: 'row',
@@ -606,11 +610,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: 999,
-    backgroundColor: colors.surfaceGray3,
+    backgroundColor: t.colors.surfacePressed,
   },
   notesHintLabel: {
     fontSize: 11,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     fontWeight: '600',
   },
   deleteButton: {
@@ -629,12 +633,12 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 10,
     borderRadius: 10,
-    backgroundColor: colors.surfaceGray3,
+    backgroundColor: t.colors.surfacePressed,
     alignSelf: 'flex-start',
   },
   dueButtonLabel: {
     fontSize: 13,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     fontWeight: '600',
   },
   notesInput: {
@@ -662,6 +666,6 @@ const styles = StyleSheet.create({
   addCtaLabel: {
     fontSize: 13,
     fontWeight: '600',
-    color: colors.primary,
+    color: t.colors.accentText,
   },
-});
+}));

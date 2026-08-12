@@ -27,21 +27,15 @@ import { useJobStore } from './src/store/useJobStore';
 
 const LAST_USER_UID_KEY = '@quotemate:lastUserUid';
 const LAST_USER_EMAIL_KEY = '@quotemate:lastUserEmail';
-import { theme, colors } from './src/theme';
+import * as Font from 'expo-font';
+import { ThemeProvider, useAppTheme, makeStyles, FONT_ASSETS } from './src/theme';
+import {
+  buildPaperTheme,
+  buildNavigationTheme,
+  statusBarStyle,
+} from './src/theme/adapters';
+import { seedAppearanceForExistingUser } from './src/services/appearance';
 
-// Custom navigation theme to match our dark theme
-const navigationTheme = {
-  ...DarkTheme,
-  colors: {
-    ...DarkTheme.colors,
-    primary: colors.primary,
-    background: colors.background,
-    card: colors.surface,
-    text: colors.text,
-    border: colors.border,
-    notification: colors.primary,
-  },
-};
 import { RootNavigator } from './src/navigation/RootNavigator';
 import { isDemoCaptureActive } from './src/demo/demoPlayback';
 import { trackEvent } from './src/services/analyticsService';
@@ -203,6 +197,10 @@ if (Platform.OS === 'web' && typeof document !== 'undefined') {
 initSentry();
 
 function App() {
+  const { theme: appTheme } = useAppTheme();
+  const paperTheme = React.useMemo(() => buildPaperTheme(appTheme), [appTheme]);
+  const navigationTheme = React.useMemo(() => buildNavigationTheme(appTheme), [appTheme]);
+  const appStyles = useAppStyles();
   const [isLoading, setIsLoading] = useState(true);
   const [fontsLoaded, setFontsLoaded] = useState(false);
   const [user, setUser] = useState<any>(null);
@@ -536,9 +534,23 @@ function App() {
     };
   }, []);
 
+  // Icons + Archivo. Both must land before first paint or the app renders one
+  // face and then reflows into another. Failure still opens the gate: the type
+  // scale falls back to the system font, which is a slightly plainer app rather
+  // than no app at all.
   useEffect(() => {
-    MaterialCommunityIcons.loadFont().then(() => setFontsLoaded(true)).catch(() => setFontsLoaded(true));
+    Promise.all([MaterialCommunityIcons.loadFont(), Font.loadAsync(FONT_ASSETS)])
+      .then(() => setFontsLoaded(true))
+      .catch(() => setFontsLoaded(true));
   }, []);
+
+  // Pin upgrading users to dark, once. Every user before this release has only
+  // ever seen a dark app; signed-in AND onboarded is the signal that they were
+  // here before it shipped. A fresh install falls through to 'system'. No-ops
+  // once a preference exists, so it is safe to re-run on every auth change.
+  useEffect(() => {
+    void seedAppearanceForExistingUser(!!user && isOnboarded);
+  }, [user, isOnboarded]);
 
   // Dead-man's switch on the splash overlay. Runs once from mount rather than
   // resetting per gate, so a chain of individually-short stalls still can't
@@ -684,14 +696,14 @@ function App() {
     <GestureHandlerRootView style={appStyles.flex}>
       <SafeAreaProvider>
         <KeyboardProvider>
-          <PaperProvider theme={theme}>
+          <PaperProvider theme={paperTheme}>
             <NavigationContainer
               key="root"
               theme={navigationTheme}
               linking={linking}
               ref={navigationRef}
             >
-              <StatusBar style="light" />
+              <StatusBar style={statusBarStyle(appTheme)} />
               {showAuthScreen ? (
                 <AuthScreen />
               ) : showMainApp ? (
@@ -724,7 +736,7 @@ function App() {
                 />
                 <ActivityIndicator
                   size="large"
-                  color={theme.colors.primary}
+                  color={appTheme.colors.accent}
                   style={appStyles.loadingSpinner}
                 />
               </View>
@@ -736,13 +748,13 @@ function App() {
   );
 }
 
-const appStyles = StyleSheet.create({
+const useAppStyles = makeStyles((t) => ({
   flex: {
     flex: 1,
   },
   loadingContainer: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -755,6 +767,18 @@ const appStyles = StyleSheet.create({
   loadingSpinner: {
     marginTop: 16,
   },
-});
+}));
 
-export default wrapRootComponent(App);
+/**
+ * ThemeProvider sits ABOVE App so App itself can read the theme — the Paper
+ * theme, the navigation theme and the status-bar style all derive from it.
+ */
+function Root() {
+  return (
+    <ThemeProvider>
+      <App />
+    </ThemeProvider>
+  );
+}
+
+export default wrapRootComponent(Root);

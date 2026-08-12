@@ -8,7 +8,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { View, StyleSheet, TouchableOpacity, Pressable, Image, Platform, TextInput as RNTextInput, ActivityIndicator, Animated, Easing } from 'react-native';
 import { Text, Menu, Divider } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { colors } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
 import { Material } from '../types';
 import { CollapsibleSection } from './CollapsibleSection';
@@ -77,6 +77,8 @@ function MaterialItemCardImpl({
   readOnly = false,
   onPress,
 }: MaterialItemCardProps) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   // Anchored dropdown for the box icon — lets the user move this material
   // to another section without leaving the card. Closed by default; opens on
   // tap, closes on selection or outside tap.
@@ -113,7 +115,7 @@ function MaterialItemCardImpl({
       : savedStore
         ? {
             name: savedStore.length > 18 ? `${savedStore.slice(0, 17)}…` : savedStore,
-            color: colors.primary,
+            color: themeColors.accentText,
           }
         : null;
 
@@ -127,11 +129,11 @@ function MaterialItemCardImpl({
   const currentSection = material.section || null;
 
   const statusIconNode = isFetching ? (
-    <ActivityIndicator size={20} color={colors.primary} />
+    <ActivityIndicator size={20} color={themeColors.accentText} />
   ) : isRecentlyPriced ? (
-    <MaterialCommunityIcons name="check-circle" size={20} color={colors.success} />
+    <MaterialCommunityIcons name="check-circle" size={20} color={themeColors.money} />
   ) : (
-    <MaterialCommunityIcons name="package-variant" size={20} color={colors.textMuted} />
+    <MaterialCommunityIcons name="package-variant" size={20} color={themeColors.textMuted} />
   );
 
   const topRow = (
@@ -207,7 +209,7 @@ function MaterialItemCardImpl({
               : ''}
             {isEstimate ? (
               <Text style={{
-                color: material.priceConfidence === 'high' ? colors.success
+                color: material.priceConfidence === 'high' ? themeColors.money
                   : material.priceConfidence === 'low' ? '#ef4444' : '#f59e0b',
                 fontWeight: '600',
               }}>
@@ -291,7 +293,7 @@ function MaterialItemCardImpl({
               onPress={onPress}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             >
-              <MaterialCommunityIcons name="plus-circle-outline" size={24} color={colors.primary} />
+              <MaterialCommunityIcons name="plus-circle-outline" size={24} color={themeColors.accentText} />
             </TouchableOpacity>
           )}
         </View>
@@ -301,14 +303,14 @@ function MaterialItemCardImpl({
               <MaterialCommunityIcons
                 name={isExpanded ? 'chevron-up' : 'chevron-down'}
                 size={16}
-                color={colors.textMuted}
+                color={themeColors.textMuted}
               />
             )}
           </View>
           <View style={styles.itemActions}>
             {showLink && (
               <TouchableOpacity style={styles.actionBtn} onPress={onOpenInStore}>
-                <MaterialCommunityIcons name="open-in-new" size={18} color={colors.primary} />
+                <MaterialCommunityIcons name="open-in-new" size={18} color={themeColors.accentText} />
               </TouchableOpacity>
             )}
             {onEdit && (
@@ -317,7 +319,7 @@ function MaterialItemCardImpl({
                 onPress={onEdit}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               >
-                <MaterialCommunityIcons name="pencil" size={18} color={colors.textMuted} />
+                <MaterialCommunityIcons name="pencil" size={18} color={themeColors.textMuted} />
               </TouchableOpacity>
             )}
             {onDelete && (
@@ -326,7 +328,7 @@ function MaterialItemCardImpl({
                 onPress={onDelete}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               >
-                <MaterialCommunityIcons name="delete-outline" size={18} color={colors.textMuted} />
+                <MaterialCommunityIcons name="delete-outline" size={18} color={themeColors.textMuted} />
               </TouchableOpacity>
             )}
           </View>
@@ -395,7 +397,7 @@ function MaterialItemCardImpl({
                 onPress={() => onQuantityUpdate?.(-1)}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               >
-                <MaterialCommunityIcons name="minus" size={16} color={colors.text} />
+                <MaterialCommunityIcons name="minus" size={16} color={themeColors.text} />
               </Pressable>
               <RNTextInput
                 style={styles.qtyInput}
@@ -411,7 +413,7 @@ function MaterialItemCardImpl({
                 onPress={() => onQuantityUpdate?.(1)}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               >
-                <MaterialCommunityIcons name="plus" size={16} color={colors.text} />
+                <MaterialCommunityIcons name="plus" size={16} color={themeColors.text} />
               </Pressable>
             </View>
             <Text style={styles.qtyUnit}>{material.unit}</Text>
@@ -419,14 +421,14 @@ function MaterialItemCardImpl({
           <View style={styles.itemActions}>
             {showLink && (
               <TouchableOpacity style={styles.actionBtn} onPress={onOpenInStore}>
-                <MaterialCommunityIcons name="open-in-new" size={18} color={colors.primary} />
+                <MaterialCommunityIcons name="open-in-new" size={18} color={themeColors.accentText} />
               </TouchableOpacity>
             )}
             <TouchableOpacity style={styles.actionBtn} onPress={onEdit}>
-              <MaterialCommunityIcons name="pencil" size={18} color={colors.textMuted} />
+              <MaterialCommunityIcons name="pencil" size={18} color={themeColors.textMuted} />
             </TouchableOpacity>
             <TouchableOpacity style={styles.actionBtn} onPress={onDelete}>
-              <MaterialCommunityIcons name="delete-outline" size={18} color={colors.textMuted} />
+              <MaterialCommunityIcons name="delete-outline" size={18} color={themeColors.textMuted} />
             </TouchableOpacity>
           </View>
         </View>
@@ -490,18 +492,18 @@ export const MaterialItemCard = React.memo(MaterialItemCardImpl, (prev, next) =>
   );
 });
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   listItem: {
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     marginHorizontal: 12,
     marginBottom: 10,
     borderRadius: 12,
     overflow: 'hidden',
   },
   listItemFetching: {
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderLeftWidth: 3,
-    borderLeftColor: colors.primary,
+    borderLeftColor: t.colors.accent,
   },
   // Subtle amber tint + shadow on cards whose price still needs verifying.
   // The actual pulse comes from the absolutely-positioned `verifyGlowRing`
@@ -574,15 +576,15 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   sectionMenuContent: {
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
   },
   sectionMenuHeader: {
     fontSize: 12,
     fontWeight: '600',
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
   itemNameWrap: {
     flex: 1,
@@ -591,12 +593,12 @@ const styles = StyleSheet.create({
   itemName: {
     fontSize: 15,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
     lineHeight: 20,
   },
   itemUnitPrice: {
     fontSize: 13,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginTop: 2,
   },
   itemPriceWrap: {
@@ -606,20 +608,20 @@ const styles = StyleSheet.create({
   itemTotal: {
     fontSize: 16,
     fontWeight: '700',
-    color: colors.primary,
+    color: t.colors.money,
   },
   itemTotalSuccess: {
-    color: colors.success,
+    color: t.colors.money,
   },
   searchingLabel: {
     fontSize: 13,
-    color: colors.primary,
+    color: t.colors.accentText,
     fontStyle: 'italic',
   },
   searchingPrice: {
     fontSize: 16,
     fontWeight: '600',
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
   itemBottomRow: {
     flexDirection: 'row',
@@ -636,10 +638,10 @@ const styles = StyleSheet.create({
   qtyStepper: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
   },
   qtyBtn: {
     paddingHorizontal: 10,
@@ -647,24 +649,24 @@ const styles = StyleSheet.create({
     borderRadius: 6,
   },
   qtyBtnPressed: {
-    backgroundColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: t.colors.surfaceOverlay,
     transform: [{ scale: 0.9 }],
   },
   qtyInput: {
     fontSize: 15,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
     minWidth: 36,
     textAlign: 'center',
     paddingVertical: 4,
     paddingHorizontal: 2,
     borderLeftWidth: 1,
     borderRightWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
   },
   qtyUnit: {
     fontSize: 13,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginLeft: 8,
   },
   itemActions: {
@@ -676,11 +678,11 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   expandedContent: {
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderTopWidth: 1,
-    borderTopColor: colors.border,
+    borderTopColor: t.colors.border,
   },
   detailsContainer: {
     flexDirection: 'row',
@@ -692,9 +694,9 @@ const styles = StyleSheet.create({
     width: Platform.OS === 'web' ? 100 : 80,
     height: Platform.OS === 'web' ? 100 : 80,
     borderRadius: 8,
-    backgroundColor: colors.surfaceLight,
+    backgroundColor: t.colors.surfaceOverlay,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
   },
   detailsColumn: {
     flex: 1,
@@ -707,14 +709,14 @@ const styles = StyleSheet.create({
   detailLabel: {
     fontSize: 12,
     fontWeight: '500',
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginRight: 8,
     minWidth: 80,
   },
   detailValue: {
     fontSize: 13,
     fontWeight: '500',
-    color: colors.text,
+    color: t.colors.text,
     flex: 1,
   },
-});
+}));

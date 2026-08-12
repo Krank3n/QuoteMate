@@ -1,13 +1,13 @@
 import { StyleSheet, Platform } from 'react-native';
-import { colors } from '../../theme';
+import { makeStyles } from '../../theme';
 
-export const documentStyles = StyleSheet.create({
+export const useDocumentStyles = makeStyles((t) => ({
   section: {
     marginBottom: 12,
     padding: 16,
     borderRadius: 14,
     elevation: 2,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     overflow: 'hidden',
   },
   sectionHeader: {
@@ -28,9 +28,11 @@ export const documentStyles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  // Archivo tokens deliberately carry NO fontWeight — Android ignores it when
+  // a custom fontFamily is set and silently renders Regular.
   sectionTitle: {
     fontSize: 15,
-    fontWeight: '700',
+    fontFamily: 'Archivo-Bold',
     marginBottom: 0,
     lineHeight: 20,
   },
@@ -38,18 +40,18 @@ export const documentStyles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 8,
-    backgroundColor: colors.primary + '15',
+    backgroundColor: t.colors.accentSubtle,
     alignItems: 'center',
     justifyContent: 'center',
   },
   text: {
     fontSize: 14,
     marginBottom: 4,
-    color: colors.text,
+    color: t.colors.text,
   },
   subtext: {
     fontSize: 13,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginBottom: 2,
   },
   input: {
@@ -67,22 +69,23 @@ export const documentStyles = StyleSheet.create({
   },
   itemName: {
     fontSize: 14,
-    fontWeight: '600',
+    fontFamily: 'Archivo-SemiBold',
     marginBottom: 2,
-    color: colors.text,
+    color: t.colors.text,
   },
   itemDetails: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
   itemTotal: {
     fontSize: 14,
-    fontWeight: '700',
-    color: colors.text,
+    fontFamily: 'Archivo-Bold',
+    color: t.colors.text,
+    fontVariant: ['tabular-nums'],
   },
   divider: {
     marginVertical: 12,
-    backgroundColor: colors.border,
+    backgroundColor: t.colors.border,
   },
   summaryRow: {
     flexDirection: 'row',
@@ -91,21 +94,22 @@ export const documentStyles = StyleSheet.create({
   },
   summaryLabel: {
     fontSize: 14,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
   },
   summaryValue: {
     fontSize: 14,
-    fontWeight: '600',
-    color: colors.text,
+    fontFamily: 'Archivo-SemiBold',
+    color: t.colors.text,
+    fontVariant: ['tabular-nums'],
   },
   totalSection: {
     marginBottom: 12,
     padding: 16,
     borderRadius: 14,
     elevation: 2,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderLeftWidth: 3,
-    borderLeftColor: colors.primary,
+    borderLeftColor: t.colors.money,
     overflow: 'hidden',
   },
   totalRow: {
@@ -116,13 +120,14 @@ export const documentStyles = StyleSheet.create({
   },
   totalLabel: {
     fontSize: 16,
-    fontWeight: '800',
-    color: colors.text,
+    fontFamily: 'Archivo-Bold',
+    color: t.colors.text,
     letterSpacing: 1,
   },
   totalValue: {
     fontSize: 26,
-    fontWeight: '800',
-    color: colors.primary,
+    fontFamily: 'Archivo-ExtraBold',
+    color: t.colors.money,
+    fontVariant: ['tabular-nums'],
   },
-});
+}));

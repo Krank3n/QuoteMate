@@ -22,10 +22,11 @@ import { useStore } from '../store/useStore';
 import { useJobStore } from '../store/useJobStore';
 import { applyJobStageChange } from '../utils/applyJobStageChange';
 import { pickPrimaryDoc } from '../components/StickyJobActionBar';
-import { colors } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
 import { Quote } from '../types';
 import { WebContainer } from '../components/WebContainer';
+import { GridBackground } from '../components/GridBackground';
 import { JobCard } from '../components/JobCard';
 import { JobStageSheet } from '../components/JobStageSheet';
 import { ScheduleJobSheet } from '../components/ScheduleJobSheet';
@@ -83,6 +84,8 @@ const SUBTITLES = [
 ];
 
 export function DashboardScreen() {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const scrollRef = useRef<ScrollView>(null);
   useScrollToTop(scrollRef);
 
@@ -685,16 +688,18 @@ export function DashboardScreen() {
         showConfetti={false}
       />
 
+    <View style={styles.gridHost}>
+    <GridBackground />
     <ScrollView
       ref={scrollRef}
-      style={styles.container}
+      style={styles.scroller}
       contentContainerStyle={{ paddingBottom: 100 }}
       refreshControl={
         <RefreshControl
           refreshing={refreshing}
           onRefresh={handleRefresh}
-          tintColor={colors.primary}
-          colors={[colors.primary]}
+          tintColor={themeColors.accent}
+          colors={[themeColors.accent]}
         />
       }
     >
@@ -716,7 +721,7 @@ export function DashboardScreen() {
                 activeOpacity={0.7}
                 accessibilityLabel="Refer a friend"
               >
-                <MaterialCommunityIcons name="gift-outline" size={20} color={colors.primary} />
+                <MaterialCommunityIcons name="gift-outline" size={20} color={themeColors.accentText} />
               </TouchableOpacity>
             </View>
           </View>
@@ -752,8 +757,8 @@ export function DashboardScreen() {
           >
             <Surface style={styles.draftBanner}>
               <View style={styles.draftBannerContent}>
-                <RNAnimated.View style={[styles.draftIconCircle, { backgroundColor: colors.warningBg, transform: [{ rotate: draftWiggle.interpolate({ inputRange: [0, 0.25, 0.5, 0.75, 1], outputRange: ['0deg', '-6deg', '0deg', '6deg', '0deg'] }) }] }]}>
-                  <MaterialCommunityIcons name="pencil-outline" size={20} color={colors.secondary} />
+                <RNAnimated.View style={[styles.draftIconCircle, { backgroundColor: themeColors.accentSubtle, transform: [{ rotate: draftWiggle.interpolate({ inputRange: [0, 0.25, 0.5, 0.75, 1], outputRange: ['0deg', '-6deg', '0deg', '6deg', '0deg'] }) }] }]}>
+                  <MaterialCommunityIcons name="pencil-outline" size={20} color={themeColors.accentText} />
                 </RNAnimated.View>
                 <View style={styles.draftBannerText}>
                   <Text style={styles.draftBannerTitle} numberOfLines={1}>
@@ -766,7 +771,7 @@ export function DashboardScreen() {
                     ].filter(Boolean).join(' · ')}
                   </Text>
                 </View>
-                <MaterialCommunityIcons name="chevron-right" size={24} color={colors.primary} />
+                <MaterialCommunityIcons name="chevron-right" size={24} color={themeColors.accentText} />
               </View>
             </Surface>
           </TouchableOpacity>
@@ -776,7 +781,7 @@ export function DashboardScreen() {
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             accessibilityLabel="Delete draft"
           >
-            <MaterialCommunityIcons name="close-circle" size={22} color="#ef4444" />
+            <MaterialCommunityIcons name="close-circle" size={22} color={themeColors.error} />
           </TouchableOpacity>
         </View>
       )}
@@ -801,14 +806,14 @@ export function DashboardScreen() {
           }}>
           <View style={{
             borderRadius: 12,
-            shadowColor: colors.primary,
+            shadowColor: themeColors.accent,
             shadowOffset: { width: 0, height: 0 },
             shadowRadius: 8,
             shadowOpacity: 0.5,
             elevation: 6,
           }}>
             <Button
-              mode="contained"
+              mode="contained" buttonColor={themeColors.accent} textColor={themeColors.onAccent}
               icon="plus-circle"
               onPress={handleNewJob}
               style={styles.newQuoteButton}
@@ -836,14 +841,14 @@ export function DashboardScreen() {
             style={({ pressed }) => [styles.mateButtonGlow, pressed && styles.mateButtonPressed]}
           >
             <LinearGradient
-              colors={['#243247', colors.surface]}
+              colors={[themeColors.surfaceOverlay, themeColors.surfaceRaised]}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
               style={styles.mateButton}
             >
-              <MaterialCommunityIcons name="chat-processing" size={20} color="#E6B872" />
+              <MaterialCommunityIcons name="chat-processing" size={20} color={themeColors.accentText} />
               <Text style={styles.mateButtonLabel}>Mate</Text>
-              <ShimmerOverlay tint="#E6B872" intensity={0.1} duration={5000} />
+              <ShimmerOverlay tint={themeColors.accent} intensity={0.07} duration={5000} />
             </LinearGradient>
           </Pressable>
           {!mateTrySeen && (
@@ -857,64 +862,64 @@ export function DashboardScreen() {
       {/* Quick Stats */}
       <View style={styles.statsContainer}>
         <AnimatedListItem index={0} style={styles.statCardWrapper}>
-          <TapRipple onPress={() => { lightTap(); navigation.navigate('Insights' as never); }} accessibilityRole="button" accessibilityLabel={`Earned this month: ${formatCurrency(thisMonthRevenue)}`} rippleColor="rgba(0,152,104,0.25)">
+          <TapRipple onPress={() => { lightTap(); navigation.navigate('Insights' as never); }} accessibilityRole="button" accessibilityLabel={`Earned this month: ${formatCurrency(thisMonthRevenue)}`} rippleColor={themeColors.moneySubtle}>
             <RNAnimated.View style={{ transform: [{ scale: cardBreath1 }, { rotate: cardTilt1.interpolate({ inputRange: [-1, 1], outputRange: ['-1deg', '1deg'] }) }] }}>
             <Surface style={styles.statCard}>
-              <RNAnimated.View style={[styles.statIconCircle, { backgroundColor: colors.primaryBg, transform: [{ translateY: iconFloat1 }, { scale: iconScale1 }] }]}>
-                <MaterialCommunityIcons name="chart-areaspline" size={22} color={colors.primary} />
+              <RNAnimated.View style={[styles.statIconCircle, { backgroundColor: themeColors.moneySubtle, transform: [{ translateY: iconFloat1 }, { scale: iconScale1 }] }]}>
+                <MaterialCommunityIcons name="chart-areaspline" size={22} color={themeColors.money} />
               </RNAnimated.View>
-              <AnimatedNumber value={thisMonthRevenue} format={formatCurrency} style={styles.statNumber} delay={0} />
+              <AnimatedNumber value={thisMonthRevenue} format={formatCurrency} style={styles.statNumberMoney} delay={0} />
               <Text style={styles.statLabel}>Earned this month</Text>
               <GrainOverlay density={60} />
-              <ShimmerOverlay tint={colors.primary} intensity={0.06} />
+              <ShimmerOverlay tint={themeColors.money} intensity={0.06} />
             </Surface>
             </RNAnimated.View>
           </TapRipple>
         </AnimatedListItem>
 
         <AnimatedListItem index={1} style={styles.statCardWrapper}>
-          <TapRipple onPress={() => { lightTap(); navigation.navigate('Insights' as never); }} accessibilityRole="button" accessibilityLabel={`Awaiting response: ${formatCurrency(pipelineValue)}`} rippleColor="rgba(90,185,234,0.25)">
+          <TapRipple onPress={() => { lightTap(); navigation.navigate('Insights' as never); }} accessibilityRole="button" accessibilityLabel={`Awaiting response: ${formatCurrency(pipelineValue)}`} rippleColor={themeColors.infoSubtle}>
             <RNAnimated.View style={{ transform: [{ scale: cardBreath2 }, { rotate: cardTilt2.interpolate({ inputRange: [-1, 1], outputRange: ['-1deg', '1deg'] }) }] }}>
             <Surface style={styles.statCard}>
-              <RNAnimated.View style={[styles.statIconCircle, { backgroundColor: colors.infoBg, transform: [{ translateY: iconFloat2 }, { scale: iconScale2 }] }]}>
-                <MaterialCommunityIcons name="timer-sand" size={22} color={colors.info} />
+              <RNAnimated.View style={[styles.statIconCircle, { backgroundColor: themeColors.infoSubtle, transform: [{ translateY: iconFloat2 }, { scale: iconScale2 }] }]}>
+                <MaterialCommunityIcons name="timer-sand" size={22} color={themeColors.info} />
               </RNAnimated.View>
               <AnimatedNumber value={pipelineValue} format={formatCurrency} style={styles.statNumber} delay={100} />
               <Text style={styles.statLabel}>Awaiting response</Text>
               <GrainOverlay density={60} />
-              <ShimmerOverlay tint={colors.info} intensity={0.06} />
+              <ShimmerOverlay tint={themeColors.info} intensity={0.06} />
             </Surface>
             </RNAnimated.View>
           </TapRipple>
         </AnimatedListItem>
 
         <AnimatedListItem index={2} style={styles.statCardWrapper}>
-          <TapRipple onPress={() => { lightTap(); navigation.navigate('Jobs'); }} accessibilityRole="button" accessibilityLabel={`${sentQuotes} quotes sent`} rippleColor="rgba(207,161,83,0.25)">
+          <TapRipple onPress={() => { lightTap(); navigation.navigate('Jobs'); }} accessibilityRole="button" accessibilityLabel={`${sentQuotes} quotes sent`} rippleColor={themeColors.accentSubtle}>
             <RNAnimated.View style={{ transform: [{ scale: cardBreath3 }, { rotate: cardTilt3.interpolate({ inputRange: [-1, 1], outputRange: ['-1deg', '1deg'] }) }] }}>
             <Surface style={styles.statCard}>
-              <RNAnimated.View style={[styles.statIconCircle, { backgroundColor: colors.warningBg, transform: [{ translateY: iconFloat3 }, { scale: iconScale3 }] }]}>
-                <MaterialCommunityIcons name="send-check" size={22} color={colors.secondary} />
+              <RNAnimated.View style={[styles.statIconCircle, { backgroundColor: themeColors.accentSubtle, transform: [{ translateY: iconFloat3 }, { scale: iconScale3 }] }]}>
+                <MaterialCommunityIcons name="send-check" size={22} color={themeColors.accentText} />
               </RNAnimated.View>
               <AnimatedNumber value={sentQuotes} style={styles.statNumber} delay={200} />
               <Text style={styles.statLabel}>Quotes sent</Text>
               <GrainOverlay density={60} />
-              <ShimmerOverlay tint={colors.secondary} intensity={0.06} />
+              <ShimmerOverlay tint={themeColors.accent} intensity={0.06} />
             </Surface>
             </RNAnimated.View>
           </TapRipple>
         </AnimatedListItem>
 
         <AnimatedListItem index={3} style={styles.statCardWrapper}>
-          <TapRipple onPress={() => { lightTap(); navigation.navigate('Jobs'); }} accessibilityRole="button" accessibilityLabel={`${acceptedQuotes} jobs won`} rippleColor="rgba(0,200,151,0.25)">
+          <TapRipple onPress={() => { lightTap(); navigation.navigate('Jobs'); }} accessibilityRole="button" accessibilityLabel={`${acceptedQuotes} jobs won`} rippleColor={themeColors.moneySubtle}>
             <RNAnimated.View style={{ transform: [{ scale: cardBreath4 }, { rotate: cardTilt4.interpolate({ inputRange: [-1, 1], outputRange: ['-1deg', '1deg'] }) }] }}>
             <Surface style={styles.statCard}>
-              <RNAnimated.View style={[styles.statIconCircle, { backgroundColor: colors.successBg, transform: [{ translateY: iconFloat4 }, { scale: iconScale4 }] }]}>
-                <MaterialCommunityIcons name="handshake" size={22} color={colors.success} />
+              <RNAnimated.View style={[styles.statIconCircle, { backgroundColor: themeColors.moneySubtle, transform: [{ translateY: iconFloat4 }, { scale: iconScale4 }] }]}>
+                <MaterialCommunityIcons name="handshake" size={22} color={themeColors.money} />
               </RNAnimated.View>
               <AnimatedNumber value={acceptedQuotes} style={styles.statNumber} delay={300} />
               <Text style={styles.statLabel}>Jobs won</Text>
               <GrainOverlay density={60} />
-              <ShimmerOverlay tint={colors.success} intensity={0.06} />
+              <ShimmerOverlay tint={themeColors.money} intensity={0.06} />
             </Surface>
             </RNAnimated.View>
           </TapRipple>
@@ -968,7 +973,7 @@ export function DashboardScreen() {
       {recentJobs.length === 0 && !inProgressDraft && initialLoaded && (
         <View style={styles.emptyState}>
           <RNAnimated.View style={[styles.emptyIconCircle, { transform: [{ translateY: emptyFloat }] }]}>
-            <MaterialCommunityIcons name="hard-hat" size={36} color={colors.primary} />
+            <MaterialCommunityIcons name="hard-hat" size={36} color={themeColors.accentText} />
           </RNAnimated.View>
           <Text style={styles.emptyTitle}>Bit quiet around here</Text>
           <Text style={styles.emptyText}>
@@ -981,6 +986,7 @@ export function DashboardScreen() {
       )}
       </WebContainer>
     </ScrollView>
+    </View>
 
     {/* Stage Sheet */}
     {selectedDoc && (
@@ -1023,10 +1029,19 @@ export function DashboardScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
+  // The wrapper owns the canvas so the grid can sit behind the scroller.
+  gridHost: {
+    flex: 1,
+    backgroundColor: t.colors.bg,
+  },
+  scroller: {
+    flex: 1,
+    backgroundColor: 'transparent',
+  },
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
   },
   header: {
     padding: 20,
@@ -1045,7 +1060,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 12,
-    backgroundColor: colors.primary + '15',
+    backgroundColor: t.colors.accentSubtle,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 2,
@@ -1061,10 +1076,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 18,
     borderRadius: 12,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     elevation: 2,
     borderLeftWidth: 3,
-    borderLeftColor: colors.secondary,
+    borderLeftColor: t.colors.warning,
   },
   draftBannerContent: {
     flexDirection: 'row',
@@ -1084,18 +1099,18 @@ const styles = StyleSheet.create({
   draftBannerTitle: {
     fontSize: 14,
     fontWeight: '600',
-    color: colors.text,
+    color: t.colors.text,
   },
   draftBannerSubtitle: {
     fontSize: 12,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     marginTop: 2,
   },
   draftDeleteButton: {
     position: 'absolute',
     top: -6,
     right: 14,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderRadius: 11,
     zIndex: 10,
     elevation: 10,
@@ -1119,8 +1134,8 @@ const styles = StyleSheet.create({
   mateButtonGlow: {
     flex: 1,
     borderRadius: 12,
-    backgroundColor: colors.surface,
-    shadowColor: colors.secondary,
+    backgroundColor: t.colors.surfaceRaised,
+    shadowColor: t.colors.accent,
     shadowOffset: { width: 0, height: 0 },
     shadowRadius: 8,
     shadowOpacity: 0.3,
@@ -1140,21 +1155,21 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingHorizontal: 12,
     borderWidth: 1.5,
-    borderColor: 'rgba(207, 161, 83, 0.55)',
+    borderColor: t.colors.borderStrong,
   },
   mateButtonLabel: {
     fontSize: 15,
-    fontWeight: '700',
+    fontFamily: 'Archivo-Bold',
     letterSpacing: 0.3,
-    color: '#E6B872',
+    color: t.colors.text,
   },
   tryBadge: {
     position: 'absolute',
     top: -6,
     right: -6,
-    backgroundColor: colors.background,
+    backgroundColor: t.colors.bg,
     borderWidth: 1,
-    borderColor: '#E6B872',
+    borderColor: t.colors.accentText,
     borderRadius: 6,
     paddingHorizontal: 4,
     paddingVertical: 1,
@@ -1162,9 +1177,9 @@ const styles = StyleSheet.create({
   },
   tryBadgeText: {
     fontSize: 7,
-    fontWeight: '700',
+    fontFamily: 'Archivo-Bold',
     letterSpacing: 0.4,
-    color: '#E6B872',
+    color: t.colors.accentText,
   },
   statsContainer: {
     flexDirection: 'row',
@@ -1181,7 +1196,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     alignItems: 'center',
     elevation: 2,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     overflow: 'hidden',
   },
   statIconCircle: {
@@ -1194,13 +1209,25 @@ const styles = StyleSheet.create({
   },
   statNumber: {
     fontSize: 22,
-    fontWeight: '700',
-    color: colors.text,
+    fontFamily: 'Archivo-ExtraBold',
+    color: t.colors.text,
     marginBottom: 3,
+    letterSpacing: -0.44,
+    fontVariant: ['tabular-nums'],
+  },
+  // Money you have actually earned reads green; counts and pipeline stay
+  // neutral, so the one number that matters is the one that pops.
+  statNumberMoney: {
+    fontSize: 22,
+    fontFamily: 'Archivo-ExtraBold',
+    color: t.colors.money,
+    marginBottom: 3,
+    letterSpacing: -0.44,
+    fontVariant: ['tabular-nums'],
   },
   statLabel: {
     fontSize: 11,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
   },
   section: {
     paddingHorizontal: 20,
@@ -1223,7 +1250,7 @@ const styles = StyleSheet.create({
     width: 72,
     height: 72,
     borderRadius: 36,
-    backgroundColor: colors.primary + '15',
+    backgroundColor: t.colors.accentSubtle,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 4,
@@ -1231,21 +1258,21 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 22,
     fontWeight: '800',
-    color: colors.text,
+    color: t.colors.text,
     marginTop: 12,
     marginBottom: 8,
   },
   emptyText: {
     fontSize: 16,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     textAlign: 'center',
     lineHeight: 22,
   },
   emptySubtext: {
     fontSize: 14,
-    color: colors.textMuted,
+    color: t.colors.textMuted,
     marginTop: 8,
     textAlign: 'center',
     lineHeight: 20,
   },
-});
+}));

@@ -9,7 +9,7 @@ import { Text, Surface, Button } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation } from '@react-navigation/native';
 
-import { colors } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 import { TRIAL_MS } from '../utils/trialConfig';
 
 interface TrialBannerProps {
@@ -87,6 +87,8 @@ function getTrialMessage(daysRemaining: number, quoteCount: number, trialExpired
 }
 
 export function TrialBanner({ trialStartedAt, quoteCount, compact = false }: TrialBannerProps) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const navigation = useNavigation<any>();
 
   const trialStart = new Date(trialStartedAt);
@@ -99,12 +101,12 @@ export function TrialBanner({ trialStartedAt, quoteCount, compact = false }: Tri
   const { title, subtitle } = getTrialMessage(daysRemaining, quoteCount, trialExpired);
 
   const barColor = trialExpired
-    ? colors.error
+    ? themeColors.error
     : daysRemaining <= 1
-    ? colors.warning
+    ? themeColors.warning
     : daysRemaining <= 3
-    ? colors.secondary
-    : colors.primary;
+    ? themeColors.warning
+    : themeColors.accent;
 
   if (compact) {
     return (
@@ -161,11 +163,11 @@ export function TrialBanner({ trialStartedAt, quoteCount, compact = false }: Tri
               </Text>
             </View>
           </View>
-          <MaterialCommunityIcons name="chevron-right" size={20} color={colors.onSurface} />
+          <MaterialCommunityIcons name="chevron-right" size={20} color={themeColors.textSecondary} />
         </View>
         {trialExpired && (
           <Button
-            mode="contained"
+            mode="contained" buttonColor={themeColors.accent} textColor={themeColors.onAccent}
             compact
             onPress={handlePress}
             style={styles.upgradeButton}
@@ -178,14 +180,14 @@ export function TrialBanner({ trialStartedAt, quoteCount, compact = false }: Tri
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   card: {
     marginHorizontal: 20,
     marginBottom: 16,
     paddingHorizontal: 14,
     paddingVertical: 16,
     borderRadius: 12,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     elevation: 2,
   },
   content: {
@@ -208,11 +210,11 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 14,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
   },
   subtitle: {
     fontSize: 12,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     marginTop: 1,
   },
   barContainer: {
@@ -224,7 +226,7 @@ const styles = StyleSheet.create({
   barBackground: {
     flex: 1,
     height: 5,
-    backgroundColor: colors.surfaceLight,
+    backgroundColor: t.colors.surfaceOverlay,
     borderRadius: 3,
     overflow: 'hidden',
   },
@@ -247,7 +249,7 @@ const styles = StyleSheet.create({
   },
   compactSubtitle: {
     fontSize: 13,
-    color: colors.onSurface,
+    color: t.colors.textSecondary,
     marginBottom: 12,
   },
   progressBarContainer: {
@@ -255,7 +257,7 @@ const styles = StyleSheet.create({
   },
   progressBarBackground: {
     height: 8,
-    backgroundColor: colors.outline + '30',
+    backgroundColor: t.colors.border,
     borderRadius: 4,
     overflow: 'hidden',
   },
@@ -263,4 +265,4 @@ const styles = StyleSheet.create({
     height: '100%',
     borderRadius: 4,
   },
-});
+}));

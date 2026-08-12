@@ -27,7 +27,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
 import type { Job, JobPhoto } from '../../shared/job/types';
 import type { Document } from '../types/document';
-import { colors } from '../theme';
+import { makeStyles, useThemeColors } from '../theme';
 import { selectionTap } from '../utils/haptics';
 
 interface JobPhotoStripProps {
@@ -60,6 +60,8 @@ function aggregatePhotos(job: Job, documents: Document[]): JobPhoto[] {
 }
 
 export function JobPhotoStrip({ job, documents }: JobPhotoStripProps) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   const photos = useMemo(() => aggregatePhotos(job, documents), [job, documents]);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
 
@@ -104,7 +106,7 @@ export function JobPhotoStrip({ job, documents }: JobPhotoStripProps) {
                 <MaterialCommunityIcons
                   name={'pencil' as any}
                   size={10}
-                  color={colors.white}
+                  color={themeColors.alwaysLight}
                 />
               </View>
             ) : null}
@@ -133,6 +135,8 @@ function Lightbox({
   onClose: () => void;
   onAdvance: (delta: number) => void;
 }) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
   if (index == null) return null;
   const photo = photos[index];
   if (!photo) return null;
@@ -164,7 +168,7 @@ function Lightbox({
             {index + 1} / {photos.length}
           </Text>
           <Pressable onPress={onClose} hitSlop={10} style={styles.lightboxClose}>
-            <MaterialCommunityIcons name={'close' as any} size={22} color={colors.white} />
+            <MaterialCommunityIcons name={'close' as any} size={22} color={themeColors.alwaysLight} />
           </Pressable>
         </View>
 
@@ -177,7 +181,7 @@ function Lightbox({
             <MaterialCommunityIcons
               name={'chevron-left' as any}
               size={32}
-              color={colors.white}
+              color={themeColors.alwaysLight}
             />
           </Pressable>
         ) : null}
@@ -190,7 +194,7 @@ function Lightbox({
             <MaterialCommunityIcons
               name={'chevron-right' as any}
               size={32}
-              color={colors.white}
+              color={themeColors.alwaysLight}
             />
           </Pressable>
         ) : null}
@@ -199,11 +203,11 @@ function Lightbox({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t) => ({
   container: {
     marginHorizontal: 16,
     marginBottom: 12,
-    backgroundColor: colors.surface,
+    backgroundColor: t.colors.surfaceRaised,
     borderRadius: 16,
     padding: 14,
   },
@@ -216,12 +220,12 @@ const styles = StyleSheet.create({
   heading: {
     fontSize: 15,
     fontWeight: '700',
-    color: colors.text,
+    color: t.colors.text,
   },
   count: {
     fontSize: 12,
     fontWeight: '600',
-    color: colors.textMuted,
+    color: t.colors.textMuted,
   },
   scroll: {
     gap: 8,
@@ -232,9 +236,9 @@ const styles = StyleSheet.create({
     height: THUMB_SIZE,
     borderRadius: 12,
     overflow: 'hidden',
-    backgroundColor: colors.surfaceGray3,
+    backgroundColor: t.colors.surfacePressed,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.colors.border,
   },
   thumbPressed: {
     opacity: 0.7,
@@ -250,7 +254,7 @@ const styles = StyleSheet.create({
     width: 18,
     height: 18,
     borderRadius: 9,
-    backgroundColor: colors.primary,
+    backgroundColor: t.colors.accent,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -272,7 +276,7 @@ const styles = StyleSheet.create({
   lightboxCounter: {
     fontSize: 13,
     fontWeight: '700',
-    color: colors.white,
+    color: t.colors.alwaysLight,
     opacity: 0.8,
   },
   lightboxClose: {
@@ -296,4 +300,4 @@ const styles = StyleSheet.create({
   },
   lightboxNavLeft: { left: 16 },
   lightboxNavRight: { right: 16 },
-});
+}));
