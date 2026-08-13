@@ -191,6 +191,41 @@ async function healLegacyCopy(uid: string, docId: string, next: any): Promise<vo
   }
 }
 
+/**
+ * Bring a legacy quotes/invoices record into line with its already-canonical
+ * unified document. No-op when the legacy copy is already canonical, so the
+ * common path costs one read and no write.
+ */
+async function healLegacyCopyIfStale(uid: string, docId: string, canonicalDoc: any): Promise<boolean> {
+  const db = admin.firestore();
+  let healed = false;
+  for (const collection of ['quotes', 'invoices']) {
+    const ref = db.doc(`users/${uid}/${collection}/${docId}`);
+    const snap = await ref.get();
+    if (!snap.exists) continue;
+    const legacy = snap.data() as any;
+    const normalisedLegacy = normaliseLabourToHours(legacy);
+    if (normalisedLegacy === legacy) continue; // already canonical
+    await ref.update({
+      ...(canonicalDoc.sections ? { sections: canonicalDoc.sections } : {}),
+      laborRate: canonicalDoc.laborRate,
+      laborHours: canonicalDoc.laborHours,
+      laborUnit: 'hours',
+      labourDisplayUnit: canonicalDoc.labourDisplayUnit ?? 'hours',
+      laborExtraHours: canonicalDoc.laborExtraHours ?? 0,
+      laborTotal: canonicalDoc.laborTotal,
+      materialsSubtotal: canonicalDoc.materialsSubtotal,
+      subtotal: canonicalDoc.subtotal,
+      markupAmount: canonicalDoc.markupAmount,
+      gst: canonicalDoc.gst,
+      total: canonicalDoc.total,
+      labourUnitsHealedAt: Date.now(),
+    });
+    healed = true;
+  }
+  return healed;
+}
+
 async function healDoc(
   uid: string,
   business: string,
@@ -216,6 +251,16 @@ async function healDoc(
   const looksInflated = multiple !== null && Math.abs(multiple - BUG_MULTIPLE) <= BUG_MULTIPLE * MULTIPLE_TOLERANCE;
   const normalised = normaliseLabourToHours(before);
   const needsNormalise = normalised !== before;
+
+  // The legacy copy is healed against whatever the unified document says, even
+  // when the unified document needs no work itself. That is the common case:
+  // the first migration fixed `documents` and left `quotes`/`invoices` stale,
+  // so 147 legacy records were still day-shaped afterwards. An old client
+  // reading those sees the wrong money regardless of what the mirror does on
+  // the way back.
+  if (opts.commit && !needsNormalise && !looksInflated) {
+    await healLegacyCopyIfStale(uid, snap.id, before);
+  }
 
   if (!needsNormalise && !looksInflated) {
     // Still worth surfacing a rate that is wildly off but not the known bug.
@@ -341,10 +386,24 @@ async function main() {
   console.log(`Customer-facing documents: ${includeSent ? 'INCLUDED in rate repair' : 'normalise only'}`);
   if (onlyUid) console.log(`Scope: uid=${onlyUid}${onlyDoc ? `, doc=${onlyDoc}` : ''}`);
 
-  const uids = onlyUid
+  // Chunking. A full walk reads every document plus both legacy copies, which
+  // is slow enough that a single invocation gets killed part-way — and a killed
+  // run still exits 0 with no summary, which reads exactly like success. Run it
+  // in slices instead: --skip=0 --take=100, then 100, then 200…  Each slice is
+  // short enough to finish and print, and the whole thing stays resumable.
+  const skipArg = args.find((a) => a.startsWith('--skip='));
+  const takeArg = args.find((a) => a.startsWith('--take='));
+  const skip = skipArg ? Number(skipArg.slice('--skip='.length)) : 0;
+  const take = takeArg ? Number(takeArg.slice('--take='.length)) : Infinity;
+
+  const allUids = onlyUid
     ? [onlyUid]
     : (await db.collection('users').get()).docs.map((u) => u.id);
-  console.log(`Walking ${uids.length} user${uids.length === 1 ? '' : 's'}…\n`);
+  const uids = onlyUid ? allUids : allUids.slice(skip, skip + take);
+  console.log(
+    `Walking ${uids.length} of ${allUids.length} user${allUids.length === 1 ? '' : 's'}` +
+    (onlyUid ? '' : ` (skip=${skip} take=${take === Infinity ? 'all' : take})`) + '…\n',
+  );
 
   const results: DocSummary[] = [];
   for (const uid of uids) {
