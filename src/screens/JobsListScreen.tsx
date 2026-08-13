@@ -27,6 +27,7 @@ import {
 } from 'react-native';
 import { Text, Searchbar, FAB } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation, useScrollToTop } from '@react-navigation/native';
 
 import type { Job, JobStage } from '../../shared/job/types';
@@ -120,6 +121,28 @@ export function JobsListScreen() {
   // visible explaining why. These keep it in view.
   const chipScrollRef = useRef<ScrollView>(null);
   const chipOffsets = useRef<Record<string, number>>({});
+
+  // Which edges are hiding chips. Both fades are conditional: a fade at an edge
+  // with nothing past it makes the first chip look clipped when it isn't.
+  const chipViewport = useRef(0);
+  const chipContent = useRef(0);
+  const chipScrollX = useRef(0);
+  const [chipFades, setChipFades] = useState({ left: false, right: false });
+
+  const syncChipFades = useCallback(() => {
+    const viewport = chipViewport.current;
+    const content = chipContent.current;
+    if (!viewport || !content) return;
+    const scrollable = content > viewport + 1;
+    const x = chipScrollX.current;
+    const left = scrollable && x > 1;
+    const right = scrollable && x + viewport < content - 1;
+    // Return prev when nothing flipped so a scroll gesture doesn't re-render
+    // the whole list on every frame.
+    setChipFades((prev) =>
+      prev.left === left && prev.right === right ? prev : { left, right },
+    );
+  }, []);
 
   const [refreshing, setRefreshing] = useState(false);
   const [initialLoaded, setInitialLoaded] = useState(jobsLoaded || jobs.length > 0);
@@ -342,13 +365,26 @@ export function JobsListScreen() {
             chrome above the list. The chips scroll horizontally instead; the
             sort button sits outside the scroller so it stays reachable. */}
         <View style={styles.controlsRow}>
-          <ScrollView
-            ref={chipScrollRef}
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.filterRow}
-            style={styles.filterScroll}
-          >
+          <View style={styles.filterScrollWrap}>
+            <ScrollView
+              ref={chipScrollRef}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.filterRow}
+              scrollEventThrottle={32}
+              onScroll={(e) => {
+                chipScrollX.current = e.nativeEvent.contentOffset.x;
+                syncChipFades();
+              }}
+              onLayout={(e) => {
+                chipViewport.current = e.nativeEvent.layout.width;
+                syncChipFades();
+              }}
+              onContentSizeChange={(w) => {
+                chipContent.current = w;
+                syncChipFades();
+              }}
+            >
             {JOB_FILTERS.map(({ key, label }) => {
               const count = counts.get(key) ?? 0;
               return (
@@ -390,7 +426,33 @@ export function JobsListScreen() {
                 </View>
               );
             })}
-          </ScrollView>
+            </ScrollView>
+            {/* Chips fade out at whichever edge is hiding them, instead of
+                being sliced mid-word — a flat-cut chip reads as a rendering
+                fault, which is exactly how the left edge looked before this.
+                Both gradients end on the page background at zero alpha rather
+                than 'transparent': interpolating towards transparent-black
+                smudges the gradient grey on iOS. pointerEvents none so they
+                never eat a chip tap. */}
+            {chipFades.left ? (
+              <LinearGradient
+                pointerEvents="none"
+                colors={[themeColors.bg, themeColors.bg + '00']}
+                start={{ x: 0, y: 0.5 }}
+                end={{ x: 1, y: 0.5 }}
+                style={[styles.filterFade, styles.filterFadeLeft]}
+              />
+            ) : null}
+            {chipFades.right ? (
+              <LinearGradient
+                pointerEvents="none"
+                colors={[themeColors.bg + '00', themeColors.bg]}
+                start={{ x: 0, y: 0.5 }}
+                end={{ x: 1, y: 0.5 }}
+                style={[styles.filterFade, styles.filterFadeRight]}
+              />
+            ) : null}
+          </View>
           <JobSortMenu value={sortKey} onChange={(key) => setSort(filter, key)} />
         </View>
       </WebContainer>
@@ -576,11 +638,23 @@ const useStyles = makeStyles((t) => ({
   // pushing it off the edge. minWidth:0 is what actually makes that work on
   // web — without it a flex child refuses to shrink below its content's
   // intrinsic width, so six chips would shove the sort button off screen.
-  filterScroll: {
+  //
+  // The wrapper exists to anchor the fade: it has to overlay the scroller, and
+  // an absolute child of the ScrollView itself would scroll away with the chips.
+  filterScrollWrap: {
     flexGrow: 1,
     flexShrink: 1,
     minWidth: 0,
+    position: 'relative',
   },
+  filterFade: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    width: 24,
+  },
+  filterFadeLeft: { left: 0 },
+  filterFadeRight: { right: 0 },
   // No flexWrap: the row is a single scrolling line. Trailing padding so the
   // last chip can clear the sort button when scrolled fully right.
   filterRow: {

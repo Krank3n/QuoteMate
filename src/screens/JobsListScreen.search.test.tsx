@@ -23,6 +23,9 @@ vi.mock('react-native-safe-area-context', () => ({
   SafeAreaProvider: ({ children }: any) => children,
   SafeAreaView: ({ children }: any) => children,
 }));
+// Also untranspiled. It's the decorative fade over the chip row — purely
+// visual, nothing asserted about it.
+vi.mock('expo-linear-gradient', () => ({ LinearGradient: () => null }));
 vi.mock('react-native-paper', async () => {
   const { Text, View, TextInput, Pressable } = await import('react-native');
   const Chip = ({ children, onPress }: any) => (
