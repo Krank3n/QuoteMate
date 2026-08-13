@@ -21,6 +21,7 @@ import { formatDistanceToNow } from 'date-fns';
 import { useStore } from '../store/useStore';
 import { useJobStore } from '../store/useJobStore';
 import { applyJobStageChange } from '../utils/applyJobStageChange';
+import { earnedInMonth } from '../utils/monthlyEarnings';
 import { pickPrimaryDoc } from '../components/StickyJobActionBar';
 import { makeStyles, useThemeColors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
@@ -325,11 +326,9 @@ export function DashboardScreen() {
   const isPro = subscriptionStatus?.isPro || isTrialActive;
 
   // Calculate quick stats (memoized to avoid recalculation on every render)
-  const { sentQuotes, acceptedQuotes, thisMonthRevenue, pipelineValue } = useMemo(() => {
-    const now = new Date();
+  const { sentQuotes, acceptedQuotes, pipelineValue } = useMemo(() => {
     let sent = 0;
     let accepted = 0;
-    let monthRevenue = 0;
     let pipeline = 0;
 
     for (const q of quotes) {
@@ -339,15 +338,22 @@ export function DashboardScreen() {
       }
       if (q.status === 'accepted' || q.status === 'completed') {
         accepted++;
-        const d = new Date(q.updatedAt);
-        if (d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()) {
-          monthRevenue += q.total;
-        }
       }
     }
 
-    return { sentQuotes: sent, acceptedQuotes: accepted, thisMonthRevenue: monthRevenue, pipelineValue: pipeline };
+    return { sentQuotes: sent, acceptedQuotes: accepted, pipelineValue: pipeline };
   }, [quotes]);
+
+  // Earnings come from the payment ledger, not from quote totals. This tile
+  // used to sum accepted/completed QUOTE values, so a quote marked Accepted
+  // with nothing paid counted in full, while an invoice that had genuinely
+  // been paid counted nothing — once converted, the legacy quote is no longer
+  // in those statuses. See earnedInMonth.
+  const documentsForEarnings = useStore((s) => s.documents);
+  const thisMonthRevenue = useMemo(
+    () => earnedInMonth(documentsForEarnings),
+    [documentsForEarnings],
+  );
 
   // Newest in-progress draft, time-boxed — pickDashboardDraft hides
   // drafts older than the banner window so a zombie draft can't squat on

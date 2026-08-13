@@ -34,6 +34,8 @@ interface PaymentChipProps {
    * instead. Handlers that don't care may ignore it.
    */
   onPress?: (doc: Document, event?: GestureResponderEvent) => void;
+  /** Drop the figures from the label — for rows that share space. */
+  compact?: boolean;
 }
 
 interface PaymentMeta {
@@ -95,7 +97,21 @@ function formatProgress(doc: Document): string {
   return `${formatCurrency(paid)} / ${formatCurrency(total)}`;
 }
 
-function metaFor(doc: Document, state: PaymentState, themeColors: Tokens): PaymentMeta {
+/**
+ * `compact` drops the money from the label.
+ *
+ * On a list card the chip shares one row with the status line, and
+ * "Part paid $1,303.13 / $2,606.26" is wide enough to squeeze that line down
+ * to "Started 2 mi…". The state is what a tradie scans a list for; the
+ * figures are on the card already and in the job. Detail views pass no flag
+ * and keep the full label.
+ */
+function metaFor(
+  doc: Document,
+  state: PaymentState,
+  themeColors: Tokens,
+  compact = false,
+): PaymentMeta {
   switch (state) {
     case 'unpaid':
       return {
@@ -106,14 +122,16 @@ function metaFor(doc: Document, state: PaymentState, themeColors: Tokens): Payme
       };
     case 'deposit_paid':
       return {
-        label: `Deposit ${formatCurrency(Number(doc.paidTotal) || 0)}`,
+        label: compact
+          ? 'Deposit paid'
+          : `Deposit ${formatCurrency(Number(doc.paidTotal) || 0)}`,
         icon: 'cash-plus',
         color: themeColors.info,
         bgColor: themeColors.infoSubtle,
       };
     case 'partially_paid':
       return {
-        label: `Part paid ${formatProgress(doc)}`,
+        label: compact ? 'Part paid' : `Part paid ${formatProgress(doc)}`,
         icon: 'progress-check',
         color: themeColors.warning,
         bgColor: themeColors.warningSubtle,
@@ -127,7 +145,7 @@ function metaFor(doc: Document, state: PaymentState, themeColors: Tokens): Payme
       };
     case 'overpaid':
       return {
-        label: `Overpaid ${formatProgress(doc)}`,
+        label: compact ? 'Overpaid' : `Overpaid ${formatProgress(doc)}`,
         icon: 'cash-refund',
         color: themeColors.warning,
         bgColor: themeColors.warningSubtle,
@@ -135,11 +153,11 @@ function metaFor(doc: Document, state: PaymentState, themeColors: Tokens): Payme
   }
 }
 
-export function PaymentChip({ doc, onPress }: PaymentChipProps) {
+export function PaymentChip({ doc, onPress, compact }: PaymentChipProps) {
   const styles = useStyles();
   const themeColors = useThemeColors();
   const state = derivePaymentState(doc);
-  const meta = metaFor(doc, state, themeColors);
+  const meta = metaFor(doc, state, themeColors, compact);
 
   const content = (
     <View style={[styles.chip, { backgroundColor: meta.bgColor, borderColor: meta.color + '44' }]}>

@@ -321,7 +321,10 @@ export const JobCard = React.memo(function JobCard({
                   accessibilityLabel={`View ${job.customerName || 'customer'} — ${customerJobCount} jobs`}
                   style={({ pressed }) => [styles.customerPress, pressed && { opacity: 0.7 }]}
                 >
-                  <Text style={styles.customer} numberOfLines={1}>
+                  <Text
+                    style={[styles.customer, styles.customerInPress]}
+                    numberOfLines={1}
+                  >
                     {job.customerName || 'Unknown customer'}
                   </Text>
                   <Text style={styles.customerCount}>· {customerJobCount} jobs</Text>
@@ -447,9 +450,11 @@ export const JobCard = React.memo(function JobCard({
             style={[styles.metaText, sortLabel?.tone === 'urgent' && styles.metaTextUrgent]}
             numberOfLines={1}
           >
-            {sortLabel
-              ? `${sortLabel.text}${headlineValue > 0 ? ` · ${formatCurrency(headlineValue)}` : ''}`
-              : `${status.label} ${formatUpdatedAt(status.ms)}`}
+            {/* Just the label. It used to append the money too, which printed
+                the identical figure twice on one card — the headline price is
+                already top-right, so "Overdue 81 days · $5,280.00" sat directly
+                under "$5,280.00". */}
+            {sortLabel ? sortLabel.text : `${status.label} ${formatUpdatedAt(status.ms)}`}
           </Text>
           {xeroSyncStatus === 'synced' ? (
             <MaterialCommunityIcons
@@ -470,6 +475,7 @@ export const JobCard = React.memo(function JobCard({
             <View style={styles.paymentChipSlot}>
               <PaymentChip
                 doc={primaryDoc as Document}
+                compact
                 onPress={
                   canRecordPaymentFor(primaryDoc) ? handlePaymentChipPress : undefined
                 }
@@ -696,12 +702,22 @@ const useStyles = makeStyles((t) => ({
     fontFamily: 'Archivo-Bold',
     color: t.colors.text,
   },
-  // Takes over the name's flex:1 so the headline price still sits hard right.
+  // flexShrink, NOT flex:1. With flex:1 the row stretched to the price and the
+  // name inside it stretched too, which stranded "· 4 jobs" in the middle of
+  // the card hard against the money — it read as though the count described
+  // the dollar figure. Hugging the content keeps the count next to the name it
+  // belongs to, and stops the empty gap being a tap target for the customer.
   customerPress: {
-    flex: 1,
+    flexShrink: 1,
     flexDirection: 'row',
     alignItems: 'baseline',
     gap: 4,
+  },
+  // Cancels styles.customer's flex:1 for the in-pressable case, so the name
+  // truncates rather than pushing the count away.
+  customerInPress: {
+    flex: 0,
+    flexShrink: 1,
   },
   customerCount: {
     fontSize: 12,
