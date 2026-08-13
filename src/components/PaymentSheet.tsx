@@ -9,7 +9,7 @@
  */
 
 import React from 'react';
-import { View, StyleSheet, ScrollView } from 'react-native';
+import { View, StyleSheet, ScrollView, Pressable } from 'react-native';
 import { Text, Button, Divider } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { format } from 'date-fns';
@@ -19,8 +19,12 @@ import type { DocumentPayment } from '../../shared/document/types';
 import { makeStyles, useThemeColors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
 import { BottomSheet } from './BottomSheet';
+import { isEditablePayment } from '../utils/editablePayment';
+import { selectionTap } from '../utils/haptics';
 
 interface PaymentSheetProps {
+  /** Opens the editor for a manually recorded payment. Omit and rows stay read-only. */
+  onEditPayment?: (doc: Document, payment: DocumentPayment) => void;
   visible: boolean;
   onDismiss: () => void;
   doc: Document;
@@ -53,7 +57,7 @@ function formatPaidAt(ms: number): string {
   }
 }
 
-export function PaymentSheet({ visible, onDismiss, doc, onRecordPayment }: PaymentSheetProps) {
+export function PaymentSheet({ visible, onDismiss, doc, onRecordPayment, onEditPayment }: PaymentSheetProps) {
   const styles = useStyles();
   const themeColors = useThemeColors();
   const payments = (doc.payments || []).slice().sort(
@@ -88,8 +92,28 @@ export function PaymentSheet({ visible, onDismiss, doc, onRecordPayment }: Payme
         </View>
       ) : (
         <ScrollView style={styles.list} contentContainerStyle={styles.listContent}>
-          {payments.map((p) => (
-            <View key={p.id} style={styles.row}>
+          {payments.map((p) => {
+            // Square entries mirror a real transaction and stay read-only —
+            // see isEditablePayment.
+            const editable = isEditablePayment(p) && !!onEditPayment;
+            const RowWrapper: any = editable ? Pressable : View;
+            return (
+            <RowWrapper
+              key={p.id}
+              {...(editable
+                ? {
+                    onPress: () => {
+                      selectionTap();
+                      onEditPayment!(doc, p);
+                    },
+                    style: ({ pressed }: { pressed: boolean }) => [
+                      styles.row,
+                      pressed && { opacity: 0.7 },
+                    ],
+                    accessibilityLabel: `Edit payment of ${formatCurrency(p.amount)}`,
+                  }
+                : { style: styles.row })}
+            >
               <View style={styles.rowIconCircle}>
                 <MaterialCommunityIcons
                   name={
@@ -115,8 +139,16 @@ export function PaymentSheet({ visible, onDismiss, doc, onRecordPayment }: Payme
                 {p.notes ? <Text style={styles.rowNotes}>{p.notes}</Text> : null}
               </View>
               <Text style={styles.rowAmount}>{formatCurrency(p.amount)}</Text>
-            </View>
-          ))}
+              {editable ? (
+                <MaterialCommunityIcons
+                  name={'pencil-outline' as any}
+                  size={16}
+                  color={themeColors.textMuted}
+                />
+              ) : null}
+            </RowWrapper>
+            );
+          })}
         </ScrollView>
       )}
 

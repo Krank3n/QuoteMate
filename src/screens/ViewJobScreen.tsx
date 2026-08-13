@@ -990,6 +990,13 @@ export function ViewJobScreen() {
           onDismiss={() => setPaymentSheetDoc(null)}
           doc={paymentSheetDoc}
           onRecordPayment={handleDocRecordPayment}
+          onEditPayment={(d, payment) => {
+            setPaymentSheetDoc(null);
+            navigation.navigate('RecordPayment', {
+              invoiceId: d.id,
+              paymentId: payment.id,
+            });
+          }}
         />
       ) : null}
 

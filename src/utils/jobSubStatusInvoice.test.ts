@@ -39,14 +39,18 @@ describe('getJobSubStatus — wording defers to an invoice document', () => {
     );
   });
 
-  it('reads the money state on a part-paid invoice', () => {
-    expect(
-      getJobSubStatus(job({ stage: 'quoted' }), invoice({ stage: 'partially_paid' })).label,
-    ).toBe('Part Paid');
+  // The rail must not talk about money — PaymentChip does, on the same
+  // card. Returning "Paid" here put the same word twice, two feet apart.
+  it('stays on the workflow axis for a part-paid invoice, leaving money to PaymentChip', () => {
+    const label = getJobSubStatus(job({ stage: 'quoted' }), invoice({ stage: 'partially_paid' })).label;
+    expect(label).toBe('Invoice Sent');
+    expect(label).not.toMatch(/paid/i);
   });
 
-  it('reads "Paid" on a settled invoice even while the job lags behind', () => {
-    expect(getJobSubStatus(job({ stage: 'quoted' }), invoice({ stage: 'paid' })).label).toBe('Paid');
+  it('stays on the workflow axis for a settled invoice too', () => {
+    const label = getJobSubStatus(job({ stage: 'quoted' }), invoice({ stage: 'paid' })).label;
+    expect(label).toBe('Invoice Sent');
+    expect(label).not.toMatch(/paid/i);
   });
 
   it('also corrects an inquiry-stage job carrying an invoice', () => {

@@ -16,6 +16,8 @@ import {
   getDoc,
   getDocs,
   deleteDoc,
+  deleteField,
+  updateDoc,
   onSnapshot,
   Unsubscribe,
   query,
@@ -31,6 +33,9 @@ import { normaliseLabourToHours } from '../../shared/document/labourUnits';
 function getUserId(): string | null {
   return auth.currentUser?.uid || null;
 }
+
+/** Ceiling on the live listener. See listenToDocuments for why it isn't unbounded. */
+export const DOCUMENTS_LISTENER_LIMIT = 500;
 
 /**
  * Fires when a day-shaped document reaches the write path, which the type
@@ -182,20 +187,36 @@ class DocumentService {
     }
   }
 
-  /** Subscribe to document changes in real-time. */
-  listenToDocuments(callback: (documents: Document[]) => void): Unsubscribe | null {
+  /**
+   * Subscribe to document changes in real-time.
+   *
+   * @param callback receives the snapshot plus whether it came back at the cap,
+   *   i.e. whether older documents exist that this listener will never deliver.
+   */
+  listenToDocuments(
+    callback: (documents: Document[], wasTruncated: boolean) => void,
+  ): Unsubscribe | null {
     const userId = getUserId();
     if (!userId) return null;
     try {
       this.documentsUnsubscribe?.();
       const ref = collection(db, 'users', userId, 'documents');
-      // Cap the live listener at 100 most-recent docs so the snapshot replay
-      // doesn't grow with usage history. Older docs remain reachable via
-      // loadDocuments() and archive views.
-      const q = query(ref, orderBy('createdAt', 'desc'), limit(100));
+      // Cap the live listener so the snapshot replay doesn't grow without
+      // bound with usage history.
+      //
+      // This used to be 100, and the old comment claimed older docs "remain
+      // reachable via loadDocuments()". They don't, in practice: a snapshot
+      // REPLACES the store array, so the capped listener overwrote whatever
+      // the unbounded loadDocuments() had fetched. A job whose only invoice
+      // fell outside the window then read as having no documents at all —
+      // wrong filter bucket, $0 on the card, and "Create Quote" offered on a
+      // job that already had a sent invoice. The caller now merges instead of
+      // trimming (see mergeTruncatedSnapshot), and 500 puts truncation out of
+      // reach for any real account.
+      const q = query(ref, orderBy('createdAt', 'desc'), limit(DOCUMENTS_LISTENER_LIMIT));
       this.documentsUnsubscribe = onSnapshot(q, (snapshot) => {
         const docs = snapshot.docs.map((d) => normaliseDocument(d.data(), d.id));
-        callback(docs);
+        callback(docs, snapshot.docs.length >= DOCUMENTS_LISTENER_LIMIT);
       }, () => {});
       return this.documentsUnsubscribe;
     } catch {
@@ -258,6 +279,28 @@ class DocumentService {
         syncedAt: new Date().toISOString(),
       }), { merge: true });
     }
+  }
+
+  /**
+   * Actually remove fields from the stored document.
+   *
+   * saveDocument strips undefined and writes with `{ merge: true }`, so
+   * setting a field to undefined leaves the stored value untouched — the
+   * key simply never reaches Firestore. That's right for a partial save
+   * and wrong when a field has to go: after "Back to a quote…" a surviving
+   * `invoicedAt` makes canConvert refuse, so the tradie could undo the
+   * conversion and then never redo it.
+   *
+   * Mirrors into the legacy quote row, which carries invoicedAt too.
+   */
+  async clearDocumentFields(documentId: string, fields: string[]): Promise<void> {
+    const userId = getUserId();
+    if (!userId || fields.length === 0) return;
+    const sentinels = Object.fromEntries(fields.map((f) => [f, deleteField()]));
+    await Promise.allSettled([
+      updateDoc(doc(db, 'users', userId, 'documents', documentId), sentinels),
+      updateDoc(doc(db, 'users', userId, 'quotes', documentId), sentinels),
+    ]);
   }
 
   async deleteDocument(documentId: string): Promise<void> {

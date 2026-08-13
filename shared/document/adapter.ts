@@ -603,7 +603,12 @@ export function documentRecordToInvoiceRecord(doc: DocumentRecord): LegacyDocume
     paymentTerms: doc.paymentTerms ?? 'net_14',
     customPaymentDays: doc.customPaymentDays,
     paidDate: fromMs(paid?.paidAt),
-    paidAmount: paid?.amount,
+    // The LEDGER total, not the representative payment's amount. `paidAmount`
+    // means "total paid on this invoice" everywhere else — legacy
+    // recordPayment accumulates into it and invoiceLinkAmountDue computes
+    // `total − paidAmount` from it — so reporting one payment's amount
+    // under-reported every invoice with more than one payment.
+    paidAmount: doc.paidTotal,
     paymentMethod,
     paymentNotes: paid?.notes,
     sourceQuoteId: doc.legacyQuoteId,

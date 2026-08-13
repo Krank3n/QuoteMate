@@ -28,8 +28,10 @@ import { updateQuoteCalculations, healBrokenLabourSections } from '../utils/quot
 import { normaliseLabourToHours } from '../../shared/document/labourUnits';
 import { calculateDueDate } from '../utils/invoiceCalculator';
 import { canRevertToQuote } from '../utils/revertToQuote';
+import { isEditablePayment, maxAmountForEdit } from '../utils/editablePayment';
 import { reconcileNextNumber, resolveNextQuoteNumber } from '../utils/nextNumber';
 import { preserveSnapshotIdentity } from '../utils/snapshotIdentity';
+import { mergeTruncatedSnapshot } from '../utils/mergeTruncatedSnapshot';
 import { firestoreService, ASSISTANT_LOGGING_ENABLED } from '../services/firestoreService';
 import { documentService } from '../services/documentService';
 // Static import — see note on the call sites below. Dynamic `import()` here
@@ -44,6 +46,7 @@ import { TRIAL_MS } from '../utils/trialConfig';
 import { trackEvent } from '../services/analyticsService';
 import { maybeRequestReview } from '../services/storeReviewService';
 import { ensureJobForDocument, ensureJobForQuote, useJobStore } from './useJobStore';
+import type { CustomerEditPlan } from '../utils/customerEdit';
 import { auth } from '../config/firebase';
 import { searchLocalSources } from '../services/localMaterialSearch';
 import { loadGroups as loadSupplierGroups } from '../services/supplierGroupService';
@@ -53,7 +56,7 @@ import { roundToTwoDecimals } from '../utils/documentCalculator';
 // The legacy PaymentMethod enum is finer-grained than the unified ledger's.
 // Cheque and card have no ledger equivalent, so they land on 'other' — the
 // human-readable detail survives in the payment's notes.
-const PAYMENT_METHOD_TO_LEDGER: Record<string, DocumentPaymentMethod> = {
+export const PAYMENT_METHOD_TO_LEDGER: Record<string, DocumentPaymentMethod> = {
   cash: 'cash',
   bank_transfer: 'bank',
   card: 'other',
@@ -207,6 +210,12 @@ interface AppState {
   xeroContacts: Contact[];
   loadContacts: () => Promise<void>;
   saveContact: (contact: Contact) => Promise<void>;
+  /**
+   * Perform a Customer-screen edit. Takes a plan from planCustomerEdit and
+   * returns the stable `c:<id>` key the screen must switch to, because the edit
+   * can move the customer's derived key.
+   */
+  applyCustomerEdit: (plan: CustomerEditPlan) => Promise<string>;
   deleteContact: (contactId: string) => Promise<void>;
   importContacts: (contacts: Contact[]) => Promise<void>;
   syncXeroContacts: () => Promise<void>;
@@ -235,6 +244,16 @@ interface AppState {
   convertDocumentToInvoice: (documentId: string) => Promise<Document>;
   /** Undo a conversion while the invoice is still untouched — see canRevertToQuote. */
   revertDocumentToQuote: (documentId: string) => Promise<Document>;
+  /** Correct a manually recorded payment. Square payments are read-only — see isEditablePayment. */
+  updateDocumentPayment: (
+    documentId: string,
+    paymentId: string,
+    patch: Partial<Pick<DocumentPayment, 'amount' | 'paidAt' | 'method' | 'notes'>>,
+  ) => Promise<Document>;
+  /** Remove a manually recorded payment and re-derive the totals from what's left. */
+  deleteDocumentPayment: (documentId: string, paymentId: string) => Promise<Document>;
+  /** Re-derive paidTotal / balanceDue / stage from a ledger and save once. */
+  saveDocumentWithLedger: (doc: Document, payments: DocumentPayment[]) => Promise<Document>;
   /**
    * Clone a Document for a new Job (Duplicate flow). Keeps scope/labor/
    * materials/terms; resets stage to quote_accepted, money state to zero,
@@ -1994,24 +2013,102 @@ export const useStore = create<AppState>((set, get) => ({
     };
     await get().saveDocument(next);
 
-    // Keep the legacy mirror in step when one exists, so the old invoice
-    // list, Xero push and any un-migrated screen see the same money. Absent
-    // legacy row is the normal case now — not an error.
-    const legacyId = doc.legacyInvoiceId || doc.id;
-    const legacy = get().invoices.find((i) => i.id === legacyId);
-    if (legacy) {
-      try {
-        await get().recordPayment(legacy.id, capped, method, notes, paymentDate);
-      } catch {
-        // The unified ledger is the source of truth; a stale legacy row
-        // must not fail a payment the tradie already recorded.
-      }
-    } else if (fullyPaid && doc.stage !== 'paid') {
-      // recordPayment normally owns this prompt; fire it here for the
-      // document-only path so the ask still lands on the best moment.
+    // The legacy mirror is ALREADY up to date at this point: saveDocument
+    // projects the document onto invoices/{id} with an absolute paidAmount.
+    //
+    // This used to also call the legacy recordPayment, which is additive
+    // (`currentPaid + amount`) — so it read the value the projection had just
+    // written and added the same payment on top. A $960 payment landed as
+    // $1,920, and onInvoiceWritten then projected that doubled total back
+    // over the unified ledger as one inflated entry. The input caps here and
+    // in RecordPaymentScreen both run before the mirror, so neither saw it.
+    if (fullyPaid && doc.stage !== 'paid') {
+      // Best moment to ask — the job just got paid in full.
       maybeRequestReview('invoice_paid').catch(() => {});
     }
 
+    return next;
+  },
+
+  updateDocumentPayment: async (documentId, paymentId, patch) => {
+    const doc = get().getDocumentById(documentId);
+    if (!doc) throw new Error('Invoice not found');
+    const existing = (doc.payments || []).find((p) => p.id === paymentId);
+    if (!existing) throw new Error('Payment not found');
+    if (!isEditablePayment(existing)) {
+      throw new Error('Square payments are managed in Square and can’t be edited here.');
+    }
+
+    // The append-time cap would measure against a balance that already
+    // includes this payment — see maxAmountForEdit.
+    const ceiling = maxAmountForEdit(doc, existing);
+    const nextAmount =
+      patch.amount === undefined
+        ? Number(existing.amount) || 0
+        : Math.min(Math.max(Number(patch.amount) || 0, 0), ceiling);
+
+    const payments = (doc.payments || []).map((p) =>
+      p.id === paymentId
+        ? {
+            ...p,
+            amount: nextAmount,
+            ...(patch.paidAt !== undefined ? { paidAt: patch.paidAt } : {}),
+            ...(patch.method !== undefined ? { method: patch.method } : {}),
+            ...(patch.notes !== undefined ? { notes: patch.notes } : {}),
+          }
+        : p,
+    );
+
+    return await get().saveDocumentWithLedger(doc, payments);
+  },
+
+  deleteDocumentPayment: async (documentId, paymentId) => {
+    const doc = get().getDocumentById(documentId);
+    if (!doc) throw new Error('Invoice not found');
+    const existing = (doc.payments || []).find((p) => p.id === paymentId);
+    if (!existing) throw new Error('Payment not found');
+    if (!isEditablePayment(existing)) {
+      throw new Error('Square payments are managed in Square and can’t be removed here.');
+    }
+    const payments = (doc.payments || []).filter((p) => p.id !== paymentId);
+    return await get().saveDocumentWithLedger(doc, payments);
+  },
+
+  /**
+   * Re-derive the money fields from a ledger and save once.
+   *
+   * Shared by the edit and delete paths so a corrected payment lands through
+   * exactly the same arithmetic as a new one — the totals, the balance and
+   * the stage all come from `payments`, never from an incremental adjustment.
+   * That is the property the doubling bug broke.
+   */
+  saveDocumentWithLedger: async (doc: Document, payments: DocumentPayment[]) => {
+    const total = Number(doc.total) || 0;
+    const paidTotal = payments.reduce((acc, p) => acc + (Number(p.amount) || 0), 0);
+    const balanceDue = Math.max(0, total - paidTotal);
+    const fullyPaid = total > 0 && paidTotal + 0.005 >= total;
+
+    // Stage follows the money. Emptying the ledger drops an invoice back to
+    // 'invoice_sent' rather than leaving it reading Paid with nothing behind
+    // it; a draft that never went out stays a draft.
+    let stage = doc.stage;
+    if (doc.type === 'invoice') {
+      if (fullyPaid) stage = 'paid';
+      else if (paidTotal > 0) stage = 'partially_paid';
+      else if (doc.stage === 'paid' || doc.stage === 'partially_paid') {
+        stage = doc.sentAt ? 'invoice_sent' : 'draft';
+      }
+    }
+
+    const next: Document = {
+      ...doc,
+      payments,
+      paidTotal,
+      balanceDue,
+      stage,
+      ...(fullyPaid ? {} : { paidInFullAt: undefined }),
+    };
+    await get().saveDocument(next);
     return next;
   },
 
@@ -2165,6 +2262,54 @@ export const useStore = create<AppState>((set, get) => ({
         }
       }
 
+      // Unified documents. These used to be skipped entirely — only the legacy
+      // quotes/invoices below were synced — so editing a contact left every
+      // Document (and so the whole Jobs surface, which reads Documents) showing
+      // the old name and number.
+      const { documents } = get();
+      const linkedDocs = documents.filter((d) => d.contactId === contact.id);
+      if (linkedDocs.length > 0) {
+        const patched = documents.map((d) =>
+          d.contactId === contact.id
+            ? {
+                ...d,
+                customerName: contact.name,
+                customerEmail: contact.email,
+                customerPhone: contact.phone,
+                // jobAddress deliberately untouched: it's the SITE, and a
+                // customer can have several. See utils/customerEdit.
+              }
+            : d,
+        );
+        set({ documents: patched });
+        if (auth.currentUser) {
+          for (const d of patched.filter((d) => d.contactId === contact.id)) {
+            documentService.saveDocument(d).catch(() => {});
+          }
+        }
+      }
+
+      // Jobs. Same omission as documents — the Jobs list, the job cards and the
+      // Customer screen all read Job.customerName, so a contact edit that
+      // skipped them looked like it hadn't saved.
+      const jobStore = useJobStore.getState();
+      const linkedJobs = jobStore.jobs.filter((j) => j.customerId === contact.id);
+      for (const j of linkedJobs) {
+        const needsPatch =
+          j.customerName !== contact.name ||
+          (j.customerEmail || undefined) !== contact.email ||
+          (j.customerPhone || undefined) !== contact.phone;
+        if (!needsPatch) continue;
+        jobStore
+          .saveJob({
+            ...j,
+            customerName: contact.name,
+            customerEmail: contact.email,
+            customerPhone: contact.phone,
+          })
+          .catch(() => {});
+      }
+
       const linkedInvoices = invoices.filter((i) => i.contactId === contact.id);
       if (linkedInvoices.length > 0) {
         const updatedInvoices = invoices.map((i) =>
@@ -2183,6 +2328,31 @@ export const useStore = create<AppState>((set, get) => ({
     } catch (error) {
       throw error;
     }
+  },
+
+  /**
+   * Apply an edit made on the Customer screen.
+   *
+   * The plan is computed by the pure planCustomerEdit (utils/customerEdit) —
+   * this only performs the writes. Contact first, because every job and
+   * document in the plan references its id: if the run dies partway, the
+   * records point at a contact that exists rather than a dangling id.
+   *
+   * Returns the stable `c:<id>` key the screen should switch to, since the edit
+   * may have moved the customer's derived key.
+   */
+  applyCustomerEdit: async (plan) => {
+    await get().saveContact(plan.contact);
+
+    const jobStore = useJobStore.getState();
+    for (const job of plan.jobs) {
+      await jobStore.saveJob(job);
+    }
+    for (const doc of plan.documents) {
+      await get().saveDocument(doc);
+    }
+
+    return plan.nextCustomerKey;
   },
 
   deleteContact: async (contactId: string) => {
@@ -2467,8 +2637,19 @@ export const useStore = create<AppState>((set, get) => ({
 
   listenToDocuments: () => {
     if (!auth.currentUser) return;
-    documentService.listenToDocuments((documents) => {
-      set({ documents, documentsLoaded: true });
+    documentService.listenToDocuments((documents, wasTruncated) => {
+      // The listener is capped while loadDocuments() is not. Replacing the
+      // array wholesale on a full snapshot dropped the older tail, and a job
+      // whose only invoice fell off the window then looked document-less:
+      // wrong filter bucket, $0 on the card, "Create Quote" on an invoiced
+      // job. Merge instead of trimming.
+      const merged = mergeTruncatedSnapshot(
+        get().documents,
+        documents,
+        (d) => d.id,
+        wasTruncated,
+      );
+      set({ documents: merged, documentsLoaded: true });
     });
   },
 
@@ -2623,6 +2804,24 @@ export const useStore = create<AppState>((set, get) => ({
     };
 
     await get().saveDocument(reverted);
+
+    // saveDocument strips undefined and merges, so the invoice-only fields
+    // above would survive in Firestore and come back on the next load —
+    // a surviving invoicedAt makes canConvert refuse, leaving the tradie
+    // unable to re-convert after undoing. Delete them for real.
+    if (auth.currentUser) {
+      try {
+        await documentService.clearDocumentFields(documentId, [
+          'invoicedAt',
+          'issueDate',
+          'dueDate',
+          'paymentTerms',
+          'convertedFromQuote',
+        ]);
+      } catch (err) {
+        logSyncError('quote', documentId, err);
+      }
+    }
 
     // Keep the legacy quote row's forward pointer honest — pickDashboardDraft
     // and the "Continue draft" banner both key off invoiceId/invoicedAt, so
@@ -3608,6 +3807,10 @@ export const useStore = create<AppState>((set, get) => ({
         STORAGE_KEYS.CONTACTS,
         STORAGE_KEYS.CONTACTS_MIGRATED,
         STORAGE_KEYS.CONVERSATIONS,
+        // NOT '@quotemate:job_list_prefs'. Which chip and sort the Jobs list
+        // opens on is a per-device view preference, not user data — same
+        // reasoning as appearance, which also survives sign-out. Don't "fix"
+        // this by adding it.
       ]);
       // Reset store state to initial values
       set({

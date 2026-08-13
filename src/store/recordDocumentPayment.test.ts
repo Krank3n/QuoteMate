@@ -120,18 +120,24 @@ describe('recordDocumentPayment', () => {
     expect(updated.balanceDue).toBe(0);
   });
 
-  it('keeps the legacy row in step when one actually exists', async () => {
+  // Was: "keeps the legacy row in step when one actually exists", asserting
+  // that the legacy recordPayment ALSO ran. That turned out to be the bug —
+  // saveDocument's mirror already writes the legacy row with an absolute
+  // paidAmount, and legacy recordPayment is additive, so the pair doubled
+  // every payment. See documentPaymentLedger.test.ts.
+  it('leaves the additive legacy recordPayment alone — the mirror already covers it', async () => {
     const recordPayment = vi.fn(async () => {});
     useStore.setState({
       invoices: [{ id: LEGACY_ID, total: 694.06, paidAmount: 0 }],
       recordPayment,
     } as any);
 
-    await useStore.getState().recordDocumentPayment(DOC_ID, 694.06, 'bank_transfer');
+    const updated = await useStore
+      .getState()
+      .recordDocumentPayment(DOC_ID, 694.06, 'bank_transfer');
 
-    expect(recordPayment).toHaveBeenCalledWith(
-      LEGACY_ID, 694.06, 'bank_transfer', undefined, undefined,
-    );
+    expect(recordPayment).not.toHaveBeenCalled();
+    expect(updated.paidTotal).toBeCloseTo(694.06);
   });
 
   it('still records the payment when the legacy mirror write throws', async () => {

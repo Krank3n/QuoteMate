@@ -332,17 +332,17 @@ export function isLiveInvoice(doc?: Document | null): boolean {
 
 export function invoiceWording(doc?: Document | null): Pick<JobSubStatus, 'label' | 'icon'> | null {
   if (!doc || !isLiveInvoice(doc)) return null;
-  switch (doc.stage) {
-    case 'paid':
-      return { label: 'Paid', icon: 'cash-check' };
-    case 'partially_paid':
-      return { label: 'Part Paid', icon: 'progress-check' };
-    case 'invoice_sent':
-      return { label: 'Invoice Sent', icon: 'send' };
-    default:
-      // Converted but not yet sent.
-      return { label: 'Invoice', icon: 'receipt' };
+  // Workflow words only. This deliberately says nothing about money —
+  // PaymentChip owns that axis, and it sits on the same card. An earlier
+  // version returned "Paid" / "Part Paid" here, so a settled invoice read
+  // "Paid" on the rail AND "Paid" on the chip, two feet apart. See the
+  // header of PaymentChip: "Splits the status UI in two: the stage chip
+  // (workflow) and this chip (money). Independent axes."
+  if (doc.stage === 'draft') {
+    // Converted but not yet sent.
+    return { label: 'Invoice', icon: 'receipt' };
   }
+  return { label: 'Invoice Sent', icon: 'send' };
 }
 
 /**

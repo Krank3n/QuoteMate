@@ -18,12 +18,27 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { format, subDays, isToday, isYesterday } from 'date-fns';
 
-import { useStore } from '../store/useStore';
+import { useStore, PAYMENT_METHOD_TO_LEDGER } from '../store/useStore';
+import { maxAmountForEdit } from '../utils/editablePayment';
 import { PaymentMethod } from '../types';
 import { makeStyles, useThemeColors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
 import { getAmountDue } from '../utils/invoiceCalculator';
 import { GridBackground } from '../components/GridBackground';
+
+/**
+ * Ledger method → the radio option that represents it. Lossy on purpose:
+ * card / cheque / other all store as 'other', so an edited card payment
+ * prefills as "Other". The amount, date and notes are what people come back
+ * to fix; losing the card/cheque distinction is the cheaper trade than
+ * widening the stored vocabulary.
+ */
+const LEDGER_METHOD_TO_FORM: Record<string, PaymentMethod> = {
+  cash: 'cash',
+  bank: 'bank_transfer',
+  square: 'card',
+  other: 'other',
+};
 
 const PAYMENT_METHODS: { value: PaymentMethod; label: string }[] = [
   { value: 'bank_transfer', label: 'Bank Transfer' },
@@ -39,6 +54,9 @@ export function RecordPaymentScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const invoiceId = route.params?.invoiceId;
+  // Present → edit that ledger entry instead of appending a new one. Same
+  // fields either way, so the screen is reused rather than duplicated.
+  const editingPaymentId: string | undefined = route.params?.paymentId;
 
   const invoices = useStore((s) => s.invoices);
   const currentInvoice = useStore((s) => s.currentInvoice);
@@ -47,6 +65,8 @@ export function RecordPaymentScreen() {
   const recordPayment = useStore((s) => s.recordPayment);
   const recordDocumentPayment = useStore((s) => s.recordDocumentPayment);
   const pushPaymentToXero = useStore((s) => s.pushPaymentToXero);
+  const updateDocumentPayment = useStore((s) => s.updateDocumentPayment);
+  const deleteDocumentPayment = useStore((s) => s.deleteDocumentPayment);
 
   // Callers navigate here with a *Document* id (ViewJobScreen passes
   // actionableDoc.id). The legacy `invoices` array is never loaded at
@@ -80,18 +100,34 @@ export function RecordPaymentScreen() {
       ? getAmountDue(invoice)
       : 0;
 
-  const [amount, setAmount] = useState(amountDue.toFixed(2));
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('bank_transfer');
-  const [notes, setNotes] = useState('');
-  const [paymentDate, setPaymentDate] = useState(new Date());
+  const editingPayment = editingPaymentId
+    ? (document?.payments || []).find((p) => p.id === editingPaymentId)
+    : undefined;
+  // When editing, the ceiling has to exclude the payment being edited —
+  // otherwise an unchanged entry caps at zero. See maxAmountForEdit.
+  const ceiling = editingPayment && document
+    ? maxAmountForEdit(document, editingPayment)
+    : amountDue;
+
+  const [amount, setAmount] = useState(
+    editingPayment ? (Number(editingPayment.amount) || 0).toFixed(2) : amountDue.toFixed(2),
+  );
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(
+    LEDGER_METHOD_TO_FORM[editingPayment?.method ?? ''] ?? 'bank_transfer',
+  );
+  const [notes, setNotes] = useState(editingPayment?.notes ?? '');
+  const [paymentDate, setPaymentDate] = useState(
+    editingPayment?.paidAt ? new Date(editingPayment.paidAt) : new Date(),
+  );
   const [dateMenuVisible, setDateMenuVisible] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
-    if (invoice) {
+    // Don't stomp the value being edited when the doc reloads.
+    if (invoice && !editingPayment) {
       setAmount(amountDue.toFixed(2));
     }
-  }, [invoice, amountDue]);
+  }, [invoice, amountDue, editingPayment]);
 
   const handleRecordPayment = async () => {
     if (!invoice) return;
@@ -105,10 +141,10 @@ export function RecordPaymentScreen() {
     // Hard-reject overpayment. Allow a 1c tolerance for rounding (e.g., when
     // a Square webhook records $50.001 and the tradie tries to close the
     // remaining cent via cash).
-    if (paymentAmount > amountDue + 0.01) {
+    if (paymentAmount > ceiling + 0.01) {
       Alert.alert(
         'Amount exceeds balance',
-        `Enter up to ${formatCurrency(amountDue)}. This invoice doesn't owe more than that.`,
+        `Enter up to ${formatCurrency(ceiling)}. This invoice doesn't owe more than that.`,
       );
       return;
     }
@@ -116,11 +152,49 @@ export function RecordPaymentScreen() {
     await submitPayment(paymentAmount);
   };
 
+  const handleDelete = () => {
+    if (!editingPaymentId || !document) return;
+    Alert.alert(
+      'Remove this payment?',
+      'The invoice balance goes back up by this amount.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: async () => {
+            setIsSubmitting(true);
+            try {
+              await deleteDocumentPayment(document.id, editingPaymentId);
+              navigation.goBack();
+            } catch (err: any) {
+              Alert.alert('Couldn’t remove it', err?.message || 'Please try again.');
+            } finally {
+              setIsSubmitting(false);
+            }
+          },
+        },
+      ],
+    );
+  };
+
   const submitPayment = async (paymentAmount: number) => {
     if (!invoice) return;
 
     setIsSubmitting(true);
     try {
+      if (editingPaymentId && document) {
+        await updateDocumentPayment(document.id, editingPaymentId, {
+          amount: paymentAmount,
+          paidAt: paymentDate.getTime(),
+          method: PAYMENT_METHOD_TO_LEDGER[paymentMethod] ?? 'other',
+          notes: notes || undefined,
+        });
+        Alert.alert('Saved', 'Payment updated.', [
+          { text: 'OK', onPress: () => navigation.goBack() },
+        ]);
+        return;
+      }
       if (document) {
         // recordDocumentPayment mirrors into the legacy row itself when one
         // exists, so this branch covers both id-spaces.
@@ -357,8 +431,21 @@ export function RecordPaymentScreen() {
         disabled={isSubmitting}
         icon="check"
       >
-        Record Payment
+        {editingPaymentId ? 'Save Changes' : 'Record Payment'}
       </Button>
+
+      {editingPaymentId ? (
+        <Button
+          mode="text"
+          textColor={themeColors.error}
+          onPress={handleDelete}
+          disabled={isSubmitting}
+          icon="trash-can-outline"
+          style={styles.deleteButton}
+        >
+          Remove this payment
+        </Button>
+      ) : null}
     </ScrollView>
   );
 }
@@ -487,5 +574,8 @@ const useStyles = makeStyles((t) => ({
   submitButton: {
     marginTop: 8,
     paddingVertical: 8,
+  },
+  deleteButton: {
+    marginTop: 4,
   },
 }));
