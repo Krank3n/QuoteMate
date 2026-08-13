@@ -8,7 +8,13 @@
  */
 import { describe, it, expect } from 'vitest';
 
-import { bucketForJob, matchesJobFilter, JOB_FILTERS } from './jobBuckets';
+import {
+  bucketForJob,
+  groupDocsByJob,
+  isJobFilterKey,
+  matchesJobFilter,
+  JOB_FILTERS,
+} from './jobBuckets';
 
 function job(over: Record<string, any> = {}): any {
   return { id: 'job1', stage: 'inquiry', name: 'A job', customerName: 'Someone', ...over };
@@ -145,5 +151,39 @@ describe('bucket integrity — what makes the chip counts trustworthy', () => {
     for (const [j, docs] of population) {
       expect(matchesJobFilter(j, docs, 'all')).toBe(true);
     }
+  });
+});
+
+describe('groupDocsByJob', () => {
+  it('indexes each job’s documents under its id', () => {
+    const docs = [
+      invoice({ id: 'a', jobId: 'j1' }),
+      invoice({ id: 'b', jobId: 'j1' }),
+      quote({ id: 'c', jobId: 'j2' }),
+    ];
+    const byJob = groupDocsByJob(docs);
+    expect(byJob.get('j1')!.map((d: any) => d.id)).toEqual(['a', 'b']);
+    expect(byJob.get('j2')!.map((d: any) => d.id)).toEqual(['c']);
+  });
+
+  it('drops documents with no jobId rather than grouping them under undefined', () => {
+    const byJob = groupDocsByJob([invoice({ id: 'orphan' })]);
+    expect(byJob.size).toBe(0);
+  });
+
+  it('returns an empty map for an empty list', () => {
+    expect(groupDocsByJob([]).size).toBe(0);
+  });
+});
+
+describe('isJobFilterKey', () => {
+  it('accepts every shipped chip', () => {
+    for (const f of JOB_FILTERS) expect(isJobFilterKey(f.key)).toBe(true);
+  });
+
+  it('rejects a chip from an older build — a persisted "archived" would strand the user on an empty list', () => {
+    expect(isJobFilterKey('archived')).toBe(false);
+    expect(isJobFilterKey('active')).toBe(false);
+    expect(isJobFilterKey(undefined)).toBe(false);
   });
 });

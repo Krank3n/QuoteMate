@@ -43,6 +43,7 @@ import {
   type JobSubStatusSlot,
 } from '../utils/jobTimeline';
 import { PaymentChip, derivePaymentState, shouldShowPaymentChip } from './PaymentChip';
+import { jobHeadlineValue, type JobSortLabel } from '../utils/jobSort';
 import type { Document } from '../types/document';
 
 // Small circular icon buttons for the contact quick-taps (call / text /
@@ -77,6 +78,22 @@ interface JobCardProps {
   onStagePress?: (job: Job) => void;
   /** Opens the 3-dot action sheet (Duplicate / Archive / Delete / ...). */
   onMenuPress?: (job: Job) => void;
+  /**
+   * The list's active sort. The card has to show the value it's being ordered
+   * by, or the order reads as arbitrary — the failure jobStatusTimestamp
+   * exists to prevent. Most keys are already covered by text the card prints
+   * anyway (price, scheduled line, stage date); only 'overdue' adds a label.
+   * See jobSortLabel.
+   */
+  sortLabel?: JobSortLabel | null;
+  /**
+   * How many jobs this customer has. A primitive, NOT the group object — the
+   * card is React.memo'd and an object prop would defeat that every render.
+   * Only 2+ does anything, so a one-off customer's card is unchanged and gains
+   * no extra tap target.
+   */
+  customerJobCount?: number;
+  onCustomerPress?: (job: Job) => void;
 }
 
 
@@ -137,33 +154,34 @@ export function canRecordPaymentFor(doc?: Document | null): boolean {
   return state === 'unpaid' || state === 'partially_paid';
 }
 
-export const JobCard = React.memo(function JobCard({ job, onPress, onStagePress, onMenuPress }: JobCardProps) {
+export const JobCard = React.memo(function JobCard({
+  job,
+  onPress,
+  onStagePress,
+  onMenuPress,
+  sortLabel,
+  customerJobCount,
+  onCustomerPress,
+}: JobCardProps) {
   const styles = useStyles();
   const themeColors = useThemeColors();
   const meta = stageMetaFor(job.stage, themeColors);
   // Live-derive the headline price from attached docs so a draft quote
   // shows its running total here without waiting on the server-side
-  // syncJobAggregates trigger. Mirrors the precedence used on
-  // JobDetailHeader: outstanding balance once invoiced, paid once
-  // cleared, otherwise the quoted total. Selector returns a primitive
-  // so the memo'd card only re-renders when the number itself moves.
-  const headlineValue = useStore((s) => {
-    const docs = s.documents.filter(
-      (d) => d.jobId === job.id && d.stage !== 'cancelled',
-    );
-    const totalQuoted = docs
-      .filter((d) => d.type === 'quote')
-      .reduce((sum, d) => sum + (Number(d.total) || 0), 0);
-    const totalInvoiced = docs
-      .filter((d) => d.type === 'invoice')
-      .reduce((sum, d) => sum + (Number(d.total) || 0), 0);
-    const totalPaid = docs.reduce((sum, d) => sum + (Number(d.paidTotal) || 0), 0);
-    const balanceDue = docs.reduce((sum, d) => sum + (Number(d.balanceDue) || 0), 0);
-    if (totalInvoiced > 0) {
-      return balanceDue > 0 ? balanceDue : totalPaid;
-    }
-    return totalQuoted;
-  });
+  // syncJobAggregates trigger.
+  //
+  // This used to compute the number inline, summing the STORED `balanceDue`
+  // — while jobBuckets and paidTransition both recomputed `total - paidTotal`
+  // because that stored field goes stale. So the green price here and the
+  // chip counts on the same screen were derived by different rules. Both now
+  // call jobHeadlineValue, which means a card with a stale balanceDue prints
+  // a different (correct) number than it used to. Selector still returns a
+  // primitive so the memo'd card only re-renders when the number moves.
+  const headlineValue = useStore(
+    (s) => jobHeadlineValue(s.documents.filter((d) => d.jobId === job.id)).value,
+  );
+
+  const isRepeatCustomer = !!onCustomerPress && (customerJobCount ?? 0) > 1;
 
   // Aggregate Xero sync state across the job's docs so the card can
   // show a small status pip on the meta row. 'error' wins over 'synced'
@@ -288,9 +306,31 @@ export const JobCard = React.memo(function JobCard({ job, onPress, onStagePress,
         <View style={styles.topRow}>
           <View style={styles.titleBlock}>
             <View style={styles.titleHeadRow}>
-              <Text style={styles.customer} numberOfLines={1}>
-                {job.customerName || 'Unknown customer'}
-              </Text>
+              {/* Repeat customers get a tappable name and a job count; one-off
+                  customers render exactly as before, so most cards gain no
+                  extra tap target. stopPropagation so the tap opens the
+                  customer rather than bubbling to the card's ViewJob. */}
+              {isRepeatCustomer ? (
+                <Pressable
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    selectionTap();
+                    onCustomerPress!(job);
+                  }}
+                  hitSlop={6}
+                  accessibilityLabel={`View ${job.customerName || 'customer'} — ${customerJobCount} jobs`}
+                  style={({ pressed }) => [styles.customerPress, pressed && { opacity: 0.7 }]}
+                >
+                  <Text style={styles.customer} numberOfLines={1}>
+                    {job.customerName || 'Unknown customer'}
+                  </Text>
+                  <Text style={styles.customerCount}>· {customerJobCount} jobs</Text>
+                </Pressable>
+              ) : (
+                <Text style={styles.customer} numberOfLines={1}>
+                  {job.customerName || 'Unknown customer'}
+                </Text>
+              )}
               {headlineValue > 0 ? (
                 <Pressable
                   onPress={handlePricePress}
@@ -394,13 +434,22 @@ export const JobCard = React.memo(function JobCard({ job, onPress, onStagePress,
         ) : null}
 
         <View style={styles.metaRow}>
+          {/* The list sorts by what this row prints. When the active sort is
+              one the row doesn't already justify (only "Most overdue" so far),
+              jobSortLabel supplies the replacement text — otherwise the order
+              on screen looks arbitrary. */}
           <MaterialCommunityIcons
-            name="clock-outline"
+            name={(sortLabel?.icon ?? 'clock-outline') as any}
             size={14}
-            color={themeColors.textMuted}
+            color={sortLabel?.tone === 'urgent' ? themeColors.error : themeColors.textMuted}
           />
-          <Text style={styles.metaText} numberOfLines={1}>
-            {status.label} {formatUpdatedAt(status.ms)}
+          <Text
+            style={[styles.metaText, sortLabel?.tone === 'urgent' && styles.metaTextUrgent]}
+            numberOfLines={1}
+          >
+            {sortLabel
+              ? `${sortLabel.text}${headlineValue > 0 ? ` · ${formatCurrency(headlineValue)}` : ''}`
+              : `${status.label} ${formatUpdatedAt(status.ms)}`}
           </Text>
           {xeroSyncStatus === 'synced' ? (
             <MaterialCommunityIcons
@@ -647,6 +696,19 @@ const useStyles = makeStyles((t) => ({
     fontFamily: 'Archivo-Bold',
     color: t.colors.text,
   },
+  // Takes over the name's flex:1 so the headline price still sits hard right.
+  customerPress: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 4,
+  },
+  customerCount: {
+    fontSize: 12,
+    fontFamily: 'Archivo-SemiBold',
+    color: t.colors.textMuted,
+    flexShrink: 0,
+  },
   titleHeadRow: {
     flexDirection: 'row',
     alignItems: 'baseline',
@@ -734,6 +796,11 @@ const useStyles = makeStyles((t) => ({
     fontSize: 12,
     color: t.colors.textMuted,
     flexShrink: 1,
+  },
+  // Overdue money reads as a warning, not as another muted timestamp.
+  metaTextUrgent: {
+    color: t.colors.error,
+    fontFamily: 'Archivo-SemiBold',
   },
   // Pushed to the far end of the meta row so money reads as its own
   // column down the list rather than trailing whatever text precedes it.

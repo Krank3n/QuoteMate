@@ -11,6 +11,7 @@ import { auth } from '../config/firebase';
 import { jobService } from '../services/jobService';
 import { generateId } from '../utils/generateId';
 import { preserveSnapshotIdentity } from '../utils/snapshotIdentity';
+import { mergeTruncatedSnapshot } from '../utils/mergeTruncatedSnapshot';
 import type { Job, JobStage } from '../../shared/job/types';
 import type { Document } from '../types/document';
 
@@ -35,6 +36,9 @@ interface JobState {
     jobAddress: string;
     name: string;
     description?: string;
+    /** Contacts link, when the wizard captured one. Strengthens customer
+     *  grouping; grouping works without it (see customerGroups). */
+    customerId?: string;
   }) => Promise<Job>;
 
   getJobById: (id: string) => Job | undefined;
@@ -89,15 +93,19 @@ export const useJobStore = create<JobState>((set, get) => ({
 
   listenToJobs: () => {
     if (!auth.currentUser) return;
-    jobService.listenToJobs((jobs) => {
+    jobService.listenToJobs((jobs, wasTruncated) => {
       // Snapshots echo our own writes (and server aggregate-trigger writes)
       // with fresh instances of every job. Reuse the previous instances for
       // unchanged jobs — and skip the set entirely on a no-op echo — so
       // subscribers (Dashboard, JobsList) don't re-render mid-navigation.
       const prev = get().jobs;
+      // The listener is capped while loadJobs() is not, so a full snapshot
+      // must not trim the older tail loadJobs already fetched. Merge first,
+      // then preserve identity over the merged set.
+      const merged = mergeTruncatedSnapshot(prev, jobs, (j) => j.id, wasTruncated);
       const stable = preserveSnapshotIdentity(
         prev,
-        jobs,
+        merged,
         (j) => j.id,
         (j) => (typeof j.updatedAt === 'number' ? j.updatedAt : NaN),
       );
@@ -151,6 +159,7 @@ export const useJobStore = create<JobState>((set, get) => ({
     const job: Job = {
       id: generateId(),
       userId: uid,
+      customerId: input.customerId,
       customerName: input.customerName,
       customerEmail: input.customerEmail,
       customerPhone: input.customerPhone,
@@ -243,6 +252,8 @@ export const useJobStore = create<JobState>((set, get) => ({
 
 interface JobLinkableSource {
   jobId?: string;
+  /** Set by the quote wizard when the customer came from saved Contacts. */
+  contactId?: string;
   customerName?: string;
   customerEmail?: string;
   customerPhone?: string;
@@ -296,6 +307,13 @@ async function syncJobFromSource<T extends JobLinkableSource>(source: T): Promis
       jobAddress,
       name: jobName,
       description: jobDescription || undefined,
+      // Carry the Contacts link onto the Job. Nothing used to write
+      // Job.customerId, so customer grouping has to derive a key from
+      // name/phone anyway — this just makes the grouping exact when the link
+      // happens to exist. Only ever written forward; historical jobs are left
+      // alone, because a wrongly backfilled id is a permanent, silent merge of
+      // two customers, while a wrong derived key recomputes next launch.
+      customerId: (source.contactId || '').trim() || undefined,
     });
     return { ...source, jobId: created.id };
   }
@@ -330,6 +348,13 @@ async function syncJobFromSource<T extends JobLinkableSource>(source: T): Promis
     jobDescription !== (existing.description || '')
   ) {
     patch.description = jobDescription;
+  }
+  // Fill in the Contacts link if the wizard has one and the Job doesn't. Only
+  // ever fills or corrects forward — see createJob above for why there's no
+  // backfill.
+  const contactId = (source.contactId || '').trim();
+  if (contactId && contactId !== (existing.customerId || '')) {
+    patch.customerId = contactId;
   }
   if (Object.keys(patch).length === 0) return source;
 

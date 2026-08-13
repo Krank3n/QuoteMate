@@ -6,45 +6,23 @@
 import * as ExpoContacts from 'expo-contacts';
 import { Contact, SearchableContact, ContactSource } from '../types';
 import { generateId } from '../utils/generateId';
+import { normalizePhoneTail } from '../utils/textMatch';
 
-/**
- * Create a new contact with generated ID and timestamps
- */
-export function createContact(
-  data: Omit<Contact, 'id' | 'createdAt' | 'updatedAt'>
-): Contact {
-  const now = new Date().toISOString();
-  return {
-    ...data,
-    id: generateId(),
-    createdAt: now,
-    updatedAt: now,
-  };
-}
-
-/**
- * Update an existing contact, merging fields and bumping updatedAt
- */
-export function updateContact(
-  existing: Contact,
-  updates: Partial<Omit<Contact, 'id' | 'createdAt'>>
-): Contact {
-  return {
-    ...existing,
-    ...updates,
-    updatedAt: new Date().toISOString(),
-  };
-}
+// createContact / updateContact live in utils/contactRecord — this module
+// imports expo-contacts to read the phone's address book, and pure utils that
+// build a Contact (customerEdit) must not drag native modules in to do it.
+// Re-exported here so existing callers don't move.
+export { createContact, updateContact } from '../utils/contactRecord';
 
 /**
  * Normalize an Australian phone number for comparison.
  * Strips spaces, dashes, parentheses, and country code prefix.
  * Returns the last 8 digits for matching.
+ *
+ * Delegates to textMatch so contact matching, Mate's findCustomer and the
+ * jobs-list search all agree on what counts as the same number.
  */
-export function normalizePhone(phone: string): string {
-  const digits = phone.replace(/[^\d]/g, '');
-  return digits.slice(-8);
-}
+export const normalizePhone = normalizePhoneTail;
 
 /**
  * Request permission to access device contacts.

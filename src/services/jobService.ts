@@ -26,6 +26,9 @@ function getUserId(): string | null {
   return auth.currentUser?.uid || null;
 }
 
+/** Ceiling on the live listener. See listenToJobs for why it isn't unbounded. */
+export const JOBS_LISTENER_LIMIT = 500;
+
 /** Recursively strip undefined values — Firestore rejects them. */
 function stripUndefined(value: any): any {
   if (value === null || value === undefined) return value;
@@ -71,20 +74,36 @@ class JobService {
     }
   }
 
-  listenToJobs(callback: (jobs: Job[]) => void): Unsubscribe | null {
+  /**
+   * @param callback receives the snapshot plus whether it came back at the cap,
+   *   i.e. whether older jobs exist that this listener will never deliver.
+   */
+  listenToJobs(
+    callback: (jobs: Job[], wasTruncated: boolean) => void,
+  ): Unsubscribe | null {
     const uid = getUserId();
     if (!uid) return null;
     try {
       // Release prior listener — token-refresh re-invokes this every ~hour.
       this.unsubscribe?.();
       const ref = collection(db, 'users', uid, 'jobs');
-      // Cap at 100 most-recent jobs for the live listener — older jobs are still
-      // available via loadJobs() / archive flow and don't need real-time sync.
-      const q = query(ref, orderBy('updatedAt', 'desc'), limit(100));
+      // Cap the live listener so a long-tenured account doesn't replay its
+      // whole history on every reconnect. 500 matches the ceiling used
+      // elsewhere (readTools reads contacts at the same limit) and puts
+      // truncation out of reach for any real user — the largest account seen
+      // is ~44 jobs.
+      //
+      // A snapshot REPLACES the store array, and loadJobs() is unbounded, so
+      // when the snapshot comes back full the caller merges rather than
+      // trimming the tail loadJobs already fetched. See mergeTruncatedSnapshot.
+      const q = query(ref, orderBy('updatedAt', 'desc'), limit(JOBS_LISTENER_LIMIT));
       this.unsubscribe = onSnapshot(
         q,
         (snap) => {
-          callback(snap.docs.map((d) => normalise(d.data(), d.id)));
+          callback(
+            snap.docs.map((d) => normalise(d.data(), d.id)),
+            snap.docs.length >= JOBS_LISTENER_LIMIT,
+          );
         },
         () => {},
       );

@@ -13,19 +13,10 @@ import {
   Linking,
   Platform,
 } from 'react-native';
-import {
-  Text,
-  Surface,
-  Searchbar,
-  Chip,
-  FAB,
-  Portal,
-  Modal,
-  TextInput,
-  Button,
-} from 'react-native-paper';
+import { Text, Surface, Searchbar, Chip, FAB } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
+import { useNavigation } from '@react-navigation/native';
 import { useStore } from '../store/useStore';
 import { makeStyles, useThemeColors } from '../theme';
 import { Contact } from '../types';
@@ -38,6 +29,7 @@ import {
 } from '../services/contactService';
 import { SOURCE_COLORS } from '../hooks/useUnifiedContactSearch';
 import { ContactActionsBar } from '../components/document/ContactActionsBar';
+import { ContactEditModal, type ContactFormValues } from '../components/ContactEditModal';
 import { AlertModal, AlertType } from '../components/AlertModal';
 import { GridBackground } from '../components/GridBackground';
 
@@ -56,6 +48,7 @@ type FilterType = 'all' | 'saved' | 'xero';
 export function ContactsScreen() {
   const styles = useStyles();
   const themeColors = useThemeColors();
+  const navigation = useNavigation<any>();
   const contacts = useStore((s) => s.contacts);
   const xeroContacts = useStore((s) => s.xeroContacts);
   const xeroConnection = useStore((s) => s.xeroConnection);
@@ -72,14 +65,7 @@ export function ContactsScreen() {
   const [phoneImporting, setPhoneImporting] = useState(false);
   const [alert, setAlert] = useState<AlertConfig | null>(null);
 
-  // Form state for add/edit
-  const [formName, setFormName] = useState('');
-  const [formBusinessName, setFormBusinessName] = useState('');
-  const [formEmail, setFormEmail] = useState('');
-  const [formPhone, setFormPhone] = useState('');
-  const [formAddress, setFormAddress] = useState('');
-  const [formWebsite, setFormWebsite] = useState('');
-  const [formNotes, setFormNotes] = useState('');
+  // Form state lives in ContactEditModal now — it seeds itself from `initial`.
 
   // Filtered and searched contacts
   const filteredContacts = useMemo(() => {
@@ -109,56 +95,21 @@ export function ContactsScreen() {
 
   const openAddModal = () => {
     setEditingContact(null);
-    setFormName('');
-    setFormBusinessName('');
-    setFormEmail('');
-    setFormPhone('');
-    setFormAddress('');
-    setFormWebsite('');
-    setFormNotes('');
     setEditModalVisible(true);
   };
 
   const openEditModal = (contact: Contact) => {
     setEditingContact(contact);
-    setFormName(contact.name);
-    setFormBusinessName(contact.businessName || '');
-    setFormEmail(contact.email || '');
-    setFormPhone(contact.phone || '');
-    setFormAddress(contact.address || '');
-    setFormWebsite(contact.website || '');
-    setFormNotes(contact.notes || '');
     setEditModalVisible(true);
   };
 
-  const handleSave = async () => {
-    if (!formName.trim()) return;
-
-    if (editingContact) {
-      const updated = updateContact(editingContact, {
-        name: formName.trim(),
-        businessName: formBusinessName.trim() || undefined,
-        email: formEmail.trim() || undefined,
-        phone: formPhone.trim() || undefined,
-        address: formAddress.trim() || undefined,
-        website: formWebsite.trim() || undefined,
-        notes: formNotes.trim() || undefined,
-      });
-      await saveContact(updated);
-    } else {
-      const contact = createContact({
-        name: formName.trim(),
-        businessName: formBusinessName.trim() || undefined,
-        email: formEmail.trim() || undefined,
-        phone: formPhone.trim() || undefined,
-        address: formAddress.trim() || undefined,
-        website: formWebsite.trim() || undefined,
-        notes: formNotes.trim() || undefined,
-        source: 'manual',
-      });
-      await saveContact(contact);
-    }
-
+  // The form itself is ContactEditModal, shared with the Customer screen — one
+  // form for customer details, so the two can't drift apart.
+  const handleSave = async (values: ContactFormValues) => {
+    const contact = editingContact
+      ? updateContact(editingContact, values)
+      : createContact({ ...values, source: 'manual' });
+    await saveContact(contact);
     setEditModalVisible(false);
   };
 
@@ -298,8 +249,20 @@ export function ContactsScreen() {
     }
   };
 
+  // Tapping a contact now opens their jobs and what they owe, rather than a
+  // form — that's what you want a customer's row for. Editing moved to the
+  // pencil below, and long-press still deletes.
+  const openCustomer = (contact: Contact) => {
+    navigation.navigate('Customer', {
+      customerKey: `c:${contact.id.toLowerCase()}`,
+      name: contact.name,
+      phone: contact.phone,
+      email: contact.email,
+    });
+  };
+
   const renderContact = ({ item }: { item: Contact }) => (
-    <TouchableOpacity onPress={() => openEditModal(item)} onLongPress={() => handleDelete(item)}>
+    <TouchableOpacity onPress={() => openCustomer(item)} onLongPress={() => handleDelete(item)}>
       <Surface style={styles.contactCard}>
         <View style={styles.contactRow}>
           <View style={styles.contactAvatar}>
@@ -328,6 +291,20 @@ export function ContactsScreen() {
             website={item.website}
             compact
           />
+          {/* Edit used to be the row tap; the row now opens the customer, so
+              it needs its own affordance. */}
+          <TouchableOpacity
+            onPress={() => openEditModal(item)}
+            style={styles.contactEditButton}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            accessibilityLabel={`Edit ${item.name}`}
+          >
+            <MaterialCommunityIcons
+              name="pencil-outline"
+              size={18}
+              color={themeColors.textMuted}
+            />
+          </TouchableOpacity>
         </View>
       </Surface>
     </TouchableOpacity>
@@ -433,96 +410,24 @@ export function ContactsScreen() {
         color={themeColors.onAccent}
       />
 
-      {/* Add/Edit Contact Modal */}
-      <Portal>
-        <Modal
-          visible={editModalVisible}
-          onDismiss={() => setEditModalVisible(false)}
-          contentContainerStyle={styles.modalContainer}
-        >
-          <Text style={styles.modalTitle}>
-            {editingContact ? 'Edit Contact' : 'New Contact'}
-          </Text>
-          <TextInput
-            label="Name *"
-            value={formName}
-            onChangeText={setFormName}
-            mode="outlined"
-            style={styles.modalInput}
-            autoCapitalize="words"
-          />
-          <TextInput
-            label="Business Name"
-            value={formBusinessName}
-            onChangeText={setFormBusinessName}
-            mode="outlined"
-            style={styles.modalInput}
-            autoCapitalize="words"
-          />
-          <TextInput
-            label="Email"
-            value={formEmail}
-            onChangeText={setFormEmail}
-            mode="outlined"
-            style={styles.modalInput}
-            keyboardType="email-address"
-            autoCapitalize="none"
-          />
-          <TextInput
-            label="Phone"
-            value={formPhone}
-            onChangeText={setFormPhone}
-            mode="outlined"
-            style={styles.modalInput}
-            keyboardType="phone-pad"
-          />
-          <TextInput
-            label="Address"
-            value={formAddress}
-            onChangeText={setFormAddress}
-            mode="outlined"
-            style={styles.modalInput}
-            multiline
-          />
-          <TextInput
-            label="Website"
-            value={formWebsite}
-            onChangeText={setFormWebsite}
-            mode="outlined"
-            style={styles.modalInput}
-            keyboardType="url"
-            autoCapitalize="none"
-          />
-          <TextInput
-            label="Notes"
-            value={formNotes}
-            onChangeText={setFormNotes}
-            mode="outlined"
-            style={styles.modalInput}
-            multiline
-          />
-          <View style={styles.modalButtons}>
-            <Button mode="text" onPress={() => setEditModalVisible(false)}>
-              Cancel
-            </Button>
-            {editingContact && (
-              <Button
-                mode="text"
-                textColor={themeColors.error}
-                onPress={() => {
-                  setEditModalVisible(false);
-                  handleDelete(editingContact);
-                }}
-              >
-                Delete
-              </Button>
-            )}
-            <Button mode="contained" buttonColor={themeColors.accent} textColor={themeColors.onAccent} onPress={handleSave} disabled={!formName.trim()}>
-              Save
-            </Button>
-          </View>
-        </Modal>
-      </Portal>
+      {/* One shared form for customer details — the Customer screen renders the
+          same component, so the two can't drift apart. */}
+      <ContactEditModal
+        visible={editModalVisible}
+        onDismiss={() => setEditModalVisible(false)}
+        onSave={handleSave}
+        initial={editingContact}
+        title={editingContact ? 'Edit Contact' : 'New Contact'}
+        onDelete={
+          editingContact
+            ? () => {
+                const target = editingContact;
+                setEditModalVisible(false);
+                handleDelete(target);
+              }
+            : undefined
+        }
+      />
 
       <AlertModal
         visible={alert !== null}
@@ -633,6 +538,10 @@ const useStyles = makeStyles((t) => ({
     flexDirection: 'row',
     alignItems: 'center',
   },
+  contactEditButton: {
+    paddingLeft: 8,
+    justifyContent: 'center',
+  },
   contactAvatar: {
     width: 40,
     height: 40,
@@ -695,26 +604,5 @@ const useStyles = makeStyles((t) => ({
     bottom: 24,
     backgroundColor: t.colors.accent,
   },
-  modalContainer: {
-    backgroundColor: t.colors.surfaceRaised,
-    margin: 20,
-    padding: 20,
-    borderRadius: 16,
-    maxHeight: '80%',
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: t.colors.text,
-    marginBottom: 16,
-  },
-  modalInput: {
-    marginBottom: 12,
-  },
-  modalButtons: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: 8,
-    marginTop: 8,
-  },
+  // The modal's own styles moved with it into ContactEditModal.
 }));

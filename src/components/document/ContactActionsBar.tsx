@@ -14,6 +14,8 @@ interface ContactActionsBarProps {
   phone?: string;
   email?: string;
   website?: string;
+  /** Street address — adds a Map button, same as the jobs-list card offers. */
+  address?: string;
   /** Compact mode hides labels and uses smaller icons (for contact list cards) */
   compact?: boolean;
 }
@@ -26,7 +28,13 @@ interface ActionItem {
   onPress: () => void;
 }
 
-export function ContactActionsBar({ phone, email, website, compact = false }: ContactActionsBarProps) {
+export function ContactActionsBar({
+  phone,
+  email,
+  website,
+  address,
+  compact = false,
+}: ContactActionsBarProps) {
   const styles = useStyles();
   const themeColors = useThemeColors();
   const actions: ActionItem[] = [];
@@ -61,6 +69,21 @@ export function ContactActionsBar({ phone, email, website, compact = false }: Co
       color: themeColors.warning,
       bgColor: themeColors.warningSubtle,
       onPress: () => Linking.openURL(`mailto:${email}`),
+    });
+  }
+
+  if (address) {
+    // Same per-platform URL scheme JobCard's inline actions use.
+    const url =
+      Platform.OS === 'ios'
+        ? `http://maps.apple.com/?q=${encodeURIComponent(address)}`
+        : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`;
+    actions.push({
+      icon: 'map-marker-outline',
+      label: 'Map',
+      color: themeColors.info,
+      bgColor: themeColors.infoSubtle,
+      onPress: () => Linking.openURL(url),
     });
   }
 

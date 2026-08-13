@@ -30,6 +30,16 @@ import { fuzzyScoreQuote } from './quoteFuzzy';
 import { getPillsForNiche } from '../../data/nichePills';
 import { NICHE_TEMPLATES } from '../../data/nicheTemplates';
 import { isSpecialistSupplyNiche } from '../../data/specialistSupplyNiches';
+// Folding rules are shared with the jobs-list search — see src/utils/textMatch.
+// If they drift, a name is findable by Mate and not by the jobs list.
+import {
+  normalizePhoneTail as normalizePhone,
+  scoreToken,
+  similarity,
+  soundex,
+  stripDiacritics,
+  tokenize,
+} from '../../utils/textMatch';
 
 function requireUid(): string {
   const uid = auth.currentUser?.uid;
@@ -37,107 +47,14 @@ function requireUid(): string {
   return uid;
 }
 
-function normalizePhone(phone: string): string {
-  return phone.replace(/[^\d]/g, '').slice(-8);
-}
-
 
 
 // --- Fuzzy / phonetic helpers -----------------------------------------------
 //
-// findCustomer used to be a strict substring match: "Kathryn" would not find
-// "Catherine", "McKay" would not find "MacKay", and a one-letter typo killed
-// the whole search. Tradies say names the way they hear them, so we now layer
-// three cheap matchers on top of substring:
-//   - Levenshtein-based similarity (typos, missing letters)
-//   - A small Soundex code (sounds-like: Kathryn/Catherine, Smith/Smyth)
-//   - Token-level scoring so "sarah" hits "Sarah Wilson" on either token
-// Each match is tagged with how it matched so Mate can decide whether to
-// trust it silently or read it back for confirmation.
-
-function stripDiacritics(s: string): string {
-  return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-}
-
-function tokenize(s: string): string[] {
-  return stripDiacritics(s.toLowerCase())
-    .replace(/[^a-z0-9\s'-]/g, ' ')
-    .split(/[\s'-]+/)
-    .filter(Boolean);
-}
-
-function soundex(input: string): string {
-  const s = stripDiacritics(input.toUpperCase()).replace(/[^A-Z]/g, '');
-  if (!s) return '';
-  const first = s[0];
-  const mapped = s
-    .slice(1)
-    .replace(/[HW]/g, '')
-    .replace(/[BFPV]/g, '1')
-    .replace(/[CGJKQSXZ]/g, '2')
-    .replace(/[DT]/g, '3')
-    .replace(/L/g, '4')
-    .replace(/[MN]/g, '5')
-    .replace(/R/g, '6')
-    .replace(/[AEIOUY]/g, '0');
-  let out = first;
-  let prev = '';
-  for (const ch of mapped) {
-    if (ch !== '0' && ch !== prev) out += ch;
-    prev = ch;
-  }
-  return (out.replace(/0/g, '') + '000').slice(0, 4);
-}
-
-function editDistance(a: string, b: string): number {
-  if (a === b) return 0;
-  const m = a.length;
-  const n = b.length;
-  if (!m) return n;
-  if (!n) return m;
-  const dp: number[] = new Array(n + 1);
-  for (let j = 0; j <= n; j++) dp[j] = j;
-  for (let i = 1; i <= m; i++) {
-    let prev = dp[0];
-    dp[0] = i;
-    for (let j = 1; j <= n; j++) {
-      const tmp = dp[j];
-      dp[j] = a[i - 1] === b[j - 1] ? prev : 1 + Math.min(prev, dp[j], dp[j - 1]);
-      prev = tmp;
-    }
-  }
-  return dp[n];
-}
-
-function similarity(a: string, b: string): number {
-  if (!a || !b) return 0;
-  if (a === b) return 1;
-  const maxLen = Math.max(a.length, b.length);
-  return 1 - editDistance(a, b) / maxLen;
-}
-
-// Score one query token against the best name token. Returns { score, kind }.
-function scoreToken(qTok: string, nameToks: string[]): { score: number; kind: string } {
-  if (!qTok || !nameToks.length) return { score: 0, kind: 'none' };
-  const qSdx = soundex(qTok);
-  let best = { score: 0, kind: 'none' };
-  for (const nt of nameToks) {
-    if (nt === qTok) return { score: 1, kind: 'exact' };
-    if (qTok.length >= 2 && nt.startsWith(qTok)) {
-      if (best.score < 0.9) best = { score: 0.9, kind: 'prefix' };
-      continue;
-    }
-    if (qTok.length >= 3 && nt.includes(qTok)) {
-      if (best.score < 0.75) best = { score: 0.75, kind: 'substring' };
-    }
-    const sim = similarity(qTok, nt);
-    if (sim >= 0.72 && sim > best.score) best = { score: sim, kind: 'fuzzy' };
-    if (qSdx && qSdx === soundex(nt) && best.score < 0.7) {
-      best = { score: 0.7, kind: 'sounds_like' };
-    }
-  }
-  return best;
-}
+// The matchers themselves now live in src/utils/textMatch (imported above), so
+// the jobs-list search folds and scores names identically without importing
+// this module — and with it, Firestore — into a pure util. See that file for
+// why findCustomer stopped being a strict substring match.
 
 function maskPhone(phone: string | undefined): string | undefined {
   if (!phone) return undefined;

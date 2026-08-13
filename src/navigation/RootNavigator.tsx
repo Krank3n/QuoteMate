@@ -44,6 +44,7 @@ import { SectionTemplatesScreen } from '../screens/settings/SectionTemplatesScre
 import { JobTemplateEditorScreen } from '../screens/settings/JobTemplateEditorScreen';
 import { EditSupplierScreen } from '../screens/settings/EditSupplierScreen';
 import { ContactsScreen } from '../screens/ContactsScreen';
+import { CustomerScreen } from '../screens/CustomerScreen';
 import { DiscoverSuppliersScreen } from '../screens/DiscoverSuppliersScreen';
 
 import { JobDetailsScreen } from '../screens/NewQuote/JobDetailsScreen';
@@ -904,6 +905,23 @@ export function RootNavigator() {
           headerTintColor: themeColors.text,
           headerTitleStyle: { fontFamily: 'Archivo-Bold' },
           title: 'Contacts',
+        }}
+      />
+      {/* One customer's whole story — reached from the jobs search, from the
+          repeat marker on a job card, and from the Contacts list. The screen
+          retitles itself with the customer's name once the group resolves. */}
+      <RootStack.Screen
+        name="Customer"
+        component={CustomerScreen}
+        options={{
+          presentation: 'card',
+          headerShown: true,
+          headerStyle: {
+            backgroundColor: themeColors.surface,
+          },
+          headerTintColor: themeColors.text,
+          headerTitleStyle: { fontFamily: 'Archivo-Bold' },
+          title: 'Customer',
         }}
       />
       <RootStack.Screen

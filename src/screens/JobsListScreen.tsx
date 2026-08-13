@@ -1,22 +1,35 @@
 /**
  * Jobs List Screen
  *
- * Top-level view of the user's jobs (Phase 10). Lists Jobs produced by
- * useJobStore, with filters (All / Active / Scheduled / Completed / Archived)
- * and search by customer or job name. Tap a card to open ViewJobScreen.
- * FAB drops straight into the quote wizard — saveDraft's
- * ensureJobForQuote auto-creates the Job once customer / address / job
- * title have been entered, so no interstitial sheet is needed.
+ * Top-level view of the user's jobs. Lists Jobs produced by useJobStore, piled
+ * by what each one needs from you (see jobBuckets), searchable by any handle
+ * the job carries (see jobSearch), and orderable by money or diary (see
+ * jobSort). Tap a card to open ViewJobScreen.
+ *
+ * The chip and the sort persist per pile so tapping into a job and coming back
+ * doesn't lose your place; the search box deliberately doesn't survive a
+ * restart (see useJobListPrefsStore).
+ *
+ * FAB drops straight into the quote wizard — saveDraft's ensureJobForQuote
+ * auto-creates the Job once customer / address / job title have been entered,
+ * so no interstitial sheet is needed.
  */
 
 import React, { useState, useMemo, useRef, useCallback, useEffect } from 'react';
-import { View, StyleSheet, FlatList, Alert, RefreshControl } from 'react-native';
-import { Text, Searchbar, Chip, FAB } from 'react-native-paper';
+import {
+  View,
+  StyleSheet,
+  FlatList,
+  Alert,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+} from 'react-native';
+import { Text, Searchbar, FAB } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation, useScrollToTop } from '@react-navigation/native';
 
 import type { Job, JobStage } from '../../shared/job/types';
-import type { Document } from '../types/document';
 import { useJobStore } from '../store/useJobStore';
 import { useStore } from '../store/useStore';
 import { makeStyles, useThemeColors } from '../theme';
@@ -31,14 +44,41 @@ import { SkeletonCrossfade } from '../components/SkeletonCrossfade';
 import { useJobActionsSheet } from '../hooks/useJobActionsSheet';
 import { lightTap } from '../utils/haptics';
 import { applyJobStageChange } from '../utils/applyJobStageChange';
-import { sortJobsForList } from '../utils/jobTimeline';
 import {
   JOB_FILTERS,
   bucketForJob,
+  groupDocsByJob,
   type JobBucket,
   type JobFilterKey,
 } from '../utils/jobBuckets';
+import { buildJobSearchIndex, filterJobsBySearch } from '../utils/jobSearch';
+import {
+  buildJobSortMetrics,
+  jobSortLabel,
+  sortJobsBy,
+  type JobSortKey,
+} from '../utils/jobSort';
+import { JobSortMenu } from '../components/JobSortMenu';
+import { useJobListPrefsStore } from '../store/useJobListPrefsStore';
+import {
+  computeCustomerRollup,
+  customerKeyByJobId,
+  groupJobsByCustomer,
+  jobCountByJobId,
+} from '../utils/customerGroups';
+import { formatCurrency } from '../utils/quoteCalculator';
 import { pickPrimaryDoc } from '../components/StickyJobActionBar';
+/**
+ * Midnight today. Overdue is measured in days, so pinning the clock to the
+ * start of the day keeps the sort order stable across a session's renders
+ * instead of drifting with every millisecond.
+ */
+function startOfToday(): number {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
 const EMPTY_COPY: Record<JobFilterKey, { title: string; body: string }> = {
   all: { title: 'No jobs yet', body: 'Start your first job and it’ll show up here' },
   to_send: { title: 'Nothing waiting on you', body: 'Drafts to send and finished work to invoice land here' },
@@ -63,8 +103,24 @@ export function JobsListScreen() {
   const saveInvoice = useStore((s) => s.saveInvoice);
   const createInvoiceFromQuote = useStore((s) => s.createInvoiceFromQuote);
 
-  const [searchQuery, setSearchQuery] = useState('');
-  const [filter, setFilter] = useState<JobFilterKey>('all');
+  // Filter, sort and query live in a store, not in useState — this screen is a
+  // tab and tapping into a job unmounts it, so component state would drop the
+  // pile you were working through. Filter and sort persist to disk; the query
+  // survives the round trip but not a restart. See useJobListPrefsStore.
+  const filter = useJobListPrefsStore((s) => s.prefs.filter);
+  const setFilter = useJobListPrefsStore((s) => s.setFilter);
+  const setSort = useJobListPrefsStore((s) => s.setSort);
+  const searchQuery = useJobListPrefsStore((s) => s.searchQuery);
+  const setSearchQuery = useJobListPrefsStore((s) => s.setSearchQuery);
+  const hydratePrefs = useJobListPrefsStore((s) => s.hydrate);
+  const sortKey = useJobListPrefsStore((s) => s.sortFor(s.prefs.filter));
+
+  // The chip row scrolls horizontally now, so the selected chip can start off
+  // screen — on a restored "Done" filter you'd see a filtered list with nothing
+  // visible explaining why. These keep it in view.
+  const chipScrollRef = useRef<ScrollView>(null);
+  const chipOffsets = useRef<Record<string, number>>({});
+
   const [refreshing, setRefreshing] = useState(false);
   const [initialLoaded, setInitialLoaded] = useState(jobsLoaded || jobs.length > 0);
   const [stageSheetJob, setStageSheetJob] = useState<Job | null>(null);
@@ -87,24 +143,40 @@ export function JobsListScreen() {
     if (!initialLoaded) {
       loadJobs().then(() => setInitialLoaded(true));
     }
+    void hydratePrefs();
   }, []);
+
+  // The pipeline below is split so a KEYSTROKE only re-runs its cheap tail.
+  // Everything derived from the data — buckets, the search index, the sort
+  // metrics — is keyed on [jobs, documents] and never rebuilt while typing.
+
+  // Walk `documents` once. Three consumers need this same map.
+  const docsByJob = useMemo(() => groupDocsByJob(documents), [documents]);
 
   // Bucket every job once per data change, rather than re-deriving it inside
   // each chip's count — that was jobs × filters × a document scan on every
   // keystroke in the search box.
   const bucketByJob = useMemo(() => {
-    const docsByJob = new Map<string, Document[]>();
-    for (const d of documents) {
-      if (!d.jobId) continue;
-      const list = docsByJob.get(d.jobId);
-      if (list) list.push(d);
-      else docsByJob.set(d.jobId, [d]);
-    }
     const map = new Map<string, JobBucket>();
     for (const j of jobs) map.set(j.id, bucketForJob(j, docsByJob.get(j.id) ?? []));
     return map;
-  }, [jobs, documents]);
+  }, [jobs, docsByJob]);
 
+  const searchIndex = useMemo(() => buildJobSearchIndex(jobs, docsByJob), [jobs, docsByJob]);
+
+  // `now` is frozen for the session on purpose. Overdue is a day-granularity
+  // idea, so re-ticking it per render would only make the comparators
+  // non-deterministic — and it's rounded to the start of the day so two
+  // renders an hour apart produce the same order.
+  const sortMetrics = useMemo(
+    () => buildJobSortMetrics(jobs, docsByJob, startOfToday()),
+    [jobs, docsByJob],
+  );
+
+  // Chip counts stay SEARCH-INDEPENDENT, deliberately: they count the whole
+  // population so they sum to the total (the property jobBuckets guarantees).
+  // Recomputing them from the searched set makes every chip read "(1)", which
+  // reads as the counts being broken.
   const counts = useMemo(() => {
     const tally = new Map<JobFilterKey, number>([['all', jobs.length]]);
     for (const bucket of bucketByJob.values()) {
@@ -113,23 +185,65 @@ export function JobsListScreen() {
     return tally;
   }, [bucketByJob, jobs.length]);
 
-  const filtered = useMemo(() => {
-    const matches = jobs.filter((j) => {
-      if (filter !== 'all' && bucketByJob.get(j.id) !== filter) return false;
-      if (searchQuery) {
-        const q = searchQuery.toLowerCase();
-        return (
-          j.customerName.toLowerCase().includes(q) ||
-          j.name.toLowerCase().includes(q) ||
-          (j.jobAddress || '').toLowerCase().includes(q)
-        );
-      }
-      return true;
-    });
-    // Sort here rather than leaning on the query's updatedAt ordering —
-    // the cards are dated by their stage stamp, and the two disagreed.
-    return sortJobsForList(matches);
-  }, [jobs, bucketByJob, filter, searchQuery]);
+  const bucketed = useMemo(
+    () => (filter === 'all' ? jobs : jobs.filter((j) => bucketByJob.get(j.id) === filter)),
+    [jobs, bucketByJob, filter],
+  );
+
+  // The only memo a keystroke invalidates.
+  const matched = useMemo(
+    () => filterJobsBySearch(bucketed, searchIndex, searchQuery),
+    [bucketed, searchIndex, searchQuery],
+  );
+
+  const filtered = useMemo(
+    () => sortJobsBy(matched, sortKey, sortMetrics),
+    [matched, sortKey, sortMetrics],
+  );
+
+  // Bring the selected chip into view whenever it changes — including the first
+  // paint after prefs restore a pile other than "All". A little lead-in so the
+  // chip doesn't sit flush against the edge and look clipped.
+  useEffect(() => {
+    const x = chipOffsets.current[filter];
+    if (x === undefined) return;
+    chipScrollRef.current?.scrollTo({ x: Math.max(0, x - 16), animated: true });
+  }, [filter]);
+
+  const searching = searchQuery.trim().length > 0;
+
+  // Customer grouping: drives the repeat marker on cards, and the customer rows
+  // the search puts above the job results. Both are entry points into the
+  // Customer screen, and neither costs a new control on this screen.
+  const customerGroups = useMemo(() => groupJobsByCustomer(jobs, docsByJob), [jobs, docsByJob]);
+  const jobCounts = useMemo(() => jobCountByJobId(customerGroups), [customerGroups]);
+  const customerKeys = useMemo(() => customerKeyByJobId(customerGroups), [customerGroups]);
+  const jobsById = useMemo(() => new Map(jobs.map((j) => [j.id, j])), [jobs]);
+
+  /**
+   * Customers whose own details match the query — shown above the job cards so
+   * "smith" offers Jane Smith's whole history, not just her individual jobs.
+   * Capped at 3: this is a shortcut, not a second list.
+   */
+  const matchedCustomers = useMemo(() => {
+    if (searchQuery.trim().length < 2) return [];
+    const matchedKeys = new Set(
+      matched.map((j) => customerKeys.get(j.id)).filter(Boolean) as string[],
+    );
+    return customerGroups
+      .filter((g) => g.isRepeat && matchedKeys.has(g.key))
+      .slice(0, 3)
+      .map((g) => ({ group: g, rollup: computeCustomerRollup(g, jobsById, docsByJob) }));
+  }, [searchQuery, matched, customerKeys, customerGroups, jobsById, docsByJob]);
+
+  const openCustomer = useCallback(
+    (job: Job) => {
+      const key = customerKeys.get(job.id);
+      if (!key) return;
+      navigation.navigate('Customer', { customerKey: key, name: job.customerName });
+    },
+    [customerKeys, navigation],
+  );
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -188,18 +302,28 @@ export function JobsListScreen() {
   };
 
 
+  // sortKey and sortMetrics MUST be in the dep array. Without them the cards
+  // keep whatever sort label they first rendered with — React.memo on JobCard
+  // hides the staleness, so the list silently orders by one thing while every
+  // card claims another.
   const renderCard = useCallback(
-    ({ item, index }: { item: Job; index: number }) => (
-      <AnimatedListItem index={index}>
-        <JobCard
-          job={item}
-          onPress={handleView}
-          onStagePress={handleStagePress}
-          onMenuPress={actionsSheet.open}
-        />
-      </AnimatedListItem>
-    ),
-    [],
+    ({ item, index }: { item: Job; index: number }) => {
+      const metrics = sortMetrics.get(item.id);
+      return (
+        <AnimatedListItem index={index}>
+          <JobCard
+            job={item}
+            onPress={handleView}
+            onStagePress={handleStagePress}
+            onMenuPress={actionsSheet.open}
+            sortLabel={metrics ? jobSortLabel(sortKey, metrics) : null}
+            customerJobCount={jobCounts.get(item.id)}
+            onCustomerPress={openCustomer}
+          />
+        </AnimatedListItem>
+      );
+    },
+    [sortKey, sortMetrics, jobCounts, openCustomer],
   );
 
   return (
@@ -207,32 +331,67 @@ export function JobsListScreen() {
       <GridBackground />
       <WebContainer>
         <Searchbar
-          placeholder="Search jobs..."
+          placeholder="Name, address, phone, invoice #"
           onChangeText={setSearchQuery}
           value={searchQuery}
           style={styles.searchBar}
         />
 
-        <View style={styles.filterRow}>
-          {JOB_FILTERS.map(({ key, label }) => {
-            const count = counts.get(key) ?? 0;
-            return (
-              <Chip
-                key={key}
-                selected={filter === key}
-                onPress={() => {
-                  lightTap();
-                  setFilter(key);
-                }}
-                style={[styles.filterChip, filter === key && styles.filterChipActive]}
-                textStyle={filter === key ? styles.filterChipTextActive : styles.filterChipText}
-                showSelectedCheck={false}
-              >
-                {label}
-                {count > 0 ? ` (${count})` : ''}
-              </Chip>
-            );
-          })}
+        {/* One line, not two. Six chips plus the sort button wrapped onto a
+            second row on any normal phone width, which put three bands of
+            chrome above the list. The chips scroll horizontally instead; the
+            sort button sits outside the scroller so it stays reachable. */}
+        <View style={styles.controlsRow}>
+          <ScrollView
+            ref={chipScrollRef}
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.filterRow}
+            style={styles.filterScroll}
+          >
+            {JOB_FILTERS.map(({ key, label }) => {
+              const count = counts.get(key) ?? 0;
+              return (
+                <View
+                  key={key}
+                  // Remember where each chip sits so the selected one can be
+                  // scrolled into view — see the effect below.
+                  onLayout={(e) => {
+                    chipOffsets.current[key] = e.nativeEvent.layout.x;
+                  }}
+                >
+                  <Pressable
+                    onPress={() => {
+                      lightTap();
+                      setFilter(key);
+                    }}
+                    // The chip is deliberately shorter than a comfortable tap
+                    // target, so extend the touch area past the visual bounds
+                    // rather than making the row taller again.
+                    hitSlop={{ top: 8, bottom: 8, left: 2, right: 2 }}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: filter === key }}
+                    style={({ pressed }) => [
+                      styles.filterChip,
+                      filter === key && styles.filterChipActive,
+                      pressed && { opacity: 0.7 },
+                    ]}
+                  >
+                    <Text
+                      style={
+                        filter === key ? styles.filterChipTextActive : styles.filterChipText
+                      }
+                      numberOfLines={1}
+                    >
+                      {label}
+                      {count > 0 ? ` (${count})` : ''}
+                    </Text>
+                  </Pressable>
+                </View>
+              );
+            })}
+          </ScrollView>
+          <JobSortMenu value={sortKey} onChange={(key) => setSort(filter, key)} />
         </View>
       </WebContainer>
 
@@ -265,22 +424,92 @@ export function JobsListScreen() {
                 colors={[themeColors.accent]}
               />
             }
+            // Only shown while searching, so it costs nothing when idle — and
+            // it makes a narrowed list obvious rather than looking like jobs
+            // have gone missing.
+            ListHeaderComponent={
+              searching ? (
+                <View>
+                  {matchedCustomers.map(({ group, rollup }) => (
+                    <Pressable
+                      key={group.key}
+                      onPress={() => {
+                        lightTap();
+                        navigation.navigate('Customer', {
+                          customerKey: group.key,
+                          name: group.name,
+                        });
+                      }}
+                      style={({ pressed }) => [
+                        styles.customerRow,
+                        pressed && { opacity: 0.7 },
+                      ]}
+                    >
+                      <MaterialCommunityIcons
+                        name={'account-outline' as any}
+                        size={18}
+                        color={themeColors.accentText}
+                      />
+                      <Text style={styles.customerRowName} numberOfLines={1}>
+                        {group.name}
+                      </Text>
+                      <Text style={styles.customerRowMeta} numberOfLines={1}>
+                        {group.jobCount} jobs
+                        {rollup.owed > 0 ? ` · ${formatCurrency(rollup.owed)} owed` : ''}
+                      </Text>
+                      <MaterialCommunityIcons
+                        name={'chevron-right' as any}
+                        size={18}
+                        color={themeColors.textMuted}
+                      />
+                    </Pressable>
+                  ))}
+                  <Text style={styles.resultCount}>
+                    Showing {filtered.length} of {bucketed.length}
+                  </Text>
+                </View>
+              ) : null
+            }
             ListEmptyComponent={
               <View style={styles.emptyState}>
                 <View style={styles.emptyIconCircle}>
                   <MaterialCommunityIcons
-                    name={'briefcase-outline' as any}
+                    name={(searching ? 'magnify' : 'briefcase-outline') as any}
                     size={36}
                     color={themeColors.accentText}
                   />
                 </View>
-                <Text style={styles.emptyTitle}>{EMPTY_COPY[filter].title}</Text>
-                <Text style={styles.emptyText}>{EMPTY_COPY[filter].body}</Text>
-                <Text style={styles.emptySubtext}>
-                  {filter === 'all'
-                    ? 'Tap + to start a new job'
-                    : 'Try another filter or tap + to start one'}
-                </Text>
+                {/* Under an active search the stock copy ("No jobs yet") is a
+                    false statement about the tradie's data — the exact shape
+                    of a "my jobs are gone" support ticket. Say what actually
+                    happened, and offer the way out. */}
+                {searching ? (
+                  <>
+                    <Text style={styles.emptyTitle}>No jobs match</Text>
+                    <Text style={styles.emptyText}>
+                      Nothing here for “{searchQuery.trim()}”
+                    </Text>
+                    <Pressable
+                      onPress={() => {
+                        lightTap();
+                        setSearchQuery('');
+                      }}
+                      style={({ pressed }) => [styles.clearSearch, pressed && { opacity: 0.7 }]}
+                    >
+                      <Text style={styles.clearSearchLabel}>Clear search</Text>
+                    </Pressable>
+                  </>
+                ) : (
+                  <>
+                    <Text style={styles.emptyTitle}>{EMPTY_COPY[filter].title}</Text>
+                    <Text style={styles.emptyText}>{EMPTY_COPY[filter].body}</Text>
+                    <Text style={styles.emptySubtext}>
+                      {filter === 'all'
+                        ? 'Tap + to start a new job'
+                        : 'Try another filter or tap + to start one'}
+                    </Text>
+                  </>
+                )}
               </View>
             }
           />
@@ -327,18 +556,51 @@ export function JobsListScreen() {
 const useStyles = makeStyles((t) => ({
   container: { flex: 1, backgroundColor: t.colors.bg },
   searchBar: {
-    margin: 16,
+    // Was margin:16 all round. Trimmed vertically — the chip row directly
+    // below supplies its own spacing, so 16 top and bottom was double.
+    marginHorizontal: 16,
+    marginTop: 10,
+    marginBottom: 10,
     elevation: 2,
     backgroundColor: t.colors.surfaceRaised,
   },
-  filterRow: {
+  controlsRow: {
     flexDirection: 'row',
-    paddingHorizontal: 16,
+    alignItems: 'center',
+    paddingLeft: 16,
+    paddingRight: 16,
     marginBottom: 8,
-    flexWrap: 'wrap',
     gap: 8,
   },
+  // flexShrink lets the scroller give way to the sort button rather than
+  // pushing it off the edge. minWidth:0 is what actually makes that work on
+  // web — without it a flex child refuses to shrink below its content's
+  // intrinsic width, so six chips would shove the sort button off screen.
+  filterScroll: {
+    flexGrow: 1,
+    flexShrink: 1,
+    minWidth: 0,
+  },
+  // No flexWrap: the row is a single scrolling line. Trailing padding so the
+  // last chip can clear the sort button when scrolled fully right.
+  filterRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingRight: 8,
+  },
+  // Hand-rolled rather than Paper's Chip, which can't be made shorter without
+  // fighting its internals: its MD3 label carries marginVertical:8 on a 20px
+  // line-height, so ~36px is its floor. This matches the Pressable idiom
+  // PillToggle and JobSortMenu already use, and lines the chips up with the
+  // sort button beside them — at 36 vs 30 they didn't agree before.
   filterChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: 28,
+    paddingHorizontal: 12,
+    borderRadius: 999,
     backgroundColor: t.colors.surfaceRaised,
     borderWidth: 1,
     borderColor: t.colors.border,
@@ -347,11 +609,55 @@ const useStyles = makeStyles((t) => ({
     backgroundColor: t.colors.accent,
     borderColor: t.colors.accentBorder,
   },
-  filterChipText: { color: t.colors.textMuted, fontFamily: 'Archivo-SemiBold' },
-  filterChipTextActive: { color: t.colors.onAccent, fontFamily: 'Archivo-Bold' },
+  filterChipText: { fontSize: 12, color: t.colors.textMuted, fontFamily: 'Archivo-SemiBold' },
+  filterChipTextActive: { fontSize: 12, color: t.colors.onAccent, fontFamily: 'Archivo-Bold' },
   listContainer: { flex: 1 },
   flatList: { flex: 1 },
   listContent: { padding: 16, paddingBottom: 100 },
+  resultCount: {
+    fontSize: 12,
+    color: t.colors.textMuted,
+    fontFamily: 'Archivo-SemiBold',
+    marginBottom: 8,
+  },
+  customerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    marginBottom: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: t.colors.border,
+    backgroundColor: t.colors.surfaceRaised,
+  },
+  customerRowName: {
+    fontSize: 15,
+    fontFamily: 'Archivo-Bold',
+    color: t.colors.text,
+    flexShrink: 1,
+  },
+  customerRowMeta: {
+    fontSize: 12,
+    color: t.colors.textMuted,
+    marginLeft: 'auto',
+    flexShrink: 0,
+  },
+  clearSearch: {
+    marginTop: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: t.colors.border,
+    backgroundColor: t.colors.surfaceRaised,
+  },
+  clearSearchLabel: {
+    fontSize: 14,
+    fontFamily: 'Archivo-SemiBold',
+    color: t.colors.text,
+  },
   emptyState: {
     alignItems: 'center',
     paddingVertical: 48,

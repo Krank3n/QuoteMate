@@ -33,6 +33,28 @@ export const JOB_FILTERS: { key: JobFilterKey; label: string }[] = [
   { key: 'done', label: 'Done' },
 ];
 
+export function isJobFilterKey(v: unknown): v is JobFilterKey {
+  return typeof v === 'string' && JOB_FILTERS.some((f) => f.key === v);
+}
+
+/**
+ * Index documents by the job they hang off.
+ *
+ * Lives here because bucketing needs it first, but the search index and the
+ * sort metrics need the same map — and walking `documents` once per consumer,
+ * per keystroke, was the cost this replaced.
+ */
+export function groupDocsByJob(documents: Document[]): Map<string, Document[]> {
+  const byJob = new Map<string, Document[]>();
+  for (const d of documents || []) {
+    if (!d?.jobId) continue;
+    const list = byJob.get(d.jobId);
+    if (list) list.push(d);
+    else byJob.set(d.jobId, [d]);
+  }
+  return byJob;
+}
+
 function isLive(doc: Document): boolean {
   return doc.stage !== 'cancelled';
 }
@@ -73,6 +95,12 @@ export function bucketForJob(job: Job, docs: Document[]): JobBucket {
   return 'to_send';
 }
 
+/**
+ * Test-only convenience. The screen deliberately does NOT use this: it
+ * buckets every job once into a map and compares against that, so adding
+ * a filter chip doesn't multiply into another pass over every document on
+ * every keystroke.
+ */
 export function matchesJobFilter(
   job: Job,
   docs: Document[],

@@ -24,6 +24,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { useStore } from './src/store/useStore';
 import { useJobStore } from './src/store/useJobStore';
+import { useJobListPrefsStore } from './src/store/useJobListPrefsStore';
 
 const LAST_USER_UID_KEY = '@quotemate:lastUserUid';
 const LAST_USER_EMAIL_KEY = '@quotemate:lastUserEmail';
@@ -417,6 +418,9 @@ function App() {
             useJobStore.getState().loadJobs(),
             loadXeroConnection(),
             loadContacts(),
+            // Which pile and sort the Jobs list should open on. Cheap local
+            // read; the screen also hydrates on mount, so this only warms it.
+            useJobListPrefsStore.getState().hydrate(),
           ]).catch(() => {});
         });
 
