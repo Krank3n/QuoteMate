@@ -1,7 +1,6 @@
 ---
 name: build-android
 description: Build a production Android AAB locally for Google Play Store upload
-disable-model-invocation: true
 allowed-tools: Bash, Read, Edit, Glob, Grep
 ---
 
