@@ -101,7 +101,16 @@ export function ContactEditModal({
         contentContainerStyle={styles.modalContainer}
       >
         <Text style={styles.modalTitle}>{title ?? 'Edit customer'}</Text>
-        <ScrollView keyboardShouldPersistTaps="handled">
+        {/* flexGrow 0 so the modal hugs its fields instead of always standing
+            80% tall with dead space under the buttons; flexShrink 1 so the
+            fields still scroll when they genuinely don't fit (which is why the
+            ScrollView is here — without it Website and Notes were unreachable
+            on a short screen). */}
+        <ScrollView
+          keyboardShouldPersistTaps="handled"
+          style={styles.fields}
+          contentContainerStyle={styles.fieldsContent}
+        >
           <TextInput
             label="Name *"
             value={values.name}
@@ -200,6 +209,13 @@ const useStyles = makeStyles((t) => ({
     fontWeight: '700',
     color: t.colors.text,
     marginBottom: 16,
+  },
+  fields: {
+    flexGrow: 0,
+    flexShrink: 1,
+  },
+  fieldsContent: {
+    paddingBottom: 4,
   },
   modalInput: {
     marginBottom: 12,

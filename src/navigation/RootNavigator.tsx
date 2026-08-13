@@ -477,6 +477,11 @@ export function RootNavigator() {
     <RootStack.Navigator
       screenOptions={{
         headerShown: false,
+        // Every screen pushed from the tabs was labelling its back button
+        // "Main" — the tab navigator's internal route name, which means nothing
+        // to a tradie. Show the chevron on its own instead. Applies to Contacts,
+        // About, Customer, DiscoverSuppliers and anything added later.
+        headerBackButtonDisplayMode: 'minimal',
         cardStyle: { backgroundColor: themeColors.bg },
         // On web, use float header mode so CardContent uses flex:1 instead of
         // minHeight:100% (pageOverflowEnabled=false), allowing ScrollViews to scroll

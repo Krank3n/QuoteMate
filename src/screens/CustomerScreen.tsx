@@ -173,8 +173,27 @@ export function CustomerScreen() {
   };
 
   React.useEffect(() => {
-    navigation.setOptions?.({ title: group?.name || fallbackName || 'Customer' });
-  }, [navigation, group?.name, fallbackName]);
+    navigation.setOptions?.({
+      title: group?.name || fallbackName || 'Customer',
+      headerRight: () => (
+        <Pressable
+          onPress={() => {
+            selectionTap();
+            setEditing(true);
+          }}
+          hitSlop={12}
+          accessibilityLabel="Edit customer details"
+          style={({ pressed }) => [styles.headerEdit, pressed && { opacity: 0.6 }]}
+        >
+          <MaterialCommunityIcons
+            name={'pencil-outline' as any}
+            size={20}
+            color={themeColors.text}
+          />
+        </Pressable>
+      ),
+    });
+  }, [navigation, group?.name, fallbackName, styles.headerEdit, themeColors.text]);
 
   // A contact with no jobs is a real state — the Contacts list can reach this
   // screen for someone who was imported but never quoted.
@@ -214,24 +233,12 @@ export function CustomerScreen() {
 
           <View style={styles.summaryCard}>
             <View style={styles.summaryHeadRow}>
-              <View style={styles.summaryLabelRow}>
-                <Text style={styles.summaryLabel}>Owed now</Text>
-                <Pressable
-                  onPress={() => {
-                    selectionTap();
-                    setEditing(true);
-                  }}
-                  hitSlop={10}
-                  accessibilityLabel="Edit customer details"
-                  style={({ pressed }) => [styles.editButton, pressed && { opacity: 0.6 }]}
-                >
-                  <MaterialCommunityIcons
-                    name={'pencil-outline' as any}
-                    size={16}
-                    color={themeColors.textMuted}
-                  />
-                </Pressable>
-              </View>
+              {/* The edit pencil used to sit right here next to "Owed now",
+                  which read as "edit the amount owed" — the last thing you want
+                  a tradie to think they can hand-type. It's a header button
+                  now, next to the customer's name, where "edit" can only mean
+                  the customer. */}
+              <Text style={styles.summaryLabel}>Owed now</Text>
               <Text
                 style={[
                   styles.summaryValue,
@@ -371,8 +378,7 @@ const useStyles = makeStyles((t) => ({
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
-  summaryLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  editButton: { padding: 2 },
+  headerEdit: { paddingHorizontal: 16, paddingVertical: 8 },
   summaryValue: { fontSize: 26, fontFamily: 'Archivo-Bold' },
   summaryValueOwed: { color: t.colors.error },
   summaryValueClear: { color: t.colors.money },
