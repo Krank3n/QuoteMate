@@ -200,4 +200,26 @@ export interface Document {
   // ===== Migration back-references =====
   legacyQuoteId?: string;
   legacyInvoiceId?: string;
+
+  /**
+   * What conversion to an invoice overwrote, so it can be undone exactly.
+   *
+   * convertDocumentToInvoice replaces the quote number with a fresh
+   * invoice number and subtracts the deposit credit from the total. Both
+   * are unrecoverable otherwise — an undo without this stash would have to
+   * mint a NEW quote number, changing the customer-facing reference twice.
+   *
+   * Present only while the undo is still on the table; cleared when the
+   * revert runs.
+   */
+  convertedFromQuote?: {
+    /** The quote number the invoice number replaced (e.g. "QU-178554"). */
+    number?: string;
+    /** Total before the deposit credit was subtracted. */
+    total: number;
+    /** Stage the quote was sitting at when it was converted. */
+    stage: DocumentStage;
+    /** When the conversion happened. */
+    at: number;
+  };
 }

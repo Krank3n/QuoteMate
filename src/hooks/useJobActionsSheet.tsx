@@ -114,6 +114,7 @@ export function useJobActionsSheet(
   const saveInvoice = useStore((s) => s.saveInvoice);
   const createInvoiceFromQuote = useStore((s) => s.createInvoiceFromQuote);
   const convertDocumentToInvoice = useStore((s) => s.convertDocumentToInvoice);
+  const revertDocumentToQuote = useStore((s) => s.revertDocumentToQuote);
 
   const { showAlert, alertNode } = useAlertModal();
 
@@ -219,6 +220,33 @@ export function useJobActionsSheet(
                 type: 'error',
                 title: 'Conversion failed',
                 message: 'Something went wrong. Pull to refresh and try again.',
+              });
+            }
+          },
+          secondaryButtonText: 'Cancel',
+          secondaryButtonAction: () => {},
+        });
+        break;
+      }
+      case 'revertToQuote': {
+        const doc = primaryDocForJob(job);
+        if (!doc) return;
+        showAlert({
+          type: 'warning',
+          title: 'Turn back into a quote?',
+          message:
+            `${doc.number || 'This invoice'} goes back to being a quote. The invoice ` +
+            'number stays used up — it won’t be handed out again.',
+          primaryButtonText: 'Back to a quote',
+          primaryButtonAction: async () => {
+            try {
+              await revertDocumentToQuote(doc.id);
+            } catch {
+              showAlert({
+                type: 'error',
+                title: 'Couldn’t change it back',
+                message:
+                  'This invoice has been sent, paid or synced since — it has to stay an invoice.',
               });
             }
           },

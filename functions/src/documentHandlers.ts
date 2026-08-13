@@ -1701,6 +1701,16 @@ export const convertDocumentToInvoice = functions.https.onCall(
         paymentTerms: 'net_14',
         total: adjustedTotal,
         legacyInvoiceId: docId,
+        // Mirror of the client stash — what this write overwrites, so the
+        // conversion can be undone exactly while the invoice is still
+        // untouched (src/utils/revertToQuote.ts). Whichever path runs
+        // first, the undo has what it needs.
+        convertedFromQuote: {
+          ...(existing.number ? { number: existing.number } : {}),
+          total: Number(existing.total) || 0,
+          stage: existing.stage,
+          at: now,
+        },
         // Xero: keep xeroQuoteId (historical link, used as Reference on the
         // pushed invoice) and xeroContactId (re-use Xero contact, avoid a
         // duplicate). Reset sync status so the invoice push fires fresh.

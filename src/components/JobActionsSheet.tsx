@@ -21,6 +21,7 @@ import { makeStyles, useThemeColors } from '../theme';
 import { BottomSheet } from './BottomSheet';
 import { selectionTap, lightTap } from '../utils/haptics';
 import { legalStageTargets, shouldOfferSchedule } from '../utils/jobStageTargets';
+import { canRevertToQuote } from '../utils/revertToQuote';
 import { jobStageMetaFor } from './JobStageSheet';
 
 export type JobAction =
@@ -29,6 +30,7 @@ export type JobAction =
   | 'edit'
   | 'send'
   | 'convertToInvoice'
+  | 'revertToQuote'
   | 'duplicate'
   | 'service_report'
   | 'exportPdf'
@@ -256,11 +258,13 @@ export function JobActionsSheet({
   // as the lifecycle step it reads as. Same action, same confirm dialog as
   // the top-level row; only the door is new.
   const canConvertToInvoice = canConvert(ctx.primaryDoc);
+  const canUndoConvert = canRevertToQuote(ctx.primaryDoc);
   const stageTargets = onSelectStage
     ? legalStageTargets(job.stage, { depositPaid, excludeScheduled: showSchedule })
     : [];
   const showChangeStatus =
-    !!onSelectStage && (stageTargets.length > 0 || showSchedule || canConvertToInvoice);
+    !!onSelectStage &&
+    (stageTargets.length > 0 || showSchedule || canConvertToInvoice || canUndoConvert);
   // Sits at the end of the everyday group, above the housekeeping rows —
   // found by the first housekeeping row rather than a fixed index, so a
   // row hidden by its `when` predicate doesn't strand it.
@@ -363,6 +367,25 @@ export function JobActionsSheet({
                 color={themeColors.accentText}
               />
               <Text style={styles.submenuLabel}>Convert to invoice…</Text>
+            </Pressable>
+          ) : null}
+          {canUndoConvert ? (
+            <Pressable
+              onPress={() => {
+                selectionTap();
+                onSelect('revertToQuote', job);
+              }}
+              style={({ pressed }) => [
+                styles.submenuRow,
+                pressed && styles.rowPressed,
+              ]}
+            >
+              <MaterialCommunityIcons
+                name={'undo-variant' as any}
+                size={18}
+                color={themeColors.textMuted}
+              />
+              <Text style={styles.submenuLabel}>Back to a quote…</Text>
             </Pressable>
           ) : null}
           {showSchedule ? (

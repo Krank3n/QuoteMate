@@ -27,6 +27,7 @@ import { loadTemplates } from '../services/sectionTemplateService';
 import { updateQuoteCalculations, healBrokenLabourSections } from '../utils/quoteCalculator';
 import { normaliseLabourToHours } from '../../shared/document/labourUnits';
 import { calculateDueDate } from '../utils/invoiceCalculator';
+import { canRevertToQuote } from '../utils/revertToQuote';
 import { reconcileNextNumber, resolveNextQuoteNumber } from '../utils/nextNumber';
 import { preserveSnapshotIdentity } from '../utils/snapshotIdentity';
 import { firestoreService, ASSISTANT_LOGGING_ENABLED } from '../services/firestoreService';
@@ -232,6 +233,8 @@ interface AppState {
   getDocumentById: (id: string) => Document | undefined;
   getDocumentByLegacyId: (legacyId: string) => Document | undefined;
   convertDocumentToInvoice: (documentId: string) => Promise<Document>;
+  /** Undo a conversion while the invoice is still untouched — see canRevertToQuote. */
+  revertDocumentToQuote: (documentId: string) => Promise<Document>;
   /**
    * Clone a Document for a new Job (Duplicate flow). Keeps scope/labor/
    * materials/terms; resets stage to quote_accepted, money state to zero,
@@ -2534,6 +2537,16 @@ export const useStore = create<AppState>((set, get) => ({
       paymentTerms: 'net_14',
       total: adjustedTotal,
       legacyInvoiceId: existing.id,
+      // Stash what this write overwrites so the conversion can be undone
+      // exactly — see canRevertToQuote. Without the old number an undo
+      // would have to mint a fresh one, changing the customer-facing
+      // reference twice.
+      convertedFromQuote: {
+        ...(existing.number ? { number: existing.number } : {}),
+        total: Number(existing.total) || 0,
+        stage: existing.stage,
+        at: now,
+      },
       updatedAt: now,
     };
     // Stamp the legacy source quote BEFORE flipping the unified doc — the
@@ -2576,6 +2589,59 @@ export const useStore = create<AppState>((set, get) => ({
       }
     }
     return optimistic;
+  },
+
+  revertDocumentToQuote: async (documentId: string) => {
+    const existing = get().getDocumentById(documentId);
+    if (!existing) throw new Error('Document not found');
+    // Re-check server-side-of-the-client: the sheet gates on the same
+    // predicate, but state can move between rendering the row and tapping
+    // it (a webhook landing a payment, say).
+    if (!canRevertToQuote(existing)) {
+      throw new Error('This invoice can no longer be turned back into a quote.');
+    }
+    const stash = existing.convertedFromQuote!;
+    const now = Date.now();
+
+    const reverted: Document = {
+      ...existing,
+      type: 'quote',
+      // Restore the number the conversion overwrote. The invoice number
+      // stays spent — tax numbering shouldn't reuse a number, so it is
+      // deliberately not returned to the pool.
+      ...(stash.number ? { number: stash.number } : {}),
+      total: Number(stash.total) || 0,
+      stage: stash.stage,
+      invoicedAt: undefined,
+      issueDate: undefined,
+      dueDate: undefined,
+      paymentTerms: undefined,
+      convertedFromQuote: undefined,
+      // Conversion reset Xero sync; going back leaves it unsynced too.
+      xeroSyncStatus: 'not_synced',
+      updatedAt: now,
+    };
+
+    await get().saveDocument(reverted);
+
+    // Keep the legacy quote row's forward pointer honest — pickDashboardDraft
+    // and the "Continue draft" banner both key off invoiceId/invoicedAt, so
+    // a stale stamp would keep the job looking invoiced.
+    const sourceQuote = get().quotes.find((q) => q.id === documentId);
+    if (sourceQuote?.invoiceId) {
+      try {
+        await get().saveQuote({
+          ...sourceQuote,
+          invoiceId: undefined,
+          invoicedAt: undefined,
+          updatedAt: new Date(now),
+        });
+      } catch {
+        // Non-fatal: the unified doc is the source of truth.
+      }
+    }
+
+    return reverted;
   },
 
   duplicateDocumentForJob: async (sourceDocumentId: string, newJobId: string) => {
