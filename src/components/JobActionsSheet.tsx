@@ -99,6 +99,17 @@ function resolve<T>(value: T | ((ctx: RowCtx) => T), ctx: RowCtx): T {
   return typeof value === 'function' ? (value as (ctx: RowCtx) => T)(ctx) : value;
 }
 
+/**
+ * Quotes only, and never re-offer once invoiced — conversion is one-way
+ * and the idempotent path already guards double-taps.
+ *
+ * Shared by the top-level row and the "Change status" submenu so the two
+ * doors can't disagree about whether conversion is on the table.
+ */
+export function canConvert(doc?: Document | null): boolean {
+  return !!doc && doc.type === 'quote' && !doc.invoicedAt;
+}
+
 // Take Payment and Follow Up sit at the top — those are the
 // everyday actions; everything else (edit, send, archive, delete)
 // is less frequent.
@@ -139,8 +150,7 @@ export const ROWS: RowDef[] = [
     icon: 'file-swap-outline',
     // Quotes only, and never re-offer once invoiced — conversion is
     // one-way and the idempotent path already guards double-taps.
-    when: ({ primaryDoc }) =>
-      !!primaryDoc && primaryDoc.type === 'quote' && !primaryDoc.invoicedAt,
+    when: ({ primaryDoc }) => canConvert(primaryDoc),
   },
   {
     id: 'duplicate',
@@ -241,10 +251,16 @@ export function JobActionsSheet({
 
   const stageMeta = jobStageMetaFor(themeColors);
   const showSchedule = !!onSchedule && shouldOfferSchedule(job);
+  // There is no "Invoiced" Job stage — invoicing lives on the document —
+  // so anyone looking for it in a status list finds nothing. Offer it here
+  // as the lifecycle step it reads as. Same action, same confirm dialog as
+  // the top-level row; only the door is new.
+  const canConvertToInvoice = canConvert(ctx.primaryDoc);
   const stageTargets = onSelectStage
     ? legalStageTargets(job.stage, { depositPaid, excludeScheduled: showSchedule })
     : [];
-  const showChangeStatus = !!onSelectStage && (stageTargets.length > 0 || showSchedule);
+  const showChangeStatus =
+    !!onSelectStage && (stageTargets.length > 0 || showSchedule || canConvertToInvoice);
   // Sits at the end of the everyday group, above the housekeeping rows —
   // found by the first housekeeping row rather than a fixed index, so a
   // row hidden by its `when` predicate doesn't strand it.
@@ -330,6 +346,25 @@ export function JobActionsSheet({
 
       {statusExpanded ? (
         <View style={styles.submenu}>
+          {canConvertToInvoice ? (
+            <Pressable
+              onPress={() => {
+                selectionTap();
+                onSelect('convertToInvoice', job);
+              }}
+              style={({ pressed }) => [
+                styles.submenuRow,
+                pressed && styles.rowPressed,
+              ]}
+            >
+              <MaterialCommunityIcons
+                name={'file-swap-outline' as any}
+                size={18}
+                color={themeColors.accentText}
+              />
+              <Text style={styles.submenuLabel}>Convert to invoice…</Text>
+            </Pressable>
+          ) : null}
           {showSchedule ? (
             <Pressable
               onPress={() => {
