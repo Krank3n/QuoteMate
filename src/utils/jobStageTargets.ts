@@ -1,16 +1,24 @@
 /**
- * Which stages a Job may legally move to next.
+ * Which stages a Job can be moved to.
  *
- * Two surfaces now offer a status change — the timeline pill's
- * JobStageSheet and the kebab's "Change status" submenu — and they must
- * agree. Computing the list twice is how a job ends up offering a
- * transition on one surface that the other hides (and, once the shared
- * state machine moves, one of them starts offering an edge the server
- * rejects).
+ * Two surfaces offer a status change — the timeline pill's JobStageSheet
+ * and the kebab's "Change status" submenu — and they must agree.
+ * Computing the list twice is how a job ends up offering a transition on
+ * one surface that the other hides.
  *
- * Only legal edges are offered. The UI used to show every stage and let
- * the server reject illegal ones, which surfaced as a silent failure
- * after the tap.
+ * **Leaps are allowed.** This used to show only the adjacent edges of the
+ * state machine, which meant a tradie who did the work and got paid
+ * without touching the app had to tap through quoted → accepted →
+ * in_progress → completed → paid, reopening the sheet each time. Nothing
+ * enforces the Job graph anyway: `assertTransition` is never called,
+ * firestore.rules has no stage checks, and the only server trigger on the
+ * jobs collection is calendar sync. (The *document* machine IS enforced
+ * server-side, in documentHandlers — that's the one whose taps used to
+ * fail silently, and it is not this one.) The rail already copes with
+ * skipped stages: isSlotReached falls back to a stage-ordinal compare
+ * "so a stage-leap still lights the dot".
+ *
+ * The money firewall still holds — see isFirewalled.
  */
 
 import type { Job, JobStage } from '../../shared/job/types';
@@ -48,6 +56,22 @@ export interface StageTargetOptions {
   excludeScheduled?: boolean;
 }
 
+/**
+ * The one rule that still blocks a leap: once a deposit has been paid, an
+ * accepted job can't drop back to quoted without an explicit cancel.
+ *
+ * Derived from `canTransition` rather than restated here, so
+ * shared/job/stage.ts stays the single source of truth for the firewall —
+ * an edge the static graph allows but the context-aware call rejects is,
+ * by definition, the firewall talking.
+ */
+function isFirewalled(from: JobStage, to: JobStage, depositPaid?: boolean): boolean {
+  return (
+    canTransition(from, to, { depositPaid: false }) &&
+    !canTransition(from, to, { depositPaid })
+  );
+}
+
 export function legalStageTargets(
   current: JobStage,
   { depositPaid, excludeScheduled }: StageTargetOptions = {},
@@ -55,7 +79,7 @@ export function legalStageTargets(
   return ALL_STAGES.filter(
     (s) =>
       s !== current &&
-      canTransition(current, s, { depositPaid }) &&
+      !isFirewalled(current, s, depositPaid) &&
       !(excludeScheduled && s === 'scheduled'),
   );
 }

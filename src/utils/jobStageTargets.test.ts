@@ -14,12 +14,22 @@ describe('legalStageTargets', () => {
     }
   });
 
-  it('offers only legal edges from the shared state machine', () => {
-    // Whatever the machine permits, nothing more — a stage the server
-    // would reject must not be tappable (it used to fail silently).
-    const targets = legalStageTargets('inquiry');
-    expect(targets.length).toBeGreaterThan(0);
-    expect(targets).toContain('quoted');
+  // Leaps are the point: a tradie who did the work and got paid without
+  // touching the app shouldn't tap through four intermediate stages.
+  it('lets a job jump ahead past the adjacent edges', () => {
+    const targets = legalStageTargets('quoted');
+    expect(targets).toContain('accepted');   // adjacent
+    expect(targets).toContain('completed');  // a leap
+    expect(targets).toContain('paid');       // a bigger leap
+  });
+
+  it('lets a job go backwards when the tradie taps the wrong thing', () => {
+    expect(legalStageTargets('completed')).toContain('quoted');
+  });
+
+  it('offers every other stage by default', () => {
+    // 9 stages in the lifecycle, minus the one you are on.
+    expect(legalStageTargets('inquiry')).toHaveLength(8);
   });
 
   it('drops `scheduled` when the caller renders its own Schedule row', () => {
@@ -44,12 +54,22 @@ describe('legalStageTargets', () => {
     expect(legalStageTargets('accepted')).toContain('quoted');
   });
 
-  it('the deposit flag removes only that edge, leaving the execution lane open', () => {
+  it('the deposit flag removes only that edge, leaving every other leap open', () => {
     const paid = legalStageTargets('accepted', { depositPaid: true });
     const soft = legalStageTargets('accepted', { depositPaid: false });
     expect(paid).toEqual(soft.filter((s) => s !== 'quoted'));
     expect(paid).toContain('scheduled');
     expect(paid).toContain('cancelled');
+    expect(paid).toContain('paid');
+  });
+
+  // The firewall is the ONLY thing that survives opening up the graph —
+  // if this stops holding, a paid deposit can be silently walked back.
+  it('is the only rule that blocks a target', () => {
+    const everyStage = legalStageTargets('accepted', { depositPaid: false });
+    const firewalled = legalStageTargets('accepted', { depositPaid: true });
+    expect(everyStage).toHaveLength(8);
+    expect(firewalled).toHaveLength(7);
   });
 
   it('returns a fresh array each call, so a caller cannot poison the next', () => {
