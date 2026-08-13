@@ -325,7 +325,7 @@ export interface JobSubStatus {
  *
  * Returns null for quotes, leaving the job-stage wording untouched.
  */
-function invoiceWording(doc?: Document | null): Pick<JobSubStatus, 'label' | 'icon'> | null {
+export function invoiceWording(doc?: Document | null): Pick<JobSubStatus, 'label' | 'icon'> | null {
   if (!doc || doc.type !== 'invoice' || doc.stage === 'cancelled') return null;
   switch (doc.stage) {
     case 'paid':
@@ -338,6 +338,24 @@ function invoiceWording(doc?: Document | null): Pick<JobSubStatus, 'label' | 'ic
       // Converted but not yet sent.
       return { label: 'Invoice', icon: 'receipt' };
   }
+}
+
+/**
+ * True when the document has moved on but the Job stage hasn't caught up —
+ * the job still reads as a quote while its document is already an invoice.
+ *
+ * Three surfaces have to ask this (the card's rail, the card's meta line,
+ * and the kebab's "Currently …" subtitle) and each phrases the answer
+ * differently, so they share the question rather than the wording. Writing
+ * the condition out three times is how one of them keeps saying "Quoted"
+ * after the other two are fixed.
+ */
+export function documentHasOutrunJobStage(
+  job: Pick<Job, 'stage'>,
+  primaryDoc?: Document | null,
+): boolean {
+  if (job.stage !== 'inquiry' && job.stage !== 'quoted') return false;
+  return !!invoiceWording(primaryDoc);
 }
 
 export function getJobSubStatus(

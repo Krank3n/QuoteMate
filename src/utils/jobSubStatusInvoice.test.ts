@@ -12,7 +12,7 @@
  */
 import { describe, it, expect } from 'vitest';
 
-import { getJobSubStatus } from './jobTimeline';
+import { getJobSubStatus, documentHasOutrunJobStage } from './jobTimeline';
 
 function job(over: Record<string, any> = {}): any {
   return { id: 'j1', stage: 'quoted', ...over };
@@ -61,6 +61,34 @@ describe('getJobSubStatus — wording defers to an invoice document', () => {
     expect(
       getJobSubStatus(job({ stage: 'quoted' }), invoice({ stage: 'cancelled' })).label,
     ).toBe('Quote');
+  });
+});
+
+/**
+ * Three surfaces ask this — the card's rail, the card's meta line, and the
+ * kebab's "Currently …" subtitle. The subtitle still read "Currently
+ * Quoted" under a freshly converted invoice after the first two were
+ * fixed, which is what writing the condition out three times buys you.
+ */
+describe('documentHasOutrunJobStage', () => {
+  it('is true when a quoted job is holding an invoice', () => {
+    expect(documentHasOutrunJobStage({ stage: 'quoted' }, invoice())).toBe(true);
+    expect(documentHasOutrunJobStage({ stage: 'inquiry' }, invoice())).toBe(true);
+  });
+
+  it('is false for a real quote', () => {
+    expect(documentHasOutrunJobStage({ stage: 'quoted' }, quote())).toBe(false);
+  });
+
+  it('is false once the job stage has caught up or moved past', () => {
+    expect(documentHasOutrunJobStage({ stage: 'in_progress' }, invoice())).toBe(false);
+    expect(documentHasOutrunJobStage({ stage: 'completed' }, invoice())).toBe(false);
+    expect(documentHasOutrunJobStage({ stage: 'paid' }, invoice())).toBe(false);
+  });
+
+  it('is false for a cancelled invoice or no document', () => {
+    expect(documentHasOutrunJobStage({ stage: 'quoted' }, invoice({ stage: 'cancelled' }))).toBe(false);
+    expect(documentHasOutrunJobStage({ stage: 'quoted' }, null)).toBe(false);
   });
 });
 

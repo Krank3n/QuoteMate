@@ -36,6 +36,7 @@ import { ShimmerOverlay } from './ShimmerOverlay';
 import { selectionTap } from '../utils/haptics';
 import { openJobPreview } from '../utils/openJobPreview';
 import {
+  documentHasOutrunJobStage,
   getJobSubStatus,
   isSlotReached,
   jobStatusTimestamp,
@@ -110,13 +111,8 @@ export function pickStageStatus(
   // JOB's stage stamp, not the invoice's, and it has to stay that way or
   // the list's sort stops matching the date it prints. So fall back to a
   // neutral word that the timestamp actually supports.
-  const staleQuoteWording =
-    (job.stage === 'inquiry' || job.stage === 'quoted') &&
-    primaryDoc?.type === 'invoice' &&
-    primaryDoc.stage !== 'cancelled';
-
   return {
-    label: staleQuoteWording
+    label: documentHasOutrunJobStage(job, primaryDoc)
       ? 'Updated'
       : STAGE_STATUS_LABELS[job.stage] ?? STAGE_STATUS_LABELS.inquiry,
     // Timestamp comes from jobTimeline so the list can sort by the very
