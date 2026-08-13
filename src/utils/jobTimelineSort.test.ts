@@ -39,10 +39,18 @@ describe('jobStatusTimestamp', () => {
     ).toBe(T - DAY);
   });
 
-  it('falls back to updatedAt for inquiry, which has no stamp of its own', () => {
-    expect(jobStatusTimestamp(job({ stage: 'inquiry', updatedAt: T - 3 * DAY }))).toBe(
-      T - 3 * DAY,
-    );
+  it('dates an inquiry by createdAt, since its card says "Created"', () => {
+    expect(
+      jobStatusTimestamp(job({ stage: 'inquiry', createdAt: T - 3 * DAY, updatedAt: T })),
+    ).toBe(T - 3 * DAY);
+  });
+
+  it('REGRESSION: editing a job does not make an old draft claim it was just created', () => {
+    // A customer edit writes to every job in the group, bumping updatedAt.
+    // Dating an inquiry by updatedAt made a two-month-old draft read "Created
+    // less than a minute ago" and jump to the top of Recent.
+    const draft = job({ stage: 'inquiry', createdAt: T - 60 * DAY, updatedAt: T });
+    expect(jobStatusTimestamp(draft)).toBe(T - 60 * DAY);
   });
 
   it('falls back to createdAt when the stage stamp and updatedAt are both missing', () => {
@@ -73,7 +81,9 @@ describe('sortJobsForList', () => {
   it('orders newest-first across different stages, each by its own stamp', () => {
     const paid = job({ id: 'paid', stage: 'paid', paidAt: T - 2 * DAY });
     const quoted = job({ id: 'quoted', stage: 'quoted', quotedAt: T - 5 * DAY });
-    const draft = job({ id: 'draft', stage: 'inquiry', updatedAt: T - DAY });
+    // Explicit createdAt: an inquiry is dated by when it was created, so the
+    // fixture has to say so rather than leaning on the factory default.
+    const draft = job({ id: 'draft', stage: 'inquiry', createdAt: T - DAY, updatedAt: T });
 
     expect(sortJobsForList([quoted, paid, draft]).map((j) => j.id)).toEqual([
       'draft',

@@ -462,11 +462,17 @@ export function isSlotReached(job: Job, slot: JobSubStatusSlot): boolean {
 
 /**
  * The write-once stamp that dates each stage — "Quote sent" reads
- * `quotedAt`, "Paid" reads `paidAt`, and so on. `inquiry` has no stamp of
- * its own; a freshly created job is dated by the fallback chain below.
+ * `quotedAt`, "Paid" reads `paidAt`, and so on.
+ *
+ * `inquiry` has no stage stamp, and used to fall through to `updatedAt`. But
+ * the card labels that stage "Created", so any later write to the job made it
+ * claim it was created just now — a two-month-old draft reading "Created less
+ * than a minute ago" after its customer's phone number was edited, and jumping
+ * to the top of the Recent sort with it. `createdAt` is the field that actually
+ * means what the label says.
  */
 const STAGE_TIMESTAMP_KEY: Record<JobStage, keyof Job | null> = {
-  inquiry: null,
+  inquiry: 'createdAt',
   quoted: 'quotedAt',
   accepted: 'acceptedAt',
   scheduled: 'scheduledAt',

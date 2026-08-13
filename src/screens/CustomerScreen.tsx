@@ -31,7 +31,6 @@ import { makeStyles, useThemeColors } from '../theme';
 import { WebContainer } from '../components/WebContainer';
 import { GridBackground } from '../components/GridBackground';
 import { JobCard } from '../components/JobCard';
-import { DocumentRow } from '../components/DocumentRow';
 import { ContactActionsBar } from '../components/document/ContactActionsBar';
 import { AnimatedListItem } from '../components/AnimatedListItem';
 import { ContactEditModal, type ContactFormValues } from '../components/ContactEditModal';
@@ -44,7 +43,6 @@ import {
 } from '../utils/customerGroups';
 import { findContactForGroup, planCustomerEdit } from '../utils/customerEdit';
 import { formatCurrency } from '../utils/quoteCalculator';
-import { openJobPreview } from '../utils/openJobPreview';
 import { lightTap, selectionTap } from '../utils/haptics';
 
 export function CustomerScreen() {
@@ -63,7 +61,6 @@ export function CustomerScreen() {
   const documents = useStore((s) => s.documents);
   const contacts = useStore((s) => s.contacts);
   const setCurrentQuote = useStore((s) => s.setCurrentQuote);
-  const setCurrentInvoice = useStore((s) => s.setCurrentInvoice);
   const applyCustomerEdit = useStore((s) => s.applyCustomerEdit);
   const canCreateQuote = useStore((s) => s.canCreateQuote);
   const createNewQuote = useStore((s) => s.createNewQuote);
@@ -96,14 +93,6 @@ export function CustomerScreen() {
     () => (group ? group.jobIds.map((id) => jobsById.get(id)).filter(Boolean as any) : []),
     [group, jobsById],
   );
-
-  const customerDocs = useMemo(() => {
-    if (!group) return [];
-    return group.jobIds
-      .flatMap((id) => docsByJob.get(id) ?? [])
-      .filter((d) => d.stage !== 'cancelled')
-      .sort((a, b) => (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0));
-  }, [group, docsByJob]);
 
   /** The saved Contact behind this group, if there is one yet. */
   const contact = useMemo(
@@ -319,20 +308,13 @@ export function CustomerScreen() {
             </AnimatedListItem>
           ))}
 
-          {customerDocs.length > 0 ? (
-            <>
-              <Text style={styles.sectionLabel}>Quotes &amp; invoices</Text>
-              {customerDocs.map((doc) => (
-                <DocumentRow
-                  key={doc.id}
-                  doc={doc}
-                  onView={(d) =>
-                    openJobPreview(d, { navigation, setCurrentQuote, setCurrentInvoice })
-                  }
-                />
-              ))}
-            </>
-          ) : null}
+          {/* No "Quotes & invoices" section. A job usually carries exactly one
+              document, so listing them again was the same rows a second time
+              with less context — the cards above already show each job's money,
+              payment state and stage, and tapping the price opens the document.
+              The rare job with extra documents shows them under "Also on this
+              job" on the job itself, and the jobs search now finds a job by its
+              document number, so nothing is lost by dropping it. */}
         </ScrollView>
       </WebContainer>
 

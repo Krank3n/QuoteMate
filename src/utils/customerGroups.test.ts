@@ -242,15 +242,29 @@ describe('groupJobsByCustomer', () => {
     expect(groupJobsByCustomer(jobs)[0].name).toBe('Jane Smith');
   });
 
-  it('fills a missing phone on the group from a later job that has one', () => {
+  it('fills a field the newest job is missing from an older job that has it', () => {
+    // Both carry the same phone, so they're one group. The newer job has no
+    // address; the group should still surface the one the older job recorded.
     const jobs = [
-      job({ id: 'a', customerName: 'Jane Smith', updatedAt: T }),
-      job({ id: 'b', customerName: 'Jane Smith', updatedAt: T + DAY, customerPhone: '0400 111 111' }),
+      job({ id: 'old', customerPhone: '0400 111 111', jobAddress: '12 Smith St', updatedAt: T }),
+      job({ id: 'new', customerPhone: '0400 111 111', jobAddress: '', updatedAt: T + DAY }),
     ];
-    // Both key on the name (the first has no phone), so they group, and the
-    // group carries the number.
+    expect(groupJobsByCustomer(jobs)[0].address).toBe('12 Smith St');
+  });
+
+  it('keeps a phone-less job out of the phone-keyed group, even with the same name', () => {
+    // This is the conservative-merge rule, not an oversight: phone beats name,
+    // so a job carrying a number is keyed by it while a job without one is
+    // keyed by name. Merging them would guess that two same-named people are
+    // one person. (An earlier version of the test above assumed they merged,
+    // and only passed because of group ordering.)
+    const jobs = [
+      job({ id: 'nameOnly', customerName: 'Jane Smith' }),
+      job({ id: 'withPhone', customerName: 'Jane Smith', customerPhone: '0400 111 111' }),
+    ];
     const groups = groupJobsByCustomer(jobs);
-    expect(groups[0].phone).toBe('0400 111 111');
+    expect(groups).toHaveLength(2);
+    expect(groups.map((g) => g.jobIds).flat().sort()).toEqual(['nameOnly', 'withPhone']);
   });
 
   it('produces identical groups when the job array is reversed', () => {

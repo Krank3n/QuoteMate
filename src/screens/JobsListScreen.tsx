@@ -121,6 +121,8 @@ export function JobsListScreen() {
   // visible explaining why. These keep it in view.
   const chipScrollRef = useRef<ScrollView>(null);
   const chipOffsets = useRef<Record<string, number>>({});
+  /** Which filter we've already auto-scrolled to, so we only do it once. */
+  const chipScrolledFor = useRef<string | null>(null);
 
   // Which edges are hiding chips. Both fades are conditional: a fade at an edge
   // with nothing past it makes the first chip look clipped when it isn't.
@@ -224,14 +226,21 @@ export function JobsListScreen() {
     [matched, sortKey, sortMetrics],
   );
 
-  // Bring the selected chip into view whenever it changes — including the first
-  // paint after prefs restore a pile other than "All". A little lead-in so the
-  // chip doesn't sit flush against the edge and look clipped.
-  useEffect(() => {
-    const x = chipOffsets.current[filter];
+  // Bring the selected chip into view. A little lead-in so it doesn't sit flush
+  // against the edge and look clipped.
+  const scrollChipIntoView = useCallback((key: JobFilterKey) => {
+    const x = chipOffsets.current[key];
     if (x === undefined) return;
+    chipScrolledFor.current = key;
     chipScrollRef.current?.scrollTo({ x: Math.max(0, x - 16), animated: true });
-  }, [filter]);
+  }, []);
+
+  useEffect(() => {
+    // Allow one auto-scroll for the new filter, then leave the row alone so we
+    // never fight the tradie's own scrolling.
+    chipScrolledFor.current = null;
+    scrollChipIntoView(filter);
+  }, [filter, scrollChipIntoView]);
 
   const searching = searchQuery.trim().length > 0;
 
@@ -391,9 +400,20 @@ export function JobsListScreen() {
                 <View
                   key={key}
                   // Remember where each chip sits so the selected one can be
-                  // scrolled into view — see the effect below.
+                  // scrolled into view — see scrollChipIntoView.
+                  //
+                  // Scrolling from HERE as well as from the effect is what makes
+                  // it reliable. On a restored filter the effect runs before any
+                  // chip has measured itself, so offsets are empty and it gives
+                  // up — leaving the selected pile off screen with no chip
+                  // highlighted, i.e. a filtered list with nothing on screen
+                  // saying why. Whichever happens last wins, and the guard keeps
+                  // it to one auto-scroll per filter.
                   onLayout={(e) => {
                     chipOffsets.current[key] = e.nativeEvent.layout.x;
+                    if (key === filter && chipScrolledFor.current !== filter) {
+                      scrollChipIntoView(filter);
+                    }
                   }}
                 >
                   <Pressable
