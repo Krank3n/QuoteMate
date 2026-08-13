@@ -54,7 +54,20 @@ export interface StageTargetOptions {
    * path bump the stage.
    */
   excludeScheduled?: boolean;
+  /**
+   * True when the primary document is already a live invoice. The
+   * quote-side stages come off the list: offering "Mark as Quoted" on a
+   * job you just invoiced contradicts the document sitting under it, and
+   * taking it wouldn't touch the invoice anyway — applyJobStageChange only
+   * propagates onto docs still in the quote lifecycle. The way back is
+   * "Back to a quote…", which reverts the document too, and it re-opens
+   * these stages by itself once the doc is a quote again.
+   */
+  documentIsInvoice?: boolean;
 }
+
+/** Stages that describe the quoting phase, before anything was invoiced. */
+const QUOTE_PHASE_STAGES: ReadonlySet<JobStage> = new Set<JobStage>(['inquiry', 'quoted']);
 
 /**
  * The one rule that still blocks a leap: once a deposit has been paid, an
@@ -74,13 +87,14 @@ function isFirewalled(from: JobStage, to: JobStage, depositPaid?: boolean): bool
 
 export function legalStageTargets(
   current: JobStage,
-  { depositPaid, excludeScheduled }: StageTargetOptions = {},
+  { depositPaid, excludeScheduled, documentIsInvoice }: StageTargetOptions = {},
 ): JobStage[] {
   return ALL_STAGES.filter(
     (s) =>
       s !== current &&
       !isFirewalled(current, s, depositPaid) &&
-      !(excludeScheduled && s === 'scheduled'),
+      !(excludeScheduled && s === 'scheduled') &&
+      !(documentIsInvoice && QUOTE_PHASE_STAGES.has(s)),
   );
 }
 

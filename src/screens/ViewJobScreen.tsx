@@ -966,6 +966,7 @@ export function ViewJobScreen() {
         visible={stageSheetVisible}
         onDismiss={() => setStageSheetVisible(false)}
         job={job}
+        primaryDoc={primaryDoc}
         depositPaid={depositHasBeenPaid(primaryDoc)}
         onSelect={handleStageSelect}
         onSchedule={() => {

@@ -325,8 +325,13 @@ export interface JobSubStatus {
  *
  * Returns null for quotes, leaving the job-stage wording untouched.
  */
+/** An invoice that still counts — cancelled ones are history, not state. */
+export function isLiveInvoice(doc?: Document | null): boolean {
+  return !!doc && doc.type === 'invoice' && doc.stage !== 'cancelled';
+}
+
 export function invoiceWording(doc?: Document | null): Pick<JobSubStatus, 'label' | 'icon'> | null {
-  if (!doc || doc.type !== 'invoice' || doc.stage === 'cancelled') return null;
+  if (!doc || !isLiveInvoice(doc)) return null;
   switch (doc.stage) {
     case 'paid':
       return { label: 'Paid', icon: 'cash-check' };

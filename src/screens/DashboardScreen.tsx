@@ -1007,6 +1007,9 @@ export function DashboardScreen() {
         visible={!!stageSheetJob}
         onDismiss={() => setStageSheetJob(null)}
         job={stageSheetJob}
+        primaryDoc={pickPrimaryDoc(
+          useStore.getState().documents.filter((d) => d.jobId === stageSheetJob.id),
+        )}
         onSelect={handleJobStageSelect}
         onSchedule={() => {
           const job = stageSheetJob;

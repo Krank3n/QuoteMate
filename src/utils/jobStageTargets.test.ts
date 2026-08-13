@@ -80,6 +80,43 @@ describe('legalStageTargets', () => {
   });
 });
 
+/**
+ * Opening up leaps had a side effect: a job whose document is already an
+ * invoice was still offered "Mark as Quoted". Taking it wouldn't touch the
+ * invoice — applyJobStageChange only propagates onto docs still in the
+ * quote lifecycle — so it just left the job contradicting its document.
+ */
+describe('legalStageTargets — quote stages once a document is an invoice', () => {
+  it('drops the quote-phase stages', () => {
+    const targets = legalStageTargets('quoted', { documentIsInvoice: true });
+    expect(targets).not.toContain('quoted');
+    expect(targets).not.toContain('inquiry');
+  });
+
+  it('keeps every stage the job could genuinely move to', () => {
+    const targets = legalStageTargets('quoted', { documentIsInvoice: true });
+    expect(targets).toContain('accepted');
+    expect(targets).toContain('in_progress');
+    expect(targets).toContain('completed');
+    expect(targets).toContain('paid');
+    expect(targets).toContain('cancelled');
+  });
+
+  it('leaves the list alone while the document is still a quote', () => {
+    expect(legalStageTargets('quoted', { documentIsInvoice: false })).toContain('inquiry');
+    expect(legalStageTargets('completed', { documentIsInvoice: false })).toContain('quoted');
+  });
+
+  // "Back to a quote…" reverts the document, so the stages come back by
+  // themselves — no separate re-enable to keep in sync.
+  it('restores them once the document is a quote again', () => {
+    const asInvoice = legalStageTargets('completed', { documentIsInvoice: true });
+    const asQuote = legalStageTargets('completed', { documentIsInvoice: false });
+    expect(asInvoice).not.toContain('quoted');
+    expect(asQuote).toContain('quoted');
+  });
+});
+
 describe('shouldOfferSchedule', () => {
   it('offers a date on jobs that still have work ahead of them', () => {
     for (const stage of ['inquiry', 'quoted', 'accepted', 'scheduled', 'in_progress'] as const) {

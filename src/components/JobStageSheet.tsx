@@ -12,6 +12,8 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
 import type { Job, JobStage } from '../../shared/job/types';
 import { legalStageTargets, shouldOfferSchedule } from '../utils/jobStageTargets';
+import { isLiveInvoice } from '../utils/jobTimeline';
+import type { Document } from '../types/document';
 import type { Tokens } from '../theme';
 import { makeStyles, useThemeColors } from '../theme';
 import { selectionTap } from '../utils/haptics';
@@ -35,6 +37,12 @@ interface JobStageSheetProps {
    */
   onSchedule?: () => void;
   title?: string;
+  /**
+   * The job's primary document. Used to drop the quote-side stages once
+   * it's a live invoice — see documentIsInvoice in jobStageTargets. Shared
+   * with the kebab's submenu so the two doors offer the same list.
+   */
+  primaryDoc?: Document | null;
 }
 
 interface StageMeta {
@@ -136,6 +144,7 @@ export function JobStageSheet({
   onSelect,
   onSchedule,
   title = 'Update Stage',
+  primaryDoc,
 }: JobStageSheetProps) {
   const styles = useStyles();
   const themeColors = useThemeColors();
@@ -144,8 +153,13 @@ export function JobStageSheet({
 
   // Shared with the kebab's "Change status" submenu — see legalStageTargets.
   const targets = React.useMemo<JobStage[]>(
-    () => legalStageTargets(job.stage, { depositPaid, excludeScheduled: showSchedule }),
-    [job.stage, depositPaid, showSchedule],
+    () =>
+      legalStageTargets(job.stage, {
+        depositPaid,
+        excludeScheduled: showSchedule,
+        documentIsInvoice: isLiveInvoice(primaryDoc),
+      }),
+    [job.stage, depositPaid, showSchedule, primaryDoc],
   );
 
   const totalRows = targets.length + (showSchedule ? 1 : 0);

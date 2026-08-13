@@ -22,7 +22,7 @@ import { BottomSheet } from './BottomSheet';
 import { selectionTap, lightTap } from '../utils/haptics';
 import { legalStageTargets, shouldOfferSchedule } from '../utils/jobStageTargets';
 import { canRevertToQuote } from '../utils/revertToQuote';
-import { documentHasOutrunJobStage } from '../utils/jobTimeline';
+import { documentHasOutrunJobStage, isLiveInvoice } from '../utils/jobTimeline';
 import { jobStageMetaFor } from './JobStageSheet';
 
 export type JobAction =
@@ -261,7 +261,11 @@ export function JobActionsSheet({
   const canConvertToInvoice = canConvert(ctx.primaryDoc);
   const canUndoConvert = canRevertToQuote(ctx.primaryDoc);
   const stageTargets = onSelectStage
-    ? legalStageTargets(job.stage, { depositPaid, excludeScheduled: showSchedule })
+    ? legalStageTargets(job.stage, {
+        depositPaid,
+        excludeScheduled: showSchedule,
+        documentIsInvoice: isLiveInvoice(ctx.primaryDoc),
+      })
     : [];
   const showChangeStatus =
     !!onSelectStage &&

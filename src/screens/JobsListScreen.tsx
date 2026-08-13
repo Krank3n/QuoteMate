@@ -300,6 +300,7 @@ export function JobsListScreen() {
           visible={!!stageSheetJob}
           onDismiss={() => setStageSheetJob(null)}
           job={stageSheetJob}
+          primaryDoc={pickPrimaryDoc(documents.filter((d) => d.jobId === stageSheetJob.id))}
           onSelect={handleStageSelect}
           onSchedule={() => {
             const job = stageSheetJob;
