@@ -7,8 +7,14 @@
  *
  * Resolution order:
  *   preference 'light' | 'dark'  → that scheme
- *   preference 'system' or unset → the OS scheme
+ *   preference 'system'          → the OS scheme
+ *   unset (never chosen)         → 'dark', the app's default look
  *   LIGHT_MODE_ENABLED === false → clamped to 'dark' regardless (Stage 1)
+ *
+ * Dark is the default rather than 'system' because QuoteMate has always looked
+ * dark, and a phone on auto-light would otherwise hand a first-time user a
+ * different app to the one in every screenshot. 'system' stays available, it
+ * just has to be chosen.
  *
  * The clamp is what makes this shippable before the screens have migrated: the
  * whole mechanism runs and is testable, but users only ever see dark.
@@ -33,10 +39,13 @@ import {
   type AppearancePreference,
 } from '../services/appearance';
 
+/** What the app looks like before the user says otherwise. */
+export const DEFAULT_APPEARANCE: AppearancePreference = 'dark';
+
 interface ThemeContextValue {
   theme: Theme;
   scheme: SchemeName;
-  /** What the user chose. 'system' when they never have. */
+  /** What the user chose. DEFAULT_APPEARANCE when they never have. */
   preference: AppearancePreference;
   setPreference: (pref: AppearancePreference) => void;
   /** False until the stored preference has been read. */
@@ -51,7 +60,7 @@ interface ThemeContextValue {
 const ThemeContext = createContext<ThemeContextValue>({
   theme: buildTheme('dark'),
   scheme: 'dark',
-  preference: 'system',
+  preference: DEFAULT_APPEARANCE,
   setPreference: () => {},
   ready: false,
 });
@@ -67,7 +76,7 @@ export function resolveScheme(
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const system = useColorScheme();
-  const [preference, setPreferenceState] = useState<AppearancePreference>('system');
+  const [preference, setPreferenceState] = useState<AppearancePreference>(DEFAULT_APPEARANCE);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {

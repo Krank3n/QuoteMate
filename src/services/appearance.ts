@@ -1,10 +1,13 @@
 /**
  * Appearance preference storage.
  *
- * Tri-state: 'system' follows the phone, 'light'/'dark' pin it. Stored locally
- * rather than in Firestore — it is a per-device choice (a tradie may want dark
- * on the phone in the ute and light on the tablet), and it must be readable
- * before auth resolves so the first paint isn't the wrong theme.
+ * Tri-state: 'system' follows the phone, 'light'/'dark' pin it. Nothing stored
+ * means the user has never chosen, which the provider renders as dark — see
+ * DEFAULT_APPEARANCE in src/theme/ThemeProvider.tsx.
+ *
+ * Stored locally rather than in Firestore — it is a per-device choice (a tradie
+ * may want dark on the phone in the ute and light on the tablet), and it must
+ * be readable before auth resolves so the first paint isn't the wrong theme.
  *
  * Same fire-and-forget posture as pendingReferral: a storage failure must never
  * block launch. Every read falls back to null, which the provider treats as
@@ -49,8 +52,11 @@ export async function setAppearancePreference(pref: AppearancePreference): Promi
  * preference there is nothing to distinguish "upgraded" from "fresh install",
  * so the caller passes the signal App.tsx already branches on — signed in AND
  * onboarded means they were here before this shipped, and they keep the app
- * they know. A genuine new install goes through onboarding and so falls
- * through to 'system'.
+ * they know.
+ *
+ * Now that unset also resolves to dark this changes nothing on screen; it is
+ * kept so a returning user's dark is a recorded choice rather than a default
+ * that could move out from under them.
  *
  * Returns the preference now in force, or null if nothing was written.
  */
