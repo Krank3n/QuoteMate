@@ -312,6 +312,34 @@ export interface JobSubStatus {
  * Returns a default for terminal stages (closed/cancelled) — callers
  * should hide the timeline in those cases anyway.
  */
+/**
+ * Wording for a primary doc that has become an invoice.
+ *
+ * The quote-flavoured labels below ("Quote", "Quote Sent") are chosen off
+ * the JOB stage, which can sit at `quoted` long after the document became
+ * an invoice — a converted invoice is deliberately left at stage `draft`
+ * so the tradie still has to press Send, and deriveJobStageBump has no
+ * rule for `draft`, so nothing drags the job forward. The card then reads
+ * "Quote" on something that is demonstrably an invoice, and the tradie
+ * goes hunting for a Convert to Invoice row that is correctly hidden.
+ *
+ * Returns null for quotes, leaving the job-stage wording untouched.
+ */
+function invoiceWording(doc?: Document | null): Pick<JobSubStatus, 'label' | 'icon'> | null {
+  if (!doc || doc.type !== 'invoice' || doc.stage === 'cancelled') return null;
+  switch (doc.stage) {
+    case 'paid':
+      return { label: 'Paid', icon: 'cash-check' };
+    case 'partially_paid':
+      return { label: 'Part Paid', icon: 'progress-check' };
+    case 'invoice_sent':
+      return { label: 'Invoice Sent', icon: 'send' };
+    default:
+      // Converted but not yet sent.
+      return { label: 'Invoice', icon: 'receipt' };
+  }
+}
+
 export function getJobSubStatus(
   job: Job,
   primaryDoc?: Document | null,
@@ -322,10 +350,16 @@ export function getJobSubStatus(
     Number(primaryDoc?.depositPaid) > 0 ||
     (primaryDoc?.payments || []).some((p) => p.kind === 'deposit');
 
+  // Slot stays keyed to the job stage so the rail's geometry is unchanged —
+  // only the wording defers to the document.
+  const asInvoice = invoiceWording(primaryDoc);
+
   if (stage === 'inquiry') {
+    if (asInvoice) return { slot: 'quote', ...asInvoice };
     return { slot: 'quote', label: 'Draft', icon: 'file-document-edit-outline' };
   }
   if (stage === 'quoted') {
+    if (asInvoice) return { slot: 'quote', ...asInvoice };
     if (docStage === 'quote_sent' || docStage === 'quote_accepted') {
       return { slot: 'quote', label: 'Quote Sent', icon: 'send' };
     }
@@ -364,6 +398,7 @@ export function getJobSubStatus(
     return { slot: 'paid', label: 'Paid', icon: 'check-decagram-outline' };
   }
 
+  if (asInvoice) return { slot: 'quote', ...asInvoice };
   return { slot: 'quote', label: 'Draft', icon: 'file-document-edit-outline' };
 }
 

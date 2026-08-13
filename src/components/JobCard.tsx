@@ -100,11 +100,27 @@ const STAGE_STATUS_LABELS: Record<JobStage, string> = {
   cancelled: 'Cancelled',
 };
 
-function pickStageStatus(job: Job): { label: string; ms: number } {
-  // Timestamp comes from jobTimeline so the list can sort by the very
-  // value printed here — see jobStatusTimestamp.
+export function pickStageStatus(
+  job: Job,
+  primaryDoc?: Document | null,
+): { label: string; ms: number } {
+  // A job can sit at `quoted` while its document is already an invoice, so
+  // "Quote sent" is plainly wrong on those cards. Naming the invoice event
+  // instead would swap one lie for another — the timestamp here is the
+  // JOB's stage stamp, not the invoice's, and it has to stay that way or
+  // the list's sort stops matching the date it prints. So fall back to a
+  // neutral word that the timestamp actually supports.
+  const staleQuoteWording =
+    (job.stage === 'inquiry' || job.stage === 'quoted') &&
+    primaryDoc?.type === 'invoice' &&
+    primaryDoc.stage !== 'cancelled';
+
   return {
-    label: STAGE_STATUS_LABELS[job.stage] ?? STAGE_STATUS_LABELS.inquiry,
+    label: staleQuoteWording
+      ? 'Updated'
+      : STAGE_STATUS_LABELS[job.stage] ?? STAGE_STATUS_LABELS.inquiry,
+    // Timestamp comes from jobTimeline so the list can sort by the very
+    // value printed here — see jobStatusTimestamp.
     ms: jobStatusTimestamp(job),
   };
 }
@@ -234,7 +250,7 @@ export const JobCard = React.memo(function JobCard({ job, onPress, onStagePress,
       ? `${scheduled} · ${duration}`
       : scheduled
     : null;
-  const status = pickStageStatus(job);
+  const status = pickStageStatus(job, primaryDoc);
   const showPaymentChip = shouldShowPaymentChip(primaryDoc);
   const handlePaymentChipPress = (doc: Document, e?: any) => {
     // stopPropagation so the chip records a payment instead of bubbling

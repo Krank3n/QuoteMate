@@ -34,7 +34,7 @@ vi.mock('./ShimmerOverlay', () => ({ ShimmerOverlay: () => null }));
 // stubbing that out would leave the paid/unpaid call untested.
 
 import { shouldShowPaymentChip } from './PaymentChip';
-import { canRecordPaymentFor } from './JobCard';
+import { canRecordPaymentFor, pickStageStatus } from './JobCard';
 
 describe('shouldShowPaymentChip', () => {
   it('shows on an invoice — there is a balance to owe against', () => {
@@ -173,5 +173,58 @@ describe('canRecordPaymentFor', () => {
     expect(
       canRecordPaymentFor({ type: 'invoice', stage: 'partially_paid', total: 1000, paidTotal: 999.999 } as any),
     ).toBe(false);
+  });
+});
+
+/**
+ * The meta line said "Quote sent 7 minutes ago" on a job whose document
+ * was already an invoice — the same lie the timeline pill told, from a
+ * second source.
+ */
+describe('pickStageStatus', () => {
+  const T = 1_700_000_000_000;
+
+  it('REGRESSION: drops the quote wording when the document is an invoice', () => {
+    const status = pickStageStatus(
+      { stage: 'quoted', quotedAt: T } as any,
+      { type: 'invoice', stage: 'draft' } as any,
+    );
+    expect(status.label).not.toMatch(/quote/i);
+    expect(status.label).toBe('Updated');
+  });
+
+  // The timestamp is the JOB's stage stamp, so naming the invoice event
+  // would be a second lie — and moving it would break the list's sort,
+  // which is keyed to exactly this value.
+  it('keeps the job stage stamp as the timestamp', () => {
+    expect(
+      pickStageStatus(
+        { stage: 'quoted', quotedAt: T, updatedAt: T + 5000 } as any,
+        { type: 'invoice', stage: 'invoice_sent' } as any,
+      ).ms,
+    ).toBe(T);
+  });
+
+  it('leaves the quote wording alone for an actual quote', () => {
+    expect(
+      pickStageStatus({ stage: 'quoted', quotedAt: T } as any, { type: 'quote', stage: 'quote_sent' } as any)
+        .label,
+    ).toBe('Quote sent');
+  });
+
+  it('leaves later job stages alone even with an invoice attached', () => {
+    expect(
+      pickStageStatus({ stage: 'paid', paidAt: T } as any, { type: 'invoice', stage: 'paid' } as any)
+        .label,
+    ).toBe('Paid');
+  });
+
+  it('ignores a cancelled invoice', () => {
+    expect(
+      pickStageStatus(
+        { stage: 'quoted', quotedAt: T } as any,
+        { type: 'invoice', stage: 'cancelled' } as any,
+      ).label,
+    ).toBe('Quote sent');
   });
 });
