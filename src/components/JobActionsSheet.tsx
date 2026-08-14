@@ -77,9 +77,9 @@ interface JobActionsSheetProps {
   /** Gates `accepted → quoted` in the shared state machine. */
   depositPaid?: boolean;
   /**
-   * Opens the date picker. When supplied, the submenu shows "Schedule…"
-   * instead of a bare `scheduled` flip, which would leave a job marked
-   * Scheduled with no date on it.
+   * Opens the date picker. When supplied, the submenu's "Mark as
+   * Scheduled…" row routes here instead of flipping the stage on its own,
+   * which would leave a job marked Scheduled with no date on it.
    */
   onSchedule?: (job: Job) => void;
 }
@@ -264,7 +264,6 @@ export function JobActionsSheet({
   const stageTargets = onSelectStage
     ? legalStageTargets(job.stage, {
         depositPaid,
-        excludeScheduled: showSchedule,
         documentIsInvoice: isLiveInvoice(ctx.primaryDoc),
       })
     : [];
@@ -381,11 +380,13 @@ export function JobActionsSheet({
               }}
             />
           ) : null}
-          {showSchedule ? (
+          {/* The ladder can't offer the stage the job is standing on, so a
+              scheduled job gets its date door here instead. */}
+          {showSchedule && job.stage === 'scheduled' ? (
             <StageOptionRow
               icon="calendar-clock-outline"
               color={themeColors.info}
-              label="Schedule…"
+              label="Reschedule…"
               onPress={() => {
                 selectionTap();
                 onSchedule?.(job);
@@ -394,14 +395,21 @@ export function JobActionsSheet({
           ) : null}
           {stageTargets.map((stage) => {
             const meta = stageMeta[stage];
+            // Scheduling writes a date; the stage follows from it. The
+            // ellipsis is the app's mark for a row that opens more UI.
+            const opensPicker = stage === 'scheduled' && showSchedule;
             return (
               <StageOptionRow
                 key={stage}
                 icon={meta.icon}
                 color={meta.color}
-                label={meta.actionLabel}
+                label={opensPicker ? `${meta.actionLabel}…` : meta.actionLabel}
                 onPress={() => {
                   selectionTap();
+                  if (opensPicker) {
+                    onSchedule?.(job);
+                    return;
+                  }
                   onSelectStage?.(stage, job);
                 }}
               />

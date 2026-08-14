@@ -29,6 +29,7 @@ import {
 } from './TimeSlotPicker';
 import { buildGoogleCalendarUrl } from '../utils/gcalUrl';
 import { deriveDuration } from '../utils/deriveDuration';
+import { stageAfterClearingDate, stageAfterScheduling } from '../utils/scheduleStage';
 import { useGoogleCalendarAuth } from '../services/googleCalendarAuth';
 import { AlertModal } from './AlertModal';
 import { useAlertModal } from '../hooks/useAlertModal';
@@ -155,18 +156,14 @@ export function ScheduleJobSheet({ visible, onDismiss, job }: ScheduleJobSheetPr
     setSaving(true);
     try {
       const next = combineDayAndMinutes(pendingDay, pendingMinutes);
-      // Setting a date should advance an Accepted job to Scheduled so the
-      // stage matches the date now sitting on it — mirrors handleClear,
-      // which demotes scheduled → accepted when the date is removed.
-      // For in-progress jobs being pushed into the future, the caller
-      // decides via opts.demote whether to drop back to Scheduled (and
-      // clear actualStartDate) or keep the in-progress stamp intact.
-      let stage: Job['stage'] = job.stage === 'accepted' ? 'scheduled' : job.stage;
-      let actualStartDate = job.actualStartDate;
-      if (opts.demote && job.stage === 'in_progress') {
-        stage = 'scheduled';
-        actualStartDate = undefined;
-      }
+      // Setting a date advances the job to Scheduled so the stage matches
+      // the date now sitting on it — see stageAfterScheduling for which
+      // stages move and why. For in-progress jobs being pushed into the
+      // future, the caller decides via opts.demote whether to drop back to
+      // Scheduled (and clear actualStartDate) or keep the stamp intact.
+      const stage = stageAfterScheduling(job.stage, { demote: opts.demote });
+      const actualStartDate =
+        opts.demote && job.stage === 'in_progress' ? undefined : job.actualStartDate;
       const updated: Job = {
         ...job,
         scheduledStartDate: next,
@@ -233,7 +230,7 @@ export function ScheduleJobSheet({ visible, onDismiss, job }: ScheduleJobSheetPr
       // If the job was only scheduled (not yet started / completed), drop
       // it back to 'accepted' so the sticky bar + stage chip match — a
       // scheduled job with no date is a contradiction.
-      const stage = job.stage === 'scheduled' ? 'accepted' : job.stage;
+      const stage = stageAfterClearingDate(job.stage);
       await saveJob({
         ...job,
         stage,

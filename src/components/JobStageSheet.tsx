@@ -29,12 +29,12 @@ interface JobStageSheetProps {
   depositPaid?: boolean;
   onSelect: (targetStage: JobStage) => void;
   /**
-   * Schedule action — when supplied, a dedicated "Schedule…" row sits
-   * above the regular stage list and the implicit `scheduled` target is
-   * dropped from the legal-transition list (so it doesn't appear twice).
-   * Schedule isn't a plain stage flip — the picker writes the date and
-   * lets the save path bump the stage — so it lives outside the
-   * canTransition graph.
+   * Schedule action — when supplied, the "Mark as Scheduled…" row opens
+   * the date picker instead of flipping the stage on its own (the picker
+   * writes the date and the save path bumps the stage). A job that's
+   * already scheduled gets a "Reschedule…" row instead, since the ladder
+   * can't offer the stage it's standing on and the card's pill is the only
+   * door to the date the list screens have.
    */
   onSchedule?: () => void;
   title?: string;
@@ -95,7 +95,11 @@ export const jobStageMetaFor = (themeColors: Tokens): Record<JobStage, StageMeta
   },
   scheduled: {
     chipLabel: STAGE_CHIP_LABELS.scheduled,
-    actionLabel: 'Schedule…',
+    // Phrased like every other row in the list. It used to read
+    // "Schedule…", which is the verb for the picker it opens but not the
+    // status it sets — a tradie scanning the list for "Scheduled" found
+    // nothing, and concluded the status didn't exist.
+    actionLabel: 'Mark as Scheduled',
     icon: 'calendar-clock-outline',
     color: themeColors.info,
     bgColor: themeColors.infoSubtle,
@@ -156,14 +160,10 @@ export function JobStageSheet({
     () =>
       legalStageTargets(job.stage, {
         depositPaid,
-        excludeScheduled: showSchedule,
         documentIsInvoice: isLiveInvoice(primaryDoc),
       }),
-    [job.stage, depositPaid, showSchedule, primaryDoc],
+    [job.stage, depositPaid, primaryDoc],
   );
-
-  const totalRows = targets.length + (showSchedule ? 1 : 0);
-  const anims = useStaggeredEntrance(totalRows, visible, 100, 40);
 
   const handleSelect = (target: JobStage) => {
     selectionTap();
@@ -178,8 +178,9 @@ export function JobStageSheet({
   // Echoes the pill the tradie just tapped — see jobStatusLabel.
   const currentLabel = jobStatusLabel(job, primaryDoc);
 
-  // Schedule first when offered, then the legal stages — the order the
-  // kebab's submenu lists them in.
+  // The legal stages in ladder order, with the date door in front of them
+  // when the job already sits on 'scheduled' (the ladder can't offer the
+  // stage it's on). Same list, same order as the kebab's submenu.
   const options: Array<{
     key: string;
     icon: string;
@@ -187,28 +188,33 @@ export function JobStageSheet({
     label: string;
     onPress: () => void;
   }> = [
-    ...(showSchedule
+    ...(showSchedule && job.stage === 'scheduled'
       ? [
           {
-            key: 'schedule',
+            key: 'reschedule',
             icon: 'calendar-clock-outline',
             color: themeColors.info,
-            label: 'Schedule…',
+            label: 'Reschedule…',
             onPress: handleSchedule,
           },
         ]
       : []),
     ...targets.map((target) => {
       const meta = JOB_STAGE_META[target];
+      // Scheduling writes a date; the stage follows from it. The ellipsis
+      // is the app's mark for a row that opens more UI.
+      const opensPicker = target === 'scheduled' && showSchedule;
       return {
         key: target,
         icon: meta.icon,
         color: meta.color,
-        label: meta.actionLabel,
-        onPress: () => handleSelect(target),
+        label: opensPicker ? `${meta.actionLabel}…` : meta.actionLabel,
+        onPress: opensPicker ? handleSchedule : () => handleSelect(target),
       };
     }),
   ];
+
+  const anims = useStaggeredEntrance(options.length, visible, 100, 40);
 
   return (
     <BottomSheet

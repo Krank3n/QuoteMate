@@ -85,7 +85,7 @@ function iconsAt(container: HTMLElement, size: number): (string | null)[] {
 
 // Both doors are mounted in the same document by the parity tests, and they
 // deliberately share wording — so every query is scoped to its own container.
-function renderPillSheet() {
+function renderPillSheet(over: Partial<React.ComponentProps<typeof JobStageSheet>> = {}) {
   const { container } = render(
     <JobStageSheet
       visible
@@ -94,12 +94,13 @@ function renderPillSheet() {
       primaryDoc={null}
       onSelect={() => {}}
       onSchedule={() => {}}
+      {...over}
     />,
   );
   return { container, q: within(container) };
 }
 
-function renderKebabSubmenu() {
+function renderKebabSubmenu(over: Partial<React.ComponentProps<typeof JobActionsSheet>> = {}) {
   const { container } = render(
     <JobActionsSheet
       visible
@@ -110,6 +111,7 @@ function renderKebabSubmenu() {
       onSelect={() => {}}
       onSelectStage={() => {}}
       onSchedule={() => {}}
+      {...over}
     />,
   );
   const q = within(container);
@@ -140,7 +142,7 @@ describe('status change UI parity', () => {
     const optionIcons = iconsAt(pill.container, 18);
     expect(iconsAt(pill.container, 22)).toEqual([]);
     expect(optionIcons).not.toContain('chevron-right');
-    for (const label of ['Schedule…', 'Mark as Accepted', 'Cancel Job']) {
+    for (const label of ['Mark as Scheduled…', 'Mark as Accepted', 'Cancel Job']) {
       expect(pill.q.getByText(label)).toBeTruthy();
       expect(kebab.q.getByText(label)).toBeTruthy();
     }
@@ -201,5 +203,61 @@ describe('status change UI parity', () => {
     );
     fireEvent.click(within(container).getByText('Mark as Accepted'));
     expect(onSelect).toHaveBeenCalledWith('accepted');
+  });
+});
+
+/**
+ * Scheduled used to be carved out of the status list entirely, replaced by
+ * a "Schedule…" row pinned above the ladder. A tradie scanning for the
+ * status they wanted found no Scheduled in the list — and the row that WAS
+ * there didn't read as a status at all.
+ */
+describe('the Scheduled status row', () => {
+  it('sits in the ladder, in stage order', () => {
+    const icons = iconsAt(renderPillSheet().container, 18);
+    const scheduled = icons.indexOf('calendar-clock-outline');
+    expect(scheduled).toBeGreaterThan(icons.indexOf('check-circle-outline')); // accepted
+    expect(scheduled).toBeLessThan(icons.indexOf('hammer-wrench')); // in progress
+  });
+
+  it('opens the date picker rather than flipping the stage on its own', () => {
+    // A bare flip would leave the job marked Scheduled with no date on it.
+    const onSelect = vi.fn();
+    const onSchedule = vi.fn();
+    const pill = renderPillSheet({ onSelect, onSchedule });
+    fireEvent.click(pill.q.getByText('Mark as Scheduled…'));
+    expect(onSchedule).toHaveBeenCalledTimes(1);
+    expect(onSelect).not.toHaveBeenCalled();
+
+    const onSelectStage = vi.fn();
+    const onScheduleFromKebab = vi.fn();
+    const kebab = renderKebabSubmenu({ onSelectStage, onSchedule: onScheduleFromKebab });
+    fireEvent.click(kebab.q.getByText('Mark as Scheduled…'));
+    expect(onScheduleFromKebab).toHaveBeenCalledTimes(1);
+    expect(onSelectStage).not.toHaveBeenCalled();
+  });
+
+  it('falls back to a plain flip where no picker is wired', () => {
+    const onSelect = vi.fn();
+    const pill = renderPillSheet({ onSelect, onSchedule: undefined });
+    // No ellipsis: nothing further opens, so the label mustn't promise it.
+    fireEvent.click(pill.q.getByText('Mark as Scheduled'));
+    expect(onSelect).toHaveBeenCalledWith('scheduled');
+  });
+
+  it('keeps a door to the date on a job that is already scheduled', () => {
+    // The ladder can't offer the stage the job is standing on, and the list
+    // screens have no other way into the picker.
+    const scheduled = { ...job, stage: 'scheduled' } as Job;
+
+    const fromPill = vi.fn();
+    const pill = renderPillSheet({ job: scheduled, onSchedule: fromPill });
+    fireEvent.click(pill.q.getByText('Reschedule…'));
+    expect(fromPill).toHaveBeenCalledTimes(1);
+
+    const fromKebab = vi.fn();
+    const kebab = renderKebabSubmenu({ job: scheduled, onSchedule: fromKebab });
+    fireEvent.click(kebab.q.getByText('Reschedule…'));
+    expect(fromKebab).toHaveBeenCalledTimes(1);
   });
 });

@@ -48,13 +48,6 @@ export interface StageTargetOptions {
   /** Gates `accepted → quoted` in the shared state machine. */
   depositPaid?: boolean;
   /**
-   * True when the caller renders its own "Schedule…" row. `scheduled` is
-   * then dropped from the plain list so the action doesn't appear twice —
-   * scheduling isn't a bare stage flip, it writes a date and lets the save
-   * path bump the stage.
-   */
-  excludeScheduled?: boolean;
-  /**
    * True when the primary document is already a live invoice. The
    * quote-side stages come off the list: offering "Mark as Quoted" on a
    * job you just invoiced contradicts the document sitting under it, and
@@ -87,18 +80,23 @@ function isFirewalled(from: JobStage, to: JobStage, depositPaid?: boolean): bool
 
 export function legalStageTargets(
   current: JobStage,
-  { depositPaid, excludeScheduled, documentIsInvoice }: StageTargetOptions = {},
+  { depositPaid, documentIsInvoice }: StageTargetOptions = {},
 ): JobStage[] {
   return ALL_STAGES.filter(
     (s) =>
       s !== current &&
       !isFirewalled(current, s, depositPaid) &&
-      !(excludeScheduled && s === 'scheduled') &&
       !(documentIsInvoice && QUOTE_PHASE_STAGES.has(s)),
   );
 }
 
-/** Whether a dedicated "Schedule…" row should show for this job. */
+/**
+ * Whether picking `scheduled` should open the date picker rather than flip
+ * the stage on its own. Scheduling isn't a bare stage flip — the picker
+ * writes the date and the save path bumps the stage (stageAfterScheduling)
+ * — but on a job whose work is done or dead, penciling in a date makes no
+ * sense, so those stages fall back to the plain flip.
+ */
 export function shouldOfferSchedule(job: Pick<Job, 'stage'>): boolean {
   return !SCHEDULE_HIDDEN_STAGES.has(job.stage);
 }

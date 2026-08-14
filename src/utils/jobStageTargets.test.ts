@@ -32,14 +32,14 @@ describe('legalStageTargets', () => {
     expect(legalStageTargets('inquiry')).toHaveLength(8);
   });
 
-  it('drops `scheduled` when the caller renders its own Schedule row', () => {
-    const withRow = legalStageTargets('accepted', { excludeScheduled: true });
-    const withoutRow = legalStageTargets('accepted', { excludeScheduled: false });
-
-    expect(withoutRow).toContain('scheduled');
-    expect(withRow).not.toContain('scheduled');
-    // Dropping the duplicate must not drop anything else with it.
-    expect(withRow).toEqual(withoutRow.filter((s) => s !== 'scheduled'));
+  // `scheduled` used to be carved out of this list whenever the caller drew
+  // its own "Schedule…" row, so the status list a tradie scanned had no
+  // Scheduled in it at all. The row is a stage row now — it just opens the
+  // date picker on the way (see shouldOfferSchedule).
+  it('offers `scheduled` like any other stage', () => {
+    for (const stage of ['inquiry', 'quoted', 'accepted', 'in_progress'] as const) {
+      expect(legalStageTargets(stage)).toContain('scheduled');
+    }
   });
 
   // The money firewall: once a deposit has been paid, an accepted job
