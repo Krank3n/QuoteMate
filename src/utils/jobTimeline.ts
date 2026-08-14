@@ -516,3 +516,56 @@ export function sortJobsForList<T extends Job>(jobs: T[]): T[] {
     return String(a.id).localeCompare(String(b.id));
   });
 }
+
+/** Chip wording per stage. Colour-free, so jobStatusLabel can reach it
+ *  without a theme — jobStageMetaFor builds its chipLabels from this. */
+export const STAGE_CHIP_LABELS: Record<JobStage, string> = {
+  inquiry: 'Inquiry',
+  quoted: 'Quoted',
+  accepted: 'Accepted',
+  scheduled: 'Scheduled',
+  in_progress: 'In Progress',
+  completed: 'Completed',
+  paid: 'Paid',
+  closed: 'Closed',
+  cancelled: 'Cancelled',
+};
+
+/**
+ * What the app currently calls this job's status — the same words the
+ * card's timeline pill prints.
+ *
+ * Both status doors print this under "Currently …", and the pill door
+ * prints it a centimetre below the pill you just tapped. Naming the raw
+ * job stage there made them disagree out loud: a job at `in_progress`
+ * under a sent invoice shows "Invoice Sent" on the pill, and the sheet it
+ * opened answered "Currently In Progress".
+ *
+ * Three places the pill isn't printing a status word, where the sentence
+ * form is the honest answer:
+ * - terminal jobs have no pill at all (the card shows a stage chip), and
+ *   getJobSubStatus falls through to "Draft" for them, which is a lie.
+ * - a scheduled job's pill prints the date ("Fri 5 Sep · 9am"), and
+ *   "Currently Fri 5 Sep · 9am" is not a sentence.
+ * - the pill marks "a quote/invoice exists" with the bare noun, so the
+ *   past participle is the same status read aloud (see STATUS_WORD).
+ */
+export function jobStatusLabel(job: Job, primaryDoc?: Document | null): string {
+  if (job.stage === 'cancelled' || job.stage === 'closed') {
+    return STAGE_CHIP_LABELS[job.stage];
+  }
+  const sub = getJobSubStatus(job, primaryDoc);
+  if (sub.slot === 'scheduled') return STAGE_CHIP_LABELS.scheduled;
+  return STATUS_WORD[sub.label] ?? sub.label;
+}
+
+/**
+ * Pill step marker → the word for it in a sentence. Only the bare nouns
+ * need this: "Currently Quote" reads as a typo, "Currently Quote Sent"
+ * doesn't. Same status either way — this is tense, not a different answer.
+ */
+const STATUS_WORD: Record<string, string> = {
+  Quote: 'Quoted',
+  Invoice: 'Invoiced',
+};
+

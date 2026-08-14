@@ -12,7 +12,7 @@ import { Animated } from 'react-native';
 
 import type { Job, JobStage } from '../../shared/job/types';
 import { legalStageTargets, shouldOfferSchedule } from '../utils/jobStageTargets';
-import { documentHasOutrunJobStage, isLiveInvoice } from '../utils/jobTimeline';
+import { isLiveInvoice, jobStatusLabel, STAGE_CHIP_LABELS } from '../utils/jobTimeline';
 import type { Document } from '../types/document';
 import type { Tokens } from '../theme';
 import { useThemeColors } from '../theme';
@@ -70,7 +70,7 @@ export function stageMetaFor(stage: JobStage | undefined, themeColors: Tokens): 
 
 export const jobStageMetaFor = (themeColors: Tokens): Record<JobStage, StageMeta> => ({
   inquiry: {
-    chipLabel: 'Inquiry',
+    chipLabel: STAGE_CHIP_LABELS.inquiry,
     actionLabel: 'Mark as Inquiry',
     icon: 'help-circle-outline',
     // Neutral for the same reason 'draft' is: nothing has happened on this job
@@ -80,56 +80,56 @@ export const jobStageMetaFor = (themeColors: Tokens): Record<JobStage, StageMeta
     bgColor: themeColors.neutralSubtle,
   },
   quoted: {
-    chipLabel: 'Quoted',
+    chipLabel: STAGE_CHIP_LABELS.quoted,
     actionLabel: 'Mark as Quoted',
     icon: 'send-outline',
     color: themeColors.warning,
     bgColor: themeColors.warningSubtle,
   },
   accepted: {
-    chipLabel: 'Accepted',
+    chipLabel: STAGE_CHIP_LABELS.accepted,
     actionLabel: 'Mark as Accepted',
     icon: 'check-circle-outline',
     color: themeColors.money,
     bgColor: themeColors.moneySubtle,
   },
   scheduled: {
-    chipLabel: 'Scheduled',
+    chipLabel: STAGE_CHIP_LABELS.scheduled,
     actionLabel: 'Schedule…',
     icon: 'calendar-clock-outline',
     color: themeColors.info,
     bgColor: themeColors.infoSubtle,
   },
   in_progress: {
-    chipLabel: 'In Progress',
+    chipLabel: STAGE_CHIP_LABELS.in_progress,
     actionLabel: 'Mark as In Progress',
     icon: 'hammer-wrench',
     color: themeColors.warning,
     bgColor: themeColors.warningSubtle,
   },
   completed: {
-    chipLabel: 'Completed',
+    chipLabel: STAGE_CHIP_LABELS.completed,
     actionLabel: 'Mark as Completed',
     icon: 'flag-checkered',
     color: themeColors.money,
     bgColor: themeColors.moneySubtle,
   },
   paid: {
-    chipLabel: 'Paid',
+    chipLabel: STAGE_CHIP_LABELS.paid,
     actionLabel: 'Mark as Paid',
     icon: 'cash-check',
     color: themeColors.money,
     bgColor: themeColors.moneySubtle,
   },
   closed: {
-    chipLabel: 'Closed',
+    chipLabel: STAGE_CHIP_LABELS.closed,
     actionLabel: 'Archive',
     icon: 'archive-outline',
     color: themeColors.textDisabled,
     bgColor: themeColors.surfacePressed,
   },
   cancelled: {
-    chipLabel: 'Cancelled',
+    chipLabel: STAGE_CHIP_LABELS.cancelled,
     actionLabel: 'Cancel Job',
     icon: 'close-octagon-outline',
     color: themeColors.error,
@@ -175,11 +175,8 @@ export function JobStageSheet({
     onSchedule?.();
   };
 
-  // Same wording as the kebab's "Currently …" line, invoice correction and
-  // all — a job still sitting at `quoted` under an invoice isn't "Quoted".
-  const currentLabel = documentHasOutrunJobStage(job, primaryDoc)
-    ? 'Invoiced'
-    : JOB_STAGE_META[job.stage]?.chipLabel ?? 'Inquiry';
+  // Echoes the pill the tradie just tapped — see jobStatusLabel.
+  const currentLabel = jobStatusLabel(job, primaryDoc);
 
   // Schedule first when offered, then the legal stages — the order the
   // kebab's submenu lists them in.
