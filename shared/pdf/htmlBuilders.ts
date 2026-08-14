@@ -848,16 +848,20 @@ export function buildQuotePdfHtml(
   const detail = resolvePriceDetail(quote);
   const perLineMoney = showsPerLineMoney(detail);
   const rollMarkup = rollMarkupFor(quote) && quote.markup > 0;
-  const showMaterials = showsLineItems(detail);
-  const showLabor = showsLineItems(detail);
+  // 'total' hides the line items entirely; 'itemised' and 'summary' both show
+  // them, differing only in how much money sits beside each one.
+  const showLineItems = showsLineItems(detail);
   const watermark = options?.watermark;
   // Derived, not toggled — see isScopeQuote.
   const scopeMode = isScopeQuote(quote.materials);
   // Labour rides in the scope table as continuation rows, but only when that
   // table is actually rendered; with material costs hidden it isn't, so labour
   // falls back to its own block.
-  const labourInScopeTable = scopeMode && showMaterials;
-  const scopeLabourRows = labourInScopeTable && showLabor && quote.laborTotal
+  // A scope line's Line Total IS its section total, so it survives 'summary'
+  // (which hides per-LINE money, not section money) — the same rule that keeps
+  // Σ section totals === Subtotal on an itemised document.
+  const labourInScopeTable = scopeMode && showLineItems;
+  const scopeLabourRows = labourInScopeTable && quote.laborTotal
     ? labourRowsForDisplay(quote)
     : [];
 
@@ -899,7 +903,7 @@ export function buildQuotePdfHtml(
         <p>${formatMultiline(quote.job.description)}</p>
       </div>
 
-      ${showMaterials ? `
+      ${showLineItems ? `
       <div class="section-wrapper">
         ${scopeMode ? '' : '<h3>Materials</h3>'}
         ${scopeMode
@@ -908,7 +912,7 @@ export function buildQuotePdfHtml(
       </div>
       ` : ''}
 
-      ${showLabor && !labourInScopeTable ? buildLaborHTML(quote) : ''}
+      ${showLineItems && !labourInScopeTable ? buildLaborHTML(quote) : ''}
 
       ${buildSummaryHTML(quote)}
 
@@ -1129,14 +1133,18 @@ export function buildInvoicePdfHtml(
   const detail = resolvePriceDetail(invoice);
   const perLineMoney = showsPerLineMoney(detail);
   const rollMarkup = rollMarkupFor(invoice) && invoice.markup > 0;
-  const showMaterials = showsLineItems(detail);
-  const showLabor = showsLineItems(detail);
+  // 'total' hides the line items entirely; 'itemised' and 'summary' both show
+  // them, differing only in how much money sits beside each one.
+  const showLineItems = showsLineItems(detail);
   const watermark = options?.watermark;
   // Symmetrical with the quote builder on purpose: an accepted scope quote
   // must not change shape the moment it becomes an invoice.
   const scopeMode = isScopeQuote(invoice.materials);
-  const labourInScopeTable = scopeMode && showMaterials;
-  const scopeLabourRows = labourInScopeTable && showLabor && invoice.laborTotal
+  // A scope line's Line Total IS its section total, so it survives 'summary'
+  // (which hides per-LINE money, not section money) — the same rule that keeps
+  // Σ section totals === Subtotal on an itemised document.
+  const labourInScopeTable = scopeMode && showLineItems;
+  const scopeLabourRows = labourInScopeTable && invoice.laborTotal
     ? labourRowsForDisplay(invoice)
     : [];
 
@@ -1182,7 +1190,7 @@ export function buildInvoicePdfHtml(
         <p>${formatMultiline(invoice.job.description)}</p>
       </div>
 
-      ${showMaterials ? `
+      ${showLineItems ? `
       <div class="section-wrapper">
         ${scopeMode ? '' : '<h3>Materials</h3>'}
         ${scopeMode
@@ -1191,7 +1199,7 @@ export function buildInvoicePdfHtml(
       </div>
       ` : ''}
 
-      ${showLabor && !labourInScopeTable ? buildLaborHTML(invoice) : ''}
+      ${showLineItems && !labourInScopeTable ? buildLaborHTML(invoice) : ''}
 
       ${buildSummaryHTML(invoice, paidAmount, amountDue, invoice.depositCredit)}
 

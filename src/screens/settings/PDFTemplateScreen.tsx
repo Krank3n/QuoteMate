@@ -37,6 +37,7 @@ import {
   type QuotePdfData,
 } from '../../../shared/pdf';
 import { resolveGstMode, GstMode, NO_GST_NOTE } from '../../../shared/document';
+import { resolvePriceDetail, type PriceDetail } from '../../../shared/document/priceDetail';
 import { calculateDocumentTotals } from '../../utils/documentCalculator';
 import { prepareLogoHtml } from '../../utils/pdfGenerator';
 import { Material, QuoteSection } from '../../types';
@@ -82,8 +83,7 @@ const SAMPLE_MARKUP_PCT = 15;
 
 function buildSampleQuote(opts: {
   showMarkup: boolean;
-  showMaterialCosts: boolean;
-  showLaborCosts: boolean;
+  priceDetail: PriceDetail;
   showLaborHours: boolean;
   pricesIncludeGst: boolean;
   gstRegistered: boolean;
@@ -130,8 +130,7 @@ function buildSampleQuote(opts: {
     markupAmount: totals.markupAmount,
     laborMarkup: SAMPLE_MARKUP_PCT,
     showMarkup: opts.showMarkup,
-    showMaterialCosts: opts.showMaterialCosts,
-    showLaborCosts: opts.showLaborCosts,
+    priceDetail: opts.priceDetail,
     showLaborHours: opts.showLaborHours,
     gst: totals.gst,
     total: totals.total,
@@ -576,8 +575,9 @@ export function PDFTemplateScreen() {
   // Here we read the current values to drive the live preview so the tradie
   // can see the effect without leaving this screen.
   const showMarkup = businessSettings?.showMarkup === true;
-  const showMaterialCostsByDefault = businessSettings?.showMaterialCostsByDefault !== false;
-  const showLaborCostsByDefault = businessSettings?.showLaborCostsByDefault !== false;
+  // Preview the account's own default presentation, resolved the same way the
+  // real document resolves it.
+  const priceDetail = resolvePriceDetail(null, businessSettings);
 
   useEffect(() => {
     if (businessSettings) {
@@ -644,8 +644,7 @@ export function PDFTemplateScreen() {
       const html = buildQuotePdfHtml(
         buildSampleQuote({
           showMarkup,
-          showMaterialCosts: showMaterialCostsByDefault,
-          showLaborCosts: showLaborCostsByDefault,
+          priceDetail,
           showLaborHours,
           pricesIncludeGst: businessSettings?.pricesIncludeGst === true,
           gstRegistered: businessSettings?.gstRegistered !== false,
@@ -682,7 +681,7 @@ export function PDFTemplateScreen() {
     } finally {
       setPreviewLoading(null);
     }
-  }, [businessSettings, showLaborHours, showMarkup, showMaterialCostsByDefault, showLaborCostsByDefault, isPro]);
+  }, [businessSettings, showLaborHours, showMarkup, priceDetail, isPro]);
 
   const businessName = businessSettings?.businessName || 'Your Business';
 
