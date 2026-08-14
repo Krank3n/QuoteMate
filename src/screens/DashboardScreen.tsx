@@ -22,6 +22,7 @@ import { useStore } from '../store/useStore';
 import { useJobStore } from '../store/useJobStore';
 import { applyJobStageChange } from '../utils/applyJobStageChange';
 import { earnedInMonth } from '../utils/monthlyEarnings';
+import { quickStats } from '../utils/quickStats';
 import { pickPrimaryDoc } from '../components/StickyJobActionBar';
 import { makeStyles, useThemeColors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
@@ -325,34 +326,24 @@ export function DashboardScreen() {
   const isTrialActive = !!(subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired);
   const isPro = subscriptionStatus?.isPro || isTrialActive;
 
-  // Calculate quick stats (memoized to avoid recalculation on every render)
-  const { sentQuotes, acceptedQuotes, pipelineValue } = useMemo(() => {
-    let sent = 0;
-    let accepted = 0;
-    let pipeline = 0;
-
-    for (const q of quotes) {
-      if (q.status === 'sent') {
-        sent++;
-        pipeline += q.total;
-      }
-      if (q.status === 'accepted' || q.status === 'completed') {
-        accepted++;
-      }
-    }
-
-    return { sentQuotes: sent, acceptedQuotes: accepted, pipelineValue: pipeline };
-  }, [quotes]);
+  // Every tile reads the unified Document model. These three used to count the
+  // legacy `quotes` collection, which populates after `documents` on a fresh
+  // sign-in — so they sat on 0 / 0 / $0.00 next to a correct earnings figure.
+  // See quickStats.
+  const documentsForStats = useStore((s) => s.documents);
+  const { sentQuotes, acceptedQuotes, pipelineValue } = useMemo(
+    () => quickStats(documentsForStats),
+    [documentsForStats],
+  );
 
   // Earnings come from the payment ledger, not from quote totals. This tile
   // used to sum accepted/completed QUOTE values, so a quote marked Accepted
   // with nothing paid counted in full, while an invoice that had genuinely
   // been paid counted nothing — once converted, the legacy quote is no longer
   // in those statuses. See earnedInMonth.
-  const documentsForEarnings = useStore((s) => s.documents);
   const thisMonthRevenue = useMemo(
-    () => earnedInMonth(documentsForEarnings),
-    [documentsForEarnings],
+    () => earnedInMonth(documentsForStats),
+    [documentsForStats],
   );
 
   // Newest in-progress draft, time-boxed — pickDashboardDraft hides
