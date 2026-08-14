@@ -71,6 +71,25 @@ export interface Material {
   };
   imageUrl?: string; // Product image URL
   description?: string; // Product description
+  /**
+   * What this line *is*. Absent/'material' = a priced product with a real
+   * quantity and unit price. 'work' = a lump-sum scope line: a title, a scope
+   * paragraph, and one price. quantity is forced to 1 and unit to 'each' so
+   * totalPrice = quantity × price still holds and every existing calculator,
+   * adapter and Xero mapper works unchanged.
+   *
+   * NOTE: material markup applies to work items (consistent with a hand-typed
+   * material today), so a tradie with 15% markup typing $22,750 sees $26,162.50.
+   */
+  kind?: 'material' | 'work';
+  /**
+   * Customer-facing scope paragraph, newline-separated. Deliberately NOT
+   * `description` — the pricing pipeline OWNS that field and overwrites it at
+   * 15 sites in materialsPipeline.ts with verdicts like "Not a retail item
+   * (service/supply) — add your price before sending". Reusing `description`
+   * would silently destroy the tradie's scope text on the next reprice.
+   */
+  scope?: string;
   brand?: string; // Product brand
   stockLevel?: string; // Stock availability (deprecated, use stockCheckedAt)
   stockCheckedAt?: string; // ISO timestamp of when stock was last checked

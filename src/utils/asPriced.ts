@@ -24,7 +24,9 @@ export interface AsPricedSnapshot {
  */
 export function stampAsPriced(materials: Material[]): void {
   for (const m of materials) {
-    if (m.manualPriceOverride) {
+    // A work item is the tradie's own lump sum, never pipeline output — same
+    // reasoning as manualPriceOverride below.
+    if (m.kind === 'work' || m.manualPriceOverride) {
       m.asPriced = undefined;
       continue;
     }

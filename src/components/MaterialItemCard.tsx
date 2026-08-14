@@ -121,6 +121,13 @@ function MaterialItemCardImpl({
 
   const qty = localQuantity ?? material.quantity;
 
+  // A work item is a lump-sum scope line — a title, a scope paragraph and one
+  // price the tradie typed. It has no unit price and no meaningful quantity,
+  // so the subtitle carries the scope text instead, and the qty stepper is
+  // hidden: one stray tap on "+" would silently double a five-figure line.
+  const isWorkItem = material.kind === 'work';
+  const scopeText = material.scope?.trim();
+
   // Box icon's interactive behaviour is gated by `onMoveToSection` —
   // without that callback (e.g. readOnly cards in the supplier book) we
   // render the same icon as a static decoration. During fetch the icon
@@ -192,6 +199,10 @@ function MaterialItemCardImpl({
         <Text style={styles.itemName} numberOfLines={2}>{material.name}</Text>
         {isFetching ? (
           <Text style={styles.searchingLabel}>Searching...</Text>
+        ) : isWorkItem ? (
+          scopeText ? (
+            <Text style={styles.itemUnitPrice} numberOfLines={3}>{scopeText}</Text>
+          ) : null
         ) : (
           <Text style={styles.itemUnitPrice}>
             {material.templateBaseQuantity ? (() => {
@@ -390,6 +401,11 @@ function MaterialItemCardImpl({
       >
         {topRow}
         <View style={styles.itemBottomRow}>
+          {isWorkItem ? (
+            // Empty spacer keeps the actions right-aligned in the
+            // space-between row now the stepper is gone.
+            <View style={styles.qtyRow} />
+          ) : (
           <View style={styles.qtyRow}>
             <View style={styles.qtyStepper}>
               <Pressable
@@ -418,6 +434,7 @@ function MaterialItemCardImpl({
             </View>
             <Text style={styles.qtyUnit}>{material.unit}</Text>
           </View>
+          )}
           <View style={styles.itemActions}>
             {showLink && (
               <TouchableOpacity style={styles.actionBtn} onPress={onOpenInStore}>

@@ -61,6 +61,10 @@ const DEFAULT_DETAIL: Record<QuoteIssueKind, string> = {
  * A manual override is never an issue — it's the tradie's own number.
  */
 function classifyRow(m: Material): QuoteIssueKind | null {
+  // A work item is a lump-sum scope line, not a product. $0 is a legitimate
+  // price for one ("General preparation — included"), so it must never be
+  // flagged `unpriced` or reset by propose_reprice.
+  if (m.kind === 'work') return null;
   if (m.manualPriceOverride) return null;
   if (!(m.price > 0)) return 'unpriced';
   if (m.priceConfidence === 'low') {

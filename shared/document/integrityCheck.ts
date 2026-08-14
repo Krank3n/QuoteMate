@@ -220,8 +220,10 @@ export function checkDocumentIntegrity(d: DocLike, opts: IntegrityCheckOptions =
   }
 
   // 8. AI-validator hits (piece-good units, zero-priced materials)
+  // `kind` rides along so the validator can tell a $0 lump-sum scope line
+  // (legitimate) from a material the pipeline failed to price (a hole).
   const flatMaterials = materials.map((m: any) => ({
-    name: m.name, unit: m.unit, quantity: m.quantity, price: m.price,
+    name: m.name, unit: m.unit, quantity: m.quantity, price: m.price, kind: m.kind,
   }));
   const { flags } = validateAndRepairAiOutput(flatMaterials, { warn: () => {} });
   if (flags.hasInvalidUnit) {

@@ -21,4 +21,12 @@ describe('needsPriceFetch — pricing pipeline gate', () => {
     expect(needsPriceFetch({ price: -1 })).toBe(true);
     expect(needsPriceFetch({ price: NaN })).toBe(true);
   });
+
+  it('never fetches a price for a work item, even at $0', () => {
+    // A "General preparation — included" scope line is legitimately $0. Without
+    // this guard it looks exactly like an unpriced material and gets shipped to
+    // the supplier search, which overwrites the tradie's title and price.
+    expect(needsPriceFetch({ price: 0, kind: 'work' })).toBe(false);
+    expect(needsPriceFetch({ price: 22750, kind: 'work' })).toBe(false);
+  });
 });

@@ -31,6 +31,10 @@ export function MaterialsSection({
   const multiplier = rollMarkupIntoMaterials && markupPercent > 0 ? (1 + markupPercent / 100) : 1;
   const showMarkedUp = multiplier > 1;
   const displaySubtotal = materialsSubtotal * multiplier;
+  // Mirrors isScopeQuote in shared/pdf/htmlBuilders — when every line is a
+  // lump-sum scope line the customer's PDF is a Project Scope table, so the
+  // in-app preview says the same thing rather than "Materials".
+  const isScopeOnly = materials.length > 0 && materials.every((m) => m.kind === 'work');
 
   const content = (
     <Surface style={[styles.section, style]}>
@@ -39,7 +43,9 @@ export function MaterialsSection({
           <View style={[styles.sectionIconCircle, { backgroundColor: themeColors.accentSubtle }]}>
             <MaterialCommunityIcons name="package-variant" size={18} color={themeColors.accentText} />
           </View>
-          <Title style={styles.sectionTitle}>Materials ({materials.length})</Title>
+          <Title style={styles.sectionTitle}>
+            {isScopeOnly ? 'Project Scope' : 'Materials'} ({materials.length})
+          </Title>
         </View>
         {onEdit && (
           <View style={styles.editButton}>
@@ -54,7 +60,13 @@ export function MaterialsSection({
           <View key={material.id} style={styles.itemRow}>
             <View style={styles.itemInfo}>
               <Text style={styles.itemName}>{material.name}</Text>
-              {showMarkedUp ? (
+              {material.kind === 'work' ? (
+                // A lump-sum scope line has no unit price and no meaningful
+                // quantity — the scope paragraph is what the customer reads.
+                material.scope?.trim() ? (
+                  <Text style={styles.itemDetails}>{material.scope.trim()}</Text>
+                ) : null
+              ) : showMarkedUp ? (
                 <Text style={styles.itemDetails}>
                   {material.quantity} {material.unit} ×{' '}
                   <Text style={{ textDecorationLine: 'line-through', color: themeColors.textMuted }}>
@@ -77,7 +89,7 @@ export function MaterialsSection({
       )}
       <Divider style={styles.divider} />
       <View style={styles.summaryRow}>
-        <Text style={styles.summaryLabel}>Materials Subtotal</Text>
+        <Text style={styles.summaryLabel}>{isScopeOnly ? 'Subtotal' : 'Materials Subtotal'}</Text>
         <Text style={styles.summaryValue}>{formatCurrency(displaySubtotal)}</Text>
       </View>
       {showMarkedUp && (
