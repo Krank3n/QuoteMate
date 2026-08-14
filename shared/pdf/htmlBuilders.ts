@@ -3,7 +3,7 @@
  * Used by both client (Expo Print) and server (Puppeteer) renderers
  */
 
-import { PdfMaterial, QuotePdfData, InvoicePdfData, BusinessPdfData, PdfTemplateId, ReportPdfData } from './types';
+import { PdfMaterial, LaborSection, QuotePdfData, InvoicePdfData, BusinessPdfData, PdfTemplateId, ReportPdfData } from './types';
 import { formatCurrency } from './formatCurrency';
 import { printMediaCSS, getTemplateCSS } from './templates';
 import { PASSTHROUGH_SURCHARGE_PCT } from './squareFees';
@@ -180,13 +180,27 @@ export function buildTermsHTML(terms: string | undefined): string {
 }
 
 /**
- * Generate materials table HTML, optionally grouped by work section
- * When markupPercent > 0, material prices are inflated by the markup percentage
+ * Generate the itemised materials table, grouped by work section whenever the
+ * document has sections. When markupPercent > 0, material prices are inflated
+ * by the markup percentage.
+ *
+ * Grouping is no longer gated on a business setting. Labour sections already
+ * rendered by default while material sections did not, so the same quote
+ * showed its work broken out in one half of the document and lumped together
+ * in the other. A tradie who went to the trouble of creating sections meant
+ * them; the setting only decided whether the PDF agreed.
+ *
+ * `sections` supplies the ORDER. The material table used to sort its groups
+ * alphabetically while the labour block used sortOrder, so "Demolition" and
+ * "Painting" could appear in one order at the top of the page and another
+ * further down. sortOrder is now the single source of truth for both, and for
+ * the in-app list.
  */
 export function generateMaterialsHTML(
   materials: PdfMaterial[],
-  groupBySection: boolean,
+  groupBySection: boolean = true,
   markupPercent: number = 0,
+  sections?: LaborSection[],
 ): string {
   if (materials.length === 0) {
     return `<p style="color: #666666; font-style: italic; margin: 10px 0;">No materials required - Labor only</p>`;
@@ -246,25 +260,49 @@ export function generateMaterialsHTML(
     grouped.get(key)!.push(m);
   });
 
-  // Sort: named sections first (alphabetically), then ungrouped
+  // Named sections in sortOrder (falling back to the array's own order for
+  // legacy documents), then any material that belongs to no section.
+  const orderByName = new Map<string, number>();
+  (sections || []).forEach((sec, i) => {
+    if (!orderByName.has(sec.name)) orderByName.set(sec.name, i);
+  });
   const sortedKeys = Array.from(grouped.keys()).sort((a, b) => {
     if (a === '' && b !== '') return 1;
     if (a !== '' && b === '') return -1;
+    const oa = orderByName.get(a) ?? Number.MAX_SAFE_INTEGER;
+    const ob = orderByName.get(b) ?? Number.MAX_SAFE_INTEGER;
+    if (oa !== ob) return oa - ob;
     return a.localeCompare(b);
+  });
+
+  const descriptionByName = new Map<string, string>();
+  (sections || []).forEach((sec) => {
+    if (sec.description?.trim() && !descriptionByName.has(sec.name)) {
+      descriptionByName.set(sec.name, sec.description.trim());
+    }
   });
 
   let html = '';
   sortedKeys.forEach(key => {
     const sectionMaterials = grouped.get(key)!;
     const sectionTotal = sumRoundedLineTotals(sectionMaterials, multiplier);
-    const sectionName = escapeHtml(key || 'Other');
+    const sectionName = escapeHtml(key);
+    const description = descriptionByName.get(key);
+    // No invented "Other" heading: a material that belongs to no section is
+    // shown as itself, exactly as the in-app list shows it, rather than under
+    // a group name the tradie never created.
+    const labelRow = key
+      ? `
+          <tr>
+            <th colspan="4" class="section-label">${sectionName}${
+              description ? `<div class="section-scope">${formatMultiline(description)}</div>` : ''
+            }</th>
+          </tr>`
+      : '';
 
     html += `
       <table>
-        <thead>
-          <tr>
-            <th colspan="4" class="section-label">${sectionName}</th>
-          </tr>
+        <thead>${labelRow}
           <tr>
             <th>Item</th>
             <th>Quantity</th>
@@ -275,7 +313,7 @@ export function generateMaterialsHTML(
         <tbody>
           ${sectionMaterials.map(materialRow).join('')}
           <tr class="total-row">
-            <td colspan="3">${sectionName} Subtotal</td>
+            <td colspan="3">${key ? `${sectionName} Subtotal` : 'Subtotal'}</td>
             <td>${formatCurrency(sectionTotal)}</td>
           </tr>
         </tbody>
@@ -802,7 +840,7 @@ export function buildQuotePdfHtml(
         ${scopeMode ? '' : '<h3>Materials</h3>'}
         ${scopeMode
           ? generateScopeHTML(quote.materials, rollMarkup ? quote.markup : 0, scopeLabourRows)
-          : generateMaterialsHTML(quote.materials, quote.groupMaterialsBySection === true, rollMarkup ? quote.markup : 0)}
+          : generateMaterialsHTML(quote.materials, true, rollMarkup ? quote.markup : 0, quote.sections)}
       </div>
       ` : ''}
 
@@ -1080,7 +1118,7 @@ export function buildInvoicePdfHtml(
         ${scopeMode ? '' : '<h3>Materials</h3>'}
         ${scopeMode
           ? generateScopeHTML(invoice.materials, rollMarkup ? invoice.markup : 0, scopeLabourRows)
-          : generateMaterialsHTML(invoice.materials, invoice.groupMaterialsBySection === true, rollMarkup ? invoice.markup : 0)}
+          : generateMaterialsHTML(invoice.materials, true, rollMarkup ? invoice.markup : 0, invoice.sections)}
       </div>
       ` : ''}
 

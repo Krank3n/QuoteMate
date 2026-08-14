@@ -226,6 +226,15 @@ export const printMediaCSS = `
     opacity: .72;
     overflow-wrap: anywhere;
   }
+  /* A section's own scope text, printed under its heading. Inherits the
+     section-label colour so it reads as part of the same band. */
+  .section-scope {
+    margin-top: 3px;
+    font-size: 10px;
+    font-weight: 400;
+    line-height: 1.4;
+    opacity: .9;
+  }
   /* Project Scope table — rendered when every line on the document is a
      lump-sum scope line (see isScopeQuote in htmlBuilders). Declared once,
      here, rather than in all five template stylesheets: printMediaCSS is

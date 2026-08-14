@@ -690,7 +690,14 @@ export interface BusinessSettings {
   // Branding
   brandColor?: string; // Custom accent color for PDF documents (overrides template default)
   // Quote/invoice display settings
-  groupMaterialsBySection?: boolean; // Group materials by work section on PDFs (default: false)
+  /**
+   * @deprecated Materials always group under their section headings on PDFs.
+   * Labour sections already rendered by default while material sections did
+   * not, so the same quote showed its work broken out in one half of the
+   * document and lumped together in the other. The field is kept so older
+   * installed builds reading it don't break; nothing writes it any more.
+   */
+  groupMaterialsBySection?: boolean;
   // PDF template
   pdfTemplate?: PdfTemplateId;
   // Whether new quotes should require a deposit by default. Separate from the
