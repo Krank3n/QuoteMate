@@ -25,6 +25,7 @@ import { makeStyles, useThemeColors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
 import { getAmountDue } from '../utils/invoiceCalculator';
 import { GridBackground } from '../components/GridBackground';
+import { WebContainer } from '../components/WebContainer';
 
 /**
  * Ledger method → the radio option that represents it. Lossy on purpose:
@@ -232,6 +233,12 @@ export function RecordPaymentScreen() {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
+      {/* This is a `presentation: 'modal'` screen, and on web that modal is
+          as wide as the browser — a payment form with a $ field and four
+          radios stretched across a 27" display. 600 matches the other
+          payment surfaces (TakePaymentSheet, StripeCheckoutModal). No-op on
+          native. */}
+      <WebContainer maxWidth={600}>
       {/* Invoice Summary */}
       <Surface style={styles.summaryCard}>
         <View style={styles.sectionHeader}>
@@ -446,6 +453,7 @@ export function RecordPaymentScreen() {
           Remove this payment
         </Button>
       ) : null}
+      </WebContainer>
     </ScrollView>
   );
 }

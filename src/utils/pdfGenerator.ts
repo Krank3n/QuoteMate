@@ -18,6 +18,7 @@ import { Quote, BusinessSettings, Invoice, BusinessCredential } from '../types';
 import { Document } from '../types/document';
 import { quoteToDocument, invoiceToDocument } from '../types/documentAdapter';
 import { formatPaymentTerms, getAmountDue } from './invoiceCalculator';
+import { isPrintDismissal } from './printDismissal';
 import { formatCurrency } from './quoteCalculator';
 import { Platform, Alert } from 'react-native';
 import {
@@ -675,6 +676,8 @@ export async function previewReportPDF(
     // bridge is the closest equivalent.
     await Print.printAsync({ html });
   } catch (error) {
+    // Closing the preview is how a reader finishes, not a failure to open it.
+    if (isPrintDismissal(error)) return;
     reserved?.close();
     throw error;
   }
@@ -790,9 +793,15 @@ export async function previewDocumentPDF(
     writeToPrintWindow(reserved, html, 'Preview', false);
     return;
   }
-  // iOS: shows the AirPrint-style preview with zoom + share.
+  // iOS: shows the AirPrint-style preview with zoom + share. Closing that
+  // sheet rejects — for a preview, that's the reader finishing, not a failure.
+  // See isPrintDismissal.
   if (Platform.OS === 'ios') {
-    await Print.printAsync({ html });
+    try {
+      await Print.printAsync({ html });
+    } catch (error) {
+      if (!isPrintDismissal(error)) throw error;
+    }
     return;
   }
   // Android: the print bridge renders the HTML in a WebView and can stall
@@ -807,6 +816,8 @@ export async function previewDocumentPDF(
       ),
     ]);
   } catch (error) {
+    // Don't answer a dismissal by pushing a share sheet at them.
+    if (isPrintDismissal(error)) return;
     try {
       const { uri } = await Print.printToFileAsync({ html });
       const namedUri = `${FileSystem.cacheDirectory}QuoteMate-Preview.pdf`;

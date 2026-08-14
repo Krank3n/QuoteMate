@@ -160,7 +160,16 @@ export function StageSheet({
               <StageOptionRow
                 icon={meta.icon}
                 color={meta.color}
-                label={meta.actionLabel}
+                // "Cancel" alone was fine as a chunky row with a red icon
+                // circle; as a plain row at the bottom of a sheet it reads
+                // as "dismiss this sheet", which is the opposite of what it
+                // does. Name what gets cancelled — the job sheet's
+                // equivalent already says "Cancel Job".
+                label={
+                  target === 'cancelled'
+                    ? `Cancel ${doc.type === 'invoice' ? 'Invoice' : 'Quote'}`
+                    : meta.actionLabel
+                }
                 onPress={() => handleSelect(target)}
               />
             </Animated.View>

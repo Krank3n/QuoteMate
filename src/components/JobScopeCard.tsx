@@ -236,7 +236,9 @@ export function JobScopeCard({
             />
           </View>
           <View style={styles.headerTextBlock}>
-            <Text style={styles.typeLabel}>{typeLabel}</Text>
+            {/* numberOfLines so a squeeze truncates rather than stacking
+                "INVOICE" one letter per line. */}
+            <Text style={styles.typeLabel} numberOfLines={1}>{typeLabel}</Text>
             <Text style={styles.docNumber} numberOfLines={1}>
               {doc.number || 'Unnumbered'}
             </Text>
@@ -614,19 +616,33 @@ const useStyles = makeStyles((t) => ({
                    // standard touch-target size
     borderBottomWidth: 1,
     borderBottomColor: t.colors.border,
+    // A full payment chip ("Part paid $1,303.13 / $2,606.26") is wider than
+    // what's left of a phone-width row, and the chip can't shrink — so
+    // something had to give. It used to be headerLeft, crushed to a single
+    // character so "INVOICE" ran down the card one letter per line. Now the
+    // chip drops to its own line instead. Nothing wraps where it fits: a
+    // quote's chip is short, and tablets/web have the width.
+    flexWrap: 'wrap',
   },
   headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
     flex: 1,
-    minWidth: 0,
+    // The floor that makes the wrap fire. With minWidth 0 flexbox is happy
+    // to shrink this to nothing and never wrap at all.
+    minWidth: 140,
   },
+  // Shrinkable. With flexShrink:0 a wide payment chip ("Part paid
+  // $1,303.13 / $2,606.26") took the whole row and squeezed headerLeft —
+  // which has minWidth:0 — down to about one character, so "INVOICE"
+  // rendered as a vertical column of letters down the card.
   headerRight: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    flexShrink: 0,
+    flexShrink: 1,
+    minWidth: 0,
   },
   typeBadge: {
     width: 32,

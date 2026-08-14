@@ -168,6 +168,26 @@ describe('status change UI parity', () => {
     expect(q.getByText('Mark as Accepted')).toBeTruthy();
   });
 
+  it('names what the cancel row cancels', () => {
+    // Bare "Cancel" at the foot of a sheet reads as "dismiss", not "cancel
+    // the quote" — the chunky red icon circle used to carry that meaning.
+    const quote = render(
+      <StageSheet visible onDismiss={() => {}} doc={doc} onSelect={() => {}} />,
+    );
+    expect(within(quote.container).getByText('Cancel Quote')).toBeTruthy();
+    expect(within(quote.container).queryByText('Cancel')).toBeNull();
+
+    const invoice = render(
+      <StageSheet
+        visible
+        onDismiss={() => {}}
+        doc={{ ...doc, type: 'invoice', stage: 'invoice_sent' } as unknown as Document}
+        onSelect={() => {}}
+      />,
+    );
+    expect(within(invoice.container).getByText('Cancel Invoice')).toBeTruthy();
+  });
+
   it('still fires the stage the tradie picked', () => {
     const onSelect = vi.fn();
     const { container } = render(

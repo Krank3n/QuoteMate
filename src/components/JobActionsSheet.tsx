@@ -22,7 +22,7 @@ import { BottomSheet } from './BottomSheet';
 import { selectionTap, lightTap } from '../utils/haptics';
 import { legalStageTargets, shouldOfferSchedule } from '../utils/jobStageTargets';
 import { canRevertToQuote } from '../utils/revertToQuote';
-import { documentHasOutrunJobStage, isLiveInvoice } from '../utils/jobTimeline';
+import { isLiveInvoice, jobStatusLabel } from '../utils/jobTimeline';
 import { jobStageMetaFor } from './JobStageSheet';
 import { StageOptionRow } from './StageOptionRow';
 
@@ -344,13 +344,10 @@ export function JobActionsSheet({
         <View style={styles.rowBody}>
           <Text style={styles.rowLabel}>Change status</Text>
           <Text style={styles.rowSub}>
-            {/* The Job stage lags the document after a convert — saying
-                "Currently Quoted" under an invoice is the same lie the
-                card used to tell. */}
-            Currently{' '}
-            {documentHasOutrunJobStage(job, ctx.primaryDoc)
-              ? 'Invoiced'
-              : stageMeta[job.stage]?.chipLabel ?? 'Inquiry'}
+            {/* Same words the card prints for this job — see jobStatusLabel.
+                Naming the raw Job stage here said "Currently Quoted" under a
+                freshly converted invoice. */}
+            Currently {jobStatusLabel(job, ctx.primaryDoc)}
           </Text>
         </View>
         <MaterialCommunityIcons
