@@ -30,6 +30,7 @@ import {
 } from './pdfGenerator';
 import { hashTerms } from './shared/pdf/terms/defaultAuTradie';
 import { toPdfMaterials } from './shared/pdf/mapMaterial';
+import { lumpSumLabourTotal, markupableLabourTotal } from './shared/document/lumpSum';
 import { dollarsToCents, centsToDollars } from './shared/pdf/money';
 import {
   quoteRecordToDocumentRecord,
@@ -388,13 +389,17 @@ function applyHideMarkupForDisplay(q: any, businessSettings?: any) {
     price: (Number(m.price) || 0) * matFactor,
     totalPrice: (Number(m.totalPrice) || 0) * matFactor,
   }));
+  // Lump-sum sections pass through at the figure the tradie typed — only the
+  // hourly slice of labour is inflated. See shared/document/lumpSum.ts.
+  const lumpSum = lumpSumLabourTotal(q.sections);
+  const inflatedLabour = lumpSum + markupableLabourTotal(q.laborTotal || 0, q.sections) * laborFactor;
   return {
     materials: inflatedMaterials,
     materialsSubtotal: (Number(q.materialsSubtotal) || 0) * matFactor,
-    laborTotal: (Number(q.laborTotal) || 0) * laborFactor,
+    laborTotal: inflatedLabour,
     subtotal:
       ((Number(q.materialsSubtotal) || 0) * matFactor) +
-      ((Number(q.laborTotal) || 0) * laborFactor) +
+      inflatedLabour +
       (Number(q.travelAdjustment) || 0),
     markupAmount: 0,
   };
@@ -413,6 +418,8 @@ function buildPdfSections(sections: any[]): any[] {
     laborRate: s.laborRate,
     laborUnit: s.laborUnit,
     laborTotal: s.laborTotal,
+    pricing: s.pricing,
+    description: s.description,
   }));
 }
 

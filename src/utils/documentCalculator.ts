@@ -11,6 +11,7 @@
 
 import { Material, QuoteSection, LaborUnit, JobSpec } from '../types';
 import type { Document } from '../types/document';
+import { markupableLabourTotal } from '../../shared/document/lumpSum';
 
 const STANDARD_DAY_HOURS = 8;
 
@@ -98,7 +99,10 @@ export function calculateDocumentTotals(
     : laborRate * laborHours;
   const subtotal = materialsSubtotal + laborTotal;
   const materialMarkupAmount = materialsSubtotal * (markupPercent / 100);
-  const laborMarkupAmount = laborTotal * (laborMarkupPercent / 100);
+  // Lump-sum sections are exempt: their laborTotal is a price the tradie
+  // typed, so marking it up would charge the customer a number the tradie
+  // never chose. See shared/document/lumpSum.ts.
+  const laborMarkupAmount = markupableLabourTotal(laborTotal, sections) * (laborMarkupPercent / 100);
   const markupAmount = materialMarkupAmount + laborMarkupAmount;
   const travelAdjustmentAmount = subtotal * (travelAdjustment / 100);
   const subtotalWithMarkup = subtotal + markupAmount + travelAdjustmentAmount;

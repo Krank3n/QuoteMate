@@ -82,19 +82,29 @@ export function calculateQuote(
  * Both branches require top-level laborHours × laborRate > 0. If no
  * top-level value is set there's nothing to redistribute and the quote
  * passes through unchanged.
+ *
+ * LUMP-SUM SECTIONS ARE INVISIBLE TO THIS FUNCTION. Their laborTotal is a
+ * number the tradie typed, not a broken derivation, so they are neither
+ * counted when deciding whether labour looks broken nor written to when it
+ * does. Healing one would replace the tradie's price with hours × a rate that
+ * is deliberately 0.
  */
 export function healBrokenLabourSections<T extends { sections?: QuoteSection[]; laborHours: number; laborRate: number }>(quote: T): T {
   if (!quote.sections || quote.sections.length === 0) return quote;
   const topLevelTotal = (quote.laborHours || 0) * (quote.laborRate || 0);
   if (topLevelTotal <= 0) return quote;
 
-  const allZero = quote.sections.every((s) => (s.laborTotal || 0) === 0);
+  const hourlySections = quote.sections.filter((s) => s.pricing !== 'lumpSum');
+  if (hourlySections.length === 0) return quote;
+
+  const allZero = hourlySections.every((s) => (s.laborTotal || 0) === 0);
   if (allZero) {
-    const sumMul = quote.sections.reduce((sum, s) => sum + (s.multiplier || 1), 0);
+    const sumMul = hourlySections.reduce((sum, s) => sum + (s.multiplier || 1), 0);
     if (sumMul <= 0) return quote;
     const perUnitHours = (quote.laborHours || 0) / sumMul;
     const rate = quote.laborRate || 0;
     const healedSections = quote.sections.map((s) => {
+      if (s.pricing === 'lumpSum') return s;
       const mul = s.multiplier || 1;
       return {
         ...s,
@@ -109,10 +119,13 @@ export function healBrokenLabourSections<T extends { sections?: QuoteSection[]; 
   }
 
   // Partial-zero path
-  const zeroSections = quote.sections.filter((s) => (s.laborTotal || 0) === 0);
+  const zeroSections = hourlySections.filter((s) => (s.laborTotal || 0) === 0);
   if (zeroSections.length === 0) return quote;
 
-  const sumNonZero = quote.sections.reduce((sum, s) => sum + (s.laborTotal || 0), 0);
+  // Lump-sum dollars are excluded from the gap arithmetic too: they are not
+  // hourly labour, so counting them would shrink the gap and under-heal the
+  // sections that genuinely are broken.
+  const sumNonZero = hourlySections.reduce((sum, s) => sum + (s.laborTotal || 0), 0);
   const gap = topLevelTotal - sumNonZero;
   if (gap <= 0) return quote;
 
@@ -122,7 +135,7 @@ export function healBrokenLabourSections<T extends { sections?: QuoteSection[]; 
   // Inherit rate/unit from a non-zero section so distributed hours are
   // expressed in the same units as the rest of the quote. Fall back to
   // top-level values when nothing else is available.
-  const reference = quote.sections.find((s) => (s.laborTotal || 0) > 0);
+  const reference = hourlySections.find((s) => (s.laborTotal || 0) > 0);
   const rate = reference?.laborRate ?? quote.laborRate ?? 0;
   const unit = reference?.laborUnit ?? 'hours';
   if (rate <= 0) return quote;
@@ -130,6 +143,7 @@ export function healBrokenLabourSections<T extends { sections?: QuoteSection[]; 
   const totalUnits = gap / rate;
   const perUnitForZero = totalUnits / sumZeroMul;
   const healedSections = quote.sections.map((s) => {
+    if (s.pricing === 'lumpSum') return s;
     if ((s.laborTotal || 0) > 0) return s;
     const mul = s.multiplier || 1;
     return {

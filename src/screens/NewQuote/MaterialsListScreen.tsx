@@ -1547,9 +1547,14 @@ export function MaterialsListScreen() {
 
   const handleSectionMultiplierChange = (sectionName: string, newMultiplier: number) => {
     if (!currentQuote || newMultiplier < 1) return;
-    const updatedSections = (currentQuote.sections || []).map(s =>
-      s.name === sectionName ? { ...s, multiplier: newMultiplier, laborTotal: s.laborHours * s.laborRate * newMultiplier } : s
-    );
+    const updatedSections = (currentQuote.sections || []).map(s => {
+      if (s.name !== sectionName) return s;
+      // A lump-sum section's laborTotal is the tradie's own figure — it has no
+      // hours and no rate to recompute from, so the multiplier moves the
+      // material quantities below and leaves the price alone.
+      if (s.pricing === 'lumpSum') return { ...s, multiplier: newMultiplier };
+      return { ...s, multiplier: newMultiplier, laborTotal: s.laborHours * s.laborRate * newMultiplier };
+    });
     const updatedMaterials = currentQuote.materials.map(m => {
       if (m.section !== sectionName || !m.templateBaseQuantity) return m;
       const newQty = m.templateBaseQuantity * newMultiplier;

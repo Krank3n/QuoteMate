@@ -28,6 +28,8 @@ export {
   effectiveHourlyRate,
 } from './labourUnits';
 
+export { isLumpSumSection, lumpSumLabourTotal, markupableLabourTotal } from './lumpSum';
+
 export type { GstMode } from './gstMode';
 export { resolveGstMode, keepSupplierPriceInclusive, NO_GST_NOTE } from './gstMode';
 

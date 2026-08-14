@@ -30,6 +30,7 @@
 
 import { validateAndRepairAiOutput } from '../ai/validateAiOutput';
 import { rateToHourly } from './labourUnits';
+import { markupableLabourTotal } from './lumpSum';
 
 const STANDARD_DAY_HOURS = 8;
 const DEFAULT_DOLLAR_TOLERANCE = 0.5;
@@ -126,7 +127,12 @@ export function checkDocumentIntegrity(d: DocLike, opts: IntegrityCheckOptions =
 
   // 2. Per-section: laborTotal = laborHours × laborRate × multiplier
   //    (QU-177866 — multiplier dropped from labour calc)
+  //
+  // Lump-sum sections are exempt from rules 2 and 3: their laborTotal is a
+  // typed figure with no hours and no rate behind it, so "expected 0, got
+  // $1,200" is the checker being wrong, not the document.
   for (const s of sections as any[]) {
+    if (s.pricing === 'lumpSum') continue;
     const expected = round2((Number(s.laborHours) || 0) * (Number(s.laborRate) || 0) * (Number(s.multiplier) || 1));
     const actual = Number(s.laborTotal) || 0;
     if (!nearlyEqual(expected, actual, tol)) {
@@ -140,6 +146,7 @@ export function checkDocumentIntegrity(d: DocLike, opts: IntegrityCheckOptions =
 
   // 3. Section with 0 hours and 0 dollars (QU-177963 paving job)
   for (const s of sections as any[]) {
+    if (s.pricing === 'lumpSum') continue;
     const hrs = Number(s.laborHours) || 0;
     const tot = Number(s.laborTotal) || 0;
     if (tot === 0 && hrs === 0) {
@@ -180,9 +187,10 @@ export function checkDocumentIntegrity(d: DocLike, opts: IntegrityCheckOptions =
   if (typeof d.markupAmount === 'number') {
     const matMarkupPct = Number(d.markup) || 0;
     const labMarkupPct = Number(d.laborMarkup ?? d.markup ?? 0);
+    // Mirrors documentCalculator: lump-sum sections are not marked up.
     const expectedMarkup = round2(
       (d.materialsSubtotal || 0) * (matMarkupPct / 100) +
-      (d.laborTotal || 0) * (labMarkupPct / 100)
+      markupableLabourTotal(d.laborTotal || 0, sections) * (labMarkupPct / 100)
     );
     if (!nearlyEqual(expectedMarkup, d.markupAmount, tol)) {
       issues.push({

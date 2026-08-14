@@ -68,6 +68,13 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
  * just for opening the editor; deriving them from the money cannot.
  */
 function sectionHours(s: QuoteSection): number {
+  // A lump-sum section has no hours by construction — its price is a number
+  // the tradie typed, not a duration × a rate. Deriving hours from its dollars
+  // (total ÷ rate, with rate 0) is a division by zero, and the old code's
+  // fallback made the section look like free work: applyLabourEditor would
+  // then write laborTotal = 0 and the money would be gone, for nothing more
+  // than opening the labour screen.
+  if (s.pricing === 'lumpSum') return 0;
   const rate = s.laborRate || 0;
   const total = s.laborTotal || 0;
   if (rate > 0 && total > 0) return total / rate;
@@ -167,6 +174,10 @@ export function applyLabourEditor(doc: LabourDocLike, state: LabourEditorState):
   let sectionsSumHours = 0;
   const sections = hasSections && canonical.sections
     ? canonical.sections.map((s) => {
+        // Byte-identical pass-through. laborTotal on a lump-sum section is the
+        // tradie's own figure; there is nothing here to recompute it FROM, so
+        // recomputing it can only destroy it.
+        if (s.pricing === 'lumpSum') return s;
         const stored = sectionHours(s);
         const hours = resolveHours(stored, state.sectionTotals[s.id], displayUnit);
         sectionsSumHours += hours;

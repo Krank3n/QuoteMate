@@ -254,6 +254,21 @@ export interface QuoteSection {
   laborUnit: StoredLabourUnit; // Always 'hours' — see StoredLabourUnit
   laborTotal: number;          // calculated: laborHours * laborRate * multiplier
   sortOrder: number;
+  /**
+   * 'hourly' (default / legacy undefined) — laborTotal is DERIVED from
+   *   laborHours × laborRate × multiplier. Editors may recompute it.
+   * 'lumpSum' — laborTotal is a number the TRADIE TYPED. laborHours and
+   *   laborRate are 0 and mean nothing. No editor, healer, integrity check
+   *   or markup pass may recompute or redistribute it.
+   *
+   * The invariant, locked by test: for 'lumpSum',
+   *   laborHours === 0 && laborHoursTotal === 0 && laborRate === 0.
+   * Zeroing the hours is what lets every hours-summing consumer stay correct
+   * without knowing this flag exists.
+   */
+  pricing?: 'hourly' | 'lumpSum';
+  /** Customer-facing scope text for this section. Multi-line, reaches the PDF. */
+  description?: string;
 }
 
 // Reusable section template (assembly)

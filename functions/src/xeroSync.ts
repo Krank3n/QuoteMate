@@ -138,6 +138,21 @@ export function buildXeroLineItems(doc: XeroSyncSourceDoc): any[] {
       for (const s of doc.sections) {
         const sectionTotal = Number(s.laborTotal ?? 0);
         const rate = Number(s.laborRate ?? 0);
+        // A lump-sum section has rate 0 by invariant, so the generic path
+        // below would either divide by zero or skip the line entirely and
+        // silently drop the money out of the Xero invoice. It is one line at
+        // quantity 1, exactly like a work item.
+        if (s.pricing === 'lumpSum') {
+          if (sectionTotal === 0) continue;
+          lineItems.push({
+            Description: s.name || 'Section',
+            Quantity: 1,
+            UnitAmount: sectionTotal,
+            AccountCode: '200',
+            TaxType: taxType,
+          });
+          continue;
+        }
         if (sectionTotal === 0 || rate <= 0) continue;
         const quantity =
           Number(s.laborHoursTotal)

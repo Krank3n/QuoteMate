@@ -15,6 +15,7 @@ import {
   type LabourUnit,
 } from '../document/labourUnits';
 import { pathHasInk } from './signatureInk';
+import { isLumpSumSection, markupableLabourTotal } from '../document/lumpSum';
 
 const escapeHtml = (s: string) =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -500,6 +501,17 @@ export function generatePaymentMethodsHTML(
 }
 
 /**
+ * The labour total as the customer reads it: the hourly slice carrying any
+ * rolled-in labour markup, plus the lump-sum sections at exactly the figures
+ * the tradie typed. Marking a lump sum up would print a number the tradie
+ * never chose — see shared/document/lumpSum.ts.
+ */
+function displayLabourTotal(data: QuotePdfData, laborMul: number): number {
+  const markupable = markupableLabourTotal(data.laborTotal, data.sections);
+  return (data.laborTotal - markupable) + markupable * laborMul;
+}
+
+/**
  * The labour lines exactly as the customer reads them: one row per section
  * (or a single "Labour" row when there are none), plus the extra-hours row.
  *
@@ -531,7 +543,7 @@ function labourRowsForDisplay(rawData: QuotePdfData): ScopeContinuationRow[] {
   // opted into showing markup as a separate line on the document.
   const rollLaborMarkup = data.showMarkup !== true;
   const laborMul = rollLaborMarkup ? 1 + ((data.laborMarkup || 0) / 100) : 1;
-  const displayLaborTotal = data.laborTotal * laborMul;
+  const displayLaborTotal = displayLabourTotal(data, laborMul);
 
   if (hasSections && !showBreakdown) {
     return [{ label: 'Labour', amount: displayLaborTotal }];
@@ -547,11 +559,16 @@ function labourRowsForDisplay(rawData: QuotePdfData): ScopeContinuationRow[] {
   }
 
   const rows: ScopeContinuationRow[] = data.sections!.map((s) => {
+    const name = escapeHtml(s.name);
+    // A lump-sum section has no hours and no rate to show, and its price is
+    // never marked up — see shared/document/lumpSum.ts.
+    if (isLumpSumSection(s)) {
+      return { label: name, amount: s.laborTotal };
+    }
     const sTotalHours =
       typeof s.laborHoursTotal === 'number'
         ? s.laborHoursTotal
         : (s.laborHours || 0) * (s.multiplier || 1);
-    const name = escapeHtml(s.name);
     return {
       label: data.showLaborHours
         ? `${name} (${qty(sTotalHours)} ${unitLabel} @ ${formatCurrency(perUnitRate(s.laborRate) * laborMul)}${rateLabel})`
@@ -592,7 +609,7 @@ function buildLaborHTML(rawData: QuotePdfData): string {
   const showBreakdown = data.showLaborBreakdown !== false;
   const rollLaborMarkup = data.showMarkup !== true;
   const laborMul = rollLaborMarkup ? 1 + ((data.laborMarkup || 0) / 100) : 1;
-  const displayLaborTotal = data.laborTotal * laborMul;
+  const displayLaborTotal = displayLabourTotal(data, laborMul);
   const rows = labourRowsForDisplay(rawData);
 
   return `
@@ -625,7 +642,7 @@ function buildSummaryHTML(data: QuotePdfData, paidAmount?: number, amountDue?: n
   const laborMul = rollMarkup ? 1 + ((data.laborMarkup || 0) / 100) : 1;
   // Match the eyeball sum of rounded line totals shown in the materials table.
   const displayMaterialsSubtotal = sumRoundedLineTotals(data.materials, materialMul);
-  const displayLaborTotal = data.laborTotal * laborMul;
+  const displayLaborTotal = displayLabourTotal(data, laborMul);
   const displaySubtotal = displayMaterialsSubtotal + displayLaborTotal;
   const gstMode = resolveGstMode(data);
   // Under exclusive mode the GST line is *added* to reach the total, so it

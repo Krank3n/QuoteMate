@@ -43,6 +43,12 @@ export interface LaborSection {
   // rendering; see normaliseLabourToHours in shared/document/labourUnits.ts.
   laborUnit?: 'hours' | 'days';
   laborTotal: number;
+  // 'lumpSum' — laborTotal is a price the tradie typed. Rendered at that
+  // figure with no hours, no rate and NO markup applied (see
+  // shared/document/lumpSum.ts). Absent/'hourly' = derived from hours × rate.
+  pricing?: 'hourly' | 'lumpSum';
+  // Customer-facing scope text for the section, rendered under its heading.
+  description?: string;
 }
 
 export interface QuotePdfData {
