@@ -1,23 +1,24 @@
 /**
  * JobStageSheet
- * Bottom sheet for changing a Job's stage. Mirrors StageSheet one-for-one —
- * filters legal transitions via canTransition (from the shared Job state
- * machine), renders each target as a tappable row with icon + label.
+ * Bottom sheet for changing a Job's stage — the door the card's timeline
+ * pill opens. Filters legal transitions via canTransition (from the shared
+ * Job state machine) and renders each target through StageOptionRow, the
+ * same row the kebab's "Change status" submenu uses, so the two doors into
+ * one action don't look like two different features.
  */
 
 import React from 'react';
-import { View, StyleSheet, Pressable, Animated } from 'react-native';
-import { Text } from 'react-native-paper';
-import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import { Animated } from 'react-native';
 
 import type { Job, JobStage } from '../../shared/job/types';
 import { legalStageTargets, shouldOfferSchedule } from '../utils/jobStageTargets';
-import { isLiveInvoice } from '../utils/jobTimeline';
+import { documentHasOutrunJobStage, isLiveInvoice } from '../utils/jobTimeline';
 import type { Document } from '../types/document';
 import type { Tokens } from '../theme';
-import { makeStyles, useThemeColors } from '../theme';
+import { useThemeColors } from '../theme';
 import { selectionTap } from '../utils/haptics';
 import { BottomSheet, useStaggeredEntrance } from './BottomSheet';
+import { StageOptionList, StageOptionRow } from './StageOptionRow';
 
 interface JobStageSheetProps {
   visible: boolean;
@@ -143,10 +144,9 @@ export function JobStageSheet({
   depositPaid,
   onSelect,
   onSchedule,
-  title = 'Update Stage',
+  title = 'Change status',
   primaryDoc,
 }: JobStageSheetProps) {
-  const styles = useStyles();
   const themeColors = useThemeColors();
   const JOB_STAGE_META = jobStageMetaFor(themeColors);
   const showSchedule = !!onSchedule && shouldOfferSchedule(job);
@@ -175,52 +175,57 @@ export function JobStageSheet({
     onSchedule?.();
   };
 
-  return (
-    <BottomSheet visible={visible} onDismiss={onDismiss} title={title}>
-      <View style={styles.optionsContainer}>
-        {showSchedule ? (
-          <Animated.View
-            style={{
-              opacity: anims[0],
-              transform: [
-                { translateY: anims[0].interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) },
-                { scale: anims[0].interpolate({ inputRange: [0, 1], outputRange: [0.95, 1] }) },
-              ],
-            }}
-          >
-            <Pressable
-              style={({ pressed }) => [
-                styles.option,
-                pressed && styles.optionPressed,
-              ]}
-              onPress={handleSchedule}
-            >
-              <View style={[styles.iconCircle, { backgroundColor: themeColors.infoSubtle }]}>
-                <MaterialCommunityIcons
-                  name={'calendar-clock-outline' as any}
-                  size={22}
-                  color={themeColors.info}
-                />
-              </View>
-              <View style={styles.labelContainer}>
-                <Text style={styles.optionLabel}>Schedule…</Text>
-              </View>
-              <MaterialCommunityIcons
-                name="chevron-right"
-                size={20}
-                color={themeColors.textDisabled}
-              />
-            </Pressable>
-          </Animated.View>
-        ) : null}
-        {targets.map((target, index) => {
-          const meta = JOB_STAGE_META[target];
-          // Offset by 1 when the schedule row owns the first stagger slot.
-          const anim = anims[index + (showSchedule ? 1 : 0)];
+  // Same wording as the kebab's "Currently …" line, invoice correction and
+  // all — a job still sitting at `quoted` under an invoice isn't "Quoted".
+  const currentLabel = documentHasOutrunJobStage(job, primaryDoc)
+    ? 'Invoiced'
+    : JOB_STAGE_META[job.stage]?.chipLabel ?? 'Inquiry';
 
+  // Schedule first when offered, then the legal stages — the order the
+  // kebab's submenu lists them in.
+  const options: Array<{
+    key: string;
+    icon: string;
+    color: string;
+    label: string;
+    onPress: () => void;
+  }> = [
+    ...(showSchedule
+      ? [
+          {
+            key: 'schedule',
+            icon: 'calendar-clock-outline',
+            color: themeColors.info,
+            label: 'Schedule…',
+            onPress: handleSchedule,
+          },
+        ]
+      : []),
+    ...targets.map((target) => {
+      const meta = JOB_STAGE_META[target];
+      return {
+        key: target,
+        icon: meta.icon,
+        color: meta.color,
+        label: meta.actionLabel,
+        onPress: () => handleSelect(target),
+      };
+    }),
+  ];
+
+  return (
+    <BottomSheet
+      visible={visible}
+      onDismiss={onDismiss}
+      title={title}
+      subtitle={`Currently ${currentLabel}`}
+    >
+      <StageOptionList>
+        {options.map((option, index) => {
+          const anim = anims[index];
           return (
             <Animated.View
-              key={target}
+              key={option.key}
               style={{
                 opacity: anim,
                 transform: [
@@ -229,71 +234,16 @@ export function JobStageSheet({
                 ],
               }}
             >
-              <Pressable
-                style={({ pressed }) => [
-                  styles.option,
-                  pressed && styles.optionPressed,
-                ]}
-                onPress={() => handleSelect(target)}
-              >
-                <View style={[styles.iconCircle, { backgroundColor: meta.bgColor }]}>
-                  <MaterialCommunityIcons
-                    name={meta.icon as any}
-                    size={22}
-                    color={meta.color}
-                  />
-                </View>
-
-                <View style={styles.labelContainer}>
-                  <Text style={styles.optionLabel}>{meta.actionLabel}</Text>
-                </View>
-
-                <MaterialCommunityIcons
-                  name="chevron-right"
-                  size={20}
-                  color={themeColors.textDisabled}
-                />
-              </Pressable>
+              <StageOptionRow
+                icon={option.icon}
+                color={option.color}
+                label={option.label}
+                onPress={option.onPress}
+              />
             </Animated.View>
           );
         })}
-      </View>
+      </StageOptionList>
     </BottomSheet>
   );
 }
-
-const useStyles = makeStyles((t) => ({
-  optionsContainer: {
-    gap: 10,
-  },
-  option: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 14,
-    paddingHorizontal: 16,
-    borderRadius: 16,
-    backgroundColor: t.colors.surfacePressed,
-    borderWidth: 1.5,
-    borderColor: 'transparent',
-  },
-  optionPressed: {
-    backgroundColor: t.colors.surfaceOverlay,
-    transform: [{ scale: 0.98 }],
-  },
-  iconCircle: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 14,
-  },
-  labelContainer: {
-    flex: 1,
-  },
-  optionLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: t.colors.text,
-  },
-}));

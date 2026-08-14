@@ -1,23 +1,22 @@
 /**
  * Stage Sheet Component
  * Bottom sheet for changing a Document's stage. Computes legal next stages
- * from the canTransition state machine and renders them as tappable rows.
- *
- * Replaces StatusSheet for document-driven flows. Matches StatusSheet's
- * visuals one-for-one so tradies don't see a UX shift.
+ * from the canTransition state machine and renders each one through
+ * StageOptionRow — the same row the job-side status surfaces use, so a
+ * tradie changing a document's status sees the list they already know from
+ * the card pill and the kebab.
  */
 
 import React from 'react';
-import { View, StyleSheet, Pressable, Animated } from 'react-native';
-import { Text } from 'react-native-paper';
-import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import { Animated } from 'react-native';
 
 import type { Document, DocumentStage } from '../types/document';
 import { canTransition } from '../../shared/document/stage';
 import type { Tokens } from '../theme';
-import { makeStyles, useThemeColors } from '../theme';
+import { useThemeColors } from '../theme';
 import { selectionTap } from '../utils/haptics';
 import { BottomSheet, useStaggeredEntrance } from './BottomSheet';
+import { StageOptionList, StageOptionRow } from './StageOptionRow';
 
 interface StageSheetProps {
   visible: boolean;
@@ -118,9 +117,8 @@ export function StageSheet({
   onDismiss,
   doc,
   onSelect,
-  title = 'Update Stage',
+  title = 'Change status',
 }: StageSheetProps) {
-  const styles = useStyles();
   const themeColors = useThemeColors();
   const STAGE_META = stageMetaFor(themeColors);
   const targets = React.useMemo<DocumentStage[]>(() => {
@@ -135,8 +133,15 @@ export function StageSheet({
   };
 
   return (
-    <BottomSheet visible={visible} onDismiss={onDismiss} title={title}>
-      <View style={styles.optionsContainer}>
+    <BottomSheet
+      visible={visible}
+      onDismiss={onDismiss}
+      title={title}
+      // Same "Currently …" line the job-side surfaces carry, so the sheet
+      // states what it's changing FROM rather than only what it can become.
+      subtitle={`Currently ${STAGE_META[doc.stage]?.chipLabel ?? 'Draft'}`}
+    >
+      <StageOptionList>
         {targets.map((target, index) => {
           const meta = STAGE_META[target];
           const anim = anims[index];
@@ -152,71 +157,16 @@ export function StageSheet({
                 ],
               }}
             >
-              <Pressable
-                style={({ pressed }) => [
-                  styles.option,
-                  pressed && styles.optionPressed,
-                ]}
+              <StageOptionRow
+                icon={meta.icon}
+                color={meta.color}
+                label={meta.actionLabel}
                 onPress={() => handleSelect(target)}
-              >
-                <View style={[styles.iconCircle, { backgroundColor: meta.bgColor }]}>
-                  <MaterialCommunityIcons
-                    name={meta.icon as any}
-                    size={22}
-                    color={meta.color}
-                  />
-                </View>
-
-                <View style={styles.labelContainer}>
-                  <Text style={styles.optionLabel}>{meta.actionLabel}</Text>
-                </View>
-
-                <MaterialCommunityIcons
-                  name="chevron-right"
-                  size={20}
-                  color={themeColors.textDisabled}
-                />
-              </Pressable>
+              />
             </Animated.View>
           );
         })}
-      </View>
+      </StageOptionList>
     </BottomSheet>
   );
 }
-
-const useStyles = makeStyles((t) => ({
-  optionsContainer: {
-    gap: 10,
-  },
-  option: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 14,
-    paddingHorizontal: 16,
-    borderRadius: 16,
-    backgroundColor: t.colors.surfacePressed,
-    borderWidth: 1.5,
-    borderColor: 'transparent',
-  },
-  optionPressed: {
-    backgroundColor: t.colors.surfaceOverlay,
-    transform: [{ scale: 0.98 }],
-  },
-  iconCircle: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 14,
-  },
-  labelContainer: {
-    flex: 1,
-  },
-  optionLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: t.colors.text,
-  },
-}));

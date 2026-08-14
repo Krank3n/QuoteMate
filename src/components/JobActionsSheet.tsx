@@ -24,6 +24,7 @@ import { legalStageTargets, shouldOfferSchedule } from '../utils/jobStageTargets
 import { canRevertToQuote } from '../utils/revertToQuote';
 import { documentHasOutrunJobStage, isLiveInvoice } from '../utils/jobTimeline';
 import { jobStageMetaFor } from './JobStageSheet';
+import { StageOptionRow } from './StageOptionRow';
 
 export type JobAction =
   | 'takePayment'
@@ -362,83 +363,51 @@ export function JobActionsSheet({
       {statusExpanded ? (
         <View style={styles.submenu}>
           {canConvertToInvoice ? (
-            <Pressable
+            <StageOptionRow
+              icon="file-swap-outline"
+              color={themeColors.accentText}
+              label="Convert to invoice…"
               onPress={() => {
                 selectionTap();
                 onSelect('convertToInvoice', job);
               }}
-              style={({ pressed }) => [
-                styles.submenuRow,
-                pressed && styles.rowPressed,
-              ]}
-            >
-              <MaterialCommunityIcons
-                name={'file-swap-outline' as any}
-                size={18}
-                color={themeColors.accentText}
-              />
-              <Text style={styles.submenuLabel}>Convert to invoice…</Text>
-            </Pressable>
+            />
           ) : null}
           {canUndoConvert ? (
-            <Pressable
+            <StageOptionRow
+              icon="undo-variant"
+              color={themeColors.textMuted}
+              label="Back to a quote…"
               onPress={() => {
                 selectionTap();
                 onSelect('revertToQuote', job);
               }}
-              style={({ pressed }) => [
-                styles.submenuRow,
-                pressed && styles.rowPressed,
-              ]}
-            >
-              <MaterialCommunityIcons
-                name={'undo-variant' as any}
-                size={18}
-                color={themeColors.textMuted}
-              />
-              <Text style={styles.submenuLabel}>Back to a quote…</Text>
-            </Pressable>
+            />
           ) : null}
           {showSchedule ? (
-            <Pressable
+            <StageOptionRow
+              icon="calendar-clock-outline"
+              color={themeColors.info}
+              label="Schedule…"
               onPress={() => {
                 selectionTap();
                 onSchedule?.(job);
               }}
-              style={({ pressed }) => [
-                styles.submenuRow,
-                pressed && styles.rowPressed,
-              ]}
-            >
-              <MaterialCommunityIcons
-                name={'calendar-clock-outline' as any}
-                size={18}
-                color={themeColors.info}
-              />
-              <Text style={styles.submenuLabel}>Schedule…</Text>
-            </Pressable>
+            />
           ) : null}
           {stageTargets.map((stage) => {
             const meta = stageMeta[stage];
             return (
-              <Pressable
+              <StageOptionRow
                 key={stage}
+                icon={meta.icon}
+                color={meta.color}
+                label={meta.actionLabel}
                 onPress={() => {
                   selectionTap();
                   onSelectStage?.(stage, job);
                 }}
-                style={({ pressed }) => [
-                  styles.submenuRow,
-                  pressed && styles.rowPressed,
-                ]}
-              >
-                <MaterialCommunityIcons
-                  name={meta.icon as any}
-                  size={18}
-                  color={meta.color}
-                />
-                <Text style={styles.submenuLabel}>{meta.actionLabel}</Text>
-              </Pressable>
+              />
             );
           })}
         </View>
@@ -481,18 +450,6 @@ const useStyles = makeStyles((t) => ({
     borderLeftWidth: 2,
     borderLeftColor: t.colors.border,
     gap: 2,
-  },
-  submenuRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    borderRadius: 10,
-  },
-  submenuLabel: {
-    fontSize: 15,
-    color: t.colors.text,
   },
   row: {
     flexDirection: 'row',
