@@ -64,6 +64,7 @@ import {
 import { pickSuccessMessage } from './jobPreviewCopy';
 import { buildPreviewQuoteSave } from './previewQuoteSave';
 import { GridBackground } from '../../components/GridBackground';
+import { resolvePriceDetail } from '../../../shared/document/priceDetail';
 
 export function JobPreviewScreen() {
   const styles = useStyles();
@@ -643,16 +644,7 @@ export function JobPreviewScreen() {
                 ? workingDoc.showMarkup === true
                 : businessSettings?.showMarkup === true
             }
-            showMaterialCosts={
-              workingDoc.showMaterialCosts !== undefined
-                ? workingDoc.showMaterialCosts
-                : businessSettings?.showMaterialCostsByDefault !== false
-            }
-            showLaborCosts={
-              workingDoc.showLaborCosts !== undefined
-                ? workingDoc.showLaborCosts
-                : businessSettings?.showLaborCostsByDefault !== false
-            }
+            priceDetail={resolvePriceDetail(workingDoc, businessSettings)}
             requireDeposit={(workingDoc as any).requireDeposit === true}
             depositPercentage={Number((workingDoc as any).depositPercentage ?? 0)}
             onChange={handleDisplaySettingsChange}

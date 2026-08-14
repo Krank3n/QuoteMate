@@ -105,6 +105,8 @@ import {
   reconcilePayout,
 } from './referralProgram.helpers';
 import { randomUUID } from 'crypto';
+import { buildAcceptanceQuotePayload } from './acceptancePayload';
+import { lumpSumLabourTotal, markupableLabourTotal } from './shared/document/lumpSum';
 import {
   normalizeResetEmail,
   planPasswordReset,
@@ -219,7 +221,10 @@ function applyHideMarkupForDisplay(q: any, businessSettings?: any) {
   const matMult = 1 + matMarkup / 100;
   const laborMult = 1 + laborMarkup / 100;
   const materialsSubtotal = (q.materialsSubtotal || 0) * matMult;
-  const laborTotal = (q.laborTotal || 0) * laborMult;
+  // Lump-sum sections pass through at the figure the tradie typed — only the
+  // hourly slice of labour is inflated. See shared/document/lumpSum.ts.
+  const lumpSum = lumpSumLabourTotal(q.sections);
+  const laborTotal = lumpSum + markupableLabourTotal(q.laborTotal || 0, q.sections) * laborMult;
   return {
     materials: (q.materials || []).map((m: any) => ({
       ...m,
@@ -6438,66 +6443,14 @@ export const getQuoteForAcceptance = functions.https.onRequest((req, res) => {
         await quoteRef.update(viewUpdate);
       }
 
-      // Return quote data for the acceptance page (excluding sensitive fields)
-      const photoUrls = (foundQuote.photos || [])
-        .map((p: any) => p.storageUrl)
-        .filter(Boolean);
-
-      // When markup is hidden, roll it into materials AND labor for the
+      // Return quote data for the acceptance page (excluding sensitive fields).
+      // When markup is hidden, roll it into materials AND labour for the
       // customer view so the visible lines reconcile to the final total.
       const display = applyHideMarkupForDisplay(foundQuote, businessSettings);
 
-      // Mirror the PDF's visibility flags on the web acceptance page so a
-      // customer who got a "lump sum only" PDF doesn't see the breakdown
-      // here. Inheritance: per-doc override > business default > show.
-      const showMaterialCosts = foundQuote.showMaterialCosts !== undefined
-        ? foundQuote.showMaterialCosts === true
-        : (businessSettings?.showMaterialCostsByDefault !== false);
-      const showLaborCosts = foundQuote.showLaborCosts !== undefined
-        ? foundQuote.showLaborCosts === true
-        : (businessSettings?.showLaborCostsByDefault !== false);
-      const showSubtotal = showMaterialCosts || showLaborCosts;
-
       res.status(200).json({
         success: true,
-        quote: {
-          id: foundQuote.id,
-          quoteNumber: foundQuote.quoteNumber,
-          customerName: foundQuote.customerName,
-          jobName: foundQuote.job?.name,
-          jobDescription: foundQuote.job?.description,
-          ...(showMaterialCosts ? {
-            materials: display.materials.map((m: any) => ({
-              name: m.name,
-              quantity: m.quantity,
-              unit: m.unit,
-              totalPrice: m.totalPrice || 0,
-            })),
-            materialsSubtotal: display.materialsSubtotal,
-          } : {}),
-          ...(showLaborCosts ? {
-            laborTotal: display.laborTotal,
-          } : {}),
-          ...(showSubtotal ? {
-            subtotal: display.subtotal,
-          } : {}),
-          markupAmount: display.markupAmount,
-          travelAdjustmentAmount: foundQuote.travelAdjustmentAmount || 0,
-          gst: foundQuote.gst,
-          pricesIncludeGst: foundQuote.pricesIncludeGst === true,
-          gstRegistered: foundQuote.gstRegistered !== false,
-          total: foundQuote.total,
-          notes: foundQuote.notes,
-          // Only expose the immutable send-time snapshot. Never fall back to
-          // live settings here or an old SMS link could show revised terms.
-          terms: foundQuote.termsSnapshot || null,
-          createdAt: foundQuote.createdAt,
-          aiEmailBody: foundQuote.aiEmailBody || null,
-          photoUrls: photoUrls,
-          showMaterialCosts,
-          showLaborCosts,
-          showSubtotal,
-        },
+        quote: buildAcceptanceQuotePayload(foundQuote, businessSettings, display),
         business: {
           name: businessSettings?.businessName || 'Your Trade Business',
           email: businessSettings?.email,
@@ -7229,6 +7182,8 @@ export function generateAcceptancePage(token: string): string {
     .line-items tr:last-child td { border-bottom: none; }
     .line-items td.qty { color: var(--muted); white-space: nowrap; }
     .line-items td.price { font-weight: 600; }
+    /* Scope paragraph under a work item's title. */
+    .scope-body { margin-top: 4px; font-size: 13px; line-height: 1.45; color: var(--muted); }
     .totals { margin-top: 4px; }
     .totals-row {
       display: flex; justify-content: space-between;
@@ -7429,35 +7384,69 @@ export function generateAcceptancePage(token: string): string {
           '</div>';
       }
 
-      // Materials (only present when the tradie shows material costs)
+      // Line items. Three shapes, matching the PDF exactly:
+      //   every line a work item -> a numbered Project Scope table
+      //   'itemised'             -> Item / Qty / Price
+      //   'summary'              -> names only; the totals block carries money
+      var priceDetail = quote.priceDetail || 'itemised';
+      var perLineMoney = priceDetail === 'itemised';
       var materialsHtml = '';
       if (quote.materials && quote.materials.length > 0) {
-        var rows = quote.materials.map(function(m) {
-          return '<tr>' +
-            '<td>' + escapeHtml(m.name) + '</td>' +
-            '<td class="qty">' + escapeHtml(String(m.quantity)) + ' ' + escapeHtml(m.unit || '') + '</td>' +
-            '<td class="price">' + formatCurrency(m.totalPrice) + '</td>' +
-          '</tr>';
-        }).join('');
-        materialsHtml =
-          '<div class="section">' +
-            '<div class="section-title">Materials</div>' +
-            '<table class="line-items">' +
-              '<thead><tr><th>Item</th><th class="qty">Qty</th><th class="price">Price</th></tr></thead>' +
-              '<tbody>' + rows + '</tbody>' +
-            '</table>' +
-          '</div>';
+        var allWork = quote.materials.every(function(m) { return m.kind === 'work'; });
+        if (allWork) {
+          var scopeRows = quote.materials.map(function(m, i) {
+            var body = m.scope ? '<div class="scope-body">' + nl2br(m.scope) + '</div>' : '';
+            return '<tr>' +
+              '<td class="qty">' + (i + 1) + '</td>' +
+              '<td><strong>' + escapeHtml(m.name) + '</strong>' + body + '</td>' +
+              (perLineMoney ? '<td class="price">' + formatCurrency(m.totalPrice) + '</td>' : '') +
+            '</tr>';
+          }).join('');
+          materialsHtml =
+            '<div class="section">' +
+              '<table class="line-items">' +
+                '<thead><tr><th class="qty">#</th><th>Project Scope</th>' +
+                  (perLineMoney ? '<th class="price">Line Total</th>' : '') +
+                '</tr></thead>' +
+                '<tbody>' + scopeRows + '</tbody>' +
+              '</table>' +
+            '</div>';
+        } else {
+          var rows = quote.materials.map(function(m) {
+            var isWork = m.kind === 'work';
+            var body = isWork && m.scope ? '<div class="scope-body">' + nl2br(m.scope) + '</div>' : '';
+            if (!perLineMoney) {
+              return '<tr><td colspan="3">' + escapeHtml(m.name) + body + '</td></tr>';
+            }
+            return '<tr>' +
+              '<td>' + escapeHtml(m.name) + body + '</td>' +
+              '<td class="qty">' + (isWork ? '' : escapeHtml(String(m.quantity)) + ' ' + escapeHtml(m.unit || '')) + '</td>' +
+              '<td class="price">' + formatCurrency(m.totalPrice) + '</td>' +
+            '</tr>';
+          }).join('');
+          materialsHtml =
+            '<div class="section">' +
+              '<div class="section-title">' + (perLineMoney ? 'Materials' : 'Included') + '</div>' +
+              '<table class="line-items">' +
+                (perLineMoney
+                  ? '<thead><tr><th>Item</th><th class="qty">Qty</th><th class="price">Price</th></tr></thead>'
+                  : '<thead><tr><th colspan="3">Item</th></tr></thead>') +
+                '<tbody>' + rows + '</tbody>' +
+              '</table>' +
+            '</div>';
+        }
       }
 
-      // Summary — mirrors the emailed PDF's visibility settings
+      // Summary — mirrors the emailed PDF exactly. The Materials/Labour split
+      // is 'itemised' only; GST shows in every mode (legal disclosure).
       var summaryRows = '';
-      if (quote.showMaterialCosts !== false && quote.materialsSubtotal !== undefined) {
+      if (perLineMoney && quote.materialsSubtotal !== undefined) {
         summaryRows += '<div class="totals-row"><span>Materials</span><span>' + formatCurrency(quote.materialsSubtotal) + '</span></div>';
       }
-      if (quote.showLaborCosts !== false && quote.laborTotal !== undefined) {
+      if (perLineMoney && quote.laborTotal !== undefined) {
         summaryRows += '<div class="totals-row"><span>Labour</span><span>' + formatCurrency(quote.laborTotal) + '</span></div>';
       }
-      if (quote.showSubtotal !== false && quote.subtotal !== undefined) {
+      if (priceDetail !== 'total' && quote.subtotal !== undefined) {
         var sub = quote.subtotal + (quote.markupAmount || 0) + (quote.travelAdjustmentAmount || 0);
         summaryRows += '<div class="totals-row"><span>' + (gstMode === 'exclusive' ? 'Subtotal (ex GST)' : 'Subtotal') + '</span><span>' + formatCurrency(sub) + '</span></div>';
       }

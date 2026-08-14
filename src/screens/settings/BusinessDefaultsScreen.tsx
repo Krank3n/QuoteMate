@@ -30,7 +30,19 @@ import { checkSquareConnection } from '../../services/squareService';
 import { defaultAuTradieTerms, hashTerms, isUnmodifiedStarterTerms } from '../../../shared/pdf/terms/defaultAuTradie';
 import { PASSTHROUGH_SURCHARGE_PCT } from '../../../shared/pdf/squareFees';
 import { resolveGstMode, GstMode } from '../../../shared/document';
+import { resolvePriceDetail, legacyFlagsFor, type PriceDetail } from '../../../shared/document/priceDetail';
 import { GridBackground } from '../../components/GridBackground';
+
+/** Mirrors the per-document control on the preview screen. */
+const PRICE_DETAIL_OPTIONS: { value: PriceDetail; label: string; blurb: string }[] = [
+  { value: 'itemised', label: 'Itemised', blurb: 'Every line with its quantity and unit price.' },
+  {
+    value: 'summary',
+    label: 'Scope only',
+    blurb: 'What you\u2019re doing and the section totals \u2014 no quantities, no unit prices.',
+  },
+  { value: 'total', label: 'Total only', blurb: 'One number: the total.' },
+];
 
 const GST_MODE_DESCRIPTIONS: Record<GstMode, string> = {
   exclusive: 'Prices you enter are ex-GST. The quote adds 10% GST to the total.',
@@ -53,8 +65,7 @@ export function BusinessDefaultsScreen() {
   const [surchargePaymentFees, setSurchargePaymentFees] = useState(false);
   const [gstMode, setGstMode] = useState<GstMode>('exclusive');
   const [showMarkup, setShowMarkup] = useState(false);
-  const [showMaterialCostsByDefault, setShowMaterialCostsByDefault] = useState(true);
-  const [showLaborCostsByDefault, setShowLaborCostsByDefault] = useState(true);
+  const [priceDetail, setPriceDetail] = useState<PriceDetail>('itemised');
   const [autoCustomerFollowUp, setAutoCustomerFollowUp] = useState(false);
   const [autoStartMic, setAutoStartMic] = useState(true);
   const [termsAndConditions, setTermsAndConditions] = useState('');
@@ -76,8 +87,9 @@ export function BusinessDefaultsScreen() {
     const sf = businessSettings.surchargePaymentFees === true;
     const gm = resolveGstMode(businessSettings);
     const sm = businessSettings.showMarkup === true;
-    const smc = businessSettings.showMaterialCostsByDefault !== false;
-    const slc = businessSettings.showLaborCostsByDefault !== false;
+    // Resolved, never read raw — an account that only ever set the legacy
+    // pair migrates on read with no backfill.
+    const pd = resolvePriceDetail(null, businessSettings);
     const acf = businessSettings.autoCustomerFollowUpEnabled === true;
     const asm = businessSettings.autoStartMicOnMate !== false;
     const tc = businessSettings.termsAndConditions ?? '';
@@ -91,13 +103,12 @@ export function BusinessDefaultsScreen() {
     setSurchargePaymentFees(sf);
     setGstMode(gm);
     setShowMarkup(sm);
-    setShowMaterialCostsByDefault(smc);
-    setShowLaborCostsByDefault(slc);
+    setPriceDetail(pd);
     setAutoCustomerFollowUp(acf);
     setAutoStartMic(asm);
     setTermsAndConditions(tc);
 
-    setInitialSnapshot(JSON.stringify({ lr, mk, lm, dp, rd, tm, sf, gm, sm, smc, slc, acf, asm, tc }));
+    setInitialSnapshot(JSON.stringify({ lr, mk, lm, dp, rd, tm, sf, gm, sm, pd, acf, asm, tc }));
   }, [businessSettings]);
 
   // Re-check on focus so the deposit + surcharge toggles unlock the moment
@@ -124,8 +135,7 @@ export function BusinessDefaultsScreen() {
       sf: surchargePaymentFees,
       gm: gstMode,
       sm: showMarkup,
-      smc: showMaterialCostsByDefault,
-      slc: showLaborCostsByDefault,
+      pd: priceDetail,
       acf: autoCustomerFollowUp,
       asm: autoStartMic,
       tc: termsAndConditions,
@@ -134,7 +144,7 @@ export function BusinessDefaultsScreen() {
   }, [
     laborRate, markup, laborMarkup, defaultDepositPercentage, requireDepositByDefault,
     transportMarkupEnabled, surchargePaymentFees, gstMode,
-    showMarkup, showMaterialCostsByDefault, showLaborCostsByDefault, autoCustomerFollowUp, autoStartMic, termsAndConditions,
+    showMarkup, priceDetail, autoCustomerFollowUp, autoStartMic, termsAndConditions,
     initialSnapshot,
   ]);
 
@@ -161,8 +171,12 @@ export function BusinessDefaultsScreen() {
         pricesIncludeGst: gstMode === 'inclusive',
         gstRegistered: gstMode !== 'none',
         showMarkup,
-        showMaterialCostsByDefault,
-        showLaborCostsByDefault,
+        defaultPriceDetail: priceDetail,
+        // Dual-written for one release so an older installed build reading
+        // the legacy pair still renders documents the way this screen says.
+        // Remove with legacyFlagsFor() in shared/document/priceDetail.ts.
+        showMaterialCostsByDefault: legacyFlagsFor(priceDetail).showMaterialCosts,
+        showLaborCostsByDefault: legacyFlagsFor(priceDetail).showLaborCosts,
         autoCustomerFollowUpEnabled: autoCustomerFollowUp,
         autoStartMicOnMate: autoStartMic,
         termsAndConditions: termsAndConditions.trim() || undefined,
@@ -293,32 +307,33 @@ export function BusinessDefaultsScreen() {
               />
             </View>
 
-            <View style={styles.toggleRow}>
-              <View style={styles.toggleLabel}>
-                <Text style={styles.toggleTitle}>Show Material Costs</Text>
-                <Text style={styles.toggleDescription}>
-                  When off, the materials breakdown and subtotal are hidden. Turn both this and labour off to show only the grand total.
-                </Text>
-              </View>
-              <Switch
-                value={showMaterialCostsByDefault}
-                onValueChange={setShowMaterialCostsByDefault}
-                color={themeColors.accentText}
-              />
+            {/* One control, mirroring the per-document one on the preview
+                screen. Two switches whose four combinations meant three
+                things — and which couldn't express "scope only" at all. */}
+            <View style={styles.toggleLabel}>
+              <Text style={styles.toggleTitle}>What the customer sees</Text>
+              <Text style={styles.toggleDescription}>
+                {PRICE_DETAIL_OPTIONS.find((o) => o.value === priceDetail)?.blurb}
+              </Text>
             </View>
-
-            <View style={styles.toggleRow}>
-              <View style={styles.toggleLabel}>
-                <Text style={styles.toggleTitle}>Show Labour Costs</Text>
-                <Text style={styles.toggleDescription}>
-                  When off, the labour breakdown and subtotal are hidden. Turn both this and materials off to show only the grand total.
-                </Text>
-              </View>
-              <Switch
-                value={showLaborCostsByDefault}
-                onValueChange={setShowLaborCostsByDefault}
-                color={themeColors.accentText}
-              />
+            <View style={styles.segmented}>
+              {PRICE_DETAIL_OPTIONS.map((opt) => {
+                const active = priceDetail === opt.value;
+                return (
+                  <TouchableOpacity
+                    key={opt.value}
+                    style={[styles.segment, active && styles.segmentActive]}
+                    onPress={() => setPriceDetail(opt.value)}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: active }}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={[styles.segmentLabel, active && styles.segmentLabelActive]}>
+                      {opt.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
           </Surface>
 
@@ -576,6 +591,33 @@ const useStyles = makeStyles((t) => ({
     fontSize: 12,
     color: t.colors.textMuted,
     marginTop: 2,
+  },
+  segmented: {
+    flexDirection: 'row',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: t.colors.border,
+    backgroundColor: t.colors.bg,
+    overflow: 'hidden',
+    marginTop: 10,
+  },
+  segment: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 9,
+    paddingHorizontal: 6,
+  },
+  segmentActive: {
+    backgroundColor: t.colors.accentSubtle,
+  },
+  segmentLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: t.colors.textMuted,
+  },
+  segmentLabelActive: {
+    color: t.colors.accentText,
   },
   connectSquareButton: {
     alignSelf: 'flex-start',

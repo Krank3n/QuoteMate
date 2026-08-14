@@ -30,6 +30,14 @@ export {
 
 export { isLumpSumSection, lumpSumLabourTotal, markupableLabourTotal } from './lumpSum';
 
+export type { PriceDetail } from './priceDetail';
+export {
+  resolvePriceDetail,
+  legacyFlagsFor,
+  showsPerLineMoney,
+  showsLineItems,
+} from './priceDetail';
+
 export type { GstMode } from './gstMode';
 export { resolveGstMode, keepSupplierPriceInclusive, NO_GST_NOTE } from './gstMode';
 

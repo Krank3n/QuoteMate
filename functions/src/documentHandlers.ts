@@ -31,6 +31,7 @@ import {
 import { hashTerms } from './shared/pdf/terms/defaultAuTradie';
 import { toPdfMaterials } from './shared/pdf/mapMaterial';
 import { lumpSumLabourTotal, markupableLabourTotal } from './shared/document/lumpSum';
+import { resolvePriceDetail } from './shared/document/priceDetail';
 import { dollarsToCents, centsToDollars } from './shared/pdf/money';
 import {
   quoteRecordToDocumentRecord,
@@ -356,6 +357,7 @@ interface BusinessSettings {
   brandColor?: string;
   pdfTemplate?: any;
   showMarkup?: boolean;
+  defaultPriceDetail?: 'itemised' | 'summary' | 'total';
   showMaterialCostsByDefault?: boolean;
   showLaborCostsByDefault?: boolean;
   showLaborHours?: boolean;
@@ -494,12 +496,10 @@ export function buildQuotePdfHtmlForQuote(
       showMarkup: quote.showMarkup !== undefined
         ? quote.showMarkup === true
         : business.showMarkup === true,
-      showMaterialCosts: quote.showMaterialCosts !== undefined
-        ? quote.showMaterialCosts
-        : business.showMaterialCostsByDefault !== false,
-      showLaborCosts: quote.showLaborCosts !== undefined
-        ? quote.showLaborCosts
-        : business.showLaborCostsByDefault !== false,
+      priceDetail: resolvePriceDetail(quote, business),
+      requireDeposit: quote.requireDeposit === true,
+      depositPercentage: quote.depositPercentage,
+      depositAmount: quote.depositAmount,
       travelAdjustment: quote.travelAdjustment,
       gst: quote.gst || 0,
       total: quote.total || 0,
@@ -809,12 +809,7 @@ async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailRes
     }
   }
 
-  const showMaterialCostsEmail = quote.showMaterialCosts !== undefined
-    ? quote.showMaterialCosts !== false
-    : business.showMaterialCostsByDefault !== false;
-  const showLaborCostsEmail = quote.showLaborCosts !== undefined
-    ? quote.showLaborCosts !== false
-    : business.showLaborCostsByDefault !== false;
+  const emailPriceDetail = resolvePriceDetail(quote, business);
 
   const htmlContent = buildQuoteEmailHtml({
     customerName: quote.customerName || 'Client',
@@ -834,8 +829,7 @@ async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailRes
     depositPayNowUrl,
     hasTerms: !!termsToSend,
     surchargePaymentFees: business.surchargePaymentFees === true,
-    showMaterialCosts: showMaterialCostsEmail,
-    showLaborCosts: showLaborCostsEmail,
+    priceDetail: emailPriceDetail,
     business: businessData,
   });
 
@@ -979,12 +973,7 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
     address: business.address, logoUrl, brandColor: business.brandColor,
   };
 
-  const showMaterialCostsEmail = invoice.showMaterialCosts !== undefined
-    ? invoice.showMaterialCosts !== false
-    : business.showMaterialCostsByDefault !== false;
-  const showLaborCostsEmail = invoice.showLaborCosts !== undefined
-    ? invoice.showLaborCosts !== false
-    : business.showLaborCostsByDefault !== false;
+  const emailPriceDetail = resolvePriceDetail(invoice, business);
 
   const plan = await resolveUserPlan(userId);
 
@@ -1005,8 +994,7 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
     depositCredit: Number(invoice.depositCredit) > 0 ? Number(invoice.depositCredit) : undefined,
     hasTerms: !!termsToSend,
     surchargePaymentFees: business.surchargePaymentFees === true,
-    showMaterialCosts: showMaterialCostsEmail,
-    showLaborCosts: showLaborCostsEmail,
+    priceDetail: emailPriceDetail,
     paymentMethods: business.paymentMethods,
     plan,
     business: businessData,
@@ -1043,12 +1031,7 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
       showMarkup: invoice.showMarkup !== undefined
         ? invoice.showMarkup === true
         : business.showMarkup === true,
-      showMaterialCosts: invoice.showMaterialCosts !== undefined
-        ? invoice.showMaterialCosts
-        : business.showMaterialCostsByDefault !== false,
-      showLaborCosts: invoice.showLaborCosts !== undefined
-        ? invoice.showLaborCosts
-        : business.showLaborCostsByDefault !== false,
+      priceDetail: resolvePriceDetail(invoice, business),
       travelAdjustment: invoice.travelAdjustment,
       gst: invoice.gst || 0,
       total: invoice.total || 0,

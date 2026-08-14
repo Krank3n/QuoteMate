@@ -19,22 +19,42 @@ import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { makeStyles, useThemeColors } from '../theme';
 import { checkSquareConnection } from '../services/squareService';
 import { formatCurrency } from '../utils/quoteCalculator';
+import { legacyFlagsFor, type PriceDetail } from '../../shared/document/priceDetail';
 
 export interface InvoiceDisplaySettingsChange {
   showMarkup?: boolean;
+  priceDetail?: PriceDetail;
+  /**
+   * @deprecated Dual-written alongside `priceDetail` for one release so an
+   * older installed build reading the legacy pair still renders the document
+   * the way the tradie set it up here. Remove together with legacyFlagsFor()
+   * in shared/document/priceDetail.ts.
+   */
   showMaterialCosts?: boolean;
+  /** @deprecated See showMaterialCosts. */
   showLaborCosts?: boolean;
   requireDeposit?: boolean;
   depositPercentage?: number;
   depositAmount?: number;
 }
 
+/** The three options, in increasing order of what stays private. */
+const PRICE_DETAIL_OPTIONS: { value: PriceDetail; label: string; blurb: string }[] = [
+  { value: 'itemised', label: 'Itemised', blurb: 'Every line with its quantity and unit price.' },
+  {
+    value: 'summary',
+    label: 'Scope only',
+    blurb: 'What you\u2019re doing and the section totals \u2014 no quantities, no unit prices.',
+  },
+  { value: 'total', label: 'Total only', blurb: 'One number: the total.' },
+];
+
 interface InvoiceDisplaySettingsProps {
   mode: 'quote' | 'invoice';
   total: number;
   showMarkup: boolean;
-  showMaterialCosts: boolean;
-  showLaborCosts: boolean;
+  /** Resolved by the parent through shared/document/priceDetail.ts. */
+  priceDetail: PriceDetail;
   requireDeposit: boolean;
   depositPercentage: number;
   onChange: (partial: InvoiceDisplaySettingsChange) => void;
@@ -69,26 +89,21 @@ function computeDeposit(total: number, pct: number): number {
 
 function buildSummary({
   showMarkup,
-  showMaterialCosts,
-  showLaborCosts,
+  priceDetail,
   requireDeposit,
   depositPercentage,
   depositAmount,
 }: {
   showMarkup: boolean;
-  showMaterialCosts: boolean;
-  showLaborCosts: boolean;
+  priceDetail: PriceDetail;
   requireDeposit: boolean;
   depositPercentage: number;
   depositAmount: number;
 }): string {
-  const hidden: string[] = [];
-  if (!showMarkup) hidden.push('markup');
-  if (!showMaterialCosts) hidden.push('materials');
-  if (!showLaborCosts) hidden.push('labour');
-
-  const parts: string[] = [];
-  parts.push(hidden.length === 0 ? 'All breakdowns shown' : `Hidden: ${hidden.join(', ')}`);
+  const parts: string[] = [
+    PRICE_DETAIL_OPTIONS.find((o) => o.value === priceDetail)?.label ?? 'Itemised',
+  ];
+  if (!showMarkup) parts.push('markup hidden');
 
   if (requireDeposit && depositPercentage > 0) {
     parts.push(
@@ -107,8 +122,7 @@ export function InvoiceDisplaySettings(props: InvoiceDisplaySettingsProps) {
     mode,
     total,
     showMarkup,
-    showMaterialCosts,
-    showLaborCosts,
+    priceDetail,
     requireDeposit,
     depositPercentage,
     onChange,
@@ -195,19 +209,35 @@ export function InvoiceDisplaySettings(props: InvoiceDisplaySettingsProps) {
         onValueChange={(v) => onChange({ showMarkup: v })}
       />
       <Divider style={styles.rowDivider} />
-      <ToggleRow
-        title={`Show material breakdown on ${docLabel}`}
-        subtitle="When off, the materials breakdown and subtotal are hidden. Turn both this and labour off to show only the grand total."
-        value={showMaterialCosts}
-        onValueChange={(v) => onChange({ showMaterialCosts: v })}
-      />
-      <Divider style={styles.rowDivider} />
-      <ToggleRow
-        title={`Show labour breakdown on ${docLabel}`}
-        subtitle="When off, the labour breakdown and subtotal are hidden. Turn both this and materials off to show only the grand total."
-        value={showLaborCosts}
-        onValueChange={(v) => onChange({ showLaborCosts: v })}
-      />
+
+      {/* One control instead of two switches whose four combinations
+          expressed three meanings — and which had no way at all to say
+          "show them the scope, not my unit prices". */}
+      <View style={styles.detailBlock}>
+        <Text style={styles.toggleTitle}>{`What the customer sees on the ${docLabel}`}</Text>
+        <View style={styles.segmented}>
+          {PRICE_DETAIL_OPTIONS.map((opt) => {
+            const active = priceDetail === opt.value;
+            return (
+              <TouchableOpacity
+                key={opt.value}
+                style={[styles.segment, active && styles.segmentActive]}
+                onPress={() => onChange({ priceDetail: opt.value, ...legacyFlagsFor(opt.value) })}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+                activeOpacity={0.85}
+              >
+                <Text style={[styles.segmentLabel, active && styles.segmentLabelActive]}>
+                  {opt.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+        <Text style={styles.toggleSubtitle}>
+          {`${PRICE_DETAIL_OPTIONS.find((o) => o.value === priceDetail)?.blurb} Your own screens always show the lot \u2014 this only changes the ${docLabel}, the email and the acceptance page.`}
+        </Text>
+      </View>
 
       <View style={styles.depositSection}>
         <Text style={styles.depositHeaderLabel}>DEPOSIT</Text>
@@ -279,8 +309,7 @@ export function InvoiceDisplaySettings(props: InvoiceDisplaySettingsProps) {
   if (variant === 'collapsible') {
     const summary = buildSummary({
       showMarkup,
-      showMaterialCosts,
-      showLaborCosts,
+      priceDetail,
       requireDeposit,
       depositPercentage,
       depositAmount: requireDeposit
@@ -450,6 +479,36 @@ const useStyles = makeStyles((t) => ({
     backgroundColor: t.colors.border,
     height: StyleSheet.hairlineWidth,
     opacity: 0.6,
+  },
+  detailBlock: {
+    paddingVertical: 10,
+    gap: 8,
+  },
+  segmented: {
+    flexDirection: 'row',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: t.colors.border,
+    backgroundColor: t.colors.bg,
+    overflow: 'hidden',
+  },
+  segment: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 9,
+    paddingHorizontal: 6,
+  },
+  segmentActive: {
+    backgroundColor: t.colors.accentSubtle,
+  },
+  segmentLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: t.colors.textMuted,
+  },
+  segmentLabelActive: {
+    color: t.colors.accentText,
   },
   depositSection: {
     marginTop: 18,

@@ -32,6 +32,10 @@ import {
   BusinessPdfData,
 } from '../../shared/pdf';
 import { ServiceReport } from '../../shared/report/types';
+// One resolver for "how much of the money does the customer see" — the
+// per-doc override / business default / fallback chain used to be written
+// out by hand at every one of these mapping sites.
+import { resolvePriceDetail } from '../../shared/document/priceDetail';
 import { useStore } from '../store/useStore';
 import { checkSquareConnection } from '../services/squareService';
 
@@ -275,12 +279,7 @@ export async function generateDocumentPDF(
       showMarkup: doc.showMarkup !== undefined
         ? doc.showMarkup === true
         : businessSettings?.showMarkup === true,
-      showMaterialCosts: doc.showMaterialCosts !== undefined
-        ? doc.showMaterialCosts
-        : businessSettings?.showMaterialCostsByDefault !== false,
-      showLaborCosts: doc.showLaborCosts !== undefined
-        ? doc.showLaborCosts
-        : businessSettings?.showLaborCostsByDefault !== false,
+      priceDetail: resolvePriceDetail(doc, businessSettings),
       travelAdjustment: doc.travelAdjustment,
       gst: doc.gst,
       total: doc.total,
@@ -333,12 +332,10 @@ export async function generateDocumentPDF(
     showMarkup: doc.showMarkup !== undefined
       ? doc.showMarkup === true
       : businessSettings?.showMarkup === true,
-    showMaterialCosts: doc.showMaterialCosts !== undefined
-      ? doc.showMaterialCosts
-      : businessSettings?.showMaterialCostsByDefault !== false,
-    showLaborCosts: doc.showLaborCosts !== undefined
-      ? doc.showLaborCosts
-      : businessSettings?.showLaborCostsByDefault !== false,
+    priceDetail: resolvePriceDetail(doc, businessSettings),
+    requireDeposit: (doc as any).requireDeposit === true,
+    depositPercentage: (doc as any).depositPercentage,
+    depositAmount: (doc as any).depositAmount,
     travelAdjustment: doc.travelAdjustment,
     gst: doc.gst,
     total: doc.total,

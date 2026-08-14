@@ -20,6 +20,7 @@ import type {
   XeroSyncStatus,
   LaborUnit,
   StoredLabourUnit,
+  PriceDetail,
 } from './index';
 
 export type {
@@ -88,8 +89,13 @@ export interface Document {
 
   // ===== Display flags =====
   showMarkup?: boolean;
+  /** How much of the money the customer sees — see shared/document/priceDetail.ts. */
+  priceDetail?: PriceDetail;
+  /** @deprecated Use priceDetail; still read, and dual-written for one release. */
   showMaterialCosts?: boolean;
+  /** @deprecated Use priceDetail. */
   showLaborCosts?: boolean;
+  /** @deprecated Superseded by priceDetail; still read for existing documents. */
   showLaborBreakdown?: boolean;
 
   // ===== Travel adjustment =====

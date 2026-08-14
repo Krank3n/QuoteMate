@@ -2,6 +2,8 @@
  * Shared PDF types used by both client and server PDF generators
  */
 
+import type { PriceDetail } from '../document/priceDetail';
+
 export type PdfTemplateId = 'professional' | 'clean' | 'bold' | 'tradesman' | 'accredited';
 
 export interface PdfTemplateInfo {
@@ -82,13 +84,15 @@ export interface QuotePdfData {
   // the customer sees a single rolled-in price.
   laborMarkup?: number;
   showMarkup?: boolean;
-  // Materials cost visibility. When false, the renderer hides the materials
-  // table AND the Materials Subtotal row in the summary. Subtotal/GST/Total
-  // are still computed and shown.
+  // How much of the money the customer sees: 'itemised' | 'summary' | 'total'.
+  // Resolved once by shared/document/priceDetail.ts — the two flags below are
+  // its legacy predecessors, still read for documents written before it and
+  // still dual-written for one release so older installed builds keep working.
+  priceDetail?: PriceDetail;
+  // @deprecated Use priceDetail. Kept so a document written by an older build
+  // and never re-opened still renders the way its author intended.
   showMaterialCosts?: boolean;
-  // Labour cost visibility. When false, the renderer hides the labour table
-  // AND the Labour row in the summary. Subtotal/GST/Total are still computed
-  // and shown.
+  // @deprecated Use priceDetail.
   showLaborCosts?: boolean;
   travelAdjustment?: number;
   gst: number;
@@ -120,6 +124,14 @@ export interface QuotePdfData {
   // disclosure line under the Pay button so the customer isn't surprised on
   // checkout (ACCC pre-commit surcharge disclosure).
   surchargePaymentFees?: boolean;
+  // Deposit, when the tradie requires one on acceptance. Rendered as a
+  // payment-schedule block under the summary so the customer knows what they
+  // are asked to pay and when. These reached only the email body and the
+  // Square link before — the PDF, which is the document a customer keeps and
+  // forwards, said nothing about the deposit at all.
+  requireDeposit?: boolean;
+  depositPercentage?: number;
+  depositAmount?: number;
   // Terms & Conditions text. Rendered as its own section at the end of the
   // document. The business's current T&Cs are snapshotted to the quote/invoice
   // at send time and passed through here so later edits don't rewrite history.

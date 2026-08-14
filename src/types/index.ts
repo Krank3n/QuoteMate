@@ -8,6 +8,10 @@ export type { PdfTemplateId, PdfTemplateInfo };
 import type { SendMethod } from '../../shared/document/types';
 export type { SendMethod };
 
+// How much of the money a customer sees — see shared/document/priceDetail.ts.
+import type { PriceDetail } from '../../shared/document/priceDetail';
+export type { PriceDetail };
+
 // Record of a customer accepting the business's T&Cs at payment time.
 // Stamped on the quote/invoice doc so the version they paid under is auditable.
 export interface TcAcceptance {
@@ -391,16 +395,28 @@ export interface Quote {
   templateSuggestions?: TemplateSuggestion[];
   // Markup visibility
   showMarkup?: boolean;        // Show markup line on customer-facing documents. Default: false (hidden)
-  // Materials cost visibility on PDFs/email. When false, both the materials
-  // table and the Materials Subtotal summary row are hidden. Undefined =
-  // inherit BusinessSettings.showMaterialCostsByDefault.
+  /**
+   * How much of the money the customer sees on this document:
+   *   'itemised' — every line with its quantity and unit price (the default)
+   *   'summary'  — line names and section totals; no quantities, no unit prices
+   *   'total'    — the grand total alone
+   * Undefined = inherit BusinessSettings.defaultPriceDetail. Always resolved
+   * through shared/document/priceDetail.ts, never read raw.
+   */
+  priceDetail?: PriceDetail;
+  /**
+   * @deprecated Use priceDetail. Read (never written alone) so a document from
+   * an older build still renders as its author intended; dual-written
+   * alongside priceDetail for one release so older installed builds do too.
+   */
   showMaterialCosts?: boolean;
-  // Labour cost visibility on PDFs/email. When false, both the labour table
-  // and the Labour summary row are hidden. Undefined = inherit
-  // BusinessSettings.showLaborCostsByDefault.
+  /** @deprecated Use priceDetail. */
   showLaborCosts?: boolean;
-  // Labour breakdown visibility on PDFs. When false, the per-section labour
-  // rows are hidden and only the Labour Total is shown. Default: true.
+  /**
+   * @deprecated The per-section labour breakdown is no longer a separate
+   * toggle — priceDetail governs how much detail the customer sees. Still READ
+   * so existing documents keep behaving; nothing writes it any more.
+   */
   showLaborBreakdown?: boolean;
   // Travel adjustment
   travelAdjustment?: number;   // percentage bump (e.g., 3 = +3%)
@@ -679,11 +695,15 @@ export interface BusinessSettings {
   // Quote display settings
   showLaborHours?: boolean; // If true, show labor hours breakdown on quotes. Default: false (show only total)
   showMarkup?: boolean; // If true, allow per-document markup line. When undefined or false, markup is hidden across all documents. Default: false (hide markup).
-  // Default for new quotes' showMaterialCosts. When false, new quotes hide
-  // the materials table + Materials Subtotal row by default. Per-quote
-  // toggle on Quote.showMaterialCosts overrides. Default: true.
+  /**
+   * Default for new documents' priceDetail. Per-document `priceDetail`
+   * overrides. Undefined falls back to the deprecated pair below, then to
+   * 'itemised'.
+   */
+  defaultPriceDetail?: PriceDetail;
+  /** @deprecated Use defaultPriceDetail. */
   showMaterialCostsByDefault?: boolean;
-  // Default for new quotes' showLaborCosts. Same shape as above for labour.
+  /** @deprecated Use defaultPriceDetail. */
   showLaborCostsByDefault?: boolean;
   // Payment method settings
   paymentMethods?: PaymentMethodSettings;
@@ -856,16 +876,28 @@ export interface Invoice {
 
   // Markup visibility
   showMarkup?: boolean;        // Show markup line on customer-facing documents. Default: false (hidden)
-  // Materials cost visibility on PDFs/email. When false, both the materials
-  // table and the Materials Subtotal summary row are hidden. Undefined =
-  // inherit BusinessSettings.showMaterialCostsByDefault.
+  /**
+   * How much of the money the customer sees on this document:
+   *   'itemised' — every line with its quantity and unit price (the default)
+   *   'summary'  — line names and section totals; no quantities, no unit prices
+   *   'total'    — the grand total alone
+   * Undefined = inherit BusinessSettings.defaultPriceDetail. Always resolved
+   * through shared/document/priceDetail.ts, never read raw.
+   */
+  priceDetail?: PriceDetail;
+  /**
+   * @deprecated Use priceDetail. Read (never written alone) so a document from
+   * an older build still renders as its author intended; dual-written
+   * alongside priceDetail for one release so older installed builds do too.
+   */
   showMaterialCosts?: boolean;
-  // Labour cost visibility on PDFs/email. When false, both the labour table
-  // and the Labour summary row are hidden. Undefined = inherit
-  // BusinessSettings.showLaborCostsByDefault.
+  /** @deprecated Use priceDetail. */
   showLaborCosts?: boolean;
-  // Labour breakdown visibility on PDFs. When false, the per-section labour
-  // rows are hidden and only the Labour Total is shown. Default: true.
+  /**
+   * @deprecated The per-section labour breakdown is no longer a separate
+   * toggle — priceDetail governs how much detail the customer sees. Still READ
+   * so existing documents keep behaving; nothing writes it any more.
+   */
   showLaborBreakdown?: boolean;
 
   // Invoice-specific

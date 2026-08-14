@@ -70,6 +70,10 @@ export function LaborMarkupScreen() {
   const [travelAdjustment, setTravelAdjustment] = useState('0');
   const [travelDismissed, setTravelDismissed] = useState(false);
   const [lastTravelValue, setLastTravelValue] = useState('0');
+  // Read, never written: "What the customer sees" on the preview screen is
+  // now the single control for document detail, and it supersedes this. The
+  // value is carried through untouched so an existing document keeps
+  // rendering the way its author left it.
   const [showLaborBreakdown, setShowLaborBreakdown] = useState(true);
   const [warningDialogVisible, setWarningDialogVisible] = useState(false);
   const [warningMessage, setWarningMessage] = useState('');
@@ -525,22 +529,6 @@ export function LaborMarkupScreen() {
           </Text>
         </Surface>
 
-        {hasSectionsMode && (
-          <View style={styles.showMarkupToggle}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.showMarkupTitle}>Show labour breakdown on PDFs</Text>
-              <Text style={styles.showMarkupSubtitle}>
-                When off, only the labour total appears on the document — per-section rows are hidden
-              </Text>
-            </View>
-            <Switch
-              value={showLaborBreakdown}
-              onValueChange={setShowLaborBreakdown}
-              trackColor={{ false: '#D1D5DB', true: themeColors.accentSubtle }}
-              thumbColor={showLaborBreakdown ? themeColors.accent : '#F3F4F6'}
-            />
-          </View>
-        )}
       </View>
 
       {/* Markup Section */}

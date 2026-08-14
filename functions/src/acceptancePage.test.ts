@@ -44,6 +44,23 @@ describe('generateAcceptancePage', () => {
     expect(html).toContain('Decline');
     expect(html).toContain('Loading your quote');
   });
+
+  it('renders a Project Scope table when every line is a work item', () => {
+    // Same derived rule as the PDF: all work items -> a numbered scope table
+    // with no Qty column. The `new Function(script)` case above automatically
+    // guards this new inline JS from a syntax error.
+    const script = inlineScript(generateAcceptancePage('a'.repeat(64)));
+    expect(script).toContain("m.kind === 'work'");
+    expect(script).toContain('Project Scope');
+    expect(script).toContain('Line Total');
+  });
+
+  it('drives the three presentation modes from priceDetail', () => {
+    const script = inlineScript(generateAcceptancePage('a'.repeat(64)));
+    expect(script).toContain("quote.priceDetail || 'itemised'");
+    expect(script).toContain("priceDetail === 'itemised'");
+    expect(script).toContain("priceDetail !== 'total'");
+  });
 });
 
 describe('acceptancePageUrlForToken', () => {
