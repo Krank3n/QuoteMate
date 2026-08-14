@@ -322,7 +322,7 @@ export const JobCard = React.memo(function JobCard({
                   style={({ pressed }) => [styles.customerPress, pressed && { opacity: 0.7 }]}
                 >
                   <Text
-                    style={[styles.customer, styles.customerInPress]}
+                    style={[styles.customerText, styles.customerInPress]}
                     numberOfLines={1}
                   >
                     {job.customerName || 'Unknown customer'}
@@ -330,7 +330,7 @@ export const JobCard = React.memo(function JobCard({
                   <Text style={styles.customerCount}>· {customerJobCount} jobs</Text>
                 </Pressable>
               ) : (
-                <Text style={styles.customer} numberOfLines={1}>
+                <Text style={[styles.customerText, styles.customer]} numberOfLines={1}>
                   {job.customerName || 'Unknown customer'}
                 </Text>
               )}
@@ -696,11 +696,17 @@ const useStyles = makeStyles((t) => ({
     fontWeight: '500',
     color: t.colors.textSecondary,
   },
-  customer: {
-    flex: 1,
+  // Type only. The two layout cases below each add their own flex, because
+  // OVERRIDING a flex shorthand is what broke the name on web — see
+  // customerInPress.
+  customerText: {
     fontSize: 17,
     fontFamily: 'Archivo-Bold',
     color: t.colors.text,
+  },
+  // One-off customer: the name owns the row up to the price.
+  customer: {
+    flex: 1,
   },
   // flexShrink, NOT flex:1. With flex:1 the row stretched to the price and the
   // name inside it stretched too, which stranded "· 4 jobs" in the middle of
@@ -713,10 +719,15 @@ const useStyles = makeStyles((t) => ({
     alignItems: 'baseline',
     gap: 4,
   },
-  // Cancels styles.customer's flex:1 for the in-pressable case, so the name
-  // truncates rather than pushing the count away.
+  // Repeat customer: the name hugs its text so "· 4 jobs" sits beside it,
+  // and truncates rather than pushing the count away.
+  //
+  // flexShrink alone, NEVER `flex: 0`. React Native reads `flex: 0` as
+  // "basis auto, don't grow" — react-native-web compiles it to
+  // `flex: 0 1 0%`, a ZERO basis that never grows, so the name rendered at
+  // 0px wide and repeat customers on the web build showed a card with no
+  // name on it (the count, flexShrink:0, stayed put and gave it away).
   customerInPress: {
-    flex: 0,
     flexShrink: 1,
   },
   customerCount: {
