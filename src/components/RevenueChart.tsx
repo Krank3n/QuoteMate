@@ -7,59 +7,26 @@ import React, { useState, useMemo } from 'react';
 import { View, StyleSheet, Pressable, TouchableOpacity } from 'react-native';
 import { Text, Surface } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { format, subMonths, startOfMonth, endOfMonth, isWithinInterval } from 'date-fns';
-
+import type { Document } from '../types/document';
 import { makeStyles, useThemeColors } from '../theme';
-import { Quote } from '../types';
+import type { MonthRevenue as MonthData } from '../utils/insightsStats';
+import { monthlyRevenue } from '../utils/insightsStats';
 import { formatCurrency } from '../utils/quoteCalculator';
 
 interface RevenueChartProps {
-  quotes: Quote[];
+  documents: Document[];
   onMonthPress?: (monthLabel: string) => void;
 }
 
-interface MonthData {
-  label: string;
-  shortLabel: string;
-  revenue: number;
-  count: number;
-  start: Date;
-  end: Date;
-}
-
-export function RevenueChart({ quotes, onMonthPress }: RevenueChartProps) {
+export function RevenueChart({ documents, onMonthPress }: RevenueChartProps) {
   const styles = useStyles();
   const themeColors = useThemeColors();
   const [showBreakdown, setShowBreakdown] = useState(false);
 
-  // Calculate monthly data for last 6 months
-  const monthlyData = useMemo(() => {
-    const now = new Date();
-    const months: MonthData[] = [];
-
-    for (let i = 5; i >= 0; i--) {
-      const monthDate = subMonths(now, i);
-      const start = startOfMonth(monthDate);
-      const end = endOfMonth(monthDate);
-
-      const monthQuotes = quotes.filter(
-        (q) =>
-          (q.status === 'accepted' || q.status === 'completed') &&
-          isWithinInterval(new Date(q.updatedAt), { start, end })
-      );
-
-      months.push({
-        label: format(monthDate, 'MMMM yyyy'),
-        shortLabel: format(monthDate, 'MMM'),
-        revenue: monthQuotes.reduce((sum, q) => sum + q.total, 0),
-        count: monthQuotes.length,
-        start,
-        end,
-      });
-    }
-
-    return months;
-  }, [quotes]);
+  // Money received per month, from the payment ledger — see monthlyRevenue.
+  // This used to sum the TOTAL of accepted quotes, which disagreed with the
+  // dashboard's "Earned this month" for the very same month.
+  const monthlyData: MonthData[] = useMemo(() => monthlyRevenue(documents), [documents]);
 
   const maxRevenue = useMemo(
     () => Math.max(...monthlyData.map((m) => m.revenue), 1),

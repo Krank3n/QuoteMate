@@ -10,11 +10,12 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
 import type { Tokens } from '../theme';
 import { makeStyles, useThemeColors } from '../theme';
-import { Quote } from '../types';
+import type { Document } from '../types/document';
+import { costBreakdown } from '../utils/insightsStats';
 import { formatCurrency } from '../utils/quoteCalculator';
 
 interface CostBreakdownChartProps {
-  quotes: Quote[];
+  documents: Document[];
 }
 
 const segmentsFor = (themeColors: Tokens) => [
@@ -23,17 +24,12 @@ const segmentsFor = (themeColors: Tokens) => [
   { key: 'markup', label: 'Markup', color: themeColors.accentText, icon: 'percent-outline' as const },
 ];
 
-export function CostBreakdownChart({ quotes }: CostBreakdownChartProps) {
+export function CostBreakdownChart({ documents }: CostBreakdownChartProps) {
   const styles = useStyles();
   const themeColors = useThemeColors();
   const SEGMENTS = segmentsFor(themeColors);
   const breakdown = useMemo(() => {
-    const accepted = quotes.filter((q) => q.status === 'accepted' || q.status === 'completed');
-    const materials = accepted.reduce((sum, q) => sum + q.materialsSubtotal, 0);
-    const labor = accepted.reduce((sum, q) => sum + q.laborTotal, 0);
-    const markup = accepted.reduce((sum, q) => sum + q.markupAmount, 0);
-    const total = Math.max(materials + labor + markup, 1);
-
+    const { materials, labor, markup, total, jobCount } = costBreakdown(documents);
     return {
       values: [materials, labor, markup],
       percentages: [
@@ -42,9 +38,9 @@ export function CostBreakdownChart({ quotes }: CostBreakdownChartProps) {
         (markup / total) * 100,
       ],
       total,
-      jobCount: accepted.length,
+      jobCount,
     };
-  }, [quotes]);
+  }, [documents]);
 
   if (breakdown.jobCount === 0) {
     return null;

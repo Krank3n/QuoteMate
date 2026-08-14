@@ -7,15 +7,14 @@ import React, { useMemo } from 'react';
 import { View, StyleSheet } from 'react-native';
 import { Text, Surface } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { subMonths, startOfMonth, endOfMonth, isWithinInterval } from 'date-fns';
-
 import { makeStyles, useThemeColors } from '../theme';
-import { Quote } from '../types';
+import type { Document } from '../types/document';
+import { monthComparison } from '../utils/insightsStats';
 import { formatCurrency } from '../utils/quoteCalculator';
 import { AnimatedNumber } from './AnimatedNumber';
 
 interface MonthComparisonChartProps {
-  quotes: Quote[];
+  documents: Document[];
 }
 
 interface Metric {
@@ -27,73 +26,48 @@ interface Metric {
   format?: (n: number) => string;
 }
 
-export function MonthComparisonChart({ quotes }: MonthComparisonChartProps) {
+export function MonthComparisonChart({ documents }: MonthComparisonChartProps) {
   const styles = useStyles();
   const themeColors = useThemeColors();
   const metrics = useMemo((): Metric[] => {
-    const now = new Date();
-    const thisStart = startOfMonth(now);
-    const thisEnd = endOfMonth(now);
-    const lastStart = startOfMonth(subMonths(now, 1));
-    const lastEnd = endOfMonth(subMonths(now, 1));
-
-    const thisMonth = quotes.filter((q) =>
-      isWithinInterval(new Date(q.createdAt), { start: thisStart, end: thisEnd })
-    );
-    const lastMonth = quotes.filter((q) =>
-      isWithinInterval(new Date(q.createdAt), { start: lastStart, end: lastEnd })
-    );
-
-    const thisAccepted = quotes.filter(
-      (q) =>
-        (q.status === 'accepted' || q.status === 'completed') &&
-        isWithinInterval(new Date(q.updatedAt), { start: thisStart, end: thisEnd })
-    );
-    const lastAccepted = quotes.filter(
-      (q) =>
-        (q.status === 'accepted' || q.status === 'completed') &&
-        isWithinInterval(new Date(q.updatedAt), { start: lastStart, end: lastEnd })
-    );
-
-    const thisRevenue = thisAccepted.reduce((s, q) => s + q.total, 0);
-    const lastRevenue = lastAccepted.reduce((s, q) => s + q.total, 0);
-
-    const thisAvgJob = thisAccepted.length > 0 ? thisRevenue / thisAccepted.length : 0;
-    const lastAvgJob = lastAccepted.length > 0 ? lastRevenue / lastAccepted.length : 0;
+    // "Revenue Earned" is money received, from the payment ledger — it used to
+    // sum the total of accepted quotes, so it disagreed with the dashboard's
+    // "Earned this month". See monthComparison.
+    const { current, previous } = monthComparison(documents);
 
     return [
       {
         label: 'Quotes\nCreated',
         icon: 'file-plus-outline',
         iconColor: themeColors.info,
-        current: thisMonth.length,
-        previous: lastMonth.length,
+        current: current.quotesCreated,
+        previous: previous.quotesCreated,
       },
       {
         label: 'Jobs\nWon',
         icon: 'handshake',
         iconColor: themeColors.accent,
-        current: thisAccepted.length,
-        previous: lastAccepted.length,
+        current: current.jobsWon,
+        previous: previous.jobsWon,
       },
       {
         label: 'Revenue\nEarned',
         icon: 'cash-multiple',
         iconColor: themeColors.warning,
-        current: thisRevenue,
-        previous: lastRevenue,
+        current: current.revenueEarned,
+        previous: previous.revenueEarned,
         format: formatCurrency,
       },
       {
         label: 'Avg Job\nValue',
         icon: 'tag-outline',
-        iconColor: themeColors.warning || themeColors.warning,
-        current: thisAvgJob,
-        previous: lastAvgJob,
+        iconColor: themeColors.warning,
+        current: current.avgJobValue,
+        previous: previous.avgJobValue,
         format: formatCurrency,
       },
     ];
-  }, [quotes]);
+  }, [documents, themeColors]);
 
   return (
     <Surface style={styles.card}>

@@ -10,47 +10,46 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
 import type { Tokens } from '../theme';
 import { makeStyles, useThemeColors } from '../theme';
-import { Quote } from '../types';
+import type { Document } from '../types/document';
+import type { PipelineKey } from '../utils/insightsStats';
+import { pipelineSummary } from '../utils/insightsStats';
 
 interface QuotePipelineChartProps {
-  quotes: Quote[];
+  documents: Document[];
 }
 
-const status_configFor = (themeColors: Tokens) => [
-  { key: 'draft' as const, label: 'Draft', color: themeColors.surfaceOverlay, icon: 'file-edit-outline' as const },
-  { key: 'sent' as const, label: 'Sent', color: themeColors.info, icon: 'send' as const },
-  { key: 'accepted' as const, label: 'Accepted', color: themeColors.money, icon: 'check-circle-outline' as const },
-  { key: 'completed' as const, label: 'Completed', color: themeColors.accentText, icon: 'check-decagram' as const },
-  { key: 'rejected' as const, label: 'Rejected', color: themeColors.error, icon: 'close-circle-outline' as const },
+// There is no 'completed' document stage — invoiced and paid are the real
+// steps past accepted, which is what the jobs list already shows.
+const status_configFor = (themeColors: Tokens): Array<{
+  key: PipelineKey;
+  label: string;
+  color: string;
+  icon: React.ComponentProps<typeof MaterialCommunityIcons>['name'];
+}> => [
+  { key: 'draft', label: 'Draft', color: themeColors.surfaceOverlay, icon: 'file-edit-outline' },
+  { key: 'sent', label: 'Sent', color: themeColors.info, icon: 'send' },
+  { key: 'accepted', label: 'Accepted', color: themeColors.money, icon: 'check-circle-outline' },
+  { key: 'invoiced', label: 'Invoiced', color: themeColors.warning, icon: 'file-document-outline' },
+  { key: 'paid', label: 'Paid', color: themeColors.accentText, icon: 'check-decagram' },
+  { key: 'rejected', label: 'Rejected', color: themeColors.error, icon: 'close-circle-outline' },
 ];
 
-export function QuotePipelineChart({ quotes }: QuotePipelineChartProps) {
+export function QuotePipelineChart({ documents }: QuotePipelineChartProps) {
   const styles = useStyles();
   const themeColors = useThemeColors();
   const STATUS_CONFIG = status_configFor(themeColors);
+  const summary = useMemo(() => pipelineSummary(documents), [documents]);
+
   const statusData = useMemo(() => {
-    const total = Math.max(quotes.length, 1);
-    return STATUS_CONFIG.map(({ key, label, color, icon }) => {
-      const filtered = quotes.filter((q) => q.status === key);
-      return {
-        key,
-        label,
-        color,
-        icon,
-        count: filtered.length,
-        ratio: filtered.length / total,
-      };
-    });
-  }, [quotes]);
+    const byKey = new Map(summary.buckets.map((b) => [b.key, b]));
+    return STATUS_CONFIG.map((config) => ({
+      ...config,
+      count: byKey.get(config.key)?.count ?? 0,
+      ratio: byKey.get(config.key)?.ratio ?? 0,
+    }));
+  }, [summary, themeColors]);
 
-  const winRate = useMemo(() => {
-    const won = quotes.filter((q) => q.status === 'accepted' || q.status === 'completed').length;
-    const rejected = quotes.filter((q) => q.status === 'rejected').length;
-    const decided = won + rejected;
-    return decided > 0 ? Math.round((won / decided) * 100) : 0;
-  }, [quotes]);
-
-  if (quotes.length === 0) {
+  if (summary.total === 0) {
     return null;
   }
 
@@ -59,11 +58,11 @@ export function QuotePipelineChart({ quotes }: QuotePipelineChartProps) {
       <View style={styles.header}>
         <View>
           <Text style={styles.title}>Quote Pipeline</Text>
-          <Text style={styles.subtitle}>{quotes.length} total quotes</Text>
+          <Text style={styles.subtitle}>{summary.total} total quotes</Text>
         </View>
         <View style={styles.winRateBadge}>
           <MaterialCommunityIcons name="trophy-outline" size={14} color={themeColors.warning} />
-          <Text style={styles.winRateText}>{winRate}% win rate</Text>
+          <Text style={styles.winRateText}>{summary.winRate}% win rate</Text>
         </View>
       </View>
 

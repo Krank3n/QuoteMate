@@ -18,7 +18,10 @@ import { GridBackground } from '../components/GridBackground';
 export function InsightsScreen() {
   const styles = useStyles();
 
-  const { quotes } = useStore();
+  // The unified Document model, same as the dashboard tiles. These charts used
+  // to read the legacy `quotes` collection, which lags on a fresh sign-in and
+  // drops a job from "won" the moment it's invoiced. See insightsStats.
+  const documents = useStore((s) => s.documents);
 
   return (
     <View style={styles.gridHost}>
@@ -26,10 +29,10 @@ export function InsightsScreen() {
     <ScrollView style={styles.scroller}>
       <WebContainer>
         <View style={styles.content}>
-          <MonthComparisonChart quotes={quotes} />
-          <QuotePipelineChart quotes={quotes} />
-          <RevenueChart quotes={quotes} />
-          <CostBreakdownChart quotes={quotes} />
+          <MonthComparisonChart documents={documents} />
+          <QuotePipelineChart documents={documents} />
+          <RevenueChart documents={documents} />
+          <CostBreakdownChart documents={documents} />
         </View>
       </WebContainer>
     </ScrollView>
