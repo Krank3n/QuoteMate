@@ -13,6 +13,7 @@ import {
   setDoc,
   getDocs,
   deleteDoc,
+  deleteField,
   onSnapshot,
   Unsubscribe,
   query,
@@ -42,6 +43,30 @@ function stripUndefined(value: any): any {
       : v;
   }
   return cleaned;
+}
+
+/**
+ * The payload for a Job write: values as given, and a delete sentinel for
+ * every top-level field the caller cleared.
+ *
+ * Callers hand saveJob a whole Job, so a top-level key sitting at
+ * `undefined` is that field having no value any more. But the write is a
+ * merge (see saveJob — the server's aggregates have to survive it), and a
+ * merge ignores keys that aren't in the payload: stripping them sent every
+ * clear as "no change". "Clear date" left scheduledStartDate on the stored
+ * job, the listener echoed it straight back, and the calendar event lived
+ * on because the sync trigger only deletes the event when the date reaches
+ * zero. Unarchive (`archivedAt: undefined`) had the same hole.
+ *
+ * Top level only — deleteField() is illegal deeper inside a merge write,
+ * so nested undefined values are still dropped rather than deleted.
+ */
+export function jobWritePayload(job: Record<string, any>): Record<string, any> {
+  const payload: Record<string, any> = {};
+  for (const [key, value] of Object.entries(job)) {
+    payload[key] = value === undefined ? deleteField() : stripUndefined(value);
+  }
+  return payload;
 }
 
 function normalise(raw: any, id: string): Job {
@@ -114,7 +139,8 @@ class JobService {
   }
 
   /**
-   * Writes the Job, scrubbing undefined values. Aggregate fields
+   * Writes the Job, scrubbing undefined values and deleting the fields the
+   * caller cleared (see jobWritePayload). Aggregate fields
    * (totalQuoted/Invoiced/Paid/balanceDue/documentIds) come from the server
    * trigger — clients should leave them alone (pass through whatever the
    * server last set). We use merge:true so a client write of user-editable
@@ -125,7 +151,7 @@ class JobService {
     const uid = getUserId();
     if (!uid) return;
     const ref = doc(db, 'users', uid, 'jobs', job.id);
-    const payload = stripUndefined({
+    const payload = jobWritePayload({
       ...job,
       userId: uid,
       updatedAt: Date.now(),
