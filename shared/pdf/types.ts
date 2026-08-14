@@ -18,6 +18,13 @@ export interface PdfMaterial {
   price: number;
   totalPrice: number;
   section?: string;
+  // 'work' = a lump-sum scope line: a title, a scope paragraph and one price.
+  // quantity is 1 and unit is 'each', so every total still reconciles, but the
+  // customer is shown neither. Absent/'material' = a priced product.
+  kind?: 'material' | 'work';
+  // Customer-facing scope paragraph for a work item. Newline-separated;
+  // rendered under the title in the Project Scope table.
+  scope?: string;
 }
 
 export interface LaborSection {

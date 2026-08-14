@@ -29,6 +29,7 @@ import {
   generateQuotePdfBuffer,
 } from './pdfGenerator';
 import { hashTerms } from './shared/pdf/terms/defaultAuTradie';
+import { toPdfMaterials } from './shared/pdf/mapMaterial';
 import { dollarsToCents, centsToDollars } from './shared/pdf/money';
 import {
   quoteRecordToDocumentRecord,
@@ -400,14 +401,7 @@ function applyHideMarkupForDisplay(q: any, businessSettings?: any) {
 }
 
 function buildPdfMaterials(materials: any[]): any[] {
-  return (materials || []).map((m: any) => ({
-    name: m.name,
-    quantity: m.quantity,
-    unit: m.unit,
-    price: m.price || 0,
-    totalPrice: m.totalPrice || 0,
-    section: m.section,
-  }));
+  return toPdfMaterials(materials);
 }
 
 function buildPdfSections(sections: any[]): any[] {
