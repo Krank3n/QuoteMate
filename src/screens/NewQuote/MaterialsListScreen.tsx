@@ -663,7 +663,8 @@ export function MaterialsListScreen() {
   const [saveTemplateKeywords, setSaveTemplateKeywords] = useState<string[]>([]);
   const [saveTemplateKeywordInput, setSaveTemplateKeywordInput] = useState('');
 
-  // Delete section confirm modal
+  // Section options sheet — reorder, save as a template, and the two ways to
+  // remove a section (keeping the items, or taking them with it).
   const [sectionActionsVisible, setSectionActionsVisible] = useState(false);
   const [sectionActionsName, setSectionActionsName] = useState('');
 

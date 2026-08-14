@@ -562,7 +562,14 @@ function InlineAddMaterialForm({
             <TouchableOpacity
               key={k}
               style={[styles.kindChip, active && styles.kindChipActive]}
-              onPress={() => setEntryKind(k)}
+              onPress={() => {
+                setEntryKind(k);
+                // Drop any supplier results and any picked result — they
+                // belong to the other mode, and a stale one reappearing on the
+                // way back would attach a product to a scope line.
+                selectedResultRef.current = null;
+                search.clearResults();
+              }}
               accessibilityRole="button"
               accessibilityState={{ selected: active }}
               accessibilityLabel={k === 'work' ? 'Work item' : 'Material'}
