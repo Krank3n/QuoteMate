@@ -7394,19 +7394,22 @@ export function generateAcceptancePage(token: string): string {
       if (quote.materials && quote.materials.length > 0) {
         var allWork = quote.materials.every(function(m) { return m.kind === 'work'; });
         if (allWork) {
+          // A scope line's Line Total IS its section total, so it survives
+          // 'summary' — which hides per-LINE money, not section money. Same
+          // rule as the PDF; the two must not disagree.
           var scopeRows = quote.materials.map(function(m, i) {
             var body = m.scope ? '<div class="scope-body">' + nl2br(m.scope) + '</div>' : '';
             return '<tr>' +
               '<td class="qty">' + (i + 1) + '</td>' +
               '<td><strong>' + escapeHtml(m.name) + '</strong>' + body + '</td>' +
-              (perLineMoney ? '<td class="price">' + formatCurrency(m.totalPrice) + '</td>' : '') +
+              '<td class="price">' + formatCurrency(m.totalPrice) + '</td>' +
             '</tr>';
           }).join('');
           materialsHtml =
             '<div class="section">' +
               '<table class="line-items">' +
                 '<thead><tr><th class="qty">#</th><th>Project Scope</th>' +
-                  (perLineMoney ? '<th class="price">Line Total</th>' : '') +
+                  '<th class="price">Line Total</th>' +
                 '</tr></thead>' +
                 '<tbody>' + scopeRows + '</tbody>' +
               '</table>' +
