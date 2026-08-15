@@ -719,34 +719,28 @@ function buildSummaryHTML(data: QuotePdfData, paidAmount?: number, amountDue?: n
   const subtotalLabel = gstMode === 'exclusive' ? 'Subtotal (ex GST)' : 'Subtotal';
   const gstLabel = gstMode === 'inclusive' ? 'Includes GST' : 'GST (10%)';
 
-  // Per-section visibility. When materials/labour costs are hidden, the
-  // corresponding subtotal row in the summary is hidden too. When BOTH are
-  // hidden, the Subtotal row is also dropped so the customer sees only the
-  // grand TOTAL (with GST disclosure). Subtotal/GST/Total still reconcile
-  // because displaySubtotal is computed regardless.
-  // Scope mode: every line in the table is already a customer-facing total, so
-  // a Materials/Labour split here would re-split precisely what the tradie
-  // chose not to itemise. One Subtotal row carries it. The same argument
-  // applies to 'summary', where the section totals in the table carry it.
+  // The Materials/Labour split is 'itemised' only. In 'summary' the section
+  // totals in the table already carry it, and in scope mode every line IS a
+  // customer-facing total — either way, splitting here would re-split exactly
+  // what the tradie chose not to itemise. One Subtotal row carries it instead.
   const scopeMode = isScopeQuote(data.materials);
   const detail = resolvePriceDetail(data);
   const showSplit = showsPerLineMoney(detail) && !scopeMode;
-  const showMaterialsRow = showSplit;
-  const showLabourRow = showSplit;
   // 'total' shows the grand total alone — no Subtotal, no Travel, nothing to
   // reconstruct the breakdown from. GST still appears; it is a legal
-  // disclosure, not a preference.
+  // disclosure, not a preference. Subtotal/GST/Total reconcile in every mode
+  // because displaySubtotal is computed regardless of what is rendered.
   const showSubtotalLine = showsLineItems(detail);
 
   return `
       <div class="summary">
-        ${showMaterialsRow ? `
+        ${showSplit ? `
         <div class="summary-row">
           <span>Materials Subtotal</span>
           <span>${formatCurrency(displayMaterialsSubtotal)}</span>
         </div>
         ` : ''}
-        ${showLabourRow ? `
+        ${showSplit ? `
         <div class="summary-row">
           <span>Labour</span>
           <span>${formatCurrency(displayLaborTotal)}</span>
