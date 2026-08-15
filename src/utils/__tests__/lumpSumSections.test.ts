@@ -22,6 +22,10 @@ import {
   isLumpSumSection,
   lumpSumLabourTotal,
   markupableLabourTotal,
+  isWorkItem,
+  lineMarkupMultiplier,
+  workItemsTotal,
+  markupableMaterialsTotal,
 } from '../../../shared/document/lumpSum';
 import { createSection } from '../sectionsModel';
 import { buildQuotePdfHtml, toPdfSections } from '../../../shared/pdf';
@@ -265,6 +269,100 @@ describe('lump-sum sections — markup', () => {
     expect(markupableLabourTotal(2050, sections)).toBe(850);
     // Never negative, even on a self-contradicting document.
     expect(markupableLabourTotal(500, sections)).toBe(0);
+  });
+});
+
+describe('work items — the typed price is the final price', () => {
+  const workItem = (name: string, price: number): Material => ({
+    id: `w-${name}`, name, kind: 'work', scope: '',
+    quantity: 1, unit: 'each', price, totalPrice: price,
+    manualPriceOverride: true, pricingSource: 'manual',
+  } as Material);
+
+  const realMaterial = (name: string, price: number, qty: number): Material => ({
+    id: `m-${name}`, name, quantity: qty, unit: 'each',
+    price, totalPrice: price * qty,
+    manualPriceOverride: false, pricingSource: 'scraper',
+  } as Material);
+
+  it('adds no markup to a work item, however high the material markup', () => {
+    const materials = [workItem('INTERIOR Surfaces to be painted', 22750)];
+    const calc = calculateDocumentTotals(
+      materials, HOURLY, 0, /* markupPercent */ 15, /* travel */ 0, [], 0, 0,
+    );
+    expect(calc.materialsSubtotal).toBe(22750);
+    // The number the tradie typed is the number that gets charged.
+    expect(calc.markupAmount).toBe(0);
+    expect(calc.subtotal).toBe(22750);
+  });
+
+  it('still marks up real materials sitting alongside a work item', () => {
+    // $1,000 of supplier stock + a $2,000 scope line, 10% material markup.
+    // Markup base is the $1,000 alone → $100, not $300.
+    const materials = [realMaterial('Merbau decking', 100, 10), workItem('Install decking', 2000)];
+    const calc = calculateDocumentTotals(
+      materials, HOURLY, 0, 10, 0, [], 0, 0,
+    );
+    expect(calc.materialsSubtotal).toBe(3000);
+    expect(calc.markupAmount).toBe(100);
+  });
+
+  it('shows the typed price on the customer PDF, not an inflated one', () => {
+    const totals = calculateDocumentTotals(
+      [workItem('EXTERIOR Surfaces to be painted', 21200)],
+      HOURLY, 0, /* markupPercent */ 15, /* travel */ 0, [], 0, 0,
+    );
+    const html = buildQuotePdfHtml(
+      {
+        customerName: 'A Customer',
+        quoteDate: '10 July 2026',
+        job: { name: 'Exterior repaint', description: 'Full exterior' },
+        materials: [{
+          name: 'EXTERIOR Surfaces to be painted',
+          quantity: 1, unit: 'each', price: 21200, totalPrice: 21200,
+          kind: 'work', scope: 'Painting of full exterior as per plans provided.',
+        }],
+        materialsSubtotal: totals.materialsSubtotal,
+        laborTotal: 0,
+        subtotal: totals.subtotal,
+        markup: 15,
+        markupAmount: totals.markupAmount,
+        showMarkup: false,
+        gst: totals.gst,
+        total: totals.total,
+      },
+      { businessName: 'Test Trades', logoHtml: '' },
+    );
+    expect(html).toContain('$21,200.00');
+    // 21200 × 1.15 — the number the old behaviour would have printed.
+    expect(html).not.toContain('$24,380.00');
+    // And the total is built on the typed price, not the inflated one.
+    expect(totals.total).toBe(23320);
+  });
+
+  it('helpers agree on what is markupable', () => {
+    const materials = [realMaterial('Merbau decking', 100, 10), workItem('Install decking', 2000)];
+    expect(isWorkItem(materials[1])).toBe(true);
+    expect(isWorkItem(materials[0])).toBe(false);
+    expect(workItemsTotal(materials)).toBe(2000);
+    expect(markupableMaterialsTotal(3000, materials)).toBe(1000);
+    // Never negative, even on a self-contradicting document.
+    expect(markupableMaterialsTotal(500, materials)).toBe(0);
+    // A real material takes the multiplier; a work item never does.
+    expect(lineMarkupMultiplier(materials[0], 1.15)).toBe(1.15);
+    expect(lineMarkupMultiplier(materials[1], 1.15)).toBe(1);
+  });
+
+  it('passes the integrity check with markup set and work items present', () => {
+    const materials = [realMaterial('Merbau decking', 100, 10), workItem('Install decking', 2000)];
+    const calc = calculateDocumentTotals(materials, HOURLY, 0, 10, 0, [], 0, 0);
+    const issues = checkDocumentIntegrity({
+      materials, materialsSubtotal: calc.materialsSubtotal,
+      laborTotal: calc.laborTotal, laborHours: 0, laborRate: HOURLY,
+      subtotal: calc.subtotal, markup: 10, markupAmount: calc.markupAmount,
+      gst: calc.gst, total: calc.total, sections: [],
+    } as any);
+    expect(issues.filter((i) => i.code === 'markup_amount_mismatch')).toEqual([]);
   });
 });
 

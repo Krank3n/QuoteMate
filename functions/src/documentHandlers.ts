@@ -30,7 +30,13 @@ import {
 } from './pdfGenerator';
 import { hashTerms } from './shared/pdf/terms/defaultAuTradie';
 import { toPdfMaterials, toPdfSections } from './shared/pdf/mapMaterial';
-import { lumpSumLabourTotal, markupableLabourTotal } from './shared/document/lumpSum';
+import {
+  lineMarkupMultiplier,
+  lumpSumLabourTotal,
+  markupableLabourTotal,
+  markupableMaterialsTotal,
+  workItemsTotal,
+} from './shared/document/lumpSum';
 import { resolvePriceDetail } from './shared/document/priceDetail';
 import { dollarsToCents, centsToDollars } from './shared/pdf/money';
 import {
@@ -385,24 +391,32 @@ function applyHideMarkupForDisplay(q: any, businessSettings?: any) {
   }
   const matFactor = 1 + matMarkup / 100;
   const laborFactor = 1 + laborMarkup / 100;
-  const inflatedMaterials = (q.materials || []).map((m: any) => ({
-    ...m,
-    price: (Number(m.price) || 0) * matFactor,
-    totalPrice: (Number(m.totalPrice) || 0) * matFactor,
-  }));
+  // Work items pass through untouched for the same reason lump-sum sections do
+  // — the price is one the tradie typed. See shared/document/lumpSum.ts.
+  const inflatedMaterials = (q.materials || []).map((m: any) => {
+    const factor = lineMarkupMultiplier(m, matFactor);
+    return {
+      ...m,
+      price: (Number(m.price) || 0) * factor,
+      totalPrice: (Number(m.totalPrice) || 0) * factor,
+    };
+  });
   // Lump-sum sections pass through at the figure the tradie typed — only the
   // hourly slice of labour is inflated. See shared/document/lumpSum.ts.
   const lumpSum = lumpSumLabourTotal(q.sections);
   const inflatedLabour = lumpSum + markupableLabourTotal(q.laborTotal || 0, q.sections) * laborFactor;
+  const work = workItemsTotal(q.materials);
+  const inflatedMaterialsSubtotal =
+    work + markupableMaterialsTotal(q.materialsSubtotal || 0, q.materials) * matFactor;
   return {
     materials: inflatedMaterials,
-    materialsSubtotal: (Number(q.materialsSubtotal) || 0) * matFactor,
+    materialsSubtotal: inflatedMaterialsSubtotal,
     laborTotal: inflatedLabour,
     // travelAdjustment is a PERCENTAGE. It used to be added here as dollars,
     // which put e.g. $3 of nothing into the emailed Subtotal on a 3% travel
     // quote — and disagreed with both the PDF and the index.ts twin, neither
     // of which include travel in this figure.
-    subtotal: ((Number(q.materialsSubtotal) || 0) * matFactor) + inflatedLabour,
+    subtotal: inflatedMaterialsSubtotal + inflatedLabour,
     markupAmount: 0,
   };
 }

@@ -30,7 +30,7 @@
 
 import { validateAndRepairAiOutput } from '../ai/validateAiOutput';
 import { rateToHourly } from './labourUnits';
-import { markupableLabourTotal } from './lumpSum';
+import { markupableLabourTotal, markupableMaterialsTotal } from './lumpSum';
 
 const STANDARD_DAY_HOURS = 8;
 const DEFAULT_DOLLAR_TOLERANCE = 0.5;
@@ -187,9 +187,10 @@ export function checkDocumentIntegrity(d: DocLike, opts: IntegrityCheckOptions =
   if (typeof d.markupAmount === 'number') {
     const matMarkupPct = Number(d.markup) || 0;
     const labMarkupPct = Number(d.laborMarkup ?? d.markup ?? 0);
-    // Mirrors documentCalculator: lump-sum sections are not marked up.
+    // Mirrors documentCalculator: neither lump-sum sections nor work items are
+    // marked up — both carry a price the tradie typed.
     const expectedMarkup = round2(
-      (d.materialsSubtotal || 0) * (matMarkupPct / 100) +
+      markupableMaterialsTotal(d.materialsSubtotal || 0, d.materials) * (matMarkupPct / 100) +
       markupableLabourTotal(d.laborTotal || 0, sections) * (labMarkupPct / 100)
     );
     if (!nearlyEqual(expectedMarkup, d.markupAmount, tol)) {

@@ -106,7 +106,13 @@ import {
 } from './referralProgram.helpers';
 import { randomUUID } from 'crypto';
 import { buildAcceptanceQuotePayload } from './acceptancePayload';
-import { lumpSumLabourTotal, markupableLabourTotal } from './shared/document/lumpSum';
+import {
+  lineMarkupMultiplier,
+  lumpSumLabourTotal,
+  markupableLabourTotal,
+  markupableMaterialsTotal,
+  workItemsTotal,
+} from './shared/document/lumpSum';
 import {
   normalizeResetEmail,
   planPasswordReset,
@@ -220,17 +226,23 @@ function applyHideMarkupForDisplay(q: any, businessSettings?: any) {
   }
   const matMult = 1 + matMarkup / 100;
   const laborMult = 1 + laborMarkup / 100;
-  const materialsSubtotal = (q.materialsSubtotal || 0) * matMult;
-  // Lump-sum sections pass through at the figure the tradie typed — only the
-  // hourly slice of labour is inflated. See shared/document/lumpSum.ts.
+  // Work items and lump-sum sections both pass through at the figure the tradie
+  // typed — only the rate-based slices are inflated. See
+  // shared/document/lumpSum.ts.
+  const materialsSubtotal =
+    workItemsTotal(q.materials) +
+    markupableMaterialsTotal(q.materialsSubtotal || 0, q.materials) * matMult;
   const lumpSum = lumpSumLabourTotal(q.sections);
   const laborTotal = lumpSum + markupableLabourTotal(q.laborTotal || 0, q.sections) * laborMult;
   return {
-    materials: (q.materials || []).map((m: any) => ({
-      ...m,
-      price: m.price ? m.price * matMult : m.price,
-      totalPrice: (m.totalPrice || 0) * matMult,
-    })),
+    materials: (q.materials || []).map((m: any) => {
+      const mult = lineMarkupMultiplier(m, matMult);
+      return {
+        ...m,
+        price: m.price ? m.price * mult : m.price,
+        totalPrice: (m.totalPrice || 0) * mult,
+      };
+    }),
     materialsSubtotal,
     laborTotal,
     subtotal: materialsSubtotal + laborTotal,

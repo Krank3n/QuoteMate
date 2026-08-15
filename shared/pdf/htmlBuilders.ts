@@ -15,7 +15,7 @@ import {
   type LabourUnit,
 } from '../document/labourUnits';
 import { pathHasInk } from './signatureInk';
-import { isLumpSumSection, markupableLabourTotal } from '../document/lumpSum';
+import { isLumpSumSection, lineMarkupMultiplier, markupableLabourTotal } from '../document/lumpSum';
 import { resolvePriceDetail, showsLineItems, showsPerLineMoney } from '../document/priceDetail';
 
 const escapeHtml = (s: string) =>
@@ -29,8 +29,16 @@ const roundCents = (n: number) => Math.round(n * 100) / 100;
 // the customer sees in the table. Multiplying the pre-rounded subtotal by the
 // markup multiplier and rounding once produces a different value when each
 // line is rounded individually first.
+//
+// The multiplier is resolved PER LINE, because a work item's price is final —
+// see shared/document/lumpSum.ts. Applying it to the whole array would inflate
+// a scope line the tradie typed, and the subtotal would then disagree with the
+// rows above it.
 const sumRoundedLineTotals = (materials: PdfMaterial[], multiplier: number) =>
-  materials.reduce((sum, m) => sum + roundCents(m.totalPrice * multiplier), 0);
+  materials.reduce(
+    (sum, m) => sum + roundCents(m.totalPrice * lineMarkupMultiplier(m, multiplier)),
+    0,
+  );
 
 /**
  * Render the T&Cs section at the end of a quote/invoice PDF. Preserves
@@ -252,7 +260,7 @@ export function generateMaterialsHTML(
       <td>${escapeHtml(m.name)}${scope}</td>
       <td>${isWork ? '' : `${m.quantity} ${escapeHtml(m.unit)}`}</td>
       <td>${isWork ? '' : formatCurrency(m.price * multiplier)}</td>
-      <td>${formatCurrency(m.totalPrice * multiplier)}</td>
+      <td>${formatCurrency(m.totalPrice * lineMarkupMultiplier(m, multiplier))}</td>
     </tr>`;
   };
 
@@ -399,7 +407,15 @@ export function generateScopeHTML(
     // An empty scope renders the title alone — no stray <br>, no empty <div>.
     const scope = m.scope?.trim();
     const body = scope ? `<div class="scope-body">${formatMultiline(scope)}</div>` : '';
-    return scopeRow(i + 1, escapeHtml(m.name), body, m.totalPrice * multiplier);
+    // Resolved per line rather than assuming every row here is a work item.
+    // It is today (isScopeQuote demands it), but the price a tradie typed must
+    // survive this function on its own terms, not on a caller's invariant.
+    return scopeRow(
+      i + 1,
+      escapeHtml(m.name),
+      body,
+      m.totalPrice * lineMarkupMultiplier(m, multiplier),
+    );
   });
 
   const continued = continuationRows.map((r, i) =>

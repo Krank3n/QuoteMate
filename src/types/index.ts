@@ -82,16 +82,14 @@ export interface Material {
    * totalPrice = quantity × price still holds and every existing calculator,
    * adapter and Xero mapper works unchanged.
    *
-   * NOTE: material markup applies to work items — consistent with how a
-   * hand-typed material behaves (the tradie types a cost, markup is added at
-   * render). So a tradie with 15% markup typing $22,750 sees $26,162.50 on the
-   * customer's copy.
-   *
-   * This is deliberate but it sits awkwardly beside `QuoteSection.pricing:
-   * 'lumpSum'`, which is EXEMPT from markup on the argument that a typed price
-   * is the price. If that argument wins here too, exempt `kind === 'work'` in
-   * documentCalculator and the scope table together — and relabel the entry
-   * field, which currently says "Line total".
+   * Markup does NOT apply to a work item. The field says "Line total" and the
+   * tradie typed a final price into it, so charging the customer more than that
+   * would be the app inventing a number nobody chose. This is the same rule
+   * `QuoteSection.pricing: 'lumpSum'` follows, and it lives in exactly one
+   * place — shared/document/lumpSum.ts. Every money path resolves the
+   * multiplier PER LINE through `lineMarkupMultiplier`; a real material still
+   * takes markup normally, because that is a margin on a supplier price the
+   * tradie didn't set.
    */
   kind?: 'material' | 'work';
   /**

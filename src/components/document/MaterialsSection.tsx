@@ -6,6 +6,11 @@ import { useThemeColors} from '../../theme';
 import { Material } from '../../types';
 import { formatCurrency } from '../../utils/quoteCalculator';
 import { isScopeQuote } from '../../../shared/pdf';
+import {
+  lineMarkupMultiplier,
+  markupableMaterialsTotal,
+  workItemsTotal,
+} from '../../../shared/document/lumpSum';
 import { useDocumentStyles } from './documentStyles';
 
 interface MaterialsSectionProps {
@@ -30,8 +35,12 @@ export function MaterialsSection({
   const styles = useDocumentStyles();
   const themeColors = useThemeColors();
   const multiplier = rollMarkupIntoMaterials && markupPercent > 0 ? (1 + markupPercent / 100) : 1;
-  const showMarkedUp = multiplier > 1;
-  const displaySubtotal = materialsSubtotal * multiplier;
+  // Work items never take markup, so the preview must agree with the PDF line
+  // for line — see shared/document/lumpSum.ts. A quote that is all scope lines
+  // has nothing markupable in it, so the "(incl. X% markup)" note goes too.
+  const displaySubtotal =
+    workItemsTotal(materials) + markupableMaterialsTotal(materialsSubtotal, materials) * multiplier;
+  const showMarkedUp = multiplier > 1 && markupableMaterialsTotal(materialsSubtotal, materials) > 0;
   // The same derived rule the PDF uses: when every line is a lump-sum scope
   // line the customer's document is a Project Scope table, so the in-app
   // preview says the same thing rather than "Materials".
@@ -83,7 +92,7 @@ export function MaterialsSection({
               )}
             </View>
             <Text style={styles.itemTotal}>
-              {formatCurrency(material.totalPrice * multiplier)}
+              {formatCurrency(material.totalPrice * lineMarkupMultiplier(material, multiplier))}
             </Text>
           </View>
         ))

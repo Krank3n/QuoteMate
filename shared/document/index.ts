@@ -28,7 +28,15 @@ export {
   effectiveHourlyRate,
 } from './labourUnits';
 
-export { isLumpSumSection, lumpSumLabourTotal, markupableLabourTotal } from './lumpSum';
+export {
+  isLumpSumSection,
+  lumpSumLabourTotal,
+  markupableLabourTotal,
+  isWorkItem,
+  lineMarkupMultiplier,
+  workItemsTotal,
+  markupableMaterialsTotal,
+} from './lumpSum';
 
 export type { PriceDetail } from './priceDetail';
 export {

@@ -11,7 +11,7 @@
 
 import { Material, QuoteSection, LaborUnit, JobSpec } from '../types';
 import type { Document } from '../types/document';
-import { markupableLabourTotal } from '../../shared/document/lumpSum';
+import { markupableLabourTotal, markupableMaterialsTotal } from '../../shared/document/lumpSum';
 
 const STANDARD_DAY_HOURS = 8;
 
@@ -98,7 +98,11 @@ export function calculateDocumentTotals(
     ? sections.reduce((sum, s) => sum + s.laborTotal, 0) + (laborExtraHours * laborRate)
     : laborRate * laborHours;
   const subtotal = materialsSubtotal + laborTotal;
-  const materialMarkupAmount = materialsSubtotal * (markupPercent / 100);
+  // Work items are exempt for the same reason lump-sum sections are: the price
+  // is one the tradie typed into a field labelled "Line total", not a supplier
+  // price we marked up on their behalf. See shared/document/lumpSum.ts.
+  const materialMarkupAmount =
+    markupableMaterialsTotal(materialsSubtotal, materials) * (markupPercent / 100);
   // Lump-sum sections are exempt: their laborTotal is a price the tradie
   // typed, so marking it up would charge the customer a number the tradie
   // never chose. See shared/document/lumpSum.ts.
