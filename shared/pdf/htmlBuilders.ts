@@ -809,10 +809,22 @@ function buildSummaryHTML(data: QuotePdfData, paidAmount?: number, amountDue?: n
  * keep — saw no mention of the deposit at all, then got asked for one.
  */
 function buildPaymentScheduleHTML(quote: QuotePdfData): string {
-  const amount = Number(quote.depositAmount) || 0;
-  if (quote.requireDeposit !== true || amount <= 0) return '';
+  if (quote.requireDeposit !== true) return '';
+  const total = Number(quote.total) || 0;
   const pct = Number(quote.depositPercentage) || 0;
-  const balance = (Number(quote.total) || 0) - amount;
+  // DERIVE from the percentage, don't trust the stored amount. `depositAmount`
+  // is only written when the tradie touches the deposit control, so it goes
+  // stale the moment the quote total changes — and the email recomputes it
+  // live, which is how the same send could show two different deposits. A
+  // percentage with no stored amount would otherwise print no schedule at all
+  // while the email showed one.
+  const amount = pct > 0
+    ? Math.round(total * (pct / 100) * 100) / 100
+    : Number(quote.depositAmount) || 0;
+  if (amount <= 0) return '';
+  // Never print a negative balance: a deposit larger than the total is a data
+  // problem, not something to render as money owed back.
+  const balance = Math.max(0, total - amount);
   const depositLabel = pct > 0 ? `Deposit (${pct}%)` : 'Deposit';
   return `
       <div class="info-section payment-schedule" style="page-break-inside: avoid;">

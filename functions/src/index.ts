@@ -7440,13 +7440,17 @@ export function generateAcceptancePage(token: string): string {
         }
       }
 
-      // Summary — mirrors the emailed PDF exactly. The Materials/Labour split
-      // is 'itemised' only; GST shows in every mode (legal disclosure).
+      // Summary — mirrors buildSummaryHTML exactly, including its scope-mode
+      // rule: when every line is already a customer-facing total, splitting
+      // Materials from Labour here would re-split what the tradie chose not
+      // to itemise (and would label a painter's scope total "Materials").
+      // GST shows in every mode — legal disclosure, not a preference.
+      var showSplit = perLineMoney && !(quote.materials || []).every(function(m) { return m.kind === 'work'; });
       var summaryRows = '';
-      if (perLineMoney && quote.materialsSubtotal !== undefined) {
+      if (showSplit && quote.materialsSubtotal !== undefined) {
         summaryRows += '<div class="totals-row"><span>Materials</span><span>' + formatCurrency(quote.materialsSubtotal) + '</span></div>';
       }
-      if (perLineMoney && quote.laborTotal !== undefined) {
+      if (showSplit && quote.laborTotal !== undefined) {
         summaryRows += '<div class="totals-row"><span>Labour</span><span>' + formatCurrency(quote.laborTotal) + '</span></div>';
       }
       if (priceDetail !== 'total' && quote.subtotal !== undefined) {

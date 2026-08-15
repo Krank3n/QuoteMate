@@ -388,6 +388,13 @@ export function LaborMarkupScreen() {
               Distribution across {currentQuote.sections.length} sections
             </Text>
             {currentQuote.sections.map((s) => {
+              // A lump-sum section has no hours to step. Its steppers moved the
+              // GLOBAL total (so "extra stays the same") while applyLabourEditor
+              // passed the section through untouched and never counted it in the
+              // sections sum — so the whole delta landed in laborExtraHours and
+              // quietly added an hour of General Labour to the quote, invisible
+              // on the row the tradie had just tapped.
+              const isLumpSum = s.pricing === 'lumpSum';
               const sectionTotalHours = parseFloat(sectionTotalHoursMap[s.id] ?? '0') || 0;
               // Read the dollars from the same object the save writes, rather
               // than re-deriving them from the rate box: a section carrying its
@@ -409,6 +416,12 @@ export function LaborMarkupScreen() {
                   <Text style={{ fontSize: 13, color: themeColors.text, flex: 1 }} numberOfLines={1}>
                     {s.name}
                   </Text>
+                  {isLumpSum ? (
+                    <Text style={{ fontSize: 12, color: themeColors.textMuted, marginRight: 8 }}>
+                      Lump sum
+                    </Text>
+                  ) : (
+                  <>
                   <TouchableOpacity
                     style={{
                       width: 28,
@@ -446,6 +459,8 @@ export function LaborMarkupScreen() {
                   >
                     <MaterialCommunityIcons name="plus" size={16} color={themeColors.accentText} />
                   </TouchableOpacity>
+                  </>
+                  )}
                   <Text style={{ fontSize: 13, color: themeColors.text, fontWeight: '600', minWidth: 70, textAlign: 'right' }}>
                     {formatCurrency(sectionDollars)}
                   </Text>

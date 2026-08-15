@@ -1,5 +1,5 @@
 /**
- * A lump-sum section in Xero.
+ * What reaches Xero.
  *
  * The generic section path derives Quantity from hours (or from
  * laborTotal / laborRate) and UnitAmount from the rate. A lump-sum section has
@@ -97,5 +97,73 @@ describe('buildXeroLineItems — lump-sum sections', () => {
       total: 44,
     });
     expect(lines.map((l) => l.Description)).toEqual(['Grout']);
+  });
+});
+
+describe('buildXeroLineItems — presentation must never lose money', () => {
+  /** $380 of materials + $3,400 of labour = $3,780 ex GST, $4,158 inc. */
+  function doc(over: Record<string, any> = {}) {
+    return {
+      job: { name: 'Repaint' },
+      materials: [{ name: 'Paint', quantity: 4, unit: 'each', price: 95, totalPrice: 380 }],
+      sections: [
+        {
+          id: 'paint', name: 'Painting', multiplier: 1,
+          laborHours: 40, laborHoursTotal: 40, laborRate: 85, laborUnit: 'hours',
+          laborTotal: 3400, sortOrder: 0, pricing: 'hourly',
+        },
+      ],
+      laborExtraHours: 0,
+      laborRate: 85,
+      materialsSubtotal: 380,
+      laborTotal: 3400,
+      subtotal: 3780,
+      markupAmount: 0,
+      gst: 378,
+      total: 4158,
+      ...over,
+    };
+  }
+
+  const sum = (lines: any[]) =>
+    Math.round(lines.reduce((t, l) => t + l.Quantity * l.UnitAmount, 0) * 100) / 100;
+
+  it('itemises the lines when the customer sees an itemised document', () => {
+    const lines = buildXeroLineItems(doc({ priceDetail: 'itemised' }));
+    expect(lines).toHaveLength(2);
+    expect(sum(lines)).toBe(3780);
+  });
+
+  it('sends ONE line for "Scope only" rather than dropping the labour', () => {
+    // Regression: this read the legacy flags raw. legacyFlagsFor('summary') says
+    // "labour hidden", which skipped the entire labour loop while materials
+    // stayed on — Xero got an invoice for $380 of a $3,780 job, and Xero
+    // derives the invoice total from the lines it is given.
+    const lines = buildXeroLineItems(doc({
+      priceDetail: 'summary',
+      showMaterialCosts: true,
+      showLaborCosts: false,
+    }));
+    expect(lines).toHaveLength(1);
+    expect(sum(lines)).toBe(3780);
+  });
+
+  it('sends ONE line for "Total only"', () => {
+    const lines = buildXeroLineItems(doc({ priceDetail: 'total' }));
+    expect(lines).toHaveLength(1);
+    expect(sum(lines)).toBe(3780);
+  });
+
+  it('falls back to a summary line whenever the lines do not add up', () => {
+    // The guard, not the projection: any future omission lands here instead of
+    // in the tradie's accounting.
+    const lines = buildXeroLineItems(doc({
+      priceDetail: 'itemised',
+      // A section carrying dollars with no rate and no lump-sum marker — the
+      // shape the generic loop skips.
+      sections: [{ id: 'x', name: 'Mystery', multiplier: 1, laborHours: 0, laborRate: 0, laborTotal: 3400 }],
+    }));
+    expect(lines).toHaveLength(1);
+    expect(sum(lines)).toBe(3780);
   });
 });

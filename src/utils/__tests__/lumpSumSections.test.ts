@@ -106,6 +106,27 @@ describe('lump-sum sections — the labour editor cannot move the price', () => 
     expect(d.laborHours).toBe(0);
   });
 
+  it('cannot absorb hours, which is why its row has no stepper', () => {
+    // The labour screen's ± bumps the tapped section AND the global total by
+    // the same delta, so "extra stays the same". A lump-sum section breaks
+    // that: applyLabourEditor passes it through and never counts it in the
+    // sections sum, so the whole delta lands in laborExtraHours and quietly
+    // adds an hour of General Labour that appears nowhere on the row tapped.
+    // LaborMarkupScreen therefore renders these rows without steppers; this
+    // pins the underlying asymmetry so the two can't drift apart again.
+    const base: any = doc([hourlySection('Strip out', 4), lumpSumSection('Bathroom regrout', 1200)]);
+    const state = hydrateLabourEditor(base);
+    // The editor reports zero hours for the lump-sum row — there is nothing
+    // for a stepper to step.
+    expect(state.sectionTotals['Bathroom regrout']).toBe('0');
+
+    // Hand-simulate one "+" tap on that row: total up by 1, section unchanged.
+    const tapped = { ...state, totalInput: String(parseFloat(state.totalInput) + 1) };
+    const after: any = { ...base, ...applyLabourEditor(base, tapped) };
+    expect(after.laborExtraHours).toBe(1);
+    expect(after.sections.find((x: QuoteSection) => x.name === 'Bathroom regrout').laborTotal).toBe(1200);
+  });
+
   it('does not let a lump-sum section drag the quote rate to zero', () => {
     // hydrate picks the hourly rate from the first section carrying one; a
     // lump-sum section's rate of 0 must not be mistaken for the answer.

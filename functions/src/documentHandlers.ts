@@ -398,10 +398,11 @@ function applyHideMarkupForDisplay(q: any, businessSettings?: any) {
     materials: inflatedMaterials,
     materialsSubtotal: (Number(q.materialsSubtotal) || 0) * matFactor,
     laborTotal: inflatedLabour,
-    subtotal:
-      ((Number(q.materialsSubtotal) || 0) * matFactor) +
-      inflatedLabour +
-      (Number(q.travelAdjustment) || 0),
+    // travelAdjustment is a PERCENTAGE. It used to be added here as dollars,
+    // which put e.g. $3 of nothing into the emailed Subtotal on a 3% travel
+    // quote — and disagreed with both the PDF and the index.ts twin, neither
+    // of which include travel in this figure.
+    subtotal: ((Number(q.materialsSubtotal) || 0) * matFactor) + inflatedLabour,
     markupAmount: 0,
   };
 }

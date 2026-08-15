@@ -63,9 +63,17 @@ export function buildAcceptanceQuotePayload(
       ? {
           materials: display.materials.map((m: any) => ({
             name: m.name,
-            quantity: m.quantity,
-            unit: m.unit,
-            totalPrice: m.totalPrice || 0,
+            // Withheld, not merely un-rendered. The customer holds the token
+            // and this is a plain GET, so per-line money left on the payload
+            // is one Network-tab click away — exactly the leak this module
+            // exists to close. A work item keeps its line total because that
+            // IS its section total, and the scope table prints it in every
+            // mode (same rule as the PDF).
+            ...(showPerLineMoney
+              ? { quantity: m.quantity, unit: m.unit, totalPrice: m.totalPrice || 0 }
+              : m.kind === 'work'
+                ? { totalPrice: m.totalPrice || 0 }
+                : {}),
             // A work item is a lump-sum scope line: a title, a paragraph and
             // one price. The page renders it as a numbered scope row, not as
             // a quantity against a unit.

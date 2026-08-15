@@ -172,8 +172,36 @@ describe('payment schedule', () => {
 
   it('is absent when no deposit is required', () => {
     expect(render('itemised')).not.toContain('Payment Schedule');
-    // …and absent when the flag is on but the amount never got set.
+    // …and absent when the flag is on but no percentage or amount was set.
     expect(render('itemised', { requireDeposit: true, depositAmount: 0 }))
       .not.toContain('Payment Schedule');
+  });
+
+  it('derives the deposit from the percentage rather than a stored amount', () => {
+    // depositAmount is only written when the tradie touches the deposit
+    // control, so it goes stale the moment the total changes — and the email
+    // recomputes it live. Two different deposits in one send.
+    const html = render('itemised', {
+      requireDeposit: true,
+      depositPercentage: 25,
+      depositAmount: 5000, // left over from a bigger version of this quote
+    });
+    // 25% of $1,859, not the stale $5,000.
+    expect(html).toContain('$464.75');
+    expect(html).not.toContain('$5,000.00');
+    expect(html).toContain('$1,394.25'); // balance on completion
+  });
+
+  it('renders from a percentage alone, with no stored amount at all', () => {
+    const html = render('itemised', { requireDeposit: true, depositPercentage: 10 });
+    expect(html).toContain('Payment Schedule');
+    expect(html).toContain('$185.90');
+  });
+
+  it('never prints a negative balance', () => {
+    const html = render('itemised', { requireDeposit: true, depositAmount: 5000 });
+    expect(html).toContain('Payment Schedule');
+    expect(html).not.toContain('-$');
+    expect(html).toContain('$0.00');
   });
 });

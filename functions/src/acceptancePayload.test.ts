@@ -37,13 +37,31 @@ describe('buildAcceptanceQuotePayload', () => {
     expect(p.subtotal).toBe(1690);
   });
 
-  it('keeps the line names but drops the money in summary', () => {
+  it('keeps the line names but WITHHOLDS the money in summary', () => {
     const p = buildAcceptanceQuotePayload(quote({ priceDetail: 'summary' }), {}, display);
     expect(p.priceDetail).toBe('summary');
-    // The names still ship — the page decides not to print the figures beside
-    // them. The section totals it needs are the subtotals below.
     expect(p.materials.map((m: any) => m.name)).toEqual(['Skip bin', 'Low sheen 10L']);
+    // Withheld from the PAYLOAD, not merely un-rendered: the customer holds
+    // the token and this is a plain GET, so anything left here is one
+    // Network-tab click from the per-line pricing the tradie hid.
+    for (const m of p.materials) {
+      expect(m).not.toHaveProperty('quantity');
+      expect(m).not.toHaveProperty('unit');
+      expect(m).not.toHaveProperty('totalPrice');
+    }
+    // The section totals the page needs are still there.
     expect(p.subtotal).toBe(1690);
+  });
+
+  it('keeps a work item\u2019s line total in summary — it IS its section total', () => {
+    const p = buildAcceptanceQuotePayload(quote({ priceDetail: 'summary' }), {}, {
+      ...display,
+      materials: [
+        { name: 'INTERIOR', quantity: 1, unit: 'each', totalPrice: 22750, kind: 'work', scope: 'Full interior.' },
+      ],
+    });
+    expect(p.materials[0].totalPrice).toBe(22750);
+    expect(p.materials[0]).not.toHaveProperty('quantity');
   });
 
   it('ships no line items at all in total mode', () => {

@@ -27,19 +27,34 @@ describe('resolvePriceDetail — migration', () => {
     expect(resolvePriceDetail({ showMaterialCosts: true, showLaborCosts: true })).toBe('itemised');
   });
 
-  it('exactly one of the two flags false → summary', () => {
-    expect(resolvePriceDetail({ showMaterialCosts: false, showLaborCosts: true })).toBe('summary');
-    expect(resolvePriceDetail({ showMaterialCosts: true, showLaborCosts: false })).toBe('summary');
-  });
-
-  it('both flags false → total', () => {
+  it('either flag explicitly false → total, never summary', () => {
+    // Three modes can't express "hide one half", so the migration discloses
+    // LESS than the author chose rather than more. Mapping a
+    // materials-hidden document to 'summary' would print every material NAME
+    // — the supplier line-up its author was hiding — and because this
+    // resolves on read it would change documents already sent.
+    expect(resolvePriceDetail({ showMaterialCosts: false, showLaborCosts: true })).toBe('total');
+    expect(resolvePriceDetail({ showMaterialCosts: true, showLaborCosts: false })).toBe('total');
     expect(resolvePriceDetail({ showMaterialCosts: false, showLaborCosts: false })).toBe('total');
   });
 
   it('one flag set and the other undefined treats the missing one as shown', () => {
     // undefined has always meant "show" everywhere in the app.
-    expect(resolvePriceDetail({ showLaborCosts: false })).toBe('summary');
-    expect(resolvePriceDetail({ showMaterialCosts: false })).toBe('summary');
+    expect(resolvePriceDetail({ showLaborCosts: false })).toBe('total');
+    expect(resolvePriceDetail({ showMaterialCosts: false })).toBe('total');
+    expect(resolvePriceDetail({ showMaterialCosts: true })).toBe('itemised');
+  });
+
+  it('nothing migrates INTO summary — it is reachable only by choosing it', () => {
+    const legacyCombos = [
+      { showMaterialCosts: true, showLaborCosts: true },
+      { showMaterialCosts: true, showLaborCosts: false },
+      { showMaterialCosts: false, showLaborCosts: true },
+      { showMaterialCosts: false, showLaborCosts: false },
+    ];
+    for (const doc of legacyCombos) {
+      expect(resolvePriceDetail(doc)).not.toBe('summary');
+    }
   });
 
   it('nothing on the doc falls through to the business default', () => {
@@ -50,7 +65,7 @@ describe('resolvePriceDetail — migration', () => {
   it("falls through to the business's own legacy pair before defaulting", () => {
     expect(resolvePriceDetail({}, { showMaterialCostsByDefault: false, showLaborCostsByDefault: false }))
       .toBe('total');
-    expect(resolvePriceDetail({}, { showLaborCostsByDefault: false })).toBe('summary');
+    expect(resolvePriceDetail({}, { showLaborCostsByDefault: false })).toBe('total');
   });
 
   it('defaults to itemised when nothing at all is set', () => {
@@ -64,10 +79,16 @@ describe('resolvePriceDetail — migration', () => {
 });
 
 describe('legacyFlagsFor — the dual write', () => {
-  it('round-trips every mode back through the resolver', () => {
-    for (const detail of ['itemised', 'summary', 'total'] as const) {
-      expect(resolvePriceDetail(legacyFlagsFor(detail))).toBe(detail);
-    }
+  it('round-trips the two modes the old pair can express', () => {
+    expect(resolvePriceDetail(legacyFlagsFor('itemised'))).toBe('itemised');
+    expect(resolvePriceDetail(legacyFlagsFor('total'))).toBe('total');
+  });
+
+  it('degrades summary to total for an older build, rather than over-disclosing', () => {
+    // The old pair has no way to say "names without prices". An old build
+    // reading materials-shown would print the per-line money 'summary' exists
+    // to hide, so the dual write tells it to show only the grand total.
+    expect(legacyFlagsFor('summary')).toEqual({ showMaterialCosts: false, showLaborCosts: false });
   });
 });
 

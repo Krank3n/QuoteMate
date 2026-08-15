@@ -840,7 +840,11 @@ export function MaterialsListScreen() {
     const existingSectionNames = new Set(sectionedGroups.map(([key]) => key));
     if (quoteSections) {
       quoteSections.forEach(s => {
+        // Track as we go: two sections sharing a name would otherwise each
+        // push a placeholder group, producing duplicate React keys and a
+        // header/footer pair that both show the summed labour.
         if (!existingSectionNames.has(s.name)) {
+          existingSectionNames.add(s.name);
           sectionedGroups.push([s.name, { info: { name: s.name, color: themeColors.accentText }, materials: [] }]);
         }
       });
@@ -1444,17 +1448,21 @@ export function MaterialsListScreen() {
     if (!newSectionName.trim() || !currentQuote) return;
     const hours = parseFloat(newSectionLaborHours) || 0;
     const defaultRate = currentQuote.laborRate || businessSettings?.defaultLaborRate || 85;
+    // A section's NAME is its identity — materials point at it by name — so a
+    // duplicate would merge two sections in every consumer that groups by it.
+    const state = { sections: currentQuote.sections || [], materials: currentQuote.materials };
+    const name = uniqueSectionName(state, newSectionName.trim());
     const next = createSection(
-      { sections: currentQuote.sections || [], materials: currentQuote.materials },
+      state,
       newSectionPricing === 'lumpSum'
         ? {
-            name: newSectionName,
+            name,
             pricing: 'lumpSum',
             laborTotal: parseFloat(newSectionPrice) || 0,
             description: newSectionScope,
           }
         : {
-            name: newSectionName,
+            name,
             laborHours: hours,
             laborRate: hours > 0 ? defaultRate : 0,
             description: newSectionScope,

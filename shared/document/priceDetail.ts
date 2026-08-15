@@ -63,8 +63,7 @@ function isPriceDetail(v: unknown): v is PriceDetail {
  *
  *   priceDetail set                    → wins outright
  *   both legacy flags true/undefined   → 'itemised'
- *   exactly one of the two flags false → 'summary'
- *   both false                         → 'total'
+ *   EITHER flag explicitly false       → 'total'
  *   nothing on the doc                 → business default → 'itemised'
  */
 export function resolvePriceDetail(
@@ -90,12 +89,25 @@ export function resolvePriceDetail(
   return 'itemised';
 }
 
+/**
+ * Three modes cannot express the old pair's fourth state ("hide materials,
+ * show labour" / "show materials, hide labour"), so a migration has to choose
+ * — and it must choose to disclose LESS than the author did, never more.
+ *
+ * Mapping a half-hidden document to 'summary' looked natural and was wrong:
+ * 'summary' prints every material NAME grouped by section, and the tradie who
+ * switched materials off was hiding their supplier line-up. Because the
+ * migration resolves on read, that would have changed documents already sent —
+ * a customer re-opening an old acceptance link would see the list its author
+ * had hidden. 'total' can only ever show less.
+ *
+ * So 'summary' is reachable only by explicitly choosing it. Nothing migrates
+ * into it.
+ */
 function fromLegacyPair(materials?: boolean, labour?: boolean): PriceDetail {
   const showMaterials = materials !== false;
   const showLabour = labour !== false;
-  if (showMaterials && showLabour) return 'itemised';
-  if (!showMaterials && !showLabour) return 'total';
-  return 'summary';
+  return showMaterials && showLabour ? 'itemised' : 'total';
 }
 
 /**
@@ -108,9 +120,11 @@ function fromLegacyPair(materials?: boolean, labour?: boolean): PriceDetail {
  * the same time. Until then, writing one without the other reintroduces
  * exactly the drift this module exists to remove.
  *
- * 'summary' maps to materials-shown / labour-hidden because that is the shape
- * an old build renders closest to it: line names visible, no separate labour
- * block.
+ * 'summary' dual-writes as BOTH flags false — i.e. an old build shows only the
+ * grand total. That is deliberately less than 'summary' shows: the old pair
+ * cannot express "names without prices", and an old build reading
+ * materials-shown would print the per-line money 'summary' exists to hide.
+ * Under-disclosing is recoverable; over-disclosing is not.
  */
 export function legacyFlagsFor(detail: PriceDetail): {
   showMaterialCosts: boolean;
@@ -120,7 +134,7 @@ export function legacyFlagsFor(detail: PriceDetail): {
     case 'total':
       return { showMaterialCosts: false, showLaborCosts: false };
     case 'summary':
-      return { showMaterialCosts: true, showLaborCosts: false };
+      return { showMaterialCosts: false, showLaborCosts: false };
     case 'itemised':
     default:
       return { showMaterialCosts: true, showLaborCosts: true };

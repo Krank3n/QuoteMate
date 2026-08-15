@@ -10,6 +10,7 @@
 
 import * as admin from 'firebase-admin';
 import fetch from 'node-fetch';
+import { resolvePriceDetail } from './shared/document/priceDetail';
 
 export type XeroAuthHeaders = Record<string, string>;
 
@@ -74,16 +75,22 @@ export async function upsertXeroContact(
  * Build Xero LineItems from a doc's materials/sections/markup. Shared between
  * quote and invoice push so the two records show the same breakdown in Xero.
  *
- * Honors the same visibility flags the PDF uses: if both showMaterialCosts
- * and showLaborCosts are off, the customer-facing PDF collapses to a single
- * "total" row — match that in Xero by emitting one summary line, so the
- * tradie's customer sees the same shape in both places.
+ * Honours the same presentation the PDF does (shared/document/priceDetail):
+ * anything but a fully itemised document goes across as ONE summary line, so
+ * the tradie's customer sees the same shape in both places AND the lines
+ * always sum to the invoice total.
  *
  * Falls back to a single summary line when nothing itemised is present.
  */
 export function buildXeroLineItems(doc: XeroSyncSourceDoc): any[] {
-  const showMaterials = doc.showMaterialCosts !== false;
-  const showLabor = doc.showLaborCosts !== false;
+  // Resolve through the one resolver. Reading the legacy flags raw here was
+  // load-bearing and wrong the moment 'summary' existed: its legacy pair says
+  // "labour hidden", which skipped the entire labour loop while materials
+  // stayed on — so Xero received an invoice whose lines summed to the
+  // materials alone. For a labour-dominant trade that is most of the invoice,
+  // and it lands in the tradie's accounting, not just on a page.
+  const detail = resolvePriceDetail(doc);
+  const itemised = detail === 'itemised';
 
   // Not GST-registered: line amounts carry no tax component at all — BAS
   // Excluded keeps the sale off the GST section of the tradie's BAS.
@@ -101,8 +108,11 @@ export function buildXeroLineItems(doc: XeroSyncSourceDoc): any[] {
       ? total
       : Math.round((total / 1.1) * 100) / 100;
 
-  // Customer-facing PDF is configured as a single total → send Xero one line.
-  if (!showMaterials && !showLabor) {
+  // Anything but a fully itemised document goes to Xero as ONE line for the
+  // whole job. 'summary' and 'total' are decisions about what the CUSTOMER
+  // sees; a partial set of lines here would simply lose money, because Xero
+  // derives the invoice total from the lines it is given.
+  if (!itemised) {
     return [{
       Description: doc.job?.name || 'Services',
       Quantity: 1,
@@ -114,7 +124,7 @@ export function buildXeroLineItems(doc: XeroSyncSourceDoc): any[] {
 
   const lineItems: any[] = [];
 
-  if (showMaterials && Array.isArray(doc.materials)) {
+  if (Array.isArray(doc.materials)) {
     for (const mat of doc.materials) {
       lineItems.push({
         Description: mat.name || 'Material',
@@ -126,67 +136,65 @@ export function buildXeroLineItems(doc: XeroSyncSourceDoc): any[] {
     }
   }
 
-  if (showLabor) {
-    if (Array.isArray(doc.sections) && doc.sections.length > 0) {
-      // Mirror calculateDocumentTotals: section.laborTotal is the authoritative
-      // figure (writer paths already account for multiplier when computing it),
-      // and laborExtraHours × top-level laborRate is the reconciliation buffer
-      // that brings the section sum back to doc.laborTotal. Deriving Quantity
-      // from laborTotal / laborRate avoids the historical bug where xeroSync
-      // re-applied the section multiplier on top of an already-totalled
-      // laborHours and produced quantities orders of magnitude too high.
-      for (const s of doc.sections) {
-        const sectionTotal = Number(s.laborTotal ?? 0);
-        const rate = Number(s.laborRate ?? 0);
-        // A lump-sum section has rate 0 by invariant, so the generic path
-        // below would either divide by zero or skip the line entirely and
-        // silently drop the money out of the Xero invoice. It is one line at
-        // quantity 1, exactly like a work item.
-        if (s.pricing === 'lumpSum') {
-          if (sectionTotal === 0) continue;
-          lineItems.push({
-            Description: s.name || 'Section',
-            Quantity: 1,
-            UnitAmount: sectionTotal,
-            AccountCode: '200',
-            TaxType: taxType,
-          });
-          continue;
-        }
-        if (sectionTotal === 0 || rate <= 0) continue;
-        const quantity =
-          Number(s.laborHoursTotal)
-          || (Number(s.laborHours ?? 0) * Number(s.multiplier ?? 1))
-          || sectionTotal / rate;
+  if (Array.isArray(doc.sections) && doc.sections.length > 0) {
+    // Mirror calculateDocumentTotals: section.laborTotal is the authoritative
+    // figure (writer paths already account for multiplier when computing it),
+    // and laborExtraHours × top-level laborRate is the reconciliation buffer
+    // that brings the section sum back to doc.laborTotal. Deriving Quantity
+    // from laborTotal / laborRate avoids the historical bug where xeroSync
+    // re-applied the section multiplier on top of an already-totalled
+    // laborHours and produced quantities orders of magnitude too high.
+    for (const s of doc.sections) {
+      const sectionTotal = Number(s.laborTotal ?? 0);
+      const rate = Number(s.laborRate ?? 0);
+      // A lump-sum section has rate 0 by invariant, so the generic path
+      // below would either divide by zero or skip the line entirely and
+      // silently drop the money out of the Xero invoice. It is one line at
+      // quantity 1, exactly like a work item.
+      if (s.pricing === 'lumpSum') {
+        if (sectionTotal === 0) continue;
         lineItems.push({
-          Description: `Labour - ${s.name || 'Section'}`,
-          Quantity: quantity,
-          UnitAmount: rate,
+          Description: s.name || 'Section',
+          Quantity: 1,
+          UnitAmount: sectionTotal,
           AccountCode: '200',
           TaxType: taxType,
         });
+        continue;
       }
-
-      const extraHours = Number(doc.laborExtraHours ?? 0);
-      const topRate = Number(doc.laborRate ?? 0);
-      if (extraHours !== 0 && topRate > 0) {
-        lineItems.push({
-          Description: 'Labour adjustment',
-          Quantity: extraHours,
-          UnitAmount: topRate,
-          AccountCode: '200',
-          TaxType: taxType,
-        });
-      }
-    } else if ((Number(doc.laborHours) || 0) > 0 && (Number(doc.laborRate) || 0) > 0) {
+      if (sectionTotal === 0 || rate <= 0) continue;
+      const quantity =
+        Number(s.laborHoursTotal)
+        || (Number(s.laborHours ?? 0) * Number(s.multiplier ?? 1))
+        || sectionTotal / rate;
       lineItems.push({
-        Description: `Labour - ${doc.job?.name || 'General'}`,
-        Quantity: doc.laborHours,
-        UnitAmount: doc.laborRate,
+        Description: `Labour - ${s.name || 'Section'}`,
+        Quantity: quantity,
+        UnitAmount: rate,
         AccountCode: '200',
         TaxType: taxType,
       });
     }
+
+    const extraHours = Number(doc.laborExtraHours ?? 0);
+    const topRate = Number(doc.laborRate ?? 0);
+    if (extraHours !== 0 && topRate > 0) {
+      lineItems.push({
+        Description: 'Labour adjustment',
+        Quantity: extraHours,
+        UnitAmount: topRate,
+        AccountCode: '200',
+        TaxType: taxType,
+      });
+    }
+  } else if ((Number(doc.laborHours) || 0) > 0 && (Number(doc.laborRate) || 0) > 0) {
+    lineItems.push({
+      Description: `Labour - ${doc.job?.name || 'General'}`,
+      Quantity: doc.laborHours,
+      UnitAmount: doc.laborRate,
+      AccountCode: '200',
+      TaxType: taxType,
+    });
   }
 
   if ((Number(doc.markupAmount) || 0) > 0) {
@@ -207,6 +215,32 @@ export function buildXeroLineItems(doc: XeroSyncSourceDoc): any[] {
       AccountCode: '200',
       TaxType: taxType,
     });
+  }
+
+  // Last line of defence. Xero derives the invoice total from the lines it is
+  // given, so a projection that silently drops a component doesn't produce a
+  // wrong-looking invoice — it produces a plausible one for the wrong amount,
+  // in the tradie's accounting. If the lines don't add up to what the customer
+  // signed for, send the one line that does. (A "Scope only" document skipped
+  // the entire labour loop this way and shipped an invoice for the materials
+  // alone.)
+  const linesTotal = lineItems.reduce(
+    (sum, l) => sum + (Number(l.Quantity) || 0) * (Number(l.UnitAmount) || 0),
+    0,
+  );
+  if (Math.abs(linesTotal - summaryAmount) > 0.05) {
+    console.warn('[xero] line items do not sum to the document total — sending one summary line', {
+      linesTotal: Math.round(linesTotal * 100) / 100,
+      summaryAmount,
+      lineCount: lineItems.length,
+    });
+    return [{
+      Description: doc.job?.name || 'Services',
+      Quantity: 1,
+      UnitAmount: summaryAmount,
+      AccountCode: '200',
+      TaxType: taxType,
+    }];
   }
 
   return lineItems;
