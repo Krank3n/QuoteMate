@@ -26,9 +26,9 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
 /**
  * Rewrite sortOrder to 0..n-1 in the array's current order, so "the order the
  * array is in" and "the order sortOrder says" can never disagree. Called at
- * the end of every mutation that can change the order, and cheap enough to be
- * called on save as a lazy backfill for documents authored before sortOrder
- * was reliable.
+ * the end of every mutation that can change the order, which is also how a
+ * document authored before sortOrder was reliable gets backfilled — on its
+ * next section edit, not on read.
  */
 export function normaliseSortOrder(sections: QuoteSection[]): QuoteSection[] {
   return sections.map((s, i) => (s.sortOrder === i ? s : { ...s, sortOrder: i }));
@@ -128,18 +128,6 @@ export function renameSection(state: SectionsState, oldName: string, rawNewName:
   return {
     sections: state.sections.map((s) => (s.name === oldName ? { ...s, name: newName } : s)),
     materials: state.materials.map((m) => (m.section === oldName ? { ...m, section: newName } : m)),
-  };
-}
-
-/** Patch a section's own fields. Never touches materials — the name is fixed. */
-export function updateSection(
-  state: SectionsState,
-  name: string,
-  patch: Partial<Omit<QuoteSection, 'id' | 'name' | 'sortOrder'>>,
-): SectionsState {
-  return {
-    sections: state.sections.map((s) => (s.name === name ? { ...s, ...patch } : s)),
-    materials: state.materials,
   };
 }
 

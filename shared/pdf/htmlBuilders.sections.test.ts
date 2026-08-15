@@ -79,7 +79,6 @@ describe('PDF sections', () => {
   it('never renders a group named "Other"', () => {
     const html = generateMaterialsHTML(
       [material('Skip bin', 'Demolition', 300), material('Consumables', undefined, 40)],
-      true,
       0,
       [labourSection('Demolition', 340)],
     );
@@ -94,7 +93,6 @@ describe('PDF sections', () => {
   it('renders a section description under its heading', () => {
     const html = generateMaterialsHTML(
       [material('Low sheen 10L', 'Painting', 200)],
-      true,
       0,
       [labourSection('Painting', 850, { description: 'Two coats, low sheen.\nWalls and ceilings.' })],
     );
@@ -104,7 +102,6 @@ describe('PDF sections', () => {
   it('escapes a section description', () => {
     const html = generateMaterialsHTML(
       [material('Trim', 'Painting', 200)],
-      true,
       0,
       [labourSection('Painting', 850, { description: 'Gloss <all> trims & sills' })],
     );
@@ -117,7 +114,7 @@ describe('PDF sections', () => {
     // rendered by default while material sections did not, so the same quote
     // showed its work broken out in one half of the document and lumped
     // together in the other.
-    const html = buildQuotePdfHtml(quoteData({ groupMaterialsBySection: undefined }), business);
+    const html = buildQuotePdfHtml(quoteData(), business);
     expect(html).toContain('class="section-label"');
     expect(html).toContain('Painting Subtotal');
   });

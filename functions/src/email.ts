@@ -3,7 +3,12 @@ import fetch from 'node-fetch';
 import { PASSTHROUGH_SURCHARGE_PCT } from './shared/pdf';
 import { NEXT_PRICE_AUD } from './foundingOffer';
 import { NO_GST_NOTE } from './shared/document/gstMode';
-import { resolvePriceDetail, type PriceDetail } from './shared/document/priceDetail';
+import {
+  resolvePriceDetail,
+  showsLineItems,
+  showsPerLineMoney,
+  type PriceDetail,
+} from './shared/document/priceDetail';
 import {
   buildPaymentReceiptContentHtml,
   PaymentReceiptContentInput,
@@ -1951,9 +1956,9 @@ export function renderPricingRows(input: PricingRowsInput): string {
   // there is nothing but the total. Subtotal survives in both of the first
   // two. GST is disclosed in all three — it is a legal disclosure, not a
   // preference.
-  const showMaterials = detail === 'itemised';
-  const showLabor = detail === 'itemised';
-  const showSubtotalRow = detail !== 'total';
+  const showMaterials = showsPerLineMoney(detail);
+  const showLabor = showsPerLineMoney(detail);
+  const showSubtotalRow = showsLineItems(detail);
   const row = (label: string, value: string, valueColor = '#111827') => `
             <tr>
               <td style="padding:10px 0;color:#6b7280;font-size:13px;border-bottom:1px solid #eef0f3;">${label}</td>

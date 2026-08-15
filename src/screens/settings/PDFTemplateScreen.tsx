@@ -34,6 +34,7 @@ import {
   PdfTemplateId,
   buildQuotePdfHtml,
   toPdfMaterials,
+  toPdfSections,
   type QuotePdfData,
 } from '../../../shared/pdf';
 import { resolveGstMode, GstMode, NO_GST_NOTE } from '../../../shared/document';
@@ -116,15 +117,7 @@ function buildSampleQuote(opts: {
     laborRate: SAMPLE_RATE,
     laborHours: 16,
     laborTotal: totals.laborTotal,
-    sections: SAMPLE_SECTIONS.map((s) => ({
-      name: s.name,
-      laborHours: s.laborHours,
-      multiplier: s.multiplier,
-      laborHoursTotal: s.laborHoursTotal,
-      laborRate: s.laborRate,
-      laborUnit: s.laborUnit,
-      laborTotal: s.laborTotal,
-    })),
+    sections: toPdfSections(SAMPLE_SECTIONS),
     subtotal: totals.subtotal,
     markup: SAMPLE_MARKUP_PCT,
     markupAmount: totals.markupAmount,
@@ -163,7 +156,6 @@ function Line({ width, height = 3, color = '#D1D5DB', style }: {
  * to preview both ways.
  */
 function TemplatePreview({ templateId, businessName, brandColor, gstMode }: { templateId: PdfTemplateId; businessName: string; brandColor?: string; gstMode: GstMode }) {
-  const groupBySection = true;
   const styles = useStyles();
   const themeColors = useThemeColors();
   const configs: Record<PdfTemplateId, {
@@ -311,7 +303,6 @@ function TemplatePreview({ templateId, businessName, brandColor, gstMode }: { te
     },
   ];
 
-  const allItems = sampleSections.flatMap(s => s.items);
 
   return (
     <View style={[styles.previewContainer, { width: PREVIEW_WIDTH, height: PREVIEW_HEIGHT }]}>
@@ -403,9 +394,7 @@ function TemplatePreview({ templateId, businessName, brandColor, gstMode }: { te
             </Text>
           </View>
 
-          {/* Table content - grouped or flat */}
-          {groupBySection ? (
-            <>
+          {/* Table content, grouped under section headings */}
               {sampleSections.map((section, si) => (
                 <View key={si} style={{ marginBottom: 4 * scale }}>
                   {/* Section label */}
@@ -447,54 +436,6 @@ function TemplatePreview({ templateId, businessName, brandColor, gstMode }: { te
                 <Text style={{ flex: 5, color: c.bodyTextColor, fontSize: 5.5 * scale, fontWeight: '700', ...font }}>Materials Subtotal</Text>
                 <Text style={{ flex: 1, color: c.bodyTextColor, fontSize: 5.5 * scale, fontWeight: '700', textAlign: 'right', ...font }}>$877.90</Text>
               </View>
-            </>
-          ) : (
-            <>
-              {/* Table header */}
-              <View style={[
-                styles.prevTableRow,
-                c.tableBorderStyle === 'filled' && { backgroundColor: c.tableHeaderBg, borderRadius: templateId === 'professional' ? 2 * scale : 0 },
-                c.tableBorderStyle === 'ruled' && { borderTopWidth: 1.5 * scale, borderBottomWidth: 1.5 * scale, borderColor: c.accentColor },
-                { paddingVertical: 3 * scale, paddingHorizontal: 4 * scale },
-              ]}>
-                <Text style={{ flex: 3, color: c.tableHeaderText, fontSize: 5.5 * scale, fontWeight: '600', ...font }}>Item</Text>
-                <Text style={{ flex: 1, color: c.tableHeaderText, fontSize: 5.5 * scale, fontWeight: '600', textAlign: 'center', ...font }}>Qty</Text>
-                <Text style={{ flex: 1, color: c.tableHeaderText, fontSize: 5.5 * scale, fontWeight: '600', textAlign: 'right', ...font }}>Price</Text>
-                <Text style={{ flex: 1, color: c.tableHeaderText, fontSize: 5.5 * scale, fontWeight: '600', textAlign: 'right', ...font }}>Total</Text>
-              </View>
-
-              {/* Table rows */}
-              {allItems.map((item, i) => (
-                <View key={i} style={[
-                  styles.prevTableRow,
-                  {
-                    paddingVertical: 2.5 * scale,
-                    paddingHorizontal: 4 * scale,
-                    borderBottomWidth: 0.5 * scale,
-                    borderBottomColor: c.bodyTextColor + '20',
-                  },
-                  c.alternateRowBg && i % 2 === 1 && { backgroundColor: c.alternateRowBg },
-                ]}>
-                  <Text style={{ flex: 3, color: c.bodyTextColor, fontSize: 5 * scale, ...font }} numberOfLines={1}>{item.name}</Text>
-                  <Text style={{ flex: 1, color: c.bodyTextColor, fontSize: 5 * scale, textAlign: 'center', ...font }}>{item.qty}</Text>
-                  <Text style={{ flex: 1, color: c.bodyTextColor, fontSize: 5 * scale, textAlign: 'right', ...font }}>{item.price}</Text>
-                  <Text style={{ flex: 1, color: c.bodyTextColor, fontSize: 5 * scale, textAlign: 'right', ...font }}>{item.total}</Text>
-                </View>
-              ))}
-
-              {/* Subtotal row */}
-              <View style={[styles.prevTableRow, {
-                paddingVertical: 2.5 * scale,
-                paddingHorizontal: 4 * scale,
-                borderTopWidth: c.tableBorderStyle === 'ruled' ? 1.5 * scale : 0,
-                borderTopColor: c.accentColor,
-                backgroundColor: templateId === 'professional' ? '#F5F5F5' : 'transparent',
-              }]}>
-                <Text style={{ flex: 5, color: c.bodyTextColor, fontSize: 5.5 * scale, fontWeight: '700', ...font }}>Materials Subtotal</Text>
-                <Text style={{ flex: 1, color: c.bodyTextColor, fontSize: 5.5 * scale, fontWeight: '700', textAlign: 'right', ...font }}>$877.90</Text>
-              </View>
-            </>
-          )}
         </View>
 
         {/* === SUMMARY === */}

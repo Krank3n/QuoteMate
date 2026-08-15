@@ -36,6 +36,8 @@ export {
   legacyFlagsFor,
   showsPerLineMoney,
   showsLineItems,
+  priceDetailBlurb,
+  PRICE_DETAIL_OPTIONS,
 } from './priceDetail';
 
 export type { GstMode } from './gstMode';

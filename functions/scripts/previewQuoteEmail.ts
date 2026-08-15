@@ -351,7 +351,6 @@ async function main() {
       notes: quote.notes,
       showLaborHours: business.showLaborHours,
       showLaborBreakdown: quote.showLaborBreakdown !== false,
-      groupMaterialsBySection: business.groupMaterialsBySection,
       paymentMethods: business.paymentMethods,
       terms: typeof business.termsAndConditions === 'string'
         ? business.termsAndConditions.trim() || undefined

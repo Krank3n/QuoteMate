@@ -23,6 +23,8 @@ import {
   lumpSumLabourTotal,
   markupableLabourTotal,
 } from '../../../shared/document/lumpSum';
+import { createSection } from '../sectionsModel';
+import { buildQuotePdfHtml, toPdfSections } from '../../../shared/pdf';
 import type { QuoteSection, Material } from '../../types';
 
 const HOURLY = 85;
@@ -242,5 +244,53 @@ describe('lump-sum sections — markup', () => {
     expect(markupableLabourTotal(2050, sections)).toBe(850);
     // Never negative, even on a self-contradicting document.
     expect(markupableLabourTotal(500, sections)).toBe(0);
+  });
+});
+
+describe('lump-sum sections — end to end, from the section the tradie created', () => {
+  it('reaches the customer document at the typed price, with no hours and no markup', () => {
+    // Create it exactly the way the New Section modal does.
+    const created = createSection(
+      { sections: [], materials: [] },
+      { name: 'Bathroom regrout', pricing: 'lumpSum', laborTotal: 1200, description: 'Strip and regrout.' },
+    );
+    const section = created.sections[0];
+
+    const totals = calculateDocumentTotals(
+      [], HOURLY, 0, /* markup */ 0, /* travel */ 0, created.sections,
+      /* laborMarkupPercent */ 20, /* extra */ 0,
+    );
+    // 20% labour markup applies to nothing here — the lump sum is exempt.
+    expect(totals.laborTotal).toBe(1200);
+    expect(totals.markupAmount).toBe(0);
+    expect(totals.total).toBe(1320);
+
+    const html = buildQuotePdfHtml(
+      {
+        customerName: 'A Customer',
+        quoteDate: '10 July 2026',
+        job: { name: 'Bathroom', description: 'Regrout' },
+        materials: [],
+        materialsSubtotal: 0,
+        laborTotal: totals.laborTotal,
+        sections: toPdfSections(created.sections),
+        subtotal: totals.subtotal,
+        markup: 0,
+        markupAmount: totals.markupAmount,
+        laborMarkup: 20,
+        gst: totals.gst,
+        total: totals.total,
+        showLaborHours: true,
+      },
+      { businessName: 'Test Trades', logoHtml: '' },
+    );
+
+    expect(html).toContain('Bathroom regrout');
+    expect(html).toContain('$1,200.00');
+    // No hours, no rate, and nothing inflated by the 20%.
+    expect(html).not.toContain('@ $85.00/hr');
+    expect(html).not.toContain('$1,440.00');
+    expect(html).toContain('$1,320.00');
+    expect(section.pricing).toBe('lumpSum');
   });
 });

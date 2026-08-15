@@ -5,6 +5,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useThemeColors} from '../../theme';
 import { Material } from '../../types';
 import { formatCurrency } from '../../utils/quoteCalculator';
+import { isScopeQuote } from '../../../shared/pdf';
 import { useDocumentStyles } from './documentStyles';
 
 interface MaterialsSectionProps {
@@ -31,10 +32,10 @@ export function MaterialsSection({
   const multiplier = rollMarkupIntoMaterials && markupPercent > 0 ? (1 + markupPercent / 100) : 1;
   const showMarkedUp = multiplier > 1;
   const displaySubtotal = materialsSubtotal * multiplier;
-  // Mirrors isScopeQuote in shared/pdf/htmlBuilders — when every line is a
-  // lump-sum scope line the customer's PDF is a Project Scope table, so the
-  // in-app preview says the same thing rather than "Materials".
-  const isScopeOnly = materials.length > 0 && materials.every((m) => m.kind === 'work');
+  // The same derived rule the PDF uses: when every line is a lump-sum scope
+  // line the customer's document is a Project Scope table, so the in-app
+  // preview says the same thing rather than "Materials".
+  const isScopeOnly = isScopeQuote(materials);
 
   const content = (
     <Surface style={[styles.section, style]}>

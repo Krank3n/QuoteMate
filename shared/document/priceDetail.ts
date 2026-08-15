@@ -22,6 +22,25 @@
 
 export type PriceDetail = 'itemised' | 'summary' | 'total';
 
+/**
+ * The three options as the tradie reads them, in increasing order of what
+ * stays private. Shared so the per-document control and the business-default
+ * control can't drift on the copy — they are the same choice in two places.
+ */
+export const PRICE_DETAIL_OPTIONS: { value: PriceDetail; label: string; blurb: string }[] = [
+  { value: 'itemised', label: 'Itemised', blurb: 'Every line with its quantity and unit price.' },
+  {
+    value: 'summary',
+    label: 'Scope only',
+    blurb: 'What you\u2019re doing and the section totals \u2014 no quantities, no unit prices.',
+  },
+  { value: 'total', label: 'Total only', blurb: 'One number: the total.' },
+];
+
+export function priceDetailBlurb(detail: PriceDetail): string {
+  return PRICE_DETAIL_OPTIONS.find((o) => o.value === detail)?.blurb ?? '';
+}
+
 export interface PriceDetailDocLike {
   priceDetail?: PriceDetail;
   showMaterialCosts?: boolean;

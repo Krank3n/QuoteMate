@@ -11,7 +11,12 @@
  * Pure and exported so the acceptance-page tests can assert on it directly.
  */
 
-import { resolvePriceDetail, type PriceDetail } from './shared/document/priceDetail';
+import {
+  resolvePriceDetail,
+  showsLineItems,
+  showsPerLineMoney,
+  type PriceDetail,
+} from './shared/document/priceDetail';
 
 /** The markup-rolled figures from applyHideMarkupForDisplay. */
 export interface AcceptanceDisplayFigures {
@@ -33,8 +38,8 @@ export function buildAcceptanceQuotePayload(
   display: AcceptanceDisplayFigures,
 ): AcceptanceQuotePayload {
   const priceDetail = resolvePriceDetail(quote, businessSettings);
-  const showLineItems = priceDetail !== 'total';
-  const showPerLineMoney = priceDetail === 'itemised';
+  const showLineItems = showsLineItems(priceDetail);
+  const showPerLineMoney = showsPerLineMoney(priceDetail);
 
   const photoUrls = (quote.photos || [])
     .map((p: any) => p.storageUrl)

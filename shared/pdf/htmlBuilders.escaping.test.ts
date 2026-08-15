@@ -18,7 +18,6 @@ describe('PDF escaping', () => {
   it('escapes a material name containing angle brackets and ampersands', () => {
     const html = generateMaterialsHTML(
       [{ name: 'Timber 90x45 <treated> & pine', quantity: 3, unit: 'm', price: 12, totalPrice: 36 }],
-      false,
     );
     expect(html).toContain('Timber 90x45 &lt;treated&gt; &amp; pine');
     expect(html).not.toContain('<treated>');
@@ -27,7 +26,6 @@ describe('PDF escaping', () => {
   it('escapes a unit and a section name', () => {
     const html = generateMaterialsHTML(
       [{ name: 'Sand', quantity: 2, unit: 'm<sup>3</sup>', price: 60, totalPrice: 120, section: 'Slab & Footings <stage 1>' }],
-      true,
     );
     expect(html).toContain('m&lt;sup&gt;3&lt;/sup&gt;');
     expect(html).toContain('Slab &amp; Footings &lt;stage 1&gt;');

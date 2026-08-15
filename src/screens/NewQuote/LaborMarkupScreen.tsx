@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { View, StyleSheet, ScrollView, Platform, TouchableOpacity, Pressable, TextInput as RNTextInput, Switch } from 'react-native';
+import { View, StyleSheet, ScrollView, Platform, TouchableOpacity, Pressable, TextInput as RNTextInput } from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import {
   Text,
@@ -70,11 +70,6 @@ export function LaborMarkupScreen() {
   const [travelAdjustment, setTravelAdjustment] = useState('0');
   const [travelDismissed, setTravelDismissed] = useState(false);
   const [lastTravelValue, setLastTravelValue] = useState('0');
-  // Read, never written: "What the customer sees" on the preview screen is
-  // now the single control for document detail, and it supersedes this. The
-  // value is carried through untouched so an existing document keeps
-  // rendering the way its author left it.
-  const [showLaborBreakdown, setShowLaborBreakdown] = useState(true);
   const [warningDialogVisible, setWarningDialogVisible] = useState(false);
   const [warningMessage, setWarningMessage] = useState('');
 
@@ -113,7 +108,6 @@ export function LaborMarkupScreen() {
     setMarkup(currentQuote.markup.toString());
     const lm = currentQuote.laborMarkup ?? currentQuote.markup ?? 0;
     setLaborMarkup(lm.toString());
-    setShowLaborBreakdown(currentQuote.showLaborBreakdown !== false);
     const ta = (currentQuote.travelAdjustment || 0).toString();
     setTravelAdjustment(ta);
     setLastTravelValue(ta);
@@ -217,7 +211,10 @@ export function LaborMarkupScreen() {
         ...patch,
         markup: markupPercent,
         laborMarkup: laborMarkupPercent,
-        showLaborBreakdown,
+        // Carried through untouched: "What the customer sees" on the preview
+        // screen supersedes this, but an existing document keeps rendering the
+        // way its author left it.
+        showLaborBreakdown: currentQuote.showLaborBreakdown,
         travelAdjustment: travelPct,
         laborTotal: calculation.laborTotal,
         materialsSubtotal: calculation.materialsSubtotal,
@@ -231,7 +228,7 @@ export function LaborMarkupScreen() {
       markupPercent,
       laborMarkupPercent,
     };
-  }, [currentQuote, laborHours, laborRate, laborUnit, sectionTotalHoursMap, markup, laborMarkup, showLaborBreakdown, travelAdjustment, travelDismissed]);
+  }, [currentQuote, laborHours, laborRate, laborUnit, sectionTotalHoursMap, markup, laborMarkup, travelAdjustment, travelDismissed]);
 
   // Save changes when navigating back
   useEffect(() => {
@@ -1067,23 +1064,6 @@ const useStyles = makeStyles((t) => ({
     fontSize: 14,
     fontWeight: '600',
     color: t.colors.accentText,
-  },
-  showMarkupToggle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 16,
-    gap: 12,
-  },
-  showMarkupTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: t.colors.text,
-  },
-  showMarkupSubtitle: {
-    fontSize: 12,
-    color: t.colors.textMuted,
-    marginTop: 2,
-    lineHeight: 16,
   },
   // Hours/Days toggle
   unitToggleRow: {

@@ -214,7 +214,6 @@ describe('PDF Project Scope table', () => {
         work({ name: 'Prep', scope: 'Cover and protect.', price: 500, totalPrice: 500 }),
         { name: 'Paint', quantity: 4, unit: 'each', price: 95, totalPrice: 380 },
       ],
-      false,
     );
     expect(html).toContain('<td>Prep<div class="scope-body">Cover and protect.</div></td>\n      <td></td>\n      <td></td>\n      <td>$500.00</td>');
     // The real material still shows both.
@@ -253,7 +252,6 @@ describe('PDF Project Scope table', () => {
         { name: 'Merbau Decking 90x19mm', quantity: 12, unit: 'm', price: 8.5, totalPrice: 102 },
         { name: 'Galvanised Screws 65mm', quantity: 2, unit: 'box', price: 24, totalPrice: 48 },
       ],
-      false,
       10,
     );
     expect(html).toBe(

@@ -199,7 +199,6 @@ export function buildTermsHTML(terms: string | undefined): string {
  */
 export function generateMaterialsHTML(
   materials: PdfMaterial[],
-  groupBySection: boolean = true,
   markupPercent: number = 0,
   sections?: LaborSection[],
   options?: { perLineMoney?: boolean },
@@ -257,7 +256,7 @@ export function generateMaterialsHTML(
     </tr>`;
   };
 
-  const hasSections = groupBySection && materials.some(m => m.section);
+  const hasSections = materials.some(m => m.section);
 
   if (!hasSections) {
     return `
@@ -731,13 +730,13 @@ function buildSummaryHTML(data: QuotePdfData, paidAmount?: number, amountDue?: n
   // applies to 'summary', where the section totals in the table carry it.
   const scopeMode = isScopeQuote(data.materials);
   const detail = resolvePriceDetail(data);
-  const showSplit = detail === 'itemised' && !scopeMode;
+  const showSplit = showsPerLineMoney(detail) && !scopeMode;
   const showMaterialsRow = showSplit;
   const showLabourRow = showSplit;
   // 'total' shows the grand total alone — no Subtotal, no Travel, nothing to
   // reconstruct the breakdown from. GST still appears; it is a legal
   // disclosure, not a preference.
-  const showSubtotalLine = detail !== 'total';
+  const showSubtotalLine = showsLineItems(detail);
 
   return `
       <div class="summary">
@@ -759,7 +758,7 @@ function buildSummaryHTML(data: QuotePdfData, paidAmount?: number, amountDue?: n
           <span>${formatCurrency(displaySubtotal)}</span>
         </div>
         ` : ''}
-        ${detail === 'itemised' && !rollMarkup && data.markupAmount > 0 ? `
+        ${showsPerLineMoney(detail) && !rollMarkup && data.markupAmount > 0 ? `
         <div class="summary-row">
           <span>Markup</span>
           <span>${formatCurrency(data.markupAmount)}</span>
@@ -908,7 +907,7 @@ export function buildQuotePdfHtml(
         ${scopeMode ? '' : '<h3>Materials</h3>'}
         ${scopeMode
           ? generateScopeHTML(quote.materials, rollMarkup ? quote.markup : 0, scopeLabourRows)
-          : generateMaterialsHTML(quote.materials, true, rollMarkup ? quote.markup : 0, quote.sections, { perLineMoney })}
+          : generateMaterialsHTML(quote.materials, rollMarkup ? quote.markup : 0, quote.sections, { perLineMoney })}
       </div>
       ` : ''}
 
@@ -1195,7 +1194,7 @@ export function buildInvoicePdfHtml(
         ${scopeMode ? '' : '<h3>Materials</h3>'}
         ${scopeMode
           ? generateScopeHTML(invoice.materials, rollMarkup ? invoice.markup : 0, scopeLabourRows)
-          : generateMaterialsHTML(invoice.materials, true, rollMarkup ? invoice.markup : 0, invoice.sections, { perLineMoney })}
+          : generateMaterialsHTML(invoice.materials, rollMarkup ? invoice.markup : 0, invoice.sections, { perLineMoney })}
       </div>
       ` : ''}
 

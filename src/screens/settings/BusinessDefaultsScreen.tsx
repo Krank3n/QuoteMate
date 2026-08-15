@@ -29,20 +29,17 @@ import { useUnsavedChangesGuard } from '../../hooks/useUnsavedChangesGuard';
 import { checkSquareConnection } from '../../services/squareService';
 import { defaultAuTradieTerms, hashTerms, isUnmodifiedStarterTerms } from '../../../shared/pdf/terms/defaultAuTradie';
 import { PASSTHROUGH_SURCHARGE_PCT } from '../../../shared/pdf/squareFees';
-import { resolveGstMode, GstMode } from '../../../shared/document';
-import { resolvePriceDetail, legacyFlagsFor, type PriceDetail } from '../../../shared/document/priceDetail';
+import {
+  resolveGstMode,
+  GstMode,
+  resolvePriceDetail,
+  legacyFlagsFor,
+  priceDetailBlurb,
+  PRICE_DETAIL_OPTIONS,
+  type PriceDetail,
+} from '../../../shared/document';
+import { PillToggle } from '../../components/PillToggle';
 import { GridBackground } from '../../components/GridBackground';
-
-/** Mirrors the per-document control on the preview screen. */
-const PRICE_DETAIL_OPTIONS: { value: PriceDetail; label: string; blurb: string }[] = [
-  { value: 'itemised', label: 'Itemised', blurb: 'Every line with its quantity and unit price.' },
-  {
-    value: 'summary',
-    label: 'Scope only',
-    blurb: 'What you\u2019re doing and the section totals \u2014 no quantities, no unit prices.',
-  },
-  { value: 'total', label: 'Total only', blurb: 'One number: the total.' },
-];
 
 const GST_MODE_DESCRIPTIONS: Record<GstMode, string> = {
   exclusive: 'Prices you enter are ex-GST. The quote adds 10% GST to the total.',
@@ -312,29 +309,15 @@ export function BusinessDefaultsScreen() {
                 things — and which couldn't express "scope only" at all. */}
             <View style={styles.toggleLabel}>
               <Text style={styles.toggleTitle}>What the customer sees</Text>
-              <Text style={styles.toggleDescription}>
-                {PRICE_DETAIL_OPTIONS.find((o) => o.value === priceDetail)?.blurb}
-              </Text>
+              <Text style={styles.toggleDescription}>{priceDetailBlurb(priceDetail)}</Text>
             </View>
-            <View style={styles.segmented}>
-              {PRICE_DETAIL_OPTIONS.map((opt) => {
-                const active = priceDetail === opt.value;
-                return (
-                  <TouchableOpacity
-                    key={opt.value}
-                    style={[styles.segment, active && styles.segmentActive]}
-                    onPress={() => setPriceDetail(opt.value)}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected: active }}
-                    activeOpacity={0.85}
-                  >
-                    <Text style={[styles.segmentLabel, active && styles.segmentLabelActive]}>
-                      {opt.label}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
+            <PillToggle
+              value={priceDetail}
+              onChange={setPriceDetail}
+              options={PRICE_DETAIL_OPTIONS}
+              fullWidth
+              style={{ marginTop: 10 }}
+            />
           </Surface>
 
           <Surface style={styles.card}>
@@ -591,33 +574,6 @@ const useStyles = makeStyles((t) => ({
     fontSize: 12,
     color: t.colors.textMuted,
     marginTop: 2,
-  },
-  segmented: {
-    flexDirection: 'row',
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: t.colors.border,
-    backgroundColor: t.colors.bg,
-    overflow: 'hidden',
-    marginTop: 10,
-  },
-  segment: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 9,
-    paddingHorizontal: 6,
-  },
-  segmentActive: {
-    backgroundColor: t.colors.accentSubtle,
-  },
-  segmentLabel: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: t.colors.textMuted,
-  },
-  segmentLabelActive: {
-    color: t.colors.accentText,
   },
   connectSquareButton: {
     alignSelf: 'flex-start',

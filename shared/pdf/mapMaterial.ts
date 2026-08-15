@@ -11,7 +11,7 @@
  * server passes a Firestore document read as `any`.
  */
 
-import { PdfMaterial } from './types';
+import { PdfMaterial, LaborSection } from './types';
 
 export interface MaterialLike {
   name?: string;
@@ -39,4 +39,40 @@ export function toPdfMaterial(m: MaterialLike): PdfMaterial {
 
 export function toPdfMaterials(materials: MaterialLike[] | undefined | null): PdfMaterial[] {
   return (materials || []).map(toPdfMaterial);
+}
+
+export interface SectionLike {
+  name?: string;
+  laborHours?: number;
+  multiplier?: number;
+  laborHoursTotal?: number;
+  laborRate?: number;
+  laborUnit?: 'hours' | 'days';
+  laborTotal?: number;
+  pricing?: 'hourly' | 'lumpSum';
+  description?: string;
+}
+
+/**
+ * The same story as toPdfMaterial: this projection was hand-written at four
+ * sites (client quote PDF, client invoice PDF, server PDF, template preview),
+ * and adding `pricing` and `description` meant editing three of them — which
+ * is the proof that it wanted to be one function.
+ */
+export function toPdfSection(s: SectionLike): LaborSection {
+  return {
+    name: s.name as string,
+    laborHours: s.laborHours as number,
+    multiplier: s.multiplier,
+    laborHoursTotal: s.laborHoursTotal,
+    laborRate: s.laborRate as number,
+    laborUnit: s.laborUnit,
+    laborTotal: s.laborTotal as number,
+    pricing: s.pricing,
+    description: s.description,
+  };
+}
+
+export function toPdfSections(sections: SectionLike[] | undefined | null): LaborSection[] {
+  return (sections || []).map(toPdfSection);
 }

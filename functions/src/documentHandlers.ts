@@ -29,7 +29,7 @@ import {
   generateQuotePdfBuffer,
 } from './pdfGenerator';
 import { hashTerms } from './shared/pdf/terms/defaultAuTradie';
-import { toPdfMaterials } from './shared/pdf/mapMaterial';
+import { toPdfMaterials, toPdfSections } from './shared/pdf/mapMaterial';
 import { lumpSumLabourTotal, markupableLabourTotal } from './shared/document/lumpSum';
 import { resolvePriceDetail } from './shared/document/priceDetail';
 import { dollarsToCents, centsToDollars } from './shared/pdf/money';
@@ -361,7 +361,6 @@ interface BusinessSettings {
   showMaterialCostsByDefault?: boolean;
   showLaborCostsByDefault?: boolean;
   showLaborHours?: boolean;
-  groupMaterialsBySection?: boolean;
   paymentMethods?: any;
   termsAndConditions?: string;
   [key: string]: any;
@@ -405,24 +404,6 @@ function applyHideMarkupForDisplay(q: any, businessSettings?: any) {
       (Number(q.travelAdjustment) || 0),
     markupAmount: 0,
   };
-}
-
-function buildPdfMaterials(materials: any[]): any[] {
-  return toPdfMaterials(materials);
-}
-
-function buildPdfSections(sections: any[]): any[] {
-  return (sections || []).map((s: any) => ({
-    name: s.name,
-    laborHours: s.laborHours,
-    multiplier: s.multiplier,
-    laborHoursTotal: s.laborHoursTotal,
-    laborRate: s.laborRate,
-    laborUnit: s.laborUnit,
-    laborTotal: s.laborTotal,
-    pricing: s.pricing,
-    description: s.description,
-  }));
 }
 
 function businessLogoHtml(business: BusinessSettings): string {
@@ -480,7 +461,7 @@ export function buildQuotePdfHtmlForQuote(
       quoteNumber: quote.quoteNumber,
       quoteDate: fmtAuDate(quote.updatedAt),
       job: quote.job || { name: 'Job', description: '' },
-      materials: buildPdfMaterials(quote.materials),
+      materials: toPdfMaterials(quote.materials),
       materialsSubtotal: quote.materialsSubtotal || 0,
       laborHours: quote.laborHours,
       laborRate: quote.laborRate,
@@ -488,7 +469,7 @@ export function buildQuotePdfHtmlForQuote(
       labourDisplayUnit: quote.labourDisplayUnit,
       laborTotal: quote.laborTotal || 0,
       laborExtraHours: quote.laborExtraHours,
-      sections: buildPdfSections(quote.sections),
+      sections: toPdfSections(quote.sections),
       subtotal: quote.subtotal || 0,
       markup: quote.markup || 0,
       markupAmount: quote.markupAmount || 0,
@@ -508,7 +489,6 @@ export function buildQuotePdfHtmlForQuote(
       notes: quote.notes,
       showLaborHours: business.showLaborHours,
       showLaborBreakdown: quote.showLaborBreakdown !== false,
-      groupMaterialsBySection: business.groupMaterialsBySection,
       paymentMethods: business.paymentMethods,
       squarePaymentLinkUrl: options.squarePaymentLinkUrl ?? quote.squarePaymentLinkUrl,
       surchargePaymentFees: business.surchargePaymentFees === true,
@@ -1015,7 +995,7 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
       paidAmount: invoice.paidAmount || 0,
       depositCredit: Number(invoice.depositCredit) > 0 ? Number(invoice.depositCredit) : undefined,
       job: invoice.job || { name: 'Job', description: '' },
-      materials: buildPdfMaterials(invoice.materials),
+      materials: toPdfMaterials(invoice.materials),
       materialsSubtotal: invoice.materialsSubtotal || 0,
       laborHours: invoice.laborHours,
       laborRate: invoice.laborRate,
@@ -1023,7 +1003,7 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
       labourDisplayUnit: invoice.labourDisplayUnit,
       laborTotal: invoice.laborTotal || 0,
       laborExtraHours: invoice.laborExtraHours,
-      sections: buildPdfSections(invoice.sections),
+      sections: toPdfSections(invoice.sections),
       subtotal: invoice.subtotal || 0,
       markup: invoice.markup || 0,
       markupAmount: invoice.markupAmount || 0,
@@ -1040,7 +1020,6 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
       notes: invoice.notes,
       showLaborHours: business.showLaborHours,
       showLaborBreakdown: invoice.showLaborBreakdown !== false,
-      groupMaterialsBySection: business.groupMaterialsBySection,
       paymentMethods: business.paymentMethods,
       squarePaymentLinkUrl: payNowUrl || invoice.squarePaymentLinkUrl,
       surchargePaymentFees: business.surchargePaymentFees === true,

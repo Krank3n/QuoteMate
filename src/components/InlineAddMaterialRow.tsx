@@ -45,8 +45,15 @@ import { useMaterialSearch } from '../hooks/useMaterialSearch';
 import { supplierPriceForGstMode, formatCurrency } from '../utils/quoteCalculator';
 import { saveFavoriteProduct } from '../services/materialFavorites';
 import { ActionSheet, ActionSheetOption } from './ActionSheet';
+import { PillToggle, type PillToggleOption } from './PillToggle';
 
 const UNITS: Material['unit'][] = ['each', 'm', 'm²', 'm³', 'L', 'kg', 'box', 'pack'];
+
+/** Is this row a product, or a lump-sum scope line? */
+const ENTRY_KIND_OPTIONS: PillToggleOption<'material' | 'work'>[] = [
+  { value: 'material', label: 'Material' },
+  { value: 'work', label: 'Work item' },
+];
 
 export interface InlineAddMaterialRowProps {
   sectionName: string;
@@ -555,32 +562,18 @@ function InlineAddMaterialForm({
   return (
     <View style={styles.expandedWrap}>
     <View style={styles.expandedCard}>
-      <View style={styles.kindRow}>
-        {(['material', 'work'] as const).map((k) => {
-          const active = entryKind === k;
-          return (
-            <TouchableOpacity
-              key={k}
-              style={[styles.kindChip, active && styles.kindChipActive]}
-              onPress={() => {
-                setEntryKind(k);
-                // Drop any supplier results and any picked result — they
-                // belong to the other mode, and a stale one reappearing on the
-                // way back would attach a product to a scope line.
-                selectedResultRef.current = null;
-                search.clearResults();
-              }}
-              accessibilityRole="button"
-              accessibilityState={{ selected: active }}
-              accessibilityLabel={k === 'work' ? 'Work item' : 'Material'}
-            >
-              <Text style={[styles.kindChipText, active && styles.kindChipTextActive]}>
-                {k === 'work' ? 'Work item' : 'Material'}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
+      <PillToggle
+        value={entryKind}
+        onChange={(k) => {
+          setEntryKind(k);
+          // Drop any supplier results and any picked result — they belong to
+          // the other mode, and a stale one reappearing on the way back would
+          // attach a product to a scope line.
+          selectedResultRef.current = null;
+          search.clearResults();
+        }}
+        options={ENTRY_KIND_OPTIONS}
+      />
 
       <View style={[styles.nameRow, nameError && styles.nameRowError]}>
         <RNTextInput
@@ -940,30 +933,6 @@ const useStyles = makeStyles((t) => ({
     fontSize: 13,
     fontWeight: '600',
     color: t.colors.text,
-  },
-  kindRow: {
-    flexDirection: 'row',
-    gap: 6,
-  },
-  kindChip: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: t.colors.border,
-    backgroundColor: t.colors.bg,
-  },
-  kindChipActive: {
-    borderColor: t.colors.accent,
-    backgroundColor: t.colors.accentSubtle,
-  },
-  kindChipText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: t.colors.textMuted,
-  },
-  kindChipTextActive: {
-    color: t.colors.accentText,
   },
   scopeInput: {
     minHeight: 88,

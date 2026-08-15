@@ -12,7 +12,6 @@ import { describe, it, expect } from 'vitest';
 import {
   createSection,
   renameSection,
-  updateSection,
   deleteSection,
   moveSection,
   moveMaterialToSection,
@@ -209,14 +208,5 @@ describe('moveMaterialToSection', () => {
     const next = moveMaterialToSection(before, 'a', null);
     expect(next.materials[0].section).toBeUndefined();
     expect(next.materials[0].templateBaseQuantity).toBeUndefined();
-  });
-});
-
-describe('updateSection', () => {
-  it('patches a section without touching any material', () => {
-    const before = state();
-    const next = updateSection(before, 'Painting', { description: 'Two coats, low sheen.' });
-    expect(next.sections.find((s) => s.name === 'Painting')!.description).toBe('Two coats, low sheen.');
-    expect(next.materials).toBe(before.materials);
   });
 });

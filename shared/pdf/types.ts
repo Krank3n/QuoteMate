@@ -109,7 +109,6 @@ export interface QuotePdfData {
   // When false, hide per-section labour rows on the PDF and show only the
   // single Labour Total. Default: true (show breakdown).
   showLaborBreakdown?: boolean;
-  groupMaterialsBySection?: boolean;
   paymentMethods?: any;
   // Subscription plan. When 'free', `generatePaymentMethodsHTML` shows only
   // the Square Pay Now button and hides bank/PayID/BPAY/PayPal/other —

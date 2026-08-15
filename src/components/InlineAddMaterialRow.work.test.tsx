@@ -49,7 +49,7 @@ vi.mock('react-native-paper', async () => {
   return { Text };
 });
 vi.mock('../services/materialFavorites', () => ({ saveFavoriteProduct: vi.fn(async () => {}) }));
-vi.mock('../utils/haptics', () => ({ lightTap: vi.fn() }));
+vi.mock('../utils/haptics', () => ({ lightTap: vi.fn(), selectionTap: vi.fn() }));
 vi.mock('./ActionSheet', () => ({ ActionSheet: () => null }));
 
 import { InlineAddMaterialRow } from './InlineAddMaterialRow';

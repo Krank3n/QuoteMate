@@ -19,7 +19,13 @@ import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { makeStyles, useThemeColors } from '../theme';
 import { checkSquareConnection } from '../services/squareService';
 import { formatCurrency } from '../utils/quoteCalculator';
-import { legacyFlagsFor, type PriceDetail } from '../../shared/document/priceDetail';
+import {
+  legacyFlagsFor,
+  priceDetailBlurb,
+  PRICE_DETAIL_OPTIONS,
+  type PriceDetail,
+} from '../../shared/document/priceDetail';
+import { PillToggle } from './PillToggle';
 
 export interface InvoiceDisplaySettingsChange {
   showMarkup?: boolean;
@@ -37,17 +43,6 @@ export interface InvoiceDisplaySettingsChange {
   depositPercentage?: number;
   depositAmount?: number;
 }
-
-/** The three options, in increasing order of what stays private. */
-const PRICE_DETAIL_OPTIONS: { value: PriceDetail; label: string; blurb: string }[] = [
-  { value: 'itemised', label: 'Itemised', blurb: 'Every line with its quantity and unit price.' },
-  {
-    value: 'summary',
-    label: 'Scope only',
-    blurb: 'What you\u2019re doing and the section totals \u2014 no quantities, no unit prices.',
-  },
-  { value: 'total', label: 'Total only', blurb: 'One number: the total.' },
-];
 
 interface InvoiceDisplaySettingsProps {
   mode: 'quote' | 'invoice';
@@ -215,27 +210,14 @@ export function InvoiceDisplaySettings(props: InvoiceDisplaySettingsProps) {
           "show them the scope, not my unit prices". */}
       <View style={styles.detailBlock}>
         <Text style={styles.toggleTitle}>{`What the customer sees on the ${docLabel}`}</Text>
-        <View style={styles.segmented}>
-          {PRICE_DETAIL_OPTIONS.map((opt) => {
-            const active = priceDetail === opt.value;
-            return (
-              <TouchableOpacity
-                key={opt.value}
-                style={[styles.segment, active && styles.segmentActive]}
-                onPress={() => onChange({ priceDetail: opt.value, ...legacyFlagsFor(opt.value) })}
-                accessibilityRole="button"
-                accessibilityState={{ selected: active }}
-                activeOpacity={0.85}
-              >
-                <Text style={[styles.segmentLabel, active && styles.segmentLabelActive]}>
-                  {opt.label}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
+        <PillToggle
+          value={priceDetail}
+          onChange={(v) => onChange({ priceDetail: v, ...legacyFlagsFor(v) })}
+          options={PRICE_DETAIL_OPTIONS}
+          fullWidth
+        />
         <Text style={styles.toggleSubtitle}>
-          {`${PRICE_DETAIL_OPTIONS.find((o) => o.value === priceDetail)?.blurb} Your own screens always show the lot \u2014 this only changes the ${docLabel}, the email and the acceptance page.`}
+          {`${priceDetailBlurb(priceDetail)} Your own screens always show the lot \u2014 this only changes the ${docLabel}, the email and the acceptance page.`}
         </Text>
       </View>
 
@@ -483,32 +465,6 @@ const useStyles = makeStyles((t) => ({
   detailBlock: {
     paddingVertical: 10,
     gap: 8,
-  },
-  segmented: {
-    flexDirection: 'row',
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: t.colors.border,
-    backgroundColor: t.colors.bg,
-    overflow: 'hidden',
-  },
-  segment: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 9,
-    paddingHorizontal: 6,
-  },
-  segmentActive: {
-    backgroundColor: t.colors.accentSubtle,
-  },
-  segmentLabel: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: t.colors.textMuted,
-  },
-  segmentLabelActive: {
-    color: t.colors.accentText,
   },
   depositSection: {
     marginTop: 18,
