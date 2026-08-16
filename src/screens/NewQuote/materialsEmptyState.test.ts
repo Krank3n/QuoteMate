@@ -62,4 +62,13 @@ describe('getMaterialsEmptyState', () => {
     expect(content.manual.title).toBeTruthy();
     expect(content.skipLabel).toContain('Labour only');
   });
+
+  it('mentions scope lines so labour-dominant trades know the app fits them', () => {
+    // A painter or plasterer reading only "gear" concludes the app can't do
+    // their quote and stops at this screen.
+    for (const hasJobNotes of [true, false]) {
+      const content = getMaterialsEmptyState({ hasJobNotes, isPro: true });
+      expect(content.manual.subtitle.toLowerCase()).toContain('scope lines');
+    }
+  });
 });

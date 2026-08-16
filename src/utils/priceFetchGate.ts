@@ -15,6 +15,12 @@
 // A locked row with NO price (tradie typed an item but left the price
 // blank) still gets a price fetched — there's nothing to protect yet.
 
-export function needsPriceFetch(m: { price: number }): boolean {
+// Work items are never fetched, at any price. A lump-sum scope line ("General
+// preparation", "Interior surfaces to be painted") is a title, a paragraph and
+// one number the tradie typed — there is no product behind it. A $0 scope line
+// would otherwise look exactly like an unpriced material and get shipped to
+// the supplier search, which then overwrites the name and the price.
+export function needsPriceFetch(m: { price: number; kind?: 'material' | 'work' }): boolean {
+  if (m.kind === 'work') return false;
   return !(m.price > 0);
 }

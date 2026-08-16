@@ -8,6 +8,10 @@ export type { PdfTemplateId, PdfTemplateInfo };
 import type { SendMethod } from '../../shared/document/types';
 export type { SendMethod };
 
+// How much of the money a customer sees — see shared/document/priceDetail.ts.
+import type { PriceDetail } from '../../shared/document/priceDetail';
+export type { PriceDetail };
+
 // Record of a customer accepting the business's T&Cs at payment time.
 // Stamped on the quote/invoice doc so the version they paid under is auditable.
 export interface TcAcceptance {
@@ -71,6 +75,31 @@ export interface Material {
   };
   imageUrl?: string; // Product image URL
   description?: string; // Product description
+  /**
+   * What this line *is*. Absent/'material' = a priced product with a real
+   * quantity and unit price. 'work' = a lump-sum scope line: a title, a scope
+   * paragraph, and one price. quantity is forced to 1 and unit to 'each' so
+   * totalPrice = quantity × price still holds and every existing calculator,
+   * adapter and Xero mapper works unchanged.
+   *
+   * Markup does NOT apply to a work item. The field says "Line total" and the
+   * tradie typed a final price into it, so charging the customer more than that
+   * would be the app inventing a number nobody chose. This is the same rule
+   * `QuoteSection.pricing: 'lumpSum'` follows, and it lives in exactly one
+   * place — shared/document/lumpSum.ts. Every money path resolves the
+   * multiplier PER LINE through `lineMarkupMultiplier`; a real material still
+   * takes markup normally, because that is a margin on a supplier price the
+   * tradie didn't set.
+   */
+  kind?: 'material' | 'work';
+  /**
+   * Customer-facing scope paragraph, newline-separated. Deliberately NOT
+   * `description` — the pricing pipeline OWNS that field and overwrites it at
+   * 15 sites in materialsPipeline.ts with verdicts like "Not a retail item
+   * (service/supply) — add your price before sending". Reusing `description`
+   * would silently destroy the tradie's scope text on the next reprice.
+   */
+  scope?: string;
   brand?: string; // Product brand
   stockLevel?: string; // Stock availability (deprecated, use stockCheckedAt)
   stockCheckedAt?: string; // ISO timestamp of when stock was last checked
@@ -235,6 +264,21 @@ export interface QuoteSection {
   laborUnit: StoredLabourUnit; // Always 'hours' — see StoredLabourUnit
   laborTotal: number;          // calculated: laborHours * laborRate * multiplier
   sortOrder: number;
+  /**
+   * 'hourly' (default / legacy undefined) — laborTotal is DERIVED from
+   *   laborHours × laborRate × multiplier. Editors may recompute it.
+   * 'lumpSum' — laborTotal is a number the TRADIE TYPED. laborHours and
+   *   laborRate are 0 and mean nothing. No editor, healer, integrity check
+   *   or markup pass may recompute or redistribute it.
+   *
+   * The invariant, locked by test: for 'lumpSum',
+   *   laborHours === 0 && laborHoursTotal === 0 && laborRate === 0.
+   * Zeroing the hours is what lets every hours-summing consumer stay correct
+   * without knowing this flag exists.
+   */
+  pricing?: 'hourly' | 'lumpSum';
+  /** Customer-facing scope text for this section. Multi-line, reaches the PDF. */
+  description?: string;
 }
 
 // Reusable section template (assembly)
@@ -357,16 +401,28 @@ export interface Quote {
   templateSuggestions?: TemplateSuggestion[];
   // Markup visibility
   showMarkup?: boolean;        // Show markup line on customer-facing documents. Default: false (hidden)
-  // Materials cost visibility on PDFs/email. When false, both the materials
-  // table and the Materials Subtotal summary row are hidden. Undefined =
-  // inherit BusinessSettings.showMaterialCostsByDefault.
+  /**
+   * How much of the money the customer sees on this document:
+   *   'itemised' — every line with its quantity and unit price (the default)
+   *   'summary'  — line names and section totals; no quantities, no unit prices
+   *   'total'    — the grand total alone
+   * Undefined = inherit BusinessSettings.defaultPriceDetail. Always resolved
+   * through shared/document/priceDetail.ts, never read raw.
+   */
+  priceDetail?: PriceDetail;
+  /**
+   * @deprecated Use priceDetail. Read (never written alone) so a document from
+   * an older build still renders as its author intended; dual-written
+   * alongside priceDetail for one release so older installed builds do too.
+   */
   showMaterialCosts?: boolean;
-  // Labour cost visibility on PDFs/email. When false, both the labour table
-  // and the Labour summary row are hidden. Undefined = inherit
-  // BusinessSettings.showLaborCostsByDefault.
+  /** @deprecated Use priceDetail. */
   showLaborCosts?: boolean;
-  // Labour breakdown visibility on PDFs. When false, the per-section labour
-  // rows are hidden and only the Labour Total is shown. Default: true.
+  /**
+   * @deprecated The per-section labour breakdown is no longer a separate
+   * toggle — priceDetail governs how much detail the customer sees. Still READ
+   * so existing documents keep behaving; nothing writes it any more.
+   */
   showLaborBreakdown?: boolean;
   // Travel adjustment
   travelAdjustment?: number;   // percentage bump (e.g., 3 = +3%)
@@ -645,18 +701,29 @@ export interface BusinessSettings {
   // Quote display settings
   showLaborHours?: boolean; // If true, show labor hours breakdown on quotes. Default: false (show only total)
   showMarkup?: boolean; // If true, allow per-document markup line. When undefined or false, markup is hidden across all documents. Default: false (hide markup).
-  // Default for new quotes' showMaterialCosts. When false, new quotes hide
-  // the materials table + Materials Subtotal row by default. Per-quote
-  // toggle on Quote.showMaterialCosts overrides. Default: true.
+  /**
+   * Default for new documents' priceDetail. Per-document `priceDetail`
+   * overrides. Undefined falls back to the deprecated pair below, then to
+   * 'itemised'.
+   */
+  defaultPriceDetail?: PriceDetail;
+  /** @deprecated Use defaultPriceDetail. */
   showMaterialCostsByDefault?: boolean;
-  // Default for new quotes' showLaborCosts. Same shape as above for labour.
+  /** @deprecated Use defaultPriceDetail. */
   showLaborCostsByDefault?: boolean;
   // Payment method settings
   paymentMethods?: PaymentMethodSettings;
   // Branding
   brandColor?: string; // Custom accent color for PDF documents (overrides template default)
   // Quote/invoice display settings
-  groupMaterialsBySection?: boolean; // Group materials by work section on PDFs (default: false)
+  /**
+   * @deprecated Materials always group under their section headings on PDFs.
+   * Labour sections already rendered by default while material sections did
+   * not, so the same quote showed its work broken out in one half of the
+   * document and lumped together in the other. The field is kept so older
+   * installed builds reading it don't break; nothing writes it any more.
+   */
+  groupMaterialsBySection?: boolean;
   // PDF template
   pdfTemplate?: PdfTemplateId;
   // Whether new quotes should require a deposit by default. Separate from the
@@ -815,16 +882,28 @@ export interface Invoice {
 
   // Markup visibility
   showMarkup?: boolean;        // Show markup line on customer-facing documents. Default: false (hidden)
-  // Materials cost visibility on PDFs/email. When false, both the materials
-  // table and the Materials Subtotal summary row are hidden. Undefined =
-  // inherit BusinessSettings.showMaterialCostsByDefault.
+  /**
+   * How much of the money the customer sees on this document:
+   *   'itemised' — every line with its quantity and unit price (the default)
+   *   'summary'  — line names and section totals; no quantities, no unit prices
+   *   'total'    — the grand total alone
+   * Undefined = inherit BusinessSettings.defaultPriceDetail. Always resolved
+   * through shared/document/priceDetail.ts, never read raw.
+   */
+  priceDetail?: PriceDetail;
+  /**
+   * @deprecated Use priceDetail. Read (never written alone) so a document from
+   * an older build still renders as its author intended; dual-written
+   * alongside priceDetail for one release so older installed builds do too.
+   */
   showMaterialCosts?: boolean;
-  // Labour cost visibility on PDFs/email. When false, both the labour table
-  // and the Labour summary row are hidden. Undefined = inherit
-  // BusinessSettings.showLaborCostsByDefault.
+  /** @deprecated Use priceDetail. */
   showLaborCosts?: boolean;
-  // Labour breakdown visibility on PDFs. When false, the per-section labour
-  // rows are hidden and only the Labour Total is shown. Default: true.
+  /**
+   * @deprecated The per-section labour breakdown is no longer a separate
+   * toggle — priceDetail governs how much detail the customer sees. Still READ
+   * so existing documents keep behaving; nothing writes it any more.
+   */
   showLaborBreakdown?: boolean;
 
   // Invoice-specific

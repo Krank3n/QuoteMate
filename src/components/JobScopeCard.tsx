@@ -33,6 +33,7 @@ import type { Invoice, PaymentTerms } from '../types';
 import { makeStyles, useThemeColors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
 import { hoursForDisplay, rateForDisplay, valueToHours, rateToHourly } from '../../shared/document/labourUnits';
+import { resolvePriceDetail } from '../../shared/document/priceDetail';
 import { calculateDueDate, formatPaymentTerms } from '../utils/invoiceCalculator';
 import { stageMetaFor } from './StageSheet';
 import { PaymentChip, shouldShowPaymentChip } from './PaymentChip';
@@ -339,16 +340,7 @@ export function JobScopeCard({
                 ? doc.showMarkup === true
                 : businessSettings?.showMarkup === true
             }
-            showMaterialCosts={
-              doc.showMaterialCosts !== undefined
-                ? doc.showMaterialCosts
-                : businessSettings?.showMaterialCostsByDefault !== false
-            }
-            showLaborCosts={
-              doc.showLaborCosts !== undefined
-                ? doc.showLaborCosts
-                : businessSettings?.showLaborCostsByDefault !== false
-            }
+            priceDetail={resolvePriceDetail(doc, businessSettings)}
             requireDeposit={doc.requireDeposit === true}
             depositPercentage={Number(doc.depositPercentage ?? 0)}
             onChange={handleDisplaySettingsChange}

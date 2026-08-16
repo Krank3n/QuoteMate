@@ -4,6 +4,12 @@ import { PASSTHROUGH_SURCHARGE_PCT } from './shared/pdf';
 import { NEXT_PRICE_AUD } from './foundingOffer';
 import { NO_GST_NOTE } from './shared/document/gstMode';
 import {
+  resolvePriceDetail,
+  showsLineItems,
+  showsPerLineMoney,
+  type PriceDetail,
+} from './shared/document/priceDetail';
+import {
   buildPaymentReceiptContentHtml,
   PaymentReceiptContentInput,
 } from './paymentReceipt.helpers';
@@ -1578,8 +1584,13 @@ interface QuoteEmailData {
   // True when the tradie has surchargePaymentFees on — the Square checkout
   // amount has been bumped, so we surface a subtle disclosure under the CTA.
   surchargePaymentFees?: boolean;
-  // Per-doc visibility toggles for the pricing breakdown rows.
+  // How much of the money the customer sees — see
+  // shared/document/priceDetail.ts. The legacy pair is still accepted so an
+  // older caller keeps working.
+  priceDetail?: PriceDetail;
+  /** @deprecated Use priceDetail. */
   showMaterialCosts?: boolean;
+  /** @deprecated Use priceDetail. */
   showLaborCosts?: boolean;
   business: {
     name: string;
@@ -1923,10 +1934,13 @@ export interface PricingRowsInput {
   // When set and > 0, render a "Deposit already paid" line and rename the
   // total label to "Balance due". Invoice-only.
   depositCredit?: number;
-  // Per-doc visibility toggles — when false, the breakdown row is hidden so
-  // the client only sees the totals. Default true preserves existing behaviour
-  // for callers that don't pass them.
+  // How much of the money the customer sees — see
+  // shared/document/priceDetail.ts. Absent falls back to the legacy pair
+  // below, then to 'itemised'.
+  priceDetail?: PriceDetail;
+  /** @deprecated Use priceDetail. */
   showMaterialCosts?: boolean;
+  /** @deprecated Use priceDetail. */
   showLaborCosts?: boolean;
 }
 
@@ -1934,12 +1948,17 @@ export function renderPricingRows(input: PricingRowsInput): string {
   const { materialsSubtotal, laborTotal, subtotal, gst, total, accent, depositCredit } = input;
   const gstRegistered = input.gstRegistered !== false;
   const hasDeposit = !!(depositCredit && depositCredit > 0);
-  const showMaterials = input.showMaterialCosts !== false;
-  const showLabor = input.showLaborCosts !== false;
-  // The Subtotal row is only meaningful when at least one of its components
-  // is visible AND there's something separating it from the final Total —
-  // i.e. when the breakdown actually shows something distinct.
-  const showSubtotalRow = showMaterials || showLabor;
+  // Same three modes as the PDF, resolved by the same function, so the email
+  // body and the attachment can't disagree about what the customer may see.
+  const detail = resolvePriceDetail(input);
+  // The Materials/Labour split is 'itemised' only: in 'summary' it would
+  // re-split precisely what the tradie chose not to itemise, and in 'total'
+  // there is nothing but the total. Subtotal survives in both of the first
+  // two. GST is disclosed in all three — it is a legal disclosure, not a
+  // preference.
+  const showMaterials = showsPerLineMoney(detail);
+  const showLabor = showsPerLineMoney(detail);
+  const showSubtotalRow = showsLineItems(detail);
   const row = (label: string, value: string, valueColor = '#111827') => `
             <tr>
               <td style="padding:10px 0;color:#6b7280;font-size:13px;border-bottom:1px solid #eef0f3;">${label}</td>
@@ -2143,6 +2162,7 @@ export function buildDocumentEmailHtml(data: DocumentEmailData): string {
     gstRegistered: data.gstRegistered,
     accent,
     depositCredit: isInvoice ? data.depositCredit : undefined,
+    priceDetail: data.priceDetail,
     showMaterialCosts: data.showMaterialCosts,
     showLaborCosts: data.showLaborCosts,
   });
@@ -2273,8 +2293,13 @@ interface InvoiceEmailData {
   // Deposit credit carried over from a quote that had a deposit paid. Rendered
   // as a "Deposit already paid" line above the total.
   depositCredit?: number;
-  // Per-doc visibility toggles for the pricing breakdown rows.
+  // How much of the money the customer sees — see
+  // shared/document/priceDetail.ts. The legacy pair is still accepted so an
+  // older caller keeps working.
+  priceDetail?: PriceDetail;
+  /** @deprecated Use priceDetail. */
   showMaterialCosts?: boolean;
+  /** @deprecated Use priceDetail. */
   showLaborCosts?: boolean;
   // Payment Information block — always rendered for invoices when an
   // invoiceNumber/dueDate is known. paymentMethods/plan only render the

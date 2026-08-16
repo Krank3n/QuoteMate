@@ -25,12 +25,18 @@ import {
   buildQuotePdfHtml,
   buildInvoicePdfHtml,
   buildReportPdfHtml,
+  toPdfMaterials,
+  toPdfSections,
   QuotePdfData,
   InvoicePdfData,
   ReportPdfData,
   BusinessPdfData,
 } from '../../shared/pdf';
 import { ServiceReport } from '../../shared/report/types';
+// One resolver for "how much of the money does the customer see" — the
+// per-doc override / business default / fallback chain used to be written
+// out by hand at every one of these mapping sites.
+import { resolvePriceDetail } from '../../shared/document/priceDetail';
 import { useStore } from '../store/useStore';
 import { checkSquareConnection } from '../services/squareService';
 
@@ -248,14 +254,7 @@ export async function generateDocumentPDF(
       paymentTerms: formatPaymentTerms(doc.paymentTerms ?? 'net_14', doc.customPaymentDays),
       paidAmount: doc.paidTotal,
       job: doc.job,
-      materials: doc.materials.map(m => ({
-        name: m.name,
-        quantity: m.quantity,
-        unit: m.unit,
-        price: m.price,
-        totalPrice: m.totalPrice,
-        section: m.section,
-      })),
+      materials: toPdfMaterials(doc.materials),
       materialsSubtotal: doc.materialsSubtotal,
       laborHours: doc.laborHours,
       laborRate: doc.laborRate,
@@ -263,15 +262,7 @@ export async function generateDocumentPDF(
       labourDisplayUnit: doc.labourDisplayUnit,
       laborTotal: doc.laborTotal,
       laborExtraHours: doc.laborExtraHours,
-      sections: doc.sections?.map(s => ({
-        name: s.name,
-        laborHours: s.laborHours,
-        multiplier: s.multiplier,
-        laborHoursTotal: s.laborHoursTotal,
-        laborRate: s.laborRate,
-        laborUnit: s.laborUnit,
-        laborTotal: s.laborTotal,
-      })),
+      sections: toPdfSections(doc.sections),
       subtotal: doc.subtotal,
       markup: doc.markup,
       markupAmount: doc.markupAmount,
@@ -279,12 +270,7 @@ export async function generateDocumentPDF(
       showMarkup: doc.showMarkup !== undefined
         ? doc.showMarkup === true
         : businessSettings?.showMarkup === true,
-      showMaterialCosts: doc.showMaterialCosts !== undefined
-        ? doc.showMaterialCosts
-        : businessSettings?.showMaterialCostsByDefault !== false,
-      showLaborCosts: doc.showLaborCosts !== undefined
-        ? doc.showLaborCosts
-        : businessSettings?.showLaborCostsByDefault !== false,
+      priceDetail: resolvePriceDetail(doc, businessSettings),
       travelAdjustment: doc.travelAdjustment,
       gst: doc.gst,
       total: doc.total,
@@ -293,7 +279,6 @@ export async function generateDocumentPDF(
       notes: doc.notes,
       showLaborHours: businessSettings?.showLaborHours,
       showLaborBreakdown: doc.showLaborBreakdown !== false,
-      groupMaterialsBySection: businessSettings?.groupMaterialsBySection,
       paymentMethods: businessSettings?.paymentMethods,
       plan,
       squarePaymentLinkUrl,
@@ -311,14 +296,7 @@ export async function generateDocumentPDF(
     quoteNumber: doc.number,
     quoteDate: format(new Date(doc.updatedAt), 'dd MMMM yyyy'),
     job: doc.job,
-    materials: doc.materials.map(m => ({
-      name: m.name,
-      quantity: m.quantity,
-      unit: m.unit,
-      price: m.price,
-      totalPrice: m.totalPrice,
-      section: m.section,
-    })),
+    materials: toPdfMaterials(doc.materials),
     materialsSubtotal: doc.materialsSubtotal,
     laborHours: doc.laborHours,
     laborRate: doc.laborRate,
@@ -326,15 +304,7 @@ export async function generateDocumentPDF(
     labourDisplayUnit: doc.labourDisplayUnit,
     laborTotal: doc.laborTotal,
     laborExtraHours: doc.laborExtraHours,
-    sections: doc.sections?.map(s => ({
-      name: s.name,
-      laborHours: s.laborHours,
-      multiplier: s.multiplier,
-      laborHoursTotal: s.laborHoursTotal,
-      laborRate: s.laborRate,
-      laborUnit: s.laborUnit,
-      laborTotal: s.laborTotal,
-    })),
+    sections: toPdfSections(doc.sections),
     subtotal: doc.subtotal,
     markup: doc.markup,
     markupAmount: doc.markupAmount,
@@ -342,12 +312,10 @@ export async function generateDocumentPDF(
     showMarkup: doc.showMarkup !== undefined
       ? doc.showMarkup === true
       : businessSettings?.showMarkup === true,
-    showMaterialCosts: doc.showMaterialCosts !== undefined
-      ? doc.showMaterialCosts
-      : businessSettings?.showMaterialCostsByDefault !== false,
-    showLaborCosts: doc.showLaborCosts !== undefined
-      ? doc.showLaborCosts
-      : businessSettings?.showLaborCostsByDefault !== false,
+    priceDetail: resolvePriceDetail(doc, businessSettings),
+    requireDeposit: (doc as any).requireDeposit === true,
+    depositPercentage: (doc as any).depositPercentage,
+    depositAmount: (doc as any).depositAmount,
     travelAdjustment: doc.travelAdjustment,
     gst: doc.gst,
     total: doc.total,
@@ -356,7 +324,6 @@ export async function generateDocumentPDF(
     notes: doc.notes,
     showLaborHours: businessSettings?.showLaborHours,
     showLaborBreakdown: doc.showLaborBreakdown !== false,
-    groupMaterialsBySection: businessSettings?.groupMaterialsBySection,
     paymentMethods: businessSettings?.paymentMethods,
     plan,
     squarePaymentLinkUrl,

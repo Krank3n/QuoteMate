@@ -46,6 +46,10 @@ import type { Tokens } from '../../theme';
 import { makeStyles, useThemeColors } from '../../theme';
 import { formatCurrency, updateMaterialTotalPrice, supplierPriceForGstMode } from '../../utils/quoteCalculator';
 import { keepSupplierPriceInclusive, normaliseTemplateToHours } from '../../../shared/document';
+import {
+  pruneBlankMaterials,
+  hasUnpricedMaterials as hasUnpricedMaterialRows,
+} from './scopeQuoteGates';
 import { parsePackInfo } from '../../utils/parsePackInfo';
 import { applyPackAwarePricing } from '../../utils/packAwarePricing';
 import {
@@ -68,6 +72,17 @@ import {
 } from '../../services/floorplanTakeoff';
 import { InlineAddMaterialRow } from '../../components/InlineAddMaterialRow';
 import { ActionSheet, type ActionSheetOption } from '../../components/ActionSheet';
+import { PillToggle, type PillToggleOption } from '../../components/PillToggle';
+import {
+  createSection,
+  renameSection,
+  deleteSection,
+  moveSection,
+  moveMaterialToSection,
+  sectionTotals,
+  sortedSections,
+  uniqueSectionName,
+} from '../../utils/sectionsModel';
 import { SupplierListCaptureModal } from '../../components/SupplierListCaptureModal';
 import { InvoiceReviewModal } from '../../components/InvoiceReviewModal';
 import { useInvoiceImport } from '../../hooks/useInvoiceImport';
@@ -84,7 +99,17 @@ import { useUnsavedChangesGuard } from '../../hooks/useUnsavedChangesGuard';
 type FlatItem =
   | { type: 'header'; key: string; sectionName: string }
   | { type: 'material'; key: string; material: Material }
-  | { type: 'footer'; key: string; sectionName: string; subtotal: number };
+  | { type: 'footer'; key: string; sectionName: string; subtotal: number; labour: number };
+
+/**
+ * How a section is priced. 'Lump sum' is the shape a tradie means by
+ * "Bathroom — these materials, $1,200 to do it": a figure they typed, with no
+ * hours behind it, that nothing may recompute.
+ */
+const SECTION_PRICING_OPTIONS: PillToggleOption<'hourly' | 'lumpSum'>[] = [
+  { value: 'hourly', label: 'By the hour' },
+  { value: 'lumpSum', label: 'Lump sum' },
+];
 
 // Helper to get section display info
 function getSectionInfo(sectionName: string | undefined, themeColors: Tokens): { name: string; color: string } {
@@ -642,6 +667,15 @@ export function MaterialsListScreen() {
   const [showNewSectionModal, setShowNewSectionModal] = useState(false);
   const [newSectionName, setNewSectionName] = useState('');
   const [newSectionLaborHours, setNewSectionLaborHours] = useState('');
+  // 'lumpSum' means the tradie types the section's price instead of its hours:
+  // "Bathroom — these materials, $1,200 to do it". No editor, healer or markup
+  // pass may recompute that figure (see shared/document/lumpSum.ts).
+  const [newSectionPricing, setNewSectionPricing] = useState<'hourly' | 'lumpSum'>('hourly');
+  const [newSectionPrice, setNewSectionPrice] = useState('');
+  const [newSectionScope, setNewSectionScope] = useState('');
+  // Destructive delete keeps its confirmation — a section can hold fifteen
+  // priced rows, and there is no undo.
+  const [deleteSectionName, setDeleteSectionName] = useState('');
   const [renamingSectionKey, setRenamingSectionKey] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
@@ -654,9 +688,10 @@ export function MaterialsListScreen() {
   const [saveTemplateKeywords, setSaveTemplateKeywords] = useState<string[]>([]);
   const [saveTemplateKeywordInput, setSaveTemplateKeywordInput] = useState('');
 
-  // Delete section confirm modal
-  const [deleteSectionModalVisible, setDeleteSectionModalVisible] = useState(false);
-  const [deleteSectionName, setDeleteSectionName] = useState('');
+  // Section options sheet — reorder, save as a template, and the two ways to
+  // remove a section (keeping the items, or taking them with it).
+  const [sectionActionsVisible, setSectionActionsVisible] = useState(false);
+  const [sectionActionsName, setSectionActionsName] = useState('');
 
   // Template picker modal
   const [templatePickerVisible, setTemplatePickerVisible] = useState(false);
@@ -789,7 +824,7 @@ export function MaterialsListScreen() {
   );
 
   const hasUnpricedMaterials = React.useMemo(
-    () => (materials && Array.isArray(materials)) ? materials.some((m) => m.price === 0) : false,
+    () => (materials && Array.isArray(materials)) ? hasUnpricedMaterialRows(materials) : false,
     [materials]
   );
 
@@ -809,30 +844,41 @@ export function MaterialsListScreen() {
     const existingSectionNames = new Set(sectionedGroups.map(([key]) => key));
     if (quoteSections) {
       quoteSections.forEach(s => {
+        // Track as we go: two sections sharing a name would otherwise each
+        // push a placeholder group, producing duplicate React keys and a
+        // header/footer pair that both show the summed labour.
         if (!existingSectionNames.has(s.name)) {
+          existingSectionNames.add(s.name);
           sectionedGroups.push([s.name, { info: { name: s.name, color: themeColors.accentText }, materials: [] }]);
         }
       });
     }
 
-    const sortOrderByName = new Map(
-      (quoteSections || []).map(s => [s.name, s.sortOrder ?? 999])
+    // sortOrder is the ONE ordering source of truth — the same one the PDF
+    // now uses, so the list and the customer's document can't disagree.
+    // sortedSections tolerates missing values by falling back to the stable
+    // array index rather than re-sorting a document just for being read.
+    const orderByName = new Map(
+      sortedSections(quoteSections).map((s, i) => [s.name, i] as const),
     );
     sectionedGroups.sort(([a], [b]) => {
-      const oa = sortOrderByName.get(a) ?? 999;
-      const ob = sortOrderByName.get(b) ?? 999;
+      const oa = orderByName.get(a) ?? Number.MAX_SAFE_INTEGER;
+      const ob = orderByName.get(b) ?? Number.MAX_SAFE_INTEGER;
       if (oa !== ob) return oa - ob;
       return a.localeCompare(b);
     });
 
     const out: FlatItem[] = [];
     sectionedGroups.forEach(([groupKey, group]) => {
-      const subtotal = group.materials.reduce((sum, m) => sum + m.totalPrice, 0);
+      const { materials: subtotal, labour } = sectionTotals(
+        { sections: quoteSections || [], materials },
+        groupKey,
+      );
       out.push({ type: 'header', key: `h-${groupKey}`, sectionName: groupKey });
       if (!collapsedSections.has(groupKey)) {
         group.materials.forEach(m => out.push({ type: 'material', key: m.id, material: m }));
       }
-      out.push({ type: 'footer', key: `f-${groupKey}`, sectionName: groupKey, subtotal });
+      out.push({ type: 'footer', key: `f-${groupKey}`, sectionName: groupKey, subtotal, labour });
     });
     if (unsectionedGroup) {
       unsectionedGroup.materials.forEach(m => out.push({ type: 'material', key: m.id, material: m }));
@@ -1396,30 +1442,47 @@ export function MaterialsListScreen() {
     setEditingMaterialId(draft.id);
   }, [currentQuote, updateQuote, createBlankDraftMaterial]);
 
+  // Labour is OPTIONAL. A tradie who just wants "Bathroom" and "Kitchen" as
+  // headings shouldn't have to invent a number of hours to be allowed one —
+  // a section with no labour is simply worth $0 of labour, which is honest
+  // and reversible. Every mutation goes through utils/sectionsModel so the
+  // sections row and the material `section` strings are always rewritten in
+  // the same document write.
   const handleCreateSection = () => {
     if (!newSectionName.trim() || !currentQuote) return;
     const hours = parseFloat(newSectionLaborHours) || 0;
-    if (hours <= 0) return; // labour hours required — Create button is disabled in this state
-    // Create a QuoteSection entry and add to quote
     const defaultRate = currentQuote.laborRate || businessSettings?.defaultLaborRate || 85;
-    const existingSections = currentQuote.sections || [];
-    const section: QuoteSection = {
-      id: `section-${Date.now()}`,
-      name: newSectionName.trim(),
-      multiplier: 1,
-      laborHours: hours,
-      laborRate: defaultRate,
-      laborUnit: 'hours',
-      laborTotal: hours * defaultRate,
-      sortOrder: existingSections.length,
-    };
-    updateQuote({
-      ...currentQuote,
-      sections: [...existingSections, section],
-    });
+    // A section's NAME is its identity — materials point at it by name — so a
+    // duplicate would merge two sections in every consumer that groups by it.
+    const state = { sections: currentQuote.sections || [], materials: currentQuote.materials };
+    const name = uniqueSectionName(state, newSectionName.trim());
+    const next = createSection(
+      state,
+      newSectionPricing === 'lumpSum'
+        ? {
+            name,
+            pricing: 'lumpSum',
+            laborTotal: parseFloat(newSectionPrice) || 0,
+            description: newSectionScope,
+          }
+        : {
+            name,
+            laborHours: hours,
+            laborRate: hours > 0 ? defaultRate : 0,
+            description: newSectionScope,
+          },
+    );
+    updateQuote({ ...currentQuote, sections: next.sections, materials: next.materials });
+    resetNewSectionForm();
+    setShowNewSectionModal(false);
+  };
+
+  const resetNewSectionForm = () => {
     setNewSectionName('');
     setNewSectionLaborHours('');
-    setShowNewSectionModal(false);
+    setNewSectionPricing('hourly');
+    setNewSectionPrice('');
+    setNewSectionScope('');
   };
 
   const handleRenameSection = (oldName: string) => {
@@ -1427,20 +1490,12 @@ export function MaterialsListScreen() {
       setRenamingSectionKey(null);
       return;
     }
-    const newName = renameValue.trim();
-    // Rename on all materials
-    const updatedMaterials = currentQuote.materials.map(m =>
-      m.section === oldName ? { ...m, section: newName } : m
+    const next = renameSection(
+      { sections: currentQuote.sections || [], materials: currentQuote.materials },
+      oldName,
+      renameValue,
     );
-    // Rename in sections array
-    const updatedSections = (currentQuote.sections || []).map(s =>
-      s.name === oldName ? { ...s, name: newName } : s
-    );
-    updateQuote({
-      ...currentQuote,
-      materials: updatedMaterials,
-      sections: updatedSections,
-    });
+    updateQuote({ ...currentQuote, sections: next.sections, materials: next.materials });
     setRenamingSectionKey(null);
   };
 
@@ -1480,16 +1535,13 @@ export function MaterialsListScreen() {
     setShowSuccessModal(true);
   };
 
-  const getUniqueSectionName = (baseName: string): string => {
-    if (!currentQuote) return baseName;
-    const existingNames = new Set<string>();
-    currentQuote.materials.forEach(m => { if (m.section) existingNames.add(m.section); });
-    (currentQuote.sections || []).forEach(s => existingNames.add(s.name));
-    if (!existingNames.has(baseName)) return baseName;
-    let counter = 2;
-    while (existingNames.has(`${baseName} (${counter})`)) counter++;
-    return `${baseName} (${counter})`;
-  };
+  const getUniqueSectionName = (baseName: string): string =>
+    currentQuote
+      ? uniqueSectionName(
+          { sections: currentQuote.sections || [], materials: currentQuote.materials },
+          baseName,
+        )
+      : baseName;
 
   const handleLoadTemplate = async () => {
     const templates = await loadTemplates();
@@ -1547,9 +1599,14 @@ export function MaterialsListScreen() {
 
   const handleSectionMultiplierChange = (sectionName: string, newMultiplier: number) => {
     if (!currentQuote || newMultiplier < 1) return;
-    const updatedSections = (currentQuote.sections || []).map(s =>
-      s.name === sectionName ? { ...s, multiplier: newMultiplier, laborTotal: s.laborHours * s.laborRate * newMultiplier } : s
-    );
+    const updatedSections = (currentQuote.sections || []).map(s => {
+      if (s.name !== sectionName) return s;
+      // A lump-sum section's laborTotal is the tradie's own figure — it has no
+      // hours and no rate to recompute from, so the multiplier moves the
+      // material quantities below and leaves the price alone.
+      if (s.pricing === 'lumpSum') return { ...s, multiplier: newMultiplier };
+      return { ...s, multiplier: newMultiplier, laborTotal: s.laborHours * s.laborRate * newMultiplier };
+    });
     const updatedMaterials = currentQuote.materials.map(m => {
       if (m.section !== sectionName || !m.templateBaseQuantity) return m;
       const newQty = m.templateBaseQuantity * newMultiplier;
@@ -1558,18 +1615,48 @@ export function MaterialsListScreen() {
     updateQuote({ ...currentQuote, sections: updatedSections, materials: updatedMaterials });
   };
 
-  const handleDeleteSection = (sectionName: string) => {
+  // One sheet for everything a section can do, opened from the header's "…".
+  // Replaces two always-visible icons with one, and is where reordering and
+  // the non-destructive delete live rather than being three more buttons.
+  const handleOpenSectionActions = (sectionName: string) => {
     if (!currentQuote) return;
-    setDeleteSectionName(sectionName);
-    setDeleteSectionModalVisible(true);
+    setSectionActionsName(sectionName);
+    setSectionActionsVisible(true);
   };
 
-  const handleConfirmDeleteSection = () => {
-    if (!currentQuote || !deleteSectionName) return;
-    const updatedMaterials = currentQuote.materials.filter(m => m.section !== deleteSectionName);
-    const updatedSections = (currentQuote.sections || []).filter(s => s.name !== deleteSectionName);
-    updateQuote({ ...currentQuote, materials: updatedMaterials, sections: updatedSections });
-    setDeleteSectionModalVisible(false);
+  const applySectionChange = (next: { sections: QuoteSection[]; materials: Material[] }) => {
+    if (!currentQuote) return;
+    updateQuote({ ...currentQuote, sections: next.sections, materials: next.materials });
+  };
+
+  const handleMoveSection = (sectionName: string, direction: -1 | 1) => {
+    if (!currentQuote) return;
+    applySectionChange(
+      moveSection(
+        { sections: currentQuote.sections || [], materials: currentQuote.materials },
+        sectionName,
+        direction,
+      ),
+    );
+  };
+
+  // keepMaterials: the lines come back unsectioned instead of going with the
+  // section. That one is safe and immediate; taking the lines with it is not,
+  // so it still asks first.
+  const handleDeleteSection = (sectionName: string, keepMaterials: boolean) => {
+    if (!currentQuote) return;
+    applySectionChange(
+      deleteSection(
+        { sections: currentQuote.sections || [], materials: currentQuote.materials },
+        sectionName,
+        { keepMaterials },
+      ),
+    );
+  };
+
+  const handleConfirmDeleteSectionAndItems = () => {
+    handleDeleteSection(deleteSectionName, false);
+    setDeleteSectionName('');
   };
 
   // Move a material to a different section. Driven by the box-icon dropdown
@@ -1578,12 +1665,12 @@ export function MaterialsListScreen() {
   // `targetSection === null` means "Unsectioned".
   const handleMoveMaterialToSection = useCallback((materialId: string, targetSection: string | null) => {
     if (!currentQuote) return;
-    const updatedMaterials = currentQuote.materials.map(m =>
-      m.id === materialId
-        ? { ...m, section: targetSection ?? undefined, templateBaseQuantity: undefined }
-        : m
+    const next = moveMaterialToSection(
+      { sections: currentQuote.sections || [], materials: currentQuote.materials },
+      materialId,
+      targetSection,
     );
-    updateQuote({ ...currentQuote, materials: updatedMaterials });
+    updateQuote({ ...currentQuote, materials: next.materials });
   }, [currentQuote, updateQuote]);
 
 
@@ -1765,31 +1852,47 @@ export function MaterialsListScreen() {
     navigation.goBack();
   }, [currentQuote, updateQuote, saveDraft, navigation, allowNextNavigation]);
 
+  /**
+   * The rapid-entry chain spawns a fresh blank row after every save, so
+   * leaving the screen normally strands one unnamed $0 material in the quote.
+   * It used to ride all the way onto the customer's PDF as an empty
+   * "1 each · $0.00" line, and — worse, now that scope lines exist — a single
+   * kind-less row is enough to knock the whole document out of the Project
+   * Scope layout and back into the four-column materials table. Drop the
+   * half-typed rows on the way out; a line with no name isn't a line.
+   */
+  const buildNextDraft = useCallback((step: string) => {
+    if (!currentQuote) return null;
+    return {
+      ...currentQuote,
+      materials: pruneBlankMaterials(currentQuote.materials),
+      draftStep: step,
+    };
+  }, [currentQuote]);
+
+  const goToLaborMarkup = useCallback(() => {
+    const draftQuote = buildNextDraft('LaborMarkup');
+    if (draftQuote) {
+      updateQuote(draftQuote);
+      saveDraft(draftQuote);
+    }
+    // Bypass the unsaved-changes guard — we just saved.
+    allowNextNavigation();
+    navigation.navigate('LaborMarkup');
+  }, [buildNextDraft, updateQuote, saveDraft, allowNextNavigation, navigation]);
+
   const handleNext = useCallback(() => {
     // Allow proceeding with no materials (labor-only quotes)
     if (hasUnpricedMaterials) {
       setUnpricedDialogVisible(true);
     } else {
-      if (currentQuote) {
-        const draftQuote = { ...currentQuote, draftStep: 'LaborMarkup' };
-        updateQuote(draftQuote);
-        saveDraft(draftQuote);
-      }
-      // Bypass the unsaved-changes guard — we just saved.
-      allowNextNavigation();
-      navigation.navigate('LaborMarkup');
+      goToLaborMarkup();
     }
-  }, [hasUnpricedMaterials, navigation, currentQuote, updateQuote, saveDraft, allowNextNavigation]);
+  }, [hasUnpricedMaterials, goToLaborMarkup]);
 
   const proceedWithUnpricedMaterials = () => {
     setUnpricedDialogVisible(false);
-    if (currentQuote) {
-      const draftQuote = { ...currentQuote, draftStep: 'LaborMarkup' };
-      updateQuote(draftQuote);
-      saveDraft(draftQuote);
-    }
-    allowNextNavigation();
-    navigation.navigate('LaborMarkup');
+    goToLaborMarkup();
   };
 
   // Handle null currentQuote case
@@ -1865,11 +1968,12 @@ export function MaterialsListScreen() {
               </View>
             )}
             <View style={styles.sectionCardActions}>
-              <TouchableOpacity onPress={() => handleSaveSectionAsTemplate(item.sectionName)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                <MaterialCommunityIcons name="content-save-outline" size={18} color={themeColors.textMuted} />
-              </TouchableOpacity>
-              <TouchableOpacity onPress={() => handleDeleteSection(item.sectionName)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                <MaterialCommunityIcons name="delete-outline" size={18} color={themeColors.textMuted} />
+              <TouchableOpacity
+                onPress={() => handleOpenSectionActions(item.sectionName)}
+                accessibilityLabel={`Section options for ${item.sectionName}`}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <MaterialCommunityIcons name="dots-horizontal" size={20} color={themeColors.textMuted} />
               </TouchableOpacity>
             </View>
           </View>
@@ -1900,11 +2004,23 @@ export function MaterialsListScreen() {
                 />
               </View>
             )}
+            {/* A section's cost is its materials AND its labour. This row used
+                to show the materials sum alone under the label "Section
+                Total", so a section whose whole cost was labour read $0.00. */}
+            {!isCollapsed && item.labour > 0 && (
+              <View style={styles.sectionCardSplitRow}>
+                <Text style={styles.sectionCardSplitText}>
+                  {`Materials ${formatCurrency(item.subtotal)} · Labour ${formatCurrency(item.labour)}`}
+                </Text>
+              </View>
+            )}
             <View style={styles.sectionCardFooter}>
               <Text style={styles.sectionCardFooterLabel}>
                 {isCollapsed ? `${materials.filter(m => m.section === item.sectionName).length} items` : 'Section Total'}
               </Text>
-              <Text style={styles.sectionCardFooterValue}>{formatCurrency(item.subtotal)}</Text>
+              <Text style={styles.sectionCardFooterValue}>
+                {formatCurrency(isCollapsed ? item.subtotal : item.subtotal + item.labour)}
+              </Text>
             </View>
           </View>
         </View>
@@ -2218,7 +2334,7 @@ export function MaterialsListScreen() {
       />
 
       <FixedBottomButton
-        label={isAiAnalyzing ? "Cancel" : (isEditFromPreview ? "Save" : "Next: Labor & Markup")}
+        label={isAiAnalyzing ? "Cancel" : (isEditFromPreview ? "Save" : "Next: Labour & Markup")}
         onPress={isAiAnalyzing ? handleCancelGeneration : (isEditFromPreview ? handleSaveAndReturn : handleNext)}
         mode={isAiAnalyzing ? "outlined" : "contained"}
         buttonStyle={isAiAnalyzing ? { borderColor: themeColors.error, borderWidth: 2 } : undefined}
@@ -2239,8 +2355,7 @@ export function MaterialsListScreen() {
           visible={showNewSectionModal}
           onDismiss={() => {
             setShowNewSectionModal(false);
-            setNewSectionName('');
-            setNewSectionLaborHours('');
+            resetNewSectionForm();
           }}
           contentContainerStyle={styles.newSectionModal}
         >
@@ -2254,14 +2369,44 @@ export function MaterialsListScreen() {
             placeholder="e.g. Fence Bay, Gate, Footings"
             autoFocus
           />
+          <PillToggle
+            value={newSectionPricing}
+            onChange={setNewSectionPricing}
+            options={SECTION_PRICING_OPTIONS}
+            fullWidth
+            style={{ marginBottom: 12 }}
+          />
+          {newSectionPricing === 'lumpSum' ? (
+            <TextInput
+              label="Section price"
+              value={newSectionPrice}
+              onChangeText={setNewSectionPrice}
+              mode="outlined"
+              keyboardType="decimal-pad"
+              placeholder="e.g. 1200"
+              left={<TextInput.Affix text="$" />}
+              style={{ marginBottom: 12 }}
+            />
+          ) : (
+            <TextInput
+              label="Labour Hours (optional)"
+              value={newSectionLaborHours}
+              onChangeText={setNewSectionLaborHours}
+              mode="outlined"
+              keyboardType="decimal-pad"
+              placeholder="e.g. 2.5"
+              right={<TextInput.Affix text="hrs" />}
+              style={{ marginBottom: 12 }}
+            />
+          )}
           <TextInput
-            label="Labour Hours"
-            value={newSectionLaborHours}
-            onChangeText={setNewSectionLaborHours}
+            label="Scope of works (optional)"
+            value={newSectionScope}
+            onChangeText={setNewSectionScope}
             mode="outlined"
-            keyboardType="decimal-pad"
-            placeholder="e.g. 2.5"
-            right={<TextInput.Affix text="hrs" />}
+            multiline
+            numberOfLines={3}
+            placeholder="What's included in this section — reaches the customer's quote"
             style={{ marginBottom: 16 }}
           />
           <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 10 }}>
@@ -2269,8 +2414,7 @@ export function MaterialsListScreen() {
               style={styles.newSectionCancelBtn}
               onPress={() => {
                 setShowNewSectionModal(false);
-                setNewSectionName('');
-                setNewSectionLaborHours('');
+                resetNewSectionForm();
               }}
             >
               <Text style={styles.newSectionCancelText}>Cancel</Text>
@@ -2278,9 +2422,9 @@ export function MaterialsListScreen() {
             <TouchableOpacity
               style={[
                 styles.newSectionSaveBtn,
-                (!newSectionName.trim() || !(parseFloat(newSectionLaborHours) > 0)) && { opacity: 0.5 },
+                !newSectionName.trim() && { opacity: 0.5 },
               ]}
-              disabled={!newSectionName.trim() || !(parseFloat(newSectionLaborHours) > 0)}
+              disabled={!newSectionName.trim()}
               onPress={handleCreateSection}
             >
               <Text style={styles.newSectionSaveText}>Create</Text>
@@ -2670,19 +2814,57 @@ export function MaterialsListScreen() {
       </Portal>
       )}
 
-      {/* Delete Section Confirmation Modal */}
+      {/* Section options — reorder, save as a template, and the two ways to
+          remove a section. Deleting used to always take the lines with it. */}
+      <ActionSheet
+        visible={sectionActionsVisible}
+        onDismiss={() => setSectionActionsVisible(false)}
+        title={sectionActionsName}
+        options={[
+          {
+            icon: 'arrow-up',
+            label: 'Move up',
+            onPress: () => { setSectionActionsVisible(false); handleMoveSection(sectionActionsName, -1); },
+          },
+          {
+            icon: 'arrow-down',
+            label: 'Move down',
+            onPress: () => { setSectionActionsVisible(false); handleMoveSection(sectionActionsName, 1); },
+          },
+          {
+            icon: 'content-save-outline',
+            label: 'Save as a template',
+            divider: true,
+            onPress: () => { setSectionActionsVisible(false); handleSaveSectionAsTemplate(sectionActionsName); },
+          },
+          {
+            icon: 'package-variant',
+            label: 'Remove section, keep the items',
+            divider: true,
+            onPress: () => { setSectionActionsVisible(false); handleDeleteSection(sectionActionsName, true); },
+          },
+          {
+            icon: 'delete-outline',
+            label: 'Delete section and its items',
+            onPress: () => { setSectionActionsVisible(false); setDeleteSectionName(sectionActionsName); },
+          },
+        ]}
+      />
+
+      {/* Destructive delete still asks — there is no undo, and a section can
+          hold every priced row on the quote. */}
       <AlertModal
-        visible={deleteSectionModalVisible}
-        onDismiss={() => setDeleteSectionModalVisible(false)}
+        visible={!!deleteSectionName}
+        onDismiss={() => setDeleteSectionName('')}
         type="warning"
         title="Ditch This Section?"
         message={`Gonna chuck "${deleteSectionName}" and all the materials in it. This can't be undone, mate.`}
         icon="delete-outline"
         showConfetti={false}
         primaryButtonText="Yeah, Ditch It"
-        primaryButtonAction={handleConfirmDeleteSection}
+        primaryButtonAction={handleConfirmDeleteSectionAndItems}
         secondaryButtonText="Nah, Keep It"
-        secondaryButtonAction={() => setDeleteSectionModalVisible(false)}
+        secondaryButtonAction={() => setDeleteSectionName('')}
       />
 
       {/* Success Modal */}
@@ -3428,6 +3610,15 @@ const useStyles = makeStyles((t) => ({
     backgroundColor: t.colors.accentSubtle,
     borderBottomLeftRadius: t.radius.md,
     borderBottomRightRadius: t.radius.md,
+  },
+  sectionCardSplitRow: {
+    paddingHorizontal: 14,
+    paddingBottom: 2,
+    alignItems: 'flex-end',
+  },
+  sectionCardSplitText: {
+    fontSize: 12,
+    color: t.colors.textMuted,
   },
   sectionCardFooterLabel: {
     fontSize: 14,

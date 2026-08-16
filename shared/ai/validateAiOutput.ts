@@ -77,7 +77,11 @@ export function validateAndRepairAiOutput(
     }
     const price = Number(m?.price);
     const qty = Number(m?.quantity);
-    if (Number.isFinite(price) && Number.isFinite(qty) && price === 0 && qty > 0) {
+    // Work items are lump-sum scope lines, not products — $0 is a valid price
+    // for one ("General preparation — included"), so they never count as a
+    // zero-priced material.
+    const isWorkItem = (m as any)?.kind === 'work';
+    if (!isWorkItem && Number.isFinite(price) && Number.isFinite(qty) && price === 0 && qty > 0) {
       zeroPricedMaterialCount++;
     }
     // Absurd-quantity guard. The AI emits `quantity` PER work unit; the

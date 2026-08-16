@@ -28,6 +28,26 @@ export {
   effectiveHourlyRate,
 } from './labourUnits';
 
+export {
+  isLumpSumSection,
+  lumpSumLabourTotal,
+  markupableLabourTotal,
+  isWorkItem,
+  lineMarkupMultiplier,
+  workItemsTotal,
+  markupableMaterialsTotal,
+} from './lumpSum';
+
+export type { PriceDetail } from './priceDetail';
+export {
+  resolvePriceDetail,
+  legacyFlagsFor,
+  showsPerLineMoney,
+  showsLineItems,
+  priceDetailBlurb,
+  PRICE_DETAIL_OPTIONS,
+} from './priceDetail';
+
 export type { GstMode } from './gstMode';
 export { resolveGstMode, keepSupplierPriceInclusive, NO_GST_NOTE } from './gstMode';
 

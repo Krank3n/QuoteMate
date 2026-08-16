@@ -2,6 +2,8 @@
  * Shared PDF types used by both client and server PDF generators
  */
 
+import type { PriceDetail } from '../document/priceDetail';
+
 export type PdfTemplateId = 'professional' | 'clean' | 'bold' | 'tradesman' | 'accredited';
 
 export interface PdfTemplateInfo {
@@ -18,6 +20,13 @@ export interface PdfMaterial {
   price: number;
   totalPrice: number;
   section?: string;
+  // 'work' = a lump-sum scope line: a title, a scope paragraph and one price.
+  // quantity is 1 and unit is 'each', so every total still reconciles, but the
+  // customer is shown neither. Absent/'material' = a priced product.
+  kind?: 'material' | 'work';
+  // Customer-facing scope paragraph for a work item. Newline-separated;
+  // rendered under the title in the Project Scope table.
+  scope?: string;
 }
 
 export interface LaborSection {
@@ -36,6 +45,12 @@ export interface LaborSection {
   // rendering; see normaliseLabourToHours in shared/document/labourUnits.ts.
   laborUnit?: 'hours' | 'days';
   laborTotal: number;
+  // 'lumpSum' — laborTotal is a price the tradie typed. Rendered at that
+  // figure with no hours, no rate and NO markup applied (see
+  // shared/document/lumpSum.ts). Absent/'hourly' = derived from hours × rate.
+  pricing?: 'hourly' | 'lumpSum';
+  // Customer-facing scope text for the section, rendered under its heading.
+  description?: string;
 }
 
 export interface QuotePdfData {
@@ -69,13 +84,15 @@ export interface QuotePdfData {
   // the customer sees a single rolled-in price.
   laborMarkup?: number;
   showMarkup?: boolean;
-  // Materials cost visibility. When false, the renderer hides the materials
-  // table AND the Materials Subtotal row in the summary. Subtotal/GST/Total
-  // are still computed and shown.
+  // How much of the money the customer sees: 'itemised' | 'summary' | 'total'.
+  // Resolved once by shared/document/priceDetail.ts — the two flags below are
+  // its legacy predecessors, still read for documents written before it and
+  // still dual-written for one release so older installed builds keep working.
+  priceDetail?: PriceDetail;
+  // @deprecated Use priceDetail. Kept so a document written by an older build
+  // and never re-opened still renders the way its author intended.
   showMaterialCosts?: boolean;
-  // Labour cost visibility. When false, the renderer hides the labour table
-  // AND the Labour row in the summary. Subtotal/GST/Total are still computed
-  // and shown.
+  // @deprecated Use priceDetail.
   showLaborCosts?: boolean;
   travelAdjustment?: number;
   gst: number;
@@ -92,7 +109,6 @@ export interface QuotePdfData {
   // When false, hide per-section labour rows on the PDF and show only the
   // single Labour Total. Default: true (show breakdown).
   showLaborBreakdown?: boolean;
-  groupMaterialsBySection?: boolean;
   paymentMethods?: any;
   // Subscription plan. When 'free', `generatePaymentMethodsHTML` shows only
   // the Square Pay Now button and hides bank/PayID/BPAY/PayPal/other —
@@ -107,6 +123,14 @@ export interface QuotePdfData {
   // disclosure line under the Pay button so the customer isn't surprised on
   // checkout (ACCC pre-commit surcharge disclosure).
   surchargePaymentFees?: boolean;
+  // Deposit, when the tradie requires one on acceptance. Rendered as a
+  // payment-schedule block under the summary so the customer knows what they
+  // are asked to pay and when. These reached only the email body and the
+  // Square link before — the PDF, which is the document a customer keeps and
+  // forwards, said nothing about the deposit at all.
+  requireDeposit?: boolean;
+  depositPercentage?: number;
+  depositAmount?: number;
   // Terms & Conditions text. Rendered as its own section at the end of the
   // document. The business's current T&Cs are snapshotted to the quote/invoice
   // at send time and passed through here so later edits don't rewrite history.

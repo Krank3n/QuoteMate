@@ -29,7 +29,16 @@ import { useUnsavedChangesGuard } from '../../hooks/useUnsavedChangesGuard';
 import { checkSquareConnection } from '../../services/squareService';
 import { defaultAuTradieTerms, hashTerms, isUnmodifiedStarterTerms } from '../../../shared/pdf/terms/defaultAuTradie';
 import { PASSTHROUGH_SURCHARGE_PCT } from '../../../shared/pdf/squareFees';
-import { resolveGstMode, GstMode } from '../../../shared/document';
+import {
+  resolveGstMode,
+  GstMode,
+  resolvePriceDetail,
+  legacyFlagsFor,
+  priceDetailBlurb,
+  PRICE_DETAIL_OPTIONS,
+  type PriceDetail,
+} from '../../../shared/document';
+import { PillToggle } from '../../components/PillToggle';
 import { GridBackground } from '../../components/GridBackground';
 
 const GST_MODE_DESCRIPTIONS: Record<GstMode, string> = {
@@ -53,8 +62,7 @@ export function BusinessDefaultsScreen() {
   const [surchargePaymentFees, setSurchargePaymentFees] = useState(false);
   const [gstMode, setGstMode] = useState<GstMode>('exclusive');
   const [showMarkup, setShowMarkup] = useState(false);
-  const [showMaterialCostsByDefault, setShowMaterialCostsByDefault] = useState(true);
-  const [showLaborCostsByDefault, setShowLaborCostsByDefault] = useState(true);
+  const [priceDetail, setPriceDetail] = useState<PriceDetail>('itemised');
   const [autoCustomerFollowUp, setAutoCustomerFollowUp] = useState(false);
   const [autoStartMic, setAutoStartMic] = useState(true);
   const [termsAndConditions, setTermsAndConditions] = useState('');
@@ -76,8 +84,9 @@ export function BusinessDefaultsScreen() {
     const sf = businessSettings.surchargePaymentFees === true;
     const gm = resolveGstMode(businessSettings);
     const sm = businessSettings.showMarkup === true;
-    const smc = businessSettings.showMaterialCostsByDefault !== false;
-    const slc = businessSettings.showLaborCostsByDefault !== false;
+    // Resolved, never read raw — an account that only ever set the legacy
+    // pair migrates on read with no backfill.
+    const pd = resolvePriceDetail(null, businessSettings);
     const acf = businessSettings.autoCustomerFollowUpEnabled === true;
     const asm = businessSettings.autoStartMicOnMate !== false;
     const tc = businessSettings.termsAndConditions ?? '';
@@ -91,13 +100,12 @@ export function BusinessDefaultsScreen() {
     setSurchargePaymentFees(sf);
     setGstMode(gm);
     setShowMarkup(sm);
-    setShowMaterialCostsByDefault(smc);
-    setShowLaborCostsByDefault(slc);
+    setPriceDetail(pd);
     setAutoCustomerFollowUp(acf);
     setAutoStartMic(asm);
     setTermsAndConditions(tc);
 
-    setInitialSnapshot(JSON.stringify({ lr, mk, lm, dp, rd, tm, sf, gm, sm, smc, slc, acf, asm, tc }));
+    setInitialSnapshot(JSON.stringify({ lr, mk, lm, dp, rd, tm, sf, gm, sm, pd, acf, asm, tc }));
   }, [businessSettings]);
 
   // Re-check on focus so the deposit + surcharge toggles unlock the moment
@@ -124,8 +132,7 @@ export function BusinessDefaultsScreen() {
       sf: surchargePaymentFees,
       gm: gstMode,
       sm: showMarkup,
-      smc: showMaterialCostsByDefault,
-      slc: showLaborCostsByDefault,
+      pd: priceDetail,
       acf: autoCustomerFollowUp,
       asm: autoStartMic,
       tc: termsAndConditions,
@@ -134,7 +141,7 @@ export function BusinessDefaultsScreen() {
   }, [
     laborRate, markup, laborMarkup, defaultDepositPercentage, requireDepositByDefault,
     transportMarkupEnabled, surchargePaymentFees, gstMode,
-    showMarkup, showMaterialCostsByDefault, showLaborCostsByDefault, autoCustomerFollowUp, autoStartMic, termsAndConditions,
+    showMarkup, priceDetail, autoCustomerFollowUp, autoStartMic, termsAndConditions,
     initialSnapshot,
   ]);
 
@@ -161,8 +168,12 @@ export function BusinessDefaultsScreen() {
         pricesIncludeGst: gstMode === 'inclusive',
         gstRegistered: gstMode !== 'none',
         showMarkup,
-        showMaterialCostsByDefault,
-        showLaborCostsByDefault,
+        defaultPriceDetail: priceDetail,
+        // Dual-written for one release so an older installed build reading
+        // the legacy pair still renders documents the way this screen says.
+        // Remove with legacyFlagsFor() in shared/document/priceDetail.ts.
+        showMaterialCostsByDefault: legacyFlagsFor(priceDetail).showMaterialCosts,
+        showLaborCostsByDefault: legacyFlagsFor(priceDetail).showLaborCosts,
         autoCustomerFollowUpEnabled: autoCustomerFollowUp,
         autoStartMicOnMate: autoStartMic,
         termsAndConditions: termsAndConditions.trim() || undefined,
@@ -293,33 +304,20 @@ export function BusinessDefaultsScreen() {
               />
             </View>
 
-            <View style={styles.toggleRow}>
-              <View style={styles.toggleLabel}>
-                <Text style={styles.toggleTitle}>Show Material Costs</Text>
-                <Text style={styles.toggleDescription}>
-                  When off, the materials breakdown and subtotal are hidden. Turn both this and labour off to show only the grand total.
-                </Text>
-              </View>
-              <Switch
-                value={showMaterialCostsByDefault}
-                onValueChange={setShowMaterialCostsByDefault}
-                color={themeColors.accentText}
-              />
+            {/* One control, mirroring the per-document one on the preview
+                screen. Two switches whose four combinations meant three
+                things — and which couldn't express "scope only" at all. */}
+            <View style={styles.toggleLabel}>
+              <Text style={styles.toggleTitle}>What the customer sees</Text>
+              <Text style={styles.toggleDescription}>{priceDetailBlurb(priceDetail)}</Text>
             </View>
-
-            <View style={styles.toggleRow}>
-              <View style={styles.toggleLabel}>
-                <Text style={styles.toggleTitle}>Show Labour Costs</Text>
-                <Text style={styles.toggleDescription}>
-                  When off, the labour breakdown and subtotal are hidden. Turn both this and materials off to show only the grand total.
-                </Text>
-              </View>
-              <Switch
-                value={showLaborCostsByDefault}
-                onValueChange={setShowLaborCostsByDefault}
-                color={themeColors.accentText}
-              />
-            </View>
+            <PillToggle
+              value={priceDetail}
+              onChange={setPriceDetail}
+              options={PRICE_DETAIL_OPTIONS}
+              fullWidth
+              style={{ marginTop: 10 }}
+            />
           </Surface>
 
           <Surface style={styles.card}>

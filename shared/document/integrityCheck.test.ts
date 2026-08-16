@@ -172,6 +172,19 @@ describe('checkDocumentIntegrity — single-issue cases', () => {
     expect(codes(checkDocumentIntegrity(doc))).toContain('zero_priced_material');
   });
 
+  it('raises no zero_priced_material for a $0 work item', () => {
+    // A lump-sum scope line is a title, a paragraph and one price the tradie
+    // typed. "General preparation — included" at $0 is correct, not a hole.
+    const doc = buildClean({
+      materials: [
+        { name: 'General Preparation', kind: 'work', quantity: 1, unit: 'each', price: 0, totalPrice: 0, scope: 'Cover and protect.' },
+        { name: 'Interior', kind: 'work', quantity: 1, unit: 'each', price: 100, totalPrice: 100 },
+      ],
+      materialsSubtotal: 100,
+    });
+    expect(codes(checkDocumentIntegrity(doc))).not.toContain('zero_priced_material');
+  });
+
   it('flags estimated_hours_drift when JobSpec estimate diverges from section sum', () => {
     const doc = buildClean({
       sections: [{ name: 'A', multiplier: 1, laborHours: 2, laborRate: 100, laborUnit: 'hours', laborTotal: 200 }],

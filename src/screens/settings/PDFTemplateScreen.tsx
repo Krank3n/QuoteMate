@@ -29,10 +29,110 @@ import { FixedBottomButton } from '../../components/FixedBottomButton';
 import { AlertModal } from '../../components/AlertModal';
 import { ProBadge } from '../../components/ProBadge';
 import { useUnsavedChangesGuard } from '../../hooks/useUnsavedChangesGuard';
-import { PDF_TEMPLATES, printMediaCSS, getTemplateCSS, PdfTemplateId, buildTermsHTML } from '../../../shared/pdf';
+import {
+  PDF_TEMPLATES,
+  PdfTemplateId,
+  buildQuotePdfHtml,
+  toPdfMaterials,
+  toPdfSections,
+  type QuotePdfData,
+} from '../../../shared/pdf';
 import { resolveGstMode, GstMode, NO_GST_NOTE } from '../../../shared/document';
+import { resolvePriceDetail, type PriceDetail } from '../../../shared/document/priceDetail';
+import { calculateDocumentTotals } from '../../utils/documentCalculator';
 import { prepareLogoHtml } from '../../utils/pdfGenerator';
+import { Material, QuoteSection } from '../../types';
 import { GridBackground } from '../../components/GridBackground';
+
+/**
+ * The one thing this screen still owns about the sample document: its data.
+ * Every figure below is run through the real calculator and the real HTML
+ * builder, so the preview cannot drift from the document a customer receives
+ * — which is exactly what the hand-written copy of the markup did.
+ */
+const SAMPLE_MATERIALS: Material[] = [
+  { id: 'm1', name: 'Treated Pine Joists 90x45mm', quantity: 18, unit: 'each', price: 28, totalPrice: 504, manualPriceOverride: true, section: 'Framing' },
+  { id: 'm2', name: 'Concrete Pier Blocks', quantity: 12, unit: 'each', price: 14.95, totalPrice: 179.4, manualPriceOverride: true, section: 'Framing' },
+  { id: 'm3', name: 'Merbau Decking 90x19mm', quantity: 48, unit: 'm', price: 12.5, totalPrice: 600, manualPriceOverride: true, section: 'Decking' },
+  { id: 'm4', name: 'Stainless Steel Deck Screws', quantity: 3, unit: 'box', price: 24.95, totalPrice: 74.85, manualPriceOverride: true, section: 'Decking' },
+  { id: 'm5', name: 'Deck Stain - Natural', quantity: 4, unit: 'L', price: 42, totalPrice: 168, manualPriceOverride: true, section: 'Finishing' },
+];
+
+const SAMPLE_RATE = 85;
+
+function sampleSection(name: string, hours: number, sortOrder: number): QuoteSection {
+  return {
+    id: `sample-${sortOrder}`,
+    name,
+    multiplier: 1,
+    laborHours: hours,
+    laborHoursTotal: hours,
+    laborRate: SAMPLE_RATE,
+    laborUnit: 'hours',
+    laborTotal: hours * SAMPLE_RATE,
+    sortOrder,
+  };
+}
+
+const SAMPLE_SECTIONS: QuoteSection[] = [
+  sampleSection('Framing', 6, 0),
+  sampleSection('Decking', 7, 1),
+  sampleSection('Finishing', 3, 2),
+];
+
+const SAMPLE_MARKUP_PCT = 15;
+
+function buildSampleQuote(opts: {
+  showMarkup: boolean;
+  priceDetail: PriceDetail;
+  showLaborHours: boolean;
+  pricesIncludeGst: boolean;
+  gstRegistered: boolean;
+  terms?: string;
+}): QuotePdfData {
+  const totals = calculateDocumentTotals(
+    SAMPLE_MATERIALS,
+    SAMPLE_RATE,
+    0,
+    SAMPLE_MARKUP_PCT,
+    0,
+    SAMPLE_SECTIONS,
+    SAMPLE_MARKUP_PCT,
+    0,
+    opts.pricesIncludeGst,
+    opts.gstRegistered,
+  );
+  return {
+    customerName: 'Sarah Johnson',
+    customerEmail: 'sarah@example.com',
+    jobAddress: '42 Banksia Drive, Melbourne VIC 3000',
+    quoteNumber: 'Q-001',
+    quoteDate: '10 March 2026',
+    job: {
+      name: 'Rear Deck Build',
+      description: 'Build a 6m x 4m hardwood deck with steps and railing to the rear of property.',
+    },
+    materials: toPdfMaterials(SAMPLE_MATERIALS),
+    materialsSubtotal: totals.materialsSubtotal,
+    laborRate: SAMPLE_RATE,
+    laborHours: 16,
+    laborTotal: totals.laborTotal,
+    sections: toPdfSections(SAMPLE_SECTIONS),
+    subtotal: totals.subtotal,
+    markup: SAMPLE_MARKUP_PCT,
+    markupAmount: totals.markupAmount,
+    laborMarkup: SAMPLE_MARKUP_PCT,
+    showMarkup: opts.showMarkup,
+    priceDetail: opts.priceDetail,
+    showLaborHours: opts.showLaborHours,
+    gst: totals.gst,
+    total: totals.total,
+    pricesIncludeGst: opts.pricesIncludeGst,
+    gstRegistered: opts.gstRegistered,
+    notes: 'All timber will be treated and stained. Work includes cleanup and disposal of waste materials. Deck will comply with local council regulations.',
+    terms: opts.terms,
+  };
+}
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const PREVIEW_WIDTH = Math.min(SCREEN_WIDTH - 64, 340);
@@ -50,8 +150,12 @@ function Line({ width, height = 3, color = '#D1D5DB', style }: {
   return <View style={[{ width: width as any, height, backgroundColor: color, borderRadius: 1 }, style]} />;
 }
 
-/** Full-width detailed native document preview */
-function TemplatePreview({ templateId, businessName, groupBySection, brandColor, gstMode }: { templateId: PdfTemplateId; businessName: string; groupBySection: boolean; brandColor?: string; gstMode: GstMode }) {
+/**
+ * Full-width detailed native document mockup. Materials always show under
+ * section headings now — grouping is no longer a setting, so there is nothing
+ * to preview both ways.
+ */
+function TemplatePreview({ templateId, businessName, brandColor, gstMode }: { templateId: PdfTemplateId; businessName: string; brandColor?: string; gstMode: GstMode }) {
   const styles = useStyles();
   const themeColors = useThemeColors();
   const configs: Record<PdfTemplateId, {
@@ -199,7 +303,6 @@ function TemplatePreview({ templateId, businessName, groupBySection, brandColor,
     },
   ];
 
-  const allItems = sampleSections.flatMap(s => s.items);
 
   return (
     <View style={[styles.previewContainer, { width: PREVIEW_WIDTH, height: PREVIEW_HEIGHT }]}>
@@ -291,9 +394,7 @@ function TemplatePreview({ templateId, businessName, groupBySection, brandColor,
             </Text>
           </View>
 
-          {/* Table content - grouped or flat */}
-          {groupBySection ? (
-            <>
+          {/* Table content, grouped under section headings */}
               {sampleSections.map((section, si) => (
                 <View key={si} style={{ marginBottom: 4 * scale }}>
                   {/* Section label */}
@@ -335,54 +436,6 @@ function TemplatePreview({ templateId, businessName, groupBySection, brandColor,
                 <Text style={{ flex: 5, color: c.bodyTextColor, fontSize: 5.5 * scale, fontWeight: '700', ...font }}>Materials Subtotal</Text>
                 <Text style={{ flex: 1, color: c.bodyTextColor, fontSize: 5.5 * scale, fontWeight: '700', textAlign: 'right', ...font }}>$877.90</Text>
               </View>
-            </>
-          ) : (
-            <>
-              {/* Table header */}
-              <View style={[
-                styles.prevTableRow,
-                c.tableBorderStyle === 'filled' && { backgroundColor: c.tableHeaderBg, borderRadius: templateId === 'professional' ? 2 * scale : 0 },
-                c.tableBorderStyle === 'ruled' && { borderTopWidth: 1.5 * scale, borderBottomWidth: 1.5 * scale, borderColor: c.accentColor },
-                { paddingVertical: 3 * scale, paddingHorizontal: 4 * scale },
-              ]}>
-                <Text style={{ flex: 3, color: c.tableHeaderText, fontSize: 5.5 * scale, fontWeight: '600', ...font }}>Item</Text>
-                <Text style={{ flex: 1, color: c.tableHeaderText, fontSize: 5.5 * scale, fontWeight: '600', textAlign: 'center', ...font }}>Qty</Text>
-                <Text style={{ flex: 1, color: c.tableHeaderText, fontSize: 5.5 * scale, fontWeight: '600', textAlign: 'right', ...font }}>Price</Text>
-                <Text style={{ flex: 1, color: c.tableHeaderText, fontSize: 5.5 * scale, fontWeight: '600', textAlign: 'right', ...font }}>Total</Text>
-              </View>
-
-              {/* Table rows */}
-              {allItems.map((item, i) => (
-                <View key={i} style={[
-                  styles.prevTableRow,
-                  {
-                    paddingVertical: 2.5 * scale,
-                    paddingHorizontal: 4 * scale,
-                    borderBottomWidth: 0.5 * scale,
-                    borderBottomColor: c.bodyTextColor + '20',
-                  },
-                  c.alternateRowBg && i % 2 === 1 && { backgroundColor: c.alternateRowBg },
-                ]}>
-                  <Text style={{ flex: 3, color: c.bodyTextColor, fontSize: 5 * scale, ...font }} numberOfLines={1}>{item.name}</Text>
-                  <Text style={{ flex: 1, color: c.bodyTextColor, fontSize: 5 * scale, textAlign: 'center', ...font }}>{item.qty}</Text>
-                  <Text style={{ flex: 1, color: c.bodyTextColor, fontSize: 5 * scale, textAlign: 'right', ...font }}>{item.price}</Text>
-                  <Text style={{ flex: 1, color: c.bodyTextColor, fontSize: 5 * scale, textAlign: 'right', ...font }}>{item.total}</Text>
-                </View>
-              ))}
-
-              {/* Subtotal row */}
-              <View style={[styles.prevTableRow, {
-                paddingVertical: 2.5 * scale,
-                paddingHorizontal: 4 * scale,
-                borderTopWidth: c.tableBorderStyle === 'ruled' ? 1.5 * scale : 0,
-                borderTopColor: c.accentColor,
-                backgroundColor: templateId === 'professional' ? '#F5F5F5' : 'transparent',
-              }]}>
-                <Text style={{ flex: 5, color: c.bodyTextColor, fontSize: 5.5 * scale, fontWeight: '700', ...font }}>Materials Subtotal</Text>
-                <Text style={{ flex: 1, color: c.bodyTextColor, fontSize: 5.5 * scale, fontWeight: '700', textAlign: 'right', ...font }}>$877.90</Text>
-              </View>
-            </>
-          )}
         </View>
 
         {/* === SUMMARY === */}
@@ -453,7 +506,6 @@ export function PDFTemplateScreen() {
 
   const [selectedTemplate, setSelectedTemplate] = useState<PdfTemplateId>('professional');
   const [showLaborHours, setShowLaborHours] = useState(false);
-  const [groupMaterialsBySection, setGroupMaterialsBySection] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [previewLoading, setPreviewLoading] = useState<PdfTemplateId | null>(null);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
@@ -464,20 +516,19 @@ export function PDFTemplateScreen() {
   // Here we read the current values to drive the live preview so the tradie
   // can see the effect without leaving this screen.
   const showMarkup = businessSettings?.showMarkup === true;
-  const showMaterialCostsByDefault = businessSettings?.showMaterialCostsByDefault !== false;
-  const showLaborCostsByDefault = businessSettings?.showLaborCostsByDefault !== false;
+  // Preview the account's own default presentation, resolved the same way the
+  // real document resolves it.
+  const priceDetail = resolvePriceDetail(null, businessSettings);
 
   useEffect(() => {
     if (businessSettings) {
       const tpl = businessSettings.pdfTemplate || 'professional';
       const slh = businessSettings.showLaborHours === true;
-      const gm = businessSettings.groupMaterialsBySection === true;
       if (businessSettings.pdfTemplate) {
         setSelectedTemplate(businessSettings.pdfTemplate);
       }
       setShowLaborHours(slh);
-      setGroupMaterialsBySection(gm);
-      setInitialSnapshot(JSON.stringify({ tpl, slh, gm }));
+      setInitialSnapshot(JSON.stringify({ tpl, slh }));
     }
   }, [businessSettings]);
 
@@ -486,9 +537,8 @@ export function PDFTemplateScreen() {
     return JSON.stringify({
       tpl: selectedTemplate,
       slh: showLaborHours,
-      gm: groupMaterialsBySection,
     }) !== initialSnapshot;
-  }, [selectedTemplate, showLaborHours, groupMaterialsBySection, initialSnapshot]);
+  }, [selectedTemplate, showLaborHours, initialSnapshot]);
 
   const handleSave = async (opts?: { silent?: boolean }): Promise<boolean> => {
     try {
@@ -497,12 +547,10 @@ export function PDFTemplateScreen() {
         ...businessSettings!,
         pdfTemplate: selectedTemplate,
         showLaborHours,
-        groupMaterialsBySection,
       });
       setInitialSnapshot(JSON.stringify({
         tpl: selectedTemplate,
         slh: showLaborHours,
-        gm: groupMaterialsBySection,
       }));
       if (!opts?.silent) setShowSuccessModal(true);
       return true;
@@ -519,188 +567,42 @@ export function PDFTemplateScreen() {
     onSave: () => handleSave({ silent: true }),
   });
 
-  /** Generate a real sample PDF and show it via the system print preview */
+  /**
+   * Preview a real sample quote through the REAL PDF builder.
+   *
+   * This used to be ~170 lines of hand-written HTML mirroring
+   * buildQuotePdfHtml, and it had already drifted: "Labor" instead of
+   * "Labour", a stale header layout, its own copy of the summary arithmetic.
+   * A preview that lies is worse than no preview — the tradie picks a
+   * template based on it. Now the only thing this screen owns is the sample
+   * data; every byte of markup comes from the same function that renders the
+   * document the customer receives.
+   */
   const handlePreviewPDF = useCallback(async (templateId: PdfTemplateId) => {
     setPreviewLoading(templateId);
     try {
-      const business = businessSettings || {
-        businessName: 'Your Business',
-        email: 'info@example.com',
-        phone: '0400 000 000',
-        abn: '12 345 678 901',
-      };
-
-      const css = getTemplateCSS(templateId, businessSettings?.brandColor);
       const logoHtml = await prepareLogoHtml(businessSettings, isPro);
-      const html = `
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-          <style>${printMediaCSS} ${css}</style>
-        </head>
-        <body>
-          <div class="content-wrapper">
-          <div class="header">
-            <div class="header-content">
-              ${logoHtml}
-              <div class="header-text">
-                <h1>${business.businessName || 'Your Business'}</h1>
-                <p>
-                  ${business.abn ? `ABN: ${business.abn}<br>` : ''}
-                  ${business.email ? `Email: ${business.email}<br>` : ''}
-                  ${business.phone ? `Phone: ${business.phone}` : ''}
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div class="info-section">
-            <h2>QUOTATION</h2>
-            <p><strong>Quote #:</strong> Q-001</p>
-            <p><strong>Quote Date:</strong> 10 March 2026</p>
-            <p><strong>Customer:</strong> Sarah Johnson</p>
-            <p><strong>Email:</strong> sarah@example.com</p>
-            <p><strong>Job Address:</strong> 42 Banksia Drive, Melbourne VIC 3000</p>
-          </div>
-
-          <div class="info-section">
-            <h3>Job Details</h3>
-            <p><strong>Rear Deck Build</strong></p>
-            <p>Build a 6m x 4m hardwood deck with steps and railing to the rear of property.</p>
-          </div>
-
-          ${showMaterialCostsByDefault ? `
-          <div class="section-wrapper">
-            <h3>Materials</h3>
-            ${groupMaterialsBySection ? `
-            <table>
-              <thead>
-                <tr><th colspan="4" class="section-label">Framing</th></tr>
-                <tr>
-                  <th>Item</th>
-                  <th>Quantity</th>
-                  <th>Unit Price</th>
-                  <th>Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr><td>Treated Pine Joists 90x45mm</td><td>18 each</td><td>$28.00</td><td>$504.00</td></tr>
-                <tr><td>Concrete Pier Blocks</td><td>12 each</td><td>$14.95</td><td>$179.40</td></tr>
-                <tr class="total-row"><td colspan="3">Framing Subtotal</td><td>$683.40</td></tr>
-              </tbody>
-            </table>
-            <table>
-              <thead>
-                <tr><th colspan="4" class="section-label">Decking</th></tr>
-                <tr>
-                  <th>Item</th>
-                  <th>Quantity</th>
-                  <th>Unit Price</th>
-                  <th>Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr><td>Merbau Decking 90x19mm</td><td>48 m</td><td>$12.50</td><td>$600.00</td></tr>
-                <tr><td>Stainless Steel Deck Screws</td><td>3 box</td><td>$24.95</td><td>$74.85</td></tr>
-                <tr class="total-row"><td colspan="3">Decking Subtotal</td><td>$674.85</td></tr>
-              </tbody>
-            </table>
-            <table>
-              <thead>
-                <tr><th colspan="4" class="section-label">Finishing</th></tr>
-                <tr>
-                  <th>Item</th>
-                  <th>Quantity</th>
-                  <th>Unit Price</th>
-                  <th>Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr><td>Deck Stain - Natural</td><td>4 L</td><td>$42.00</td><td>$168.00</td></tr>
-                <tr class="total-row"><td colspan="3">Finishing Subtotal</td><td>$168.00</td></tr>
-              </tbody>
-            </table>
-            <table>
-              <tbody>
-                <tr class="total-row"><td colspan="3"><strong>All Materials Subtotal</strong></td><td><strong>$1,526.25</strong></td></tr>
-              </tbody>
-            </table>
-            ` : `
-            <table>
-              <thead>
-                <tr>
-                  <th>Item</th>
-                  <th>Quantity</th>
-                  <th>Unit Price</th>
-                  <th>Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr><td>Merbau Decking 90x19mm</td><td>48 m</td><td>$12.50</td><td>$600.00</td></tr>
-                <tr><td>Treated Pine Joists 90x45mm</td><td>18 each</td><td>$28.00</td><td>$504.00</td></tr>
-                <tr><td>Concrete Pier Blocks</td><td>12 each</td><td>$14.95</td><td>$179.40</td></tr>
-                <tr><td>Stainless Steel Deck Screws</td><td>3 box</td><td>$24.95</td><td>$74.85</td></tr>
-                <tr><td>Deck Stain - Natural</td><td>4 L</td><td>$42.00</td><td>$168.00</td></tr>
-                <tr class="total-row"><td colspan="3">Materials Subtotal</td><td>$1,526.25</td></tr>
-              </tbody>
-            </table>
-            `}
-          </div>
-          ` : ''}
-
-          ${showLaborCostsByDefault ? `
-          <div class="section-wrapper">
-            <h3>Labor</h3>
-            <table>
-              <tbody>
-                <tr>
-                  <td>${showLaborHours ? 'Labor (16 hours @ $85.00/hr)' : 'Labor'}</td>
-                  <td style="text-align: right;">$1,360.00</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          ` : ''}
-
-          <div class="summary">
-            ${showMaterialCostsByDefault ? `<div class="summary-row"><span>Materials Subtotal</span><span>$1,526.25</span></div>` : ''}
-            ${showLaborCostsByDefault ? `<div class="summary-row"><span>Labor</span><span>$1,360.00</span></div>` : ''}
-            ${resolveGstMode(businessSettings ?? {}) === 'inclusive'
-              ? `${(showMaterialCostsByDefault || showLaborCostsByDefault) ? `<div class="summary-row"><span>Subtotal</span><span>$2,886.25</span></div>` : ''}
-                ${showMarkup ? `<div class="summary-row"><span>Markup (15%)</span><span>$432.94</span></div>` : ''}
-                <div class="summary-row"><span>Includes GST</span><span>$301.74</span></div>
-                <hr>
-                <div class="summary-row grand-total"><span>TOTAL</span><span>$3,319.19</span></div>`
-              : resolveGstMode(businessSettings ?? {}) === 'none'
-              ? `${(showMaterialCostsByDefault || showLaborCostsByDefault) ? `<div class="summary-row"><span>Subtotal</span><span>$2,886.25</span></div>` : ''}
-                ${showMarkup ? `<div class="summary-row"><span>Markup (15%)</span><span>$432.94</span></div>` : ''}
-                <hr>
-                <div class="summary-row grand-total"><span>TOTAL</span><span>$3,319.19</span></div>
-                <div class="summary-row" style="font-size: 0.85em; color: #666;"><span>${NO_GST_NOTE}</span><span></span></div>`
-              : `${(showMaterialCostsByDefault || showLaborCostsByDefault) ? `<div class="summary-row"><span>Subtotal (ex GST)</span><span>$2,886.25</span></div>` : ''}
-                ${showMarkup ? `<div class="summary-row"><span>Markup (15%)</span><span>$432.94</span></div>` : ''}
-                <div class="summary-row"><span>GST (10%)</span><span>$331.92</span></div>
-                <hr>
-                <div class="summary-row grand-total"><span>TOTAL</span><span>$3,651.11</span></div>`
-            }
-          </div>
-
-          <div class="info-section"><h3>Notes</h3><p>All timber will be treated and stained. Work includes cleanup and disposal of waste materials. Deck will comply with local council regulations.</p></div>
-
-          <div style="margin-top: 40px; font-size: 12px; color: #666666;">
-            <p>This quote is valid for 30 days from the date of issue.</p>
-          </div>
-
-          ${buildTermsHTML(businessSettings?.termsAndConditions)}
-          </div>
-
-          <div class="pdf-footer">
-            <p>Powered by QuoteMate | quotemateapp.au</p>
-          </div>
-        </body>
-        </html>
-      `;
+      const html = buildQuotePdfHtml(
+        buildSampleQuote({
+          showMarkup,
+          priceDetail,
+          showLaborHours,
+          pricesIncludeGst: businessSettings?.pricesIncludeGst === true,
+          gstRegistered: businessSettings?.gstRegistered !== false,
+          terms: businessSettings?.termsAndConditions,
+        }),
+        {
+          businessName: businessSettings?.businessName || 'Your Business',
+          email: businessSettings?.email || 'info@example.com',
+          phone: businessSettings?.phone || '0400 000 000',
+          website: businessSettings?.website,
+          abn: businessSettings?.abn || '12 345 678 901',
+          address: businessSettings?.address,
+          logoHtml,
+          brandColor: businessSettings?.brandColor,
+          pdfTemplate: templateId,
+        },
+      );
 
       if (Platform.OS === 'web') {
         const printWindow = window.open('', '_blank');
@@ -720,7 +622,7 @@ export function PDFTemplateScreen() {
     } finally {
       setPreviewLoading(null);
     }
-  }, [businessSettings, showLaborHours, showMarkup, showMaterialCostsByDefault, showLaborCostsByDefault, groupMaterialsBySection, isPro]);
+  }, [businessSettings, showLaborHours, showMarkup, priceDetail, isPro]);
 
   const businessName = businessSettings?.businessName || 'Your Business';
 
@@ -779,7 +681,7 @@ export function PDFTemplateScreen() {
 
                   {/* Large preview */}
                   <View style={styles.previewWrapper}>
-                    <TemplatePreview templateId={template.id} businessName={businessName} groupBySection={groupMaterialsBySection} brandColor={businessSettings?.brandColor} gstMode={resolveGstMode(businessSettings ?? {})} />
+                    <TemplatePreview templateId={template.id} businessName={businessName} brandColor={businessSettings?.brandColor} gstMode={resolveGstMode(businessSettings ?? {})} />
                   </View>
 
                   {/* Preview PDF button */}
@@ -808,7 +710,7 @@ export function PDFTemplateScreen() {
 
             <View style={styles.toggleRow}>
               <View style={styles.toggleLabel}>
-                <Text style={styles.toggleTitle}>Show Labor Hours</Text>
+                <Text style={styles.toggleTitle}>Show Labour Hours</Text>
                 <Text style={styles.toggleSubtitle}>Display hourly rate and hours breakdown on PDFs</Text>
               </View>
               <Switch
@@ -816,21 +718,6 @@ export function PDFTemplateScreen() {
                 onValueChange={setShowLaborHours}
                 trackColor={{ false: '#D1D5DB', true: themeColors.accentSubtle }}
                 thumbColor={showLaborHours ? themeColors.accent : '#F3F4F6'}
-              />
-            </View>
-
-            <View style={styles.toggleDivider} />
-
-            <View style={styles.toggleRow}>
-              <View style={styles.toggleLabel}>
-                <Text style={styles.toggleTitle}>Group Materials by Section</Text>
-                <Text style={styles.toggleSubtitle}>Organise materials under work section headings</Text>
-              </View>
-              <Switch
-                value={groupMaterialsBySection}
-                onValueChange={setGroupMaterialsBySection}
-                trackColor={{ false: '#D1D5DB', true: themeColors.accentSubtle }}
-                thumbColor={groupMaterialsBySection ? themeColors.accent : '#F3F4F6'}
               />
             </View>
           </Surface>

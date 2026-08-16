@@ -1052,7 +1052,7 @@ export function NewOnboardingScreen() {
             <Surface style={styles.card}>
                 <TextInput
                     ref={laborRateRef}
-                    label="Hourly Labor Rate"
+                    label="Hourly Labour Rate"
                     value={laborRate}
                     onChangeText={setLaborRate}
                     mode="outlined"

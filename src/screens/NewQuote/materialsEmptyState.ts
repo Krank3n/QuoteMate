@@ -63,7 +63,10 @@ export function getMaterialsEmptyState(opts: {
     hero,
     manual: {
       title: 'I’ll build it myself',
-      subtitle: 'Start with a blank list and add your own gear by hand.',
+      // Names scope lines explicitly. A painter, plasterer or cleaner reading
+      // "gear" assumes the app can't do their quote at all and stops here —
+      // which is exactly what happened before work items existed.
+      subtitle: 'Start with a blank list and add your own gear, or scope lines priced as a lump sum.',
     },
     skipLabel: 'Labour only · skip materials',
   };

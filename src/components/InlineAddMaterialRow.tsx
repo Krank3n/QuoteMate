@@ -13,6 +13,15 @@
  * Tapping a result autofills name/unit/price; tapping Save with no result
  * commits a manual line. After Save, the form clears, the name input
  * refocuses, and the row stays expanded for rapid entry.
+ *
+ * The same card also enters WORK ITEMS — lump-sum scope lines, which is how
+ * every labour-dominant trade quotes. The Material | Work item chip pair
+ * swaps the qty stepper and unit chip for a scope paragraph, relabels the
+ * price as the line total, and shuts the supplier search off entirely: there
+ * is no product behind "Interior surfaces to be painted", so searching for
+ * one can only overwrite what the tradie typed. Rather than a new screen,
+ * because this row is already mounted in every section footer, the
+ * unsectioned footer and edit mode — so the affordance appears everywhere.
  */
 
 import React, { useCallback, useMemo, useRef, useState } from 'react';
@@ -36,8 +45,15 @@ import { useMaterialSearch } from '../hooks/useMaterialSearch';
 import { supplierPriceForGstMode, formatCurrency } from '../utils/quoteCalculator';
 import { saveFavoriteProduct } from '../services/materialFavorites';
 import { ActionSheet, ActionSheetOption } from './ActionSheet';
+import { PillToggle, type PillToggleOption } from './PillToggle';
 
 const UNITS: Material['unit'][] = ['each', 'm', 'm²', 'm³', 'L', 'kg', 'box', 'pack'];
+
+/** Is this row a product, or a lump-sum scope line? */
+const ENTRY_KIND_OPTIONS: PillToggleOption<'material' | 'work'>[] = [
+  { value: 'material', label: 'Material' },
+  { value: 'work', label: 'Work item' },
+];
 
 export interface InlineAddMaterialRowProps {
   sectionName: string;
@@ -212,6 +228,14 @@ function InlineAddMaterialForm({
   const [qty, setQty] = useState(initialMaterial ? String(initialMaterial.quantity) : '1');
   const [price, setPrice] = useState(initialMaterial ? String(initialMaterial.price ?? '') : '');
   const [unit, setUnit] = useState<Material['unit']>(initialMaterial?.unit ?? 'each');
+  // 'work' turns this card into a lump-sum scope line. Sticky across
+  // rapid-entry saves — a painter typing three scope lines shouldn't have to
+  // re-pick the mode each time.
+  const [entryKind, setEntryKind] = useState<'material' | 'work'>(
+    initialMaterial?.kind === 'work' ? 'work' : 'material',
+  );
+  const isWork = entryKind === 'work';
+  const [scope, setScope] = useState(initialMaterial?.scope ?? '');
   const [nameError, setNameError] = useState(false);
   const [unitSheetVisible, setUnitSheetVisible] = useState(false);
   // Sticky across rapid-entry saves so a tradie filling in several lines
@@ -261,13 +285,18 @@ function InlineAddMaterialForm({
     if (selectedResultRef.current && next !== selectedResultRef.current.productName) {
       selectedResultRef.current = null;
     }
+    // A work item has no product behind it, so nothing is searched for: no
+    // debounced supplier fetch, no results, no chance of a supplier row
+    // overwriting the tradie's title or price.
+    if (isWork) return;
     search.setQuery(next);
-  }, [nameError, search]);
+  }, [nameError, search, isWork]);
 
   const resetForm = useCallback(() => {
     setName('');
     setQty('1');
     setPrice('');
+    setScope('');
     setNameError(false);
     selectedResultRef.current = null;
     search.clearResults();
@@ -306,6 +335,51 @@ function InlineAddMaterialForm({
     if (!trimmed) return null;
     const parsedQty = parseFloat(qty) || 1;
     const parsedPrice = parseFloat(price) || 0;
+
+    if (isWork) {
+      // A lump-sum scope line. quantity 1 and unit 'each' are bookkeeping, not
+      // display: they keep totalPrice = quantity × price true, so every
+      // existing calculator, adapter and Xero mapper works unchanged. $0 is a
+      // legitimate line total ("General preparation — included").
+      const workBase: Material = initialMaterial ? { ...initialMaterial } : ({} as Material);
+      return {
+        ...workBase,
+        id: initialMaterial?.id ?? generateId(),
+        name: trimmed,
+        kind: 'work',
+        scope: scope.trim() || undefined,
+        quantity: 1,
+        unit: 'each',
+        price: parsedPrice,
+        totalPrice: parsedPrice,
+        // Belt and braces on top of the `kind` guards: the pricing pipeline
+        // already skips manual overrides, so a work item stays protected even
+        // if a future gate is written without knowing about `kind`.
+        manualPriceOverride: true,
+        pricingSource: 'manual',
+        section: initialMaterial ? initialMaterial.section : (sectionName || undefined),
+        // Product metadata cannot survive the conversion — a scope line with a
+        // Bunnings item number would show a supplier badge and a product link.
+        ...(initialMaterial
+          ? {
+              bunningsItemNumber: undefined,
+              reeceItemNumber: undefined,
+              reeceUnitOfMeasure: undefined,
+              productUrl: undefined,
+              imageUrl: undefined,
+              favoriteProduct: undefined,
+              packSize: undefined,
+              packUnit: undefined,
+              requiredQty: undefined,
+              requiredUnit: undefined,
+              templateBaseQuantity: undefined,
+              priceConfidence: undefined,
+              asPriced: undefined,
+            }
+          : {}),
+      } as Material;
+    }
+
     const picked = selectedResultRef.current;
     // Defaults for a manually-typed line.
     let pricingSource: Material['pricingSource'] = 'manual';
@@ -361,11 +435,12 @@ function InlineAddMaterialForm({
       pricingSource,
       section: initialMaterial ? initialMaterial.section : (sectionName || undefined),
       // Editing breaks any template-derived quantity link — same rule the
-      // qty stepper applies.
-      ...(initialMaterial ? { templateBaseQuantity: undefined } : {}),
+      // qty stepper applies. Switching a work item back to a material clears
+      // the scope fields so the row stops rendering as one.
+      ...(initialMaterial ? { templateBaseQuantity: undefined, kind: undefined, scope: undefined } : {}),
       ...extra,
     } as Material;
-  }, [name, qty, price, unit, sectionName, initialMaterial]);
+  }, [name, qty, price, unit, scope, isWork, sectionName, initialMaterial]);
 
   const handleSave = useCallback(() => {
     const material = buildMaterial();
@@ -431,6 +506,7 @@ function InlineAddMaterialForm({
     setName('');
     setQty('1');
     setPrice('');
+    setScope('');
     setNameError(false);
     selectedResultRef.current = null;
     search.clearResults();
@@ -474,7 +550,7 @@ function InlineAddMaterialForm({
     </View>
   ) : null;
 
-  const visibleResults = search.results.slice(0, 5);
+  const visibleResults = isWork ? [] : search.results.slice(0, 5);
   // Only offer "Add as custom" alongside actual search results — without
   // results it tempts the user to commit before they've typed qty/price.
   // The bottom Save button is the manual-entry path when no results exist.
@@ -486,18 +562,32 @@ function InlineAddMaterialForm({
   return (
     <View style={styles.expandedWrap}>
     <View style={styles.expandedCard}>
+      <PillToggle
+        value={entryKind}
+        onChange={(k) => {
+          setEntryKind(k);
+          // Drop any supplier results and any picked result — they belong to
+          // the other mode, and a stale one reappearing on the way back would
+          // attach a product to a scope line.
+          selectedResultRef.current = null;
+          search.clearResults();
+        }}
+        options={ENTRY_KIND_OPTIONS}
+      />
+
       <View style={[styles.nameRow, nameError && styles.nameRowError]}>
         <RNTextInput
           ref={nameInputRef}
           style={styles.nameInputInner}
           value={name}
           onChangeText={handleNameChange}
-          placeholder="Material name"
+          placeholder={isWork ? 'Work item name' : 'Material name'}
           placeholderTextColor={themeColors.textMuted}
-          returnKeyType="search"
-          onSubmitEditing={runFullSearch}
+          returnKeyType={isWork ? 'done' : 'search'}
+          onSubmitEditing={isWork ? undefined : runFullSearch}
           autoFocus
         />
+        {!isWork && (
         <TouchableOpacity
           style={[
             styles.searchIconBtn,
@@ -518,7 +608,21 @@ function InlineAddMaterialForm({
             />
           )}
         </TouchableOpacity>
+        )}
       </View>
+
+      {isWork && (
+        <RNTextInput
+          style={styles.scopeInput}
+          value={scope}
+          onChangeText={setScope}
+          placeholder="Scope of works — what's included"
+          placeholderTextColor={themeColors.textMuted}
+          multiline
+          numberOfLines={4}
+          textAlignVertical="top"
+        />
+      )}
 
       {visibleResults.length > 0 && (
         <View style={styles.resultsList}>
@@ -575,6 +679,12 @@ function InlineAddMaterialForm({
       )}
 
       <View style={styles.fieldsRow}>
+        {isWork ? (
+          // No quantity, no unit — a scope line is one lump sum. The price
+          // field is relabelled so it can't be read as a unit rate.
+          <Text style={styles.lineTotalLabel}>Line total</Text>
+        ) : (
+        <>
         <View style={styles.qtyStepper}>
           <Pressable style={({ pressed }) => [styles.qtyBtn, pressed && styles.qtyBtnPressed]} onPress={decrementQty}>
             <MaterialCommunityIcons name="minus" size={14} color={themeColors.text} />
@@ -595,6 +705,8 @@ function InlineAddMaterialForm({
           <Text style={styles.unitChipText}>{unit}</Text>
           <MaterialCommunityIcons name="chevron-down" size={14} color={themeColors.textMuted} />
         </TouchableOpacity>
+        </>
+        )}
 
         <View style={styles.priceWrap}>
           <Text style={styles.priceDollar}>$</Text>
@@ -614,6 +726,7 @@ function InlineAddMaterialForm({
           <MaterialCommunityIcons name="close" size={16} color={themeColors.textMuted} />
           <Text style={styles.cancelText}>Cancel</Text>
         </TouchableOpacity>
+        {!isWork && (
         <TouchableOpacity
           style={[styles.saveToBookChip, saveToBook && styles.saveToBookChipActive]}
           onPress={() => setSaveToBook(v => !v)}
@@ -629,6 +742,7 @@ function InlineAddMaterialForm({
             Save to book
           </Text>
         </TouchableOpacity>
+        )}
         <TouchableOpacity style={styles.saveBtn} onPress={handleSave}>
           <MaterialCommunityIcons name="check" size={16} color={themeColors.onAccent} />
           <Text style={styles.saveText}>Save</Text>
@@ -819,6 +933,23 @@ const useStyles = makeStyles((t) => ({
     fontSize: 13,
     fontWeight: '600',
     color: t.colors.text,
+  },
+  scopeInput: {
+    minHeight: 88,
+    fontSize: 14,
+    lineHeight: 20,
+    color: t.colors.text,
+    backgroundColor: t.colors.bg,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: t.colors.border,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  lineTotalLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: t.colors.textMuted,
   },
   fieldsRow: {
     flexDirection: 'row',

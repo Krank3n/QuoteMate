@@ -50,6 +50,7 @@ import { AlertModal } from './AlertModal';
 import { useStore } from '../store/useStore';
 import { trackEvent } from '../services/analyticsService';
 import { isEmailAddress, isSelfSend } from '../utils/sendFlow';
+import { resolvePriceDetail, showsPerLineMoney } from '../../shared/document/priceDetail';
 
 /**
  * Honest indeterminate wait. The old version ran a four-step checklist on a
@@ -392,7 +393,7 @@ export function DocumentEmailPreviewModal({
     const warning = buildPresendWarning(
       reviewQuoteMaterials(doc.materials, doc.sections),
       doc.type === 'invoice' ? 'invoice' : 'quote',
-      { materialsShownToCustomer: doc.showMaterialCosts !== false },
+      { materialsShownToCustomer: showsPerLineMoney(resolvePriceDetail(doc, businessSettings)) },
     );
     if (warning) {
       setPresendWarning(warning);

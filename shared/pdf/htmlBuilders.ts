@@ -3,7 +3,7 @@
  * Used by both client (Expo Print) and server (Puppeteer) renderers
  */
 
-import { PdfMaterial, QuotePdfData, InvoicePdfData, BusinessPdfData, PdfTemplateId, ReportPdfData } from './types';
+import { PdfMaterial, LaborSection, QuotePdfData, InvoicePdfData, BusinessPdfData, PdfTemplateId, ReportPdfData } from './types';
 import { formatCurrency } from './formatCurrency';
 import { printMediaCSS, getTemplateCSS } from './templates';
 import { PASSTHROUGH_SURCHARGE_PCT } from './squareFees';
@@ -15,6 +15,8 @@ import {
   type LabourUnit,
 } from '../document/labourUnits';
 import { pathHasInk } from './signatureInk';
+import { isLumpSumSection, lineMarkupMultiplier, markupableLabourTotal } from '../document/lumpSum';
+import { resolvePriceDetail, showsLineItems, showsPerLineMoney } from '../document/priceDetail';
 
 const escapeHtml = (s: string) =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -27,8 +29,16 @@ const roundCents = (n: number) => Math.round(n * 100) / 100;
 // the customer sees in the table. Multiplying the pre-rounded subtotal by the
 // markup multiplier and rounding once produces a different value when each
 // line is rounded individually first.
+//
+// The multiplier is resolved PER LINE, because a work item's price is final —
+// see shared/document/lumpSum.ts. Applying it to the whole array would inflate
+// a scope line the tradie typed, and the subtotal would then disagree with the
+// rows above it.
 const sumRoundedLineTotals = (materials: PdfMaterial[], multiplier: number) =>
-  materials.reduce((sum, m) => sum + roundCents(m.totalPrice * multiplier), 0);
+  materials.reduce(
+    (sum, m) => sum + roundCents(m.totalPrice * lineMarkupMultiplier(m, multiplier)),
+    0,
+  );
 
 /**
  * Render the T&Cs section at the end of a quote/invoice PDF. Preserves
@@ -179,22 +189,46 @@ export function buildTermsHTML(terms: string | undefined): string {
 }
 
 /**
- * Generate materials table HTML, optionally grouped by work section
- * When markupPercent > 0, material prices are inflated by the markup percentage
+ * Generate the itemised materials table, grouped by work section whenever the
+ * document has sections. When markupPercent > 0, material prices are inflated
+ * by the markup percentage.
+ *
+ * Grouping is no longer gated on a business setting. Labour sections already
+ * rendered by default while material sections did not, so the same quote
+ * showed its work broken out in one half of the document and lumped together
+ * in the other. A tradie who went to the trouble of creating sections meant
+ * them; the setting only decided whether the PDF agreed.
+ *
+ * `sections` supplies the ORDER. The material table used to sort its groups
+ * alphabetically while the labour block used sortOrder, so "Demolition" and
+ * "Painting" could appear in one order at the top of the page and another
+ * further down. sortOrder is now the single source of truth for both, and for
+ * the in-app list.
  */
 export function generateMaterialsHTML(
-  materials: PdfMaterial[],
-  groupBySection: boolean,
+  allMaterials: PdfMaterial[],
   markupPercent: number = 0,
+  sections?: LaborSection[],
+  options?: { perLineMoney?: boolean },
 ): string {
+  // Same rule as the scope table: a row with no name is a half-typed line, and
+  // it used to reach the customer as an empty "1 each · $0.00".
+  const materials = allMaterials.filter((m) => !!m.name?.trim());
   if (materials.length === 0) {
-    return `<p style="color: #666666; font-style: italic; margin: 10px 0;">No materials required - Labor only</p>`;
+    return `<p style="color: #666666; font-style: italic; margin: 10px 0;">No materials required - Labour only</p>`;
   }
 
   const multiplier = markupPercent > 0 ? (1 + markupPercent / 100) : 1;
   const displaySubtotal = sumRoundedLineTotals(materials, multiplier);
+  // 'summary' presentation: the customer sees WHAT is being done, not what
+  // each part of it costs. Names stay, every per-line figure goes, and the
+  // section subtotals carry the money — so the visible numbers still add up
+  // to the Subtotal below.
+  const perLineMoney = options?.perLineMoney !== false;
+  const columns = perLineMoney ? 4 : 2;
 
-  const tableHeader = `
+  const tableHeader = perLineMoney
+    ? `
     <thead>
       <tr>
         <th>Item</th>
@@ -202,17 +236,38 @@ export function generateMaterialsHTML(
         <th>Unit Price</th>
         <th>Total</th>
       </tr>
+    </thead>`
+    : `
+    <thead>
+      <tr>
+        <th colspan="2">Item</th>
+      </tr>
     </thead>`;
 
-  const materialRow = (m: PdfMaterial) => `
+  // Mixed document: a work item inside the itemised table. It has no unit
+  // price and its quantity is a bookkeeping 1, so both cells stay empty
+  // rather than printing "1 each × $22,750.00" at a customer.
+  const materialRow = (m: PdfMaterial) => {
+    const isWork = m.kind === 'work';
+    const scope = isWork && m.scope?.trim()
+      ? `<div class="scope-body">${formatMultiline(m.scope.trim())}</div>`
+      : '';
+    if (!perLineMoney) {
+      return `
     <tr>
-      <td>${m.name}</td>
-      <td>${m.quantity} ${m.unit}</td>
-      <td>${formatCurrency(m.price * multiplier)}</td>
-      <td>${formatCurrency(m.totalPrice * multiplier)}</td>
+      <td colspan="2">${escapeHtml(m.name)}${scope}</td>
     </tr>`;
+    }
+    return `
+    <tr>
+      <td>${escapeHtml(m.name)}${scope}</td>
+      <td>${isWork ? '' : `${m.quantity} ${escapeHtml(m.unit)}`}</td>
+      <td>${isWork ? '' : formatCurrency(m.price * multiplier)}</td>
+      <td>${formatCurrency(m.totalPrice * lineMarkupMultiplier(m, multiplier))}</td>
+    </tr>`;
+  };
 
-  const hasSections = groupBySection && materials.some(m => m.section);
+  const hasSections = materials.some(m => m.section);
 
   if (!hasSections) {
     return `
@@ -221,7 +276,7 @@ export function generateMaterialsHTML(
         <tbody>
           ${materials.map(materialRow).join('')}
           <tr class="total-row">
-            <td colspan="3">Materials Subtotal</td>
+            <td${columns > 2 ? ` colspan="${columns - 1}"` : ''}>Materials Subtotal</td>
             <td>${formatCurrency(displaySubtotal)}</td>
           </tr>
         </tbody>
@@ -236,36 +291,54 @@ export function generateMaterialsHTML(
     grouped.get(key)!.push(m);
   });
 
-  // Sort: named sections first (alphabetically), then ungrouped
+  // Named sections in sortOrder (falling back to the array's own order for
+  // legacy documents), then any material that belongs to no section.
+  const orderByName = new Map<string, number>();
+  (sections || []).forEach((sec, i) => {
+    if (!orderByName.has(sec.name)) orderByName.set(sec.name, i);
+  });
   const sortedKeys = Array.from(grouped.keys()).sort((a, b) => {
     if (a === '' && b !== '') return 1;
     if (a !== '' && b === '') return -1;
+    const oa = orderByName.get(a) ?? Number.MAX_SAFE_INTEGER;
+    const ob = orderByName.get(b) ?? Number.MAX_SAFE_INTEGER;
+    if (oa !== ob) return oa - ob;
     return a.localeCompare(b);
+  });
+
+  const descriptionByName = new Map<string, string>();
+  (sections || []).forEach((sec) => {
+    if (sec.description?.trim() && !descriptionByName.has(sec.name)) {
+      descriptionByName.set(sec.name, sec.description.trim());
+    }
   });
 
   let html = '';
   sortedKeys.forEach(key => {
     const sectionMaterials = grouped.get(key)!;
     const sectionTotal = sumRoundedLineTotals(sectionMaterials, multiplier);
-    const sectionName = key || 'Other';
+    const sectionName = escapeHtml(key);
+    const description = descriptionByName.get(key);
+    // No invented "Other" heading: a material that belongs to no section is
+    // shown as itself, exactly as the in-app list shows it, rather than under
+    // a group name the tradie never created.
+    const labelRow = key
+      ? `
+          <tr>
+            <th colspan="${columns}" class="section-label">${sectionName}${
+              description ? `<div class="section-scope">${formatMultiline(description)}</div>` : ''
+            }</th>
+          </tr>`
+      : '';
 
     html += `
       <table>
-        <thead>
-          <tr>
-            <th colspan="4" class="section-label">${sectionName}</th>
-          </tr>
-          <tr>
-            <th>Item</th>
-            <th>Quantity</th>
-            <th>Unit Price</th>
-            <th>Total</th>
-          </tr>
+        <thead>${labelRow}${tableHeader.replace('<thead>', '').replace('</thead>', '')}
         </thead>
         <tbody>
           ${sectionMaterials.map(materialRow).join('')}
           <tr class="total-row">
-            <td colspan="3">${sectionName} Subtotal</td>
+            <td${columns > 2 ? ` colspan="${columns - 1}"` : ''}>${key ? `${sectionName} Subtotal` : 'Subtotal'}</td>
             <td>${formatCurrency(sectionTotal)}</td>
           </tr>
         </tbody>
@@ -276,13 +349,107 @@ export function generateMaterialsHTML(
     <table>
       <tbody>
         <tr class="total-row">
-          <td colspan="3"><strong>All Materials Subtotal</strong></td>
+          <td${columns > 2 ? ` colspan="${columns - 1}"` : ''}><strong>All Materials Subtotal</strong></td>
           <td><strong>${formatCurrency(displaySubtotal)}</strong></td>
         </tr>
       </tbody>
     </table>`;
 
   return html;
+}
+
+/**
+ * Every priced line is a lump-sum scope line → render the Project Scope table.
+ *
+ * The mode is DERIVED, never toggled. A tradie should not have to find a
+ * setting to make their quote look like their quote, and `every()` is the
+ * safety property: a document carrying so much as one real material can not
+ * enter the scope branch, so nothing that renders as an itemised table today
+ * can change shape. Add a material to a pure-scope quote and the PDF flips
+ * back to four columns — deliberately, because there is now a quantity and a
+ * unit price worth showing.
+ */
+export function isScopeQuote(materials: PdfMaterial[]): boolean {
+  // Nameless rows don't count either way. The materials screen's rapid-entry
+  // chain leaves a blank $0 draft behind, and one of those was enough to drop
+  // a pure scope quote back into the four-column materials table — the exact
+  // layout the tradie was trying to get away from. The entry screen prunes
+  // them on the way out; this is the second line of defence, because the
+  // question here is "what is this document", and an empty row says nothing.
+  const real = materials.filter((m) => !!m.name?.trim());
+  return real.length > 0 && real.every((m) => m.kind === 'work');
+}
+
+/** One row of the Project Scope table. `label` is already HTML-safe. */
+interface ScopeContinuationRow {
+  label: string;
+  amount: number;
+}
+
+/**
+ * The Project Scope table: a numbered list of lump-sum scope lines, each a
+ * bold title over a scope paragraph, against one price. This is how a painter,
+ * plasterer or cleaner has always quoted — the itemised materials table is the
+ * wrong shape for a job whose cost is labour and method, not products.
+ *
+ * `continuationRows` are appended as further numbered rows (labour, when the
+ * document also carries hours) so the customer reads one continuous list
+ * rather than a scope table followed by an unrelated labour table.
+ *
+ * No subtotal row: the summary block immediately below carries Subtotal, GST
+ * and TOTAL, and the two would otherwise print the same number twice in a row.
+ */
+export function generateScopeHTML(
+  allMaterials: PdfMaterial[],
+  markupPercent: number = 0,
+  continuationRows: ScopeContinuationRow[] = [],
+): string {
+  // Nameless rows never reach the customer. The entry screen prunes the blank
+  // draft its rapid-entry chain leaves behind, but quotes saved before that
+  // fix still carry one, and an empty numbered row on a customer's quote looks
+  // like the tradie forgot to finish it.
+  const materials = allMaterials.filter((m) => !!m.name?.trim());
+  const multiplier = markupPercent > 0 ? (1 + markupPercent / 100) : 1;
+
+  const scopeRow = (index: number, title: string, body: string, amount: number) => `
+    <tr>
+      <td class="scope-num">${index}</td>
+      <td class="scope-title"><strong>${title}</strong>${body}</td>
+      <td class="scope-total">${formatCurrency(amount)}</td>
+    </tr>`;
+
+  const rows = materials.map((m, i) => {
+    // An empty scope renders the title alone — no stray <br>, no empty <div>.
+    const scope = m.scope?.trim();
+    const body = scope ? `<div class="scope-body">${formatMultiline(scope)}</div>` : '';
+    // Resolved per line rather than assuming every row here is a work item.
+    // It is today (isScopeQuote demands it), but the price a tradie typed must
+    // survive this function on its own terms, not on a caller's invariant.
+    return scopeRow(
+      i + 1,
+      escapeHtml(m.name),
+      body,
+      m.totalPrice * lineMarkupMultiplier(m, multiplier),
+    );
+  });
+
+  const continued = continuationRows.map((r, i) =>
+    scopeRow(materials.length + i + 1, r.label, '', r.amount),
+  );
+
+  return `
+      <table class="scope-table">
+        <thead>
+          <tr>
+            <th class="scope-num">#</th>
+            <th>Project Scope</th>
+            <th class="scope-total">Line Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.join('')}${continued.join('')}
+        </tbody>
+      </table>`;
 }
 
 /**
@@ -417,11 +584,38 @@ export function generatePaymentMethodsHTML(
 }
 
 /**
- * Build labor section HTML with support for per-section labor breakdown
- * and an optional "General Labour" row for any extra hours added on top of
- * the section sums (laborExtraHours).
+ * Markup is broken out as its own line ONLY when the tradie asked for it AND
+ * the document is itemised. Once per-line money is hidden there is nothing for
+ * a Markup row to reconcile against, so it rolls into the visible figures
+ * instead — the alternative is a page whose numbers don't add up.
  */
-function buildLaborHTML(rawData: QuotePdfData): string {
+function rollMarkupFor(data: QuotePdfData): boolean {
+  return data.showMarkup !== true || resolvePriceDetail(data) !== 'itemised';
+}
+
+/**
+ * The labour total as the customer reads it: the hourly slice carrying any
+ * rolled-in labour markup, plus the lump-sum sections at exactly the figures
+ * the tradie typed. Marking a lump sum up would print a number the tradie
+ * never chose — see shared/document/lumpSum.ts.
+ */
+function displayLabourTotal(data: QuotePdfData, laborMul: number): number {
+  const markupable = markupableLabourTotal(data.laborTotal, data.sections);
+  return (data.laborTotal - markupable) + markupable * laborMul;
+}
+
+/**
+ * The labour lines exactly as the customer reads them: one row per section
+ * (or a single "Labour" row when there are none), plus the extra-hours row.
+ *
+ * Shared by the standalone Labour block and by the Project Scope table, which
+ * appends the same rows as numbered continuations — one derivation, so the two
+ * presentations can never drift apart on hours, rates or rolled-in markup.
+ *
+ * `label` comes back HTML-safe (section names are escaped here) because the
+ * rate detail has to be interpolated into the same string.
+ */
+function labourRowsForDisplay(rawData: QuotePdfData): ScopeContinuationRow[] {
   // Canonicalise first: every quantity below is HOURS and every rate is
   // $/hour, whatever shape the record arrived in. Days are then applied once,
   // at render, from the tradie's display preference — so a day rate can never
@@ -440,57 +634,91 @@ function buildLaborHTML(rawData: QuotePdfData): string {
   const extra = data.laborExtraHours || 0;
   // Labor markup is rolled into displayed labour prices unless the user has
   // opted into showing markup as a separate line on the document.
-  const rollLaborMarkup = data.showMarkup !== true;
+  // "(30 hours @ $85.00/hr)" is a unit price. Once the tradie has chosen not
+  // to show per-line money, it goes with the rest of it.
+  const perLineMoney = showsPerLineMoney(resolvePriceDetail(rawData));
+  const showHours = data.showLaborHours && perLineMoney;
+  const rollLaborMarkup = rollMarkupFor(data);
   const laborMul = rollLaborMarkup ? 1 + ((data.laborMarkup || 0) / 100) : 1;
-  // Use the section's rate (or top-level fallback) for the extra row's math.
-  const extraRate = (hasSections && data.sections && data.sections[0]?.laborRate) || data.laborRate || 0;
-  // Positive extra renders as "General Labour"; negative as "Labour Adjustment"
-  // so the customer-facing label still reads sensibly.
-  const extraLabel = extra >= 0 ? 'General Labour' : 'Labour Adjustment';
-  const extraDetails = data.showLaborHours
-    ? ` (${extra > 0 ? '+' : ''}${qty(extra)} ${unitLabel} @ ${formatCurrency(perUnitRate(extraRate) * laborMul)}${rateLabel})`
-    : '';
-  const displayLaborTotal = data.laborTotal * laborMul;
+  const displayLaborTotal = displayLabourTotal(data, laborMul);
 
-  // Collapsed view: a single "Labour" row with the displayed total.
   if (hasSections && !showBreakdown) {
-    return `
-      <div class="section-wrapper">
-        <h3>Labour</h3>
-        <table>
-          <tbody>
-            <tr>
-              <td>Labour</td>
-              <td style="text-align: right;">${formatCurrency(displayLaborTotal)}</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>`;
+    return [{ label: 'Labour', amount: displayLaborTotal }];
   }
+
+  if (!hasSections) {
+    return [{
+      label: showHours && data.laborHours && data.laborRate
+        ? `Labour (${qty(data.laborHours)} ${unitLabel} @ ${formatCurrency(perUnitRate(data.laborRate) * laborMul)}${rateLabel})`
+        : 'Labour',
+      amount: displayLaborTotal,
+    }];
+  }
+
+  const rows: ScopeContinuationRow[] = data.sections!.map((s) => {
+    const name = escapeHtml(s.name);
+    // A lump-sum section has no hours and no rate to show, and its price is
+    // never marked up — see shared/document/lumpSum.ts.
+    if (isLumpSumSection(s)) {
+      return { label: name, amount: s.laborTotal };
+    }
+    const sTotalHours =
+      typeof s.laborHoursTotal === 'number'
+        ? s.laborHoursTotal
+        : (s.laborHours || 0) * (s.multiplier || 1);
+    return {
+      label: showHours
+        ? `${name} (${qty(sTotalHours)} ${unitLabel} @ ${formatCurrency(perUnitRate(s.laborRate) * laborMul)}${rateLabel})`
+        : name,
+      amount: s.laborTotal * laborMul,
+    };
+  });
+
+  if (extra !== 0) {
+    // Use the section's rate (or top-level fallback) for the extra row's math.
+    const extraRate = (data.sections && data.sections[0]?.laborRate) || data.laborRate || 0;
+    // Positive extra renders as "General Labour"; negative as "Labour
+    // Adjustment" so the customer-facing label still reads sensibly.
+    const extraLabel = extra >= 0 ? 'General Labour' : 'Labour Adjustment';
+    const extraDetails = showHours
+      ? ` (${extra > 0 ? '+' : ''}${qty(extra)} ${unitLabel} @ ${formatCurrency(perUnitRate(extraRate) * laborMul)}${rateLabel})`
+      : '';
+    rows.push({ label: `${extraLabel}${extraDetails}`, amount: extra * extraRate * laborMul });
+  }
+
+  return rows;
+}
+
+/**
+ * Build labor section HTML with support for per-section labor breakdown
+ * and an optional "General Labour" row for any extra hours added on top of
+ * the section sums (laborExtraHours).
+ */
+function buildLaborHTML(rawData: QuotePdfData): string {
+  // A pure-scope document with no labour has nothing to say here — a "Labour
+  // $0.00" block under a Project Scope table reads as a mistake. When there IS
+  // labour it rides in the scope table as continuation rows instead, so this
+  // builder isn't called at all (see buildQuotePdfHtml).
+  if (isScopeQuote(rawData.materials) && !rawData.laborTotal) return '';
+
+  const data = normaliseLabourToHours(rawData) as QuotePdfData;
+  const hasSections = !!(data.sections && data.sections.length > 0);
+  const showBreakdown = data.showLaborBreakdown !== false;
+  const rollLaborMarkup = rollMarkupFor(data);
+  const laborMul = rollLaborMarkup ? 1 + ((data.laborMarkup || 0) / 100) : 1;
+  const displayLaborTotal = displayLabourTotal(data, laborMul);
+  const rows = labourRowsForDisplay(rawData);
 
   return `
       <div class="section-wrapper">
         <h3>Labour</h3>
         <table>
           <tbody>
-            ${hasSections ? data.sections!.map(s => {
-              const sTotalHours =
-                typeof s.laborHoursTotal === 'number'
-                  ? s.laborHoursTotal
-                  : (s.laborHours || 0) * (s.multiplier || 1);
-              return `<tr>
-                <td>${data.showLaborHours ? `${s.name} (${qty(sTotalHours)} ${unitLabel} @ ${formatCurrency(perUnitRate(s.laborRate) * laborMul)}${rateLabel})` : s.name}</td>
-                <td style="text-align: right;">${formatCurrency(s.laborTotal * laborMul)}</td>
-              </tr>`;
-            }).join('') : `<tr>
-              <td>${data.showLaborHours && data.laborHours && data.laborRate ? `Labour (${qty(data.laborHours)} ${unitLabel} @ ${formatCurrency(perUnitRate(data.laborRate) * laborMul)}${rateLabel})` : 'Labour'}</td>
-              <td style="text-align: right;">${formatCurrency(displayLaborTotal)}</td>
-            </tr>`}
-            ${hasSections && extra !== 0 ? `<tr>
-              <td>${extraLabel}${extraDetails}</td>
-              <td style="text-align: right;">${formatCurrency(extra * extraRate * laborMul)}</td>
-            </tr>` : ''}
-            ${hasSections ? `<tr class="total-row">
+            ${rows.map(r => `<tr>
+              <td>${r.label}</td>
+              <td style="text-align: right;">${formatCurrency(r.amount)}</td>
+            </tr>`).join('')}
+            ${hasSections && showBreakdown ? `<tr class="total-row">
               <td>Labour Total</td>
               <td style="text-align: right;">${formatCurrency(displayLaborTotal)}</td>
             </tr>` : ''}
@@ -506,12 +734,12 @@ function buildSummaryHTML(data: QuotePdfData, paidAmount?: number, amountDue?: n
   // By default markup is rolled into the displayed line totals (combined).
   // When showMarkup is explicitly true, the markup is broken out as its own
   // line and the materials/labour rows show their raw (pre-markup) totals.
-  const rollMarkup = data.showMarkup !== true;
+  const rollMarkup = rollMarkupFor(data);
   const materialMul = rollMarkup ? 1 + ((data.markup || 0) / 100) : 1;
   const laborMul = rollMarkup ? 1 + ((data.laborMarkup || 0) / 100) : 1;
   // Match the eyeball sum of rounded line totals shown in the materials table.
   const displayMaterialsSubtotal = sumRoundedLineTotals(data.materials, materialMul);
-  const displayLaborTotal = data.laborTotal * laborMul;
+  const displayLaborTotal = displayLabourTotal(data, laborMul);
   const displaySubtotal = displayMaterialsSubtotal + displayLaborTotal;
   const gstMode = resolveGstMode(data);
   // Under exclusive mode the GST line is *added* to reach the total, so it
@@ -522,24 +750,28 @@ function buildSummaryHTML(data: QuotePdfData, paidAmount?: number, amountDue?: n
   const subtotalLabel = gstMode === 'exclusive' ? 'Subtotal (ex GST)' : 'Subtotal';
   const gstLabel = gstMode === 'inclusive' ? 'Includes GST' : 'GST (10%)';
 
-  // Per-section visibility. When materials/labour costs are hidden, the
-  // corresponding subtotal row in the summary is hidden too. When BOTH are
-  // hidden, the Subtotal row is also dropped so the customer sees only the
-  // grand TOTAL (with GST disclosure). Subtotal/GST/Total still reconcile
-  // because displaySubtotal is computed regardless.
-  const showMaterials = data.showMaterialCosts !== false;
-  const showLabor = data.showLaborCosts !== false;
-  const showSubtotalLine = showMaterials || showLabor;
+  // The Materials/Labour split is 'itemised' only. In 'summary' the section
+  // totals in the table already carry it, and in scope mode every line IS a
+  // customer-facing total — either way, splitting here would re-split exactly
+  // what the tradie chose not to itemise. One Subtotal row carries it instead.
+  const scopeMode = isScopeQuote(data.materials);
+  const detail = resolvePriceDetail(data);
+  const showSplit = showsPerLineMoney(detail) && !scopeMode;
+  // 'total' shows the grand total alone — no Subtotal, no Travel, nothing to
+  // reconstruct the breakdown from. GST still appears; it is a legal
+  // disclosure, not a preference. Subtotal/GST/Total reconcile in every mode
+  // because displaySubtotal is computed regardless of what is rendered.
+  const showSubtotalLine = showsLineItems(detail);
 
   return `
       <div class="summary">
-        ${showMaterials ? `
+        ${showSplit ? `
         <div class="summary-row">
           <span>Materials Subtotal</span>
           <span>${formatCurrency(displayMaterialsSubtotal)}</span>
         </div>
         ` : ''}
-        ${showLabor ? `
+        ${showSplit ? `
         <div class="summary-row">
           <span>Labour</span>
           <span>${formatCurrency(displayLaborTotal)}</span>
@@ -551,13 +783,13 @@ function buildSummaryHTML(data: QuotePdfData, paidAmount?: number, amountDue?: n
           <span>${formatCurrency(displaySubtotal)}</span>
         </div>
         ` : ''}
-        ${!rollMarkup && data.markupAmount > 0 ? `
+        ${showsPerLineMoney(detail) && !rollMarkup && data.markupAmount > 0 ? `
         <div class="summary-row">
           <span>Markup</span>
           <span>${formatCurrency(data.markupAmount)}</span>
         </div>
         ` : ''}
-        ${data.travelAdjustment && data.travelAdjustment > 0 ? `
+        ${showSubtotalLine && data.travelAdjustment && data.travelAdjustment > 0 ? `
         <div class="summary-row">
           <span>Travel Adjustment (${data.travelAdjustment}%)</span>
           <span>${formatCurrency(data.subtotal * (data.travelAdjustment / 100))}</span>
@@ -600,6 +832,46 @@ function buildSummaryHTML(data: QuotePdfData, paidAmount?: number, amountDue?: n
 }
 
 /**
+ * The payment schedule: what is due before work starts, and what is due on
+ * completion. Rendered only when the tradie has actually set a deposit.
+ *
+ * The deposit fields used to reach only the email body and the Square link, so
+ * a customer who printed or forwarded the PDF — the artifact they actually
+ * keep — saw no mention of the deposit at all, then got asked for one.
+ */
+function buildPaymentScheduleHTML(quote: QuotePdfData): string {
+  if (quote.requireDeposit !== true) return '';
+  const total = Number(quote.total) || 0;
+  const pct = Number(quote.depositPercentage) || 0;
+  // DERIVE from the percentage, don't trust the stored amount. `depositAmount`
+  // is only written when the tradie touches the deposit control, so it goes
+  // stale the moment the quote total changes — and the email recomputes it
+  // live, which is how the same send could show two different deposits. A
+  // percentage with no stored amount would otherwise print no schedule at all
+  // while the email showed one.
+  const amount = pct > 0
+    ? Math.round(total * (pct / 100) * 100) / 100
+    : Number(quote.depositAmount) || 0;
+  if (amount <= 0) return '';
+  // Never print a negative balance: a deposit larger than the total is a data
+  // problem, not something to render as money owed back.
+  const balance = Math.max(0, total - amount);
+  const depositLabel = pct > 0 ? `Deposit (${pct}%)` : 'Deposit';
+  return `
+      <div class="info-section payment-schedule" style="page-break-inside: avoid;">
+        <h3>Payment Schedule</h3>
+        <div class="summary-row">
+          <span>${depositLabel} &mdash; before commencement of any work</span>
+          <span>${formatCurrency(amount)}</span>
+        </div>
+        <div class="summary-row">
+          <span>Balance &mdash; on completion</span>
+          <span>${formatCurrency(balance)}</span>
+        </div>
+      </div>`;
+}
+
+/**
  * Build the full quote PDF HTML document
  */
 export function buildQuotePdfHtml(
@@ -608,10 +880,26 @@ export function buildQuotePdfHtml(
   options?: { watermark?: string }
 ): string {
   const templateId: PdfTemplateId = business.pdfTemplate || 'professional';
-  const rollMarkup = quote.showMarkup !== true && quote.markup > 0;
-  const showMaterials = quote.showMaterialCosts !== false;
-  const showLabor = quote.showLaborCosts !== false;
+  // One resolver, one answer — see shared/document/priceDetail.ts.
+  const detail = resolvePriceDetail(quote);
+  const perLineMoney = showsPerLineMoney(detail);
+  const rollMarkup = rollMarkupFor(quote) && quote.markup > 0;
+  // 'total' hides the line items entirely; 'itemised' and 'summary' both show
+  // them, differing only in how much money sits beside each one.
+  const showLineItems = showsLineItems(detail);
   const watermark = options?.watermark;
+  // Derived, not toggled — see isScopeQuote.
+  const scopeMode = isScopeQuote(quote.materials);
+  // Labour rides in the scope table as continuation rows, but only when that
+  // table is actually rendered; with material costs hidden it isn't, so labour
+  // falls back to its own block.
+  // A scope line's Line Total IS its section total, so it survives 'summary'
+  // (which hides per-LINE money, not section money) — the same rule that keeps
+  // Σ section totals === Subtotal on an itemised document.
+  const labourInScopeTable = scopeMode && showLineItems;
+  const scopeLabourRows = labourInScopeTable && quote.laborTotal
+    ? labourRowsForDisplay(quote)
+    : [];
 
   return `
     <!DOCTYPE html>
@@ -651,18 +939,22 @@ export function buildQuotePdfHtml(
         <p>${formatMultiline(quote.job.description)}</p>
       </div>
 
-      ${showMaterials ? `
+      ${showLineItems ? `
       <div class="section-wrapper">
-        <h3>Materials</h3>
-        ${generateMaterialsHTML(quote.materials, quote.groupMaterialsBySection === true, rollMarkup ? quote.markup : 0)}
+        ${scopeMode ? '' : '<h3>Materials</h3>'}
+        ${scopeMode
+          ? generateScopeHTML(quote.materials, rollMarkup ? quote.markup : 0, scopeLabourRows)
+          : generateMaterialsHTML(quote.materials, rollMarkup ? quote.markup : 0, quote.sections, { perLineMoney })}
       </div>
       ` : ''}
 
-      ${showLabor ? buildLaborHTML(quote) : ''}
+      ${showLineItems && !labourInScopeTable ? buildLaborHTML(quote) : ''}
 
       ${buildSummaryHTML(quote)}
 
-      ${quote.notes ? `<div class="info-section"><h3>Notes</h3><p>${quote.notes}</p></div>` : ''}
+      ${buildPaymentScheduleHTML(quote)}
+
+      ${quote.notes ? `<div class="info-section"><h3>Notes</h3><p>${escapeHtml(quote.notes)}</p></div>` : ''}
 
       ${generatePaymentMethodsHTML(quote.paymentMethods, { plan: quote.plan, squarePaymentLinkUrl: quote.squarePaymentLinkUrl, surchargePaymentFees: quote.surchargePaymentFees })}
 
@@ -673,8 +965,12 @@ export function buildQuotePdfHtml(
       ${buildTermsHTML(quote.terms)}
       </div>
 
+      <!-- The tradie's name, not ours. A quote is their document going to
+           their customer; our branding on the footer reads to that customer
+           like the job was subcontracted to software. The service report has
+           always done it this way — quotes and invoices now match. -->
       <div class="pdf-footer">
-        <p>QuoteMate</p>
+        <p>${escapeHtml(business.businessName)}</p>
       </div>
     </body>
     </html>
@@ -873,10 +1169,24 @@ export function buildInvoicePdfHtml(
   options?: { watermark?: string }
 ): string {
   const templateId: PdfTemplateId = business.pdfTemplate || 'professional';
-  const rollMarkup = invoice.showMarkup !== true && invoice.markup > 0;
-  const showMaterials = invoice.showMaterialCosts !== false;
-  const showLabor = invoice.showLaborCosts !== false;
+  // One resolver, one answer — see shared/document/priceDetail.ts.
+  const detail = resolvePriceDetail(invoice);
+  const perLineMoney = showsPerLineMoney(detail);
+  const rollMarkup = rollMarkupFor(invoice) && invoice.markup > 0;
+  // 'total' hides the line items entirely; 'itemised' and 'summary' both show
+  // them, differing only in how much money sits beside each one.
+  const showLineItems = showsLineItems(detail);
   const watermark = options?.watermark;
+  // Symmetrical with the quote builder on purpose: an accepted scope quote
+  // must not change shape the moment it becomes an invoice.
+  const scopeMode = isScopeQuote(invoice.materials);
+  // A scope line's Line Total IS its section total, so it survives 'summary'
+  // (which hides per-LINE money, not section money) — the same rule that keeps
+  // Σ section totals === Subtotal on an itemised document.
+  const labourInScopeTable = scopeMode && showLineItems;
+  const scopeLabourRows = labourInScopeTable && invoice.laborTotal
+    ? labourRowsForDisplay(invoice)
+    : [];
 
   const paidAmount = invoice.paidAmount || 0;
   const amountDue = invoice.total - paidAmount;
@@ -920,18 +1230,20 @@ export function buildInvoicePdfHtml(
         <p>${formatMultiline(invoice.job.description)}</p>
       </div>
 
-      ${showMaterials ? `
+      ${showLineItems ? `
       <div class="section-wrapper">
-        <h3>Materials</h3>
-        ${generateMaterialsHTML(invoice.materials, invoice.groupMaterialsBySection === true, rollMarkup ? invoice.markup : 0)}
+        ${scopeMode ? '' : '<h3>Materials</h3>'}
+        ${scopeMode
+          ? generateScopeHTML(invoice.materials, rollMarkup ? invoice.markup : 0, scopeLabourRows)
+          : generateMaterialsHTML(invoice.materials, rollMarkup ? invoice.markup : 0, invoice.sections, { perLineMoney })}
       </div>
       ` : ''}
 
-      ${showLabor ? buildLaborHTML(invoice) : ''}
+      ${showLineItems && !labourInScopeTable ? buildLaborHTML(invoice) : ''}
 
       ${buildSummaryHTML(invoice, paidAmount, amountDue, invoice.depositCredit)}
 
-      ${invoice.notes ? `<div class="info-section"><h3>Notes</h3><p>${invoice.notes}</p></div>` : ''}
+      ${invoice.notes ? `<div class="info-section"><h3>Notes</h3><p>${escapeHtml(invoice.notes)}</p></div>` : ''}
 
       <div class="payment-box">
         <h3>Payment Information</h3>
@@ -945,8 +1257,12 @@ export function buildInvoicePdfHtml(
       ${buildTermsHTML(invoice.terms)}
       </div>
 
+      <!-- The tradie's name, not ours. A quote is their document going to
+           their customer; our branding on the footer reads to that customer
+           like the job was subcontracted to software. The service report has
+           always done it this way — quotes and invoices now match. -->
       <div class="pdf-footer">
-        <p>QuoteMate</p>
+        <p>${escapeHtml(business.businessName)}</p>
       </div>
     </body>
     </html>

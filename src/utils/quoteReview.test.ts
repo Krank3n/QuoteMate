@@ -99,6 +99,17 @@ describe('reviewQuoteMaterials', () => {
     expect(review.counts.total).toBe(0);
   });
 
+  it('does not flag a $0 work item as unpriced', () => {
+    // A lump-sum scope line at $0 ("General preparation — included") is the
+    // tradie's own number, not a pricing miss. Flagging it would let
+    // propose_reprice zero and re-fetch the line.
+    const review = reviewQuoteMaterials([
+      mat({ id: 'w', name: 'General Preparation', kind: 'work', price: 0, totalPrice: 0 }),
+    ]);
+    expect(review.counts.total).toBe(0);
+    expect(isFlaggedRow(mat({ kind: 'work', price: 0, totalPrice: 0 }))).toBe(false);
+  });
+
   it('summarises a mixed quote with counts and a couple of names', () => {
     const review = reviewQuoteMaterials([
       mat({ id: 'a', name: 'Merbau Decking Oil', price: 0, totalPrice: 0, priceConfidence: 'low' }),

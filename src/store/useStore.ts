@@ -1571,6 +1571,15 @@ export const useStore = create<AppState>((set, get) => ({
       paymentTerms: 'net_14',
       sourceQuoteId: quote.id,
       notes: quote.notes,
+      // Carry the presentation choice across. An accepted quote must not
+      // change shape the moment it becomes an invoice — the customer already
+      // agreed to what they were shown. (The unified convertDocumentToInvoice
+      // path above is an in-place flip, so it preserves this for free; this
+      // legacy fallback mints a new record and has to copy it.) The legacy
+      // pair rides along for one release, same as everywhere else.
+      priceDetail: quote.priceDetail,
+      showMaterialCosts: quote.showMaterialCosts,
+      showLaborCosts: quote.showLaborCosts,
       ...(depositCredit > 0
         ? { depositCredit, depositCreditFromQuoteId: quote.id }
         : {}),

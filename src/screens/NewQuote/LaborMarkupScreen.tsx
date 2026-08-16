@@ -1,10 +1,10 @@
 /**
- * Labor & Markup Screen
+ * Labour & Markup Screen
  * Set labor hours, rates, and markup percentage
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { View, StyleSheet, ScrollView, Platform, TouchableOpacity, Pressable, TextInput as RNTextInput, Switch } from 'react-native';
+import { View, StyleSheet, ScrollView, Platform, TouchableOpacity, Pressable, TextInput as RNTextInput } from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import {
   Text,
@@ -34,6 +34,7 @@ import { QuoteSentBanner } from '../../components/QuoteSentBanner';
 import { FixedBottomButton } from '../../components/FixedBottomButton';
 import { WebContainer } from '../../components/WebContainer';
 import { AlertModal } from '../../components/AlertModal';
+import { labourIsInScopeLines } from './scopeQuoteGates';
 
 export function LaborMarkupScreen() {
   const styles = useStyles();
@@ -70,7 +71,6 @@ export function LaborMarkupScreen() {
   const [travelAdjustment, setTravelAdjustment] = useState('0');
   const [travelDismissed, setTravelDismissed] = useState(false);
   const [lastTravelValue, setLastTravelValue] = useState('0');
-  const [showLaborBreakdown, setShowLaborBreakdown] = useState(true);
   const [warningDialogVisible, setWarningDialogVisible] = useState(false);
   const [warningMessage, setWarningMessage] = useState('');
 
@@ -109,7 +109,6 @@ export function LaborMarkupScreen() {
     setMarkup(currentQuote.markup.toString());
     const lm = currentQuote.laborMarkup ?? currentQuote.markup ?? 0;
     setLaborMarkup(lm.toString());
-    setShowLaborBreakdown(currentQuote.showLaborBreakdown !== false);
     const ta = (currentQuote.travelAdjustment || 0).toString();
     setTravelAdjustment(ta);
     setLastTravelValue(ta);
@@ -213,7 +212,10 @@ export function LaborMarkupScreen() {
         ...patch,
         markup: markupPercent,
         laborMarkup: laborMarkupPercent,
-        showLaborBreakdown,
+        // Carried through untouched: "What the customer sees" on the preview
+        // screen supersedes this, but an existing document keeps rendering the
+        // way its author left it.
+        showLaborBreakdown: currentQuote.showLaborBreakdown,
         travelAdjustment: travelPct,
         laborTotal: calculation.laborTotal,
         materialsSubtotal: calculation.materialsSubtotal,
@@ -227,7 +229,7 @@ export function LaborMarkupScreen() {
       markupPercent,
       laborMarkupPercent,
     };
-  }, [currentQuote, laborHours, laborRate, laborUnit, sectionTotalHoursMap, markup, laborMarkup, showLaborBreakdown, travelAdjustment, travelDismissed]);
+  }, [currentQuote, laborHours, laborRate, laborUnit, sectionTotalHoursMap, markup, laborMarkup, travelAdjustment, travelDismissed]);
 
   // Save changes when navigating back
   useEffect(() => {
@@ -291,13 +293,16 @@ export function LaborMarkupScreen() {
     // from sections), not hours × rate at top level. Validate against the real
     // total instead so a sectioned quote with non-zero per-section labour
     // doesn't trip the "Zero Labor Cost" warning.
-    const zeroLabour = hasSectionsMode
+    // A quote built from priced scope lines has its labour inside those line
+    // totals, so zero hours is the correct answer, not an oversight. Warning
+    // there tells a painter their own quote is broken.
+    const zeroLabour = !labourIsInScopeLines(currentQuote?.materials) && (hasSectionsMode
       ? calculation.laborTotal === 0
-      : (totalHoursInput === 0 || rate === 0);
+      : (totalHoursInput === 0 || rate === 0));
     if (zeroLabour) {
       const docType = mode === 'invoice' ? 'invoice' : 'quote';
       setWarningMessage(
-        `Labor hours or rate is set to $0. This means no labor cost will be included in the ${docType}.\n\nDo you want to continue?`
+        `Labour hours or rate is set to $0. This means no labour cost will be included in the ${docType}.\n\nDo you want to continue?`
       );
       setWarningDialogVisible(true);
       return;
@@ -326,7 +331,7 @@ export function LaborMarkupScreen() {
         visible={warningDialogVisible}
         onDismiss={() => setWarningDialogVisible(false)}
         type="warning"
-        title="Zero Labor Cost"
+        title="Zero Labour Cost"
         message={warningMessage}
         primaryButtonText="Continue"
         primaryButtonAction={proceedToPreview}
@@ -387,6 +392,13 @@ export function LaborMarkupScreen() {
               Distribution across {currentQuote.sections.length} sections
             </Text>
             {currentQuote.sections.map((s) => {
+              // A lump-sum section has no hours to step. Its steppers moved the
+              // GLOBAL total (so "extra stays the same") while applyLabourEditor
+              // passed the section through untouched and never counted it in the
+              // sections sum — so the whole delta landed in laborExtraHours and
+              // quietly added an hour of General Labour to the quote, invisible
+              // on the row the tradie had just tapped.
+              const isLumpSum = s.pricing === 'lumpSum';
               const sectionTotalHours = parseFloat(sectionTotalHoursMap[s.id] ?? '0') || 0;
               // Read the dollars from the same object the save writes, rather
               // than re-deriving them from the rate box: a section carrying its
@@ -408,6 +420,12 @@ export function LaborMarkupScreen() {
                   <Text style={{ fontSize: 13, color: themeColors.text, flex: 1 }} numberOfLines={1}>
                     {s.name}
                   </Text>
+                  {isLumpSum ? (
+                    <Text style={{ fontSize: 12, color: themeColors.textMuted, marginRight: 8 }}>
+                      Lump sum
+                    </Text>
+                  ) : (
+                  <>
                   <TouchableOpacity
                     style={{
                       width: 28,
@@ -445,6 +463,8 @@ export function LaborMarkupScreen() {
                   >
                     <MaterialCommunityIcons name="plus" size={16} color={themeColors.accentText} />
                   </TouchableOpacity>
+                  </>
+                  )}
                   <Text style={{ fontSize: 13, color: themeColors.text, fontWeight: '600', minWidth: 70, textAlign: 'right' }}>
                     {formatCurrency(sectionDollars)}
                   </Text>
@@ -525,22 +545,6 @@ export function LaborMarkupScreen() {
           </Text>
         </Surface>
 
-        {hasSectionsMode && (
-          <View style={styles.showMarkupToggle}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.showMarkupTitle}>Show labour breakdown on PDFs</Text>
-              <Text style={styles.showMarkupSubtitle}>
-                When off, only the labour total appears on the document — per-section rows are hidden
-              </Text>
-            </View>
-            <Switch
-              value={showLaborBreakdown}
-              onValueChange={setShowLaborBreakdown}
-              trackColor={{ false: '#D1D5DB', true: themeColors.accentSubtle }}
-              thumbColor={showLaborBreakdown ? themeColors.accent : '#F3F4F6'}
-            />
-          </View>
-        )}
       </View>
 
       {/* Markup Section */}
@@ -740,7 +744,7 @@ export function LaborMarkupScreen() {
         </View>
 
         <View style={styles.summaryRow}>
-          <Text style={styles.summaryLabel}>Labor</Text>
+          <Text style={styles.summaryLabel}>Labour</Text>
           <Text style={styles.summaryValue}>
             {formatCurrency(calculation.laborTotal)}
           </Text>
@@ -1079,23 +1083,6 @@ const useStyles = makeStyles((t) => ({
     fontSize: 14,
     fontWeight: '600',
     color: t.colors.accentText,
-  },
-  showMarkupToggle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 16,
-    gap: 12,
-  },
-  showMarkupTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: t.colors.text,
-  },
-  showMarkupSubtitle: {
-    fontSize: 12,
-    color: t.colors.textMuted,
-    marginTop: 2,
-    lineHeight: 16,
   },
   // Hours/Days toggle
   unitToggleRow: {

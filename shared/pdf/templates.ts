@@ -226,6 +226,49 @@ export const printMediaCSS = `
     opacity: .72;
     overflow-wrap: anywhere;
   }
+  /* A section's own scope text, printed under its heading. Inherits the
+     section-label colour so it reads as part of the same band. */
+  .section-scope {
+    margin-top: 3px;
+    font-size: 10px;
+    font-weight: 400;
+    line-height: 1.4;
+    opacity: .9;
+  }
+  /* Project Scope table — rendered when every line on the document is a
+     lump-sum scope line (see isScopeQuote in htmlBuilders). Declared once,
+     here, rather than in all five template stylesheets: printMediaCSS is
+     concatenated ahead of getTemplateCSS and these class selectors don't
+     collide with the bare table/th/td rules, so the scope table picks up each
+     template's colours and borders for free. Explicit column widths stop a
+     four-line scope paragraph squeezing the money column off the page. */
+  .scope-num {
+    width: 6%;
+    vertical-align: top;
+    white-space: nowrap;
+  }
+  .scope-title {
+    vertical-align: top;
+  }
+  .scope-body {
+    margin-top: 4px;
+    font-size: 11px;
+    line-height: 1.45;
+    opacity: .85;
+  }
+  .scope-total {
+    width: 22%;
+    text-align: right;
+    vertical-align: top;
+    white-space: nowrap;
+  }
+  /* A scope row is a title plus a paragraph — splitting it across a page
+     break separates the work from its price. Same reasoning as
+     .terms-section. */
+  .scope-table tr {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
   @page {
     size: A4;
     margin: 40px;

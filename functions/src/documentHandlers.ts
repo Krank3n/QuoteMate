@@ -29,6 +29,15 @@ import {
   generateQuotePdfBuffer,
 } from './pdfGenerator';
 import { hashTerms } from './shared/pdf/terms/defaultAuTradie';
+import { toPdfMaterials, toPdfSections } from './shared/pdf/mapMaterial';
+import {
+  lineMarkupMultiplier,
+  lumpSumLabourTotal,
+  markupableLabourTotal,
+  markupableMaterialsTotal,
+  workItemsTotal,
+} from './shared/document/lumpSum';
+import { resolvePriceDetail } from './shared/document/priceDetail';
 import { dollarsToCents, centsToDollars } from './shared/pdf/money';
 import {
   quoteRecordToDocumentRecord,
@@ -354,10 +363,10 @@ interface BusinessSettings {
   brandColor?: string;
   pdfTemplate?: any;
   showMarkup?: boolean;
+  defaultPriceDetail?: 'itemised' | 'summary' | 'total';
   showMaterialCostsByDefault?: boolean;
   showLaborCostsByDefault?: boolean;
   showLaborHours?: boolean;
-  groupMaterialsBySection?: boolean;
   paymentMethods?: any;
   termsAndConditions?: string;
   [key: string]: any;
@@ -382,44 +391,34 @@ function applyHideMarkupForDisplay(q: any, businessSettings?: any) {
   }
   const matFactor = 1 + matMarkup / 100;
   const laborFactor = 1 + laborMarkup / 100;
-  const inflatedMaterials = (q.materials || []).map((m: any) => ({
-    ...m,
-    price: (Number(m.price) || 0) * matFactor,
-    totalPrice: (Number(m.totalPrice) || 0) * matFactor,
-  }));
+  // Work items pass through untouched for the same reason lump-sum sections do
+  // — the price is one the tradie typed. See shared/document/lumpSum.ts.
+  const inflatedMaterials = (q.materials || []).map((m: any) => {
+    const factor = lineMarkupMultiplier(m, matFactor);
+    return {
+      ...m,
+      price: (Number(m.price) || 0) * factor,
+      totalPrice: (Number(m.totalPrice) || 0) * factor,
+    };
+  });
+  // Lump-sum sections pass through at the figure the tradie typed — only the
+  // hourly slice of labour is inflated. See shared/document/lumpSum.ts.
+  const lumpSum = lumpSumLabourTotal(q.sections);
+  const inflatedLabour = lumpSum + markupableLabourTotal(q.laborTotal || 0, q.sections) * laborFactor;
+  const work = workItemsTotal(q.materials);
+  const inflatedMaterialsSubtotal =
+    work + markupableMaterialsTotal(q.materialsSubtotal || 0, q.materials) * matFactor;
   return {
     materials: inflatedMaterials,
-    materialsSubtotal: (Number(q.materialsSubtotal) || 0) * matFactor,
-    laborTotal: (Number(q.laborTotal) || 0) * laborFactor,
-    subtotal:
-      ((Number(q.materialsSubtotal) || 0) * matFactor) +
-      ((Number(q.laborTotal) || 0) * laborFactor) +
-      (Number(q.travelAdjustment) || 0),
+    materialsSubtotal: inflatedMaterialsSubtotal,
+    laborTotal: inflatedLabour,
+    // travelAdjustment is a PERCENTAGE. It used to be added here as dollars,
+    // which put e.g. $3 of nothing into the emailed Subtotal on a 3% travel
+    // quote — and disagreed with both the PDF and the index.ts twin, neither
+    // of which include travel in this figure.
+    subtotal: inflatedMaterialsSubtotal + inflatedLabour,
     markupAmount: 0,
   };
-}
-
-function buildPdfMaterials(materials: any[]): any[] {
-  return (materials || []).map((m: any) => ({
-    name: m.name,
-    quantity: m.quantity,
-    unit: m.unit,
-    price: m.price || 0,
-    totalPrice: m.totalPrice || 0,
-    section: m.section,
-  }));
-}
-
-function buildPdfSections(sections: any[]): any[] {
-  return (sections || []).map((s: any) => ({
-    name: s.name,
-    laborHours: s.laborHours,
-    multiplier: s.multiplier,
-    laborHoursTotal: s.laborHoursTotal,
-    laborRate: s.laborRate,
-    laborUnit: s.laborUnit,
-    laborTotal: s.laborTotal,
-  }));
 }
 
 function businessLogoHtml(business: BusinessSettings): string {
@@ -477,7 +476,7 @@ export function buildQuotePdfHtmlForQuote(
       quoteNumber: quote.quoteNumber,
       quoteDate: fmtAuDate(quote.updatedAt),
       job: quote.job || { name: 'Job', description: '' },
-      materials: buildPdfMaterials(quote.materials),
+      materials: toPdfMaterials(quote.materials),
       materialsSubtotal: quote.materialsSubtotal || 0,
       laborHours: quote.laborHours,
       laborRate: quote.laborRate,
@@ -485,7 +484,7 @@ export function buildQuotePdfHtmlForQuote(
       labourDisplayUnit: quote.labourDisplayUnit,
       laborTotal: quote.laborTotal || 0,
       laborExtraHours: quote.laborExtraHours,
-      sections: buildPdfSections(quote.sections),
+      sections: toPdfSections(quote.sections),
       subtotal: quote.subtotal || 0,
       markup: quote.markup || 0,
       markupAmount: quote.markupAmount || 0,
@@ -493,12 +492,10 @@ export function buildQuotePdfHtmlForQuote(
       showMarkup: quote.showMarkup !== undefined
         ? quote.showMarkup === true
         : business.showMarkup === true,
-      showMaterialCosts: quote.showMaterialCosts !== undefined
-        ? quote.showMaterialCosts
-        : business.showMaterialCostsByDefault !== false,
-      showLaborCosts: quote.showLaborCosts !== undefined
-        ? quote.showLaborCosts
-        : business.showLaborCostsByDefault !== false,
+      priceDetail: resolvePriceDetail(quote, business),
+      requireDeposit: quote.requireDeposit === true,
+      depositPercentage: quote.depositPercentage,
+      depositAmount: quote.depositAmount,
       travelAdjustment: quote.travelAdjustment,
       gst: quote.gst || 0,
       total: quote.total || 0,
@@ -507,7 +504,6 @@ export function buildQuotePdfHtmlForQuote(
       notes: quote.notes,
       showLaborHours: business.showLaborHours,
       showLaborBreakdown: quote.showLaborBreakdown !== false,
-      groupMaterialsBySection: business.groupMaterialsBySection,
       paymentMethods: business.paymentMethods,
       squarePaymentLinkUrl: options.squarePaymentLinkUrl ?? quote.squarePaymentLinkUrl,
       surchargePaymentFees: business.surchargePaymentFees === true,
@@ -808,12 +804,7 @@ async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailRes
     }
   }
 
-  const showMaterialCostsEmail = quote.showMaterialCosts !== undefined
-    ? quote.showMaterialCosts !== false
-    : business.showMaterialCostsByDefault !== false;
-  const showLaborCostsEmail = quote.showLaborCosts !== undefined
-    ? quote.showLaborCosts !== false
-    : business.showLaborCostsByDefault !== false;
+  const emailPriceDetail = resolvePriceDetail(quote, business);
 
   const htmlContent = buildQuoteEmailHtml({
     customerName: quote.customerName || 'Client',
@@ -833,8 +824,7 @@ async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailRes
     depositPayNowUrl,
     hasTerms: !!termsToSend,
     surchargePaymentFees: business.surchargePaymentFees === true,
-    showMaterialCosts: showMaterialCostsEmail,
-    showLaborCosts: showLaborCostsEmail,
+    priceDetail: emailPriceDetail,
     business: businessData,
   });
 
@@ -978,12 +968,7 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
     address: business.address, logoUrl, brandColor: business.brandColor,
   };
 
-  const showMaterialCostsEmail = invoice.showMaterialCosts !== undefined
-    ? invoice.showMaterialCosts !== false
-    : business.showMaterialCostsByDefault !== false;
-  const showLaborCostsEmail = invoice.showLaborCosts !== undefined
-    ? invoice.showLaborCosts !== false
-    : business.showLaborCostsByDefault !== false;
+  const emailPriceDetail = resolvePriceDetail(invoice, business);
 
   const plan = await resolveUserPlan(userId);
 
@@ -1004,8 +989,7 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
     depositCredit: Number(invoice.depositCredit) > 0 ? Number(invoice.depositCredit) : undefined,
     hasTerms: !!termsToSend,
     surchargePaymentFees: business.surchargePaymentFees === true,
-    showMaterialCosts: showMaterialCostsEmail,
-    showLaborCosts: showLaborCostsEmail,
+    priceDetail: emailPriceDetail,
     paymentMethods: business.paymentMethods,
     plan,
     business: businessData,
@@ -1026,7 +1010,7 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
       paidAmount: invoice.paidAmount || 0,
       depositCredit: Number(invoice.depositCredit) > 0 ? Number(invoice.depositCredit) : undefined,
       job: invoice.job || { name: 'Job', description: '' },
-      materials: buildPdfMaterials(invoice.materials),
+      materials: toPdfMaterials(invoice.materials),
       materialsSubtotal: invoice.materialsSubtotal || 0,
       laborHours: invoice.laborHours,
       laborRate: invoice.laborRate,
@@ -1034,7 +1018,7 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
       labourDisplayUnit: invoice.labourDisplayUnit,
       laborTotal: invoice.laborTotal || 0,
       laborExtraHours: invoice.laborExtraHours,
-      sections: buildPdfSections(invoice.sections),
+      sections: toPdfSections(invoice.sections),
       subtotal: invoice.subtotal || 0,
       markup: invoice.markup || 0,
       markupAmount: invoice.markupAmount || 0,
@@ -1042,12 +1026,7 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
       showMarkup: invoice.showMarkup !== undefined
         ? invoice.showMarkup === true
         : business.showMarkup === true,
-      showMaterialCosts: invoice.showMaterialCosts !== undefined
-        ? invoice.showMaterialCosts
-        : business.showMaterialCostsByDefault !== false,
-      showLaborCosts: invoice.showLaborCosts !== undefined
-        ? invoice.showLaborCosts
-        : business.showLaborCostsByDefault !== false,
+      priceDetail: resolvePriceDetail(invoice, business),
       travelAdjustment: invoice.travelAdjustment,
       gst: invoice.gst || 0,
       total: invoice.total || 0,
@@ -1056,7 +1035,6 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
       notes: invoice.notes,
       showLaborHours: business.showLaborHours,
       showLaborBreakdown: invoice.showLaborBreakdown !== false,
-      groupMaterialsBySection: business.groupMaterialsBySection,
       paymentMethods: business.paymentMethods,
       squarePaymentLinkUrl: payNowUrl || invoice.squarePaymentLinkUrl,
       surchargePaymentFees: business.surchargePaymentFees === true,
