@@ -367,7 +367,14 @@ export function generateMaterialsHTML(
  * unit price worth showing.
  */
 export function isScopeQuote(materials: PdfMaterial[]): boolean {
-  return materials.length > 0 && materials.every((m) => m.kind === 'work');
+  // Nameless rows don't count either way. The materials screen's rapid-entry
+  // chain leaves a blank $0 draft behind, and one of those was enough to drop
+  // a pure scope quote back into the four-column materials table — the exact
+  // layout the tradie was trying to get away from. The entry screen prunes
+  // them on the way out; this is the second line of defence, because the
+  // question here is "what is this document", and an empty row says nothing.
+  const real = materials.filter((m) => !!m.name?.trim());
+  return real.length > 0 && real.every((m) => m.kind === 'work');
 }
 
 /** One row of the Project Scope table. `label` is already HTML-safe. */

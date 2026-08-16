@@ -46,6 +46,10 @@ import type { Tokens } from '../../theme';
 import { makeStyles, useThemeColors } from '../../theme';
 import { formatCurrency, updateMaterialTotalPrice, supplierPriceForGstMode } from '../../utils/quoteCalculator';
 import { keepSupplierPriceInclusive, normaliseTemplateToHours } from '../../../shared/document';
+import {
+  pruneBlankMaterials,
+  hasUnpricedMaterials as hasUnpricedMaterialRows,
+} from './scopeQuoteGates';
 import { parsePackInfo } from '../../utils/parsePackInfo';
 import { applyPackAwarePricing } from '../../utils/packAwarePricing';
 import {
@@ -820,7 +824,7 @@ export function MaterialsListScreen() {
   );
 
   const hasUnpricedMaterials = React.useMemo(
-    () => (materials && Array.isArray(materials)) ? materials.some((m) => m.price === 0) : false,
+    () => (materials && Array.isArray(materials)) ? hasUnpricedMaterialRows(materials) : false,
     [materials]
   );
 
@@ -1848,31 +1852,47 @@ export function MaterialsListScreen() {
     navigation.goBack();
   }, [currentQuote, updateQuote, saveDraft, navigation, allowNextNavigation]);
 
+  /**
+   * The rapid-entry chain spawns a fresh blank row after every save, so
+   * leaving the screen normally strands one unnamed $0 material in the quote.
+   * It used to ride all the way onto the customer's PDF as an empty
+   * "1 each · $0.00" line, and — worse, now that scope lines exist — a single
+   * kind-less row is enough to knock the whole document out of the Project
+   * Scope layout and back into the four-column materials table. Drop the
+   * half-typed rows on the way out; a line with no name isn't a line.
+   */
+  const buildNextDraft = useCallback((step: string) => {
+    if (!currentQuote) return null;
+    return {
+      ...currentQuote,
+      materials: pruneBlankMaterials(currentQuote.materials),
+      draftStep: step,
+    };
+  }, [currentQuote]);
+
+  const goToLaborMarkup = useCallback(() => {
+    const draftQuote = buildNextDraft('LaborMarkup');
+    if (draftQuote) {
+      updateQuote(draftQuote);
+      saveDraft(draftQuote);
+    }
+    // Bypass the unsaved-changes guard — we just saved.
+    allowNextNavigation();
+    navigation.navigate('LaborMarkup');
+  }, [buildNextDraft, updateQuote, saveDraft, allowNextNavigation, navigation]);
+
   const handleNext = useCallback(() => {
     // Allow proceeding with no materials (labor-only quotes)
     if (hasUnpricedMaterials) {
       setUnpricedDialogVisible(true);
     } else {
-      if (currentQuote) {
-        const draftQuote = { ...currentQuote, draftStep: 'LaborMarkup' };
-        updateQuote(draftQuote);
-        saveDraft(draftQuote);
-      }
-      // Bypass the unsaved-changes guard — we just saved.
-      allowNextNavigation();
-      navigation.navigate('LaborMarkup');
+      goToLaborMarkup();
     }
-  }, [hasUnpricedMaterials, navigation, currentQuote, updateQuote, saveDraft, allowNextNavigation]);
+  }, [hasUnpricedMaterials, goToLaborMarkup]);
 
   const proceedWithUnpricedMaterials = () => {
     setUnpricedDialogVisible(false);
-    if (currentQuote) {
-      const draftQuote = { ...currentQuote, draftStep: 'LaborMarkup' };
-      updateQuote(draftQuote);
-      saveDraft(draftQuote);
-    }
-    allowNextNavigation();
-    navigation.navigate('LaborMarkup');
+    goToLaborMarkup();
   };
 
   // Handle null currentQuote case

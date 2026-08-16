@@ -98,6 +98,25 @@ describe('isScopeQuote', () => {
     expect(isScopeQuote([work(), { name: 'Paint', quantity: 2, unit: 'each', price: 60, totalPrice: 120 }])).toBe(false);
     expect(isScopeQuote([])).toBe(false);
   });
+
+  // Regression: the materials screen's rapid-entry chain leaves a blank $0
+  // draft behind, and one kind-less row used to drop a pure scope quote back
+  // into the four-column materials table on the customer's PDF.
+  it('ignores a blank draft row left behind by the entry screen', () => {
+    const blank = { name: '', quantity: 1, unit: 'each', price: 0, totalPrice: 0 };
+    expect(isScopeQuote([work(), work(), blank])).toBe(true);
+    expect(isScopeQuote([work(), { name: '   ', quantity: 1, unit: 'each', price: 0, totalPrice: 0 }])).toBe(true);
+  });
+
+  it('is still false when a blank row sits beside a real material', () => {
+    const blank = { name: '', quantity: 1, unit: 'each', price: 0, totalPrice: 0 };
+    const real = { name: 'Paint', quantity: 2, unit: 'each', price: 60, totalPrice: 120 };
+    expect(isScopeQuote([work(), real, blank])).toBe(false);
+  });
+
+  it('is false for a document that is nothing but blank rows', () => {
+    expect(isScopeQuote([{ name: '', quantity: 1, unit: 'each', price: 0, totalPrice: 0 }])).toBe(false);
+  });
 });
 
 describe('PDF Project Scope table', () => {

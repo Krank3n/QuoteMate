@@ -34,6 +34,7 @@ import { QuoteSentBanner } from '../../components/QuoteSentBanner';
 import { FixedBottomButton } from '../../components/FixedBottomButton';
 import { WebContainer } from '../../components/WebContainer';
 import { AlertModal } from '../../components/AlertModal';
+import { labourIsInScopeLines } from './scopeQuoteGates';
 
 export function LaborMarkupScreen() {
   const styles = useStyles();
@@ -292,9 +293,12 @@ export function LaborMarkupScreen() {
     // from sections), not hours × rate at top level. Validate against the real
     // total instead so a sectioned quote with non-zero per-section labour
     // doesn't trip the "Zero Labor Cost" warning.
-    const zeroLabour = hasSectionsMode
+    // A quote built from priced scope lines has its labour inside those line
+    // totals, so zero hours is the correct answer, not an oversight. Warning
+    // there tells a painter their own quote is broken.
+    const zeroLabour = !labourIsInScopeLines(currentQuote?.materials) && (hasSectionsMode
       ? calculation.laborTotal === 0
-      : (totalHoursInput === 0 || rate === 0);
+      : (totalHoursInput === 0 || rate === 0));
     if (zeroLabour) {
       const docType = mode === 'invoice' ? 'invoice' : 'quote';
       setWarningMessage(
