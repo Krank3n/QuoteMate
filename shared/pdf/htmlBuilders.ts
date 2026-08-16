@@ -206,11 +206,14 @@ export function buildTermsHTML(terms: string | undefined): string {
  * the in-app list.
  */
 export function generateMaterialsHTML(
-  materials: PdfMaterial[],
+  allMaterials: PdfMaterial[],
   markupPercent: number = 0,
   sections?: LaborSection[],
   options?: { perLineMoney?: boolean },
 ): string {
+  // Same rule as the scope table: a row with no name is a half-typed line, and
+  // it used to reach the customer as an empty "1 each · $0.00".
+  const materials = allMaterials.filter((m) => !!m.name?.trim());
   if (materials.length === 0) {
     return `<p style="color: #666666; font-style: italic; margin: 10px 0;">No materials required - Labor only</p>`;
   }
@@ -397,10 +400,15 @@ interface ScopeContinuationRow {
  * and TOTAL, and the two would otherwise print the same number twice in a row.
  */
 export function generateScopeHTML(
-  materials: PdfMaterial[],
+  allMaterials: PdfMaterial[],
   markupPercent: number = 0,
   continuationRows: ScopeContinuationRow[] = [],
 ): string {
+  // Nameless rows never reach the customer. The entry screen prunes the blank
+  // draft its rapid-entry chain leaves behind, but quotes saved before that
+  // fix still carry one, and an empty numbered row on a customer's quote looks
+  // like the tradie forgot to finish it.
+  const materials = allMaterials.filter((m) => !!m.name?.trim());
   const multiplier = markupPercent > 0 ? (1 + markupPercent / 100) : 1;
 
   const scopeRow = (index: number, title: string, body: string, amount: number) => `

@@ -119,6 +119,29 @@ describe('isScopeQuote', () => {
   });
 });
 
+describe('blank rows never reach the customer', () => {
+  const blank = { name: '', quantity: 1, unit: 'each', price: 0, totalPrice: 0 };
+
+  it('does not number a blank row in the scope table', () => {
+    const q = painterQuote();
+    const html = buildQuotePdfHtml({ ...q, materials: [...q.materials, blank] } as any, business);
+    // Three real lines — there must be no fourth.
+    expect(html).toContain('<td class="scope-num">3</td>');
+    expect(html).not.toContain('<td class="scope-num">4</td>');
+  });
+
+  it('does not print an empty 1 each row in the itemised table', () => {
+    const real = { name: 'Merbau decking', quantity: 48, unit: 'm', price: 14.38, totalPrice: 690 };
+    const html = buildQuotePdfHtml(
+      { ...painterQuote(), materials: [real, blank], materialsSubtotal: 690, subtotal: 690 } as any,
+      business,
+    );
+    expect(html).toContain('Merbau decking');
+    expect(html).not.toContain('<td></td>');
+    expect((html.match(/<tr>/g) || []).length).toBeLessThan(6);
+  });
+});
+
 describe('PDF Project Scope table', () => {
   it('renders a two-column Project Scope table when every line is a work item', () => {
     const html = buildQuotePdfHtml(painterQuote(), business);
