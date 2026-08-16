@@ -9700,7 +9700,7 @@ function generateDashboardPage(data: AnalyticsData, key: string): string {
       <div class="stat-row"><span class="stat-label">Median Value</span><span class="stat-value">$${d.quotes.medianValue.toFixed(2)}</span></div>
       <div class="stat-row"><span class="stat-label">Range</span><span class="stat-value">$${d.quotes.minValue.toFixed(0)} - $${d.quotes.maxValue.toFixed(0)}</span></div>
       <div class="stat-row"><span class="stat-label">Avg Markup</span><span class="stat-value">${d.quotes.avgMarkup}%</span></div>
-      <div class="stat-row"><span class="stat-label">Median Labor Rate</span><span class="stat-value">$${d.quotes.laborRateMedian}/hr</span></div>
+      <div class="stat-row"><span class="stat-label">Median Labour Rate</span><span class="stat-value">$${d.quotes.laborRateMedian}/hr</span></div>
       <div class="stat-row"><span class="stat-label">Avg Materials/Quote</span><span class="stat-value">${d.quotes.avgMaterialsPerQuote}</span></div>
       <div class="stat-row"><span class="stat-label">Quote-to-Invoice</span><span class="stat-value">${d.invoices.quoteToInvoiceRate}%</span></div>
     </div>

@@ -27,7 +27,7 @@ export function MaterialsSection({
   materials,
   materialsSubtotal,
   onEdit,
-  emptyMessage = 'No materials required - Labor only',
+  emptyMessage = 'No materials required - Labour only',
   markupPercent = 0,
   rollMarkupIntoMaterials = false,
   style,

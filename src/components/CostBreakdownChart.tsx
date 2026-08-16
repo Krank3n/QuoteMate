@@ -20,7 +20,7 @@ interface CostBreakdownChartProps {
 
 const segmentsFor = (themeColors: Tokens) => [
   { key: 'materials', label: 'Materials', color: themeColors.info, icon: 'package-variant' as const },
-  { key: 'labor', label: 'Labor', color: themeColors.warning, icon: 'hammer-wrench' as const },
+  { key: 'labor', label: 'Labour', color: themeColors.warning, icon: 'hammer-wrench' as const },
   { key: 'markup', label: 'Markup', color: themeColors.accentText, icon: 'percent-outline' as const },
 ];
 

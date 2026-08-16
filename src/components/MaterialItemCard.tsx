@@ -140,7 +140,14 @@ function MaterialItemCardImpl({
   ) : isRecentlyPriced ? (
     <MaterialCommunityIcons name="check-circle" size={20} color={themeColors.money} />
   ) : (
-    <MaterialCommunityIcons name="package-variant" size={20} color={themeColors.textMuted} />
+    // A work item is labour, not stock — the parcel icon reads as something
+    // that arrives on a pallet, which is exactly the wrong idea for
+    // "Prepare and paint interior walls".
+    <MaterialCommunityIcons
+      name={isWorkItem ? 'clipboard-text-outline' : 'package-variant'}
+      size={20}
+      color={themeColors.textMuted}
+    />
   );
 
   const topRow = (

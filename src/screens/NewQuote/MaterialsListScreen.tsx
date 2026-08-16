@@ -2334,7 +2334,7 @@ export function MaterialsListScreen() {
       />
 
       <FixedBottomButton
-        label={isAiAnalyzing ? "Cancel" : (isEditFromPreview ? "Save" : "Next: Labor & Markup")}
+        label={isAiAnalyzing ? "Cancel" : (isEditFromPreview ? "Save" : "Next: Labour & Markup")}
         onPress={isAiAnalyzing ? handleCancelGeneration : (isEditFromPreview ? handleSaveAndReturn : handleNext)}
         mode={isAiAnalyzing ? "outlined" : "contained"}
         buttonStyle={isAiAnalyzing ? { borderColor: themeColors.error, borderWidth: 2 } : undefined}

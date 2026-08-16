@@ -710,7 +710,7 @@ export function PDFTemplateScreen() {
 
             <View style={styles.toggleRow}>
               <View style={styles.toggleLabel}>
-                <Text style={styles.toggleTitle}>Show Labor Hours</Text>
+                <Text style={styles.toggleTitle}>Show Labour Hours</Text>
                 <Text style={styles.toggleSubtitle}>Display hourly rate and hours breakdown on PDFs</Text>
               </View>
               <Switch

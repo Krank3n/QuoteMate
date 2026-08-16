@@ -1,5 +1,5 @@
 /**
- * Labor & Markup Screen
+ * Labour & Markup Screen
  * Set labor hours, rates, and markup percentage
  */
 
@@ -302,7 +302,7 @@ export function LaborMarkupScreen() {
     if (zeroLabour) {
       const docType = mode === 'invoice' ? 'invoice' : 'quote';
       setWarningMessage(
-        `Labor hours or rate is set to $0. This means no labor cost will be included in the ${docType}.\n\nDo you want to continue?`
+        `Labour hours or rate is set to $0. This means no labour cost will be included in the ${docType}.\n\nDo you want to continue?`
       );
       setWarningDialogVisible(true);
       return;
@@ -331,7 +331,7 @@ export function LaborMarkupScreen() {
         visible={warningDialogVisible}
         onDismiss={() => setWarningDialogVisible(false)}
         type="warning"
-        title="Zero Labor Cost"
+        title="Zero Labour Cost"
         message={warningMessage}
         primaryButtonText="Continue"
         primaryButtonAction={proceedToPreview}
@@ -744,7 +744,7 @@ export function LaborMarkupScreen() {
         </View>
 
         <View style={styles.summaryRow}>
-          <Text style={styles.summaryLabel}>Labor</Text>
+          <Text style={styles.summaryLabel}>Labour</Text>
           <Text style={styles.summaryValue}>
             {formatCurrency(calculation.laborTotal)}
           </Text>

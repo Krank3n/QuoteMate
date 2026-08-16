@@ -43,7 +43,7 @@ export function hasUnpricedMaterials(materials: Material[] | undefined): boolean
 
 /**
  * Whether the quote's labour is already inside its scope lines. When it is,
- * zero labour hours is the correct answer and the "Zero Labor Cost" warning is
+ * zero labour hours is the correct answer and the "Zero Labour Cost" warning is
  * telling the tradie their own quote is broken.
  */
 export function labourIsInScopeLines(materials: Material[] | undefined): boolean {

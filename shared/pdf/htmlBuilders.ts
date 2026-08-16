@@ -215,7 +215,7 @@ export function generateMaterialsHTML(
   // it used to reach the customer as an empty "1 each · $0.00".
   const materials = allMaterials.filter((m) => !!m.name?.trim());
   if (materials.length === 0) {
-    return `<p style="color: #666666; font-style: italic; margin: 10px 0;">No materials required - Labor only</p>`;
+    return `<p style="color: #666666; font-style: italic; margin: 10px 0;">No materials required - Labour only</p>`;
   }
 
   const multiplier = markupPercent > 0 ? (1 + markupPercent / 100) : 1;
@@ -965,8 +965,12 @@ export function buildQuotePdfHtml(
       ${buildTermsHTML(quote.terms)}
       </div>
 
+      <!-- The tradie's name, not ours. A quote is their document going to
+           their customer; our branding on the footer reads to that customer
+           like the job was subcontracted to software. The service report has
+           always done it this way — quotes and invoices now match. -->
       <div class="pdf-footer">
-        <p>QuoteMate</p>
+        <p>${escapeHtml(business.businessName)}</p>
       </div>
     </body>
     </html>
@@ -1253,8 +1257,12 @@ export function buildInvoicePdfHtml(
       ${buildTermsHTML(invoice.terms)}
       </div>
 
+      <!-- The tradie's name, not ours. A quote is their document going to
+           their customer; our branding on the footer reads to that customer
+           like the job was subcontracted to software. The service report has
+           always done it this way — quotes and invoices now match. -->
       <div class="pdf-footer">
-        <p>QuoteMate</p>
+        <p>${escapeHtml(business.businessName)}</p>
       </div>
     </body>
     </html>
