@@ -7228,6 +7228,13 @@ export function generateAcceptancePage(token: string): string {
     .line-items tr:last-child td { border-bottom: none; }
     .line-items td.qty { color: var(--muted); white-space: nowrap; }
     .line-items td.price { font-weight: 600; }
+    /* The Project Scope table's row number. It can't reuse .qty: that column
+       is right-aligned against a zero horizontal padding on td, so the digit
+       ended up flush against the scope title ("1Rinnai B26..."). */
+    .line-items th.num, .line-items td.num {
+      width: 30px; text-align: left; padding-right: 12px;
+      color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums;
+    }
     /* Scope paragraph under a work item's title. */
     .scope-body { margin-top: 4px; font-size: 13px; line-height: 1.45; color: var(--muted); }
     .totals { margin-top: 4px; }
@@ -7457,7 +7464,7 @@ export function generateAcceptancePage(token: string): string {
           var scopeRows = quote.materials.map(function(m, i) {
             var body = m.scope ? '<div class="scope-body">' + nl2br(m.scope) + '</div>' : '';
             return '<tr>' +
-              '<td class="qty">' + (i + 1) + '</td>' +
+              '<td class="num">' + (i + 1) + '</td>' +
               '<td><strong>' + escapeHtml(m.name) + '</strong>' + body + '</td>' +
               '<td class="price">' + formatCurrency(m.totalPrice) + '</td>' +
             '</tr>';
@@ -7465,7 +7472,7 @@ export function generateAcceptancePage(token: string): string {
           materialsHtml =
             '<div class="section">' +
               '<table class="line-items">' +
-                '<thead><tr><th class="qty">#</th><th>Project Scope</th>' +
+                '<thead><tr><th class="num">#</th><th>Project Scope</th>' +
                   '<th class="price">Line Total</th>' +
                 '</tr></thead>' +
                 '<tbody>' + scopeRows + '</tbody>' +

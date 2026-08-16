@@ -55,6 +55,15 @@ describe('generateAcceptancePage', () => {
     expect(script).toContain('Line Total');
   });
 
+  it('gives the scope row number its own column, not the right-aligned Qty one', () => {
+    // Reusing .qty put the digit flush against the title ("1Rinnai B26...")
+    // because .line-items td carries zero horizontal padding.
+    const html = generateAcceptancePage('a'.repeat(64));
+    expect(html).toContain('<th class="num">#</th>');
+    expect(inlineScript(html)).toContain('<td class="num">');
+    expect(html).toMatch(/\.line-items th\.num, \.line-items td\.num \{[^}]*padding-right/);
+  });
+
   it('drives the three presentation modes from priceDetail', () => {
     const script = inlineScript(generateAcceptancePage('a'.repeat(64)));
     expect(script).toContain("quote.priceDetail || 'itemised'");
