@@ -635,6 +635,15 @@ const useStyles = makeStyles((t) => ({
     gap: 6,
     flexShrink: 1,
     minWidth: 0,
+    // flexShrink alone never helped: the children are chips with fixed
+    // padding and a Text that won't shrink, so a paid invoice carrying BOTH
+    // a stage chip and a full payment chip ("Part paid $960.00 / $975.60")
+    // ran past the card edge. Let them wrap instead — this is a detail view,
+    // where PaymentChip deliberately keeps its figures (see its `compact`
+    // note), so the width has to give somewhere and a second line is the
+    // honest place.
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
   },
   typeBadge: {
     width: 32,
