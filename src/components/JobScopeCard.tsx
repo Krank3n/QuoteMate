@@ -228,6 +228,7 @@ export function JobScopeCard({
   return (
     <View style={styles.card}>
       <View style={styles.header}>
+        <View style={styles.headerFlow}>
         <View style={styles.headerLeft}>
           <View style={styles.typeBadge}>
             <MaterialCommunityIcons
@@ -276,22 +277,28 @@ export function JobScopeCard({
           {shouldShowPaymentChip(doc) ? (
             <PaymentChip doc={doc} onPress={onPaymentPress} />
           ) : null}
-          <Pressable
-            onPress={handleToggle}
-            hitSlop={10}
-            style={({ pressed }) => [
-              styles.expandButton,
-              pressed && styles.expandButtonPressed,
-            ]}
-            accessibilityLabel={expanded ? 'Hide details' : 'Show details'}
-          >
-            <MaterialCommunityIcons
-              name={(expanded ? 'chevron-up' : 'chevron-down') as any}
-              size={20}
-              color={themeColors.textMuted}
-            />
-          </Pressable>
         </View>
+        </View>
+        {/* Outside the flow, pinned to the top-right corner. The chevron
+            expands the CARD, not the chip group — leaving it as the chips'
+            last sibling meant a wrap stranded it alone on a second line, and
+            an affordance that moves when the data changes is one a tradie has
+            to hunt for. */}
+        <Pressable
+          onPress={handleToggle}
+          hitSlop={10}
+          style={({ pressed }) => [
+            styles.expandButton,
+            pressed && styles.expandButtonPressed,
+          ]}
+          accessibilityLabel={expanded ? 'Hide details' : 'Show details'}
+        >
+          <MaterialCommunityIcons
+            name={(expanded ? 'chevron-up' : 'chevron-down') as any}
+            size={20}
+            color={themeColors.textMuted}
+          />
+        </Pressable>
       </View>
 
       {expanded ? (
@@ -599,7 +606,9 @@ const useStyles = makeStyles((t) => ({
   },
   header: {
     flexDirection: 'row',
-    alignItems: 'center',
+    // flex-start, not center: the chevron is pinned to the top-right corner,
+    // so it must not drift down the card as the chips below it wrap.
+    alignItems: 'flex-start',
     gap: 10,
     paddingHorizontal: 4,
     paddingTop: 4,
@@ -608,12 +617,22 @@ const useStyles = makeStyles((t) => ({
                    // standard touch-target size
     borderBottomWidth: 1,
     borderBottomColor: t.colors.border,
-    // A full payment chip ("Part paid $1,303.13 / $2,606.26") is wider than
-    // what's left of a phone-width row, and the chip can't shrink — so
-    // something had to give. It used to be headerLeft, crushed to a single
-    // character so "INVOICE" ran down the card one letter per line. Now the
-    // chip drops to its own line instead. Nothing wraps where it fits: a
-    // quote's chip is short, and tablets/web have the width.
+  },
+  // Everything that may reflow — identity and chips. The chevron sits outside
+  // it so the two can never fight for the same line.
+  //
+  // A full payment chip ("Part paid $1,303.13 / $2,606.26") is wider than what
+  // is left of a phone-width row, and the chip can't shrink — so something had
+  // to give. It used to be headerLeft, crushed to a single character so
+  // "INVOICE" ran down the card one letter per line. Now the chips drop to
+  // their own line instead. Nothing wraps where it fits: a quote's chip is
+  // short, and tablets/web have the width.
+  headerFlow: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
     flexWrap: 'wrap',
   },
   headerLeft: {
@@ -629,12 +648,20 @@ const useStyles = makeStyles((t) => ({
   // $1,303.13 / $2,606.26") took the whole row and squeezed headerLeft —
   // which has minWidth:0 — down to about one character, so "INVOICE"
   // rendered as a vertical column of letters down the card.
+  // The chips. flexShrink was never going to save this on its own: the
+  // children are chips with fixed padding wrapping a Text that doesn't
+  // shrink, so a paid invoice carrying BOTH a stage chip and a full payment
+  // chip ("Part paid $960.00 / $975.60") had nothing to give and ran past the
+  // card edge. They wrap now — this is a detail view, where PaymentChip
+  // deliberately keeps its figures (see its `compact` note), so the width has
+  // to give somewhere and a second line is the honest place.
   headerRight: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
     flexShrink: 1,
     minWidth: 0,
+    flexWrap: 'wrap',
   },
   typeBadge: {
     width: 32,

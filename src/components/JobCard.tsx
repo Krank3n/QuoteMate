@@ -274,11 +274,11 @@ export const JobCard = React.memo(function JobCard({
     selectionTap();
     navigation.navigate('RecordPayment', { invoiceId: doc.id });
   };
+  // The timeline's active pill covers every non-terminal stage (including
+  // inquiry → "Draft" and completed → "Completed"). Cancelled and closed have
+  // no timeline, so they render a stage chip in its place — same row, same
+  // rhythm as every other card.
   const terminal = job.stage === 'cancelled' || job.stage === 'closed';
-  // The timeline's active pill now covers every non-terminal stage
-  // (including inquiry → "Draft" and completed → "Completed"), so the
-  // stage chip is only needed for the terminal stages we don't render.
-  const showStageChip = terminal;
 
   return (
     <Animated.View
@@ -361,42 +361,6 @@ export const JobCard = React.memo(function JobCard({
               />
             </View>
           </View>
-
-          {showStageChip && onStagePress ? (
-            <Pressable
-              // stopPropagation so the chip tap opens the stage sheet
-              // instead of bubbling to the Card.onPress (which would
-              // navigate into ViewJob).
-              onPress={(e) => {
-                e.stopPropagation();
-                selectionTap();
-                onStagePress(job);
-              }}
-              hitSlop={8}
-              style={({ pressed }) => [
-                styles.stageChip,
-                { backgroundColor: meta.bgColor, borderColor: meta.color + '44' },
-                pressed && styles.stageChipPressed,
-              ]}
-            >
-              <MaterialCommunityIcons name={meta.icon as any} size={14} color={meta.color} />
-              <Text style={[styles.stageLabel, { color: meta.color }]}>
-                {meta.chipLabel}
-              </Text>
-            </Pressable>
-          ) : showStageChip ? (
-            <View
-              style={[
-                styles.stageChip,
-                { backgroundColor: meta.bgColor, borderColor: meta.color + '44' },
-              ]}
-            >
-              <MaterialCommunityIcons name={meta.icon as any} size={14} color={meta.color} />
-              <Text style={[styles.stageLabel, { color: meta.color }]}>
-                {meta.chipLabel}
-              </Text>
-            </View>
-          ) : null}
 
           {onMenuPress ? (
             <Pressable
@@ -490,7 +454,51 @@ export const JobCard = React.memo(function JobCard({
             primaryDoc={primaryDoc}
             onActivePress={onStagePress}
           />
-        ) : null}
+        ) : (
+          // Terminal stages have no timeline to sit in, but the status still
+          // belongs on the same line every other card puts it on. Inline in
+          // the title row it stole the width the name and job title need —
+          // "Aaron Ngoi" became "Aar…" and "Construction of 2m x 4m Deck"
+          // broke mid-word — for a status that is not the thing you scan a
+          // list for.
+          <View style={styles.terminalRow}>
+            {onStagePress ? (
+              <Pressable
+                // stopPropagation so the chip tap opens the stage sheet
+                // instead of bubbling to the Card.onPress (which would
+                // navigate into ViewJob).
+                onPress={(e) => {
+                  e.stopPropagation();
+                  selectionTap();
+                  onStagePress(job);
+                }}
+                hitSlop={8}
+                style={({ pressed }) => [
+                  styles.stageChip,
+                  { backgroundColor: meta.bgColor, borderColor: meta.color + '44' },
+                  pressed && styles.stageChipPressed,
+                ]}
+              >
+                <MaterialCommunityIcons name={meta.icon as any} size={14} color={meta.color} />
+                <Text style={[styles.stageLabel, { color: meta.color }]}>
+                  {meta.chipLabel}
+                </Text>
+              </Pressable>
+            ) : (
+              <View
+                style={[
+                  styles.stageChip,
+                  { backgroundColor: meta.bgColor, borderColor: meta.color + '44' },
+                ]}
+              >
+                <MaterialCommunityIcons name={meta.icon as any} size={14} color={meta.color} />
+                <Text style={[styles.stageLabel, { color: meta.color }]}>
+                  {meta.chipLabel}
+                </Text>
+              </View>
+            )}
+          </View>
+        )}
         </View>
       </Card>
     </Animated.View>
@@ -834,6 +842,14 @@ const useStyles = makeStyles((t) => ({
   paymentChipSlot: {
     marginLeft: 'auto',
     paddingLeft: 8,
+  },
+  // Where the timeline would have been, so a cancelled card keeps the same
+  // vertical rhythm as every other card in the list.
+  terminalRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 10,
+    marginBottom: 2,
   },
   timelineRow: {
     flexDirection: 'row',

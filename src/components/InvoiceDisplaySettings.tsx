@@ -437,6 +437,11 @@ const useStyles = makeStyles((t) => ({
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 14,
+    // Matches the card header's inset. Without it the Switch sits hard
+    // against the card's inner edge while every sibling row (Materials,
+    // Labour) is inset by its own padding, so the toggle read as though it
+    // were falling off the card.
+    paddingHorizontal: 4,
     gap: 16,
   },
   toggleRowDense: {
