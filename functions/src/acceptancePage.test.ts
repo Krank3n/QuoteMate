@@ -40,8 +40,8 @@ describe('generateAcceptancePage', () => {
 
   it('presents accept and decline actions and the quote shell', () => {
     const html = generateAcceptancePage('a'.repeat(64));
-    expect(html).toContain('Accept Quote');
-    expect(html).toContain('Decline');
+    expect(html).toContain('Accept quote');
+    expect(html).toContain('Decline quote');
     expect(html).toContain('Loading your quote');
   });
 

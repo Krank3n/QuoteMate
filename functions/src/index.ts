@@ -30,6 +30,8 @@ import {
   sendPaymentReceiptEmail,
   classifyUnsendable,
   canSendEmail,
+  formatMoney,
+  safeBrandColor,
 } from './email';
 import { listAllAuthUsers } from './authUsers.helpers';
 import { isUnreachableEmail, reEngagementVerdict } from './reEngagement.helpers';
@@ -6987,9 +6989,14 @@ export const downloadQuotePdf = functions.runWith({ timeoutSeconds: 120, memory:
 });
 
 /**
- * Generate a simple confirmation page after accepting/declining
+ * Confirmation page shown after the customer clicks Accept or Decline in the
+ * quote email. Deliberately mirrors the email's design language — same light
+ * surface, same business lockup, same button shape — so the click doesn't dump
+ * the customer onto a page that looks like it belongs to someone else.
+ *
+ * Exported for confirmationPage.test.ts.
  */
-function generateConfirmationPage(
+export function generateConfirmationPage(
   type: 'accepted' | 'declined' | 'already' | 'error',
   message: string,
   businessName?: string,
@@ -6997,93 +7004,117 @@ function generateConfirmationPage(
   logoUrl?: string | null,
   depositPayment?: { url: string; amount: number } | null
 ): string {
-  const accent = brandColor || '#f97316';
+  const esc = escapeHtml;
+  // Match the email's default brand colour so an unbranded business doesn't
+  // get a green email followed by an orange confirmation page.
+  const accent = safeBrandColor(brandColor);
   const icon = type === 'accepted' ? '&#10003;' : type === 'declined' ? '&#10005;' : type === 'already' ? '&#8505;' : '&#9888;';
-  const iconBg = type === 'accepted' ? '#22c55e' : type === 'declined' ? '#64748b' : type === 'error' ? '#ef4444' : '#f97316';
-  const heading = type === 'accepted' ? 'Quote Accepted'
-    : type === 'declined' ? 'Quote Declined'
-    : type === 'already' ? 'Already Responded'
-    : 'Something Went Wrong';
+  const iconBg = type === 'accepted' ? '#059669' : type === 'declined' ? '#6b7280' : type === 'error' ? '#dc2626' : '#d97706';
+  const heading = type === 'accepted' ? 'Quote accepted'
+    : type === 'declined' ? 'Quote declined'
+    : type === 'already' ? 'Already responded'
+    : 'Something went wrong';
+
+  // What happens next — the old page ended on a full stop and left the
+  // customer wondering whether anything had actually happened.
+  const who = businessName ? esc(businessName) : 'The business';
+  const nextStep = type === 'accepted' && !depositPayment
+    ? `${who} will be in touch to lock in a date. Keep the quote PDF from the email for your records.`
+    : type === 'declined'
+      ? `No hard feelings — if something changes, just reply to the original email.`
+      : '';
 
   const logoHtml = logoUrl
-    ? `<img src="${logoUrl}" alt="" style="width:64px;height:64px;border-radius:14px;object-fit:cover;margin-bottom:16px;" />`
+    ? `<img src="${esc(logoUrl)}" alt="${esc(businessName || '')}" class="logo" />`
     : '';
 
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="color-scheme" content="light">
   <title>${heading}</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      background: #f7f7f7;
+      color: #111827;
       min-height: 100vh;
       display: flex;
       align-items: center;
       justify-content: center;
-      padding: 20px;
+      padding: 32px 16px calc(32px + env(safe-area-inset-bottom));
     }
+    .wrap { width: 100%; max-width: 460px; text-align: center; }
+    .logo {
+      width: 88px; height: 88px; object-fit: contain; background: #fff;
+      border-radius: 12px; margin: 0 auto 14px; display: block;
+    }
+    .business { font-size: 19px; font-weight: 700; letter-spacing: -0.2px; margin-bottom: 20px; }
     .card {
-      background: #1e293b;
-      border-radius: 20px;
-      padding: 48px 36px;
-      max-width: 440px;
-      width: 100%;
-      text-align: center;
-      box-shadow: 0 8px 32px rgba(0,0,0,0.4);
-      border: 1px solid #334155;
+      background: #ffffff;
+      border: 1px solid #e5e7eb;
+      border-top: 4px solid ${accent};
+      border-radius: 14px;
+      padding: 40px 28px;
     }
     .icon {
-      width: 72px;
-      height: 72px;
-      border-radius: 50%;
+      width: 68px; height: 68px; border-radius: 50%;
       background: ${iconBg};
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      margin: 0 auto 24px;
-      font-size: 32px;
-      color: white;
+      display: flex; align-items: center; justify-content: center;
+      margin: 0 auto 22px; font-size: 30px; color: #fff;
     }
-    h1 {
-      color: #f8fafc;
-      font-size: 24px;
-      margin-bottom: 12px;
+    h1 { font-size: 23px; font-weight: 800; letter-spacing: -0.3px; margin-bottom: 10px; }
+    .message { color: #4b5563; font-size: 16px; line-height: 1.65; }
+    .next { color: #6b7280; font-size: 14px; line-height: 1.65; margin-top: 14px; }
+    .deposit {
+      margin-top: 26px; padding: 22px 20px;
+      background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 12px;
     }
-    .message {
-      color: #94a3b8;
-      font-size: 16px;
-      line-height: 1.6;
+    .deposit-label {
+      color: #6b7280; font-size: 11px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 6px;
     }
-    .business {
-      color: ${accent};
-      font-size: 18px;
-      font-weight: 600;
-      margin-bottom: 24px;
+    .deposit-amount {
+      font-size: 32px; font-weight: 800; letter-spacing: -0.5px; margin-bottom: 18px;
+      font-variant-numeric: tabular-nums;
+    }
+    .btn {
+      display: block; background: ${accent}; color: #fff;
+      padding: 15px 24px; border-radius: 10px; font-weight: 700;
+      text-decoration: none; font-size: 16px; line-height: 1.2;
+    }
+    .deposit-note { color: #6b7280; font-size: 12px; line-height: 1.6; margin-top: 14px; }
+    .powered { color: #9ca3af; font-size: 12px; margin-top: 20px; }
+    @media (max-width: 420px) {
+      .card { padding: 32px 20px; }
     }
   </style>
 </head>
 <body>
-  <div class="card">
+  <div class="wrap">
     ${logoHtml}
-    ${businessName ? `<div class="business">${businessName}</div>` : ''}
-    <div class="icon">${icon}</div>
-    <h1>${heading}</h1>
-    <p class="message">${message}</p>
-    ${
-      depositPayment && type === 'accepted'
-        ? `
-      <div style="margin-top:28px;padding:20px;background:#0f172a;border:1px solid #334155;border-radius:14px;">
-        <div style="color:#94a3b8;font-size:13px;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">Deposit due to start work</div>
-        <div style="color:#f8fafc;font-size:32px;font-weight:700;margin-bottom:16px;">$${depositPayment.amount.toFixed(2)}</div>
-        <a href="${depositPayment.url}" style="display:inline-block;background:${accent};color:#0f172a;padding:14px 32px;border-radius:10px;font-weight:700;text-decoration:none;font-size:16px;">Pay Deposit Securely</a>
-        <div style="color:#64748b;font-size:12px;margin-top:14px;">Secured by Square. ${businessName || 'The business'} will be notified once your deposit is received.</div>
+    ${businessName ? `<div class="business">${esc(businessName)}</div>` : ''}
+    <div class="card">
+      <div class="icon">${icon}</div>
+      <h1>${heading}</h1>
+      <p class="message">${esc(message)}</p>
+      ${nextStep ? `<p class="next">${nextStep}</p>` : ''}
+      ${
+        depositPayment && type === 'accepted'
+          ? `
+      <div class="deposit">
+        <div class="deposit-label">Deposit to get started</div>
+        <div class="deposit-amount">${formatMoney(depositPayment.amount)}</div>
+        <a href="${esc(depositPayment.url)}" class="btn">Pay deposit securely</a>
+        <div class="deposit-note">Secure card payment through Square. ${who} is notified the moment it clears.</div>
       </div>`
-        : ''
-    }
+          : ''
+      }
+    </div>
+    <div class="powered">Sent with QuoteMate</div>
   </div>
 </body>
 </html>`;
@@ -7106,7 +7137,9 @@ export function generateAcceptancePage(token: string): string {
   <title>Your Quote</title>
   <style>
     :root {
-      --accent: #f97316;
+      /* Matches the quote email's default brand colour — a business with no
+         brandColor set must not get a green email and an orange page. */
+      --accent: #059669;
       --ink: #0f172a;
       --muted: #64748b;
       --line: #e2e8f0;
@@ -7120,7 +7153,8 @@ export function generateAcceptancePage(token: string): string {
       background: var(--bg);
       color: var(--ink);
       min-height: 100vh;
-      padding: 24px 16px calc(120px + env(safe-area-inset-bottom));
+      /* Clears the two-row sticky action bar (accept + secondary row). */
+      padding: 24px 16px calc(176px + env(safe-area-inset-bottom));
     }
     .page { max-width: 680px; margin: 0 auto; }
     .card {
@@ -7237,7 +7271,8 @@ export function generateAcceptancePage(token: string): string {
       border-top: 1px solid var(--line);
       padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
     }
-    .action-inner { max-width: 680px; margin: 0 auto; display: flex; gap: 10px; }
+    .action-inner { max-width: 680px; margin: 0 auto; display: flex; flex-direction: column; gap: 10px; }
+    .action-secondary { display: flex; gap: 10px; }
     .btn {
       flex: 1; border: none; border-radius: 14px; cursor: pointer;
       padding: 15px 10px; font-size: 16px; font-weight: 700; font-family: inherit;
@@ -7246,9 +7281,15 @@ export function generateAcceptancePage(token: string): string {
     }
     .btn:active { transform: scale(0.98); }
     .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-    .btn-accept { background: #16a34a; color: #fff; flex: 1.4; }
-    .btn-decline { background: #fff; color: var(--muted); border: 1px solid var(--line); flex: 0.9; }
-    .btn-pdf { background: var(--ink); color: #fff; flex: 1; }
+    /* Accept leads on colour and width; Decline is a real, readable button
+       rather than a greyed-out afterthought — same as the email. */
+    .btn-accept { background: var(--accent); color: #fff; width: 100%; }
+    .btn-decline, .btn-pdf {
+      background: #fff; border: 1px solid var(--line);
+      font-size: 15px; padding: 13px 10px;
+    }
+    .btn-decline { color: #475569; }
+    .btn-pdf { color: var(--ink); }
 
     /* ---- States ---- */
     .state { text-align: center; padding: 72px 24px; }
@@ -7275,8 +7316,6 @@ export function generateAcceptancePage(token: string): string {
       .header, .hero { padding-left: 20px; padding-right: 20px; }
       .body-sections { padding: 8px 20px 24px; }
       .total-amount { font-size: 32px; }
-      .action-inner { flex-wrap: wrap; }
-      .btn-pdf { order: 3; flex-basis: 100%; }
     }
   </style>
 </head>
@@ -7296,15 +7335,20 @@ export function generateAcceptancePage(token: string): string {
 
   <div class="action-bar" id="actionBar" style="display:none;">
     <div class="action-inner">
-      <a class="btn btn-pdf" id="pdfBtn" href="#">&#11015;&#65038; Download PDF</a>
-      <button class="btn btn-decline" id="declineBtn" onclick="respondToQuote('rejected')">Decline</button>
-      <button class="btn btn-accept" id="acceptBtn" onclick="respondToQuote('accepted')">Accept Quote</button>
+      <button class="btn btn-accept" id="acceptBtn" onclick="respondToQuote('accepted')">Accept quote</button>
+      <div class="action-secondary">
+        <a class="btn btn-pdf" id="pdfBtn" href="#">&#11015;&#65038; Download PDF</a>
+        <button class="btn btn-decline" id="declineBtn" onclick="respondToQuote('rejected')">Decline quote</button>
+      </div>
     </div>
   </div>
 
   <script>
     var TOKEN = ${tokenLiteral};
     var API_BASE = 'https://us-central1-hansendev.cloudfunctions.net';
+    // Filled in by renderQuote so the confirmation states can name the
+    // business instead of saying "the business" at the customer.
+    var BUSINESS_NAME = '';
 
     function formatCurrency(amount) {
       return new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD' }).format(amount || 0);
@@ -7360,6 +7404,7 @@ export function generateAcceptancePage(token: string): string {
       if (business.brandColor) {
         document.documentElement.style.setProperty('--accent', business.brandColor);
       }
+      BUSINESS_NAME = business.name || '';
       document.title = 'Quote from ' + (business.name || 'your tradie');
 
       var logoHtml = business.logoUrl
@@ -7589,8 +7634,8 @@ export function generateAcceptancePage(token: string): string {
           '<div class="state-icon-ring">' + (isAccepted ? '&#10003;' : '&#9998;') + '</div>' +
           '<h2>' + (isAccepted ? 'Quote accepted — nice one!' : 'Response sent') + '</h2>' +
           '<p>' + (isAccepted
-            ? 'Thanks for accepting this quote. The business has been notified and will be in touch shortly.'
-            : 'Your response has been recorded and the business has been notified.') + '</p>' +
+            ? 'Thanks for accepting. ' + escapeHtml(BUSINESS_NAME || 'The business') + ' has been notified and will be in touch to lock in a date.'
+            : 'Your response has been recorded and ' + escapeHtml(BUSINESS_NAME || 'the business') + ' has been notified.') + '</p>' +
         '</div>';
       window.scrollTo(0, 0);
     }
