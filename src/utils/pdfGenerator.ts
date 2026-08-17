@@ -20,6 +20,7 @@ import { quoteToDocument, invoiceToDocument } from '../types/documentAdapter';
 import { formatPaymentTerms, getAmountDue } from './invoiceCalculator';
 import { isPrintDismissal } from './printDismissal';
 import { formatCurrency } from './quoteCalculator';
+import { imageMimeFromBase64 } from './imageMime';
 import { Platform, Alert } from 'react-native';
 import {
   buildQuotePdfHtml,
@@ -48,6 +49,46 @@ const logoHtmlCache = new Map<string, string>();
 const escapeHtmlAttribute = (value: string) =>
   value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
+/**
+ * Download (or read) an image and return it as base64 with its real mime type,
+ * or null when what came back isn't an image.
+ *
+ * FileSystem.downloadAsync does NOT throw on an HTTP error — it writes the
+ * response BODY to the file and resolves. Nothing checked `status`, so a 404
+ * from Firebase Storage got base64-encoded and embedded as
+ * `data:image/png;base64,<the 404 JSON>`, which every print renderer draws as a
+ * broken-image icon. That is what printed in the logo slot of this account's
+ * customer quotes: the stored logo object is gone (404 Not Found), and the
+ * error body was inlined in its place.
+ *
+ * Both guards matter. The status check catches the ordinary 4xx/5xx; the
+ * magic-byte sniff catches a 200 that isn't an image anyway (a captive portal,
+ * an HTML error page, a zero-byte file). Returning null lets callers fall back
+ * to the business-name lockup — the same outcome remoteLogoUrl gives the
+ * server-side paths.
+ */
+async function fetchInlineImage(
+  uri: string,
+  tmpPrefix: string,
+): Promise<{ base64: string; mime: string } | null> {
+  const isRemote = uri.startsWith('http://') || uri.startsWith('https://');
+  let base64: string;
+  if (isRemote) {
+    const tmp = `${FileSystem.cacheDirectory}${tmpPrefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.img`;
+    const downloaded = await FileSystem.downloadAsync(uri, tmp);
+    if (downloaded.status < 200 || downloaded.status >= 300) return null;
+    base64 = await FileSystem.readAsStringAsync(downloaded.uri, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+  } else {
+    base64 = await FileSystem.readAsStringAsync(uri, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+  }
+  const mime = imageMimeFromBase64(base64);
+  return mime ? { base64, mime } : null;
+}
+
 async function preparePdfImageHtml(
   uri: string,
   alt: string,
@@ -70,20 +111,13 @@ async function preparePdfImageHtml(
   // Mobile print bridges are unreliable with remote images, so download and
   // inline both the company logo and accreditation badges before rendering.
   try {
-    const isRemote = uri.startsWith('http://') || uri.startsWith('https://');
-    let base64: string;
-    if (isRemote) {
-      const tmp = `${FileSystem.cacheDirectory}pdf-brand-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.img`;
-      const downloaded = await FileSystem.downloadAsync(uri, tmp);
-      base64 = await FileSystem.readAsStringAsync(downloaded.uri, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-    } else {
-      base64 = await FileSystem.readAsStringAsync(uri, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-    }
-    const html = `<img src="data:image/png;base64,${base64}" alt="${safeAlt}" class="${className}"${styleAttr} />`;
+    const image = await fetchInlineImage(uri, 'pdf-brand');
+    // Not an image (404 body, error page, unreadable file) — render nothing so
+    // the header falls back to the business-name lockup. Deliberately NOT
+    // cached: a logo that 404s today because of a transient blip, or because
+    // the tradie is mid-re-upload, should be retried on the next export.
+    if (!image) return '';
+    const html = `<img src="data:${image.mime};base64,${image.base64}" alt="${safeAlt}" class="${className}"${styleAttr} />`;
     logoHtmlCache.set(cacheKey, html);
     return html;
   } catch {
@@ -542,22 +576,13 @@ async function prepareReportPhoto(uri: string): Promise<{ dataUri?: string; url?
   if (cached) return { dataUri: cached };
 
   try {
-    const isRemote = uri.startsWith('http://') || uri.startsWith('https://');
-    let base64: string;
-    if (isRemote) {
-      const tmp = `${FileSystem.cacheDirectory}report-photo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.img`;
-      const downloaded = await FileSystem.downloadAsync(uri, tmp);
-      base64 = await FileSystem.readAsStringAsync(downloaded.uri, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-    } else {
-      base64 = await FileSystem.readAsStringAsync(uri, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-    }
-    // image/jpeg decodes fine for both JPEG and PNG payloads in the print
-    // renderers (WebKit / Android print WebView) — same as the logo path.
-    const dataUri = `data:image/jpeg;base64,${base64}`;
+    const image = await fetchInlineImage(uri, 'report-photo');
+    // Same guard as the logo: downloadAsync resolves on a 404 and hands back
+    // the error body, which used to be inlined as if it were the photo. Skip
+    // it instead — a missing photo is better than a broken-image box on a
+    // report the customer keeps.
+    if (!image) return null;
+    const dataUri = `data:${image.mime};base64,${image.base64}`;
     photoDataUriCache.set(uri, dataUri);
     return { dataUri };
   } catch {
