@@ -60,7 +60,7 @@ const PREF_ITEMS: PrefItem[] = [
   {
     key: 'inactivityNudges',
     title: 'Draft Reminders',
-    subtitle: 'Quotes you built but never sent',
+    subtitle: 'Quotes you built but never sent. Max one a day.',
     icon: 'hand-wave',
   },
 ];
