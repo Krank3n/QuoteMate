@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { coverageSanePurchaseCount, coverageFloorPurchaseCount } from './purchaseCoverage';
+import { coverageSanePurchaseCount, coverageFloorPurchaseCount, recoverPackInfo } from './purchaseCoverage';
+import { parsePackInfo } from './parsePackInfo';
 
 describe('coverageSanePurchaseCount', () => {
   describe('the QU-178011 failures it exists to fix', () => {
@@ -234,5 +235,134 @@ describe('coverageFloorPurchaseCount', () => {
     expect(
       coverageFloorPurchaseCount({ requirement: 0, name: 'Treated Pine Post', requirementUnit: 'each' }),
     ).toBeNull();
+  });
+});
+
+/**
+ * QU-178692 (fencing quote, 17 Aug 2026). The same "Concrete Mix" product
+ * appeared twice in one quote and got two different answers:
+ *
+ *   End Post & Site Setup — requiredQty 40 kg,  packSize 20 kg → 2 packs   ✓
+ *   Fence Bay (2.4m)      — requiredQty 440 kg, packSize null  → 11 packs  ✗
+ *
+ * 11 × 20 kg = 220 kg against a 440 kg requirement: half the concrete for an
+ * 11-bay fence. The reconcile model even stated the shortfall in its own
+ * reasoning — "20kg per bag, 11 bags total 220kg" — but because the chosen
+ * candidate carried no structured pack size, coverageFloorPurchaseCount had
+ * nothing to divide by, returned null, and the under-buy went through.
+ */
+describe('recoverPackInfo — the QU-178692 under-buy', () => {
+  const CONCRETE = 'Concrete Mix';
+  const MODEL_REASONING = '20kg per bag, 11 bags total 220kg';
+
+  const floorFor = (sources: Parameters<typeof recoverPackInfo>[0], requirement = 440) => {
+    const { packSize, packUnit } = recoverPackInfo(sources, parsePackInfo);
+    return coverageFloorPurchaseCount({
+      requirement,
+      name: CONCRETE,
+      requirementUnit: 'kg',
+      packSize,
+      packUnit,
+    });
+  };
+
+  it('recovers the pack size the model stated in its own reasoning', () => {
+    expect(recoverPackInfo({ rowDescription: MODEL_REASONING }, parsePackInfo)).toEqual({
+      packSize: 20,
+      packUnit: 'kg',
+    });
+  });
+
+  it('had no floor at all before recovery — this is the gap that shipped', () => {
+    // What the pipeline passed pre-fix: candidate carried no pack fields, so
+    // nothing to divide by, so no floor, so the model's 11 stood unchecked.
+    expect(
+      coverageFloorPurchaseCount({
+        requirement: 440,
+        name: CONCRETE,
+        requirementUnit: 'kg',
+        packSize: undefined,
+        packUnit: undefined,
+      }),
+    ).toBeNull();
+  });
+
+  it('turns the unguarded 11 bags into a floor of 22', () => {
+    expect(floorFor({ rowDescription: MODEL_REASONING })).toBe(22);
+  });
+
+  it('recovers from the row name when the description says nothing', () => {
+    expect(floorFor({ rowName: 'Concrete Mix 20kg' })).toBe(22);
+  });
+
+  it('recovers pack info already stamped on the row by an earlier pass', () => {
+    expect(floorFor({ rowPackSize: 20, rowPackUnit: 'kg' })).toBe(22);
+  });
+
+  it('leaves the sibling 40 kg row at 2 bags', () => {
+    expect(floorFor({ rowDescription: '20kg per bag' }, 40)).toBe(2);
+  });
+
+  describe('precedence — most trustworthy source wins', () => {
+    it('prefers the candidate’s structured pack size over any parsed text', () => {
+      const { packSize } = recoverPackInfo(
+        {
+          candidatePackSize: 40,
+          candidatePackUnit: 'kg',
+          candidateProductName: 'Concrete Mix 20kg',
+          rowDescription: MODEL_REASONING,
+        },
+        parsePackInfo,
+      );
+      expect(packSize).toBe(40);
+    });
+
+    it('prefers the candidate product name over the row’s own text', () => {
+      const { packSize } = recoverPackInfo(
+        { candidateProductName: 'Rapid Set Concrete Mix 25kg', rowDescription: MODEL_REASONING },
+        parsePackInfo,
+      );
+      expect(packSize).toBe(25);
+    });
+  });
+
+  describe('the estimate branch — same gap, one decision-type over', () => {
+    // reconcile can return decision='estimate' when no candidate matched. That
+    // branch ran only the over-buy clamp, and coverageSanePurchaseCount bails
+    // out on anything that is not a fastener or a liquid — so an estimated
+    // concrete row had NO guard in either direction.
+    it('clamps nothing for a bulk material, leaving the floor as the only guard', () => {
+      expect(
+        coverageSanePurchaseCount({ requirement: 440, name: CONCRETE, perPurchasePrice: 12.9 }),
+      ).toBeNull();
+    });
+
+    it('floors an estimated concrete row off the model’s coverage note', () => {
+      expect(floorFor({ rowDescription: 'estimated 20kg bags' })).toBe(22);
+    });
+  });
+
+  describe('guards that must not regress', () => {
+    it('recovers nothing when no source carries a size', () => {
+      expect(recoverPackInfo({ rowName: CONCRETE, rowDescription: 'Great value' }, parsePackInfo)).toEqual({
+        packSize: undefined,
+        packUnit: undefined,
+      });
+    });
+
+    it('still refuses to divide when the recovered unit cannot match the requirement', () => {
+      // "60 each" concrete bags against a 20kg SKU must NOT become 3 — the
+      // requirement is already counted in bags. Recovery does not weaken this.
+      const { packSize, packUnit } = recoverPackInfo({ rowDescription: '20kg per bag' }, parsePackInfo);
+      expect(
+        coverageFloorPurchaseCount({
+          requirement: 60,
+          name: CONCRETE,
+          requirementUnit: 'each',
+          packSize,
+          packUnit,
+        }),
+      ).toBeNull();
+    });
   });
 });

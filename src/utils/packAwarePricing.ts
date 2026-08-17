@@ -44,7 +44,16 @@ export function applyPackAwarePricing(
   let packSize = product.packSize;
   let packUnit = product.packUnit as Material['unit'] | undefined;
 
-  const requiredUnitNormalised = PACK_UNIT_EQUIVALENT[material.unit];
+  // Compare against the REQUIREMENT's unit, not `material.unit` — the two stop
+  // agreeing the moment a first pass converts the row, because that pass
+  // overwrites `unit` with a purchase unit ('pack'/'each'). Reading `unit` here
+  // made this function non-idempotent: re-pricing an already-converted row saw
+  // 'pack' → 'each', found it incompatible with the product's 'kg', and fell to
+  // the no-division branch — which sets quantity = requiredQty outright. On
+  // QU-178692's successor that turned a 440 kg concrete requirement into 440
+  // BAGS ($4,048 of quick-set for an 11-bay fence). requiredUnit is captured
+  // just above precisely so the original unit survives the mutation.
+  const requiredUnitNormalised = PACK_UNIT_EQUIVALENT[material.requiredUnit ?? material.unit];
 
   // Prefer pack info compatible with the material requirement. Scrapers can
   // surface secondary coverage/yield values (e.g. concrete bag description says
@@ -70,7 +79,7 @@ export function applyPackAwarePricing(
   const packUnitNormalised = packUnit ? PACK_UNIT_EQUIVALENT[packUnit] : undefined;
   const nominalLengthPerEach = firstMetreLength(`${material.name} ${material.searchTerm || ''}`);
   const lengthEachToMetres =
-    material.unit === 'each' &&
+    (material.requiredUnit ?? material.unit) === 'each' &&
     packUnitNormalised === 'm' &&
     nominalLengthPerEach &&
     /track|gutter|downpipe|pipe|conduit|rail|length/i.test(`${material.name} ${material.searchTerm || ''} ${productNameLower}`);

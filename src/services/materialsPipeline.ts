@@ -24,7 +24,7 @@ import { supplierPriceForGstMode, roundToTwoDecimals } from '../utils/quoteCalcu
 import { keepSupplierPriceInclusive } from '../../shared/document';
 import { applyPackAwarePricing } from '../utils/packAwarePricing';
 import { parsePackInfo } from '../utils/parsePackInfo';
-import { coverageSanePurchaseCount, coverageFloorPurchaseCount } from '../utils/purchaseCoverage';
+import { coverageSanePurchaseCount, coverageFloorPurchaseCount, recoverPackInfo } from '../utils/purchaseCoverage';
 import {
   parseJobAreaM2,
   geometricSanePieceCount,
@@ -454,8 +454,11 @@ type ReconcileOutcome = 'applied' | 'estimated' | 'rejected' | 'skipped';
  * pass and the rejected-row rescue pass so both apply identical semantics
  * (candidate enrichment, coverage floor against under-buys, over-buy clamp,
  * 2dp unit price with derived line total).
+ *
+ * Exported for tests — this is where an under-buy is caught or missed, so it
+ * needs coverage independent of the network-bound pipeline around it.
  */
-function applyReconcileResult(
+export function applyReconcileResult(
   m: Material,
   r: ReconcileResult,
   cands: ScraperProduct[],
@@ -476,9 +479,39 @@ function applyReconcileResult(
     r.purchaseCount > 0
   ) {
     if (m.requiredQty === undefined) m.requiredQty = m.quantity;
-    // Deterministic coverage guard — no candidate matched, so no pack
-    // size is known; relies on the estimated unit price being bulk.
+    // Capture the requirement's own unit before `m.unit` is overwritten with a
+    // purchase unit below — a second reconcile pass (rescueRejectedRows) would
+    // otherwise compare the coverage guards against 'pack' instead of 'kg'.
+    if (m.requiredUnit === undefined) m.requiredUnit = m.unit;
+    // No candidate matched, so there is no scraped pack size — recover one from
+    // the row and from the model's own coverage note, as the apply branch does.
+    const { packSize: estPackSize, packUnit: estPackUnit } = recoverPackInfo(
+      {
+        rowPackSize: m.packSize,
+        rowPackUnit: m.packUnit,
+        rowDescription: r.coverageNote || r.reasoning,
+        rowName: m.name,
+      },
+      parsePackInfo,
+    );
     let estPurchaseCount = r.purchaseCount;
+    // Coverage FLOOR against under-buys. This branch only ever ran the
+    // over-buy clamp below, so an ESTIMATED row could be under-bought by any
+    // factor with nothing to catch it — the same gap that let the apply branch
+    // ship half the concrete on QU-178692, just one decision-type over.
+    const estFloor = coverageFloorPurchaseCount({
+      requirement: m.requiredQty,
+      correctedRequirement: r.correctedRequirement,
+      name: m.name,
+      requirementUnit: m.requiredUnit,
+      packSize: estPackSize,
+      packUnit: estPackUnit,
+    });
+    if (estFloor !== null && estFloor > estPurchaseCount) estPurchaseCount = estFloor;
+    // Over-buy clamp. Deliberately NOT given the recovered pack size: without a
+    // matched candidate that size can come from model prose, and this guard's
+    // price-based assumptions are what QU-178011 relies on. Floor raises on
+    // recovered evidence; the clamp keeps its own.
     const estSane = coverageSanePurchaseCount({
       requirement: m.requiredQty,
       name: m.name,
@@ -528,6 +561,9 @@ function applyReconcileResult(
       if (chosen.stockCheckedAt) m.stockCheckedAt = chosen.stockCheckedAt;
     }
     if (m.requiredQty === undefined) m.requiredQty = m.quantity;
+    // As in the estimate branch: pin the requirement's unit before `m.unit`
+    // becomes a purchase unit, so a rescue pass still compares against 'kg'.
+    if (m.requiredUnit === undefined) m.requiredUnit = m.unit;
     const originalCount = r.purchaseCount;
     // Per-purchase price: prefer the chosen candidate's real shelf price,
     // else the LLM's implied unit price (its total ÷ its count).
@@ -542,13 +578,21 @@ function applyReconcileResult(
     // (e.g. 19 tubs of decking screws when 1 covers a 10 m² deck). Uses
     // the candidate's real pack size when known, else a conservative
     // bulk assumption for high-priced fastener/liquid rows only.
-    const candidateParsedPack = parsePackInfo(chosen?.productName);
-    const candidatePackSize =
-      (chosen as { packSize?: number } | undefined)?.packSize ??
-      candidateParsedPack?.packSize;
-    const candidatePackUnit =
-      (chosen as { packUnit?: string } | undefined)?.packUnit ??
-      candidateParsedPack?.packUnit;
+    // Without a pack size the coverage FLOOR below returns null for any bulk
+    // (kg/L/m) requirement, so the model's purchaseCount stands unchecked and a
+    // row can be under-bought by any factor — see recoverPackInfo (QU-178692).
+    const { packSize: candidatePackSize, packUnit: candidatePackUnit } = recoverPackInfo(
+      {
+        candidatePackSize: (chosen as { packSize?: number } | undefined)?.packSize,
+        candidatePackUnit: (chosen as { packUnit?: string } | undefined)?.packUnit,
+        candidateProductName: chosen?.productName,
+        rowPackSize: m.packSize,
+        rowPackUnit: m.packUnit,
+        rowDescription: m.description,
+        rowName: m.name,
+      },
+      parsePackInfo,
+    );
     // Coverage FLOOR against reconcile under-buys: the LLM sometimes
     // returns a purchaseCount its own reasoning contradicts (3 posts
     // for a 7-post requirement). Raise to the minimum that covers the
@@ -571,6 +615,20 @@ function applyReconcileResult(
     const purchaseCount = sane !== null && sane < flooredCount ? sane : flooredCount;
     m.quantity = purchaseCount;
     if (r.purchaseUnit) m.unit = r.purchaseUnit as Material['unit'];
+    // Record the pack size when it actually explains the count, so the row
+    // carries its own arithmetic ("20 kg/pack (need 440 kg)") the way the
+    // pack-aware path's rows do. Without this a reconciled row shows a bare
+    // quantity and there is no way — in the UI or on a re-price — to tell a
+    // correct buy from an under-buy.
+    if (
+      candidatePackSize &&
+      candidatePackUnit &&
+      m.requiredQty &&
+      Math.max(1, Math.ceil(m.requiredQty / candidatePackSize)) === purchaseCount
+    ) {
+      m.packSize = candidatePackSize;
+      m.packUnit = candidatePackUnit as Material['unit'];
+    }
     // Establish a 2dp unit price and derive the line total from it so
     // quantity × price === totalPrice always holds — this also kills the
     // float drift that printed $182.22 next to "96 × $1.90".
