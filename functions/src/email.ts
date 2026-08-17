@@ -1566,6 +1566,11 @@ interface QuoteEmailData {
   subtotal: number;
   gst: number;
   total: number;
+  // Travel surcharge: the percentage the tradie set, and its dollar value
+  // computed off the RAW subtotal. See PricingRowsInput for why the amount is
+  // passed rather than derived from `subtotal` above.
+  travelAdjustment?: number;
+  travelAdjustmentAmount?: number;
   // false = business not GST-registered: hide the GST row and the
   // "(inc GST)" total label, and show a "No GST has been charged" note.
   gstRegistered?: boolean;
@@ -1961,6 +1966,15 @@ export interface PricingRowsInput {
   // instead of in a second card that repeats the same number.
   dueDate?: string; // ISO date string
   invoiceNumber?: string;
+  // Travel surcharge. `travelAdjustment` is the PERCENTAGE the tradie set
+  // (7 = +7%), used for the label only.
+  travelAdjustment?: number;
+  // The surcharge in dollars, computed by the caller rather than derived here.
+  // It is a percentage of the RAW subtotal (materials + labour, pre-markup —
+  // see documentCalculator), while `subtotal` above is the DISPLAY subtotal
+  // with markup folded into materials when the tradie hides it. Deriving it
+  // from the wrong one of those two overstates the charge.
+  travelAdjustmentAmount?: number;
 }
 
 export function renderPricingRows(input: PricingRowsInput): string {
@@ -1978,6 +1992,16 @@ export function renderPricingRows(input: PricingRowsInput): string {
   const showMaterials = showsPerLineMoney(detail);
   const showLabor = showsPerLineMoney(detail);
   const showSubtotalRow = showsLineItems(detail);
+  // The travel surcharge is part of the price build-up, so it belongs wherever
+  // Subtotal does: in 'total' there is nothing but the total, but in the other
+  // two the customer can see Subtotal and Total and this is the difference
+  // between them. Omitting it left an unexplained gap — a real quote showed
+  // Subtotal $6,021.85 above Total $6,406.73 with $384.88 charged and never
+  // named. Same gate and same position (after Subtotal, before GST) as the PDF
+  // in shared/pdf/htmlBuilders.ts, so the body and the attachment agree.
+  const travelPercent = Number(input.travelAdjustment) || 0;
+  const travelAmount = Number(input.travelAdjustmentAmount) || 0;
+  const showTravel = showSubtotalRow && travelPercent > 0 && travelAmount > 0;
   const row = (label: string, value: string, valueColor = '#111827') => `
             <tr>
               <td style="padding:11px 0;color:#6b7280;font-size:14px;border-bottom:1px solid #eef0f3;">${label}</td>
@@ -2004,7 +2028,7 @@ export function renderPricingRows(input: PricingRowsInput): string {
   // to break down. Rendering the "Summary" header over an empty box looked
   // like a bug, so the card collapses to the total on its own. Mirrors the row
   // conditions below exactly — a row must never render outside this guard.
-  const hasBreakdownRows = showMaterials || showLabor || showSubtotalRow || gstRegistered || hasDeposit;
+  const hasBreakdownRows = showMaterials || showLabor || showSubtotalRow || showTravel || gstRegistered || hasDeposit;
   const breakdownSection = hasBreakdownRows
     ? `
       <tr>
@@ -2014,6 +2038,7 @@ export function renderPricingRows(input: PricingRowsInput): string {
             ${showMaterials ? row('Materials', formatMoney(materialsSubtotal)) : ''}
             ${showLabor ? row('Labour', formatMoney(laborTotal)) : ''}
             ${showSubtotalRow ? row('Subtotal', formatMoney(subtotal)) : ''}
+            ${showTravel ? row(`Travel adjustment (${travelPercent}%)`, formatMoney(travelAmount)) : ''}
             ${gstRegistered ? row('GST', formatMoney(gst)) : ''}
             ${hasDeposit ? `
             <tr>
@@ -2251,6 +2276,8 @@ export function buildDocumentEmailHtml(data: DocumentEmailData): string {
     priceDetail: data.priceDetail,
     showMaterialCosts: data.showMaterialCosts,
     showLaborCosts: data.showLaborCosts,
+    travelAdjustment: data.travelAdjustment,
+    travelAdjustmentAmount: data.travelAdjustmentAmount,
     dueDate: isInvoice ? data.dueDate : undefined,
     invoiceNumber: isInvoice ? data.invoiceNumber : undefined,
   });
@@ -2358,6 +2385,11 @@ interface InvoiceEmailData {
   subtotal: number;
   gst: number;
   total: number;
+  // Travel surcharge: the percentage the tradie set, and its dollar value
+  // computed off the RAW subtotal. See PricingRowsInput for why the amount is
+  // passed rather than derived from `subtotal` above.
+  travelAdjustment?: number;
+  travelAdjustmentAmount?: number;
   // See QuoteEmailData.gstRegistered.
   gstRegistered?: boolean;
   invoiceNumber?: string;
