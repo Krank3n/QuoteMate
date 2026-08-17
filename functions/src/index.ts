@@ -32,6 +32,7 @@ import {
   canSendEmail,
   formatMoney,
   safeBrandColor,
+  remoteLogoUrl,
 } from './email';
 import { listAllAuthUsers } from './authUsers.helpers';
 import { isUnreachableEmail, reEngagementVerdict } from './reEngagement.helpers';
@@ -6472,7 +6473,9 @@ export const getQuoteForAcceptance = functions.https.onRequest((req, res) => {
           abn: businessSettings?.abn || null,
           address: businessSettings?.address || null,
           website: businessSettings?.website || null,
-          logoUrl: businessSettings?.logoStorageUrl || businessSettings?.logoUri || null,
+          // A device-local file:// logo can't be fetched by the customer's
+          // browser — send null so the page renders its initial-tile fallback.
+          logoUrl: remoteLogoUrl(businessSettings?.logoStorageUrl || businessSettings?.logoUri) || null,
           brandColor: businessSettings?.brandColor || null,
         },
       });
@@ -6737,7 +6740,7 @@ export const quoteAcceptancePage = functions.https.onRequest(async (req, res) =>
     const businessSettings = settingsDoc.exists ? settingsDoc.data() : null;
     const businessName = businessSettings?.businessName || 'Your Trade Business';
     const brandColor = businessSettings?.brandColor || null;
-    const logoUrl = businessSettings?.logoStorageUrl || businessSettings?.logoUri || null;
+    const logoUrl = remoteLogoUrl(businessSettings?.logoStorageUrl || businessSettings?.logoUri) || null;
 
     // Check if already responded
     if (foundQuote.respondedAt) {
@@ -7024,8 +7027,12 @@ export function generateConfirmationPage(
       ? `No hard feelings — if something changes, just reply to the original email.`
       : '';
 
-  const logoHtml = logoUrl
-    ? `<img src="${esc(logoUrl)}" alt="${esc(businessName || '')}" class="logo" />`
+  // Guarded here as well as at the caller: a device-local file:// logo would
+  // print a broken-image box above the confirmation, and this function is
+  // exported and called from several paths.
+  const fetchableLogo = remoteLogoUrl(logoUrl);
+  const logoHtml = fetchableLogo
+    ? `<img src="${esc(fetchableLogo)}" alt="${esc(businessName || '')}" class="logo" />`
     : '';
 
   return `<!DOCTYPE html>

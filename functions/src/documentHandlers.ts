@@ -18,6 +18,7 @@ import * as admin from 'firebase-admin';
 import * as functions from 'firebase-functions';
 import {
   buildQuoteEmailHtml,
+  remoteLogoUrl,
   buildInvoiceEmailHtml,
   sendEmail,
   getUserEmail,
@@ -422,7 +423,9 @@ function applyHideMarkupForDisplay(q: any, businessSettings?: any) {
 }
 
 function businessLogoHtml(business: BusinessSettings): string {
-  const url = business.logoStorageUrl || business.logoUri || '';
+  // A device-local file:// path is unreachable from the PDF renderer, so it
+  // would print a broken-image box on the customer's quote.
+  const url = remoteLogoUrl(business.logoStorageUrl || business.logoUri);
   if (!url) return '';
   return `<img src="${url}" alt="${business.businessName || 'Business'}" class="logo" />`;
 }
@@ -765,7 +768,7 @@ async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailRes
     : `https://us-central1-hansendev.cloudfunctions.net/quoteAcceptancePage?token=${token}`;
 
   const photoUrls = (quote.photos || []).map((p: any) => p.storageUrl).filter(Boolean);
-  const logoUrl = business.logoStorageUrl || business.logoUri || '';
+  const logoUrl = remoteLogoUrl(business.logoStorageUrl || business.logoUri) || '';
   const displayQuote = applyHideMarkupForDisplay(quote, business);
   const emailMaterials = displayQuote.materials.map((m: any) => ({
     name: m.name, quantity: m.quantity, unit: m.unit,
@@ -957,7 +960,7 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
     }
   }
 
-  const logoUrl = business.logoStorageUrl || business.logoUri || '';
+  const logoUrl = remoteLogoUrl(business.logoStorageUrl || business.logoUri) || '';
   const emailMaterials = (invoice.materials || []).map((m: any) => ({
     name: m.name, quantity: m.quantity, unit: m.unit,
     totalPrice: m.totalPrice || 0, section: m.section,

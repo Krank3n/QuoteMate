@@ -1610,6 +1610,21 @@ function escapeHtml(str: string): string {
 export const DEFAULT_BRAND_COLOR = '#059669';
 
 /**
+ * A logo is only usable on a customer-facing surface if the recipient's device
+ * can actually fetch it. Some accounts hold a device-local `file://` path (the
+ * phone's own copy, saved before upload) or a `data:` URI, and both render as
+ * a broken-image icon in the email and on the acceptance page — worse than the
+ * business-name fallback those templates already have.
+ *
+ * Same rule the site-photos section has always applied; the logo just never
+ * got it.
+ */
+export function remoteLogoUrl(url?: string | null): string | undefined {
+  const trimmed = (url || '').trim();
+  return /^https?:\/\//i.test(trimmed) ? trimmed : undefined;
+}
+
+/**
  * The tradie's brand colour lands in `style="background:${accent}"` and in a
  * `<style>` block on the acceptance pages, so a stray quote or `</style>` in
  * the stored value would break out of the attribute. The app only ever writes
@@ -1634,8 +1649,11 @@ export function formatMoney(amount: number): string {
 
 // Light-themed wrapper for client-facing quote emails (business-branded, no QM logo)
 function wrapQuoteEmailTemplate(content: string, options: { brandColor?: string; businessName?: string; logoUrl?: string; preheader?: string }): string {
-  const { brandColor: rawBrandColor, businessName = '', logoUrl, preheader } = options;
+  const { brandColor: rawBrandColor, businessName = '', preheader } = options;
   const brandColor = safeBrandColor(rawBrandColor);
+  // Guarded here rather than at each caller so every email through this shell
+  // degrades to the business-name lockup instead of a broken-image icon.
+  const logoUrl = remoteLogoUrl(options.logoUrl);
 
   const logoSection = logoUrl
     ? `<tr><td align="center" style="padding:0 0 14px;">

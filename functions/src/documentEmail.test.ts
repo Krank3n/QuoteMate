@@ -10,6 +10,7 @@ import {
   buildQuoteReminderEmailHtml,
   formatMoney,
   safeBrandColor,
+  remoteLogoUrl,
 } from './email';
 import { generateConfirmationPage } from './index';
 
@@ -107,6 +108,35 @@ describe('safeBrandColor', () => {
     expect(quote({ business: { ...business, brandColor: hostile } })).not.toContain('onmouseover');
     expect(generateConfirmationPage('accepted', 'Thanks!', 'Hansen Fencing', hostile))
       .not.toContain('onmouseover');
+  });
+});
+
+describe('remoteLogoUrl', () => {
+  it('keeps a logo the recipient can actually fetch', () => {
+    expect(remoteLogoUrl('https://storage.googleapis.com/x/logo.png'))
+      .toBe('https://storage.googleapis.com/x/logo.png');
+    expect(remoteLogoUrl('  http://example.test/logo.png  '))
+      .toBe('http://example.test/logo.png');
+  });
+
+  it('drops anything the recipient cannot fetch', () => {
+    // Both exist on real accounts today and render as a broken-image icon.
+    expect(remoteLogoUrl('file:///var/mobile/Containers/Data/logo.png')).toBeUndefined();
+    expect(remoteLogoUrl('data:image/png;base64,iVBORw0KGgo=')).toBeUndefined();
+    expect(remoteLogoUrl('content://media/external/images/1')).toBeUndefined();
+    expect(remoteLogoUrl('')).toBeUndefined();
+    expect(remoteLogoUrl(undefined)).toBeUndefined();
+    expect(remoteLogoUrl(null)).toBeUndefined();
+  });
+
+  it('falls back to the business-name lockup rather than a broken image', () => {
+    const withLocal = quote({ business: { ...business, logoUrl: 'file:///var/mobile/logo.png' } });
+    expect(withLocal).not.toContain('file:///var/mobile/logo.png');
+    expect(withLocal).not.toContain('<img');
+    expect(withLocal).toContain('Hansen Fencing');
+
+    const withRemote = quote({ business: { ...business, logoUrl: 'https://cdn.test/logo.png' } });
+    expect(withRemote).toContain('<img src="https://cdn.test/logo.png"');
   });
 });
 
@@ -320,6 +350,14 @@ describe('generateConfirmationPage', () => {
     );
     expect(html).not.toContain('<script>alert(1)</script>');
     expect(html).not.toContain('"onerror="alert(1)');
+  });
+
+  it('drops an unfetchable logo instead of printing a broken image', () => {
+    const html = generateConfirmationPage(
+      'accepted', 'Thanks!', 'Hansen Fencing', null, 'file:///var/mobile/logo.png',
+    );
+    expect(html).not.toContain('file:///var/mobile/logo.png');
+    expect(html).not.toContain('<img');
   });
 
   it('escapes the message body', () => {
