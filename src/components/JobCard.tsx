@@ -69,7 +69,7 @@ const TIMELINE_SLOTS: Array<{ slot: JobSubStatusSlot }> = [
   { slot: 'accepted' },
   { slot: 'scheduled' },
   { slot: 'in_progress' },
-  { slot: 'paid' },
+  { slot: 'completed' },
 ];
 
 interface JobCardProps {
@@ -265,7 +265,11 @@ export const JobCard = React.memo(function JobCard({
       : scheduled
     : null;
   const status = pickStageStatus(job, primaryDoc);
-  const showPaymentChip = shouldShowPaymentChip(primaryDoc);
+  // The rail talks about the work only, so the money has to reach the card
+  // through the chip — including on a cash job whose only record of it is
+  // the Job stage. See PaymentContext.
+  const paymentContext = { jobIsPaid: job.stage === 'paid' };
+  const showPaymentChip = shouldShowPaymentChip(primaryDoc, paymentContext);
   const handlePaymentChipPress = (doc: Document, e?: any) => {
     // stopPropagation so the chip records a payment instead of bubbling
     // to Card.onPress and opening the job — same guard the headline
@@ -440,6 +444,7 @@ export const JobCard = React.memo(function JobCard({
               <PaymentChip
                 doc={primaryDoc as Document}
                 compact
+                context={paymentContext}
                 onPress={
                   canRecordPaymentFor(primaryDoc) ? handlePaymentChipPress : undefined
                 }

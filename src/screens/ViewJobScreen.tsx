@@ -916,6 +916,7 @@ export function ViewJobScreen() {
             onStagePress={setDocStageSheetDoc}
             onPaymentPress={handlePaymentChipPress}
             onConvertToInvoice={handleConvertToInvoice}
+            jobIsPaid={job.stage === 'paid'}
             extra={<>{serviceReportRows}{reeceOrderEntry}</>}
           />
         ) : null}
@@ -937,6 +938,7 @@ export function ViewJobScreen() {
             onStagePress={setDocStageSheetDoc}
             onPaymentPress={handlePaymentChipPress}
             onConvertToInvoice={handleConvertToInvoice}
+            jobIsPaid={job.stage === 'paid'}
             extra={<>{serviceReportRows}{reeceOrderEntry}</>}
           />
         ) : null}
@@ -1094,6 +1096,9 @@ interface ScopeBlockProps {
   /** Optional slot rendered between the primary doc card and the
    *  "Also on this job" section. Used for the Order-from-Reece entry. */
   extra?: React.ReactNode;
+  /** The Job's stage reads `paid` — the only record a cash job has of it,
+   *  now that the timeline rail speaks about work alone. */
+  jobIsPaid?: boolean;
 }
 
 function ScopeBlock({
@@ -1104,6 +1109,7 @@ function ScopeBlock({
   onPaymentPress,
   onConvertToInvoice,
   extra,
+  jobIsPaid,
 }: ScopeBlockProps) {
   const styles = useStyles();
   const themeColors = useThemeColors();
@@ -1137,6 +1143,7 @@ function ScopeBlock({
         onEdit={onEdit}
         onStagePress={onStagePress}
         onPaymentPress={onPaymentPress}
+        paymentContext={{ jobIsPaid }}
       />
       {extra}
       {secondaryDocs.length > 0 ? (

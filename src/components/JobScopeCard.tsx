@@ -36,7 +36,7 @@ import { hoursForDisplay, rateForDisplay, valueToHours, rateToHourly } from '../
 import { resolvePriceDetail } from '../../shared/document/priceDetail';
 import { calculateDueDate, formatPaymentTerms } from '../utils/invoiceCalculator';
 import { stageMetaFor } from './StageSheet';
-import { PaymentChip, shouldShowPaymentChip } from './PaymentChip';
+import { PaymentChip, shouldShowPaymentChip, type PaymentContext } from './PaymentChip';
 import { selectionTap } from '../utils/haptics';
 import { previewDocumentPDF } from '../utils/pdfGenerator';
 import { useStore } from '../store/useStore';
@@ -59,6 +59,9 @@ interface JobScopeCardProps {
   onEdit: (doc: Document, step: ScopeStep) => void;
   onStagePress?: (doc: Document) => void;
   onPaymentPress?: (doc: Document) => void;
+  /** What the Job knows and this document can't — see PaymentContext. On a
+   *  cash job the Job stage is the only record that the money came in. */
+  paymentContext?: PaymentContext;
 }
 
 // Android needs explicit opt-in for LayoutAnimation, otherwise the
@@ -143,6 +146,7 @@ export function JobScopeCard({
   onEdit,
   onStagePress,
   onPaymentPress,
+  paymentContext,
 }: JobScopeCardProps) {
   const styles = useStyles();
   const themeColors = useThemeColors();
@@ -274,8 +278,8 @@ export function JobScopeCard({
               </Text>
             </Pressable>
           ) : null}
-          {shouldShowPaymentChip(doc) ? (
-            <PaymentChip doc={doc} onPress={onPaymentPress} />
+          {shouldShowPaymentChip(doc, paymentContext) ? (
+            <PaymentChip doc={doc} context={paymentContext} onPress={onPaymentPress} />
           ) : null}
         </View>
         </View>

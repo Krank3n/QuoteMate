@@ -56,7 +56,7 @@ const TIMELINE_SLOTS: Array<{ slot: JobSubStatusSlot }> = [
   { slot: 'accepted' },
   { slot: 'scheduled' },
   { slot: 'in_progress' },
-  { slot: 'paid' },
+  { slot: 'completed' },
 ];
 
 function openMapsFor(address: string) {

@@ -299,13 +299,19 @@ export function formatEventAmount(amount?: number): string {
  * timeline pill. Each slot can render multiple sub-statuses (e.g. the
  * "quote" slot covers Draft → Quote → Quote Sent) which getJobSubStatus
  * picks between based on the current stage and primary doc.
+ *
+ * The rail measures WORK, so it ends at `completed`. `paid` used to own
+ * that last slot with `completed` squatting in it, which meant marking a
+ * job paid slid the pill to the end of the job — a claim about the work
+ * that money isn't entitled to make, and flatly wrong on the jobs tradies
+ * get paid for up front. Money has its own pill: see PaymentChip.
  */
 export type JobSubStatusSlot =
   | 'quote'
   | 'accepted'
   | 'scheduled'
   | 'in_progress'
-  | 'paid';
+  | 'completed';
 
 export interface JobSubStatus {
   slot: JobSubStatusSlot;
@@ -374,6 +380,50 @@ export function documentHasOutrunJobStage(
   return !!invoiceWording(primaryDoc);
 }
 
+const COMPLETED_STATUS: JobSubStatus = {
+  slot: 'completed',
+  label: 'Completed',
+  icon: 'flag-checkered',
+};
+
+/** The booking, worded for the pill: "Wed 23 Apr · 9am". */
+function scheduledStatus(job: Job): JobSubStatus {
+  const ms = job.scheduledStartDate;
+  const date = formatScheduledDate(ms);
+  const time = formatScheduledTime(ms);
+  if (date && time) {
+    // "9:00 am" → "9am" so the pill stays compact on small screens.
+    const compactTime = time.replace(/^(\d+):00\s/, '$1');
+    return { slot: 'scheduled', label: `${date} · ${compactTime}`, icon: 'calendar-clock' };
+  }
+  if (date) {
+    return { slot: 'scheduled', label: date, icon: 'calendar-check-outline' };
+  }
+  return { slot: 'scheduled', label: 'Scheduled', icon: 'calendar-check-outline' };
+}
+
+/**
+ * Where a PAID job's work actually got to.
+ *
+ * `paid` is a fact about money, and the money can land at any point in the
+ * job — plenty of tradies take the lot up front, so the stage arrives while
+ * the work is still a date in the diary. The rail therefore reads the
+ * write-once stage stamps, which record where the work genuinely reached,
+ * and leaves the money to PaymentChip.
+ *
+ * Walked from the far end of the ladder back, so the furthest point the job
+ * ever reached is the one that shows.
+ */
+function workflowStatusOfPaidJob(job: Job): JobSubStatus {
+  if (job.completedAt || job.completedDate) return COMPLETED_STATUS;
+  if (job.inProgressAt) return { slot: 'in_progress', label: 'In Progress', icon: 'hammer-wrench' };
+  if (job.scheduledStartDate || job.scheduledAt) return scheduledStatus(job);
+  // Nothing but money: a job paid straight off the quote, with no work
+  // stamps at all. Acceptance is the one thing the payment does prove —
+  // the customer said yes — so the rail stops there rather than guessing.
+  return { slot: 'accepted', label: 'Accepted', icon: 'handshake-outline' };
+}
+
 export function getJobSubStatus(
   job: Job,
   primaryDoc?: Document | null,
@@ -406,18 +456,7 @@ export function getJobSubStatus(
     return { slot: 'accepted', label: 'Accepted', icon: 'handshake-outline' };
   }
   if (stage === 'scheduled') {
-    const ms = job.scheduledStartDate;
-    const date = formatScheduledDate(ms);
-    const time = formatScheduledTime(ms);
-    if (date && time) {
-      // "9:00 am" → "9am" so the pill stays compact on small screens.
-      const compactTime = time.replace(/^(\d+):00\s/, '$1');
-      return { slot: 'scheduled', label: `${date} · ${compactTime}`, icon: 'calendar-clock' };
-    }
-    if (date) {
-      return { slot: 'scheduled', label: date, icon: 'calendar-check-outline' };
-    }
-    return { slot: 'scheduled', label: 'Scheduled', icon: 'calendar-check-outline' };
+    return scheduledStatus(job);
   }
   if (stage === 'in_progress') {
     if (docStage === 'invoice_sent' || docStage === 'partially_paid') {
@@ -426,10 +465,10 @@ export function getJobSubStatus(
     return { slot: 'in_progress', label: 'In Progress', icon: 'hammer-wrench' };
   }
   if (stage === 'completed') {
-    return { slot: 'paid', label: 'Completed', icon: 'flag-checkered' };
+    return COMPLETED_STATUS;
   }
   if (stage === 'paid') {
-    return { slot: 'paid', label: 'Paid', icon: 'check-decagram-outline' };
+    return workflowStatusOfPaidJob(job);
   }
 
   if (asInvoice) return { slot: 'quote', ...asInvoice };
@@ -442,7 +481,7 @@ const SLOT_MIN_STAGE_ORDINAL: Record<JobSubStatusSlot, number> = {
   accepted: 2,      // STAGE_ORDER['accepted']
   scheduled: 3,     // STAGE_ORDER['scheduled']
   in_progress: 4,   // STAGE_ORDER['in_progress']
-  paid: 6,          // STAGE_ORDER['paid']
+  completed: 5,     // STAGE_ORDER['completed']
 };
 
 const STAGE_ORDINAL: Record<JobStage, number> = {
@@ -463,12 +502,34 @@ const SLOT_STAMP: Record<JobSubStatusSlot, keyof Job> = {
   accepted: 'acceptedAt',
   scheduled: 'scheduledAt',
   in_progress: 'inProgressAt',
-  paid: 'paidAt',
+  completed: 'completedAt',
 };
 
+/** Did the WORK finish? Money is silent on the question. */
+export function jobWorkIsDone(job: Pick<Job, 'stage' | 'completedAt' | 'completedDate'>): boolean {
+  return !!job.completedAt || !!job.completedDate || job.stage === 'completed';
+}
+
+/**
+ * How far along the WORK the job is, for lighting dots.
+ *
+ * `paid` sits above `in_progress` and `completed` on the stage ladder, so
+ * taking its ordinal at face value lit every work dot on a job that hasn't
+ * started — the pill would sit on next Tuesday's booking with the dot after
+ * it already green. Money doesn't advance the work, so a paid job is
+ * measured by where its pill genuinely landed instead.
+ */
+function workflowOrdinal(job: Job): number {
+  if (job.stage !== 'paid') return STAGE_ORDINAL[job.stage];
+  return SLOT_MIN_STAGE_ORDINAL[workflowStatusOfPaidJob(job).slot];
+}
+
 export function isSlotReached(job: Job, slot: JobSubStatusSlot): boolean {
+  // Stamps still speak for themselves, so a stage-leap lights what it skipped.
   if (job[SLOT_STAMP[slot]]) return true;
-  return STAGE_ORDINAL[job.stage] >= SLOT_MIN_STAGE_ORDINAL[slot];
+  // The finish line needs evidence the work finished — never an ordinal.
+  if (slot === 'completed') return jobWorkIsDone(job);
+  return workflowOrdinal(job) >= SLOT_MIN_STAGE_ORDINAL[slot];
 }
 
 /**
