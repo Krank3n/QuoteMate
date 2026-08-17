@@ -50,6 +50,7 @@ import { AlertModal } from './AlertModal';
 import { useStore } from '../store/useStore';
 import { trackEvent } from '../services/analyticsService';
 import { isEmailAddress, isSelfSend } from '../utils/sendFlow';
+import { maybePromptForPushPermission } from '../services/pushPermissionPrompt';
 import { resolvePriceDetail, showsPerLineMoney } from '../../shared/document/priceDetail';
 
 /**
@@ -422,11 +423,15 @@ export function DocumentEmailPreviewModal({
       }
 
       setSent(true);
+      const selfSend = isSelfSend(recipientEmail, ownerEmail);
       trackEvent('quote_send_succeeded', {
         doc_type: docType,
         method: 'email',
-        to_self: isSelfSend(recipientEmail, ownerEmail),
+        to_self: selfSend,
       });
+      // Now that a real customer has the document, offer to tell them when it
+      // gets opened, accepted or paid. No-ops if already asked or granted.
+      void maybePromptForPushPermission({ isSelfSend: selfSend }).catch(() => {});
       onSent?.();
     } catch (error: any) {
       showAlert('error', 'Send Failed', error.message || 'Could not send the email. Please try again.');

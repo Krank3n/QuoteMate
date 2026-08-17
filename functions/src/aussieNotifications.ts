@@ -1,6 +1,11 @@
 /**
- * Aussie-themed push notification message pools for QuoteMate.
- * Each event type has multiple random variants with variable interpolation.
+ * Push notification message pools for QuoteMate.
+ *
+ * Every body here has to carry the fact that justified the interruption — who,
+ * which job, how much. A notification that reads "Ka-ching! Someone paid up!"
+ * forces the tradie to open the app just to learn what happened, which is the
+ * same cost as not sending it. The Aussie voice sits on top of the fact, never
+ * in place of it.
  */
 
 export type AussieEvent =
@@ -10,7 +15,6 @@ export type AussieEvent =
   | 'quote_expiring'
   | 'invoice_paid'
   | 'invoice_overdue'
-  | 'daily_motivation'
   | 'milestone'
   | 'inactivity'
   | 'draft_nudge';
@@ -23,164 +27,133 @@ interface MessageVariant {
 const MESSAGE_POOL: Record<AussieEvent, MessageVariant[]> = {
   quote_accepted: [
     {
-      title: 'Ripper! Quote Accepted ✅',
-      body: "Ripper! {customer} just accepted your quote, legend!",
+      title: 'Quote accepted ✅',
+      body: '{customer} accepted your {amount} quote for {job}. Nice one!',
     },
     {
-      title: 'Bewdy! Quote Accepted ✅',
-      body: "Bewdy! {customer}'s given your quote the tick of approval!",
-    },
-    {
-      title: 'Too Easy! Quote Accepted ✅',
-      body: "Too easy! {customer} accepted the quote for {job}!",
+      title: 'Quote accepted ✅',
+      body: "Beauty — {customer} gave {job} the tick. That's {amount} locked in.",
     },
   ],
   quote_rejected: [
     {
-      title: 'Quote Declined ❌',
-      body: "Ah bugger, {customer} knocked back your quote.",
+      title: 'Quote declined',
+      body: '{customer} passed on {job}. Worth a call to see if the price was the sticking point.',
     },
     {
-      title: 'Quote Declined ❌',
-      body: "No wukkas mate, {customer} passed on this one. Plenty more fish!",
-    },
-    {
-      title: 'Quote Declined ❌',
-      body: "Bummer, {customer} gave your quote the flick.",
+      title: 'Quote declined',
+      body: "Ah bugger — {customer} knocked back {job}. Plenty more out there, mate.",
     },
   ],
   quote_viewed: [
     {
-      title: "👀 Someone's Having a Squiz",
-      body: "Heads up! {customer}'s having a squiz at your quote!",
+      title: 'Quote opened 👀',
+      body: '{customer} just opened your {amount} quote for {job}. Good time to follow up.',
     },
     {
-      title: '👀 Quote Viewed',
-      body: "Oi, someone's eyeballing your quote for {job}!",
-    },
-    {
-      title: '👀 Eyes On Your Quote',
-      body: "{customer} just opened your quote. Fingers crossed, mate!",
+      title: 'Quote opened 👀',
+      body: "{customer}'s having a squiz at {job} right now. Strike while it's hot.",
     },
   ],
   quote_expiring: [
     {
-      title: '⏰ Quote Expiring Soon',
-      body: "Your quote for {customer} is about to cark it! Chase 'em up!",
+      title: 'Quote expires soon ⏰',
+      body: "{customer}'s quote for {job} expires in {days}. Give 'em a nudge before it lapses.",
     },
     {
-      title: '⏰ Quote Expiring Soon',
-      body: "Oi, quote's expiring soon — give {customer} a nudge!",
-    },
-    {
-      title: '⏰ Quote Expiring Soon',
-      body: "Don't let this one slip, mate! Your quote for {customer} expires soon.",
+      title: 'Quote expires soon ⏰',
+      body: "Don't let this one slip — {amount} for {customer} expires in {days}.",
     },
   ],
   invoice_paid: [
     {
-      title: 'Ka-ching! Invoice Paid 💰',
-      body: "Ka-ching! {customer} just paid up, ya legend! 🍺",
+      title: 'Paid 💰',
+      body: '{customer} paid {amount} for {job}. Money\'s in!',
     },
     {
-      title: "Money's In! 💰",
-      body: "Money's in! {customer} settled the bill. Time for a cold one!",
-    },
-    {
-      title: 'Invoice Paid! 💰',
-      body: "{customer} paid the invoice. Beers are on them tonight! 🍻",
+      title: 'Paid 💰',
+      body: "Ka-ching — {amount} from {customer} just landed. Beers are on them. 🍻",
     },
   ],
   invoice_overdue: [
     {
-      title: '🔴 Invoice Overdue',
-      body: "This invoice is more overdue than a library book from 2003!",
+      title: 'Overdue invoices',
+      body: '{customer} owes you {amount}, past due. Time to chase it up.',
     },
     {
-      title: '🔴 Invoice Overdue',
-      body: "Oi, {customer} still hasn't paid. Give 'em a bell!",
-    },
-    {
-      title: '🔴 Invoice Overdue',
-      body: "{customer}'s invoice is overdue. Time to chase up the cash, mate!",
-    },
-  ],
-  daily_motivation: [
-    {
-      title: "G'day Legend! 🇦🇺",
-      body: "G'day legend! Time to smash out some quotes!",
-    },
-    {
-      title: 'Rise and Shine! ☀️',
-      body: "Rise and shine, champ! Let's get after it today!",
-    },
-    {
-      title: "Let's Go! 💪",
-      body: "Oi oi oi! Another day, another dollar. Go get 'em, mate!",
+      title: 'Overdue invoices',
+      body: "{amount} still outstanding from {customer}. Give 'em a bell?",
     },
   ],
   milestone: [
     {
-      title: 'Streuth! Milestone! 🏆',
-      body: "Streuth! You've sent {n} quotes! Absolute machine!",
+      title: 'Milestone 🏆',
+      body: "That's {n} quotes sent. Absolute machine.",
     },
     {
-      title: 'Legend Status! 🏆',
-      body: "Legend status! {n} quotes and counting!",
-    },
-    {
-      title: 'What a Ripper! 🏆',
-      body: "{n} quotes sent! You're smashing it harder than a snag on the barbie!",
+      title: 'Milestone 🏆',
+      body: 'Legend status — {n} quotes and counting.',
     },
   ],
   draft_nudge: [
     {
-      title: '📝 Draft Sitting There',
-      body: "Oi, your quote for {customer} is just sitting there! Send it off, legend!",
+      title: 'Quote ready to send',
+      body: "{customer}'s quote for {job} has been sitting {days}. Send it before they find someone else.",
     },
     {
-      title: '📝 Quote Ready to Go',
-      body: "Your quote for {customer} is gathering dust, mate. Hit send!",
-    },
-    {
-      title: "📝 Don't Leave 'Em Hanging",
-      body: "{customer}'s waiting on that quote! Flick it over before they find someone else.",
+      title: 'Quote ready to send',
+      body: "That {amount} quote for {customer} is still a draft. Flick it over?",
     },
   ],
   inactivity: [
     {
-      title: "Where'd Ya Go? 👋",
-      body: "Oi, haven't seen ya in a while! Your quotes miss ya, mate.",
-    },
-    {
-      title: 'We Miss Ya! 👋',
-      body: "Where'd ya go? The app's lonely without ya!",
-    },
-    {
-      title: 'Come Back, Legend! 👋',
-      body: "It's been a while, mate. Got quotes to smash and invoices to send!",
+      title: 'Still got quotes to send?',
+      body: "Haven't seen ya in a bit, mate. Your drafts are waiting whenever you're ready.",
     },
   ],
 };
 
+/** Drop placeholders the caller didn't supply, then tidy the spacing they leave. */
+function stripUnfilled(text: string): string {
+  return text
+    .replace(/\s*\{[a-zA-Z0-9_]+\}/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .replace(/\s+([.,!?])/g, '$1')
+    .trim();
+}
+
 /**
- * Pick a random Aussie notification message for the given event and interpolate variables.
+ * Pick a message for the event and interpolate variables.
+ *
+ * Variants that still contain an unfilled placeholder after interpolation are
+ * skipped where possible, so a caller that has no dollar figure gets the
+ * variant that doesn't need one rather than a body reading "your quote".
  */
 export function getAussieMessage(
   event: AussieEvent,
   vars: Record<string, string> = {}
 ): { title: string; body: string } {
   const variants = MESSAGE_POOL[event];
-  const variant = variants[Math.floor(Math.random() * variants.length)];
+  const supplied = Object.entries(vars).filter(([, value]) => Boolean(value));
+  const suppliedKeys = new Set(supplied.map(([key]) => key));
+
+  const placeholdersOf = (v: MessageVariant) =>
+    (`${v.title} ${v.body}`.match(/\{([a-zA-Z0-9_]+)\}/g) || [])
+      .map((p) => p.slice(1, -1));
+
+  // Prefer variants whose every placeholder can actually be filled.
+  const fillable = variants.filter((v) => placeholdersOf(v).every((p) => suppliedKeys.has(p)));
+  const pool = fillable.length > 0 ? fillable : variants;
+  const variant = pool[Math.floor(Math.random() * pool.length)];
 
   let title = variant.title;
   let body = variant.body;
 
-  for (const [key, value] of Object.entries(vars)) {
+  for (const [key, value] of supplied) {
     const placeholder = `{${key}}`;
     title = title.split(placeholder).join(value);
     body = body.split(placeholder).join(value);
   }
 
-  return { title, body };
+  return { title: stripUnfilled(title), body: stripUnfilled(body) };
 }

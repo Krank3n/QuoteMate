@@ -800,7 +800,7 @@ class FirestoreService {
    * Save an Expo push token for multi-device support.
    * The fcmTokens collection/method name is retained for schema compatibility.
    */
-  async saveFcmToken(token: string, deviceId: string): Promise<void> {
+  async saveFcmToken(token: string, deviceId: string, timezone?: string | null): Promise<void> {
     const userId = this.getUserId();
     if (!userId) {
       return;
@@ -813,6 +813,9 @@ class FirestoreService {
         provider: 'expo',
         deviceId,
         platform: require('react-native').Platform.OS,
+        // The send path holds reminders outside the tradie's own daytime; every
+        // scheduler runs on Sydney time, which is up to 3h ahead of Perth.
+        ...(timezone ? { timezone } : {}),
         updatedAt: new Date().toISOString(),
       });
     } catch (error) {

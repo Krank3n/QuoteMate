@@ -14,6 +14,16 @@ export interface ExpoPushPayload {
   title: string;
   body: string;
   data?: Record<string, unknown>;
+  /**
+   * Android channel to deliver on. Defaults to the original single channel so
+   * devices that registered before the channels were split still receive.
+   */
+  channelId?: string;
+  /**
+   * Android importance / iOS interruption level. Reminders ride at 'normal' so
+   * they don't buzz with the same urgency as money landing.
+   */
+  priority?: 'default' | 'normal' | 'high';
 }
 
 interface ExpoPushTicket {
@@ -101,8 +111,8 @@ export async function sendExpoPushNotifications(
       body: payload.body,
       data: payload.data || {},
       sound: 'default' as const,
-      priority: 'high' as const,
-      channelId: 'quote-responses',
+      priority: payload.priority || 'high',
+      channelId: payload.channelId || 'quote-responses',
     }));
 
     const headers: Record<string, string> = {

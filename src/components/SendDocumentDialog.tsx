@@ -29,6 +29,7 @@ import { documentToQuote, documentToInvoice } from '../types/documentAdapter';
 import { formatCurrency } from '../utils/quoteCalculator';
 import { exportDocumentPDF } from '../utils/pdfGenerator';
 import { markDocumentSent } from '../utils/applyStageChange';
+import { maybePromptForPushPermission } from '../services/pushPermissionPrompt';
 import { useStore } from '../store/useStore';
 import {
   ensureCanDeliver,
@@ -356,6 +357,9 @@ export function SendDocumentDialog({
     }
     // No recipient on these channels, so they can never be a self-send.
     trackEvent('quote_send_succeeded', { doc_type: docType, method, to_self: false });
+    // Offer push now that a real customer has the document. No-ops if the
+    // tradie already granted or already declined once.
+    void maybePromptForPushPermission().catch(() => {});
     if (wasDraft) onMarkedSent?.(doc, method);
   };
 

@@ -72,6 +72,7 @@ import { stripeService } from './src/services/stripeService';
 import { firestoreService } from './src/services/firestoreService';
 import { documentService } from './src/services/documentService';
 import { notificationService } from './src/services/notificationService';
+import { routeForNotification } from './src/services/notificationRouting';
 import { checkForUpdate, AppUpdateInfo } from './src/services/appUpdateService';
 import { checkDeferredLink } from './src/services/supplierDiscoveryService';
 import { applyPendingReferral, storePendingReferral } from './src/services/pendingReferral';
@@ -444,24 +445,41 @@ function App() {
           })
           .catch(() => {});
 
-        // Register for push notifications
+        // Push registration is no longer requested here. Asking at sign-in
+        // burns the one-shot OS prompt before the tradie has seen anything
+        // work, and on iOS a decline is permanent. The ask now happens after
+        // they send their first quote — see maybePromptForPushPermission.
         if (Platform.OS !== 'web') {
-          notificationService.registerForPushNotifications().then((token) => {
-            if (token) {
-            }
-          });
+          // Re-register silently for anyone who already granted permission, so
+          // a reinstall or token rotation doesn't quietly stop delivery.
+          notificationService.refreshTokenIfPermitted().catch(() => {});
 
-          // Set up notification listeners
+          // Clear any badge left over from notifications received while away.
+          notificationService.clearBadge().catch(() => {});
+
           notificationService.setupNotificationListeners(
-            (notification) => {
-              // Handle notification received while app is open
-            },
+            undefined,
             (response) => {
-              // Handle user tapping on notification
-              const data = response.notification.request.content.data;
-              if (data?.quoteId && data?.type === 'quote_response') {
-                // Could navigate to the quote here if needed
+              // Take the tradie to whatever the notification was about.
+              const route = routeForNotification(
+                response?.notification?.request?.content?.data
+              );
+              if (!route || !navigationRef.isReady()) return;
+              try {
+                // The route name is resolved at runtime from the push payload,
+                // so it can't be checked against RootStackParamList here.
+                const navigate = navigationRef.navigate as (
+                  screen: string,
+                  params?: Record<string, unknown>,
+                ) => void;
+                navigate(route.screen, route.params);
+              } catch (err) {
+                reportIssue('notification navigation failed', {
+                  screen: route.screen,
+                  message: (err as Error)?.message,
+                });
               }
+              void notificationService.clearBadge();
             }
           );
         }

@@ -27,7 +27,6 @@ import { GridBackground } from '../../components/GridBackground';
 const DEFAULT_PREFS: NotificationPreferences = {
   quoteUpdates: true,
   invoiceUpdates: true,
-  dailyMotivation: true,
   milestoneCelebrations: true,
   inactivityNudges: true,
 };
@@ -43,7 +42,7 @@ const PREF_ITEMS: PrefItem[] = [
   {
     key: 'quoteUpdates',
     title: 'Quote Updates',
-    subtitle: 'Accepted, declined, viewed, expiring',
+    subtitle: 'Opened, accepted, declined, expiring',
     icon: 'file-document-outline',
   },
   {
@@ -53,12 +52,6 @@ const PREF_ITEMS: PrefItem[] = [
     icon: 'receipt',
   },
   {
-    key: 'dailyMotivation',
-    title: 'Daily Motivation',
-    subtitle: 'Morning Aussie pep talks',
-    icon: 'weather-sunny',
-  },
-  {
     key: 'milestoneCelebrations',
     title: 'Milestone Celebrations',
     subtitle: 'Quote count achievements',
@@ -66,8 +59,8 @@ const PREF_ITEMS: PrefItem[] = [
   },
   {
     key: 'inactivityNudges',
-    title: 'Inactivity Nudges',
-    subtitle: '"We miss ya" reminders',
+    title: 'Draft Reminders',
+    subtitle: 'Quotes you built but never sent',
     icon: 'hand-wave',
   },
 ];
