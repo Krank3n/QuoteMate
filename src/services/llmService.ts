@@ -955,104 +955,113 @@ export async function cleanupTranscriptionAndGenerateTitle(
   templates?: TemplateMatchInput[],
   pillSpec?: PillSpecInput[]
 ): Promise<{ cleanedDescription: string; suggestedTitle: string; templateSuggestions?: TemplateSuggestionResult[]; pills?: PillStateResult }> {
-  // On web, use Firebase Functions
-  if (Platform.OS === 'web') {
-    return cleanupViaFirebaseFunction(transcribedText, pillSpec);
+  // Server first, on EVERY platform. The Anthropic key lives in Firebase
+  // Functions, never in the app bundle — mobile used to go straight to Gemini
+  // with a bundled key, and when that key was pulled from .env after the July
+  // leak (see .env.backup-pre-key-removal) `allowUndefined: true` in
+  // babel.config.js turned the import into `undefined` instead of failing the
+  // build. Both client paths then threw, nobody noticed, and every job title
+  // silently became extractSimpleTitle's truncation — which is what shipped to
+  // customers on the PDF, the email subject and the PDF filename (QU-178692).
+  try {
+    return await callCleanupFunction(transcribedText, pillSpec);
+  } catch (functionError) {
+    // Server unreachable — fall through to the client-side ladder below.
   }
 
-  // On mobile, try Gemini Flash Lite first (fast + cheap), then Claude as fallback
+  // Legacy client-side paths. These only do anything when a key is present in
+  // the bundle; they are kept so a build that still carries one kicks in
+  // offline, and because Gemini is the only path that returns
+  // templateSuggestions. Prefer deleting them once no such build is live.
   try {
     return await cleanupViaGemini(transcribedText, templates, true, pillSpec);
   } catch (geminiError) {
-
-    // Try Claude as fallback
-    if (ANTHROPIC_API_KEY) {
-      try {
-        const prompt = createCleanupPrompt(transcribedText, templates, pillSpec);
-
-        const response = await fetch(ANTHROPIC_API_URL, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-api-key': ANTHROPIC_API_KEY,
-            'anthropic-version': '2023-06-01',
-          },
-          body: JSON.stringify({
-            model: 'claude-sonnet-4-5-20250929',
-            max_tokens: 4000,
-            temperature: 0.2,
-            messages: [
-              {
-                role: 'user',
-                content: prompt,
-              },
-            ],
-          }),
-        });
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(`API returned ${response.status}: ${errorText}`);
-        }
-
-        const data = await response.json();
-        const content = data.content[0].text;
-        return parseCleanupResponse(content);
-      } catch (claudeError) {
-        // Claude fallback also failed
-      }
-    }
-
-    // Final fallback: return original text with a basic title
-    return {
-      cleanedDescription: transcribedText,
-      suggestedTitle: extractSimpleTitle(transcribedText),
-    };
+    // Gemini unavailable — try Claude.
   }
+
+  if (ANTHROPIC_API_KEY) {
+    try {
+      const prompt = createCleanupPrompt(transcribedText, templates, pillSpec);
+
+      const response = await fetch(ANTHROPIC_API_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': ANTHROPIC_API_KEY,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-5-20250929',
+          max_tokens: 4000,
+          temperature: 0.2,
+          messages: [
+            {
+              role: 'user',
+              content: prompt,
+            },
+          ],
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`API returned ${response.status}: ${errorText}`);
+      }
+
+      const data = await response.json();
+      const content = data.content[0].text;
+      return parseCleanupResponse(content);
+    } catch (claudeError) {
+      // Claude fallback also failed
+    }
+  }
+
+  // Final fallback: return original text with a basic title
+  return {
+    cleanedDescription: transcribedText,
+    suggestedTitle: extractSimpleTitle(transcribedText),
+  };
 }
 
 /**
- * Clean up transcription via Firebase Cloud Function (for web)
+ * Clean up transcription via the Firebase Cloud Function, which holds the
+ * Anthropic key server-side. THROWS on any failure — the caller owns the
+ * fallback ladder, so this must not quietly return a degraded result.
  */
-async function cleanupViaFirebaseFunction(
+async function callCleanupFunction(
   transcribedText: string,
   pillSpec?: PillSpecInput[]
 ): Promise<{ cleanedDescription: string; suggestedTitle: string; pills?: PillStateResult }> {
-  try {
-    const idToken = await auth.currentUser?.getIdToken();
-    const response = await fetch(`${FIREBASE_FUNCTIONS_URL}/cleanupTranscription`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${idToken}`,
-      },
-      body: JSON.stringify({ transcribedText, pillSpec }),
-    });
+  const idToken = await auth.currentUser?.getIdToken();
+  const response = await fetch(`${FIREBASE_FUNCTIONS_URL}/cleanupTranscription`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${idToken}`,
+    },
+    body: JSON.stringify({ transcribedText, pillSpec }),
+  });
 
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error || `API returned ${response.status}`);
-    }
-
-    const data = await response.json();
-    return {
-      cleanedDescription: data.cleanedDescription || transcribedText,
-      suggestedTitle: data.suggestedTitle || '',
-      pills: data.pills,
-    };
-  } catch (error) {
-    // Try Gemini as fallback
-    try {
-      return await cleanupViaGemini(transcribedText, undefined, false, pillSpec);
-    } catch (geminiError) {
-      // Gemini fallback also failed
-    }
-
-    return {
-      cleanedDescription: transcribedText,
-      suggestedTitle: extractSimpleTitle(transcribedText),
-    };
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || `API returned ${response.status}`);
   }
+
+  const data = await response.json();
+  // An empty title is a failed generation, not a valid answer — say so, so the
+  // ladder moves on instead of handing the caller a title-less result.
+  if (!isNonEmptyString(data.cleanedDescription) || !isNonEmptyString(data.suggestedTitle)) {
+    throw new Error('cleanupTranscription returned an incomplete result');
+  }
+  return {
+    cleanedDescription: data.cleanedDescription,
+    suggestedTitle: data.suggestedTitle,
+    pills: data.pills,
+  };
+}
+
+function isNonEmptyString(v: unknown): v is string {
+  return typeof v === 'string' && v.trim().length > 0;
 }
 
 /**
@@ -1526,9 +1535,82 @@ export async function suggestSupplierColumnMapping(payload: {
 /**
  * Extract a simple title from text as fallback
  */
+const TITLE_MAX_CHARS = 50;
+
+/** Words a title must never end on — cutting mid-phrase leaves them dangling. */
+const TRAILING_STOP_WORDS = new Set([
+  // articles + conjunctions
+  'a', 'an', 'the', 'and', 'or', 'but', 'plus', 'as', 'than', 'that', 'which',
+  // copulas
+  'is', 'was', 'are', 'were', 'be',
+  // prepositions
+  'of', 'to', 'in', 'on', 'at', 'by', 'for', 'with', 'from', 'into', 'onto',
+  'over', 'under', 'near', 'up', 'down', 'out', 'off', 'about', 'around',
+  'across', 'along', 'through', 'between', 'behind', 'beside', 'within',
+  'against', 'during', 'including', 'per', 'via', 'upon', 'toward', 'towards',
+]);
+
+/**
+ * Last-ditch title when every model path is unavailable.
+ *
+ * This runs far more often than "last-ditch" suggests, and whatever it returns
+ * is printed on the customer's PDF, used as the email subject and baked into
+ * the attachment filename. It used to be `substring(0, 47) + '...'`, so a real
+ * quote went out titled "Replace the left boundary paling fence at a sin..."
+ * (QU-178692). A truncation is acceptable; an obviously-broken one is not.
+ *
+ * So: cut on a word boundary, never mid-word, and never emit an ellipsis. Then
+ * back off any trailing preposition/article run so the title reads as a phrase
+ * ("…paling fence") rather than a severed one ("…fence at a single").
+ */
 function extractSimpleTitle(text: string): string {
-  // Take first sentence or first 50 chars, whichever is shorter
-  const firstSentence = text.split(/[.!?]/)[0];
-  const title = firstSentence.length > 50 ? firstSentence.substring(0, 47) + '...' : firstSentence;
-  return title || 'Custom Job';
+  const firstSentence = (text.split(/[.!?\n]/)[0] || '').replace(/\s+/g, ' ').trim();
+  if (!firstSentence) return 'Custom Job';
+  // Short enough to use whole — nothing was severed, so nothing to repair.
+  // "Construction of 2m x 4m Deck" keeps its "of".
+  if (firstSentence.length <= TITLE_MAX_CHARS) return firstSentence.replace(/[\s,;:–—-]+$/, '');
+
+  const words = firstSentence.split(' ');
+  const kept: string[] = [];
+  for (const word of words) {
+    const candidate = kept.length === 0 ? word : `${kept.join(' ')} ${word}`;
+    if (candidate.length > TITLE_MAX_CHARS) break;
+    kept.push(word);
+  }
+  // A single word longer than the cap has no word boundary to cut on; a hard
+  // slice is the only option left and still beats an ellipsis.
+  if (kept.length === 0) return firstSentence.slice(0, TITLE_MAX_CHARS);
+
+  return healSeveredTail(kept) || kept.join(' ');
+}
+
+/** How far back from the cut a dangling preposition can be and still be one. */
+const SEVERED_TAIL_WINDOW = 3;
+
+/**
+ * Repair a phrase the length cut severed mid-clause.
+ *
+ * Only the last few words can be the damage: if a preposition or article sits
+ * in that window, the clause it opened got cut off with it, so drop from there
+ * — "…paling fence at a single" → "…paling fence". Words further back are load
+ * bearing and stay put, which is why this looks at a window and not the whole
+ * phrase ("Supply and install…" must not collapse to "Supply").
+ *
+ * Returns '' when nothing meaningful survives, so the caller keeps its cut.
+ */
+function healSeveredTail(words: string[]): string {
+  let end = words.length;
+  for (let i = Math.max(1, words.length - SEVERED_TAIL_WINDOW); i < words.length; i++) {
+    if (TRAILING_STOP_WORDS.has(stripPunctuation(words[i]))) {
+      end = i;
+      break;
+    }
+  }
+  const trimmed = words.slice(0, end).join(' ').replace(/[\s,;:–—-]+$/, '');
+  // Never trim away the whole phrase or leave a bare stub.
+  return end >= 2 && trimmed.length >= 3 ? trimmed : '';
+}
+
+function stripPunctuation(word: string): string {
+  return word.replace(/[^a-z]/gi, '').toLowerCase();
 }
