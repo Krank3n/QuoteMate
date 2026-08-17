@@ -93,6 +93,46 @@ export function coverageSanePurchaseCount(input: CoverageInput): number | null {
   return null;
 }
 
+export interface PackInfoSources {
+  /** Structured pack size on the chosen candidate — most trustworthy. */
+  candidatePackSize?: number;
+  candidatePackUnit?: string;
+  /** Candidate product name, e.g. "…Concrete Mix 20kg". */
+  candidateProductName?: string;
+  /** Pack info already stamped on the row by an earlier pricing pass. */
+  rowPackSize?: number;
+  rowPackUnit?: string;
+  /** The reconcile model's own reasoning — it routinely states the pack size
+   *  ("20kg per bag, 11 bags total 220kg") even when nothing structured did. */
+  rowDescription?: string;
+  /** The material name, which sometimes carries the size itself. */
+  rowName?: string;
+}
+
+/**
+ * Recover a pack size from the best source available, most to least reliable.
+ *
+ * The coverage floor can only catch an under-buy when it has a pack size to
+ * divide by; with none it returns null and the model's purchase count stands
+ * unchecked. That is how QU-178692 shipped 11 × 20 kg bags against a 440 kg
+ * concrete requirement — the size was there in the model's own reasoning, just
+ * never read. Recovering it is safe because every consumer re-checks that the
+ * unit matches the requirement before dividing.
+ */
+export function recoverPackInfo(
+  s: PackInfoSources,
+  parsePack: (text?: string) => { packSize: number; packUnit: string } | null,
+): { packSize?: number; packUnit?: string } {
+  const fromCandidateName = parsePack(s.candidateProductName);
+  const fromStated = parsePack(s.rowDescription) ?? parsePack(s.rowName);
+  return {
+    packSize:
+      s.candidatePackSize ?? fromCandidateName?.packSize ?? s.rowPackSize ?? fromStated?.packSize,
+    packUnit:
+      s.candidatePackUnit ?? fromCandidateName?.packUnit ?? s.rowPackUnit ?? fromStated?.packUnit,
+  };
+}
+
 export interface CoverageFloorInput {
   /** The tradie's underlying requirement (requiredQty), in requirementUnit. */
   requirement: number;
