@@ -113,6 +113,10 @@ export type AnalyticsEvent =
   // sweep rather than by the buyer returning to the paywall. Non-zero here means
   // someone was charged-but-not-Pro and we healed it without them noticing —
   // worth watching, because a rising count implies validation is flaking again.
+  // Fires only on receipts the sweep actually HEALED. The stores hand back every
+  // live subscription on each launch, so this once fired for healthy subscribers
+  // too and could not be read as an alarm; those now land in the summary's
+  // alreadyEntitled instead. See receiptEntitlement.RecoverySummary.
   | 'purchase_recovered_on_launch'
   // The 14-day Pro trial began (fires with the first quote). Deliberately
   // redundant with the durable trialStartedAt field — events are lossy,

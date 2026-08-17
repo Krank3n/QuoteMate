@@ -122,7 +122,7 @@ import {
   describeProviders,
   evaluateThrottle,
 } from './passwordReset.helpers';
-import { receiptVerdict } from './receiptValidation.helpers';
+import { receiptVerdict, isFirstGrantOfTransaction } from './receiptValidation.helpers';
 import { verifyAppleJws } from './appleJws.helpers';
 import { resolveServerPlan } from './subscription.helpers';
 import {
@@ -1506,48 +1506,68 @@ export const validateAppleReceipt = functions.https.onRequest((req, res) => {
 
       const firestore = admin.firestore();
       const subscriptionRef = firestore.doc(`users/${userId}/profile/subscription`);
+      const resolvedTransactionId = jwsResult.transactionId || transactionId;
 
-      await subscriptionRef.set({
-        isPro: true,
-        platform: 'ios',
-        productId: signedProductId,
-        transactionId: jwsResult.transactionId || transactionId,
-        purchaseToken: purchaseToken || null,
-        // Persist the signed environment so isBilledSub() can exclude sandbox
-        // purchases from revenue without re-decoding the token every read.
-        environment: jwsResult.environment,
-        appleValidated,
-        validatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        currentPeriodStart: now,
-        currentPeriodEnd: expiryDate,
-        quotesThisMonth: 0,
-      }, { merge: true });
+      // Decide "is this a new sale?" and write the entitlement ATOMICALLY. The
+      // launch sweep re-posts every live receipt StoreKit hands back, so this
+      // endpoint re-validates subscriptions it entitled weeks ago — and the
+      // paywall listener and the sweep can post the same NEW receipt at once.
+      // A plain read-then-write loses that race: both see "not entitled yet"
+      // and both alert, which is how one 8 Jul purchase sent two emails.
+      const firstGrant = await firestore.runTransaction(async (tx) => {
+        const priorSub = (await tx.get(subscriptionRef)).data();
+        const isFirst = isFirstGrantOfTransaction(priorSub, resolvedTransactionId);
+        tx.set(subscriptionRef, {
+          isPro: true,
+          platform: 'ios',
+          productId: signedProductId,
+          transactionId: resolvedTransactionId,
+          purchaseToken: purchaseToken || null,
+          // Persist the signed environment so isBilledSub() can exclude sandbox
+          // purchases from revenue without re-decoding the token every read.
+          environment: jwsResult.environment,
+          appleValidated,
+          validatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          currentPeriodStart: now,
+          currentPeriodEnd: expiryDate,
+          quotesThisMonth: 0,
+        }, { merge: true });
+        return isFirst;
+      });
 
 
-      // Process referral commission — bill against the signed SKU so a forged
-      // request body can't inflate a referrer's commission.
-      try {
-        const grossCents = PRODUCT_PRICES[signedProductId] || 4900;
-        await processReferralCommission(userId, 'ios', signedProductId, grossCents);
-      } catch (refError) {
-        // silently ignore
-      }
+      // Once per transaction, never once per app open. A re-validated receipt
+      // is the same sale: re-paying commission or re-alerting on it turns one
+      // subscriber into a stream of phantom upgrades.
+      if (firstGrant) {
+        // Process referral commission — bill against the signed SKU so a forged
+        // request body can't inflate a referrer's commission.
+        try {
+          const grossCents = PRODUCT_PRICES[signedProductId] || 4900;
+          await processReferralCommission(userId, 'ios', signedProductId, grossCents);
+        } catch (refError) {
+          // silently ignore
+        }
 
-      // Notify admin of new Pro subscription
-      try {
-        const userEmail = await getUserEmail(userId) || 'unknown';
-        const iosFirestore = admin.firestore();
-        const userProfile = await iosFirestore.doc(`users/${userId}/settings/business`).get();
-        const businessName = userProfile.data()?.businessName || '';
-        await sendNewProSubscriptionEmail(userEmail, userId, 'ios', signedProductId, businessName);
-      } catch (emailError) {
-        // silently ignore
+        // Notify admin of new Pro subscription
+        try {
+          const userEmail = await getUserEmail(userId) || 'unknown';
+          const iosFirestore = admin.firestore();
+          const userProfile = await iosFirestore.doc(`users/${userId}/settings/business`).get();
+          const businessName = userProfile.data()?.businessName || '';
+          await sendNewProSubscriptionEmail(userEmail, userId, 'ios', signedProductId, businessName);
+        } catch (emailError) {
+          // silently ignore
+        }
       }
 
       res.status(200).json({
         success: true,
         isPremium: true,
         validated: appleValidated,
+        // Lets the client's launch sweep tell a healed purchase from a routine
+        // re-check, so purchase_recovered_on_launch stays an actual alarm.
+        alreadyEntitled: !firstGrant,
         expiryDate: expiryDate.toISOString(),
       });
     } catch (error: any) {
@@ -1671,42 +1691,53 @@ export const validateGoogleReceipt = functions.https.onRequest((req, res) => {
       const firestore = admin.firestore();
       const subscriptionRef = firestore.doc(`users/${userId}/profile/subscription`);
 
-      await subscriptionRef.set({
-        isPro: true,
-        platform: 'android',
-        productId,
-        transactionId,
-        purchaseToken: purchaseToken || null,
-        googleValidated,
-        validatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        currentPeriodStart: now,
-        currentPeriodEnd: expiryDate,
-        quotesThisMonth: 0,
-      }, { merge: true });
+      // Atomic decide-and-write — see the iOS handler for why this is a
+      // transaction and not a read followed by a set.
+      const firstGrant = await firestore.runTransaction(async (tx) => {
+        const priorSub = (await tx.get(subscriptionRef)).data();
+        const isFirst = isFirstGrantOfTransaction(priorSub, transactionId);
+        tx.set(subscriptionRef, {
+          isPro: true,
+          platform: 'android',
+          productId,
+          transactionId,
+          purchaseToken: purchaseToken || null,
+          googleValidated,
+          validatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          currentPeriodStart: now,
+          currentPeriodEnd: expiryDate,
+          quotesThisMonth: 0,
+        }, { merge: true });
+        return isFirst;
+      });
 
 
-      // Process referral commission
-      try {
-        const grossCents = PRODUCT_PRICES[productId] || 4900;
-        await processReferralCommission(userId, 'android', productId, grossCents);
-      } catch (refError) {
-        // silently ignore
-      }
+      // Once per transaction, never once per app open — see the iOS handler.
+      if (firstGrant) {
+        // Process referral commission
+        try {
+          const grossCents = PRODUCT_PRICES[productId] || 4900;
+          await processReferralCommission(userId, 'android', productId, grossCents);
+        } catch (refError) {
+          // silently ignore
+        }
 
-      // Notify admin of new Pro subscription
-      try {
-        const userEmail = await getUserEmail(userId) || 'unknown';
-        const userProfile = await firestore.doc(`users/${userId}/settings/business`).get();
-        const businessName = userProfile.data()?.businessName || '';
-        await sendNewProSubscriptionEmail(userEmail, userId, 'android', productId, businessName);
-      } catch (emailError) {
-        // silently ignore
+        // Notify admin of new Pro subscription
+        try {
+          const userEmail = await getUserEmail(userId) || 'unknown';
+          const userProfile = await firestore.doc(`users/${userId}/settings/business`).get();
+          const businessName = userProfile.data()?.businessName || '';
+          await sendNewProSubscriptionEmail(userEmail, userId, 'android', productId, businessName);
+        } catch (emailError) {
+          // silently ignore
+        }
       }
 
       res.status(200).json({
         success: true,
         isPremium: true,
         validated: googleValidated,
+        alreadyEntitled: !firstGrant,
         expiryDate: expiryDate.toISOString(),
       });
     } catch (error: any) {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { receiptVerdict } from './receiptValidation.helpers';
+import { receiptVerdict, isFirstGrantOfTransaction } from './receiptValidation.helpers';
 
 const NOW = new Date('2026-07-17T00:00:00Z');
 
@@ -48,5 +48,45 @@ describe('receiptVerdict (PAY-01)', () => {
   it('grants a 365-day fallback for a validated yearly receipt with no store expiry', () => {
     const v = receiptVerdict({ outcome: 'valid', storeExpiry: null, productId: 'quotemate_pro_yearly', now: NOW });
     expect(v).toEqual({ grant: true, expiryDate: new Date(NOW.getTime() + 365 * 86400000) });
+  });
+});
+
+describe('isFirstGrantOfTransaction', () => {
+  const TXN = 'txn-original';
+  const RENEWAL_TXN = 'txn-renewal';
+
+  it('REGRESSION: a live sub re-validated on launch is not a new grant', () => {
+    // The Aug-2026 bug: a yearly subscriber who bought six weeks earlier got a
+    // fresh "💰 New Pro subscriber" admin email — and re-entered the referral
+    // commission path — every time they opened the app, because the stores
+    // hand a live subscription back on every launch.
+    expect(isFirstGrantOfTransaction({ isPro: true, transactionId: TXN }, TXN)).toBe(false);
+  });
+
+  it('treats a renewal as a new grant — it mints a new transaction id', () => {
+    expect(isFirstGrantOfTransaction({ isPro: true, transactionId: TXN }, RENEWAL_TXN)).toBe(true);
+  });
+
+  it('treats a first-ever purchase (no prior doc) as a new grant', () => {
+    expect(isFirstGrantOfTransaction(undefined, TXN)).toBe(true);
+    expect(isFirstGrantOfTransaction(null, TXN)).toBe(true);
+    expect(isFirstGrantOfTransaction({}, TXN)).toBe(true);
+  });
+
+  it('treats a charged-but-not-entitled buyer being healed as a new grant', () => {
+    // The exact shape recoverStuckPurchases.ts existed for: the id was logged
+    // but isPro never got written. This buyer MUST still trigger the alert.
+    expect(isFirstGrantOfTransaction({ isPro: false, transactionId: TXN }, TXN)).toBe(true);
+  });
+
+  it('fails open when either id is missing — a duplicate alert beats a silent sale', () => {
+    expect(isFirstGrantOfTransaction({ isPro: true }, TXN)).toBe(true);
+    expect(isFirstGrantOfTransaction({ isPro: true, transactionId: '' }, TXN)).toBe(true);
+    expect(isFirstGrantOfTransaction({ isPro: true, transactionId: 123 }, TXN)).toBe(true);
+    expect(isFirstGrantOfTransaction({ isPro: true, transactionId: TXN }, '')).toBe(true);
+  });
+
+  it('does not treat a truthy-but-not-true isPro as an existing entitlement', () => {
+    expect(isFirstGrantOfTransaction({ isPro: 'yes', transactionId: TXN }, TXN)).toBe(true);
   });
 });

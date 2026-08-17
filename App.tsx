@@ -608,10 +608,14 @@ function App() {
             const summary = await recoverPendingPurchases({
               onGranted: async () => { await loadSubscription(); },
             });
+            // summary.granted counts only receipts this sweep actually healed.
+            // Re-checks of a live subscription land in alreadyEntitled, so an
+            // ordinary Pro user opening the app no longer trips the alarm.
             if (summary.granted > 0) {
               trackEvent('purchase_recovered_on_launch', {
                 granted: summary.granted,
                 checked: summary.checked,
+                alreadyEntitled: summary.alreadyEntitled,
                 platform: Platform.OS,
               });
             }
