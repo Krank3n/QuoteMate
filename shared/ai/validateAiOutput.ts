@@ -47,10 +47,57 @@ const ABSURD_QUANTITY_BY_UNIT: Record<string, number> = {
   m: 2000,      // 2km of timber/cable
   'm²': 1000,   // 1000 m² — a very large surface
   m2: 1000,
-  'm³': 100,    // 100 m³ of concrete — a slab or footings job
-  m3: 100,
+  // 30 m³ is already a 300 m² slab at 100 mm. Residential footings need 1-3.
+  // Tightened from 100 after QU-178694 shipped 35 m³ on a 6x8 m deck without
+  // tripping anything — see clampMaterialQuantity below.
+  'm³': 30,
+  m3: 30,
   L: 500,       // 500 L of paint/oil — a commercial job
 };
+
+/**
+ * Units that count discrete objects you buy off a shelf. Half a paver or
+ * 0.3 of a screw is meaningless, so these round to whole numbers.
+ */
+const DISCRETE_UNITS = new Set(['each', 'box', 'pack']);
+
+/** Whole-unit ceiling for discrete counts (fasteners, boards, pavers). */
+const MAX_DISCRETE_QUANTITY = 999;
+/**
+ * Ceiling for continuous measures. Deliberately far above any real job: the
+ * per-unit × sectionMultiplier explosion is caught by ABSURD_QUANTITY_BY_UNIT
+ * above and by the COUNT_UNITS backstop in convertLLMMaterialsToMaterials.
+ * This only stops a garbage value reaching the pricing layer.
+ */
+const MAX_BULK_QUANTITY = 100000;
+
+/**
+ * Clamp an AI-emitted material quantity, respecting whether its unit counts
+ * discrete objects or measures a continuous amount.
+ *
+ * QU-178694: every unit used to share one `Math.min(Math.max(Math.round(q), 1), 999)`.
+ * That broke continuous units in both directions:
+ *   - `Math.round(0.054)` → 0 → floored to 1. The prompt asks for ready-mix
+ *     concrete as m³ PER FOOTING ("A 0.054 m³ footing = 0.054"), so a correct
+ *     answer became 1 m³ per footing, then × the 35-footing sectionMultiplier
+ *     = 35 m³ of concrete ($9,545) on a 6x8 m deck needing 1.89 m³.
+ *   - the 999 ceiling truncated the bulk masses the prompt explicitly asks
+ *     for ("4000 kg of crusher dust" for a 25 m² patio) down to 999 kg.
+ * Both are the same mistake — a discrete-count clamp applied to a continuous
+ * measure. Keep this the ONLY place either rule lives; the client and the
+ * server's sanity-check pass both call it.
+ */
+export function clampMaterialQuantity(quantity: number, unit: string): number {
+  const q = Number(quantity);
+  if (!Number.isFinite(q) || q <= 0) return 0;
+  if (DISCRETE_UNITS.has(unit)) {
+    return Math.min(Math.max(Math.round(q), 1), MAX_DISCRETE_QUANTITY);
+  }
+  // Continuous measure — keep the fraction. 3 dp matches the precision
+  // convertLLMMaterialsToMaterials already stores after × sectionMultiplier.
+  const rounded = Math.round(q * 1000) / 1000;
+  return Math.min(Math.max(rounded, 0.001), MAX_BULK_QUANTITY);
+}
 
 export function validateAndRepairAiOutput(
   materials: AiMaterial[],
@@ -104,7 +151,13 @@ export function validateAndRepairAiOutput(
         effectiveQuantity: effectiveQty,
         ceiling,
       });
-      next = { ...next, pricingSource: 'absurd_quantity' };
+      // Don't clobber a more specific diagnosis. A piece-good carried in m³
+      // (83 m³ of pavers) is a UNIT error; the absurd volume is a symptom of
+      // it, not a second independent fault. Both counts still increment, so
+      // no signal is lost — only the single pricingSource label is at stake.
+      if (next.pricingSource !== 'invalid_unit') {
+        next = { ...next, pricingSource: 'absurd_quantity' };
+      }
     }
     const section = typeof m?.section === 'string' ? m.section : null;
     if (section) {

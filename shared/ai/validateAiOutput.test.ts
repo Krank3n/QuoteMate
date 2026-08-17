@@ -1,4 +1,4 @@
-import { validateAndRepairAiOutput } from './validateAiOutput';
+import { validateAndRepairAiOutput, clampMaterialQuantity } from './validateAiOutput';
 
 // Silent logger so warning chatter doesn't pollute test output.
 const silent = { warn: () => {} };
@@ -529,5 +529,99 @@ describe('validateAndRepairAiOutput — performance smoke', () => {
     // We expect SOME flags to fire on this dataset (zero-priced + zero-labour seeded)
     expect(flags.hasZeroPricedMaterial).toBe(true);
     expect(flags.hasZeroLabourSection).toBe(true);
+  });
+});
+
+describe('clampMaterialQuantity', () => {
+  describe('discrete units round to whole numbers with a floor of 1', () => {
+    it('rounds a fractional count up or down to the nearest whole item', () => {
+      expect(clampMaterialQuantity(6.4, 'each')).toBe(6);
+      expect(clampMaterialQuantity(6.6, 'each')).toBe(7);
+      expect(clampMaterialQuantity(2.5, 'pack')).toBe(3);
+      expect(clampMaterialQuantity(1.2, 'box')).toBe(1);
+    });
+
+    it('floors a sub-1 count at 1 — you cannot buy 0.4 of a gate latch', () => {
+      expect(clampMaterialQuantity(0.4, 'each')).toBe(1);
+      expect(clampMaterialQuantity(0.004, 'pack')).toBe(1);
+    });
+
+    it('caps a runaway count at 999', () => {
+      expect(clampMaterialQuantity(2400, 'each')).toBe(999);
+    });
+
+    it('treats an unrecognised unit as a discrete count', () => {
+      expect(clampMaterialQuantity(0.5, 'each')).toBe(1);
+    });
+  });
+
+  describe('continuous units keep their fraction — the QU-178694 defect', () => {
+    it('preserves 0.054 m³, the per-footing concrete volume the prompt asks for', () => {
+      // Was Math.round(0.054) -> 0 -> floored to 1, which the 35-footing
+      // sectionMultiplier then turned into 35 m³ of concrete ($9,545).
+      expect(clampMaterialQuantity(0.054, 'm³')).toBe(0.054);
+    });
+
+    it('preserves fractions for every continuous unit', () => {
+      expect(clampMaterialQuantity(0.25, 'kg')).toBe(0.25);
+      expect(clampMaterialQuantity(0.5, 'L')).toBe(0.5);
+      expect(clampMaterialQuantity(1.75, 'm')).toBe(1.75);
+      expect(clampMaterialQuantity(0.8, 'm²')).toBe(0.8);
+    });
+
+    it('rounds to 3 decimal places, matching downstream storage precision', () => {
+      expect(clampMaterialQuantity(0.0544444, 'm³')).toBe(0.054);
+      expect(clampMaterialQuantity(1.23456, 'kg')).toBe(1.235);
+    });
+
+    it('never collapses a tiny positive amount to zero', () => {
+      expect(clampMaterialQuantity(0.0001, 'm³')).toBe(0.001);
+    });
+
+    it('does not truncate bulk masses at 999 — the prompt asks for 4000 kg of crusher dust', () => {
+      expect(clampMaterialQuantity(4000, 'kg')).toBe(4000);
+      expect(clampMaterialQuantity(1275, 'kg')).toBe(1275);
+    });
+
+    it('still stops a garbage value reaching the pricing layer', () => {
+      expect(clampMaterialQuantity(1e9, 'kg')).toBe(100000);
+    });
+  });
+
+  describe('non-positive and malformed input', () => {
+    it('returns 0 so callers can drop the row', () => {
+      expect(clampMaterialQuantity(0, 'm³')).toBe(0);
+      expect(clampMaterialQuantity(-5, 'each')).toBe(0);
+      expect(clampMaterialQuantity(NaN, 'kg')).toBe(0);
+      expect(clampMaterialQuantity(Infinity, 'm')).toBe(0);
+    });
+  });
+});
+
+describe('m³ absurd-quantity ceiling (tightened after QU-178694)', () => {
+  it('flags 35 m³ of concrete on a residential job', () => {
+    const { flags } = validateAndRepairAiOutput(
+      [{ name: 'Ready Mix Concrete', quantity: 1, unit: 'm³', price: 272.73, sectionMultiplier: 35 }],
+      silent,
+    );
+    expect(flags.hasAbsurdQuantity).toBe(true);
+  });
+
+  it('does not flag the corrected 1.89 m³ the same job actually needs', () => {
+    const { flags } = validateAndRepairAiOutput(
+      [{ name: 'Ready Mix Concrete', quantity: 0.054, unit: 'm³', price: 272.73, sectionMultiplier: 35 }],
+      silent,
+    );
+    expect(flags.hasAbsurdQuantity).toBe(false);
+  });
+
+  it('keeps the more specific invalid_unit label when both would fire', () => {
+    const { materials, flags } = validateAndRepairAiOutput(
+      [{ name: 'Concrete Pavers 200x200x60', quantity: 83, unit: 'm³', price: 46 }],
+      silent,
+    );
+    expect(materials[0].pricingSource).toBe('invalid_unit');
+    expect(flags.hasInvalidUnit).toBe(true);
+    expect(flags.hasAbsurdQuantity).toBe(true);
   });
 });

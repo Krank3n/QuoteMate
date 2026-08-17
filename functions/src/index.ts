@@ -184,7 +184,7 @@ import { hashTerms } from './shared/pdf/terms/defaultAuTradie';
 import { generateQuotePdfBuffer } from './pdfGenerator';
 import { processAndStoreLogo } from './logoProcessing';
 import { dollarsToCents, centsToDollars } from './shared/pdf/money';
-import { validateAndRepairAiOutput } from './shared/ai/validateAiOutput';
+import { validateAndRepairAiOutput, clampMaterialQuantity } from './shared/ai/validateAiOutput';
 import { getFeedbackDocId, getCategoryLabel, isSideEffectFreeRequest, isRatingRecordRequest } from './quickFeedback.helpers';
 import { buildReconcilePrompt } from './reconcile.helpers';
 import {
@@ -2503,6 +2503,7 @@ Use general structural-counting knowledge that applies across all trades:
 - One-per-unit items: count = N units × items_per_unit.
 - Volumetric (concrete bags, sand): bags = volume / yield.
 - If quantity has a sectionMultiplier (per-unit qty × multiplier), multiplier is the count of repeating WORK UNITS — sanity-check the multiplier itself against the scope.
+- Units "m", "m²", "m³", "kg" and "L" are continuous measures, so a FRACTIONAL newQuantity is valid and often correct — one deck footing is 0.054 m³ of concrete, not 1. Only "each", "pack" and "box" must be whole numbers. Never round a per-unit volume or mass up to 1 just to make it an integer; in a section with a large multiplier that multiplies straight into the quote.
 
 CRITICAL — be conservative. A 20-30% over-spec is normal for waste; do NOT adjust those. Only adjust when the count is clearly disproportionate. When in doubt, keep.
 
@@ -2524,7 +2525,12 @@ Respond with ONLY valid JSON in this exact shape:
       typeof r.newQuantity === 'number' &&
       r.newQuantity > 0
     ) {
-      adjustments.set(r.index, Math.round(r.newQuantity));
+      // Unit-aware, same as the client. A corrective pass that rounds
+      // 0.054 m³ to 0 (or floors it to 1) would re-create the very bug it
+      // exists to catch — see clampMaterialQuantity.
+      const unit = typeof materials[r.index]?.unit === 'string' ? materials[r.index].unit : 'each';
+      const clamped = clampMaterialQuantity(r.newQuantity, unit);
+      if (clamped > 0) adjustments.set(r.index, clamped);
     }
   }
   if (adjustments.size === 0) return materials;
