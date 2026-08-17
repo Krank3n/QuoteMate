@@ -25,10 +25,12 @@ export interface AiValidationFlags {
   hasZeroLabourSection: boolean;
   hasZeroPricedMaterial: boolean;
   hasAbsurdQuantity: boolean;
+  hasLaunderedSection: boolean;
   invalidUnitCount: number;
   zeroLabourSections: string[];
   zeroPricedMaterialCount: number;
   absurdQuantityCount: number;
+  launderedSections: string[];
 }
 
 const PIECE_GOOD_NAME_RE = /\b(pavers?|tiles?|decking boards?|plasterboards?|weatherboards?|downlights?|gpos?|hinges?|door handles?)\b/i;
@@ -114,6 +116,65 @@ export function clampMaterialQuantity(quantity: number, unit: string): number {
   return Math.min(Math.max(rounded, 0.001), MAX_BULK_QUANTITY);
 }
 
+/**
+ * A section is "laundered" when its material quantities were never derived:
+ * the AI emitted the same round placeholder across several materials against a
+ * large sectionMultiplier, so save-time multiplication smears the job's SIZE
+ * onto every line.
+ *
+ * Live example — QU-178425, a 165 m² re-roof stored with multiplier 165 and
+ * sheets, batten screws and sealant all at 1 per m²:
+ *     165 m of roofing sheet, 165 batten screws, 165 tubes of silicone ($2,887)
+ * while the sheets are simultaneously UNDER-quoted (165 lm where 238 is right).
+ *
+ * The generation prompt already forbids exactly this ("ANTI-LAUNDER RULE") and
+ * the model still does it, so instructions alone are not a control. This is the
+ * deterministic detector; the server feeds what it finds into the quantity
+ * sanity-check pass as a targeted re-derivation order.
+ *
+ * Calibration is deliberately conservative, checked against stored documents:
+ *   - multiplier >= 40 — genuine repeating work-unit counts (fence bays, post
+ *     footings, doors) sit well below this, areas in m² sit above it. A 35-footing
+ *     deck and a 13-bay fence both stay clear.
+ *   - 3+ materials sharing the IDENTICAL small round quantity — a real per-unit
+ *     section varies (2 posts, 3 sheets, 1 cap per bay). Three separate lines at
+ *     exactly the same 1 is a placeholder, not a calculation.
+ *   - fractional quantities are never placeholders, so they are ignored.
+ */
+const LAUNDER_MIN_MULTIPLIER = 40;
+const LAUNDER_MIN_MATCHING_MATERIALS = 3;
+const LAUNDER_PLACEHOLDER_MAX = 3;
+
+export function detectLaunderedSections(materials: AiMaterial[]): string[] {
+  const bySection = new Map<string, Map<number, number>>();
+
+  for (const m of materials || []) {
+    const section = typeof m?.section === 'string' ? m.section.trim() : '';
+    if (!section) continue;
+    const multiplier = Number((m as any)?.sectionMultiplier);
+    if (!Number.isFinite(multiplier) || multiplier < LAUNDER_MIN_MULTIPLIER) continue;
+    const qty = Number(m?.quantity);
+    if (!Number.isFinite(qty) || qty <= 0 || qty > LAUNDER_PLACEHOLDER_MAX) continue;
+    // A fraction means the AI actually did the maths — never a placeholder.
+    if (Math.abs(qty - Math.round(qty)) > 1e-9) continue;
+
+    const counts = bySection.get(section) || new Map<number, number>();
+    counts.set(qty, (counts.get(qty) || 0) + 1);
+    bySection.set(section, counts);
+  }
+
+  const laundered: string[] = [];
+  for (const [section, counts] of bySection) {
+    for (const n of counts.values()) {
+      if (n >= LAUNDER_MIN_MATCHING_MATERIALS) {
+        laundered.push(section);
+        break;
+      }
+    }
+  }
+  return laundered;
+}
+
 export function validateAndRepairAiOutput(
   materials: AiMaterial[],
   log: { warn: (msg: string, meta?: unknown) => void } = console,
@@ -192,6 +253,11 @@ export function validateAndRepairAiOutput(
     }
   }
 
+  const launderedSections = detectLaunderedSections(materials);
+  for (const section of launderedSections) {
+    log.warn('[ai-validate] section quantities not derived — multiplier will launder', { section });
+  }
+
   return {
     materials: repaired,
     flags: {
@@ -199,10 +265,12 @@ export function validateAndRepairAiOutput(
       hasZeroLabourSection: zeroLabourSections.length > 0,
       hasZeroPricedMaterial: zeroPricedMaterialCount > 0,
       hasAbsurdQuantity: absurdQuantityCount > 0,
+      hasLaunderedSection: launderedSections.length > 0,
       invalidUnitCount,
       zeroLabourSections,
       zeroPricedMaterialCount,
       absurdQuantityCount,
+      launderedSections,
     },
   };
 }
