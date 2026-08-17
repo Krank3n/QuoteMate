@@ -6,6 +6,7 @@
 import { ANTHROPIC_API_KEY, GEMINI_API_KEY } from '@env';
 import { Material, FloorplanAnalysis } from '../types';
 import { normaliseFloorplanAnalysis } from './floorplanNormalise';
+import { clampMaterialQuantity } from '../../shared/ai/validateAiOutput';
 import { Platform } from 'react-native';
 import { auth } from '../config/firebase';
 // Lazy-import FileSystem (only available on native). try/catch so the module
@@ -515,19 +516,24 @@ function validateMaterials(materials: LLMMaterial[]): LLMMaterial[] {
         m.quantity > 0 &&
         (m.searchTerm || m.savedRateName || m.pricingSource === 'saved_rate' || m.reeceProductId)
     )
-    // Clamp and normalise values
-    .map(m => ({
-      ...m,
-      qualityTier:
-        m.qualityTier === 'budget' || m.qualityTier === 'standard' || m.qualityTier === 'premium'
-          ? m.qualityTier
+    // Clamp and normalise values. Normalise the unit FIRST — the quantity
+    // clamp is unit-aware, so an unrecognised unit has to fall back to 'each'
+    // before we decide whether a fraction is meaningful.
+    .map(m => {
+      const unit = VALID_UNITS.includes(m.unit) ? m.unit : 'each';
+      return {
+        ...m,
+        qualityTier:
+          m.qualityTier === 'budget' || m.qualityTier === 'standard' || m.qualityTier === 'premium'
+            ? m.qualityTier
+            : undefined,
+        quantity: clampMaterialQuantity(m.quantity, unit),
+        sectionMultiplier: m.sectionMultiplier
+          ? Math.min(Math.max(Math.round(m.sectionMultiplier), 1), 200)
           : undefined,
-      quantity: Math.min(Math.max(Math.round(m.quantity), 1), 999),
-      sectionMultiplier: m.sectionMultiplier
-        ? Math.min(Math.max(Math.round(m.sectionMultiplier), 1), 200)
-        : undefined,
-      unit: VALID_UNITS.includes(m.unit) ? m.unit : 'each',
-    }));
+        unit,
+      };
+    });
 
   // Enforce consistent multiplier per section.
   //
