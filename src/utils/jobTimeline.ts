@@ -235,11 +235,22 @@ export function deriveTimelineEvents(
       title: 'Marked as paid',
     });
   }
-  if (job.closedAt) {
+  // Archiving writes different fields depending on which affordance was used:
+  // the kebab's Archive parks the job with `archivedAt` alone and leaves the
+  // stage untouched, while the stage sheet and closeJob move it to `closed`
+  // (server-stamped `closedAt`). Reading only `closedAt` meant a kebab-archived
+  // job showed nothing at all in its history — and since bucketFor() checks
+  // `archivedAt` first, it had silently dropped into Done with its old stage
+  // pill still showing. Take whichever stamp exists, oldest first.
+  const archivedStamp =
+    job.closedAt && job.archivedAt
+      ? Math.min(job.closedAt, job.archivedAt)
+      : job.closedAt ?? job.archivedAt;
+  if (archivedStamp) {
     push(events, {
       id: `${job.id}:closed`,
       kind: 'job_closed',
-      at: job.closedAt,
+      at: archivedStamp,
       title: 'Archived',
     });
   }
