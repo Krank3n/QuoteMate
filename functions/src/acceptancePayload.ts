@@ -17,6 +17,7 @@ import {
   showsPerLineMoney,
   type PriceDetail,
 } from './shared/document/priceDetail';
+import { travelAdjustmentAmountFor } from './travelSurcharge';
 
 /** The markup-rolled figures from applyHideMarkupForDisplay. */
 export interface AcceptanceDisplayFigures {
@@ -87,7 +88,14 @@ export function buildAcceptanceQuotePayload(
       : {}),
     priceDetail,
     markupAmount: display.markupAmount,
-    travelAdjustmentAmount: quote.travelAdjustmentAmount || 0,
+    // Never persisted — documentCalculator derives it on the client for
+    // display and nothing writes it back, so this read was always 0. The page
+    // folds travel into the Subtotal it prints
+    // (`subtotal + markupAmount + travelAdjustmentAmount`), so a zero here
+    // understated that figure by the whole surcharge and left the customer the
+    // same unexplained gap between Subtotal and Total that the email had.
+    travelAdjustmentAmount:
+      Number(quote.travelAdjustmentAmount) || travelAdjustmentAmountFor(quote),
     gst: quote.gst,
     pricesIncludeGst: quote.pricesIncludeGst === true,
     gstRegistered: quote.gstRegistered !== false,

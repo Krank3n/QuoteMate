@@ -16,6 +16,7 @@
 
 import * as admin from 'firebase-admin';
 import * as functions from 'firebase-functions';
+import { travelAdjustmentAmountFor } from './travelSurcharge';
 import {
   buildQuoteEmailHtml,
   remoteLogoUrl,
@@ -820,6 +821,8 @@ async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailRes
     gst: quote.gst || 0,
     total: quote.total || 0,
     gstRegistered: quote.gstRegistered,
+    travelAdjustment: quote.travelAdjustment,
+    travelAdjustmentAmount: travelAdjustmentAmountFor(quote),
     acceptanceUrl,
     photoUrls,
     depositAmount: depositAmountForEmail || undefined,
@@ -986,6 +989,8 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
     gst: invoice.gst || 0,
     total: invoice.total || 0,
     gstRegistered: invoice.gstRegistered,
+    travelAdjustment: invoice.travelAdjustment,
+    travelAdjustmentAmount: travelAdjustmentAmountFor(invoice),
     invoiceNumber: invoice.invoiceNumber,
     dueDate: invoice.dueDate || new Date().toISOString(),
     payNowUrl,

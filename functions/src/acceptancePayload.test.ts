@@ -115,3 +115,52 @@ describe('buildAcceptanceQuotePayload', () => {
     ).toBe('As sent.');
   });
 });
+
+/**
+ * The acceptance page folds the travel surcharge into the Subtotal it prints:
+ *
+ *   sub = quote.subtotal + markupAmount + travelAdjustmentAmount
+ *
+ * but it read `quote.travelAdjustmentAmount`, which is NEVER persisted —
+ * documentCalculator derives it on the client for display and nothing writes it
+ * back. So the term was always 0, the printed Subtotal was short by the whole
+ * surcharge, and the customer got the same unexplained gap between Subtotal and
+ * Total that the email had.
+ */
+describe('buildAcceptanceQuotePayload — travel surcharge', () => {
+  it('derives the surcharge the stored field never carried', () => {
+    const payload = buildAcceptanceQuotePayload(
+      quote({ travelAdjustment: 7, subtotal: 1690 }),
+      {},
+      display,
+    );
+    expect(payload.travelAdjustmentAmount).toBe(118.3); // 1690 * 7%
+  });
+
+  it('makes the page’s Subtotal reconcile instead of understating it', () => {
+    const payload = buildAcceptanceQuotePayload(
+      quote({ travelAdjustment: 7, subtotal: 1690 }),
+      {},
+      display,
+    );
+    // The expression the page evaluates.
+    const printed = display.subtotal + payload.markupAmount + payload.travelAdjustmentAmount;
+    expect(printed).toBe(1808.3);
+    // Previously this collapsed to the bare subtotal, hiding $118.30.
+    expect(printed).not.toBe(display.subtotal);
+  });
+
+  it('stays at zero when no travel surcharge applies', () => {
+    const payload = buildAcceptanceQuotePayload(quote({ subtotal: 1690 }), {}, display);
+    expect(payload.travelAdjustmentAmount).toBe(0);
+  });
+
+  it('prefers a stored amount if one is ever written', () => {
+    const payload = buildAcceptanceQuotePayload(
+      quote({ travelAdjustment: 7, subtotal: 1690, travelAdjustmentAmount: 99.99 }),
+      {},
+      display,
+    );
+    expect(payload.travelAdjustmentAmount).toBe(99.99);
+  });
+});
