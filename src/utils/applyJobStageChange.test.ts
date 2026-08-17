@@ -157,3 +157,86 @@ describe('applyJobStageChange — other targets are untouched', () => {
     expect(h.saveJob).toHaveBeenCalledWith(expect.objectContaining({ stage: 'accepted' }));
   });
 });
+
+/**
+ * Reopening a parked job.
+ *
+ * The per-stage timestamps are write-once server-side and the activity
+ * timeline renders straight off them, so nothing cleared them on the way back
+ * out. A job taken Cancel -> Archive -> Mark as Accepted kept "Cancelled" and
+ * "Archived" at the top of its history as its most recent events while the
+ * pill read Accepted, and — because bucketFor() checks archivedAt ahead of
+ * stage — sat in the Done pile the whole time. Observed on a live job on
+ * 17 Aug 2026: pill "Accepted", invoice part-paid, log "Archived / Cancelled".
+ */
+describe('applyJobStageChange — leaving a terminal stage', () => {
+  const parked = (over: Record<string, any> = {}) =>
+    job({ stage: 'cancelled', cancelledAt: 111, closedAt: 222, archivedAt: 333, ...over });
+
+  it('clears the stamps that parked the job when it is reopened', async () => {
+    const h = harness();
+    await applyJobStageChange({
+      job: parked(),
+      target: 'in_progress',
+      attachedDocs: [],
+      saveJob: h.saveJob,
+      helpers: h.helpers,
+    });
+
+    const saved = h.saveJob.mock.calls[0][0];
+    expect(saved.stage).toBe('in_progress');
+    // undefined is what saveJob turns into a Firestore deleteField().
+    expect(saved.cancelledAt).toBeUndefined();
+    expect(saved.closedAt).toBeUndefined();
+    expect(saved.archivedAt).toBeUndefined();
+  });
+
+  it('clears them for the exact path that produced the live bug', async () => {
+    const h = harness();
+    await applyJobStageChange({
+      job: parked({ stage: 'closed' }),
+      target: 'accepted',
+      attachedDocs: [],
+      saveJob: h.saveJob,
+      helpers: h.helpers,
+    });
+
+    const saved = h.saveJob.mock.calls[0][0];
+    expect(saved.stage).toBe('accepted');
+    expect(saved.archivedAt).toBeUndefined();
+    expect(saved.cancelledAt).toBeUndefined();
+  });
+
+  it('keeps the stamps when the job is being parked, not reopened', async () => {
+    for (const target of ['cancelled', 'closed'] as const) {
+      const h = harness();
+      await applyJobStageChange({
+        job: job({ stage: 'in_progress', cancelledAt: 111 }),
+        target,
+        attachedDocs: [],
+        saveJob: h.saveJob,
+        helpers: h.helpers,
+      });
+      const saved = h.saveJob.mock.calls[0][0];
+      expect(saved.stage).toBe(target);
+      expect(saved.cancelledAt).toBe(111);
+    }
+  });
+
+  it('does not send redundant clears on an ordinary transition', async () => {
+    const h = harness();
+    await applyJobStageChange({
+      job: job({ stage: 'accepted' }),
+      target: 'in_progress',
+      attachedDocs: [],
+      saveJob: h.saveJob,
+      helpers: h.helpers,
+    });
+
+    const saved = h.saveJob.mock.calls[0][0];
+    // A job that was never parked must not carry three deleteField() writes.
+    expect('cancelledAt' in saved).toBe(false);
+    expect('closedAt' in saved).toBe(false);
+    expect('archivedAt' in saved).toBe(false);
+  });
+});

@@ -31,6 +31,10 @@ export interface ApplyJobStageChangeOptions {
 
 const QUOTE_LIFECYCLE_STAGES = ['draft', 'quote_sent', 'quote_accepted'] as const;
 
+/** The two stages that park a job. Reaching either stamps a timestamp the
+ *  timeline reads; leaving either has to clear it. */
+const TERMINAL_STAGES: ReadonlySet<JobStage> = new Set<JobStage>(['cancelled', 'closed']);
+
 /**
  * Map a Job stage to the matching Document stage on the quote side. Returns
  * null when there's nothing to propagate (e.g. for stages that only mean
@@ -87,5 +91,31 @@ export async function applyJobStageChange({
     }
   }
 
-  await saveJob({ ...job, stage: target });
+  // Reopening a job has to clear the stamps that killed it.
+  //
+  // The per-stage timestamps are write-once server-side (STAGE_STAMP_FIELD in
+  // functions/src/jobHandlers.ts) and the activity timeline renders straight
+  // off them (jobTimeline.ts). Nothing ever cleared them on the way back out,
+  // so a job taken Cancel -> Archive -> Mark as Accepted kept "Cancelled" and
+  // "Archived" sitting at the top of its history as its most recent events
+  // while the pill read Accepted — the job contradicting its own log.
+  //
+  // `archivedAt` matters most: bucketFor() checks it FIRST, ahead of stage, so
+  // a reopened job stayed in the Done pile no matter what stage it claimed.
+  const leavingTerminalState =
+    !TERMINAL_STAGES.has(target) &&
+    (job.cancelledAt !== undefined ||
+      job.closedAt !== undefined ||
+      job.archivedAt !== undefined);
+
+  await saveJob({
+    ...job,
+    stage: target,
+    // saveJob turns a top-level `undefined` into a Firestore deleteField() —
+    // see jobWritePayload. Only sent when something is actually set, so an
+    // ordinary transition doesn't carry three redundant deletes.
+    ...(leavingTerminalState
+      ? { cancelledAt: undefined, closedAt: undefined, archivedAt: undefined }
+      : {}),
+  });
 }
