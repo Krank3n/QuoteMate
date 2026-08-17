@@ -178,6 +178,33 @@ export function ViewJobScreen() {
   // the job is deleted out from under us.
   const actionableDoc = useMemo(() => pickPrimaryDoc(attachedDocs), [attachedDocs]);
 
+  // Duration comes from the primary attached doc's labour rather than
+  // duplicate fields on the Job itself. Prefer the explicitly-linked
+  // primaryDocumentId when it's still on the job; otherwise fall back to
+  // the actionable doc.
+  //
+  // Sits above the `!job` guard for the same reason actionableDoc does: the
+  // email warm-up effect below depends on it, and every hook has to run on
+  // every render. Deleting a job from the Actions menu made `job` undefined,
+  // the guard returned early, and that effect went missing mid-render —
+  // "Rendered fewer hooks than expected" (ViewJobScreen.tsx:69), a red box on
+  // dev and a crash in release, on the delete path of any job.
+  const primaryDoc = job?.primaryDocumentId
+    ? documents.find((d) => d.id === job.primaryDocumentId) ?? actionableDoc
+    : actionableDoc;
+
+  // Warm the customer email for the doc this screen is about. This screen's
+  // sticky-bar Send drives the same SendDocumentDialog as the wizard, but had
+  // no warm-up of its own — so sending from here always paid the full
+  // generation wait. warmEmailDraft is fire-and-forget and self-guarding: it
+  // no-ops off the free tier, on a doc that already carries a body, on
+  // anything past draft, and on a doc already warm or in flight. Safe to call
+  // on every doc change.
+  useEffect(() => {
+    if (!primaryDoc) return;
+    void warmEmailDraft(primaryDoc, businessSettings, { isPro });
+  }, [primaryDoc?.id, businessSettings, isPro]);
+
   if (!job) {
     return (
       <View style={[styles.container, styles.centered]}>
@@ -198,26 +225,7 @@ export function ViewJobScreen() {
   }
 
   const meta = stageMetaFor(job.stage, themeColors);
-  // Duration comes from the primary attached doc's labour rather than
-  // duplicate fields on the Job itself. Prefer the explicitly-linked
-  // primaryDocumentId when it's still on the job; otherwise fall back to
-  // the actionable doc.
-  const primaryDoc = job.primaryDocumentId
-    ? documents.find((d) => d.id === job.primaryDocumentId) ?? actionableDoc
-    : actionableDoc;
   const completedAt = formatScheduledDateLong(job.completedDate);
-
-  // Warm the customer email for the doc this screen is about. This screen's
-  // sticky-bar Send drives the same SendDocumentDialog as the wizard, but had
-  // no warm-up of its own — so sending from here always paid the full
-  // generation wait. warmEmailDraft is fire-and-forget and self-guarding: it
-  // no-ops off the free tier, on a doc that already carries a body, on
-  // anything past draft, and on a doc already warm or in flight. Safe to call
-  // on every doc change.
-  useEffect(() => {
-    if (!primaryDoc) return;
-    void warmEmailDraft(primaryDoc, businessSettings, { isPro });
-  }, [primaryDoc?.id, businessSettings, isPro]);
 
   // "Order from Reece" entry — only when Reece is connected and the doc has
   // at least one Reece-priced material with order identifiers. Slots into
