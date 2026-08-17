@@ -61,8 +61,23 @@ const ABSURD_QUANTITY_BY_UNIT: Record<string, number> = {
  */
 const DISCRETE_UNITS = new Set(['each', 'box', 'pack']);
 
-/** Whole-unit ceiling for discrete counts (fasteners, boards, pavers). */
-const MAX_DISCRETE_QUANTITY = 999;
+/**
+ * Whole-unit ceiling for discrete counts (fasteners, boards, pavers).
+ *
+ * This is a PER-UNIT ceiling — it is applied before sectionMultiplier. The
+ * ceiling on what actually gets stored is the COUNT_UNITS backstop in
+ * convertLLMMaterialsToMaterials, which caps quantity × multiplier at 5000.
+ *
+ * It used to be 999, which silently truncated whole-job counts in sections
+ * with multiplier 1: a 6x8 m deck needs ~26-30 stainless screws per m², so
+ * every replay of that job asked for 1300-2400 and got 999 — the tradie
+ * buying roughly half the fasteners the deck needs. Raising this to match the
+ * post-multiply backstop does NOT widen the worst case, because that backstop
+ * is unchanged: a runaway per-unit value still collapses to 5000 once
+ * multiplied. It only stops the truncation of counts that were already
+ * correct. Anything past 5000 is still badged by ABSURD_QUANTITY_BY_UNIT.
+ */
+const MAX_DISCRETE_QUANTITY = 5000;
 /**
  * Ceiling for continuous measures. Deliberately far above any real job: the
  * per-unit × sectionMultiplier explosion is caught by ABSURD_QUANTITY_BY_UNIT

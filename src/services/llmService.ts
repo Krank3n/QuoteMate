@@ -891,12 +891,16 @@ export function convertLLMMaterialsToMaterials(llmMaterials: LLMMaterial[]): (Pa
   return llmMaterials.map((m) => {
     const multiplier = m.sectionMultiplier || 1;
     let finalQuantity = Math.round(m.quantity * multiplier * 1000) / 1000;
-    // Backstop against the per-unit × multiplier explosion. validateMaterials
-    // caps per-unit qty at 999 and the multiplier at 200 independently, so their
-    // PRODUCT can still reach ~200k (real stored cases: 500 × 25 = 12,500 and
-    // 42,957 "each" decking screws). Bulk units (kg/L/m/m²/m³) can legitimately
-    // be large, so only cap discrete COUNT units; the downstream pack-aware +
-    // coverage passes then collapse this to the real number of packs to buy.
+    // Backstop against the per-unit × multiplier explosion, and the ONLY cap
+    // that decides what gets stored. validateMaterials caps per-unit qty at
+    // 5000 and the multiplier at 200 independently, so their PRODUCT can reach
+    // 1M (real stored cases: 500 × 25 = 12,500 and 42,957 "each" decking
+    // screws). Bulk units (kg/L/m/m²/m³) can legitimately be large, so only cap
+    // discrete COUNT units; the downstream pack-aware + coverage passes then
+    // collapse this to the real number of packs to buy.
+    // Keep this in step with MAX_DISCRETE_QUANTITY in shared/ai/validateAiOutput:
+    // the per-unit ceiling is deliberately set to this same value so a correct
+    // whole-job count in a multiplier-1 section is never truncated on the way in.
     const COUNT_UNITS = ['each', 'pack', 'box'];
     if (COUNT_UNITS.includes(m.unit) && finalQuantity > 5000) {
       finalQuantity = 5000;
