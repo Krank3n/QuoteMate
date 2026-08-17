@@ -1,4 +1,4 @@
-import { validateAndRepairAiOutput, clampMaterialQuantity } from './validateAiOutput';
+import { validateAndRepairAiOutput, clampMaterialQuantity, detectLaunderedSections } from './validateAiOutput';
 
 // Silent logger so warning chatter doesn't pollute test output.
 const silent = { warn: () => {} };
@@ -630,5 +630,112 @@ describe('m³ absurd-quantity ceiling (tightened after QU-178694)', () => {
     expect(materials[0].pricingSource).toBe('invalid_unit');
     expect(flags.hasInvalidUnit).toBe(true);
     expect(flags.hasAbsurdQuantity).toBe(true);
+  });
+});
+
+describe('detectLaunderedSections', () => {
+  // The real QU-178425 shape: a 165 m² re-roof stored as a per-m² section with
+  // sheets, batten screws and sealant all at 1 per m². 165 tubes of silicone.
+  const roofSection = [
+    { name: 'Colorbond Corrugated Roofing Sheets 0.48mm BMT', quantity: 1, unit: 'm', section: 'Roof Replacement', sectionMultiplier: 165 },
+    { name: 'Batten Screws', quantity: 1, unit: 'each', section: 'Roof Replacement', sectionMultiplier: 165 },
+    { name: 'Roof and Gutter Silicone Sealant', quantity: 1, unit: 'each', section: 'Roof Replacement', sectionMultiplier: 165 },
+    { name: 'Roofing Screws (Timber Fixing)', quantity: 3, unit: 'each', section: 'Roof Replacement', sectionMultiplier: 165 },
+  ];
+
+  it('catches the 165 m² re-roof that shipped 165 tubes of sealant', () => {
+    expect(detectLaunderedSections(roofSection)).toEqual(['Roof Replacement']);
+  });
+
+  it('catches turf/fertiliser/edging all at 1 per m² on a 100 m² lawn', () => {
+    expect(
+      detectLaunderedSections([
+        { name: 'Buffalo Turf', quantity: 1, unit: 'm²', section: 'Lawn', sectionMultiplier: 100 },
+        { name: 'Lawn Starter Fertiliser', quantity: 1, unit: 'kg', section: 'Lawn', sectionMultiplier: 100 },
+        { name: 'Treated Pine Edging 100x16mm', quantity: 1, unit: 'm', section: 'Lawn', sectionMultiplier: 100 },
+      ]),
+    ).toEqual(['Lawn']);
+  });
+
+  it('reports every laundered section, and only those', () => {
+    const found = detectLaunderedSections([
+      ...roofSection,
+      { name: 'Skip Bin Hire', quantity: 1, unit: 'each', section: 'Site Setup & Waste', sectionMultiplier: 1 },
+      { name: 'Dust Sheets', quantity: 1, unit: 'each', section: 'Site Setup & Waste', sectionMultiplier: 1 },
+      { name: 'Tape', quantity: 1, unit: 'each', section: 'Site Setup & Waste', sectionMultiplier: 1 },
+    ]);
+    expect(found).toEqual(['Roof Replacement']);
+  });
+
+  describe('does not fire on genuine per-unit sections', () => {
+    it('leaves a 13-bay Colorbond fence alone — the multiplier is a real bay count', () => {
+      expect(
+        detectLaunderedSections([
+          { name: 'Steel Fence Post 50x50', quantity: 2, unit: 'each', section: 'Fence Bay', sectionMultiplier: 13 },
+          { name: 'Colorbond Sheet 1.8m', quantity: 3, unit: 'each', section: 'Fence Bay', sectionMultiplier: 13 },
+          { name: 'Post Cap 50x50', quantity: 1, unit: 'each', section: 'Fence Bay', sectionMultiplier: 13 },
+        ]),
+      ).toEqual([]);
+    });
+
+    it('leaves the 35-footing deck alone — that was the QU-178694 clamp bug, not laundering', () => {
+      expect(
+        detectLaunderedSections([
+          { name: 'H4 Treated Pine Post 90x90mm', quantity: 1, unit: 'each', section: 'Deck Footings', sectionMultiplier: 35 },
+          { name: 'Ready Mix Concrete', quantity: 0.054, unit: 'm³', section: 'Deck Footings', sectionMultiplier: 35 },
+          { name: 'M10 Cup Head Bolt', quantity: 2, unit: 'each', section: 'Deck Footings', sectionMultiplier: 35 },
+        ]),
+      ).toEqual([]);
+    });
+
+    it('leaves a real per-m² paving section alone — derived densities are not round', () => {
+      expect(
+        detectLaunderedSections([
+          { name: 'Concrete Pavers 400x400', quantity: 6.25, unit: 'each', section: 'Paving', sectionMultiplier: 160 },
+          { name: 'Bedding Sand', quantity: 51, unit: 'kg', section: 'Paving', sectionMultiplier: 160 },
+          { name: 'Jointing Sand', quantity: 1.1, unit: 'kg', section: 'Paving', sectionMultiplier: 160 },
+        ]),
+      ).toEqual([]);
+    });
+
+    it('needs three matching lines, not two', () => {
+      expect(
+        detectLaunderedSections([
+          { name: 'Membrane', quantity: 1, unit: 'm²', section: 'Wet Area', sectionMultiplier: 60 },
+          { name: 'Primer', quantity: 1, unit: 'L', section: 'Wet Area', sectionMultiplier: 60 },
+          { name: 'Screed', quantity: 22, unit: 'kg', section: 'Wet Area', sectionMultiplier: 60 },
+        ]),
+      ).toEqual([]);
+    });
+
+    it('needs the multiplier to be area-scale, not a work-unit count', () => {
+      const smallMultiplier = roofSection.map(m => ({ ...m, sectionMultiplier: 12 }));
+      expect(detectLaunderedSections(smallMultiplier)).toEqual([]);
+    });
+
+    it('ignores materials with no section', () => {
+      expect(
+        detectLaunderedSections([
+          { name: 'A', quantity: 1, unit: 'each', sectionMultiplier: 165 },
+          { name: 'B', quantity: 1, unit: 'each', sectionMultiplier: 165 },
+          { name: 'C', quantity: 1, unit: 'each', sectionMultiplier: 165 },
+        ]),
+      ).toEqual([]);
+    });
+  });
+
+  it('surfaces through validateAndRepairAiOutput flags', () => {
+    const { flags } = validateAndRepairAiOutput(roofSection, silent);
+    expect(flags.hasLaunderedSection).toBe(true);
+    expect(flags.launderedSections).toEqual(['Roof Replacement']);
+  });
+
+  it('leaves the flag clear on a clean list', () => {
+    const { flags } = validateAndRepairAiOutput(
+      [{ name: 'Concrete', quantity: 5, unit: 'kg', price: 12, section: 'Footings', sectionLaborHours: 2 }],
+      silent,
+    );
+    expect(flags.hasLaunderedSection).toBe(false);
+    expect(flags.launderedSections).toEqual([]);
   });
 });
