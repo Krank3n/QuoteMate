@@ -247,7 +247,7 @@ export function PaywallScreen() {
               if (!claimPurchase(key)) return;
               let outcome: ReceiptOutcome;
               try {
-                outcome = await validatePurchase(purchase);
+                ({ outcome } = await validatePurchase(purchase));
               } finally {
                 releasePurchase(key);
               }
@@ -385,8 +385,10 @@ export function PaywallScreen() {
       if (activeSubscriptions.length > 0) {
         const purchase = activeSubscriptions[0];
         // PAY-01: restore only completes when the server verifies the
-        // receipt — no local-premium fallback.
-        const outcome: ReceiptOutcome = await validatePurchase(purchase);
+        // receipt — no local-premium fallback. A restore of an already-entitled
+        // subscription is still a successful restore to the tradie; it just
+        // isn't a new sale, which is why the server won't re-alert on it.
+        const { outcome } = await validatePurchase(purchase);
 
         if (outcome === 'granted') {
           await loadSubscription();

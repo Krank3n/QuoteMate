@@ -40,14 +40,26 @@ export function releasePurchase(key: string): void {
   inFlight.delete(key);
 }
 
+export interface ValidationResult {
+  outcome: ReceiptOutcome;
+  /**
+   * The server had already entitled this exact transaction — this call changed
+   * nothing. True for every launch-time re-check of a healthy subscription,
+   * false for a genuinely new grant (including a renewal, which mints a new
+   * transaction id). Older builds' servers don't send the flag; absent means
+   * "assume new", matching the pre-flag behaviour.
+   */
+  alreadyEntitled: boolean;
+}
+
 /**
- * Post a receipt to the platform's validator. Returns 'granted' | 'rejected' |
- * 'retry'; 'retry' means we could not reach a verdict, so the caller must leave
- * the store transaction UNFINISHED for later re-delivery.
+ * Post a receipt to the platform's validator. `outcome` is
+ * 'granted' | 'rejected' | 'retry'; 'retry' means we could not reach a verdict,
+ * so the caller must leave the store transaction UNFINISHED for re-delivery.
  */
-export async function validatePurchase(purchase: any): Promise<ReceiptOutcome> {
+export async function validatePurchase(purchase: any): Promise<ValidationResult> {
   const currentUser = auth.currentUser;
-  if (!currentUser) return 'retry';
+  if (!currentUser) return { outcome: 'retry', alreadyEntitled: false };
 
   const endpoint = Platform.OS === 'ios' ? 'validateAppleReceipt' : 'validateGoogleReceipt';
   try {
@@ -62,16 +74,30 @@ export async function validatePurchase(purchase: any): Promise<ReceiptOutcome> {
       }),
     });
     const data = await response.json().catch(() => null);
-    return classifyReceiptResponse(response.status, data);
+    return {
+      outcome: classifyReceiptResponse(response.status, data),
+      alreadyEntitled: (data as { alreadyEntitled?: unknown } | null)?.alreadyEntitled === true,
+    };
   } catch {
     // Network/parse failure is never a verdict on the buyer's purchase.
-    return 'retry';
+    return { outcome: 'retry', alreadyEntitled: false };
   }
 }
 
 export interface RecoverySummary {
   checked: number;
+  /**
+   * Purchases this sweep actually turned into Pro — i.e. someone was
+   * charged-but-not-entitled and we healed it. NOT incremented for a healthy
+   * subscription being re-checked, which is the overwhelmingly common case:
+   * `getRecoverablePurchases()` returns current entitlements, so every active
+   * iOS subscriber lands here on every single launch. Counting those made
+   * `purchase_recovered_on_launch` fire for healthy subscribers and rendered
+   * the outage alarm meaningless.
+   */
   granted: number;
+  /** Live subscriptions re-checked and already entitled — the boring path. */
+  alreadyEntitled: number;
   rejected: number;
   retry: number;
 }
@@ -81,13 +107,14 @@ export interface RecoverySummary {
  * them. Silent by design — this runs at launch and must never interrupt a
  * tradie mid-job with a modal about billing.
  *
- * onGranted fires only when the server actually granted, so callers can
- * refresh subscription state without polling.
+ * onGranted fires only when this sweep actually changed something, so callers
+ * can refresh subscription state without polling. Local Pro state does not
+ * depend on it: App.tsx loads the subscription during bootstrap regardless.
  */
 export async function recoverPendingPurchases(
   opts: { onGranted?: (purchase: any) => Promise<void> | void } = {},
 ): Promise<RecoverySummary> {
-  const summary: RecoverySummary = { checked: 0, granted: 0, rejected: 0, retry: 0 };
+  const summary: RecoverySummary = { checked: 0, granted: 0, alreadyEntitled: 0, rejected: 0, retry: 0 };
 
   if (Platform.OS === 'web') return summary;
   if (!auth.currentUser) return summary;
@@ -105,12 +132,19 @@ export async function recoverPendingPurchases(
     if (!claimPurchase(key)) continue;
     try {
       summary.checked += 1;
-      const outcome = await validatePurchase(purchase);
+      const { outcome, alreadyEntitled } = await validatePurchase(purchase);
 
       if (outcome === 'granted') {
-        summary.granted += 1;
+        // Finish either way — the receipt is good, so the store should stop
+        // re-delivering it. Only a receipt we actually healed counts as a
+        // recovery and warrants refreshing subscription state.
+        if (alreadyEntitled) {
+          summary.alreadyEntitled += 1;
+        } else {
+          summary.granted += 1;
+        }
         await billingService.finishTransaction(purchase);
-        await opts.onGranted?.(purchase);
+        if (!alreadyEntitled) await opts.onGranted?.(purchase);
       } else if (outcome === 'rejected') {
         // The store affirmatively disowned it — finishing stops the store
         // re-delivering a receipt that will never validate.

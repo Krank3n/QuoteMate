@@ -49,3 +49,32 @@ export function receiptVerdict(params: {
   const periodMs = (isYearly ? 365 : 30) * 24 * 60 * 60 * 1000;
   return { grant: true, expiryDate: new Date(now.getTime() + periodMs) };
 }
+
+/**
+ * Is this validation the FIRST grant of a given store transaction?
+ *
+ * Both stores hand a LIVE subscription back on every launch — StoreKit's
+ * currentEntitlements (via getAvailablePurchases) and Play's equivalent — and
+ * the launch-time sweep re-posts whatever they hand back. So these endpoints
+ * routinely re-validate a receipt they entitled weeks ago. Writing the
+ * entitlement again is harmless and should keep happening; the side effects
+ * that mean "someone just upgraded" must not.
+ *
+ * Before this gate a single yearly subscriber generated a "💰 New Pro
+ * subscriber" admin email every time they opened the app, and re-entered
+ * processReferralCommission on each launch — where a new month's billing
+ * bucket would mint a second commission for one upfront payment.
+ *
+ * A renewal mints a NEW transactionId, so real recurring revenue still reads
+ * as a new grant. When either id is missing we return true: failing open
+ * costs a duplicate alert, failing closed silently swallows a real sale.
+ */
+export function isFirstGrantOfTransaction(
+  priorSub: { isPro?: unknown; transactionId?: unknown } | undefined | null,
+  transactionId: string,
+): boolean {
+  if (!priorSub || priorSub.isPro !== true) return true;
+  if (typeof priorSub.transactionId !== 'string' || !priorSub.transactionId) return true;
+  if (!transactionId) return true;
+  return priorSub.transactionId !== transactionId;
+}

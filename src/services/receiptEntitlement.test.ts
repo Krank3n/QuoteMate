@@ -81,30 +81,40 @@ describe('purchaseKey / claim guard', () => {
 describe('validatePurchase', () => {
   it('returns granted on 200', async () => {
     mockFetch(200, { success: true });
-    expect(await validatePurchase(purchase())).toBe('granted');
+    expect((await validatePurchase(purchase())).outcome).toBe('granted');
   });
 
   it('returns rejected on a terminal 402', async () => {
     mockFetch(402, { error: 'RECEIPT_VALIDATION_FAILED' });
-    expect(await validatePurchase(purchase())).toBe('rejected');
+    expect((await validatePurchase(purchase())).outcome).toBe('rejected');
   });
 
   it('returns retry on a 503', async () => {
     mockFetch(503, { error: 'RECEIPT_VALIDATION_UNAVAILABLE' });
-    expect(await validatePurchase(purchase())).toBe('retry');
+    expect((await validatePurchase(purchase())).outcome).toBe('retry');
   });
 
   it('returns retry when the network throws, never rejected', async () => {
     (globalThis as any).fetch = vi.fn().mockRejectedValue(new Error('offline'));
-    expect(await validatePurchase(purchase())).toBe('retry');
+    expect((await validatePurchase(purchase())).outcome).toBe('retry');
   });
 
   it('returns retry when signed out rather than posting anonymously', async () => {
     mockAuth.currentUser = null;
     const spy = vi.fn();
     (globalThis as any).fetch = spy;
-    expect(await validatePurchase(purchase())).toBe('retry');
+    expect((await validatePurchase(purchase())).outcome).toBe('retry');
     expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('surfaces the server alreadyEntitled flag', async () => {
+    mockFetch(200, { success: true, alreadyEntitled: true });
+    expect(await validatePurchase(purchase())).toEqual({ outcome: 'granted', alreadyEntitled: true });
+  });
+
+  it('assumes a new grant when an older server omits the flag', async () => {
+    mockFetch(200, { success: true });
+    expect(await validatePurchase(purchase())).toEqual({ outcome: 'granted', alreadyEntitled: false });
   });
 });
 
@@ -116,9 +126,41 @@ describe('recoverPendingPurchases', () => {
 
     const s = await recoverPendingPurchases({ onGranted });
 
-    expect(s).toMatchObject({ checked: 1, granted: 1, rejected: 0, retry: 0 });
+    expect(s).toMatchObject({ checked: 1, granted: 1, alreadyEntitled: 0, rejected: 0, retry: 0 });
     expect(finishTransaction).toHaveBeenCalledTimes(1);
     expect(onGranted).toHaveBeenCalledTimes(1);
+  });
+
+  it('REGRESSION: a healthy live subscription re-checked at launch is not a recovery', async () => {
+    // getRecoverablePurchases() returns StoreKit's CURRENT ENTITLEMENTS, so
+    // every active iOS subscriber flows through this sweep on every launch.
+    // Counting those as `granted` made purchase_recovered_on_launch fire for
+    // healthy subscribers — the alarm built for the Jul-2026 outage cried wolf.
+    getRecoverablePurchases.mockResolvedValue([purchase()]);
+    mockFetch(200, { success: true, alreadyEntitled: true });
+    const onGranted = vi.fn();
+
+    const s = await recoverPendingPurchases({ onGranted });
+
+    expect(s).toMatchObject({ checked: 1, granted: 0, alreadyEntitled: 1, rejected: 0, retry: 0 });
+    // Still finished: the receipt is good, so the store should stop re-delivering it.
+    expect(finishTransaction).toHaveBeenCalledTimes(1);
+    // Nothing changed, so there is nothing to refresh.
+    expect(onGranted).not.toHaveBeenCalled();
+  });
+
+  it('still reports a genuinely healed purchase alongside a re-checked one', async () => {
+    getRecoverablePurchases.mockResolvedValue([
+      purchase({ transactionId: 'live' }),
+      purchase({ transactionId: 'stuck' }),
+    ]);
+    (globalThis as any).fetch = vi.fn()
+      .mockResolvedValueOnce({ status: 200, json: async () => ({ success: true, alreadyEntitled: true }) })
+      .mockResolvedValueOnce({ status: 200, json: async () => ({ success: true }) });
+
+    const s = await recoverPendingPurchases();
+
+    expect(s).toMatchObject({ checked: 2, granted: 1, alreadyEntitled: 1 });
   });
 
   it('LEAVES a retryable purchase unfinished so the store re-delivers it', async () => {
