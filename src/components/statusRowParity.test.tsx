@@ -260,4 +260,35 @@ describe('the Scheduled status row', () => {
     fireEvent.click(kebab.q.getByText('Reschedule…'));
     expect(fromKebab).toHaveBeenCalledTimes(1);
   });
+
+  // A job the customer paid up front is `paid` with the work still ahead of
+  // it. Both doors used to hide the picker on a paid job, so the booking
+  // sitting on it couldn't be moved or cleared from anywhere.
+  it('keeps a door to the date on a job paid before the work is done', () => {
+    const paidAndBooked = {
+      ...job,
+      stage: 'paid',
+      scheduledStartDate: Date.now() + 86400000,
+    } as Job;
+
+    for (const render of [renderPillSheet, renderKebabSubmenu]) {
+      const onSchedule = vi.fn();
+      const onStage = vi.fn();
+      const door = render({
+        job: paidAndBooked,
+        onSchedule,
+        onSelect: onStage,
+        onSelectStage: onStage,
+      } as any);
+
+      fireEvent.click(door.q.getByText('Reschedule…'));
+      expect(onSchedule).toHaveBeenCalledTimes(1);
+
+      // ...and the ladder's own row stays an honest stage flip, rather than
+      // a second door onto the same picker labelled as something else.
+      fireEvent.click(door.q.getByText('Mark as Scheduled'));
+      expect(onStage).toHaveBeenCalledTimes(1);
+      expect(onSchedule).toHaveBeenCalledTimes(1);
+    }
+  });
 });

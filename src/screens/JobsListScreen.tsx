@@ -183,7 +183,10 @@ export function JobsListScreen() {
   // keystroke in the search box.
   const bucketByJob = useMemo(() => {
     const map = new Map<string, JobBucket>();
-    for (const j of jobs) map.set(j.id, bucketForJob(j, docsByJob.get(j.id) ?? []));
+    // One clock for the whole pass, so two jobs booked for the same day can't
+    // land in different buckets because midnight fell between them.
+    const today = startOfToday();
+    for (const j of jobs) map.set(j.id, bucketForJob(j, docsByJob.get(j.id) ?? [], today));
     return map;
   }, [jobs, docsByJob]);
 

@@ -13,6 +13,10 @@
  * encodes: a payment waiting to be collected outranks everything else. A
  * booked job that's been invoiced and not paid is money owed, not a diary
  * entry.
+ *
+ * The one thing money does NOT outrank is a day still to come. Tradies who
+ * take the cash up front are paid before the work exists, so `paid` on its
+ * own can't mean "finished" — see isStillBooked.
  */
 
 import type { Job } from '../../shared/job/types';
@@ -69,13 +73,58 @@ function invoiceOwes(doc: Document): boolean {
   return total - paid > EPSILON;
 }
 
-export function bucketForJob(job: Job, docs: Document[]): JobBucket {
+/** Midnight today — the granularity a booking is judged at. */
+function startOfToday(): number {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+/**
+ * Is the booking still ahead of the tradie?
+ *
+ * Day-granularity on purpose: a job booked for 9am today is still today's
+ * work at 3pm, so the whole day counts as upcoming. Measured off the END of
+ * a multi-day booking, since day three of a three-day job is still work.
+ */
+export function isStillBooked(job: Job, today: number = startOfToday()): boolean {
+  const end = Number(job.scheduledEndDate) || Number(job.scheduledStartDate) || 0;
+  return end > 0 && end >= today;
+}
+
+/**
+ * @param today Midnight of the current day. Frozen by the caller for the
+ *   session — a booking is a day-level idea, so re-ticking it per render
+ *   would only make the buckets non-deterministic and the tests unwritable.
+ */
+export function bucketForJob(
+  job: Job,
+  docs: Document[],
+  today: number = startOfToday(),
+): JobBucket {
   const attached = (docs || []).filter(Boolean);
 
   // Parked or settled. Checked first so an archived job never reappears in
   // a working pile because of a stale doc hanging off it.
   if (job.archivedAt) return 'done';
-  if (job.stage === 'closed' || job.stage === 'cancelled' || job.stage === 'paid') {
+  if (job.stage === 'closed' || job.stage === 'cancelled') return 'done';
+  // `paid` normally ends the line — but it arrives early on a job the
+  // customer paid up front, and filing next Tuesday's work under Done hid it
+  // from the pile the tradie plans the week from, while its calendar event
+  // carried on existing. Money in the bank doesn't finish the work.
+  //
+  // A job can also be left reading `paid` while an invoice still owes money:
+  // correcting or removing a payment re-derives the document from its ledger,
+  // and the Job stage only follows on the server's next cascade (see
+  // deriveJobStageBump in functions/src/jobHandlers.ts). Filing that under
+  // Done is what hid real money from the Owed pile, so an outstanding balance
+  // wins here too — and keeps any job already stuck in that state visible
+  // without waiting for a write to heal it.
+  if (
+    job.stage === 'paid' &&
+    !isStillBooked(job, today) &&
+    !attached.some(invoiceOwes)
+  ) {
     return 'done';
   }
 
@@ -83,9 +132,10 @@ export function bucketForJob(job: Job, docs: Document[]): JobBucket {
   if (attached.some(invoiceOwes)) return 'owed';
 
   // Work in hand. `completed` deliberately isn't here: a finished job with
-  // nothing invoiced still needs something sent, so it falls through.
+  // nothing invoiced still needs something sent, so it falls through — and
+  // a date that has already been and gone doesn't hold it in the diary.
   if (job.stage === 'scheduled' || job.stage === 'in_progress') return 'scheduled';
-  if (job.scheduledStartDate) return 'scheduled';
+  if (isStillBooked(job, today)) return 'scheduled';
 
   // Sent and the ball is in the customer's court.
   if (attached.some((d) => isLive(d) && d.stage === 'quote_sent')) return 'waiting';
@@ -105,7 +155,8 @@ export function matchesJobFilter(
   job: Job,
   docs: Document[],
   filter: JobFilterKey,
+  today?: number,
 ): boolean {
   if (filter === 'all') return true;
-  return bucketForJob(job, docs) === filter;
+  return bucketForJob(job, docs, today) === filter;
 }

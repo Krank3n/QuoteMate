@@ -11,6 +11,7 @@ import { describe, it, expect } from 'vitest';
 import {
   bucketForJob,
   groupDocsByJob,
+  isStillBooked,
   isJobFilterKey,
   matchesJobFilter,
   JOB_FILTERS,
@@ -27,6 +28,10 @@ function invoice(over: Record<string, any> = {}): any {
 function quote(over: Record<string, any> = {}): any {
   return { id: 'q1', type: 'quote', stage: 'draft', total: 1000, paidTotal: 0, ...over };
 }
+
+const DAY = 24 * 60 * 60 * 1000;
+/** Midnight of the day the clock-sensitive cases are judged against. */
+const TODAY = new Date(2026, 7, 17).getTime();
 
 describe('bucketForJob', () => {
   it('puts an unsent draft in "to send" — the pile that was drowning "Active"', () => {
@@ -91,6 +96,128 @@ describe('bucketForJob', () => {
     expect(bucketForJob(job({ stage: 'completed' }), [])).toBe('to_send');
   });
 
+  // Pay-up-front trades reach `paid` before the work exists. Sending those
+  // jobs to Done hid next Tuesday's booking from the pile the tradie plans
+  // the week from, while the calendar event for it stayed live.
+  describe('a job paid before the work is done', () => {
+    it('keeps a paid job with its day still ahead in "scheduled"', () => {
+      expect(
+        bucketForJob(
+          job({ stage: 'paid', scheduledStartDate: TODAY + 7 * DAY }),
+          [invoice({ stage: 'paid', total: 1000, paidTotal: 1000 })],
+          TODAY,
+        ),
+      ).toBe('scheduled');
+    });
+
+    it('keeps a job booked for today in the diary all day, not just before 9am', () => {
+      expect(
+        bucketForJob(
+          job({ stage: 'paid', scheduledStartDate: TODAY + 9 * 60 * 60 * 1000 }),
+          [],
+          TODAY,
+        ),
+      ).toBe('scheduled');
+    });
+
+    it('holds a multi-day booking until its final day passes', () => {
+      const j = job({
+        stage: 'paid',
+        scheduledStartDate: TODAY - 2 * DAY,
+        scheduledEndDate: TODAY + DAY,
+      });
+      expect(bucketForJob(j, [], TODAY)).toBe('scheduled');
+    });
+
+    it('sends it to "done" once the day has been and gone', () => {
+      expect(
+        bucketForJob(job({ stage: 'paid', scheduledStartDate: TODAY - DAY }), [], TODAY),
+      ).toBe('done');
+    });
+
+    // Money-first still holds: a second invoice owing outranks the diary.
+    it('still ranks money above the booking', () => {
+      expect(
+        bucketForJob(
+          job({ stage: 'paid', scheduledStartDate: TODAY + DAY }),
+          [invoice({ total: 1000, paidTotal: 0 })],
+          TODAY,
+        ),
+      ).toBe('owed');
+    });
+
+    // Archiving or killing a job is an explicit "stop showing me this",
+    // which a date sitting on it must not undo.
+    it('does not resurrect a closed, cancelled or archived job', () => {
+      const booked = { scheduledStartDate: TODAY + DAY };
+      expect(bucketForJob(job({ stage: 'closed', ...booked }), [], TODAY)).toBe('done');
+      expect(bucketForJob(job({ stage: 'cancelled', ...booked }), [], TODAY)).toBe('done');
+      expect(bucketForJob(job({ stage: 'paid', archivedAt: 123, ...booked }), [], TODAY)).toBe(
+        'done',
+      );
+    });
+  });
+
+  /**
+   * Aug 2026, reproduced on a 1.53 build: record a full payment, then remove
+   * it again from the payment history. The document correctly went back to
+   * unpaid, but the Job stage stayed `paid` (the server cascade was
+   * forward-only), and this rule filed it under Done — so an invoice still
+   * owing $972.40 could never appear under Owed. The server now walks the
+   * stage back; this keeps a job already stuck in that state visible without
+   * waiting for a write to heal it.
+   */
+  describe('a job left reading paid while an invoice still owes', () => {
+    it('files it under "owed", not "done"', () => {
+      expect(
+        bucketForJob(
+          job({ stage: 'paid' }),
+          [invoice({ stage: 'invoice_sent', total: 972.4, paidTotal: 0 })],
+          TODAY,
+        ),
+      ).toBe('owed');
+    });
+
+    it('still sends a genuinely settled job to "done"', () => {
+      expect(
+        bucketForJob(
+          job({ stage: 'paid' }),
+          [invoice({ stage: 'paid', total: 972.4, paidTotal: 972.4 })],
+          TODAY,
+        ),
+      ).toBe('done');
+    });
+
+    it('does not let a cancelled invoice drag it out of "done"', () => {
+      expect(
+        bucketForJob(
+          job({ stage: 'paid' }),
+          [invoice({ stage: 'cancelled', total: 972.4, paidTotal: 0 })],
+          TODAY,
+        ),
+      ).toBe('done');
+    });
+
+    it('keeps archive winning over an outstanding balance', () => {
+      expect(
+        bucketForJob(
+          job({ stage: 'paid', archivedAt: 123 }),
+          [invoice({ stage: 'invoice_sent', total: 972.4, paidTotal: 0 })],
+          TODAY,
+        ),
+      ).toBe('done');
+    });
+  });
+
+  // The diary is for work still to come. A date that has already passed
+  // used to pin a finished job in "scheduled" forever, which is how work
+  // waiting to be invoiced went missing from "to send".
+  it('lets completed work with a past date fall through to "to send"', () => {
+    expect(
+      bucketForJob(job({ stage: 'completed', scheduledStartDate: TODAY - DAY }), [], TODAY),
+    ).toBe('to_send');
+  });
+
   it('puts paid, closed, cancelled and archived jobs in "done"', () => {
     expect(bucketForJob(job({ stage: 'paid' }), [])).toBe('done');
     expect(bucketForJob(job({ stage: 'closed' }), [])).toBe('done');
@@ -128,6 +255,8 @@ describe('bucket integrity — what makes the chip counts trustworthy', () => {
     [job({ id: 'e', stage: 'paid' }), []],
     [job({ id: 'f', stage: 'cancelled' }), []],
     [job({ id: 'g', stage: 'completed' }), []],
+    // Paid up front, work still to come — the case that now escapes "done".
+    [job({ id: 'h', stage: 'paid', scheduledStartDate: Date.now() + DAY }), []],
   ];
 
   it('lands every job in exactly one bucket', () => {
@@ -151,6 +280,21 @@ describe('bucket integrity — what makes the chip counts trustworthy', () => {
     for (const [j, docs] of population) {
       expect(matchesJobFilter(j, docs, 'all')).toBe(true);
     }
+  });
+});
+
+// Shared with the sticky action bar, so the button a paid job offers and
+// the pile it sits in can't disagree about whether the work is still ahead.
+describe('isStillBooked', () => {
+  it('is false for a job with no date at all', () => {
+    expect(isStillBooked(job(), TODAY)).toBe(false);
+    expect(isStillBooked(job({ scheduledStartDate: 0 }), TODAY)).toBe(false);
+  });
+
+  it('measures a multi-day booking off its final day', () => {
+    const j = job({ scheduledStartDate: TODAY - 3 * DAY, scheduledEndDate: TODAY });
+    expect(isStillBooked(j, TODAY)).toBe(true);
+    expect(isStillBooked(j, TODAY + DAY)).toBe(false);
   });
 });
 

@@ -11,7 +11,11 @@ import React from 'react';
 import { Animated } from 'react-native';
 
 import type { Job, JobStage } from '../../shared/job/types';
-import { legalStageTargets, shouldOfferSchedule } from '../utils/jobStageTargets';
+import {
+  legalStageTargets,
+  shouldOfferReschedule,
+  shouldOfferSchedule,
+} from '../utils/jobStageTargets';
 import { isLiveInvoice, jobStatusLabel, STAGE_CHIP_LABELS } from '../utils/jobTimeline';
 import type { Document } from '../types/document';
 import type { Tokens } from '../theme';
@@ -154,6 +158,7 @@ export function JobStageSheet({
   const themeColors = useThemeColors();
   const JOB_STAGE_META = jobStageMetaFor(themeColors);
   const showSchedule = !!onSchedule && shouldOfferSchedule(job);
+  const showReschedule = !!onSchedule && shouldOfferReschedule(job);
 
   // Shared with the kebab's "Change status" submenu — see legalStageTargets.
   const targets = React.useMemo<JobStage[]>(
@@ -179,8 +184,8 @@ export function JobStageSheet({
   const currentLabel = jobStatusLabel(job, primaryDoc);
 
   // The legal stages in ladder order, with the date door in front of them
-  // when the job already sits on 'scheduled' (the ladder can't offer the
-  // stage it's on). Same list, same order as the kebab's submenu.
+  // when the ladder can't carry it (see shouldOfferReschedule). Same list,
+  // same order as the kebab's submenu.
   const options: Array<{
     key: string;
     icon: string;
@@ -188,7 +193,7 @@ export function JobStageSheet({
     label: string;
     onPress: () => void;
   }> = [
-    ...(showSchedule && job.stage === 'scheduled'
+    ...(showReschedule
       ? [
           {
             key: 'reschedule',
@@ -202,8 +207,9 @@ export function JobStageSheet({
     ...targets.map((target) => {
       const meta = JOB_STAGE_META[target];
       // Scheduling writes a date; the stage follows from it. The ellipsis
-      // is the app's mark for a row that opens more UI.
-      const opensPicker = target === 'scheduled' && showSchedule;
+      // is the app's mark for a row that opens more UI. Skipped when the
+      // sheet already drew a Reschedule row — one picker, one door.
+      const opensPicker = target === 'scheduled' && showSchedule && !showReschedule;
       return {
         key: target,
         icon: meta.icon,

@@ -18,6 +18,8 @@
  *   in_progress / no   → Generate Invoice + Mark Complete
  *     invoice yet
  *   invoice unpaid     → Take Final Payment + Send Invoice
+ *   paid (work still   → Edit Date + Close Job
+ *     booked ahead)
  *   paid               → Close Job
  *   terminal (cancelled/
  *     closed)          → (hidden)
@@ -38,6 +40,7 @@ import type { Document } from '../types/document';
 import type { Tokens } from '../theme';
 import { makeStyles, useThemeColors } from '../theme';
 import { selectionTap, lightTap } from '../utils/haptics';
+import { isStillBooked } from '../utils/jobBuckets';
 
 export type JobActionId =
   | 'createQuote'
@@ -178,10 +181,15 @@ function invoiceBalanceOwed(doc: Document | null): boolean {
  * Resolve which actions to show for a given (jobStage, primaryDoc) combo.
  * Returns up to two actions — primary first, secondary second. The
  * sticky bar itself caps at two buttons.
+ *
+ * @param stillBooked The job's day hasn't been and gone yet — see
+ *   isStillBooked. Only matters once the money is in: a job the customer
+ *   paid up front still has the work ahead of it.
  */
 export function resolveJobActions(
   stage: JobStage,
   primaryDoc: Document | null,
+  stillBooked = false,
 ): ActionSpec[] {
   if (stage === 'cancelled' || stage === 'closed') return [];
 
@@ -204,6 +212,16 @@ export function resolveJobActions(
 
   // Invoice in play → money-collection is the priority.
   if (isInvoicePaid) {
+    // Unless the money came in ahead of the work. Closing out a job booked
+    // for next Tuesday isn't the next move, and the accented button saying
+    // so was the only thing this screen offered — with the date locked
+    // three taps deep in the status sheet behind it.
+    if (stillBooked) {
+      return [
+        { id: 'schedule', label: 'Edit Date', icon: 'calendar-edit', tone: 'primary' },
+        { id: 'closeJob', label: 'Close Job', icon: 'archive-arrow-down-outline', tone: 'ghost' },
+      ];
+    }
     return [
       { id: 'closeJob', label: 'Close Job', icon: 'archive-arrow-down-outline', tone: 'primary' },
     ];
@@ -343,7 +361,7 @@ export function StickyJobActionBar({
   const styles = useStyles();
   const themeColors = useThemeColors();
   const insets = useSafeAreaInsets();
-  const actions = resolveJobActions(job.stage, primaryDoc);
+  const actions = resolveJobActions(job.stage, primaryDoc, isStillBooked(job));
 
   if (actions.length === 0) return null;
 
