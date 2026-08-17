@@ -121,19 +121,50 @@ describe('bulk units are no longer truncated at the discrete-count ceiling', () 
     expect(analysis.materials[0].quantity).toBe(4000);
   });
 
-  it('still caps a runaway discrete count at 999', async () => {
-    stubServerResponse([
-      {
-        name: 'Stainless Steel Decking Screws 10g x 50mm',
-        searchTerm: 'stainless decking screws 10g 50mm',
-        quantity: 2400,
-        unit: 'each',
-        section: 'Merbau Decking',
-        sectionMultiplier: 1,
-        sectionLaborHours: 24,
-      },
-    ]);
+});
+
+describe('discrete whole-job counts survive an unmultiplied section', () => {
+  const screws = (quantity: number, sectionMultiplier = 1) => [
+    {
+      name: 'Stainless Steel Decking Screws 10g x 50mm',
+      searchTerm: 'stainless decking screws 10g 50mm',
+      quantity,
+      unit: 'each',
+      section: 'Merbau Decking',
+      sectionMultiplier,
+      sectionLaborHours: 24,
+    },
+  ];
+
+  it('keeps all 2400 decking screws instead of truncating to 999', async () => {
+    stubServerResponse(screws(2400));
     const analysis = await analyzeJobDescription('Build a new 6m x 8m Merbau deck');
-    expect(analysis.materials[0].quantity).toBe(999);
+    const stored = convertLLMMaterialsToMaterials(analysis.materials as never);
+
+    expect(analysis.materials[0].quantity).toBe(2400);
+    expect(stored[0].quantity).toBe(2400);
+  });
+
+  it('keeps the 1300-screw low end of the same job', async () => {
+    stubServerResponse(screws(1300));
+    const analysis = await analyzeJobDescription('Build a new 6m x 8m Merbau deck');
+    expect(analysis.materials[0].quantity).toBe(1300);
+  });
+
+  it('still collapses the 42,957-screw case to the 5000 backstop', async () => {
+    stubServerResponse(screws(42957));
+    const analysis = await analyzeJobDescription('Build a new 6m x 8m Merbau deck');
+    const stored = convertLLMMaterialsToMaterials(analysis.materials as never);
+    expect(stored[0].quantity).toBe(5000);
+  });
+
+  it('does not widen the worst case when a multiplier is also in play', async () => {
+    // Per-unit now clamps at 5000 rather than 999, so the product it feeds the
+    // backstop is larger — but the stored value is unchanged, because the
+    // post-multiply cap is what decides. 5000 x 200 and 999 x 200 both land here.
+    stubServerResponse(screws(42957, 200));
+    const analysis = await analyzeJobDescription('Build a new 6m x 8m Merbau deck');
+    const stored = convertLLMMaterialsToMaterials(analysis.materials as never);
+    expect(stored[0].quantity).toBe(5000);
   });
 });

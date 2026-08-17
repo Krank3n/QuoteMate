@@ -546,8 +546,15 @@ describe('clampMaterialQuantity', () => {
       expect(clampMaterialQuantity(0.004, 'pack')).toBe(1);
     });
 
-    it('caps a runaway count at 999', () => {
-      expect(clampMaterialQuantity(2400, 'each')).toBe(999);
+    it('keeps the 2400 stainless screws a 6x8 m deck actually needs', () => {
+      // ~26-30 screws per m² over 48 m². Was truncated to 999 — the tradie
+      // bought less than half the fasteners for the job.
+      expect(clampMaterialQuantity(2400, 'each')).toBe(2400);
+      expect(clampMaterialQuantity(1300, 'each')).toBe(1300);
+    });
+
+    it('caps a runaway count at 5000, matching the post-multiply backstop', () => {
+      expect(clampMaterialQuantity(42957, 'each')).toBe(5000);
     });
 
     it('treats an unrecognised unit as a discrete count', () => {
