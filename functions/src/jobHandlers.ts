@@ -238,10 +238,12 @@ async function syncJobAggregates(userId: string, jobId: string): Promise<void> {
     ? buildUserFieldSync(job, primary as unknown as Record<string, unknown>)
     : {};
 
-  // Forward-only stage cascade. If any attached doc has moved to quote_sent
-  // / accepted / invoiced / partial / paid, nudge the Job along — but only
-  // forward. Leaves manual progressions (scheduled / in_progress /
-  // completed) intact and never drags a paid or cancelled job backwards.
+  // Stage cascade. If any attached doc has moved to quote_sent / accepted /
+  // invoiced / partial / paid, nudge the Job along. Forward-only, with one
+  // exception: a Job sitting at `paid` when no document is paid any more has
+  // to come back down — see deriveJobStageBump. Manual progressions
+  // (scheduled / in_progress / completed) stay intact either way, and a
+  // cancelled or closed job is never touched.
   const stageBump = deriveJobStageBump(
     typeof job.stage === 'string' ? (job.stage as string) : 'inquiry',
     docs,
@@ -350,7 +352,7 @@ const JOB_STAGE_ORDER = [
  *
  * Skips cancelled / closed jobs entirely — those are user decisions.
  */
-function deriveJobStageBump(currentStage: string, docs: JobDocument[]): string | null {
+export function deriveJobStageBump(currentStage: string, docs: JobDocument[]): string | null {
   if (currentStage === 'cancelled' || currentStage === 'closed') return null;
 
   const active = docs.filter((d) => d.stage !== 'cancelled');
@@ -362,6 +364,29 @@ function deriveJobStageBump(currentStage: string, docs: JobDocument[]): string |
     target = 'in_progress';
   } else if (active.some((d) => d.stage === 'quote_accepted')) target = 'accepted';
   else if (active.some((d) => d.stage === 'quote_sent')) target = 'quoted';
+
+  // `paid` is the one Job stage that is purely a claim about money, which
+  // makes it the one stage that has to be able to come back DOWN.
+  //
+  // Removing or correcting a payment drops the document out of `paid`
+  // (saveDocumentWithLedger re-derives its stage from the ledger), but with a
+  // strictly forward-only cascade the Job stayed `paid` forever. The card then
+  // said three things at once — "Paid 3 minutes ago" on the status line,
+  // "Unpaid" on the payment chip, and a green Paid pill on the timeline — and,
+  // because bucketForJob files stage `paid` under Done, an invoice that still
+  // owed money sat in the finished pile where the Owed filter could never
+  // surface it.
+  //
+  // Deliberately the ONLY backward move. A manual push to scheduled /
+  // in_progress / completed still stands: those say nothing about money, so
+  // they stay the tradie's to own.
+  if (currentStage === 'paid' && target !== 'paid') {
+    // No positive target means the documents support nothing on the ladder —
+    // e.g. the invoice was un-sent as well as un-paid, leaving only a draft.
+    // Every job that reached `paid` did the work, so `completed` is the
+    // strongest claim still standing, and it's one tap from anywhere else.
+    return target ?? 'completed';
+  }
 
   if (!target) return null;
   const curIdx = JOB_STAGE_ORDER.indexOf(currentStage as typeof JOB_STAGE_ORDER[number]);
