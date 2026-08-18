@@ -32,6 +32,7 @@ import { jobStageMetaFor } from './JobStageSheet';
 import { StageOptionRow } from './StageOptionRow';
 
 export type JobAction =
+  | 'recordPayment'
   | 'takePayment'
   | 'followUp'
   | 'edit'
@@ -122,7 +123,28 @@ export function canConvert(doc?: Document | null): boolean {
 // Take Payment and Follow Up sit at the top — those are the
 // everyday actions; everything else (edit, send, archive, delete)
 // is less frequent.
+/** Money still outstanding on an invoice — the only state where "I've been
+ *  paid" is a sentence the tradie can truthfully write. */
+function invoiceOwes(doc?: Document | null): boolean {
+  if (!doc || doc.type !== 'invoice' || doc.stage === 'cancelled') return false;
+  return (Number(doc.total) || 0) - (Number(doc.paidTotal) || 0) > 0.005;
+}
+
 export const ROWS: RowDef[] = [
+  {
+    // First, above the card-reader row. Recording a transfer that already
+    // landed is the everyday act; taking a card on the spot is the occasional
+    // one. This used to be the THIRD row inside the sheet behind
+    // "Take Payment — tap to pay or share the Square link", so the tradie who
+    // just wanted to write down a bank transfer had to go through a door
+    // labelled for something else to find it. Unlike Take Payment it needs no
+    // Square setup and no card reader, so it shows on iOS too.
+    id: 'recordPayment',
+    label: 'Record a payment',
+    sub: "Bank transfer, cash or cheque you've already been paid",
+    icon: 'cash-multiple',
+    when: ({ primaryDoc }) => invoiceOwes(primaryDoc),
+  },
   {
     id: 'takePayment',
     label: 'Take Payment',

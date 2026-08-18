@@ -40,3 +40,55 @@ describe('JobActionsSheet — Convert to Invoice row', () => {
     expect(convertRow.when(ctx(null))).toBe(false);
   });
 });
+
+/**
+ * "Record a payment" — the manual door.
+ *
+ * It used to be the THIRD row INSIDE the sheet that "Take Payment — tap to
+ * pay or share the Square link" opens, so a tradie who simply wanted to write
+ * down a bank transfer had to go through a door labelled for card payments to
+ * reach it. One told us the app couldn't record payments at all. It is now a
+ * top-level row, above the card-reader one, because banking a transfer that
+ * already landed is the everyday act and taking a card is the occasional one.
+ */
+const recordRow = ROWS.find((r: any) => r.id === 'recordPayment')!;
+
+describe('JobActionsSheet — Record a payment row', () => {
+  it('exists, and sits above the card-reader row', () => {
+    expect(recordRow).toBeTruthy();
+    const iRecord = ROWS.findIndex((r: any) => r.id === 'recordPayment');
+    const iTake = ROWS.findIndex((r: any) => r.id === 'takePayment');
+    expect(iRecord).toBeGreaterThanOrEqual(0);
+    expect(iRecord).toBeLessThan(iTake);
+  });
+
+  it('shows while an invoice still owes money', () => {
+    expect(recordRow.when(ctx({ type: 'invoice', stage: 'invoice_sent', total: 972.4, paidTotal: 0 }))).toBe(true);
+    expect(recordRow.when(ctx({ type: 'invoice', stage: 'partially_paid', total: 972.4, paidTotal: 400 }))).toBe(true);
+  });
+
+  it('hides once the invoice is settled', () => {
+    expect(recordRow.when(ctx({ type: 'invoice', stage: 'paid', total: 972.4, paidTotal: 972.4 }))).toBe(false);
+  });
+
+  it('treats a sub-cent remainder as settled', () => {
+    expect(recordRow.when(ctx({ type: 'invoice', stage: 'invoice_sent', total: 1000, paidTotal: 999.999 }))).toBe(false);
+  });
+
+  it('hides on quotes and cancelled invoices — nothing to bank against', () => {
+    expect(recordRow.when(ctx({ type: 'quote', stage: 'quote_sent', total: 972.4, paidTotal: 0 }))).toBe(false);
+    expect(recordRow.when(ctx({ type: 'invoice', stage: 'cancelled', total: 972.4, paidTotal: 0 }))).toBe(false);
+  });
+
+  it('hides when the job has no document at all', () => {
+    expect(recordRow.when(ctx(null))).toBe(false);
+  });
+
+  it('does NOT gate on Square or platform, unlike Take Payment', () => {
+    // Take Payment is Android-only while iOS Tap to Pay is pending approval.
+    // Recording a transfer you already received needs neither a reader nor a
+    // Square account, so it must reach iOS too.
+    const src = recordRow.when.toString();
+    expect(src).not.toContain('Platform');
+  });
+});

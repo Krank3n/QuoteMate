@@ -143,3 +143,57 @@ describe('resolveJobActions — paid before the work is done', () => {
     expect(resolveJobActions('scheduled', owing, true).map((a) => a.id)).not.toContain('schedule');
   });
 });
+
+/**
+ * Log Payment on a sent-but-unpaid invoice.
+ *
+ * The second slot used to be "Resend", and Log Payment only appeared once an
+ * invoice was PARTLY paid — so the one state a tradie is in every single time
+ * (invoice sent, cash or transfer received, nothing recorded yet) was the one
+ * state with no button for banking it. Resend still lives in the kebab.
+ */
+describe('sticky bar — banking a payment on an unpaid invoice', () => {
+  const invoice = (over: Record<string, any> = {}): any => ({
+    id: 'inv1', type: 'invoice', stage: 'invoice_sent',
+    total: 972.4, paidTotal: 0, ...over,
+  });
+
+  it('offers Log Payment on a sent, unpaid invoice', () => {
+    const ids = resolveJobActions('in_progress', invoice()).map((a: any) => a.id);
+    expect(ids).toContain('recordPayment');
+  });
+
+  it('still offers it once partly paid', () => {
+    const ids = resolveJobActions('in_progress', invoice({ stage: 'partially_paid', paidTotal: 400 }))
+      .map((a: any) => a.id);
+    expect(ids).toContain('recordPayment');
+  });
+
+  it('no longer spends the slot on Resend while money is owed', () => {
+    const ids = resolveJobActions('in_progress', invoice()).map((a: any) => a.id);
+    expect(ids).not.toContain('resendInvoice');
+  });
+
+  it('leaves a settled invoice alone', () => {
+    const ids = resolveJobActions('paid', invoice({ stage: 'paid', paidTotal: 972.4 }))
+      .map((a: any) => a.id);
+    expect(ids).not.toContain('recordPayment');
+  });
+});
+
+describe('sticky bar — iOS, where card payments are still gated', () => {
+  it('offers Log Payment on iOS too: no reader or Square account needed', async () => {
+    vi.resetModules();
+    vi.doMock('react-native', async () => {
+      const actual: any = await vi.importActual('react-native');
+      return { ...actual, Platform: { OS: 'ios', select: (o: any) => o.ios ?? o.default } };
+    });
+    const { resolveJobActions: resolveIos } = await import('./StickyJobActionBar');
+    const ids = resolveIos('in_progress', {
+      id: 'inv1', type: 'invoice', stage: 'invoice_sent', total: 972.4, paidTotal: 0,
+    } as any).map((a: any) => a.id);
+    expect(ids).toContain('recordPayment');
+    vi.doUnmock('react-native');
+    vi.resetModules();
+  });
+});

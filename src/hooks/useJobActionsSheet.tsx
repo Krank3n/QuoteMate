@@ -255,6 +255,12 @@ export function useJobActionsSheet(
         });
         break;
       }
+      case 'recordPayment': {
+        const doc = primaryDocForJob(job);
+        if (!doc) return;
+        navigation.navigate('RecordPayment', { invoiceId: doc.id });
+        break;
+      }
       case 'takePayment': {
         const doc = primaryDocForJob(job);
         if (!doc) return;
