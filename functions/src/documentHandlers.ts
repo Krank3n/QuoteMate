@@ -1392,6 +1392,9 @@ async function mirrorLinkToLegacy(
         update.depositPaymentLinkId = link.id;
         update.depositPaymentLinkUrl = link.url;
         update.depositPaymentLinkCreatedAt = link.createdAt;
+        // Stamped so the legacy minter can tell a repriced deposit from a
+        // reusable link — see createSquareDepositPaymentLinkInternal.
+        update.depositPaymentLinkAmount = link.amount;
       } else if (link && link.kind === 'quote_full') {
         update.fullPaymentLinkId = link.id;
         update.fullPaymentLinkUrl = link.url;
