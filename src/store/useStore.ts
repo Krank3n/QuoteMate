@@ -26,6 +26,7 @@ import { reviewQuoteMaterials, isFlaggedRow, QuoteReview } from '../utils/quoteR
 import { loadTemplates } from '../services/sectionTemplateService';
 import { updateQuoteCalculations, healBrokenLabourSections } from '../utils/quoteCalculator';
 import { normaliseLabourToHours } from '../../shared/document/labourUnits';
+import { isAlreadyInvoiced } from '../../shared/document/convertGuard';
 import { calculateDueDate } from '../utils/invoiceCalculator';
 import { canRevertToQuote } from '../utils/revertToQuote';
 import { isEditablePayment, maxAmountForEdit } from '../utils/editablePayment';
@@ -2700,8 +2701,11 @@ export const useStore = create<AppState>((set, get) => ({
     if (!existing) {
       throw new Error('Document not found');
     }
-    // Idempotent: already an invoice — short-circuit before any RPC.
-    if (existing.type === 'invoice' || existing.invoicedAt) {
+    // Idempotent: already an invoice — short-circuit before any RPC. Type
+    // alone, for the same reason the server guard uses it: `invoicedAt` can
+    // arrive on a still-quote document from our own legacy stamp via the
+    // mirror. See shared/document/convertGuard.
+    if (isAlreadyInvoiced(existing)) {
       return existing;
     }
     // Stamp client-side first so the UI updates immediately, then ask the
