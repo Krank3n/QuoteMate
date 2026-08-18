@@ -26,6 +26,7 @@ import {
   shouldOfferSchedule,
 } from '../utils/jobStageTargets';
 import { canRevertToQuote } from '../utils/revertToQuote';
+import { canConvertDocument } from '../../shared/document/convertGuard';
 import { isLiveInvoice, jobStatusLabel } from '../utils/jobTimeline';
 import { jobStageMetaFor } from './JobStageSheet';
 import { StageOptionRow } from './StageOptionRow';
@@ -115,7 +116,7 @@ function resolve<T>(value: T | ((ctx: RowCtx) => T), ctx: RowCtx): T {
  * doors can't disagree about whether conversion is on the table.
  */
 export function canConvert(doc?: Document | null): boolean {
-  return !!doc && doc.type === 'quote' && !doc.invoicedAt;
+  return canConvertDocument(doc as any);
 }
 
 // Take Payment and Follow Up sit at the top — those are the

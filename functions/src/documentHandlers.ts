@@ -15,6 +15,8 @@
  */
 
 import * as admin from 'firebase-admin';
+
+import { isAlreadyInvoiced, type ConvertCandidate } from './shared/document/convertGuard';
 import * as functions from 'firebase-functions';
 import { travelAdjustmentAmountFor } from './travelSurcharge';
 import {
@@ -1658,8 +1660,11 @@ export const convertDocumentToInvoice = functions.https.onCall(
       throw new functions.https.HttpsError('not-found', 'Document not found.');
     }
 
-    // Idempotent — already invoiced.
-    if (existing.type === 'invoice' || existing.invoicedAt) {
+    // Idempotent — already invoiced. Keyed on TYPE alone: this call's own
+    // caller stamps `invoicedAt` on the legacy quote moments earlier, and the
+    // mirror lands it on this document while it is still a quote. Reading it
+    // here made convert refuse its own groundwork. See shared/document/convertGuard.
+    if (isAlreadyInvoiced(existing as ConvertCandidate)) {
       return { ok: true, alreadyInvoiced: true, document: existing };
     }
 
