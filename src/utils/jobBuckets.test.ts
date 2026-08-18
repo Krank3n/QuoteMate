@@ -218,11 +218,105 @@ describe('bucketForJob', () => {
     ).toBe('to_send');
   });
 
-  it('puts paid, closed, cancelled and archived jobs in "done"', () => {
-    expect(bucketForJob(job({ stage: 'paid' }), [])).toBe('done');
+  it('puts finished, closed, cancelled and archived jobs in "done"', () => {
+    expect(bucketForJob(job({ stage: 'paid', completedAt: TODAY - DAY }), [], TODAY)).toBe('done');
     expect(bucketForJob(job({ stage: 'closed' }), [])).toBe('done');
     expect(bucketForJob(job({ stage: 'cancelled' }), [])).toBe('done');
     expect(bucketForJob(job({ stage: 'quoted', archivedAt: 123 }), [])).toBe('done');
+  });
+
+  /**
+   * Paying for a job doesn't perform it. "Done" used to take any paid job,
+   * so work nobody had booked or turned up to was filed as finished the
+   * moment the money landed — and the pile a tradie checks to see what's
+   * left said there was nothing left.
+   */
+  describe('paid is not the same as done', () => {
+    it('sends a paid job nobody has booked to "to book", not "done"', () => {
+      expect(bucketForJob(job({ stage: 'paid' }), [], TODAY)).toBe('to_book');
+      expect(
+        bucketForJob(job({ stage: 'paid' }), [quote({ stage: 'quote_accepted' })], TODAY),
+      ).toBe('to_book');
+    });
+
+    // Nobody invoices work they haven't done, so an invoice is the line
+    // between paid-up-front and paid-on-completion.
+    it('calls an invoiced job done, even with no date on it', () => {
+      expect(
+        bucketForJob(job({ stage: 'paid' }), [invoice({ stage: 'paid', paidTotal: 1000 })], TODAY),
+      ).toBe('done');
+    });
+
+    it('calls it done once the work is marked complete', () => {
+      expect(
+        bucketForJob(job({ stage: 'paid', completedAt: TODAY - DAY }), [], TODAY),
+      ).toBe('done');
+    });
+
+    // Turning up is the completion most tradies record — they rarely come
+    // back to tap Completed, and the diary already said when.
+    it('treats a booked day that has passed as the work being done', () => {
+      expect(
+        bucketForJob(job({ stage: 'paid', scheduledStartDate: TODAY - DAY }), [], TODAY),
+      ).toBe('done');
+    });
+
+    it('still keeps a paid job with its day ahead in "scheduled"', () => {
+      expect(
+        bucketForJob(job({ stage: 'paid', scheduledStartDate: TODAY + DAY }), [], TODAY),
+      ).toBe('scheduled');
+    });
+  });
+
+  /**
+   * Won work with no day against it had nowhere to live: an accepted job sat
+   * under "To send" — which reads as owing the customer a document, when
+   * what they're owed is a start date.
+   */
+  describe('to book — won, but not in the diary', () => {
+    it('takes an accepted job with no date', () => {
+      expect(
+        bucketForJob(job({ stage: 'accepted' }), [quote({ stage: 'quote_accepted' })], TODAY),
+      ).toBe('to_book');
+    });
+
+    it('takes a job whose quote was accepted even if the stage lags', () => {
+      expect(
+        bucketForJob(job({ stage: 'quoted' }), [quote({ stage: 'quote_accepted' })], TODAY),
+      ).toBe('to_book');
+    });
+
+    it('leaves an unaccepted quote where it was', () => {
+      expect(bucketForJob(job({ stage: 'inquiry' }), [quote()], TODAY)).toBe('to_send');
+      expect(
+        bucketForJob(job({ stage: 'quoted' }), [quote({ stage: 'quote_sent' })], TODAY),
+      ).toBe('waiting');
+    });
+
+    // A date — even a past one — means the job was booked, so the question
+    // it raises is whether it got finished, not when it starts.
+    it('never takes a job that has a date on it', () => {
+      expect(
+        bucketForJob(job({ stage: 'accepted', scheduledStartDate: TODAY - DAY }), [], TODAY),
+      ).not.toBe('to_book');
+    });
+
+    it('never takes finished work', () => {
+      expect(
+        bucketForJob(job({ stage: 'completed' }), [quote({ stage: 'quote_accepted' })], TODAY),
+      ).toBe('to_send');
+    });
+
+    // Money still comes first, and so does a document that hasn't gone out:
+    // "To book" would bury an invoice that can't be chased until it's sent.
+    it('yields to an invoice owing and to one still in draft', () => {
+      expect(
+        bucketForJob(job({ stage: 'accepted' }), [invoice({ total: 500, paidTotal: 0 })], TODAY),
+      ).toBe('owed');
+      expect(
+        bucketForJob(job({ stage: 'accepted' }), [invoice({ stage: 'draft', total: 0 })], TODAY),
+      ).toBe('to_send');
+    });
   });
 
   // An archived job reappearing in a working pile because of a stale doc
@@ -257,6 +351,8 @@ describe('bucket integrity — what makes the chip counts trustworthy', () => {
     [job({ id: 'g', stage: 'completed' }), []],
     // Paid up front, work still to come — the case that now escapes "done".
     [job({ id: 'h', stage: 'paid', scheduledStartDate: Date.now() + DAY }), []],
+    // Won, with nothing in the diary against it.
+    [job({ id: 'i', stage: 'accepted' }), [quote({ stage: 'quote_accepted' })]],
   ];
 
   it('lands every job in exactly one bucket', () => {
