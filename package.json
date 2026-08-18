@@ -1,6 +1,6 @@
 {
   "name": "@quotemate/app",
-  "version": "1.0.74",
+  "version": "1.54",
   "main": "index.js",
   "scripts": {
     "start": "expo start --dev-client",
@@ -13,6 +13,7 @@
     "export:staging": "expo export --platform web --output-dir dist-staging",
     "deploy:staging": "npm run export:staging && firebase deploy --only hosting --config firebase.staging.json --project hansendev",
     "funnel:onboarding": "node scripts/onboarding-dropoff.js",
+    "release:announce": "cd functions && npx ts-node scripts/announceRelease.ts",
     "test": "vitest run",
     "test:rules": "export PATH=\"/opt/homebrew/opt/openjdk/bin:$PATH\" && firebase emulators:exec --only firestore --project demo-quotemate-rules \"vitest run --config vitest.rules.config.ts\"",
     "test:watch": "vitest",

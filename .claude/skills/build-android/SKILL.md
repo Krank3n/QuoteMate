@@ -63,4 +63,18 @@ The release signing config in `android/app/build.gradle` reads from `keystore.pr
    - The new `versionName` and `versionCode`
    - Whether the SHA1 fingerprint matched
 
+9. **Remind the user of the post-release step.** Once the build is actually live
+   on both stores (not before — see `docs/RELEASE.md`), the in-app update sheet
+   has to be told about it:
+
+   ```
+   npm run release:announce -- --whats-new "..."        # dry run
+   npm run release:announce -- --whats-new "..." --write
+   ```
+
+   Skipping this is invisible: `config/appUpdate` went stale at `1.0.74` while
+   the app shipped `1.54`, and no user saw an update prompt for months. Do NOT
+   run it as part of the build — announcing a version still in review points
+   people at a download that doesn't exist yet.
+
 The build timeout should be set to 600000ms (10 minutes) to allow for the full Gradle build.

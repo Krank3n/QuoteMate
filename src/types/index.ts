@@ -1034,7 +1034,8 @@ export interface SearchableContact extends Contact {
 export interface NotificationPreferences {
   quoteUpdates: boolean;       // Quote accepted/rejected/viewed/expiring
   invoiceUpdates: boolean;     // Invoice paid/overdue
-  dailyMotivation: boolean;    // Morning Aussie motivation
   milestoneCelebrations: boolean; // Quote count milestones
-  inactivityNudges: boolean;   // "We miss ya" nudges
+  inactivityNudges: boolean;   // Unsent drafts and "still there?" nudges
+  // dailyMotivation was removed — a content-free daily push that was the
+  // single most-disabled setting and 100% of all push volume.
 }

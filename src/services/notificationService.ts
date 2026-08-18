@@ -70,10 +70,98 @@ class NotificationService {
   }
 
   /**
-   * Register for push notifications
-   * Returns the Expo push token or null if registration fails
+   * The device's IANA timezone, sent up with the token.
+   *
+   * Server-side schedulers all run on Australia/Sydney, which lands a
+   * Sydney-morning reminder on a Perth phone two to three hours early. Storing
+   * the real zone lets the send path hold nudges until the tradie's own
+   * daytime.
    */
-  async registerForPushNotifications(): Promise<string | null> {
+  private getTimezone(): string | null {
+    try {
+      return Intl.DateTimeFormat().resolvedOptions().timeZone || null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Create the Android channels. Separating these means a tradie can silence
+   * reminders in the OS without also silencing "you've been paid" — with a
+   * single shared channel, muting one meant muting everything.
+   */
+  private async ensureAndroidChannels(): Promise<void> {
+    if (Platform.OS !== 'android' || !Notifications) return;
+
+    await Notifications.setNotificationChannelAsync('money', {
+      name: 'Payments & accepted quotes',
+      description: 'A customer accepted a quote, or money landed.',
+      importance: Notifications.AndroidImportance.HIGH,
+      vibrationPattern: [0, 250, 250, 250],
+      lightColor: '#f97316',
+    });
+
+    await Notifications.setNotificationChannelAsync('quote-responses', {
+      name: 'Quote activity',
+      description: 'A customer opened or declined your quote.',
+      importance: Notifications.AndroidImportance.HIGH,
+      vibrationPattern: [0, 250, 250, 250],
+      lightColor: '#f97316',
+    });
+
+    await Notifications.setNotificationChannelAsync('reminders', {
+      name: 'Reminders',
+      description: 'Overdue invoices, expiring quotes and unsent drafts.',
+      importance: Notifications.AndroidImportance.DEFAULT,
+      lightColor: '#f97316',
+    });
+  }
+
+  /** Whether the OS has already granted notification permission. */
+  async hasPermission(): Promise<boolean> {
+    if (!isNativeModuleAvailable || !Notifications) return false;
+    try {
+      const { status } = await Notifications.getPermissionsAsync();
+      return status === 'granted';
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Whether the OS will still show a permission prompt. Once a user declines
+   * on iOS the prompt never appears again, so there is no point asking.
+   */
+  async canAskPermission(): Promise<boolean> {
+    if (!isNativeModuleAvailable || !Notifications || !Device?.isDevice) return false;
+    try {
+      const { status, canAskAgain } = await Notifications.getPermissionsAsync();
+      return status !== 'granted' && canAskAgain !== false;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Refresh the stored token when permission is already granted, without ever
+   * showing a prompt. Keeps delivery alive across reinstalls and token
+   * rotation for users who opted in previously.
+   */
+  async refreshTokenIfPermitted(): Promise<string | null> {
+    if (!(await this.hasPermission())) return null;
+    return this.registerForPushNotifications({ promptIfNeeded: false });
+  }
+
+  /**
+   * Register for push notifications.
+   * Returns the Expo push token or null if registration fails.
+   *
+   * `promptIfNeeded` gates the one-shot OS permission dialog — pass false to
+   * refresh silently for users who already granted it.
+   */
+  async registerForPushNotifications(
+    { promptIfNeeded = true }: { promptIfNeeded?: boolean } = {}
+  ): Promise<string | null> {
     // Check if native module is available
     if (!isNativeModuleAvailable || !Notifications || !Device) {
       return null;
@@ -90,6 +178,9 @@ class NotificationService {
 
     // Request permission if not granted
     if (existingStatus !== 'granted') {
+      if (!promptIfNeeded) {
+        return null;
+      }
       const { status } = await Notifications.requestPermissionsAsync();
       finalStatus = status;
     }
@@ -108,21 +199,26 @@ class NotificationService {
       this.expoPushToken = tokenData.data;
       // Save token to Firestore for this device
       const deviceId = this.getDeviceId();
-      await firestoreService.saveFcmToken(this.expoPushToken, deviceId);
+      await firestoreService.saveFcmToken(this.expoPushToken, deviceId, this.getTimezone());
 
-      // Set up Android notification channel
-      if (Platform.OS === 'android') {
-        await Notifications.setNotificationChannelAsync('quote-responses', {
-          name: 'Quote Responses',
-          importance: Notifications.AndroidImportance.HIGH,
-          vibrationPattern: [0, 250, 250, 250],
-          lightColor: '#f97316', // Orange to match app theme
-        });
-      }
+      await this.ensureAndroidChannels();
 
       return this.expoPushToken;
     } catch (error) {
       return null;
+    }
+  }
+
+  /**
+   * Reset the app icon badge. Nothing cleared it previously, so the count grew
+   * forever and stopped meaning anything.
+   */
+  async clearBadge(): Promise<void> {
+    if (!isNativeModuleAvailable || !Notifications) return;
+    try {
+      await Notifications.setBadgeCountAsync(0);
+    } catch {
+      // Badge support is platform/launcher dependent; never surface a failure.
     }
   }
 

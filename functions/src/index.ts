@@ -179,6 +179,13 @@ export { onJobWriteSyncCal } from './googleCalendarSync';
 export { requestKatieDemoCall, getKatieSignupLink, katieRecoveryDrip } from './callKatie';
 import { quoteRecordToDocumentRecord, invoiceRecordToDocumentRecord } from './shared/document/adapter';
 import { getAussieMessage, AussieEvent } from './aussieNotifications';
+import {
+  decidePush,
+  localDayKey,
+  normaliseTimezone,
+  summariseOverdue,
+  DEFAULT_TIMEZONE,
+} from './pushPolicy';
 import { sendExpoPushNotifications } from './expoPush';
 import { hashTerms } from './shared/pdf/terms/defaultAuTradie';
 import { generateQuotePdfBuffer } from './pdfGenerator';
@@ -6709,18 +6716,18 @@ export const respondToQuote = functions.https.onRequest((req, res) => {
         }
       }
 
-      // The app stores Expo push tokens (despite the legacy collection name),
-      // so delivery must go through Expo rather than Firebase Admin Messaging.
+      // Routed through sendAussiePush so the user's notification preferences
+      // are honoured — calling sendExpoPushToUser directly bypassed them.
       try {
         const aussieEvent: AussieEvent = response === 'accepted' ? 'quote_accepted' : 'quote_rejected';
-        const aussieMsg = getAussieMessage(aussieEvent, {
+        await sendAussiePush(foundUserId, aussieEvent, {
           customer: foundQuote.customerName,
           job: foundQuote.job?.name || 'the job',
-        });
-        await sendExpoPushToUser(foundUserId, aussieMsg.title, aussieMsg.body, {
+          amount: formatPushAmount(foundQuote.total),
+        }, {
           quoteId: foundQuote.id,
-          type: 'quote_response',
           response,
+          ...jobLink(foundQuote),
         });
       } catch {
         // Push is best-effort; sendExpoPushToUser logs gateway failures.
@@ -6903,17 +6910,17 @@ export const quoteAcceptancePage = functions.https.onRequest(async (req, res) =>
       }
     }
 
-    // Send the stored Expo token through Expo's push gateway.
+    // Routed through sendAussiePush so notification preferences are honoured.
     try {
       const aussieEvent: AussieEvent = responseType === 'accepted' ? 'quote_accepted' : 'quote_rejected';
-      const aussieMsg = getAussieMessage(aussieEvent, {
+      await sendAussiePush(foundUserId, aussieEvent, {
         customer: foundQuote.customerName,
         job: foundQuote.job?.name || 'the job',
-      });
-      await sendExpoPushToUser(foundUserId, aussieMsg.title, aussieMsg.body, {
+        amount: formatPushAmount(foundQuote.total),
+      }, {
         quoteId: foundQuote.id,
-        type: 'quote_response',
         response: responseType,
+        ...jobLink(foundQuote),
       });
     } catch {
       // Push is best-effort; sendExpoPushToUser logs gateway failures.
@@ -10635,7 +10642,8 @@ async function sendExpoPushToUser(
   userId: string,
   title: string,
   body: string,
-  data: Record<string, unknown> = {}
+  data: Record<string, unknown> = {},
+  delivery: { channelId?: string; priority?: 'default' | 'normal' | 'high' } = {}
 ): Promise<boolean> {
   const tokensSnapshot = await db.collection('users').doc(userId).collection('fcmTokens').get();
   if (tokensSnapshot.empty) return false;
@@ -10646,7 +10654,7 @@ async function sendExpoPushToUser(
         id: doc.id,
         token: typeof doc.data().token === 'string' ? doc.data().token : '',
       })),
-      { title, body, data }
+      { title, body, data, channelId: delivery.channelId, priority: delivery.priority }
     );
 
     if (result.tokenDocumentIdsToDelete.length > 0) {
@@ -10685,8 +10693,49 @@ async function sendExpoPushToUser(
 }
 
 /**
- * Send an Aussie-themed push notification to a user.
- * Checks notification preferences and delivers via Expo's push gateway.
+ * Dollar figure for a notification body, or '' when there isn't a usable one.
+ * getAussieMessage prefers a variant it can fill, so an empty string makes it
+ * pick wording that doesn't mention money rather than printing "$0".
+ */
+function formatPushAmount(value: unknown): string {
+  const amount = Number(value);
+  if (!Number.isFinite(amount) || amount <= 0) return '';
+  return `$${Math.round(amount).toLocaleString('en-AU')}`;
+}
+
+/**
+ * Tapping a notification has to land on the thing it's about. The client opens
+ * ViewJob when a jobId is present, so carry it whenever the source doc has one.
+ */
+function jobLink(doc: { jobId?: unknown } | undefined | null): Record<string, string> {
+  const jobId = doc?.jobId;
+  return typeof jobId === 'string' && jobId ? { jobId } : {};
+}
+
+/**
+ * The timezone the device last reported. Every scheduler in this file runs on
+ * Australia/Sydney, which puts a Sydney-morning job on a Perth tradie's phone
+ * two to three hours before their own morning.
+ */
+async function getUserPushTimezone(userId: string): Promise<string> {
+  try {
+    const snapshot = await db.collection('users').doc(userId).collection('fcmTokens').get();
+    for (const doc of snapshot.docs) {
+      const zone = doc.data()?.timezone;
+      if (typeof zone === 'string' && zone.trim()) return normaliseTimezone(zone);
+    }
+  } catch {
+    // Fall through to the default.
+  }
+  return DEFAULT_TIMEZONE;
+}
+
+/**
+ * Send a push to a user, subject to the delivery policy in pushPolicy.ts.
+ *
+ * Every push in the codebase goes through here — the accept/decline paths used
+ * to call sendExpoPushToUser directly and so ignored the user's preferences
+ * entirely.
  */
 async function sendAussiePush(
   userId: string,
@@ -10694,33 +10743,63 @@ async function sendAussiePush(
   vars: Record<string, string> = {},
   dataPayload: Record<string, string> = {}
 ): Promise<boolean> {
-  // Check notification preferences
-  const prefsDoc = await db.collection('users').doc(userId).collection('settings').doc('notificationPreferences').get();
-  const prefs = prefsDoc.exists ? prefsDoc.data() : {};
+  const nowMs = Date.now();
+  const userRef = db.collection('users').doc(userId);
+  const pushStateRef = userRef.collection('settings').doc('pushState');
 
-  const prefMap: Record<string, string> = {
-    quote_accepted: 'quoteUpdates',
-    quote_rejected: 'quoteUpdates',
-    quote_viewed: 'quoteUpdates',
-    quote_expiring: 'quoteUpdates',
-    invoice_paid: 'invoiceUpdates',
-    invoice_overdue: 'invoiceUpdates',
-    daily_motivation: 'dailyMotivation',
-    milestone: 'milestoneCelebrations',
-    inactivity: 'inactivityNudges',
-    draft_nudge: 'inactivityNudges',
-  };
+  const [prefsDoc, stateDoc, timezone] = await Promise.all([
+    userRef.collection('settings').doc('notificationPreferences').get(),
+    pushStateRef.get(),
+    getUserPushTimezone(userId),
+  ]);
 
-  const prefKey = prefMap[event];
-  if (prefs && prefKey && prefs[prefKey] === false) {
+  const state = stateDoc.exists ? stateDoc.data() || {} : {};
+  const provisionalDayKey = localDayKey(normaliseTimezone(timezone), nowMs);
+  const nudgesSentToday = state.nudgeDayKey === provisionalDayKey
+    ? Number(state.nudgeCount) || 0
+    : 0;
+
+  const decision = decidePush({
+    event,
+    prefs: prefsDoc.exists ? prefsDoc.data() : {},
+    timezone,
+    nowMs,
+    nudgesSentToday,
+  });
+
+  if (!decision.send) {
+    functions.logger.info('push_suppressed', {
+      userId, event, reason: decision.reason, timezone: decision.timezone,
+    });
     return false;
   }
 
   const aussieMsg = getAussieMessage(event, vars);
-  return sendExpoPushToUser(userId, aussieMsg.title, aussieMsg.body, {
-    type: event,
-    ...dataPayload,
-  });
+  const accepted = await sendExpoPushToUser(
+    userId,
+    aussieMsg.title,
+    aussieMsg.body,
+    { type: event, ...dataPayload },
+    {
+      channelId: decision.channelId,
+      priority: decision.pushClass === 'nudge' ? 'normal' : 'high',
+    }
+  );
+
+  // Only a delivered nudge burns the day's allowance — a user with no
+  // registered device must not have their one slot consumed by a no-op.
+  if (accepted && decision.pushClass === 'nudge') {
+    await pushStateRef.set({
+      nudgeDayKey: decision.localDayKey,
+      nudgeCount: state.nudgeDayKey === decision.localDayKey
+        ? admin.firestore.FieldValue.increment(1)
+        : 1,
+      lastNudgeAt: admin.firestore.FieldValue.serverTimestamp(),
+      lastNudgeEvent: event,
+    }, { merge: true });
+  }
+
+  return accepted;
 }
 
 // -----------------------------------------------------------
@@ -10743,10 +10822,26 @@ export const onQuoteViewed = functions.firestore
       return;
     }
 
-    await sendAussiePush(userId, 'quote_viewed', {
+    // A customer weighing up a quote opens it repeatedly. Notifying on every
+    // open turned one interested customer into a burst of identical pushes,
+    // which is the fastest way to teach someone to mute the channel. Tell the
+    // tradie the first time, then stay quiet for a day.
+    const lastNotifiedMs = toMs(after.viewNotifiedAt) ?? 0;
+    if (lastNotifiedMs && Date.now() - lastNotifiedMs < 24 * 60 * 60 * 1000) {
+      return;
+    }
+
+    const sent = await sendAussiePush(userId, 'quote_viewed', {
       customer: after.customerName || 'A customer',
       job: after.job?.name || 'the job',
-    }, { quoteId });
+      amount: formatPushAmount(after.total),
+    }, { quoteId, ...jobLink(after) });
+
+    if (sent) {
+      await change.after.ref.update({
+        viewNotifiedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    }
   });
 
 // -----------------------------------------------------------
@@ -10767,7 +10862,8 @@ export const onInvoiceStatusChanged = functions.firestore
     await sendAussiePush(userId, 'invoice_paid', {
       customer: after.customerName || 'A customer',
       job: after.job?.name || 'the job',
-    }, { invoiceId });
+      amount: formatPushAmount(after.total),
+    }, { invoiceId, ...jobLink(after) });
   });
 
 // -----------------------------------------------------------
@@ -10828,7 +10924,10 @@ export const onInvoicePaymentReceived = functions.firestore
 // onInvoiceOverdue — Scheduled daily: nudge about overdue invoices
 // -----------------------------------------------------------
 export const onInvoiceOverdue = functions.pubsub
-  .schedule('every day 09:00')
+  // 11:30 Sydney is 08:30 Perth at worst (AEDT), so this clears the 8am
+  // quiet-hours floor in every Australian timezone. Runs after onQuoteExpiring
+  // because a deadline beats a debt for the day's single nudge slot.
+  .schedule('every day 11:30')
   .timeZone('Australia/Sydney')
   .onRun(async () => {
     const now = new Date();
@@ -10839,6 +10938,15 @@ export const onInvoiceOverdue = functions.pubsub
         .collection('invoices')
         .where('status', 'in', ['sent', 'partial', 'overdue'])
         .get();
+
+      // Collect every overdue invoice first and send ONE summary. Pushing per
+      // invoice meant a tradie with six overdue invoices got six near-identical
+      // buzzes in a row every morning, indefinitely.
+      const overdue: Array<{
+        doc: FirebaseFirestore.QueryDocumentSnapshot;
+        customerName: string;
+        balance: number;
+      }> = [];
 
       for (const invoiceDoc of invoicesSnapshot.docs) {
         const invoice = invoiceDoc.data();
@@ -10853,13 +10961,39 @@ export const onInvoiceOverdue = functions.pubsub
           if (hoursSinceNudge < 23) continue; // Already nudged within the last day
         }
 
-        await sendAussiePush(userDoc.id, 'invoice_overdue', {
-          customer: invoice.customerName || 'A customer',
-          job: invoice.job?.name || 'the job',
-        }, { invoiceId: invoiceDoc.id });
+        const total = Number(invoice.total) || 0;
+        const paid = Number(invoice.paidAmount) || 0;
+        const balance = Number.isFinite(Number(invoice.balanceDue))
+          ? Number(invoice.balanceDue)
+          : total - paid;
+        overdue.push({
+          doc: invoiceDoc,
+          customerName: invoice.customerName || 'A customer',
+          balance: Math.max(0, balance),
+        });
+      }
 
-        // Mark as nudged
-        await invoiceDoc.ref.update({ lastOverdueNudgeAt: admin.firestore.FieldValue.serverTimestamp() });
+      const summary = summariseOverdue(overdue);
+      if (!summary) continue;
+
+      const sent = await sendAussiePush(userDoc.id, 'invoice_overdue', {
+        customer: summary.customer,
+        amount: summary.amount,
+      }, {
+        // A single overdue invoice can deep-link straight to it; a summary
+        // opens the invoice list instead.
+        ...(overdue.length === 1
+          ? { invoiceId: overdue[0].doc.id, ...jobLink(overdue[0].doc.data()) }
+          : { screen: 'invoices' }),
+      });
+
+      // Only stamp the invoices once the push actually went out, so a
+      // suppressed nudge (quiet hours, daily cap) is retried tomorrow rather
+      // than silently skipped for good.
+      if (sent) {
+        for (const item of overdue) {
+          await item.doc.ref.update({ lastOverdueNudgeAt: admin.firestore.FieldValue.serverTimestamp() });
+        }
       }
     }
 
@@ -10869,7 +11003,9 @@ export const onInvoiceOverdue = functions.pubsub
 // onQuoteExpiring — Scheduled daily: remind about quotes expiring within 48hrs
 // -----------------------------------------------------------
 export const onQuoteExpiring = functions.pubsub
-  .schedule('every day 09:30')
+  // First claim on the day's one nudge: an expiring quote is the only nudge
+  // with a hard deadline attached.
+  .schedule('every day 11:00')
   .timeZone('Australia/Sydney')
   .onRun(async () => {
     const now = new Date();
@@ -10897,11 +11033,17 @@ export const onQuoteExpiring = functions.pubsub
         // Check if already notified about expiring
         if (quote.expiryNotifiedAt) continue;
 
-        await sendAussiePush(userDoc.id, 'quote_expiring', {
+        const hoursLeft = Math.max(1, Math.round((expiresAt.getTime() - now.getTime()) / (60 * 60 * 1000)));
+        const expirySent = await sendAussiePush(userDoc.id, 'quote_expiring', {
           customer: quote.customerName || 'A customer',
           job: quote.job?.name || 'the job',
-        }, { quoteId: quoteDoc.id });
+          days: hoursLeft <= 24 ? `${hoursLeft} hours` : '2 days',
+          amount: formatPushAmount(quote.total),
+        }, { quoteId: quoteDoc.id, ...jobLink(quote) });
 
+        // Only burn the once-per-quote flag on a delivered push, otherwise a
+        // quiet-hours suppression silences this quote's warning permanently.
+        if (!expirySent) continue;
         await quoteDoc.ref.update({ expiryNotifiedAt: admin.firestore.FieldValue.serverTimestamp() });
       }
     }
@@ -11099,24 +11241,10 @@ export const quoteFollowUp = functions.pubsub
 
   });
 
-// -----------------------------------------------------------
-// dailyMotivation — Scheduled: Aussie motivation at 7:30am AEST
-// -----------------------------------------------------------
-export const dailyMotivation = functions.pubsub
-  .schedule('every day 07:30')
-  .timeZone('Australia/Sydney')
-  .onRun(async () => {
-    const usersSnapshot = await db.collection('users').get();
-
-    for (const userDoc of usersSnapshot.docs) {
-      // Only send to users who have stored Expo push tokens (active users)
-      const tokensSnapshot = await userDoc.ref.collection('fcmTokens').get();
-      if (tokensSnapshot.empty) continue;
-
-      await sendAussiePush(userDoc.id, 'daily_motivation');
-    }
-
-  });
+// dailyMotivation was removed: a content-free 7:30am pep talk was 100% of all
+// push volume, went out to users who had been inactive for months, and landed
+// on Perth phones before dawn. It was also the most-disabled preference among
+// the users who found the settings screen.
 
 // -----------------------------------------------------------
 // milestoneChecker — Scheduled daily: check for quote count milestones
@@ -11124,7 +11252,7 @@ export const dailyMotivation = functions.pubsub
 const MILESTONES = [10, 25, 50, 100, 250, 500, 1000];
 
 export const milestoneChecker = functions.pubsub
-  .schedule('every day 10:00')
+  .schedule('every day 12:30')
   .timeZone('Australia/Sydney')
   .onRun(async () => {
     const usersSnapshot = await db.collection('users').get();
@@ -11143,9 +11271,13 @@ export const milestoneChecker = functions.pubsub
 
       if (achievedMilestone <= lastCelebrated) continue;
 
-      await sendAussiePush(userDoc.id, 'milestone', {
+      const milestoneSent = await sendAussiePush(userDoc.id, 'milestone', {
         n: String(achievedMilestone),
-      });
+      }, { screen: 'quotes' });
+
+      // Leave the milestone uncelebrated if the push was suppressed, so it can
+      // land tomorrow rather than being marked done with nothing delivered.
+      if (!milestoneSent) continue;
 
       await userDoc.ref.collection('settings').doc('milestones').set({
         lastCelebratedMilestone: achievedMilestone,
@@ -11159,7 +11291,7 @@ export const milestoneChecker = functions.pubsub
 // inactivityNudge — Scheduled weekly: nudge users inactive for 7+ days
 // -----------------------------------------------------------
 export const inactivityNudge = functions.pubsub
-  .schedule('every monday 10:00')
+  .schedule('every monday 13:00')
   .timeZone('Australia/Sydney')
   .onRun(async () => {
     const now = new Date();
@@ -11222,7 +11354,7 @@ export const inactivityNudge = functions.pubsub
 // Tier 3 (7 days): email only (final nudge)
 // -----------------------------------------------------------
 export const draftNudge = functions.pubsub
-  .schedule('every day 11:00')
+  .schedule('every day 12:00')
   .timeZone('Australia/Sydney')
   .onRun(async () => {
     const now = new Date();
@@ -11335,20 +11467,33 @@ export const draftNudge = functions.pubsub
       processed++;
 
       try {
-        // Send push for each draft (tier 1, 2, 3)
-        for (const draft of draftsToPush) {
-          const quote = draft.doc.data();
-          await sendAussiePush(userDoc.id, 'draft_nudge', {
-            customer: quote.customerName || 'A customer',
-            job: quote.job?.name || 'the job',
-          }, { quoteId: draft.doc.id });
+        // One push for the whole pile, not one per draft. The oldest draft
+        // leads the message because it's the one closest to going cold.
+        const oldest = draftsToPush.reduce((a, b) => (b.daysOld > a.daysOld ? b : a));
+        const oldestQuote = oldest.doc.data();
+        const others = draftsToPush.length - 1;
 
-          // Mark tier on the quote doc
-          await draft.doc.ref.update({
-            draftNudgeTier: draft.tier,
-            lastDraftNudgeAt: admin.firestore.FieldValue.serverTimestamp(),
-          });
-          nudgesSent++;
+        const pushSent = await sendAussiePush(userDoc.id, 'draft_nudge', {
+          customer: others > 0
+            ? `${oldestQuote.customerName || 'A customer'} +${others} more`
+            : (oldestQuote.customerName || 'A customer'),
+          job: oldestQuote.job?.name || 'the job',
+          days: oldest.daysOld === 1 ? 'a day' : `${oldest.daysOld} days`,
+          amount: formatPushAmount(oldestQuote.total),
+        }, others > 0
+          ? { screen: 'quotes' }
+          : { quoteId: oldest.doc.id, ...jobLink(oldestQuote) });
+
+        // Advance the tier only on a delivered push, so a nudge suppressed by
+        // quiet hours or the daily cap isn't burned without being seen.
+        if (pushSent) {
+          for (const draft of draftsToPush) {
+            await draft.doc.ref.update({
+              draftNudgeTier: draft.tier,
+              lastDraftNudgeAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+            nudgesSent++;
+          }
         }
 
         // Send email summary (tier 2 and 3 only)
@@ -14529,14 +14674,15 @@ export const squareWebhook = functions.https.onRequest(async (req, res) => {
           // Swallow.
         }
         try {
-          const aussieMsg = getAussieMessage('quote_accepted', {
+          // Routed through sendAussiePush so preferences are honoured.
+          await sendAussiePush(userId, 'quote_accepted', {
             customer: quote.customerName,
             job: quote.job?.name || 'the job',
-          });
-          await sendExpoPushToUser(userId, aussieMsg.title, aussieMsg.body, {
+            amount: formatPushAmount(quote.total),
+          }, {
             quoteId: quote.id,
-            type: 'quote_response',
             response: 'accepted',
+            ...jobLink(quote),
           });
         } catch {
           // Push is best-effort; sendExpoPushToUser logs gateway failures.

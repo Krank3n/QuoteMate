@@ -32,7 +32,9 @@ if [ ! -f "android/keystore.properties" ]; then
 fi
 
 # Get current version
-VERSION=$(grep "version" package.json | head -1 | sed 's/.*"version": "\(.*\)".*/\1/')
+# app.config.js is the authority: it is what Constants.expoConfig.version
+# returns at runtime and what config/appUpdate is compared against.
+VERSION=$(grep -m1 -E '^[[:space:]]*version:' app.config.js | sed -E 's/.*version:[[:space:]]*"([^"]+)".*/\1/')
 echo "📦 Building version: $VERSION"
 echo ""
 
