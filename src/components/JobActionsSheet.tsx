@@ -20,7 +20,11 @@ import type { Document } from '../types/document';
 import { makeStyles, useThemeColors } from '../theme';
 import { BottomSheet } from './BottomSheet';
 import { selectionTap, lightTap } from '../utils/haptics';
-import { legalStageTargets, shouldOfferSchedule } from '../utils/jobStageTargets';
+import {
+  legalStageTargets,
+  shouldOfferReschedule,
+  shouldOfferSchedule,
+} from '../utils/jobStageTargets';
 import { canRevertToQuote } from '../utils/revertToQuote';
 import { isLiveInvoice, jobStatusLabel } from '../utils/jobTimeline';
 import { jobStageMetaFor } from './JobStageSheet';
@@ -255,6 +259,7 @@ export function JobActionsSheet({
 
   const stageMeta = jobStageMetaFor(themeColors);
   const showSchedule = !!onSchedule && shouldOfferSchedule(job);
+  const showReschedule = !!onSchedule && shouldOfferReschedule(job);
   // There is no "Invoiced" Job stage — invoicing lives on the document —
   // so anyone looking for it in a status list finds nothing. Offer it here
   // as the lifecycle step it reads as. Same action, same confirm dialog as
@@ -380,9 +385,9 @@ export function JobActionsSheet({
               }}
             />
           ) : null}
-          {/* The ladder can't offer the stage the job is standing on, so a
-              scheduled job gets its date door here instead. */}
-          {showSchedule && job.stage === 'scheduled' ? (
+          {/* A job the ladder can't hand a date door to gets one here
+              instead — see shouldOfferReschedule. */}
+          {showReschedule ? (
             <StageOptionRow
               icon="calendar-clock-outline"
               color={themeColors.info}
@@ -397,7 +402,8 @@ export function JobActionsSheet({
             const meta = stageMeta[stage];
             // Scheduling writes a date; the stage follows from it. The
             // ellipsis is the app's mark for a row that opens more UI.
-            const opensPicker = stage === 'scheduled' && showSchedule;
+            // Skipped when the submenu already drew a Reschedule row.
+            const opensPicker = stage === 'scheduled' && showSchedule && !showReschedule;
             return (
               <StageOptionRow
                 key={stage}

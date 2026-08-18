@@ -36,6 +36,8 @@ interface PaymentChipProps {
   onPress?: (doc: Document, event?: GestureResponderEvent) => void;
   /** Drop the figures from the label — for rows that share space. */
   compact?: boolean;
+  /** What the Job knows and the document can't — see PaymentContext. */
+  context?: PaymentContext;
 }
 
 interface PaymentMeta {
@@ -45,11 +47,32 @@ interface PaymentMeta {
   bgColor: string;
 }
 
+/**
+ * What the JOB knows that the document can't.
+ *
+ * A cash job never gets invoiced and never touches the payment ledger, so
+ * the tradie marking the job Paid is the only record that exists. The
+ * document alone would call that "unpaid" — and now that the timeline rail
+ * is workflow-only (see jobTimeline.JobSubStatusSlot), the chip is the last
+ * place on the card that could say otherwise.
+ */
+export interface PaymentContext {
+  /** The Job's own stage reads `paid`. */
+  jobIsPaid?: boolean;
+}
+
+/** The Job's word only counts where the document has no money of its own —
+ *  an invoice's ledger is the record, and a real balance outranks a stage. */
+function jobStandsInForLedger(doc: Document, ctx: PaymentContext): boolean {
+  return !!ctx.jobIsPaid && doc.type !== 'invoice' && (Number(doc.paidTotal) || 0) <= 0;
+}
+
 // Ordered so "overpaid" feels like an unusual positive (surplus) rather than
 // a negative; the refund path still drives stage → cancelled elsewhere.
-export function derivePaymentState(doc: Document): PaymentState {
+export function derivePaymentState(doc: Document, ctx: PaymentContext = {}): PaymentState {
   const total = Number(doc.total) || 0;
   const paid = Number(doc.paidTotal) || 0;
+  if (jobStandsInForLedger(doc, ctx)) return 'paid';
   if (total <= 0 && paid <= 0) return 'unpaid';
   const tolerance = 0.005;
   if (paid + tolerance >= total && total > 0) {
@@ -80,14 +103,19 @@ export function derivePaymentState(doc: Document): PaymentState {
  * that case would strand the pay-link route on those quotes — mirrors
  * depositOwed in StickyJobActionBar.
  */
-export function shouldShowPaymentChip(doc?: Document | null): boolean {
+export function shouldShowPaymentChip(
+  doc?: Document | null,
+  ctx: PaymentContext = {},
+): boolean {
   if (!doc) return false;
   if (doc.stage === 'cancelled') return false;
   if (doc.type === 'invoice') return true;
   if ((Number(doc.paidTotal) || 0) > 0) return true;
   const depositRequired = Number(doc.depositAmount) || 0;
   const depositPaid = Number(doc.depositPaid) || 0;
-  return depositRequired > 0 && depositPaid < depositRequired;
+  if (depositRequired > 0 && depositPaid < depositRequired) return true;
+  // Cash job marked paid on the Job itself — see PaymentContext.
+  return jobStandsInForLedger(doc, ctx);
 }
 
 function formatProgress(doc: Document): string {
@@ -153,10 +181,10 @@ function metaFor(
   }
 }
 
-export function PaymentChip({ doc, onPress, compact }: PaymentChipProps) {
+export function PaymentChip({ doc, onPress, compact, context }: PaymentChipProps) {
   const styles = useStyles();
   const themeColors = useThemeColors();
-  const state = derivePaymentState(doc);
+  const state = derivePaymentState(doc, context);
   const meta = metaFor(doc, state, themeColors, compact);
 
   const content = (

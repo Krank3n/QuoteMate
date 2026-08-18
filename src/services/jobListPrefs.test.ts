@@ -81,6 +81,12 @@ describe('defaultSortForFilter', () => {
     expect(defaultSortForFilter('scheduled')).toBe('scheduled');
   });
 
+  // Same logic from the other end of the diary: the job won three weeks ago
+  // and never booked is the one going cold, and Recent would hide it.
+  it('defaults the To book pile to oldest first', () => {
+    expect(defaultSortForFilter('to_book')).toBe('oldest');
+  });
+
   it('defaults every other pile to Recent', () => {
     expect(defaultSortForFilter('all')).toBe('recent');
     expect(defaultSortForFilter('to_send')).toBe('recent');

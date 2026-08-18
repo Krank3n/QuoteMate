@@ -46,11 +46,14 @@ export const DEFAULT_JOB_LIST_PREFS: JobListPrefs = {
  * Owed defaults to most-overdue because the pile exists to chase money, and
  * Recent would bury the 60-day-old invoice under this morning's. Scheduled
  * defaults to soonest-start for the same reason: it's a diary, so date order
- * is the useful order.
+ * is the useful order. To book opens oldest-first on the same logic from the
+ * other end: the job won three weeks ago and never put in the diary is the
+ * one going cold, and Recent would hide it under today's.
  */
 export function defaultSortForFilter(filter: JobFilterKey): JobSortKey {
   if (filter === 'owed') return 'overdue';
   if (filter === 'scheduled') return 'scheduled';
+  if (filter === 'to_book') return 'oldest';
   return 'recent';
 }
 

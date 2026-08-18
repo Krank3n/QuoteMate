@@ -118,3 +118,28 @@ describe('resolveJobActions — accepted quote conversion access', () => {
     expect(actions.map((a) => a.id)).toEqual(['generateInvoice', 'markComplete']);
   });
 });
+
+// Pay-up-front trades reach `paid` before the work exists. The bar's only
+// button was an accented "Close Job" — an invitation to archive a job the
+// tradie hasn't turned up to yet, with no way to the date from this screen.
+describe('resolveJobActions — paid before the work is done', () => {
+  const paidInvoice = quoteDoc({ type: 'invoice', stage: 'paid' });
+
+  it('leads with the date, not the archive, while the booking is ahead', () => {
+    const actions = resolveJobActions('paid', paidInvoice, true);
+    expect(actions.map((a) => a.id)).toEqual(['schedule', 'closeJob']);
+    expect(actions[0].tone).toBe('primary');
+    expect(actions[1].tone).toBe('ghost');
+  });
+
+  it('goes back to Close Job once the day has passed', () => {
+    const actions = resolveJobActions('paid', paidInvoice, false);
+    expect(actions.map((a) => a.id)).toEqual(['closeJob']);
+    expect(actions[0].tone).toBe('primary');
+  });
+
+  it('leaves an unpaid invoice on the money path either way', () => {
+    const owing = quoteDoc({ type: 'invoice', stage: 'invoice_sent', total: 1000, paidTotal: 0 });
+    expect(resolveJobActions('scheduled', owing, true).map((a) => a.id)).not.toContain('schedule');
+  });
+});

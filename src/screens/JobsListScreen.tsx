@@ -85,8 +85,9 @@ const EMPTY_COPY: Record<JobFilterKey, { title: string; body: string }> = {
   to_send: { title: 'Nothing waiting on you', body: 'Drafts to send and finished work to invoice land here' },
   waiting: { title: 'Nobody to chase', body: 'Quotes you’ve sent sit here until the customer answers' },
   owed: { title: 'Nothing outstanding', body: 'Invoices with money still owing land here' },
+  to_book: { title: 'Nothing waiting on a date', body: 'Work you’ve won but haven’t put in the diary lands here' },
   scheduled: { title: 'Nothing on the calendar', body: 'Schedule a start date to see a job here' },
-  done: { title: 'Nothing in the rear-view', body: 'Paid, closed and archived jobs rest here' },
+  done: { title: 'Nothing in the rear-view', body: 'Finished work that’s been paid for rests here, with anything closed or archived' },
 };
 
 export function JobsListScreen() {
@@ -183,7 +184,10 @@ export function JobsListScreen() {
   // keystroke in the search box.
   const bucketByJob = useMemo(() => {
     const map = new Map<string, JobBucket>();
-    for (const j of jobs) map.set(j.id, bucketForJob(j, docsByJob.get(j.id) ?? []));
+    // One clock for the whole pass, so two jobs booked for the same day can't
+    // land in different buckets because midnight fell between them.
+    const today = startOfToday();
+    for (const j of jobs) map.set(j.id, bucketForJob(j, docsByJob.get(j.id) ?? [], today));
     return map;
   }, [jobs, docsByJob]);
 

@@ -33,7 +33,7 @@ vi.mock('./ShimmerOverlay', () => ({ ShimmerOverlay: () => null }));
 // canRecordPaymentFor is exercised against the real derivePaymentState —
 // stubbing that out would leave the paid/unpaid call untested.
 
-import { shouldShowPaymentChip } from './PaymentChip';
+import { derivePaymentState, shouldShowPaymentChip } from './PaymentChip';
 import { canRecordPaymentFor, pickStageStatus } from './JobCard';
 
 describe('shouldShowPaymentChip', () => {
@@ -122,6 +122,47 @@ describe('shouldShowPaymentChip', () => {
     expect(
       shouldShowPaymentChip({ type: 'quote', stage: 'draft', paidTotal: 'abc' } as any),
     ).toBe(false);
+  });
+
+  /**
+   * A cash job is never invoiced and never touches the ledger, so the Job
+   * stage is the only record that the money came in — and now that the
+   * timeline rail talks about work alone, this chip is the last place on
+   * the card that can say so.
+   */
+  describe('a cash job whose only record of payment is the Job stage', () => {
+    const cashJob = { type: 'quote', stage: 'quote_accepted', total: 6351.54, paidTotal: 0 } as any;
+
+    it('shows the chip once the job itself reads paid', () => {
+      expect(shouldShowPaymentChip(cashJob)).toBe(false);
+      expect(shouldShowPaymentChip(cashJob, { jobIsPaid: true })).toBe(true);
+    });
+
+    it('says Paid rather than the ledger-derived Unpaid', () => {
+      expect(derivePaymentState(cashJob)).toBe('unpaid');
+      expect(derivePaymentState(cashJob, { jobIsPaid: true })).toBe('paid');
+    });
+
+    // An invoice keeps its own books: a stage can't paper over a balance.
+    // This is the state a removed payment leaves behind until the server
+    // walks the job stage back (see deriveJobStageBump).
+    it('never overrides an invoice that still owes money', () => {
+      const owing = { type: 'invoice', stage: 'invoice_sent', total: 960, paidTotal: 25 } as any;
+      expect(derivePaymentState(owing, { jobIsPaid: true })).toBe('partially_paid');
+      const untouched = { type: 'invoice', stage: 'invoice_sent', total: 960, paidTotal: 0 } as any;
+      expect(derivePaymentState(untouched, { jobIsPaid: true })).toBe('unpaid');
+    });
+
+    it('leaves a deposit on the quote reading as a deposit', () => {
+      const deposit = { type: 'quote', stage: 'quote_accepted', total: 1000, paidTotal: 200 } as any;
+      expect(derivePaymentState(deposit, { jobIsPaid: true })).toBe('deposit_paid');
+    });
+
+    it('still hides a cancelled document', () => {
+      expect(
+        shouldShowPaymentChip({ type: 'quote', stage: 'cancelled' } as any, { jobIsPaid: true }),
+      ).toBe(false);
+    });
   });
 });
 

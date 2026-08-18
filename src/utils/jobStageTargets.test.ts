@@ -5,7 +5,11 @@
  */
 import { describe, it, expect } from 'vitest';
 
-import { legalStageTargets, shouldOfferSchedule } from './jobStageTargets';
+import {
+  legalStageTargets,
+  shouldOfferReschedule,
+  shouldOfferSchedule,
+} from './jobStageTargets';
 
 describe('legalStageTargets', () => {
   it('never offers the stage the job is already on', () => {
@@ -128,5 +132,48 @@ describe('shouldOfferSchedule', () => {
     for (const stage of ['completed', 'paid', 'closed', 'cancelled'] as const) {
       expect(shouldOfferSchedule({ stage })).toBe(false);
     }
+  });
+
+  // A job paid up front is `paid` with next Tuesday still sitting on it.
+  // Hiding the picker locked the tradie out of their own booking: the date
+  // couldn't be moved, and clearing it — which is what takes the calendar
+  // event down — was impossible without dropping the stage back first.
+  it('always offers the picker on a job that already has a date', () => {
+    for (const stage of ['completed', 'paid', 'closed', 'cancelled'] as const) {
+      expect(shouldOfferSchedule({ stage, scheduledStartDate: 1 })).toBe(true);
+    }
+  });
+});
+
+describe('shouldOfferReschedule', () => {
+  // The ladder never offers the stage you're standing on, so a scheduled
+  // job has no `scheduled` row to open the picker from.
+  it('gives a scheduled job its own date row', () => {
+    expect(shouldOfferReschedule({ stage: 'scheduled', scheduledStartDate: 1 })).toBe(true);
+  });
+
+  it('gives a paid job with a booking its own date row', () => {
+    expect(shouldOfferReschedule({ stage: 'paid', scheduledStartDate: 1 })).toBe(true);
+  });
+
+  // Two rows opening the same picker is one row too many: an in-progress
+  // job's `scheduled` row already IS the date door (opensPicker), and it
+  // carries the demote prompt with it.
+  it('stays out of the way when the ladder already carries the date door', () => {
+    expect(shouldOfferReschedule({ stage: 'in_progress', scheduledStartDate: 1 })).toBe(false);
+    expect(shouldOfferReschedule({ stage: 'accepted', scheduledStartDate: 1 })).toBe(false);
+  });
+
+  it('offers nothing to reschedule when no date has been picked', () => {
+    for (const stage of ['accepted', 'paid', 'completed', 'cancelled'] as const) {
+      expect(shouldOfferReschedule({ stage })).toBe(false);
+    }
+  });
+
+  // A bare stage flip can leave a job marked Scheduled with no date on it.
+  // The ladder still can't offer the stage it's on, so this row is the only
+  // way that job ever gets a date.
+  it('still opens the picker for a scheduled job that never got a date', () => {
+    expect(shouldOfferReschedule({ stage: 'scheduled' })).toBe(true);
   });
 });

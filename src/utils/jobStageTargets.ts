@@ -96,7 +96,38 @@ export function legalStageTargets(
  * writes the date and the save path bumps the stage (stageAfterScheduling)
  * — but on a job whose work is done or dead, penciling in a date makes no
  * sense, so those stages fall back to the plain flip.
+ *
+ * A date already on the job is the exception: it can always be moved or
+ * cleared. A job the customer paid up front is `paid` with next Tuesday
+ * still on it, and hiding the picker left the only door to that booking
+ * closed — the date couldn't be changed, and clearing it (which is what
+ * takes the calendar event down) was impossible without dropping the stage
+ * back first.
  */
-export function shouldOfferSchedule(job: Pick<Job, 'stage'>): boolean {
+export function shouldOfferSchedule(
+  job: Pick<Job, 'stage' | 'scheduledStartDate'>,
+): boolean {
+  if (job.scheduledStartDate) return true;
   return !SCHEDULE_HIDDEN_STAGES.has(job.stage);
+}
+
+/**
+ * Whether the sheet has to carry its own "Reschedule…" row.
+ *
+ * Normally the date door IS the ladder's `scheduled` row (see the
+ * `opensPicker` handling in JobStageSheet / JobActionsSheet). Two jobs can't
+ * use that door: one already standing on `scheduled`, because the ladder
+ * never offers the stage you're on, and one past the schedule stages with a
+ * booking still on it, where the row goes on meaning "move this job back to
+ * Scheduled" and relabelling it as a date change would be a lie. Both get an
+ * explicit row instead.
+ */
+export function shouldOfferReschedule(
+  job: Pick<Job, 'stage' | 'scheduledStartDate'>,
+): boolean {
+  if (!shouldOfferSchedule(job)) return false;
+  // Standing on `scheduled`, this is the only door there is — including on
+  // a job a bare stage flip left marked Scheduled with no date at all.
+  if (job.stage === 'scheduled') return true;
+  return !!job.scheduledStartDate && SCHEDULE_HIDDEN_STAGES.has(job.stage);
 }
