@@ -232,6 +232,11 @@ export function resolveJobActions(
     // and a Square reader is available for App Review demo. On iOS, surface
     // the followUp as the primary action (or a generic Send Reminder).
     if (Platform.OS === 'ios') {
+      // Collecting by card is hidden on iOS until Tap to Pay clears review,
+      // but banking a transfer that already landed needs no reader and no
+      // Square account — so iOS gets the Log Payment slot too. Without it an
+      // iPhone tradie had no button on this bar for the commonest thing
+      // they do after sending an invoice.
       return [
         {
           id: 'followUpInvoice',
@@ -239,6 +244,7 @@ export function resolveJobActions(
           icon: followUp === 'overdue' ? 'alert-circle-outline' : 'bell-outline',
           tone: followUp ? toneForFollowUp(followUp) : 'primary',
         },
+        { id: 'recordPayment', label: 'Log Payment', icon: 'cash-multiple', tone: 'ghost' },
       ];
     }
     const primary: ActionSpec = isPartiallyPaid
@@ -255,11 +261,14 @@ export function resolveJobActions(
         },
       ];
     }
+    // Money owed, nothing to chase yet: the second slot is for banking a
+    // payment that has already landed. It used to be Resend, and Log Payment
+    // only appeared once an invoice was PARTLY paid — so the one state a
+    // tradie is in every time (sent, unpaid, cash or transfer received) was
+    // the state with no button for it. Resend still lives in the kebab.
     return [
       primary,
-      isPartiallyPaid
-        ? { id: 'recordPayment', label: 'Log Payment', icon: 'cash-multiple', tone: 'ghost' }
-        : { id: 'resendInvoice', label: 'Resend', icon: 'email-send-outline', tone: 'ghost' },
+      { id: 'recordPayment', label: 'Log Payment', icon: 'cash-multiple', tone: 'ghost' },
     ];
   }
   if (isInvoice && isDraft) {

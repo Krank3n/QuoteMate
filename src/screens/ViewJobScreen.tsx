@@ -347,14 +347,25 @@ export function ViewJobScreen() {
     return 'overdue';
   };
 
-  // Chip tap routing: an unpaid doc with a real total has nothing useful to
-  // show in the history sheet, so jump straight to TakePaymentSheet. Anything
-  // already paid (or a $0 draft) falls through to the history view.
+  // Chip tap routing. An unpaid INVOICE goes straight to Record Payment —
+  // the same place the identical chip goes from a job card. It used to open
+  // TakePaymentSheet here instead, so one control did two different things
+  // depending on which screen you were standing on, and the fast path (two
+  // taps) became a slow one (four) for no reason the tradie could see.
+  // Collecting by card is still one tap away on the sticky bar.
+  //
+  // A quote with a deposit owing still needs the sheet: there is no manual
+  // deposit path, and the Square rows are the only way to take one.
   const handlePaymentChipPress = async (doc: Document) => {
     const state = derivePaymentState(doc);
-    if (state === 'unpaid' && Number(doc.total) > 0) {
-      // No Square gate here — the sheet's manual "Record a payment" row must
-      // work with zero Square setup; the Square rows gate themselves.
+    const owed = state === 'unpaid' || state === 'partially_paid';
+    if (owed && Number(doc.total) > 0) {
+      if (doc.type === 'invoice') {
+        navigation.navigate('RecordPayment', { invoiceId: doc.id });
+        return;
+      }
+      // No Square gate here — the sheet's manual rows must work with zero
+      // Square setup; the Square rows gate themselves.
       openTakePaymentForDoc(doc);
       return;
     }
@@ -667,6 +678,11 @@ export function ViewJobScreen() {
   const handleActionSelect = async (action: JobAction) => {
     setActionsSheetVisible(false);
     switch (action) {
+      case 'recordPayment':
+        if (primaryDoc) {
+          navigation.navigate('RecordPayment', { invoiceId: primaryDoc.id });
+        }
+        break;
       case 'takePayment':
         if (primaryDoc) {
           openTakePaymentForDoc(primaryDoc);

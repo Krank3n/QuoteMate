@@ -95,6 +95,12 @@ export function RecordPaymentScreen() {
           xeroInvoiceId: document.xeroInvoiceId,
         } as any
       : null);
+  // The legacy row wins the lookup above, and its projection can reach us
+  // without a customerName — which printed a blank "Customer" line on a
+  // screen whose whole job is confirming who paid you. Take the name from
+  // whichever source actually has one.
+  const customerName =
+    (invoice?.customerName || '').trim() || (document?.customerName || '').trim();
   const amountDue = document
     ? Math.max(0, (Number(document.total) || 0) - (Number(document.paidTotal) || 0))
     : invoice
@@ -253,7 +259,7 @@ export function RecordPaymentScreen() {
         </View>
         <View style={styles.summaryRow}>
           <Text style={styles.summaryLabel}>Customer</Text>
-          <Text style={styles.summaryValue}>{invoice.customerName}</Text>
+          <Text style={styles.summaryValue}>{customerName}</Text>
         </View>
         <View style={styles.summaryRow}>
           <Text style={styles.summaryLabel}>Total</Text>

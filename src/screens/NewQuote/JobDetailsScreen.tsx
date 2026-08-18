@@ -1072,7 +1072,7 @@ export function JobDetailsScreen() {
         visible={analysisErrorDialogVisible}
         onDismiss={() => setAnalysisErrorDialogVisible(false)}
         type="error"
-        title="AI Analysis Failed"
+        title="Couldn't work that one out"
         message={analysisErrorMessage}
         primaryButtonText="Try Again"
         primaryButtonAction={() => { setAnalysisErrorDialogVisible(false); handleAnalyzeCustomJob(); }}
@@ -1415,7 +1415,7 @@ export function JobDetailsScreen() {
                   color={includePhotosInAi ? themeColors.accent : themeColors.textMuted}
                 />
                 <Text style={[styles.aiPhotoToggleText, includePhotosInAi && { color: themeColors.text }]}>
-                  Include photos in AI analysis
+                  Use photos to help build the quote
                 </Text>
                 {!isPro && <ProBadge size="small" />}
               </TouchableOpacity>

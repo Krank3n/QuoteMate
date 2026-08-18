@@ -166,7 +166,9 @@ function metaFor(
       };
     case 'paid':
       return {
-        label: 'Paid',
+        // Non-compact rows sit beside a stage chip that already says "Paid",
+        // so carry the figure there rather than echoing the word twice.
+        label: compact ? 'Paid' : `Paid ${formatCurrency(Number(doc.paidTotal) || 0)}`,
         icon: 'cash-check',
         color: themeColors.money,
         bgColor: themeColors.moneySubtle,
@@ -187,12 +189,34 @@ export function PaymentChip({ doc, onPress, compact, context }: PaymentChipProps
   const state = derivePaymentState(doc, context);
   const meta = metaFor(doc, state, themeColors, compact);
 
+  /**
+   * A chip you can act on has to look like one.
+   *
+   * The fastest way to record a payment in the app is this chip — two taps
+   * from the jobs list to a pre-filled Record Payment. It rendered as muted
+   * grey text on a pressed-surface pill, sitting in a row of chips that are
+   * genuinely inert, so nobody found it: a tradie chasing this exact job went
+   * looking for the feature and concluded it wasn't there. The state word
+   * stays (it's true and it's what the row is scanned for); the colour and the
+   * chevron say it's a door.
+   *
+   * Only where money is actually owed. On a settled invoice the chip is a
+   * receipt, not an invitation.
+   */
+  const owed = state === 'unpaid' || state === 'partially_paid';
+  const actionable = !!onPress && owed;
+  const fg = actionable ? themeColors.accentText : meta.color;
+  const bg = actionable ? themeColors.accentSubtle : meta.bgColor;
+
   const content = (
-    <View style={[styles.chip, { backgroundColor: meta.bgColor, borderColor: meta.color + '44' }]}>
-      <MaterialCommunityIcons name={meta.icon as any} size={14} color={meta.color} />
-      <Text style={[styles.label, { color: meta.color }]} numberOfLines={1}>
+    <View style={[styles.chip, { backgroundColor: bg, borderColor: fg + '44' }]}>
+      <MaterialCommunityIcons name={meta.icon as any} size={14} color={fg} />
+      <Text style={[styles.label, { color: fg }]} numberOfLines={1}>
         {meta.label}
       </Text>
+      {actionable ? (
+        <MaterialCommunityIcons name={'chevron-right' as any} size={14} color={fg} />
+      ) : null}
     </View>
   );
 
