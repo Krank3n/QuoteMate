@@ -9,16 +9,14 @@
  *   01:30:21.691  convertDocumentToInvoice started    <- 5.9s later, reads its own residue
  *   01:30:22.197  convertDocumentToInvoice 200        <- "alreadyInvoiced", type never flipped
  *
- * The document was left type 'quote' WITH invoicedAt, which the old
- * canConvert read as "already done" — so both doors vanished and it sent as a
- * quote. Silent, permanent, and intermittent (it depends on whether the
- * mirror beats the RPC).
+ * The document was left type 'quote' WITH invoicedAt, so the UI read it as
+ * "already done" — both doors vanished and it sent as a quote. Silent,
+ * permanent, and intermittent (it depends on whether the mirror beats the RPC).
  */
 import { describe, it, expect } from 'vitest';
 
 import {
   isAlreadyInvoiced,
-  isSelfStampedConvert,
   canConvertDocument,
   type ConvertCandidate,
 } from './convertGuard';
@@ -38,35 +36,14 @@ describe('isAlreadyInvoiced', () => {
     expect(isAlreadyInvoiced(quote({ invoicedAt: 1755480615817 }))).toBe(false);
   });
 
+  it('is unmoved by a legacy pointer, resolvable or not', () => {
+    expect(isAlreadyInvoiced(quote({ invoicedAt: 1, legacyInvoiceId: 'doc1' }))).toBe(false);
+    expect(isAlreadyInvoiced(quote({ invoicedAt: 1, legacyInvoiceId: 'gone' }))).toBe(false);
+  });
+
   it('handles null and undefined', () => {
     expect(isAlreadyInvoiced(null)).toBe(false);
     expect(isAlreadyInvoiced(undefined)).toBe(false);
-  });
-});
-
-describe('isSelfStampedConvert', () => {
-  it('recognises the stranded document: legacyInvoiceId points at itself', () => {
-    expect(
-      isSelfStampedConvert(quote({ invoicedAt: 1, legacyInvoiceId: 'doc1' })),
-    ).toBe(true);
-  });
-
-  it('does NOT claim a quote whose legacy invoice lives at another id', () => {
-    // The legacy createInvoiceFromQuote path mints a separate invoice and
-    // stamps its id here. Healing this one would bill the customer twice.
-    expect(
-      isSelfStampedConvert(quote({ invoicedAt: 1, legacyInvoiceId: 'invoice-99' })),
-    ).toBe(false);
-  });
-
-  it('stays out of it when the link is missing entirely', () => {
-    // Ambiguous — could be an old legacy record. Conservative by design.
-    expect(isSelfStampedConvert(quote({ invoicedAt: 1 }))).toBe(false);
-  });
-
-  it('is false for an untouched quote and for an invoice', () => {
-    expect(isSelfStampedConvert(quote())).toBe(false);
-    expect(isSelfStampedConvert({ id: 'd', type: 'invoice', invoicedAt: 1 })).toBe(false);
   });
 });
 
@@ -76,21 +53,16 @@ describe('canConvertDocument', () => {
     expect(canConvertDocument(quote({ id: 'x' }))).toBe(true);
   });
 
-  it('re-offers conversion on a document stranded by the race', () => {
-    // The whole point: recoverable in-app, no support round-trip.
-    expect(
-      canConvertDocument(quote({ invoicedAt: 1, legacyInvoiceId: 'doc1' })),
-    ).toBe(true);
-  });
-
   it('never re-offers it once the document is an invoice', () => {
     expect(canConvertDocument({ id: 'd', type: 'invoice' })).toBe(false);
   });
 
-  it('never offers it on a quote that already has a real legacy invoice', () => {
-    expect(
-      canConvertDocument(quote({ invoicedAt: 1, legacyInvoiceId: 'invoice-99' })),
-    ).toBe(false);
+  it('never re-offers it on a quote that has already been invoiced', () => {
+    // One-way action. Whether the pointer still resolves is not this
+    // predicate's business — a stranded document is a repair job, and
+    // offering convert on a quote that DOES have an invoice would bill twice.
+    expect(canConvertDocument(quote({ invoicedAt: 1, legacyInvoiceId: 'invoice-99' }))).toBe(false);
+    expect(canConvertDocument(quote({ invoicedAt: 1, legacyInvoiceId: 'doc1' }))).toBe(false);
     expect(canConvertDocument(quote({ invoicedAt: 1 }))).toBe(false);
   });
 
