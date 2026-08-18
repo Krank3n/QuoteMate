@@ -12,7 +12,7 @@
  *
  * Observed 18 Aug 2026: the mirror finished at 01:30:15.817 and the convert
  * started at 01:30:21.691 — 5.9s later, reading its own residue. The document
- * was left `type: 'quote'` WITH `invoicedAt`, which `canConvert` then read as
+ * was left `type: 'quote'` WITH `invoicedAt`, which the UI then read as
  * "already done": the row disappeared from both doors and the document sent as
  * a quote. A race with a permanent, silent dead end.
  *
@@ -39,27 +39,21 @@ export function isAlreadyInvoiced(doc?: ConvertCandidate | null): boolean {
 }
 
 /**
- * A quote left carrying `invoicedAt` from a convert that never completed.
+ * Should the UI offer "Convert to invoice"? Quotes only, and never twice.
  *
- * Distinguishable from a quote that genuinely spawned a legacy invoice: the
- * legacy path stamps `invoiceId` with the NEW invoice's id, so the mirrored
- * `legacyInvoiceId` points somewhere else. The half-finished unified convert
- * stamps `invoiceId: documentId` — itself. Anything ambiguous (no
- * `legacyInvoiceId` at all) is deliberately NOT healed: offering convert on a
- * quote that already has a real invoice elsewhere would bill the customer twice.
- */
-export function isSelfStampedConvert(doc?: ConvertCandidate | null): boolean {
-  if (!doc || doc.type !== 'quote' || !doc.invoicedAt) return false;
-  return !!doc.legacyInvoiceId && !!doc.id && doc.legacyInvoiceId === doc.id;
-}
-
-/**
- * Should the UI offer "Convert to invoice"? Quotes only, never twice — but a
- * document stranded by the race above is offered again so it can be recovered
- * without a support round-trip.
+ * Deliberately does NOT try to rescue a quote already stranded by the race
+ * above. The first cut of this file did, on the theory that a half-finished
+ * convert leaves `legacyInvoiceId` pointing at the document itself — and a
+ * scan of production on 18 Aug 2026 proved that theory wrong. Across 198 users
+ * holding quotes, 10 quotes carried `invoicedAt`, 8 pointed at a real invoice,
+ * and the 2 stranded ones pointed at ids that exist in no collection at all.
+ * Nothing was self-referential, so the rescue matched nothing and only added a
+ * predicate that read as if it did something.
+ *
+ * Two documents is a repair job, not a product feature. Telling them apart
+ * needs a lookup this pure predicate can't do, and the guard above stops new
+ * ones appearing — so the honest thing here is the plain rule.
  */
 export function canConvertDocument(doc?: ConvertCandidate | null): boolean {
-  if (!doc || doc.type !== 'quote') return false;
-  if (!doc.invoicedAt) return true;
-  return isSelfStampedConvert(doc);
+  return !!doc && doc.type === 'quote' && !doc.invoicedAt;
 }
