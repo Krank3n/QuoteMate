@@ -42,8 +42,16 @@ const tapToPay = vi.hoisted(() => ({
 vi.mock('../hooks/useTapToPayEnabled', () => ({
   useTapToPayEnabled: () => tapToPay.state,
 }));
+// The sheet writes an edited deposit straight to the document store (every
+// entry point gets the behaviour without three call sites wiring a callback),
+// so the mock has to carry those two members.
+const store = vi.hoisted(() => ({
+  businessSettings: null as any,
+  getDocumentById: vi.fn((id: string) => ({ id, type: 'quote', total: 1200 })),
+  saveDocument: vi.fn(async (_doc: any) => {}),
+}));
 vi.mock('../store/useStore', () => ({
-  useStore: () => ({ businessSettings: null }),
+  useStore: () => store,
 }));
 
 import { TakePaymentSheet, type TakePaymentTarget } from './TakePaymentSheet';
@@ -82,7 +90,26 @@ function renderSheet(overrides: Partial<React.ComponentProps<typeof TakePaymentS
 beforeEach(() => {
   vi.clearAllMocks();
   tapToPay.state = { enabled: false, reason: 'pending_apple' };
+  store.getDocumentById.mockImplementation((id: string) => ({
+    id,
+    type: 'quote',
+    total: 1200,
+  }));
+  store.saveDocument.mockImplementation(async () => {});
 });
+
+/**
+ * The deposit field, which only renders for a quote target in deposit mode.
+ * Looked up on `baseElement`, not `container` — react-native-web's Modal
+ * portals its children onto document.body, so `container` is empty.
+ */
+function depositField(baseElement: HTMLElement): HTMLInputElement {
+  const input = baseElement.querySelector<HTMLInputElement>(
+    'input[aria-label="Deposit amount"]',
+  );
+  if (!input) throw new Error('deposit field not rendered');
+  return input;
+}
 
 describe('TakePaymentSheet manual "Record a payment" row', () => {
   it('renders for an invoice target and fires onRecordManualPayment with the invoice id', () => {
@@ -169,5 +196,140 @@ describe('TakePaymentSheet Square rows gate themselves', () => {
         target: { kind: 'invoice', invoiceId: 'inv-42' },
       }),
     );
+  });
+});
+
+
+/**
+ * The deposit on the quote is a starting point — on the day the tradie agrees
+ * whatever gets the job moving. Before Aug 2026 the sheet showed the quoted
+ * deposit as a fixed number with no way to change it, so a different figure
+ * meant backing out to the quote editor mid-conversation.
+ */
+describe('TakePaymentSheet adjustable deposit', () => {
+  it('renders the deposit as an editable field seeded with the quoted amount', () => {
+    const { baseElement } = renderSheet({ target: depositTarget });
+    expect(depositField(baseElement).value).toBe('300.00');
+  });
+
+  it('has no editable field for an invoice — the balance is not negotiable here', () => {
+    const { baseElement } = renderSheet({ target: invoiceTarget });
+    expect(
+      baseElement.querySelector('input[aria-label="Deposit amount"]'),
+    ).toBeNull();
+  });
+
+  it('writes the edited deposit back to the quote with requireDeposit and a re-derived percentage', async () => {
+    const { baseElement } = renderSheet({ target: depositTarget });
+    const input = depositField(baseElement);
+
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: '500' } });
+    fireEvent.blur(input);
+
+    await waitFor(() => expect(store.saveDocument).toHaveBeenCalled());
+    expect(store.saveDocument).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'quote-7',
+        requireDeposit: true,
+        depositAmount: 500,
+        // 500 of 1200.
+        depositPercentage: 41.67,
+      }),
+    );
+  });
+
+  it('charges the edited deposit, not the quoted one', async () => {
+    tapToPay.state = { enabled: true };
+    const { baseElement, getByText } = renderSheet({
+      target: depositTarget,
+      ensureSquareConnected: vi.fn(async () => true),
+    });
+    const input = depositField(baseElement);
+
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: '500' } });
+    fireEvent.blur(input);
+
+    fireEvent.click(getByText('Tap to Pay / Card Entry'));
+
+    await waitFor(() => expect(squarePayments.takeInAppPayment).toHaveBeenCalled());
+    expect(squarePayments.takeInAppPayment).toHaveBeenCalledWith(
+      expect.objectContaining({ amountCents: 50000 }),
+    );
+  });
+
+  it('caps the deposit at the quote total — Square must not collect more than the job earns', async () => {
+    const { baseElement } = renderSheet({ target: depositTarget });
+    const input = depositField(baseElement);
+
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: '9999' } });
+    fireEvent.blur(input);
+
+    await waitFor(() => expect(store.saveDocument).toHaveBeenCalled());
+    expect(store.saveDocument).toHaveBeenCalledWith(
+      expect.objectContaining({ depositAmount: 1200 }),
+    );
+  });
+
+  it('ignores junk and zero rather than storing an uncollectable deposit', async () => {
+    const { baseElement } = renderSheet({ target: depositTarget });
+    const input = depositField(baseElement);
+
+    for (const value of ['', 'abc', '0']) {
+      fireEvent.focus(input);
+      fireEvent.change(input, { target: { value } });
+      fireEvent.blur(input);
+    }
+
+    expect(store.saveDocument).not.toHaveBeenCalled();
+    expect(depositField(baseElement).value).toBe('300.00');
+  });
+
+  it('mints the pay link only after the edit has been written — the link is priced server-side', async () => {
+    let releaseSave: () => void = () => {};
+    store.saveDocument.mockImplementation(
+      () => new Promise<void>((resolve) => { releaseSave = () => resolve(); }),
+    );
+    const { baseElement, getByText } = renderSheet({
+      target: depositTarget,
+      ensureSquareConnected: vi.fn(async () => true),
+    });
+    const input = depositField(baseElement);
+
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: '500' } });
+    fireEvent.blur(input);
+
+    fireEvent.click(getByText('Share Pay Link'));
+
+    await waitFor(() => expect(store.saveDocument).toHaveBeenCalled());
+    expect(squareService.mintQuoteDepositPaymentLink).not.toHaveBeenCalled();
+
+    releaseSave();
+    await waitFor(() =>
+      expect(squareService.mintQuoteDepositPaymentLink).toHaveBeenCalledWith('quote-7'),
+    );
+  });
+
+  it('aborts the payment and restores the quoted amount when the write fails', async () => {
+    store.saveDocument.mockRejectedValue(new Error('offline'));
+    const { baseElement, getByText, props } = renderSheet({
+      target: depositTarget,
+      ensureSquareConnected: vi.fn(async () => true),
+    });
+    const input = depositField(baseElement);
+
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: '500' } });
+    fireEvent.blur(input);
+
+    await waitFor(() => expect(props.onError).toHaveBeenCalled());
+    expect(depositField(baseElement).value).toBe('300.00');
+
+    fireEvent.click(getByText('Share Pay Link'));
+    await waitFor(() => expect(props.onError).toHaveBeenCalledTimes(1));
+    expect(squareService.mintQuoteDepositPaymentLink).not.toHaveBeenCalled();
   });
 });

@@ -14221,10 +14221,16 @@ async function createSquareDepositPaymentLinkInternal(
         : quote.depositPaymentLinkCreatedAt?.toMillis?.() ?? Date.parse(String(quote.depositPaymentLinkCreatedAt)))
     : undefined;
   const linkFresh = linkCreatedAt && (Date.now() - linkCreatedAt) < SQUARE_LINK_TTL_MS;
-  // Also re-mint if the deposit amount changed since the link was issued
-  // (e.g. tradie edited the quote total). The old link would charge the
-  // old amount, which would confuse both parties.
-  const amountMatchesLink = Number(quote.depositAmount) === depositAmount;
+  // Also re-mint if the deposit amount changed since the link was issued —
+  // the tradie can edit the deposit from the take-payment sheet, and Square
+  // has no API to reprice an existing link, so the old URL would collect the
+  // old amount. Compare against the amount stamped ON the link, not against
+  // quote.depositAmount: that field is where `depositAmount` above is read
+  // from, so comparing the two could never detect drift. A link issued before
+  // this field existed has no stamp and is treated as stale.
+  const linkedAmount = Number(quote.depositPaymentLinkAmount);
+  const amountMatchesLink =
+    Number.isFinite(linkedAmount) && Math.abs(linkedAmount - depositAmount) < 0.005;
   if (quote.depositPaymentLinkId && quote.depositPaymentLinkUrl && linkFresh && amountMatchesLink) {
     return {
       paymentLinkId: quote.depositPaymentLinkId,
@@ -14293,6 +14299,7 @@ async function createSquareDepositPaymentLinkInternal(
       depositPaymentLinkId: paymentLinkId,
       depositPaymentLinkUrl: paymentLinkUrl,
       depositPaymentLinkCreatedAt: Date.now(),
+      depositPaymentLinkAmount: depositAmount,
       depositAmount,
     },
     { merge: true },

@@ -10,12 +10,14 @@
  * charge a customer who already paid via an emailed link.
  */
 
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   Modal,
   View,
   StyleSheet,
   TouchableOpacity,
+  TextInput,
+  KeyboardAvoidingView,
   Share,
   ActivityIndicator,
   Platform,
@@ -88,6 +90,8 @@ interface TakePaymentSheetProps {
 function describeAmounts(
   target: TakePaymentTarget,
   quoteMode: QuotePaymentMode,
+  /** The deposit actually being collected — the tradie can edit it on the day. */
+  depositAmount: number,
 ): {
   alreadyPaid: number;
   remaining: number;
@@ -111,7 +115,7 @@ function describeAmounts(
       label: target.jobName ? `Full quote — ${target.jobName}` : 'Full quote',
     };
   }
-  const remaining = Math.max(0, target.depositAmount - target.depositPaid);
+  const remaining = Math.max(0, depositAmount - target.depositPaid);
   return {
     alreadyPaid: target.depositPaid,
     remaining,
@@ -138,8 +142,19 @@ export function TakePaymentSheet({
   const [termsAcknowledged, setTermsAcknowledged] = useState(false);
   const [termsModalVisible, setTermsModalVisible] = useState(false);
   const tapToPay = useTapToPayEnabled();
-  const { businessSettings } = useStore();
+  const { businessSettings, getDocumentById, saveDocument } = useStore();
   const surchargeOn = businessSettings?.surchargePaymentFees === true;
+
+  // The quote's deposit is a starting point, not a rule — on the day the
+  // tradie agrees whatever gets the job started ("give us $500 and we'll
+  // start Monday"). `depositDraft` is the raw text while the field has focus;
+  // `depositOverride` is the committed dollar figure for this session.
+  const [depositDraft, setDepositDraft] = useState<string | null>(null);
+  const [depositOverride, setDepositOverride] = useState<number | null>(null);
+  // Share Pay Link mints server-side off `quote.depositAmount`, so an edit has
+  // to land in Firestore BEFORE the link is minted. Payment rows await this.
+  // Resolves false when the write failed (the sheet has already told the user).
+  const depositSave = useRef<Promise<boolean> | null>(null);
 
   // Reset the acknowledgement + modal state whenever the sheet opens for a
   // new target so previous ticks don't carry over.
@@ -147,6 +162,9 @@ export function TakePaymentSheet({
     if (!visible) {
       setTermsAcknowledged(false);
       setTermsModalVisible(false);
+      setDepositDraft(null);
+      setDepositOverride(null);
+      depositSave.current = null;
     }
   }, [visible]);
 
@@ -164,18 +182,82 @@ export function TakePaymentSheet({
 
   if (!target) return null;
 
-  // Show the deposit/full pill only when a quote has a deposit smaller than
-  // total — otherwise the toggle has nothing to toggle.
-  const showQuoteModePill =
-    target.kind === 'quote_deposit' &&
-    target.total > target.depositAmount;
+  // Every quote gets the deposit/full pill: the deposit is editable here, so
+  // "no deposit set" is a starting value of zero rather than a missing option.
+  const showQuoteModePill = target.kind === 'quote_deposit' && target.total > 0;
 
-  const amounts = describeAmounts(target, quoteMode);
+  const quoteDeposit =
+    target.kind === 'quote_deposit'
+      ? depositOverride ?? target.depositAmount
+      : 0;
+  const editingDeposit = target.kind === 'quote_deposit' && quoteMode === 'deposit';
+
+  const amounts = describeAmounts(target, quoteMode, quoteDeposit);
+
+  /**
+   * Write the edited deposit back to the quote. Also flips `requireDeposit`
+   * on and re-derives the percentage, because the server's link minter reads
+   * all three — a quote that never had a deposit configured can be given one
+   * from here.
+   */
+  const persistDeposit = async (amount: number): Promise<boolean> => {
+    if (target.kind !== 'quote_deposit') return true;
+    try {
+      const doc = getDocumentById(target.quoteId);
+      if (!doc) throw new Error('Quote not found');
+      const pct =
+        target.total > 0
+          ? Math.round((amount / target.total) * 10000) / 100
+          : 0;
+      await saveDocument({
+        ...doc,
+        requireDeposit: true,
+        depositAmount: amount,
+        depositPercentage: pct,
+      });
+      return true;
+    } catch {
+      // Roll the display back to the stored figure — charging an amount we
+      // failed to record would leave the quote and the payment disagreeing.
+      setDepositOverride(null);
+      onError(
+        'Could not save the new deposit amount. Check your connection and try again.',
+      );
+      return false;
+    }
+  };
+
+  const commitDeposit = () => {
+    const raw = depositDraft;
+    setDepositDraft(null);
+    if (raw === null || target.kind !== 'quote_deposit') return;
+    const parsed = parseFloat(raw.replace(/[^0-9.]/g, ''));
+    if (!Number.isFinite(parsed)) return;
+    // Anything from a token amount up to the whole job, but never more than
+    // the quote — Square would be collecting money the job can't earn.
+    const next = Math.min(
+      Math.max(Math.round(parsed * 100) / 100, 0),
+      target.total,
+    );
+    // Zero or unchanged: leave the stored figure alone, field snaps back.
+    if (next <= 0 || next === quoteDeposit) return;
+    setDepositOverride(next);
+    depositSave.current = persistDeposit(next);
+  };
+
+  /** Block a charge on an edit that never made it to Firestore. */
+  const depositWriteSettled = async (): Promise<boolean> => {
+    if (!depositSave.current) return true;
+    return depositSave.current;
+  };
 
   const handleTakeCardPayment = async () => {
     if (chargingCard || amounts.remaining <= 0) return;
     setChargingCard(true);
     try {
+      // An in-flight deposit edit has to land first — otherwise we'd charge a
+      // figure the quote doesn't know about.
+      if (!(await depositWriteSettled())) return;
       // Square-only path: route to settings if not connected. Runs inside
       // the spinner window (the check is a network round-trip) and the
       // guard has already navigated away, so dismiss to avoid a stranded
@@ -232,6 +314,9 @@ export function TakePaymentSheet({
     if (sharing) return;
     setSharing(true);
     try {
+      // The deposit link is minted server-side from quote.depositAmount, so an
+      // edit must be written before we ask for a link.
+      if (!(await depositWriteSettled())) return;
       // Square-only path: route to settings if not connected. Runs inside
       // the spinner window (the check is a network round-trip) and the
       // guard has already navigated away, so dismiss to avoid a stranded
@@ -279,183 +364,226 @@ export function TakePaymentSheet({
       animationType="slide"
       onRequestClose={onDismiss}
     >
-      <TouchableOpacity
-        style={styles.backdrop}
-        activeOpacity={1}
-        onPress={onDismiss}
+      {/* The deposit field is inside a bottom sheet, so the keyboard would
+          otherwise cover the very number being edited. */}
+      <KeyboardAvoidingView
+        style={styles.keyboardHost}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <TouchableOpacity style={styles.sheet} activeOpacity={1}>
-          <View style={styles.grabber} />
-          <Text style={styles.title}>Take Payment</Text>
-          <Text style={styles.subtitle}>{amounts.label}</Text>
+        <TouchableOpacity
+          style={styles.backdrop}
+          activeOpacity={1}
+          onPress={onDismiss}
+        >
+          <TouchableOpacity style={styles.sheet} activeOpacity={1}>
+            <View style={styles.grabber} />
+            <Text style={styles.title}>Take Payment</Text>
+            <Text style={styles.subtitle}>{amounts.label}</Text>
 
-          {showQuoteModePill && (
-            <View style={styles.modeSwitcher}>
-              <TouchableOpacity
-                style={[
-                  styles.modePill,
-                  quoteMode === 'deposit' && styles.modePillActive,
-                ]}
-                onPress={() => setQuoteMode('deposit')}
-                activeOpacity={0.7}
-              >
-                <Text
+            {showQuoteModePill && (
+              <View style={styles.modeSwitcher}>
+                <TouchableOpacity
                   style={[
-                    styles.modePillText,
-                    quoteMode === 'deposit' && styles.modePillTextActive,
+                    styles.modePill,
+                    quoteMode === 'deposit' && styles.modePillActive,
                   ]}
+                  onPress={() => setQuoteMode('deposit')}
+                  activeOpacity={0.7}
                 >
-                  Deposit
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[
-                  styles.modePill,
-                  quoteMode === 'full' && styles.modePillActive,
-                ]}
-                onPress={() => setQuoteMode('full')}
-                activeOpacity={0.7}
-              >
-                <Text
+                  <Text
+                    style={[
+                      styles.modePillText,
+                      quoteMode === 'deposit' && styles.modePillTextActive,
+                    ]}
+                  >
+                    Deposit
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
                   style={[
-                    styles.modePillText,
-                    quoteMode === 'full' && styles.modePillTextActive,
+                    styles.modePill,
+                    quoteMode === 'full' && styles.modePillActive,
                   ]}
+                  onPress={() => setQuoteMode('full')}
+                  activeOpacity={0.7}
                 >
-                  Full amount
+                  <Text
+                    style={[
+                      styles.modePillText,
+                      quoteMode === 'full' && styles.modePillTextActive,
+                    ]}
+                  >
+                    Full amount
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            <View style={styles.amountsRow}>
+              <View style={styles.amountBlock}>
+                <Text style={styles.amountLabel}>Already paid</Text>
+                <Text style={styles.amountValue}>
+                  {formatCurrency(amounts.alreadyPaid)}
                 </Text>
-              </TouchableOpacity>
-            </View>
-          )}
-
-          <View style={styles.amountsRow}>
-            <View style={styles.amountBlock}>
-              <Text style={styles.amountLabel}>Already paid</Text>
-              <Text style={styles.amountValue}>
-                {formatCurrency(amounts.alreadyPaid)}
-              </Text>
-            </View>
-            <View style={styles.amountDivider} />
-            <View style={styles.amountBlock}>
-              <Text style={styles.amountLabel}>Remaining</Text>
-              <Text style={[styles.amountValue, styles.amountValueDue]}>
-                {formatCurrency(amounts.remaining)}
-              </Text>
-            </View>
-          </View>
-
-          {surchargeOn && amounts.remaining > 0 && (
-            <Text style={styles.surchargeNote}>
-              Customer pays {formatCurrency(amounts.remaining * (1 + PASSTHROUGH_SURCHARGE_PCT / 100))} on card (incl. {PASSTHROUGH_SURCHARGE_PCT}% surcharge).
-            </Text>
-          )}
-
-          {/* Terms row — only surfaced when this quote/invoice carries a
-              T&Cs snapshot. Two-in-one: tap to review the full text in a
-              modal, checkbox to attest the customer has read them. Keeps the
-              sheet tidy instead of a wall of tiny print. */}
-          {tapToPay.enabled && hasTerms && (
-            <View style={styles.termsCard}>
-              <TouchableOpacity
-                style={styles.termsHeader}
-                onPress={() => setTermsModalVisible(true)}
-                activeOpacity={0.7}
-              >
-                <MaterialCommunityIcons
-                  name="file-document-outline"
-                  size={18}
-                  color={themeColors.accentText}
-                />
-                <Text style={styles.termsHeaderText}>
-                  Terms for this {target.kind === 'invoice' ? 'invoice' : 'quote'}
+              </View>
+              <View style={styles.amountDivider} />
+              <View style={styles.amountBlock}>
+                <Text style={styles.amountLabel}>
+                  {editingDeposit ? 'Deposit' : 'Remaining'}
                 </Text>
-                <Text style={styles.termsViewLink}>View</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.ackRow}
-                activeOpacity={0.7}
-                onPress={() => setTermsAcknowledged((v) => !v)}
-              >
-                <View
-                  style={[
-                    styles.ackCheckbox,
-                    termsAcknowledged && styles.ackCheckboxActive,
-                  ]}
-                >
-                  {termsAcknowledged && (
-                    <MaterialCommunityIcons
-                      name="check"
-                      size={14}
-                      color={themeColors.onAccent}
+                {editingDeposit ? (
+                  <View style={styles.depositField}>
+                    <Text style={styles.depositCurrency}>$</Text>
+                    <TextInput
+                      style={styles.depositInput}
+                      value={depositDraft ?? quoteDeposit.toFixed(2)}
+                      onChangeText={setDepositDraft}
+                      onFocus={() => setDepositDraft(quoteDeposit.toFixed(2))}
+                      onBlur={commitDeposit}
+                      onSubmitEditing={commitDeposit}
+                      keyboardType="decimal-pad"
+                      returnKeyType="done"
+                      selectTextOnFocus
+                      accessibilityLabel="Deposit amount"
+                      placeholder="0.00"
+                      placeholderTextColor={themeColors.textFaint}
                     />
-                  )}
-                </View>
-                <Text style={styles.ackText}>
-                  Customer has read and agrees to the terms.
-                </Text>
-              </TouchableOpacity>
+                    <MaterialCommunityIcons
+                      name="pencil"
+                      size={13}
+                      color={themeColors.textMuted}
+                    />
+                  </View>
+                ) : (
+                  <Text style={[styles.amountValue, styles.amountValueDue]}>
+                    {formatCurrency(amounts.remaining)}
+                  </Text>
+                )}
+              </View>
             </View>
-          )}
 
-          {/* Tap to Pay / Card Entry — gated on remote flag + device capability */}
-          <MethodRow
-            icon="cellphone-nfc"
-            title="Tap to Pay / Card Entry"
-            subtitle={
-              tapToPay.enabled
-                ? termsGatePassed
-                  ? 'Tap a card or phone, or key in details.'
-                  : 'Confirm customer has read terms above.'
-                : tapToPay.reason === 'pending_apple'
-                  ? 'Coming soon on iPhone — pending Apple approval.'
-                  : tapToPay.reason === 'unsupported_device'
-                    ? 'This device does not support Tap to Pay.'
-                    : tapToPay.reason === 'loading'
-                      ? 'Checking device…'
-                      : 'Not enabled for your account yet.'
-            }
-            onPress={
-              tapToPay.enabled && termsGatePassed
-                ? handleTakeCardPayment
-                : undefined
-            }
-            disabled={!tapToPay.enabled || !termsGatePassed}
-            loading={chargingCard}
-          />
+            {/* Only says something the row above doesn't when part of the
+                deposit is already in — then the edited figure is the whole
+                deposit, not what's being collected now. */}
+            {editingDeposit && amounts.alreadyPaid > 0 && (
+              <Text style={styles.sheetNote}>
+                Taking {formatCurrency(amounts.remaining)} now.
+              </Text>
+            )}
 
-          {/* Phase 1 — Share a Square pay link */}
-          <MethodRow
-            icon="share-variant"
-            title="Share Pay Link"
-            subtitle="Send a Square checkout link via SMS, email or WhatsApp."
-            onPress={handleShareLink}
-            loading={sharing}
-          />
+            {surchargeOn && amounts.remaining > 0 && (
+              <Text style={styles.sheetNote}>
+                Customer pays {formatCurrency(amounts.remaining * (1 + PASSTHROUGH_SURCHARGE_PCT / 100))} on card (incl. {PASSTHROUGH_SURCHARGE_PCT}% surcharge).
+              </Text>
+            )}
 
-          {/* Manual recording — invoice only (quotes have no manual deposit
-              path). No Square guard: works with zero Square setup. */}
-          {target.kind === 'invoice' && onRecordManualPayment && (
+            {/* Terms row — only surfaced when this quote/invoice carries a
+                T&Cs snapshot. Two-in-one: tap to review the full text in a
+                modal, checkbox to attest the customer has read them. Keeps the
+                sheet tidy instead of a wall of tiny print. */}
+            {tapToPay.enabled && hasTerms && (
+              <View style={styles.termsCard}>
+                <TouchableOpacity
+                  style={styles.termsHeader}
+                  onPress={() => setTermsModalVisible(true)}
+                  activeOpacity={0.7}
+                >
+                  <MaterialCommunityIcons
+                    name="file-document-outline"
+                    size={18}
+                    color={themeColors.accentText}
+                  />
+                  <Text style={styles.termsHeaderText}>
+                    Terms for this {target.kind === 'invoice' ? 'invoice' : 'quote'}
+                  </Text>
+                  <Text style={styles.termsViewLink}>View</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.ackRow}
+                  activeOpacity={0.7}
+                  onPress={() => setTermsAcknowledged((v) => !v)}
+                >
+                  <View
+                    style={[
+                      styles.ackCheckbox,
+                      termsAcknowledged && styles.ackCheckboxActive,
+                    ]}
+                  >
+                    {termsAcknowledged && (
+                      <MaterialCommunityIcons
+                        name="check"
+                        size={14}
+                        color={themeColors.onAccent}
+                      />
+                    )}
+                  </View>
+                  <Text style={styles.ackText}>
+                    Customer has read and agrees to the terms.
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {/* Tap to Pay / Card Entry — gated on remote flag + device capability */}
             <MethodRow
-              icon="cash-multiple"
-              title="Record a payment"
-              subtitle="Bank transfer, cash or cheque you've already received."
-              onPress={() => {
-                onDismiss();
-                onRecordManualPayment(target.invoiceId);
-              }}
+              icon="cellphone-nfc"
+              title="Tap to Pay / Card Entry"
+              subtitle={
+                tapToPay.enabled
+                  ? termsGatePassed
+                    ? 'Tap a card or phone, or key in details.'
+                    : 'Confirm customer has read terms above.'
+                  : tapToPay.reason === 'pending_apple'
+                    ? 'Coming soon on iPhone — pending Apple approval.'
+                    : tapToPay.reason === 'unsupported_device'
+                      ? 'This device does not support Tap to Pay.'
+                      : tapToPay.reason === 'loading'
+                        ? 'Checking device…'
+                        : 'Not enabled for your account yet.'
+              }
+              onPress={
+                tapToPay.enabled && termsGatePassed
+                  ? handleTakeCardPayment
+                  : undefined
+              }
+              disabled={!tapToPay.enabled || !termsGatePassed}
+              loading={chargingCard}
             />
-          )}
 
-          <Button
-            mode="text"
-            onPress={onDismiss}
-            style={styles.cancelButton}
-            disabled={sharing || chargingCard}
-          >
-            Cancel
-          </Button>
+            {/* Phase 1 — Share a Square pay link */}
+            <MethodRow
+              icon="share-variant"
+              title="Share Pay Link"
+              subtitle="Send a Square checkout link via SMS, email or WhatsApp."
+              onPress={handleShareLink}
+              loading={sharing}
+            />
+
+            {/* Manual recording — invoice only (quotes have no manual deposit
+                path). No Square guard: works with zero Square setup. */}
+            {target.kind === 'invoice' && onRecordManualPayment && (
+              <MethodRow
+                icon="cash-multiple"
+                title="Record a payment"
+                subtitle="Bank transfer, cash or cheque you've already received."
+                onPress={() => {
+                  onDismiss();
+                  onRecordManualPayment(target.invoiceId);
+                }}
+              />
+            )}
+
+            <Button
+              mode="text"
+              onPress={onDismiss}
+              style={styles.cancelButton}
+              disabled={sharing || chargingCard}
+            >
+              Cancel
+            </Button>
+          </TouchableOpacity>
         </TouchableOpacity>
-      </TouchableOpacity>
+      </KeyboardAvoidingView>
 
       {/* Terms preview modal. Rendered inside the parent Modal so it layers
           above the sheet without fighting its backdrop. */}
@@ -599,9 +727,12 @@ function MethodRow({
 }
 
 const useStyles = makeStyles((t) => ({
+  keyboardHost: {
+    flex: 1,
+  },
   backdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.55)',
+    backgroundColor: t.colors.backdrop,
     justifyContent: 'flex-end',
     ...(Platform.OS === 'web' && {
       alignItems: 'center',
@@ -611,6 +742,8 @@ const useStyles = makeStyles((t) => ({
     backgroundColor: t.colors.surfaceRaised,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
+    borderTopWidth: 1,
+    borderTopColor: t.colors.border,
     padding: 20,
     paddingBottom: 32,
     ...(Platform.OS === 'web' && {
@@ -642,7 +775,7 @@ const useStyles = makeStyles((t) => ({
   modeSwitcher: {
     flexDirection: 'row',
     alignSelf: 'center',
-    backgroundColor: t.colors.bg,
+    backgroundColor: t.colors.surfaceOverlay,
     borderRadius: 999,
     padding: 4,
     marginBottom: 16,
@@ -659,7 +792,7 @@ const useStyles = makeStyles((t) => ({
   modePillText: {
     fontSize: 13,
     fontWeight: '600',
-    color: t.colors.textMuted,
+    color: t.colors.textSecondary,
   },
   modePillTextActive: {
     color: t.colors.onAccent,
@@ -667,10 +800,11 @@ const useStyles = makeStyles((t) => ({
   amountsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: t.colors.bg,
+    backgroundColor: t.colors.surfaceOverlay,
     borderRadius: 12,
     padding: 16,
     marginBottom: 20,
+    ...t.elevation[1],
   },
   amountBlock: {
     flex: 1,
@@ -683,7 +817,7 @@ const useStyles = makeStyles((t) => ({
   },
   amountLabel: {
     fontSize: 12,
-    color: t.colors.textMuted,
+    color: t.colors.textSecondary,
     marginBottom: 4,
   },
   amountValue: {
@@ -694,13 +828,46 @@ const useStyles = makeStyles((t) => ({
   amountValueDue: {
     color: t.colors.money,
   },
+  // Reads as an input rather than a number: boxed, with a pencil.
+  depositField: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: t.colors.borderStrong,
+    backgroundColor: t.colors.surfaceRaised,
+  },
+  depositCurrency: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: t.colors.money,
+  },
+  depositInput: {
+    // Fixed rather than flexible: react-native-web grows a bare input to fill
+    // the row, which shoves the "$" off to the far edge.
+    width: 92,
+    flexGrow: 0,
+    flexShrink: 0,
+    fontSize: 18,
+    fontWeight: '700',
+    color: t.colors.money,
+    textAlign: 'center',
+    padding: 0,
+    // Web (react-native-web) draws its own focus ring on the raw input.
+    ...(Platform.OS === 'web' ? ({ outlineStyle: 'none' } as any) : null),
+  },
   methodRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: t.colors.bg,
+    backgroundColor: t.colors.surfaceOverlay,
     borderRadius: 12,
     padding: 14,
     marginBottom: 10,
+    ...t.elevation[1],
   },
   methodRowDisabled: {
     opacity: 0.55,
@@ -728,7 +895,7 @@ const useStyles = makeStyles((t) => ({
   },
   methodSubtitle: {
     fontSize: 12,
-    color: t.colors.textMuted,
+    color: t.colors.textSecondary,
     marginTop: 2,
   },
   cancelButton: {
@@ -759,10 +926,10 @@ const useStyles = makeStyles((t) => ({
   ackText: {
     flex: 1,
     fontSize: 13,
-    color: t.colors.textMuted,
+    color: t.colors.textSecondary,
     lineHeight: 18,
   },
-  surchargeNote: {
+  sheetNote: {
     fontSize: 12,
     color: t.colors.textMuted,
     textAlign: 'center',
@@ -771,11 +938,12 @@ const useStyles = makeStyles((t) => ({
     fontStyle: 'italic',
   },
   termsCard: {
-    backgroundColor: t.colors.bg,
+    backgroundColor: t.colors.surfaceOverlay,
     borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 4,
     marginBottom: 10,
+    ...t.elevation[1],
   },
   termsHeader: {
     flexDirection: 'row',
