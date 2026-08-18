@@ -2117,7 +2117,7 @@ interface QuoteCtaInput {
  * look on the one email where the customer is deciding whether to trust this
  * tradie with thousands of dollars. Accept still wins on weight and colour.
  */
-function renderQuoteCta(input: QuoteCtaInput): string {
+export function renderQuoteCta(input: QuoteCtaInput): string {
   if (!input.acceptanceUrl) return '';
   const esc = escapeHtml;
   const { acceptanceUrl, depositAmount, depositPercentage, depositPayNowUrl, hasTerms, surchargePaymentFees, accent, businessName } = input;
@@ -2176,10 +2176,28 @@ function renderQuoteCta(input: QuoteCtaInput): string {
 
   // Buttons are table cells (not padded <a>) so Outlook renders the full
   // background, and the <a> fills the cell so the whole block is tappable.
+  // `clicktracking="off"` is Brevo's documented per-link opt-out (same
+  // convention Mailchimp uses). Without it Brevo rewrites every href to
+  // https://<random>.r.bh.d.sendibt3.com/tr/cl/<hash>, so the one link in the
+  // email that asks someone to commit to thousands of dollars points at an
+  // opaque third-party redirect. Hovering that is indistinguishable from
+  // phishing, and the customers most likely to check a link before clicking
+  // it are exactly the ones being asked to approve the biggest jobs.
+  //
+  // Measured 18 Aug 2026 on a real tradie's account: a $31,737 quote was
+  // delivered and opened ELEVEN times with zero clicks, and a $44,304 quote
+  // opened once with zero clicks. The quote PDF is attached, so the customer
+  // can read everything without ever following the link — which leaves the
+  // tracking domain as the only thing standing between them and accepting.
+  //
+  // Cost: Brevo no longer reports clicks on these two links. Acceptance is
+  // already recorded server-side when the page posts back, so the number that
+  // matters survives; what we lose is the "clicked but didn't accept" gap,
+  // which was near-zero anyway.
   const button = (href: string, label: string, opts: { fill: string; text: string; border: string; weight: number; size: number }) => `
                     <tr>
                       <td class="qm-c-btn" style="background:${opts.fill};border:1px solid ${opts.border};border-radius:10px;text-align:center;">
-                        <a href="${esc(href)}" target="_blank" style="display:block;padding:15px 24px;color:${opts.text};font-size:${opts.size}px;font-weight:${opts.weight};line-height:1.2;text-decoration:none;">${label}</a>
+                        <a href="${esc(href)}" target="_blank" clicktracking="off" style="display:block;padding:15px 24px;color:${opts.text};font-size:${opts.size}px;font-weight:${opts.weight};line-height:1.2;text-decoration:none;">${label}</a>
                       </td>
                     </tr>`;
 
