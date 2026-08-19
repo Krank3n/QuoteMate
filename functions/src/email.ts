@@ -2117,7 +2117,7 @@ interface QuoteCtaInput {
  * look on the one email where the customer is deciding whether to trust this
  * tradie with thousands of dollars. Accept still wins on weight and colour.
  */
-function renderQuoteCta(input: QuoteCtaInput): string {
+export function renderQuoteCta(input: QuoteCtaInput): string {
   if (!input.acceptanceUrl) return '';
   const esc = escapeHtml;
   const { acceptanceUrl, depositAmount, depositPercentage, depositPayNowUrl, hasTerms, surchargePaymentFees, accent, businessName } = input;
@@ -2174,6 +2174,28 @@ function renderQuoteCta(input: QuoteCtaInput): string {
       : '',
   ].filter(Boolean);
 
+  /**
+   * The real acceptance URL, in plain text, for anyone who won't click a
+   * button they can't verify.
+   *
+   * Brevo rewrites every `href` to https://<sub>.r.bh.d.sendibt3.com/tr/cl/…
+   * and there is no per-message opt-out (tried `clicktracking="off"` — a
+   * Mailchimp convention Brevo ignores; shipped and reverted 18-19 Aug 2026).
+   * So the buttons above CANNOT show our domain. Measured on a real account:
+   * a $31,737 quote opened eleven times with zero clicks, a $44,304 quote
+   * opened once with zero clicks, while a $24,040 quote that was clicked got
+   * accepted two days later. An opaque redirect on the one link asking
+   * someone to approve thousands of dollars is the obvious suspect.
+   *
+   * What Brevo rewrites is the `href` ATTRIBUTE. A bare URL sitting in the
+   * body as text is left alone — verified by sending a probe and reading the
+   * delivered message. So the customer gets one legible, unrewritten
+   * `quotemateapp.au` address they can read, type, or check the button
+   * against. Deliberately NOT wrapped in an <a>: the moment it is, Brevo
+   * rewrites it and we are back where we started.
+   */
+  const plainUrl = (acceptanceUrl || '').trim();
+
   // Buttons are table cells (not padded <a>) so Outlook renders the full
   // background, and the <a> fills the cell so the whole block is tappable.
   //
@@ -2219,6 +2241,7 @@ function renderQuoteCta(input: QuoteCtaInput): string {
             </tr>
           </table>
           <p style="color:#6b7280;font-size:12px;line-height:1.6;text-align:center;margin:16px 0 0;">${reassurance}</p>
+          ${plainUrl ? `<p style="color:#6b7280;font-size:12px;line-height:1.7;text-align:center;margin:14px 0 0;padding:12px 10px 0;border-top:1px solid #e5e7eb;">Rather type it in? Open this address in your browser:<br><span style="color:#374151;font-weight:600;word-break:break-all;">${esc(plainUrl)}</span></p>` : ''}
           ${footnotes.map(note => `<p style="color:#9ca3af;font-size:11px;line-height:1.6;text-align:center;margin:6px 0 0;">${note}</p>`).join('')}
         </td>
       </tr>
