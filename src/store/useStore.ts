@@ -459,15 +459,26 @@ function pricingEventToProgress(event: PricingEvent): Partial<WorkingStatus> | n
 }
 
 // Wipe the price off every row the review flags (no price, AI estimate,
-// low-confidence) so fetchPrices re-fetches them — it skips any row already at
-// price > 0. Manual overrides and confident rows are never flagged, so they're
-// left exactly as they were. requiredQty is preserved so pack rounding still works.
+// low-confidence, weak product match) so fetchPrices re-fetches them — it skips
+// any row already at price > 0. Manual overrides and confident rows are never
+// flagged, so they're left exactly as they were. requiredQty is preserved so
+// pack rounding still works.
 function resetFlaggedRowsForReprice(materials: Material[]): { materials: Material[]; resetCount: number } {
   let resetCount = 0;
   const next = materials.map((m) => {
     if (!isFlaggedRow(m)) return m;
     resetCount++;
-    return { ...m, price: 0, totalPrice: 0, priceConfidence: undefined, pricingSource: undefined };
+    // weakProductMatch goes too: it describes the product this row WAS priced
+    // against, and that product is being thrown away. Leaving it set would
+    // keep warning about a match that no longer exists if the re-fetch fails.
+    return {
+      ...m,
+      price: 0,
+      totalPrice: 0,
+      priceConfidence: undefined,
+      pricingSource: undefined,
+      weakProductMatch: undefined,
+    };
   });
   return { materials: next, resetCount };
 }

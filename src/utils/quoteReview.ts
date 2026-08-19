@@ -21,7 +21,12 @@
 
 import { Material, QuoteSection } from '../types';
 
-export type QuoteIssueKind = 'unpriced' | 'estimated' | 'low_confidence' | 'inflated_quantity';
+export type QuoteIssueKind =
+  | 'unpriced'
+  | 'estimated'
+  | 'low_confidence'
+  | 'inflated_quantity'
+  | 'weak_match';
 
 export interface QuoteIssue {
   materialId: string;
@@ -42,6 +47,8 @@ export interface QuoteReview {
     lowConfidence: number;
     /** Quantities laundered from a job area anchor (see detectAnchorLaunderedIssues). */
     inflatedQuantity: number;
+    /** Rows priced off a product that barely resembles the request. */
+    weakMatch: number;
     /** Total flagged rows — equals issues.length. */
     total: number;
   };
@@ -54,6 +61,7 @@ const DEFAULT_DETAIL: Record<QuoteIssueKind, string> = {
   estimated: 'Estimated price, not a real supplier quote — verify before sending.',
   low_confidence: 'Low-confidence price — worth a quick check.',
   inflated_quantity: 'Quantity looks scaled from the job size, not real coverage — verify before sending.',
+  weak_match: 'The product we priced barely matches this line — it may be the wrong item.',
 };
 
 /**
@@ -67,6 +75,12 @@ function classifyRow(m: Material): QuoteIssueKind | null {
   if (m.kind === 'work') return null;
   if (m.manualPriceOverride) return null;
   if (!(m.price > 0)) return 'unpriced';
+  // Ranked above the generic low-confidence bucket: an estimate is the right
+  // price for the right product, this is a real price for what may be the
+  // wrong product. QU-178711 shipped 30 chrome towel bars at $85 for a rebar
+  // line — $2,550, 64% of the quote's materials — as a 'high' confidence
+  // supplier price.
+  if (m.weakProductMatch) return 'weak_match';
   if (m.priceConfidence === 'low') {
     return m.pricingSource === 'ai' ? 'estimated' : 'low_confidence';
   }
@@ -86,6 +100,7 @@ function buildSummary(issues: QuoteIssue[], counts: QuoteReview['counts']): stri
 
   const parts: string[] = [];
   if (counts.inflatedQuantity) parts.push(`${counts.inflatedQuantity} with an inflated quantity`);
+  if (counts.weakMatch) parts.push(`${counts.weakMatch} possibly the wrong product`);
   if (counts.unpriced) parts.push(`${counts.unpriced} with no price`);
   if (counts.estimated) parts.push(`${counts.estimated} estimated`);
   if (counts.lowConfidence) parts.push(`${counts.lowConfidence} low-confidence`);
@@ -220,6 +235,7 @@ export function reviewQuoteMaterials(
     estimated: issues.filter((i) => i.kind === 'estimated').length,
     lowConfidence: issues.filter((i) => i.kind === 'low_confidence').length,
     inflatedQuantity: issues.filter((i) => i.kind === 'inflated_quantity').length,
+    weakMatch: issues.filter((i) => i.kind === 'weak_match').length,
     total: issues.length,
   };
 
@@ -233,12 +249,15 @@ export interface PresendWarning {
 
 /**
  * Pre-send gate message: built when the document still contains $0 rows (they
- * print as $0 line items on the customer's copy) OR area-anchor-laundered
+ * print as $0 line items on the customer's copy), area-anchor-laundered
  * quantities (an absurd count like "165 silicone tubes" is a trust-killer on
- * the customer copy — see detectAnchorLaunderedIssues). Estimated /
- * low-confidence rows alone don't gate the send (they're priced and flagged
- * in the list already; warning on every estimate would teach tradies to
- * dismiss the dialog without reading it).
+ * the customer copy — see detectAnchorLaunderedIssues), or a row priced off a
+ * product that barely matches the request. Estimated / low-confidence rows
+ * alone don't gate the send (they're priced and flagged in the list already;
+ * warning on every estimate would teach tradies to dismiss the dialog without
+ * reading it) — a weak product match is different in kind: the number is a
+ * real supplier price for what may be a completely different product, and it
+ * carries real money (QU-178711's towel bars were 64% of the materials).
  */
 export function buildPresendWarning(
   review: QuoteReview,
@@ -253,7 +272,8 @@ export function buildPresendWarning(
 ): PresendWarning | null {
   const unpriced = review.issues.filter((i) => i.kind === 'unpriced');
   const inflated = review.issues.filter((i) => i.kind === 'inflated_quantity');
-  if (unpriced.length === 0 && inflated.length === 0) return null;
+  const weak = review.issues.filter((i) => i.kind === 'weak_match');
+  if (unpriced.length === 0 && inflated.length === 0 && weak.length === 0) return null;
 
   const lines: string[] = [];
 
@@ -282,6 +302,17 @@ export function buildPresendWarning(
     );
   }
 
+  if (weak.length > 0) {
+    if (lines.length > 0) lines.push('');
+    const shown = weak.slice(0, 3).map((i) => `• ${i.name} (${i.quantity} × $${i.price.toFixed(2)})`);
+    const more = weak.length - shown.length;
+    lines.push(
+      `${weak.length} ${weak.length === 1 ? 'line was' : 'lines were'} priced off a product that doesn't look like a match — check ${weak.length === 1 ? 'it' : 'them'} before sending:`,
+      ...shown,
+      ...(more > 0 ? [`(+${more} more)`] : []),
+    );
+  }
+
   // Estimate tail only alongside unpriced rows (unchanged behaviour) — warning
   // on every estimate would train tradies to dismiss the dialog unread.
   if (unpriced.length > 0) {
@@ -291,8 +322,9 @@ export function buildPresendWarning(
     }
   }
 
+  const pricesNeedALook = unpriced.length > 0 || weak.length > 0;
   const title =
-    unpriced.length > 0 && inflated.length > 0
+    pricesNeedALook && inflated.length > 0
       ? 'Some prices and quantities need a look'
       : inflated.length > 0
         ? 'Some quantities need a look'

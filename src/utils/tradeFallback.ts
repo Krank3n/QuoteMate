@@ -22,6 +22,15 @@ export function isNonRetailTradeRow(nameText: string, unit?: string, qty?: numbe
   if (/rinnai\s*b26|continuous\s+flow\s+gas\s+hot\s+water|gas\s+hot\s+water\s+heater|gas\s+compliance\s+certificate|compliance\s+certificate|stump\s+grinder\s+(?:replacement\s+)?teeth|grinder\s+teeth|material\s+delivery|delivery\s+fee/.test(name)) return true;
   if (/colorbond\s+fence\s+(?:sheet|panel|rail)|fence\s+(?:sheet|panel|rail).*colorbond/.test(name)) return true;
   if (/\b(?:rhs|shs)\b|rectangular\s+hollow|square\s+hollow|steel\s+base\s+plate|base\s+plate/.test(name)) return true;
+  // Reinforcing steel comes off a steel merchant's rack, not a hardware shelf.
+  // Bunnings stocks none of it, so the scraper returns whatever is lexically
+  // nearby and stamps it high confidence: "N12 starter bar 600mm dowel"
+  // matched a chrome towel bar at $85 and shipped 30 of them on QU-178711.
+  // Deliberately NOT routed away: trench mesh and bar chairs, which Bunnings
+  // genuinely stocks and prices correctly.
+  if (/\bn(?:12|16|20|24|28|32|36)\b.*\b(?:bar|rod|dowel|reo|starter)\b|\b(?:starter|dowel|deformed|reinforcing|reo)\s+bars?\b(?!\s*chairs?)|\brebar\b/.test(name)) return true;
+  if (/\bsl\s?(?:52|62|72|82|92|102)\b|\b(?:reo|slab|reinforcing)\s+mesh\b|\bmesh\s+sheets?\b/.test(name) && !/trench/.test(name)) return true;
+  if (/formwork\s+(?:pegs?|pins?|stakes?)|\bform\s+pegs?\b/.test(name)) return true;
   if (/plasterboard|villaboard|fibre\s+cement\s+sheet|fiber\s+cement\s+sheet|cement\s+sheet|cladding\s+sheets?|external\s+cladding|floor\s+tiles?|wall\s+tiles?|\bgrout\b|basin\s+mixer|mixer\s+tap|plumber'?s?\s+putty|plumbing\s+putty|debris\s+netting|safety\s+debris/.test(name)) return true;
   if (/road\s+base|crusher\s+dust|aggregate\s+base/.test(name)) return true;
   if (/green\s+waste|tip\s*fee|tipping|dumping|disposal|hook\s*bin|soil\s+disposal|spoil\s+disposal|dirt\s+disposal|heavy\s+waste/.test(name)) return true;
@@ -56,6 +65,18 @@ export function tradeFallbackUnitPrice(nameText: string, unit?: string): number 
   if (/material\s+delivery|delivery\s+fee/.test(name)) return 150;
   if (/colorbond\s+fence\s+(?:sheet|panel)|fence\s+(?:sheet|panel).*colorbond/.test(name)) return 38;
   if (/colorbond\s+fence\s+rail|fence\s+rail.*colorbond/.test(name)) return 18;
+  // Reinforcing steel, priced the way a steel merchant sells it. Bar length
+  // decides the unit price, so read it off the row name: a 600mm starter/dowel
+  // is a cut piece, anything longer (or unstated) is a full stock length.
+  if (/\bn(?:12|16|20|24|28|32|36)\b.*\b(?:bar|rod|dowel|reo|starter)\b|\b(?:starter|dowel|deformed|reinforcing|reo)\s+bars?\b(?!\s*chairs?)|\brebar\b/.test(name)) {
+    if (unit === 'm') return 4;
+    const mm = name.match(/\b(\d{2,4})\s*mm\b/);
+    return mm && parseInt(mm[1], 10) <= 1500 ? 6 : 26;
+  }
+  if (/\bsl\s?(?:52|62|72|82|92|102)\b|\b(?:reo|slab|reinforcing)\s+mesh\b|\bmesh\s+sheets?\b/.test(name) && !/trench/.test(name)) {
+    return unit === 'm²' ? 8 : 105;
+  }
+  if (/formwork\s+(?:pegs?|pins?|stakes?)|\bform\s+pegs?\b/.test(name)) return 7;
   if (/\b(?:rhs|shs)\b|rectangular\s+hollow|square\s+hollow/.test(name)) return unit === 'm' ? 45 : 180;
   if (/steel\s+base\s+plate|base\s+plate/.test(name)) return 28;
   if (/steel\s+post|galvanised\s+post|galvanized\s+post/.test(name)) return unit === 'm' ? 38 : 90;

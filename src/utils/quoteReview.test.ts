@@ -296,3 +296,51 @@ describe('detectAnchorLaunderedIssues — does not fire on genuine sections', ()
     expect(detectAnchorLaunderedIssues(materials, sections)).toEqual([]);
   });
 });
+
+describe('weak product match (QU-178711)', () => {
+  const towelBar = (over: Partial<Material> = {}): Material =>
+    ({
+      id: 'w1',
+      name: 'N12 Starter Bars 600mm',
+      quantity: 30,
+      unit: 'each',
+      price: 85,
+      totalPrice: 2550,
+      manualPriceOverride: false,
+      pricingSource: 'scraper',
+      priceConfidence: 'low',
+      weakProductMatch: true,
+      description: 'Not sure this is the right product — check it against your supplier before sending',
+      ...over,
+    }) as Material;
+
+  it('reports a weak match as its own kind, not a generic low-confidence row', () => {
+    const review = reviewQuoteMaterials([towelBar()]);
+    expect(review.counts.weakMatch).toBe(1);
+    expect(review.counts.lowConfidence).toBe(0);
+    expect(review.issues[0].kind).toBe('weak_match');
+    expect(review.summary).toContain('possibly the wrong product');
+  });
+
+  it('marks the row for re-pricing', () => {
+    expect(isFlaggedRow(towelBar())).toBe(true);
+  });
+
+  it("never flags a row the tradie priced themselves", () => {
+    expect(isFlaggedRow(towelBar({ manualPriceOverride: true }))).toBe(false);
+  });
+
+  it('gates the send on its own, with the line and its money', () => {
+    // A plain estimate deliberately does NOT gate the send. A weak match does:
+    // it is a real supplier price for what may be a different product.
+    const warning = buildPresendWarning(reviewQuoteMaterials([towelBar()]));
+    expect(warning).not.toBeNull();
+    expect(warning!.message).toContain("doesn't look like a match");
+    expect(warning!.message).toContain('N12 Starter Bars 600mm (30 × $85.00)');
+  });
+
+  it('still lets a clean quote through', () => {
+    const clean = towelBar({ weakProductMatch: undefined, priceConfidence: 'high', description: undefined });
+    expect(buildPresendWarning(reviewQuoteMaterials([clean]))).toBeNull();
+  });
+});

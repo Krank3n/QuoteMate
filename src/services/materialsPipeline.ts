@@ -56,6 +56,7 @@ import {
 import { searchMaterialPrice } from './webSearchPricing';
 import { pickBestCandidate, isSemanticallyCompatible, type RankableCandidate } from './candidateRanker';
 import { summarizePriceFetchOutcome } from './priceFetchTelemetry';
+import { matchEvidence, stampMatchConfidence } from '../utils/matchEvidence';
 import { withOrigin } from '../utils/materialOrigin';
 import { withKeepAwake } from '../utils/withKeepAwake';
 import { httpsCallable } from 'firebase/functions';
@@ -639,6 +640,11 @@ export function applyReconcileResult(
     }
     if (r.confidence) m.priceConfidence = r.confidence;
     if (r.coverageNote) m.description = r.coverageNote;
+    // The reconcile model is the category gate, and it is one non-deterministic
+    // call: on QU-178711 it waved through a towel bar for a rebar row and
+    // stamped it 'high'. Its confidence can never outrank what the two names
+    // actually have in common.
+    stampMatchConfidence(m, chosen?.productName);
     return 'applied';
   }
   return 'skipped';
@@ -937,6 +943,10 @@ async function fetchPricesForQuoteInner(
       if (result.store) m.description = `Available at ${result.store}`;
       if (result.imageUrl) m.imageUrl = result.imageUrl;
       if (result.productUrl) m.productUrl = result.productUrl;
+      // This path deliberately falls back to candidates[0] when the ranker
+      // refuses every hit, so the evidence check has to be applied to what
+      // actually landed on the row rather than trusted to the pick.
+      stampMatchConfidence(m, result.productName);
       fetchedCount += 1;
       reecePricedTerms.add(term);
       onEvent?.({
@@ -1028,6 +1038,7 @@ async function fetchPricesForQuoteInner(
             packSize: (product as any).packSize,
             packUnit: (product as any).packUnit,
           });
+          stampMatchConfidence(material, product.productName);
         };
 
         batchResults = await batchFindBestMatchesProgressive(
@@ -1179,6 +1190,7 @@ async function fetchPricesForQuoteInner(
             packSize: (product as any).packSize,
             packUnit: (product as any).packUnit,
           });
+          stampMatchConfidence(material, product.productName);
           fetchedCount += 1;
           onEvent?.({
             kind: 'item-priced',
@@ -1270,8 +1282,14 @@ async function fetchPricesForQuoteInner(
     for (const m of updatedMaterials) {
       const raw = candidatesByMaterialId.get(m.id);
       if (!raw || raw.length === 0) continue;
-      const gated = raw.filter((c) =>
-        isSemanticallyCompatible(m.searchTerm || m.name, c.productName || ''),
+      const gated = raw.filter(
+        (c) =>
+          isSemanticallyCompatible(m.searchTerm || m.name, c.productName || '') &&
+          // Same evidence bar as round-1 ranking. Without it the reconcile
+          // model is handed candidates the deterministic layer already
+          // refused, and one non-deterministic call is all that stands
+          // between a chrome towel bar and a rebar line (QU-178711).
+          matchEvidence(m.searchTerm || m.name, c.productName || '') === 'strong',
       );
       if (gated.length > 0) gatedCandidatesByMaterialId.set(m.id, gated);
     }
@@ -1351,8 +1369,10 @@ async function fetchPricesForQuoteInner(
               // Gate against the ORIGINAL material name — the simplified
               // term dropped specs on purpose to broaden the search, but the
               // specs still decide what's an acceptable substitute.
-              const gated = cands.filter((c) =>
-                isSemanticallyCompatible(m.name, c.productName || ''),
+              const gated = cands.filter(
+                (c) =>
+                  isSemanticallyCompatible(m.name, c.productName || '') &&
+                  matchEvidence(m.name, c.productName || '') === 'strong',
               );
               if (gated.length > 0) {
                 rescueTerm.set(m.id, simplified);
@@ -1513,6 +1533,21 @@ async function fetchPricesForQuoteInner(
     cancelled,
   });
   httpsCallable(functions, 'reportPriceFetchUsage')(usageSummary).catch(() => {});
+
+  // ── No silent $0 rows ──
+  // A row the pipeline could not price at all keeps price 0 and, until now, no
+  // description — so it printed as a bare "$0.00" on the materials list and on
+  // the customer's quote with nothing saying why. The rescue path already
+  // stamps rows the reconcile pass rejected, but a row whose search returned
+  // nothing usable never reaches it: QU-178711 shipped "Steel Formwork Pegs
+  // 600mm ×30" at $0.00, unexplained. Work items are lump-sum scope lines, so
+  // $0 is a legitimate price for one — they are left alone.
+  for (const m of updatedMaterials) {
+    if (m.kind === 'work' || m.manualPriceOverride) continue;
+    if (m.price > 0 || m.description) continue;
+    m.priceConfidence = 'low';
+    m.description = 'No price found — add your own price before sending';
+  }
 
   // Baseline for send-time edit telemetry: every pipeline-priced row records
   // the state this run left it in, so edits the tradie makes before sending

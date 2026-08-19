@@ -14,6 +14,8 @@
  * pick. No new network calls.
  */
 
+import { matchEvidence } from '../utils/matchEvidence';
+
 export type QualityTier = 'budget' | 'standard' | 'premium';
 
 /**
@@ -601,13 +603,23 @@ export function pickBestCandidate<T extends RankableCandidate>(
   if (!candidates || candidates.length === 0) return null;
   const query = material.searchTerm || material.name || '';
   const hadPricedCandidates = candidates.some((c) => typeof c.price === 'number' && c.price > 0);
-  const priced = candidates.filter((c) =>
+  const inCategory = candidates.filter((c) =>
     typeof c.price === 'number' &&
     c.price > 0 &&
     isSemanticallyCompatible(query, c.productName || '')
   );
-  // If there were priced candidates but every one failed the semantic gate,
-  // return null so callers can estimate/flag instead of silently applying an
+  // General backstop under the category rules above, which only cover the
+  // families someone has already been burned by. A hit that shares no more
+  // than an incidental word with the request is not a worse match, it is a
+  // different product: "builders tie wire roll 1.5mm" came back as a "Ryobi
+  // 1.6mm Rotary Tool Grout Removal Bit" ($19.99) and "N12 starter bar 600mm
+  // dowel" as a "Mondella Chrome Resonance Double Towel Bar" ($85 × 30), both
+  // applied because nothing here required the hit to resemble the request.
+  // Only a well-evidenced match is priced automatically; anything less falls
+  // to the estimate path, which at least says it is a guess.
+  const priced = inCategory.filter((c) => matchEvidence(query, c.productName || '') === 'strong');
+  // If there were priced candidates but every one failed the gates, return
+  // null so callers can estimate/flag instead of silently applying an
   // unrelated SKU. If the supplier truly returned no prices, preserve the old
   // fallback for callers that use the product metadata only.
   if (priced.length === 0) return hadPricedCandidates ? null : candidates[0];
@@ -615,7 +627,13 @@ export function pickBestCandidate<T extends RankableCandidate>(
 
   const tier: QualityTier = material.qualityTier || options.jobQualityTier || 'standard';
 
-  const sortedPrices = priced.map((c) => c.price).sort((a, b) => a - b);
+  // Price band comes from the whole in-category set, NOT the evidence-gated
+  // subset: the gate decides which candidates are ELIGIBLE, and dropping one
+  // for relevance must not move the market anchor the tier bias scores
+  // against. Deriving the median from `priced` made the gate reprice
+  // unrelated rows — refusing a $23.88 hit on a masonry-bit row pulled the
+  // median from $29.90 to $48.98 and handed the row an 8-piece bit SET.
+  const sortedPrices = inCategory.map((c) => c.price).sort((a, b) => a - b);
   const median = sortedPrices[Math.floor(sortedPrices.length / 2)];
 
   const searchTokens = importantTokens(query);
