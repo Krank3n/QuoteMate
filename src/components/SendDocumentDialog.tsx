@@ -268,9 +268,14 @@ export function SendDocumentDialog({
    * Square API error, not an entitlement issue. Pro / trial users always
    * pass without a network round-trip.
    */
-  const passesDeliveryGate = async (): Promise<boolean> => {
+  const passesDeliveryGate = async (settledQuote: Quote): Promise<boolean> => {
+    // Takes the settled quote rather than reading `activeQuote`: callers settle
+    // inside the same invocation, so the state that would update it has not
+    // re-rendered this closure yet. On the free tier this gate mints a Square
+    // payment link for the quote's amount, so a stale figure here bills the
+    // customer the wrong money.
     const gate = await ensureCanDeliver(
-      isInvoice ? { kind: 'invoice', doc: invoice } : { kind: 'quote', doc: activeQuote }
+      isInvoice ? { kind: 'invoice', doc: invoice } : { kind: 'quote', doc: settledQuote }
     );
     if (gate.ok) return true;
     setActionSheetVisible(false);
@@ -295,7 +300,7 @@ export function SendDocumentDialog({
   const handleEmailOption = async () => {
     const settledNow = await settleTotals();
     if (!settledNow) return;
-    if (!(await passesDeliveryGate())) return;
+    if (!(await passesDeliveryGate(settledNow.quote))) return;
     setActionSheetVisible(false);
     trackEvent('send_method_chosen', { method: 'email', doc_type: docType });
 
@@ -502,7 +507,7 @@ export function SendDocumentDialog({
     }
     const settledNow = await settleTotals();
     if (!settledNow) return;
-    if (!(await passesDeliveryGate())) return;
+    if (!(await passesDeliveryGate(settledNow.quote))) return;
     trackEvent('send_method_chosen', { method: 'sms', doc_type: docType });
 
     // A quote SMS must carry the quote itself, not merely announce a total.
@@ -594,7 +599,7 @@ export function SendDocumentDialog({
   const handleShareFromDialog = async () => {
     const settledNow = await settleTotals();
     if (!settledNow) return;
-    if (!(await passesDeliveryGate())) return;
+    if (!(await passesDeliveryGate(settledNow.quote))) return;
     setActionSheetVisible(false);
     trackEvent('send_method_chosen', { method: 'share', doc_type: docType });
     try {
@@ -614,7 +619,7 @@ export function SendDocumentDialog({
   const handleExportFromDialog = async () => {
     const settledNow = await settleTotals();
     if (!settledNow) return;
-    if (!(await passesDeliveryGate())) return;
+    if (!(await passesDeliveryGate(settledNow.quote))) return;
     setActionSheetVisible(false);
     trackEvent('send_method_chosen', { method: 'export_pdf', doc_type: docType });
     try {
@@ -637,8 +642,11 @@ export function SendDocumentDialog({
     if (isAttachingPayLink) return;
     setIsAttachingPayLink(true);
     try {
+      // Settled, not the screen's copy: this mints a Square link for a real
+      // amount — the deposit, or the full quote total — so a stale figure here
+      // puts a Pay Now button on the customer's page for the wrong money.
       const result = await attachTrialPayLink(
-        isInvoice ? { kind: 'invoice', doc: invoice } : { kind: 'quote', doc: quote }
+        isInvoice ? { kind: 'invoice', doc: invoice } : { kind: 'quote', doc: activeQuote }
       );
       trackEvent('pay_link_optin_tapped', {
         doc_type: docType,

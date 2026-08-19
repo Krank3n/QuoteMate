@@ -727,6 +727,22 @@ describe('settling the total before it reaches a customer', () => {
     expect(sms.openSmsComposer.mock.calls[0][1]).toContain('Total: $770.00');
   });
 
+  it('mints the Pay Now link against the settled total, not the screen\'s', async () => {
+    // attachTrialPayLink asks Square for a link for a real amount (deposit, or
+    // the full quote total). A stale figure here puts a Pay Now button on the
+    // customer's page for money the quote no longer says.
+    renderDialog({ doc: drifting({ customerEmail: 'barb@example.com' }) });
+    await answerSettlePrompt('send');
+    await waitFor(() => expect(screen.getByTestId('preview')).toBeTruthy());
+    fireEvent.click(screen.getByText('stub-sent'));
+    fireEvent.click(screen.getByText('stub-close'));
+
+    fireEvent.click(screen.getByText('Set it up'));
+
+    await waitFor(() => expect(guard.attachTrialPayLink).toHaveBeenCalledTimes(1));
+    expect(guard.attachTrialPayLink.mock.calls[0][0].doc.total).toBe(7819.02);
+  });
+
   it('settles an invoice by leaving it alone — saveInvoice does not re-cost', async () => {
     renderDialog({
       doc: drifting({ type: 'invoice', customerPhone: '0421617499', dueDate: 0 } as any),
@@ -781,5 +797,42 @@ describe('quotes the settle must not touch', () => {
     // The figure the customer was actually quoted, not the one its placeholder
     // lines recompute to ($5,612.61).
     expect(sms.openSmsComposer.mock.calls[0][1]).toContain('Total: $5,698.95');
+  });
+});
+
+describe('the free-tier gate settles first too', () => {
+  /**
+   * On the free tier ensureCanDeliver mints a Square payment link for the
+   * quote's amount before anything can go out. It runs inside the same handler
+   * invocation as the settle, so reading the figure off component state would
+   * hand it the pre-settle number and bill the customer the wrong money.
+   */
+  it('gates on the settled total, not the stale one', async () => {
+    store.state.getEffectivePlan = () => 'free';
+    renderDialog({
+      doc: doc({
+        customerEmail: undefined,
+        customerPhone: '0421617499',
+        materials: [{ id: 'm1', name: 'Decking oil', quantity: 4, unit: 'each', price: 50, totalPrice: 200 }],
+        laborRate: 80,
+        laborHours: 6,
+        markup: 10,
+        laborMarkup: 0,
+        total: 500, // stale: recomputes to 770
+      }),
+    });
+    await waitFor(() => expect(screen.getByTestId('sheet')).toBeTruthy());
+
+    fireEvent.click(screen.getByText('SMS'));
+
+    await waitFor(() => expect(
+      vi.mocked(Alert.alert).mock.calls.find(([t]) => t === 'Total has changed'),
+    ).toBeTruthy());
+    const buttons = vi.mocked(Alert.alert).mock.calls
+      .find(([t]) => t === 'Total has changed')?.[2] as any[];
+    await act(async () => { buttons.find((b) => String(b.text).startsWith('Send')).onPress(); });
+
+    await waitFor(() => expect(guard.ensureCanDeliver).toHaveBeenCalled());
+    expect(guard.ensureCanDeliver.mock.calls[0][0].doc.total).toBe(770);
   });
 });
