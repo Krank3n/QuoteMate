@@ -2190,9 +2190,18 @@ export function renderQuoteCta(input: QuoteCtaInput): string {
    * What Brevo rewrites is the `href` ATTRIBUTE. A bare URL sitting in the
    * body as text is left alone — verified by sending a probe and reading the
    * delivered message. So the customer gets one legible, unrewritten
-   * `quotemateapp.au` address they can read, type, or check the button
-   * against. Deliberately NOT wrapped in an <a>: the moment it is, Brevo
-   * rewrites it and we are back where we started.
+   * `quotemateapp.au` address to check the buttons against.
+   *
+   * Deliberately NOT wrapped in an <a>: the moment it is, Brevo rewrites it
+   * and we are back where we started. There is a test pinning that.
+   *
+   * Worth knowing, from opening a delivered quote in Gmail: the client
+   * LINKIFIES this text itself, and because the text is the real URL the
+   * resulting link is the real URL. So the customer both reads our domain and
+   * gets a working tap — without us ever emitting an href for Brevo to eat.
+   * The copy says "check the link yourself" rather than "type it in" because
+   * the token is 64 characters and nobody is typing that; the point is that
+   * the address is legible, not that it's transcribable.
    */
   const plainUrl = (acceptanceUrl || '').trim();
 
@@ -2241,7 +2250,7 @@ export function renderQuoteCta(input: QuoteCtaInput): string {
             </tr>
           </table>
           <p style="color:#6b7280;font-size:12px;line-height:1.6;text-align:center;margin:16px 0 0;">${reassurance}</p>
-          ${plainUrl ? `<p style="color:#6b7280;font-size:12px;line-height:1.7;text-align:center;margin:14px 0 0;padding:12px 10px 0;border-top:1px solid #e5e7eb;">Rather type it in? Open this address in your browser:<br><span style="color:#374151;font-weight:600;word-break:break-all;">${esc(plainUrl)}</span></p>` : ''}
+          ${plainUrl ? `<p style="color:#6b7280;font-size:12px;line-height:1.7;text-align:center;margin:14px 0 0;padding:12px 10px 0;border-top:1px solid #e5e7eb;">Or check the link yourself:<br><span style="color:#374151;font-weight:600;word-break:break-all;">${esc(plainUrl)}</span></p>` : ''}
           ${footnotes.map(note => `<p style="color:#9ca3af;font-size:11px;line-height:1.6;text-align:center;margin:6px 0 0;">${note}</p>`).join('')}
         </td>
       </tr>

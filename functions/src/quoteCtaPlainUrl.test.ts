@@ -37,7 +37,7 @@ describe('quote email — plain-text acceptance address', () => {
   it('never wraps that URL in a link — one <a> and it is rewritten again', () => {
     const html = render();
     const anchored = html.match(/<a\b[^>]*>[\s\S]*?<\/a>/g) || [];
-    for (const a of anchored) expect(a).not.toContain('Rather type it in');
+    for (const a of anchored) expect(a).not.toContain('Or check the link yourself');
     // The address must appear in the body text, not only inside a button.
     expect(textOnly(html)).toMatch(/quotemateapp\.au\/q\?token=abc123/);
   });
@@ -67,6 +67,6 @@ describe('quote email — plain-text acceptance address', () => {
 
   it('renders nothing extra when there is no acceptance URL to show', () => {
     const html = renderQuoteCta({ accent: '#059669' } as any);
-    expect(html).not.toContain('Rather type it in');
+    expect(html).not.toContain('Or check the link yourself');
   });
 });
