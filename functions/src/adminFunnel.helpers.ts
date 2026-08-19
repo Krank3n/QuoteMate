@@ -232,10 +232,11 @@ export function isTestAccount(
  * tradie actually authored in the app. They carry a sent-looking stage, so any
  * funnel that counts them reads a send that never happened — exclude them
  * everywhere (see accountReclaim.rebuild.ts for how they're minted).
+ *
+ * Re-exported from shared/ so the client send flow, which must not recompute
+ * one of these over its stored total, tests the same predicate.
  */
-export function isRecoveredDocId(docId: string | null | undefined): boolean {
-  return typeof docId === 'string' && docId.startsWith('recovered-');
-}
+export { isRecoveredDocId } from './shared/document/recovered';
 
 /**
  * True when a single document counts as "activated" (the tradie actually sent

@@ -741,3 +741,45 @@ describe('settling the total before it reaches a customer', () => {
     expect(sms.openSmsComposer.mock.calls[0][1]).toContain('Total: $6,389.02');
   });
 });
+
+describe('quotes the settle must not touch', () => {
+  /**
+   * `recovered-` docs are the 2026-07 account-reclaim reconstructions: the
+   * grand total is real (read off the email that went out) but the lines under
+   * it are placeholders that were never meant to add up to it. Recomputing one
+   * would move a historical record — downwards, in front of a customer.
+   */
+  it('leaves a recovered- quote on its stored total', async () => {
+    renderDialog({
+      doc: doc({
+        id: 'recovered-QU-177680',
+        customerEmail: undefined,
+        customerPhone: '0421617499',
+        materials: [
+          { id: 'r1', name: 'Materials (recovered)', quantity: 1, unit: 'each', price: 3932.37, totalPrice: 3932.37 },
+          { id: 'r2', name: 'Labour (recovered)', quantity: 1, unit: 'each', price: 1170, totalPrice: 1170 },
+        ],
+        laborRate: 0,
+        laborHours: 0,
+        laborTotal: 0,
+        markup: 0,
+        laborMarkup: 0,
+        materialsSubtotal: 5104.37,
+        subtotal: 5104.37,
+        gst: 518.09,
+        total: 5698.95,
+      }),
+    });
+    await waitFor(() => expect(screen.getByTestId('sheet')).toBeTruthy());
+
+    fireEvent.click(screen.getByText('SMS'));
+
+    await waitFor(() => expect(sms.openSmsComposer).toHaveBeenCalled());
+    expect(vi.mocked(Alert.alert).mock.calls.find(([title]) => title === 'Total has changed'))
+      .toBeUndefined();
+    expect(store.state.saveDraft).not.toHaveBeenCalled();
+    // The figure the customer was actually quoted, not the one its placeholder
+    // lines recompute to ($5,612.61).
+    expect(sms.openSmsComposer.mock.calls[0][1]).toContain('Total: $5,698.95');
+  });
+});

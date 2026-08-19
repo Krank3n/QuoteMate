@@ -50,6 +50,7 @@ import { hasCustomerEmail } from '../utils/sendFlow';
 import { cleanSmsRecipient, openSmsComposer } from '../utils/smsComposer';
 import { generateAcceptanceLink } from '../services/quoteAcceptanceService';
 import { hashTerms } from '../../shared/pdf/terms/defaultAuTradie';
+import { isRecoveredDocId } from '../../shared/document/recovered';
 
 /**
  * The figures a send is going out on. `changed` is true when the settling
@@ -103,10 +104,20 @@ export function SendDocumentDialog({
     () => (isInvoice ? quote : updateQuoteCalculations(quote)),
     [isInvoice, quote],
   );
-  // Invoices are exempt: saveInvoice persists what it is given rather than
-  // re-costing it, so an invoice's saved copy already matches this screen's.
+  // Two exemptions, for opposite reasons.
+  //
+  // Invoices: saveInvoice persists what it is given rather than re-costing it,
+  // so an invoice's saved copy already matches this screen's — there is nothing
+  // to settle.
+  //
+  // `recovered-` quotes: their stored total is the only real figure they carry
+  // (the rest is placeholder lines that were never meant to add up to it), so
+  // recomputing would move a historical record downwards in front of a
+  // customer. See shared/document/recovered.ts.
   const totalMoved =
-    !isInvoice && Math.abs(recalculatedQuote.total - quote.total) >= 0.01;
+    !isInvoice
+    && !isRecoveredDocId(doc.id)
+    && Math.abs(recalculatedQuote.total - quote.total) >= 0.01;
   const [settled, setSettled] = useState<{ quote: Quote; doc: Document } | null>(null);
   // What every customer-facing surface in this dialog quotes from: the
   // screen's copy until the send flow settles the figures, the settled record
@@ -448,19 +459,26 @@ export function SendDocumentDialog({
   // Record a non-email delivery (SMS / Share / Export) against the doc so its
   // first-send audit is captured. Fully self-contained: a marking failure is
   // swallowed — it must never surface an error to the user mid-send.
-  const recordSend = async (method: SendMethod) => {
+  /**
+   * `sendDoc` is passed in rather than read off `activeDoc`: the settle runs
+   * inside the same handler invocation that later calls us, so the state it
+   * set has not re-rendered this closure yet. The figures would still come out
+   * right — saveQuote re-costs whatever it is handed — but only by accident,
+   * and this write is the one that stamps the send.
+   */
+  const recordSend = async (method: SendMethod, sendDoc: Document) => {
     // Only a doc still in draft actually transitions here; anything already
     // sent/accepted no-ops inside markDocumentSent. Capture that up front so
     // we only notify the host on a real draft→sent move (and never on failure).
-    const wasDraft = activeDoc.stage === 'draft';
+    const wasDraft = sendDoc.stage === 'draft';
     try {
       // Non-email sends do not pass through the email backend's snapshot
       // step. Preserve the exact terms in force when the document leaves so
       // later settings edits cannot rewrite what the customer accepted.
       const currentTerms = businessSettings?.termsAndConditions?.trim();
-      const deliveredDoc = currentTerms && !activeDoc.termsSnapshot
-        ? { ...activeDoc, termsSnapshot: currentTerms, termsVersionHash: hashTerms(currentTerms) }
-        : activeDoc;
+      const deliveredDoc = currentTerms && !sendDoc.termsSnapshot
+        ? { ...sendDoc, termsSnapshot: currentTerms, termsVersionHash: hashTerms(currentTerms) }
+        : sendDoc;
       await markDocumentSent(deliveredDoc, method, { saveQuote, saveInvoice, createInvoiceFromQuote });
     } catch {
       // Best-effort audit; ignore.
@@ -471,7 +489,7 @@ export function SendDocumentDialog({
     // Offer push now that a real customer has the document. No-ops if the
     // tradie already granted or already declined once.
     void maybePromptForPushPermission().catch(() => {});
-    if (wasDraft) onMarkedSent?.(activeDoc, method);
+    if (wasDraft) onMarkedSent?.(sendDoc, method);
   };
 
   const handleSendSMS = async () => {
@@ -535,7 +553,7 @@ export function SendDocumentDialog({
             {
               text: 'Mark as sent',
               onPress: async () => {
-                await recordSend('sms');
+                await recordSend('sms', settledNow.doc);
                 onDismiss();
               },
             },
@@ -555,7 +573,7 @@ export function SendDocumentDialog({
             {
               text: 'Mark as sent',
               onPress: async () => {
-                await recordSend('sms');
+                await recordSend('sms', settledNow.doc);
                 onDismiss();
               },
             },
@@ -564,7 +582,7 @@ export function SendDocumentDialog({
         );
         return;
       }
-      await recordSend('sms');
+      await recordSend('sms', settledNow.doc);
       onDismiss();
     } catch {
       // Keep the send sheet available for a retry or another delivery method.
@@ -585,7 +603,7 @@ export function SendDocumentDialog({
         : `Quote for ${settledNow.quote.customerName}\n${settledNow.quote.job.name}\nTotal: ${formatCurrency(settledNow.quote.total)}`;
       const result = await Share.share({ message, title: isInvoice ? 'Share Invoice' : 'Share Quote' });
       if (result.action === Share.sharedAction) {
-        await recordSend('share');
+        await recordSend('share', settledNow.doc);
       }
     } catch {
       Alert.alert('Error', `Could not share ${isInvoice ? 'invoice' : 'quote'}`);
@@ -601,7 +619,7 @@ export function SendDocumentDialog({
     trackEvent('send_method_chosen', { method: 'export_pdf', doc_type: docType });
     try {
       await exportDocumentPDF(settledNow.doc, businessSettings, 'export', { isPro });
-      await recordSend('export_pdf');
+      await recordSend('export_pdf', settledNow.doc);
     } catch {
       Alert.alert('Error', 'Failed to export PDF. Please try again.');
     }
