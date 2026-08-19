@@ -66,6 +66,12 @@ export type AnalyticsEvent =
   // doc_type + has_customer_email + plan; has_customer_email is what decides
   // between the sheet and going straight to the email preview.
   | 'send_sheet_opened'
+  // The send flow re-costed the quote and landed on a different total than
+  // the screen was showing, so the tradie was asked to confirm before it
+  // went out. Every one of these is a quote that would previously have gone
+  // to a customer with a total the acceptance link then contradicted.
+  // Carries shown_total + settled_total, so the size of the gap is visible.
+  | 'send_total_recalculated'
   // A delivery channel was picked: email / sms / share / export_pdf. Fires
   // for the auto-routed email path too, so sheet friction is measurable as
   // the gap between send_sheet_opened and this.
