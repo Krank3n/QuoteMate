@@ -104,6 +104,7 @@ export function JobsListScreen() {
   const saveQuote = useStore((s) => s.saveQuote);
   const saveInvoice = useStore((s) => s.saveInvoice);
   const createInvoiceFromQuote = useStore((s) => s.createInvoiceFromQuote);
+  const supersedeOtherQuotes = useStore((s) => s.supersedeOtherQuotesOnJob);
 
   // Filter, sort and query live in a store, not in useState — this screen is a
   // tab and tapping into a job unmounts it, so component state would drop the
@@ -330,7 +331,7 @@ export function JobsListScreen() {
         primaryDoc,
         attachedDocs: attached,
         saveJob,
-        helpers: { saveQuote, saveInvoice, createInvoiceFromQuote, navigation },
+        helpers: { saveQuote, saveInvoice, createInvoiceFromQuote, navigation, supersedeOtherQuotes },
       });
     } catch {
       Alert.alert('Error', 'Failed to update stage. Please try again.');

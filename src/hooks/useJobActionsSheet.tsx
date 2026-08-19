@@ -113,6 +113,8 @@ export function useJobActionsSheet(
   const saveQuote = useStore((s) => s.saveQuote);
   const saveInvoice = useStore((s) => s.saveInvoice);
   const createInvoiceFromQuote = useStore((s) => s.createInvoiceFromQuote);
+  const supersedeOtherQuotes = useStore((s) => s.supersedeOtherQuotesOnJob);
+  const addQuoteOptionToJob = useStore((s) => s.addQuoteOptionToJob);
   const convertDocumentToInvoice = useStore((s) => s.convertDocumentToInvoice);
   const revertDocumentToQuote = useStore((s) => s.revertDocumentToQuote);
 
@@ -136,7 +138,7 @@ export function useJobActionsSheet(
         // closes.
         attachedDocs: useStore.getState().documents.filter((d) => d.jobId === job.id),
         saveJob,
-        helpers: { saveQuote, saveInvoice, createInvoiceFromQuote, navigation },
+        helpers: { saveQuote, saveInvoice, createInvoiceFromQuote, navigation, supersedeOtherQuotes },
       });
     } catch {
       showAlert({
@@ -176,6 +178,24 @@ export function useJobActionsSheet(
   const handleActionSelect = async (action: JobAction, job: Job) => {
     setActionsJob(null);
     switch (action) {
+      case 'addOption': {
+        const doc = primaryDocForJob(job);
+        if (!doc) return;
+        try {
+          const option = await addQuoteOptionToJob(doc.id);
+          // Straight into the materials list: an option is a copy that exists
+          // to be changed, so landing on a read-only view would just be a tap
+          // in the way.
+          setCurrentQuote(documentToQuote(option));
+          navigation.navigate('NewJob', {
+            screen: 'MaterialsList',
+            params: { editing: true },
+          });
+        } catch (e: any) {
+          Alert.alert('Could not add an option', e?.message || 'Please try again.');
+        }
+        return;
+      }
       case 'edit': {
         const doc = primaryDocForJob(job);
         if (!doc) return;
@@ -460,6 +480,7 @@ export function useJobActionsSheet(
         saveQuote,
         saveInvoice,
         createInvoiceFromQuote,
+        supersedeOtherQuotes,
         navigation,
       });
     } catch {

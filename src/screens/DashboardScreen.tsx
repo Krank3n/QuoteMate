@@ -302,6 +302,7 @@ export function DashboardScreen() {
   const saveQuote = useStore((s) => s.saveQuote);
   const canCreateQuote = useStore((s) => s.canCreateQuote);
   const createInvoiceFromQuote = useStore((s) => s.createInvoiceFromQuote);
+  const supersedeOtherQuotes = useStore((s) => s.supersedeOtherQuotesOnJob);
   const saveInvoice = useStore((s) => s.saveInvoice);
   const loadQuotes = useStore((s) => s.loadQuotes);
   const saveDraft = useStore((s) => s.saveDraft);
@@ -491,7 +492,7 @@ export function DashboardScreen() {
         primaryDoc,
         attachedDocs: attached,
         saveJob,
-        helpers: { saveQuote, saveInvoice, createInvoiceFromQuote, navigation },
+        helpers: { saveQuote, saveInvoice, createInvoiceFromQuote, navigation, supersedeOtherQuotes },
       });
     } catch {
       Alert.alert('Error', 'Failed to update stage. Please try again.');
@@ -637,6 +638,7 @@ export function DashboardScreen() {
         saveQuote,
         saveInvoice,
         createInvoiceFromQuote,
+        supersedeOtherQuotes,
         navigation,
       });
     } catch {

@@ -27,6 +27,7 @@ import {
 } from '../utils/jobStageTargets';
 import { canRevertToQuote } from '../utils/revertToQuote';
 import { canConvertDocument } from '../../shared/document/convertGuard';
+import { canAddQuoteOption } from '../../shared/document/quoteOptions';
 import { isLiveInvoice, jobStatusLabel } from '../utils/jobTimeline';
 import { jobStageMetaFor } from './JobStageSheet';
 import { StageOptionRow } from './StageOptionRow';
@@ -38,6 +39,7 @@ export type JobAction =
   | 'edit'
   | 'send'
   | 'convertToInvoice'
+  | 'addOption'
   | 'revertToQuote'
   | 'duplicate'
   | 'service_report'
@@ -182,6 +184,13 @@ export const ROWS: RowDef[] = [
     // Quotes only, and never re-offer once invoiced — conversion is
     // one-way and the idempotent path already guards double-taps.
     when: ({ primaryDoc }) => canConvert(primaryDoc),
+  },
+  {
+    id: 'addOption',
+    label: 'Add another option',
+    sub: 'A second price for this job — your customer picks one',
+    icon: 'file-multiple-outline',
+    when: ({ primaryDoc }) => canAddQuoteOption(primaryDoc),
   },
   {
     id: 'duplicate',

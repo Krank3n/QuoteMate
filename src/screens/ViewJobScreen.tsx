@@ -83,6 +83,8 @@ export function ViewJobScreen() {
   const saveQuote = useStore((s) => s.saveQuote);
   const saveInvoice = useStore((s) => s.saveInvoice);
   const createInvoiceFromQuote = useStore((s) => s.createInvoiceFromQuote);
+  const supersedeOtherQuotes = useStore((s) => s.supersedeOtherQuotesOnJob);
+  const addQuoteOptionToJob = useStore((s) => s.addQuoteOptionToJob);
   const convertDocumentToInvoice = useStore((s) => s.convertDocumentToInvoice);
   const duplicateDocumentForJob = useStore((s) => s.duplicateDocumentForJob);
   const setCurrentQuote = useStore((s) => s.setCurrentQuote);
@@ -286,7 +288,7 @@ export function ViewJobScreen() {
         primaryDoc: actionableDoc,
         attachedDocs,
         saveJob,
-        helpers: { saveQuote, saveInvoice, createInvoiceFromQuote, navigation },
+        helpers: { saveQuote, saveInvoice, createInvoiceFromQuote, navigation, supersedeOtherQuotes },
       });
     } catch (err) {
       console.error('[ViewJob] applyStageTransition failed', err);
@@ -471,6 +473,7 @@ export function ViewJobScreen() {
               saveQuote,
               saveInvoice,
               createInvoiceFromQuote,
+              supersedeOtherQuotes,
               navigation,
             });
           }
@@ -498,6 +501,7 @@ export function ViewJobScreen() {
               saveQuote,
               saveInvoice,
               createInvoiceFromQuote,
+              supersedeOtherQuotes,
               navigation,
             });
             await saveJob({ ...job, stage: 'accepted' });
@@ -534,6 +538,7 @@ export function ViewJobScreen() {
               saveQuote,
               saveInvoice,
               createInvoiceFromQuote,
+              supersedeOtherQuotes,
               navigation,
             });
           }
@@ -693,6 +698,21 @@ export function ViewJobScreen() {
           handleConvertToInvoice(primaryDoc);
         }
         break;
+      case 'addOption':
+        if (primaryDoc && primaryDoc.type === 'quote') {
+          try {
+            const option = await addQuoteOptionToJob(primaryDoc.id);
+            // An option exists to be edited — open it where the prices are.
+            openEditorForDoc(option, 'materials');
+          } catch (e: any) {
+            showAlert({
+              type: 'error',
+              title: 'Could not add an option',
+              message: e?.message || 'Please try again.',
+            });
+          }
+        }
+        break;
       case 'followUp':
         if (primaryDoc) {
           setFollowUpState({
@@ -839,6 +859,7 @@ export function ViewJobScreen() {
         saveQuote,
         saveInvoice,
         createInvoiceFromQuote,
+        supersedeOtherQuotes,
         navigation,
       });
     } catch {
@@ -871,6 +892,7 @@ export function ViewJobScreen() {
         saveQuote,
         saveInvoice,
         createInvoiceFromQuote,
+        supersedeOtherQuotes,
         navigation,
       });
     } catch {

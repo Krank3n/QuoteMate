@@ -178,6 +178,7 @@ export { storeGoogleCalendarToken, disconnectGoogleCalendar } from './googleCale
 export { onJobWriteSyncCal } from './googleCalendarSync';
 export { requestKatieDemoCall, getKatieSignupLink, katieRecoveryDrip } from './callKatie';
 import { quoteRecordToDocumentRecord, invoiceRecordToDocumentRecord } from './shared/document/adapter';
+import { supersedeSiblingQuotes } from './quoteOptions.helpers';
 import { getAussieMessage, AussieEvent } from './aussieNotifications';
 import {
   decidePush,
@@ -6685,6 +6686,43 @@ export const respondToQuote = functions.https.onRequest((req, res) => {
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
 
+      // A job can carry more than one quote — competing options, of which the
+      // customer picks one (see shared/document/quoteOptions.ts). The moment
+      // they accept one, the others are off the table; leaving them live would
+      // leave the tradie unable to tell which price was agreed. The mirror
+      // carries status='cancelled' through to the unified documents.
+      //
+      // Best-effort and deliberately after the accept: the customer's answer
+      // is the thing that must not be lost, and no sibling bookkeeping is
+      // worth failing it for.
+      if (response === 'accepted' && foundUserId) {
+        try {
+          const quotesCol = db.collection('users').doc(foundUserId).collection('quotes');
+          const result = await supersedeSiblingQuotes(
+            {
+              quotes: quotesCol as any,
+              batch: () => db.batch() as any,
+              now: () => admin.firestore.FieldValue.serverTimestamp(),
+            },
+            foundQuoteRef.id,
+            foundQuote,
+          );
+          if (result.superseded.length > 0) {
+            functions.logger.info('[quoteOptions] superseded_on_accept', {
+              userId: foundUserId,
+              jobId: foundQuote.jobId,
+              accepted: foundQuoteRef.id,
+              superseded: result.superseded.length,
+            });
+          }
+        } catch (err: any) {
+          functions.logger.warn('[quoteOptions] supersede_failed', {
+            userId: foundUserId,
+            jobId: foundQuote.jobId,
+            error: err?.message,
+          });
+        }
+      }
 
       // Send email notification to business owner
       if (businessSettings?.email) {
