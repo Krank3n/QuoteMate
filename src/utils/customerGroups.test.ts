@@ -365,6 +365,28 @@ describe('computeCustomerRollup', () => {
     return computeCustomerRollup(groups[0], jobsById(jobs), docsMap(docs));
   }
 
+  it('counts one quote per job, not every option', () => {
+    // A job with two competing options is worth one of them. Summing would
+    // inflate what the customer is shown as quoted.
+    const jobs = [job({ id: 'a' })];
+    const docs = {
+      a: [
+        quote({ id: 'opt1', stage: 'quote_sent', total: 6675.02, updatedAt: 2 }),
+        quote({ id: 'opt2', stage: 'draft', total: 6116, updatedAt: 1 }),
+      ],
+    };
+    expect(rollupFor(jobs, docs).totalQuoted).toBe(6675.02);
+  });
+
+  it('still adds one quote per job ACROSS jobs', () => {
+    const jobs = [job({ id: 'a' }), job({ id: 'b' })];
+    const docs = {
+      a: [quote({ id: 'q1', total: 100 })],
+      b: [quote({ id: 'q2', total: 200 })],
+    };
+    expect(rollupFor(jobs, docs).totalQuoted).toBe(300);
+  });
+
   it('sums owed across two unpaid invoices on different jobs', () => {
     const jobs = [job({ id: 'a' }), job({ id: 'b' })];
     const docs = {

@@ -37,10 +37,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { Job, JobStage } from '../../shared/job/types';
 import type { Document } from '../types/document';
+import { pickPrimaryDoc } from '../utils/pickPrimaryDoc';
 import type { Tokens } from '../theme';
 import { makeStyles, useThemeColors } from '../theme';
 import { selectionTap, lightTap } from '../utils/haptics';
 import { isStillBooked } from '../utils/jobBuckets';
+
+export { pickPrimaryDoc };
 
 export type JobActionId =
   | 'createQuote'
@@ -131,20 +134,6 @@ interface StickyJobActionBarProps {
   primaryDoc: Document | null;
   onAction: (id: JobActionId) => void;
   pending?: JobActionId | null;
-}
-
-/** Pick the primary actionable doc: any invoice beats the latest quote. */
-export function pickPrimaryDoc(docs: Document[]): Document | null {
-  if (docs.length === 0) return null;
-  const invoices = docs.filter((d) => d.type === 'invoice');
-  if (invoices.length > 0) {
-    return [...invoices].sort(
-      (a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0),
-    )[0];
-  }
-  return [...docs].sort(
-    (a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0),
-  )[0];
 }
 
 /**

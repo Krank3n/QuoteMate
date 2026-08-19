@@ -66,6 +66,28 @@ function order(jobs: any[], key: JobSortKey, docs: Record<string, any[]> = {}, n
 }
 
 describe('jobHeadlineValue — money comes from the documents, never the Job', () => {
+  it('headlines ONE of a job’s competing quote options, never their sum', () => {
+    // Two alternatives, one job. Adding them prints a price the customer was
+    // never offered. See shared/job/aggregate.ts.
+    const money = jobHeadlineValue([
+      quote({ id: 'opt1', stage: 'quote_sent', total: 6675.02, updatedAt: 2 }),
+      quote({ id: 'opt2', stage: 'draft', total: 6116, updatedAt: 1 }),
+    ]);
+    expect(money).toEqual({ value: 6675.02, kind: 'quoted' });
+  });
+
+  it('headlines the accepted option once the customer has chosen', () => {
+    const money = jobHeadlineValue([
+      quote({ id: 'opt1', stage: 'quote_sent', total: 9999, updatedAt: 9 }),
+      quote({ id: 'opt2', stage: 'quote_accepted', total: 6116, updatedAt: 1 }),
+    ]);
+    expect(money).toEqual({ value: 6116, kind: 'quoted' });
+  });
+
+  it('is unchanged for the ordinary one-quote job', () => {
+    expect(jobHeadlineValue([quote({ total: 972.4 })])).toEqual({ value: 972.4, kind: 'quoted' });
+  });
+
   it('REGRESSION: ignores a stale stored balanceDue and recomputes from total minus paidTotal', () => {
     // Stored balanceDue says 999; the real outstanding amount is 400.
     const money = jobHeadlineValue([invoice({ total: 1000, paidTotal: 600, balanceDue: 999 })]);

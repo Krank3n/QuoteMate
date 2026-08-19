@@ -29,6 +29,7 @@
 
 import type { Job } from '../../shared/job/types';
 import type { Document } from '../types/document';
+import { representativeQuote } from '../../shared/job/aggregate';
 import { jobStatusTimestamp, sortJobsForList } from './jobTimeline';
 import { toMs } from './followUpNudge';
 
@@ -91,20 +92,27 @@ function invoiceBalance(doc: Document): number {
 export function jobHeadlineValue(docs: Document[]): JobMoney {
   const live = (docs || []).filter((d) => d && d.stage !== 'cancelled');
 
-  let totalQuoted = 0;
   let totalInvoiced = 0;
   let totalPaid = 0;
   let owing = 0;
 
   for (const d of live) {
     const total = Number(d.total) || 0;
-    if (d.type === 'quote') totalQuoted += total;
     if (d.type === 'invoice') {
       totalInvoiced += total;
       owing += invoiceBalance(d);
     }
     totalPaid += Number(d.paidTotal) || 0;
   }
+
+  // Several quotes on one job are competing OPTIONS, not parts of the work, so
+  // the card prints ONE of them. Summing would headline a price the customer
+  // was never offered — $12,791 for a job whose two options are $6,675 and
+  // $6,116. Same rule as the server aggregate, so the card and the job's own
+  // stored figure agree. See shared/job/aggregate.ts.
+  const totalQuoted = Number(
+    representativeQuote(live.filter((d) => d.type === 'quote'))?.total,
+  ) || 0;
 
   if (totalInvoiced > 0) {
     if (owing > EPSILON) return { value: owing, kind: 'owing' };
