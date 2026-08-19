@@ -142,7 +142,7 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
   {
     name: 'review_quote',
     description:
-      "Check a priced quote for rows the pricing pipeline flagged — items with no price, AI estimates that aren't real supplier prices, and low-confidence matches. Returns a compact summary plus the flagged rows (no full materials dump). Use this to answer \"anything look off / dodgy on QU-xxx?\" or before sending, and to decide whether to offer propose_reprice. Returns { summary, counts, issues[] } where each issue has kind ('unpriced' | 'estimated' | 'low_confidence'), name and a short detail.",
+      "Check a priced quote for rows the pricing pipeline flagged — items with no price, rows priced off a product that barely matches the request, AI estimates that aren't real supplier prices, and low-confidence matches. Returns a compact summary plus the flagged rows (no full materials dump). Use this to answer \"anything look off / dodgy on QU-xxx?\" or before sending, and to decide whether to offer propose_reprice. Returns { summary, counts, issues[] } where each issue has kind ('unpriced' | 'weak_match' | 'estimated' | 'low_confidence'), name and a short detail. 'weak_match' is the most serious: a real supplier price for what may be the wrong product — always call those out by name.",
     parameters: {
       type: 'object',
       properties: {

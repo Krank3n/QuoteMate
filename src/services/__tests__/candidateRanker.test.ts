@@ -8,6 +8,89 @@ const c = (
 ): RankableCandidate => ({ price, productName, ...extra });
 
 describe('pickBestCandidate', () => {
+  describe('match-evidence gate (QU-178711)', () => {
+    it('returns null when no priced candidate resembles the request', () => {
+      // What the Bunnings scraper actually returned for a concreter's tie
+      // wire row. Every hit was priced and stamped confidence 'high', and the
+      // ranker applied the best of them at $19.99.
+      const candidates = [
+        c(9.99, 'Ryobi 1.5mm Rotary Diamond Cylinder Point Bit', { confidence: 'high' }),
+        c(6, 'Paint Partner 1.2m Composite Wood Paintpole - 1200mm', { confidence: 'high' }),
+        c(19.99, 'Ryobi 1.6mm Rotary Tool Grout Removal Bit', { confidence: 'high' }),
+        c(19.99, 'Ryobi 3.2mm Rotary Tool Grout Removal Bit', { confidence: 'high' }),
+      ];
+      expect(
+        pickBestCandidate(candidates, { name: 'Tie Wire Roll', searchTerm: 'builders tie wire roll 1.5mm' }),
+      ).toBeNull();
+    });
+
+    it('refuses a match whose only tie to the request is an incidental word', () => {
+      // "Towel Bar" for "N12 starter bar" shares nothing but the word "bar".
+      // This shipped as 30 x $85 = $2,550 of chrome towel rails on a
+      // concreter's driveway quote, stamped high confidence.
+      const candidates = [
+        c(85, 'Mondella 935mm Chrome Resonance Double Towel Bar', { confidence: 'high' }),
+        c(72, 'Mondella 620mm Chrome Maestro Double Towel Bar', { confidence: 'high' }),
+        c(83, 'Mondella 935mm Chrome Plated Maestro Double Towel Bar', { confidence: 'high' }),
+      ];
+      expect(
+        pickBestCandidate(candidates, {
+          name: 'N12 Starter Bars 600mm',
+          searchTerm: 'N12 starter bar 600mm dowel',
+        }),
+      ).toBeNull();
+    });
+
+    it('still accepts a same-spec substitute with no shared noun', () => {
+      // The gate reads dimensions as well as words, so a legitimate framing
+      // substitution for a rafter row survives it.
+      const timber = c(18, '140 x 45mm MGP10 Pine Framing 3.6m');
+      expect(
+        pickBestCandidate([timber, c(9, 'Craftright 190mm Sliding Bevel')], {
+          name: 'Rafters 140x45mm 3.6m',
+          searchTerm: 'Rafters 140x45mm 3.6m',
+        }),
+      ).toBe(timber);
+    });
+
+    it('drops only the unrelated candidates when a real one is present', () => {
+      const real = c(89, 'SL72 Reinforcing Mesh Sheet 6000 x 2400mm');
+      const picked = pickBestCandidate(
+        [c(19.99, 'Ryobi 1.6mm Rotary Tool Grout Removal Bit'), real],
+        { name: 'SL72 Reinforcing Mesh', searchTerm: 'SL72 reinforcing mesh sheet' },
+      );
+      expect(picked).toBe(real);
+    });
+
+    it('does not let a refusal move the price band for the rows it keeps', () => {
+      // The gate decides eligibility, not price. Refusing the $23.88 "4 Cut
+      // Tip" must not shift the median that the tier bias scores against —
+      // deriving it from the surviving set handed this row an 8-piece SET.
+      const single = c(29.9, 'Kango 14mm x 260mm K4 SDS Plus Drill Bit', { confidence: 'high' });
+      const picked = pickBestCandidate(
+        [
+          single,
+          c(75.95, 'Kango 14mm x 600mm K4 SDS Plus Drill Bit', { confidence: 'high' }),
+          c(16.98, 'Full Boar 14mm TCT Masonry Drill Bit', { confidence: 'high' }),
+          c(48.98, 'Kango K2 8 Piece SDS Plus Drill Bit Set', { confidence: 'high' }),
+          c(23.88, 'Full Boar 14mm x 210mm 4 Cut Tip for SDS-Plus Hammers', { confidence: 'high' }),
+        ],
+        { name: 'Masonry Drill Bit 14mm SDS', searchTerm: 'masonry drill bit 14mm SDS' },
+      );
+      expect(picked).toBe(single);
+    });
+
+    it('keeps the single-candidate path behind the same gate', () => {
+      // priced.length === 1 short-circuits the scoring, so the gate has to sit
+      // in the filter above it or a lone bad hit walks straight through.
+      expect(
+        pickBestCandidate([c(85, 'Mondella 935mm Chrome Double Towel Bar')], {
+          searchTerm: 'builders tie wire roll 1.5mm',
+        }),
+      ).toBeNull();
+    });
+  });
+
   it('returns null for empty list', () => {
     expect(pickBestCandidate([])).toBeNull();
   });

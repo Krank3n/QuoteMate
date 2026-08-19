@@ -70,3 +70,65 @@ describe('tradeFallbackUnitPrice — new table entries', () => {
     expect(tradeFallbackUnitPrice('something with no rule at all', 'each')).toBeNull();
   });
 });
+
+describe('reinforcing steel is a steel-merchant line, not a hardware shelf (QU-178711)', () => {
+  it('keeps N-bar / starter bar / dowel rows out of retail search', () => {
+    expect(isNonRetailTradeRow('N12 starter bar 600mm dowel N12 Starter Bars 600mm')).toBe(true);
+    expect(isNonRetailTradeRow('n16 reo bar 6m')).toBe(true);
+    expect(isNonRetailTradeRow('deformed bar 12mm')).toBe(true);
+    expect(isNonRetailTradeRow('rebar 500mm')).toBe(true);
+  });
+
+  it('keeps slab mesh sheets out of retail search', () => {
+    expect(isNonRetailTradeRow('SL72 reinforcing mesh sheet')).toBe(true);
+    expect(isNonRetailTradeRow('sl82 mesh sheet 6.0 x 2.4m')).toBe(true);
+  });
+
+  it('keeps steel formwork pegs out of retail search', () => {
+    expect(isNonRetailTradeRow('steel formwork peg 600mm')).toBe(true);
+    expect(isNonRetailTradeRow('galvanised formwork pins 450mm')).toBe(true);
+  });
+
+  it('leaves hardwood formwork pegs on the retail path', () => {
+    // They are just hardwood stakes, which Bunnings stocks at $2-3; the audit
+    // caught them being priced off the steel table at $7.
+    expect(isNonRetailTradeRow('hardwood peg 300mm Hardwood Formwork Pegs 300mm')).toBe(false);
+    expect(tradeFallbackUnitPrice('hardwood peg 300mm Hardwood Formwork Pegs 300mm', 'each')).not.toBe(7);
+  });
+
+  it('prices a split-system wall bracket as a bracket pair, not an angle bracket', () => {
+    expect(tradeFallbackUnitPrice('heavy duty air conditioner wall bracket', 'each')).toBe(55);
+    expect(tradeFallbackUnitPrice('galvanised angle bracket', 'each')).toBe(3);
+  });
+
+  it('leaves the reo lines Bunnings genuinely stocks on the retail path', () => {
+    // Both priced correctly by the scraper on QU-178711 — routing them away
+    // would swap a real shelf price for a table guess.
+    expect(isNonRetailTradeRow('trench mesh 3 bar 6m Trench Mesh 3-Bar')).toBe(false);
+    expect(isNonRetailTradeRow('concrete bar chairs 50/65mm Bar Chairs 50/65mm')).toBe(false);
+    expect(isNonRetailTradeRow('reinforcing bar chairs 50mm')).toBe(false);
+    expect(isNonRetailTradeRow('builders tie wire roll 1.5mm')).toBe(false);
+  });
+
+  it('prices a cut starter bar as a cut piece and a stock bar as a length', () => {
+    // A 600mm dowel and a 6m stock bar are the same product at very different
+    // money; the row name carries the only signal that separates them.
+    expect(tradeFallbackUnitPrice('N12 starter bar 600mm dowel', 'each')).toBe(6);
+    expect(tradeFallbackUnitPrice('N12 reinforcing bar 6000mm', 'each')).toBe(26);
+    expect(tradeFallbackUnitPrice('N12 reinforcing bar', 'each')).toBe(26);
+    expect(tradeFallbackUnitPrice('N12 reinforcing bar', 'm')).toBe(4);
+  });
+
+  it('prices mesh per sheet or per square metre', () => {
+    expect(tradeFallbackUnitPrice('SL72 reinforcing mesh sheet', 'each')).toBe(105);
+    expect(tradeFallbackUnitPrice('SL72 reinforcing mesh sheet', 'm²')).toBe(8);
+  });
+
+  it('prices steel formwork pegs', () => {
+    expect(tradeFallbackUnitPrice('steel formwork peg 600mm', 'each')).toBe(7);
+  });
+
+  it('never returns the towel-bar money for a starter bar', () => {
+    expect(tradeFallbackUnitPrice('N12 starter bar 600mm dowel', 'each')).toBeLessThan(20);
+  });
+});

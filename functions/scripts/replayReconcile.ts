@@ -16,6 +16,7 @@ import { parseJobAreaM2, geometricSanePieceCount } from '../../src/utils/geometr
 import { parsePackInfo } from '../../src/utils/parsePackInfo';
 import { simplifySearchTerm } from '../../src/utils/simplifySearchTerm';
 import { isSemanticallyCompatible } from '../../src/services/candidateRanker';
+import { matchEvidence } from '../../src/utils/matchEvidence';
 import { ReconcileItem, ReconcileItemCandidate, ReconcileDecision } from '../src/reconcile.helpers';
 
 export interface ReplayScraperCandidate {
@@ -72,11 +73,16 @@ export function buildReconcileItems(
     // (e.g. "PPE Consumables Allowance") gets handed retail candidates the
     // routing already excluded and the LLM applies one (ear muffs, $11).
     if (row.priceStatus === 'estimated-trade' || row.priceStatus === 'unpriced-trade') return;
-    // Same semantic/spec gate as round-1 ranking — the reconcile LLM must
-    // never be offered a candidate the gate already refused (70x35 framing
-    // for a 140x45 rafter request).
-    const cands = (candidatesBySearchTerm.get(row.searchTerm) || []).filter((c) =>
-      isSemanticallyCompatible(row.searchTerm || row.name, c.productName || '')
+    // Same semantic/spec gate AND match-evidence bar as round-1 ranking — the
+    // reconcile LLM must never be offered a candidate the gate already refused
+    // (70x35 framing for a 140x45 rafter request; a chrome towel bar for an
+    // N12 starter bar). Keep both filters in step with materialsPipeline's
+    // gatedCandidatesByMaterialId or this audit grades a pipeline that isn't
+    // the one in production.
+    const cands = (candidatesBySearchTerm.get(row.searchTerm) || []).filter(
+      (c) =>
+        isSemanticallyCompatible(row.searchTerm || row.name, c.productName || '') &&
+        matchEvidence(row.searchTerm || row.name, c.productName || '') === 'strong'
     );
     if (cands.length === 0) return;
     const id = `row-${i}`;
@@ -258,8 +264,10 @@ export async function rescueRejectedRows(
       const m = rows[i];
       // Gate against the ORIGINAL name — the simplified term dropped specs
       // to broaden the search, but specs still decide what's acceptable.
-      const found = (cands.get(term) || []).filter((c) =>
-        isSemanticallyCompatible(m.name, c.productName || '')
+      const found = (cands.get(term) || []).filter(
+        (c) =>
+          isSemanticallyCompatible(m.name, c.productName || '') &&
+          matchEvidence(m.name, c.productName || '') === 'strong'
       );
       if (found.length === 0) continue;
       const id = `row-${i}`;

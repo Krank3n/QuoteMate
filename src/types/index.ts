@@ -62,6 +62,12 @@ export interface Material {
   // Pricing and product metadata
   pricingSource?: 'scraper' | 'api' | 'ai' | 'manual'; // Where the price came from
   priceConfidence?: 'high' | 'medium' | 'low'; // AI price confidence level
+  // The priced product barely resembles what we searched for — a lexical
+  // near-miss the supplier still returned (see utils/matchEvidence.ts). The
+  // price is real, but it may be a real price for the WRONG product, so this
+  // gates the send rather than just tinting the row. Cleared on a re-price
+  // that lands a proper match.
+  weakProductMatch?: boolean;
   // Snapshot of the row as the pricing pipeline last left it (see
   // utils/asPriced.ts). Send-time telemetry diffs the sent row against this
   // to log tradie corrections — confirmed pipeline misses. Absent on
