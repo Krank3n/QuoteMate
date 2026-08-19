@@ -30,7 +30,10 @@ export function isNonRetailTradeRow(nameText: string, unit?: string, qty?: numbe
   // genuinely stocks and prices correctly.
   if (/\bn(?:12|16|20|24|28|32|36)\b.*\b(?:bar|rod|dowel|reo|starter)\b|\b(?:starter|dowel|deformed|reinforcing|reo)\s+bars?\b(?!\s*chairs?)|\brebar\b/.test(name)) return true;
   if (/\bsl\s?(?:52|62|72|82|92|102)\b|\b(?:reo|slab|reinforcing)\s+mesh\b|\bmesh\s+sheets?\b/.test(name) && !/trench/.test(name)) return true;
-  if (/formwork\s+(?:pegs?|pins?|stakes?)|\bform\s+pegs?\b/.test(name)) return true;
+  // Steel/metal formwork pegs only: hardwood formwork pegs are stocked (they
+  // are just hardwood stakes) and routing them here priced a $2-3 timber peg
+  // off the steel table.
+  if (/\b(?:steel|metal|galvanised|galvanized)\b[^.]*\bformwork\s+(?:pegs?|pins?)|\bformwork\s+(?:pegs?|pins?)\b[^.]*\b(?:steel|metal|galvanised|galvanized)\b/.test(name)) return true;
   if (/plasterboard|villaboard|fibre\s+cement\s+sheet|fiber\s+cement\s+sheet|cement\s+sheet|cladding\s+sheets?|external\s+cladding|floor\s+tiles?|wall\s+tiles?|\bgrout\b|basin\s+mixer|mixer\s+tap|plumber'?s?\s+putty|plumbing\s+putty|debris\s+netting|safety\s+debris/.test(name)) return true;
   if (/road\s+base|crusher\s+dust|aggregate\s+base/.test(name)) return true;
   if (/green\s+waste|tip\s*fee|tipping|dumping|disposal|hook\s*bin|soil\s+disposal|spoil\s+disposal|dirt\s+disposal|heavy\s+waste/.test(name)) return true;
@@ -76,7 +79,7 @@ export function tradeFallbackUnitPrice(nameText: string, unit?: string): number 
   if (/\bsl\s?(?:52|62|72|82|92|102)\b|\b(?:reo|slab|reinforcing)\s+mesh\b|\bmesh\s+sheets?\b/.test(name) && !/trench/.test(name)) {
     return unit === 'm²' ? 8 : 105;
   }
-  if (/formwork\s+(?:pegs?|pins?|stakes?)|\bform\s+pegs?\b/.test(name)) return 7;
+  if (/\b(?:steel|metal|galvanised|galvanized)\b[^.]*\bformwork\s+(?:pegs?|pins?)|\bformwork\s+(?:pegs?|pins?)\b[^.]*\b(?:steel|metal|galvanised|galvanized)\b/.test(name)) return 7;
   if (/\b(?:rhs|shs)\b|rectangular\s+hollow|square\s+hollow/.test(name)) return unit === 'm' ? 45 : 180;
   if (/steel\s+base\s+plate|base\s+plate/.test(name)) return 28;
   if (/steel\s+post|galvanised\s+post|galvanized\s+post/.test(name)) return unit === 'm' ? 38 : 90;
@@ -105,6 +108,9 @@ export function tradeFallbackUnitPrice(nameText: string, unit?: string): number 
   if (/sliding\s+gate\s+wheels?|gate\s+wheels?/.test(name)) return 35;
   if (/electrical\s+tape|insulation\s+tape/.test(name)) return 5;
   if (/joist\s+hanger/.test(name)) return 8;
+  // Before the generic bracket rule: a split-system wall bracket is a ~$55
+  // pair, not a $3 angle bracket, and the audit caught it landing on $3.
+  if (/(?:air\s*con(?:ditioner)?|aircon|split\s+system|condenser)[^.]*\bbrackets?\b|\bbrackets?\b[^.]*(?:air\s*con(?:ditioner)?|aircon|split\s+system|condenser)/.test(name)) return 55;
   if (/bracket|multigrip|connector|clip/.test(name)) return 3;
   if (/silicone|sealant|caulk/.test(name)) return 14;
   if (/pointing\s+compound/.test(name)) return unit === 'L' ? 5.5 : 55;

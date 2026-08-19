@@ -86,6 +86,19 @@ describe('reinforcing steel is a steel-merchant line, not a hardware shelf (QU-1
 
   it('keeps steel formwork pegs out of retail search', () => {
     expect(isNonRetailTradeRow('steel formwork peg 600mm')).toBe(true);
+    expect(isNonRetailTradeRow('galvanised formwork pins 450mm')).toBe(true);
+  });
+
+  it('leaves hardwood formwork pegs on the retail path', () => {
+    // They are just hardwood stakes, which Bunnings stocks at $2-3; the audit
+    // caught them being priced off the steel table at $7.
+    expect(isNonRetailTradeRow('hardwood peg 300mm Hardwood Formwork Pegs 300mm')).toBe(false);
+    expect(tradeFallbackUnitPrice('hardwood peg 300mm Hardwood Formwork Pegs 300mm', 'each')).not.toBe(7);
+  });
+
+  it('prices a split-system wall bracket as a bracket pair, not an angle bracket', () => {
+    expect(tradeFallbackUnitPrice('heavy duty air conditioner wall bracket', 'each')).toBe(55);
+    expect(tradeFallbackUnitPrice('galvanised angle bracket', 'each')).toBe(3);
   });
 
   it('leaves the reo lines Bunnings genuinely stocks on the retail path', () => {

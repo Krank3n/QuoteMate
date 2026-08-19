@@ -54,11 +54,27 @@ const GENERIC_WORDS = new Set([
 const LENGTH_TO_MM: Record<string, number> = { mm: 1, cm: 10, m: 1000 };
 
 /**
- * Conservative plural fold. English -es only collapses after a sibilant
+ * Fold a word to its stem so two spellings of the same thing meet.
+ *
+ * Deliberately inflectional only — never derivational. Stripping -er would
+ * fold "painter" onto "paint" and -all would fold "coveralls" onto "cover",
+ * which is how "Disposable painters coveralls" came to be priced as a paint
+ * roller cover in the first place. -es only collapses after a sibilant
  * ("boxes" → "box"); applying it blindly turned "hinges" into "hing" and made
  * a legitimate hinge match look like no evidence at all.
+ *
+ * The -ing/-ed arm (with consonant undoubling) is what lets "punched metal
+ * strap bracing" meet "Galvanised Strapping", and "Spotting chemicals" meet
+ * "Spot and Stain Remover" — both correct matches the audit caught this
+ * refusing. The 4-character floor stops "string" collapsing to "str".
  */
-function singular(t: string): string {
+function stem(t: string): string {
+  const inflected = t.match(/^(.{4,}?)(?:ing|ed|en)$/);
+  if (inflected) {
+    const base = inflected[1];
+    // "strapping" → "strapp" → "strap"; "spotting" → "spott" → "spot".
+    return /([bdfglmnprt])\1$/.test(base) ? base.slice(0, -1) : base;
+  }
   if (t.length > 4 && /(?:s|x|z|ch|sh)es$/.test(t)) return t.slice(0, -2);
   if (t.length > 3 && /[^s]s$/.test(t)) return t.slice(0, -1);
   return t;
@@ -109,7 +125,7 @@ function fingerprint(s: string): Fingerprint {
     // Trailing-unit forms the split above leaves alone ("600mm" already
     // handled; "1200w", "10a" are kept as words — they're specs, not sizes).
     if (t.length <= 2) continue;
-    const w = singular(t.replace(/\./g, ''));
+    const w = stem(t.replace(/\./g, ''));
     if (w.length > 2 && !GENERIC_WORDS.has(w)) {
       words.add(w);
       ordered.push(w);
@@ -162,6 +178,13 @@ export function matchEvidence(query: string, productName: string): MatchEvidence
   if (specChain && sharedMeasures === q.measures.size) return 'strong';
 
   if (q.words.size === 0) return sharedMeasures > 0 ? 'strong' : 'none';
+
+  // Agreement on WHAT it is (a shared word) and WHAT SIZE it is (a shared
+  // dimension) is evidence on both axes, and outranks bare word coverage.
+  // Without it a "20mm corrugated condensate drain pipe" row dropped the
+  // 20mm corrugated conduit it had matched and took a 2.5m washing-machine
+  // drain hose at 2.3x the price, purely on having one more shared word.
+  if (sharedWords > 0 && sharedMeasures > 0) return 'strong';
 
   // A compound hit can push the count past the word total; cap the ratio.
   return Math.min(sharedWords, q.words.size) / q.words.size >= STRONG_WORD_COVERAGE

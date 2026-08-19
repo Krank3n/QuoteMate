@@ -37,6 +37,17 @@ describe('matchEvidence', () => {
   });
 
   describe("'weak' — one incidental word, apply but flag", () => {
+    it('is where a verbose query lands even on a correct match', () => {
+      // Known and accepted cost. "punched metal strap bracing hoop iron"
+      // names the thing four ways; the product uses one of them, so coverage
+      // is 1/6 and this correct match is refused to an estimate. Loosening
+      // coverage far enough to catch it is what lets a towel bar through for
+      // "N12 starter bar" — a flagged estimate is the cheaper mistake.
+      expect(
+        matchEvidence('punched metal strap bracing hoop iron', 'Bremick 25mm x 0.8mm x 30 Metres Galvanised Strapping'),
+      ).toBe('weak');
+    });
+
     it('grades a chrome towel bar against N12 starter bars as weak (QU-178711)', () => {
       // The only tie is the word "bar". This shipped 30 × $85 = $2,550.
       expect(
@@ -108,6 +119,28 @@ describe('matchEvidence', () => {
       expect(matchEvidence('Junction Box 4-Way IP54', 'DETA Junction Box With 4 x 40A Connectors')).toBe(
         'strong',
       );
+    });
+
+    it('meets an inflected form of the same word (found by the replay audit)', () => {
+      // "Spotting" vs "Spot" was refused outright before the -ing arm, and it
+      // is a correct match — a carpet cleaner's spotting chemical.
+      expect(matchEvidence('Spotting chemicals', 'No Vac 550g Instant Spot And Stain Remover')).toBe('strong');
+    });
+
+    it('does not fold a derived word onto its root', () => {
+      // -er and -all are derivational, not inflectional. Folding them is how
+      // "Disposable painters coveralls" got priced as a paint roller cover.
+      expect(
+        matchEvidence('Disposable painters coveralls', 'Paint Partner 230mm Paint Roller Cover - 8 Pack'),
+      ).toBe('none');
+    });
+
+    it('counts agreement on both what it is and what size it is', () => {
+      // Word coverage alone dropped the 20mm corrugated conduit this row had
+      // matched in favour of a 2.5m washing-machine drain hose at 2.3x.
+      expect(
+        matchEvidence('20mm corrugated condensate drain pipe', 'Deta 20m Medium Duty 20mm Corrugated Conduit'),
+      ).toBe('strong');
     });
 
     it('accepts an exact product-family hit', () => {
