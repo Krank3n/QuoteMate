@@ -177,13 +177,38 @@ function invoiceBalanceOwed(doc: Document | null): boolean {
  *   isStillBooked. Only matters once the money is in: a job the customer
  *   paid up front still has the work ahead of it.
  */
+/**
+ * The bar's actions for a job.
+ *
+ * `competingOptions` withholds the two that COMMIT TO A PRICE. Each resolves
+ * to ONE document — whichever pickPrimaryDoc lands on — which the bar cannot
+ * name, so on a job showing two equal options they become big primary buttons
+ * that silently pick one: Send puts an arbitrary option in front of the
+ * customer, and Generate Invoice bills for it.
+ *
+ * Both stay reachable against a document the tradie has actually pointed at —
+ * every option card carries its own Send, and each card's status sheet its own
+ * Convert to Invoice. With nothing left to offer, the bar hides itself.
+ */
 export function resolveJobActions(
+  stage: JobStage,
+  primaryDoc: Document | null,
+  stillBooked = false,
+  competingOptions = false,
+): ActionSpec[] {
+  const actions = resolveJobActionsInner(stage, primaryDoc, stillBooked);
+  if (!competingOptions) return actions;
+  return actions.filter((a) => (
+    a.id !== 'sendQuote' && a.id !== 'resendQuote' && a.id !== 'generateInvoice'
+  ));
+}
+
+function resolveJobActionsInner(
   stage: JobStage,
   primaryDoc: Document | null,
   stillBooked = false,
 ): ActionSpec[] {
   if (stage === 'cancelled' || stage === 'closed') return [];
-
   // No doc attached yet — kick the tradie straight into the quote wizard.
   if (!primaryDoc) {
     return [
@@ -362,15 +387,9 @@ export function StickyJobActionBar({
   const styles = useStyles();
   const themeColors = useThemeColors();
   const insets = useSafeAreaInsets();
-  let actions = resolveJobActions(job.stage, primaryDoc, isStillBooked(job));
-  // A job carrying competing options has no single quote to send. The bar acts
-  // on ONE document (the most recently touched), which it cannot name — so on
-  // a screen showing two equal options it would be a big primary button that
-  // silently picks one. Each option card carries its own Send instead; drop
-  // the ambiguous one here. If nothing else applies the bar hides itself.
-  if (competingOptions) {
-    actions = actions.filter((a) => a.id !== 'sendQuote' && a.id !== 'resendQuote');
-  }
+  const actions = resolveJobActions(
+    job.stage, primaryDoc, isStillBooked(job), competingOptions,
+  );
 
   if (actions.length === 0) return null;
 
