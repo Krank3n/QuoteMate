@@ -32,6 +32,7 @@ import { resumableReportId, reportRowMeta } from './ServiceReport/reportDraft';
 import { ServiceReportCard } from '../components/ServiceReportCard';
 import type { ServiceReport } from '../../shared/report/types';
 import { liveQuoteOptions } from '../../shared/document/quoteOptions';
+import { QuoteOptionsHeader } from '../components/QuoteOptionsHeader';
 import { StageSheet } from '../components/StageSheet';
 import { JobStageSheet, stageMetaFor } from '../components/JobStageSheet';
 import {
@@ -1217,11 +1218,7 @@ function ScopeBlock({
     <WebContainer>
       {isOptionSet ? (
         <View style={styles.optionSetWrap}>
-          <Text style={styles.secondaryDocsLabel}>Options</Text>
-          <Text style={styles.optionSetHint}>
-            Alternative prices for the same job. Your customer picks one, and
-            accepting it takes the others off the table.
-          </Text>
+          <QuoteOptionsHeader options={liveQuotes} />
           {liveQuotes.map((doc) => (
             <JobScopeCard
               key={doc.id}
@@ -1288,14 +1285,6 @@ const useStyles = makeStyles((t) => ({
     textAlign: 'center',
   },
   optionSetWrap: { marginTop: 4, gap: 8 },
-  optionSetHint: {
-    fontSize: 12,
-    color: t.colors.textMuted,
-    marginHorizontal: 20,
-    marginTop: -4,
-    marginBottom: 2,
-    lineHeight: 16,
-  },
   notesAddButton: {
     flexDirection: 'row',
     alignItems: 'center',

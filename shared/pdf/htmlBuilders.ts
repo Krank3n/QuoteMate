@@ -874,12 +874,19 @@ function buildPaymentScheduleHTML(quote: QuotePdfData): string {
 /**
  * Build the full quote PDF HTML document
  */
-export function buildQuotePdfHtml(
-  quote: QuotePdfData,
-  business: BusinessPdfData,
-  options?: { watermark?: string }
-): string {
-  const templateId: PdfTemplateId = business.pdfTemplate || 'professional';
+/**
+ * The priced middle of a quote: its line items (materials or scope table),
+ * its labour block when that doesn't ride inside the scope table, and its
+ * totals ending in TOTAL.
+ *
+ * Split out because a quote is not the only document that prints one. A job
+ * carrying competing OPTIONS prints several — one per option, each with its
+ * own TOTAL and deliberately no grand total (see
+ * buildQuoteOptionsPdfHtml). Two copies of this branching is how the options
+ * document would end up disagreeing with the single-quote one about whether
+ * labour is a row or a block.
+ */
+export function buildQuotePricingHTML(quote: QuotePdfData): string {
   // One resolver, one answer — see shared/document/priceDetail.ts.
   const detail = resolvePriceDetail(quote);
   const perLineMoney = showsPerLineMoney(detail);
@@ -887,7 +894,6 @@ export function buildQuotePdfHtml(
   // 'total' hides the line items entirely; 'itemised' and 'summary' both show
   // them, differing only in how much money sits beside each one.
   const showLineItems = showsLineItems(detail);
-  const watermark = options?.watermark;
   // Derived, not toggled — see isScopeQuote.
   const scopeMode = isScopeQuote(quote.materials);
   // Labour rides in the scope table as continuation rows, but only when that
@@ -900,6 +906,30 @@ export function buildQuotePdfHtml(
   const scopeLabourRows = labourInScopeTable && quote.laborTotal
     ? labourRowsForDisplay(quote)
     : [];
+
+  return `
+      ${showLineItems ? `
+      <div class="section-wrapper">
+        ${scopeMode ? '' : '<h3>Materials</h3>'}
+        ${scopeMode
+          ? generateScopeHTML(quote.materials, rollMarkup ? quote.markup : 0, scopeLabourRows)
+          : generateMaterialsHTML(quote.materials, rollMarkup ? quote.markup : 0, quote.sections, { perLineMoney })}
+      </div>
+      ` : ''}
+
+      ${showLineItems && !labourInScopeTable ? buildLaborHTML(quote) : ''}
+
+      ${buildSummaryHTML(quote)}
+`;
+}
+
+export function buildQuotePdfHtml(
+  quote: QuotePdfData,
+  business: BusinessPdfData,
+  options?: { watermark?: string }
+): string {
+  const templateId: PdfTemplateId = business.pdfTemplate || 'professional';
+  const watermark = options?.watermark;
 
   return `
     <!DOCTYPE html>
@@ -939,18 +969,7 @@ export function buildQuotePdfHtml(
         <p>${formatMultiline(quote.job.description)}</p>
       </div>
 
-      ${showLineItems ? `
-      <div class="section-wrapper">
-        ${scopeMode ? '' : '<h3>Materials</h3>'}
-        ${scopeMode
-          ? generateScopeHTML(quote.materials, rollMarkup ? quote.markup : 0, scopeLabourRows)
-          : generateMaterialsHTML(quote.materials, rollMarkup ? quote.markup : 0, quote.sections, { perLineMoney })}
-      </div>
-      ` : ''}
-
-      ${showLineItems && !labourInScopeTable ? buildLaborHTML(quote) : ''}
-
-      ${buildSummaryHTML(quote)}
+      ${buildQuotePricingHTML(quote)}
 
       ${buildPaymentScheduleHTML(quote)}
 
@@ -1028,6 +1047,103 @@ function buildReportSignatureHTML(
  * the tradie's business name (never "QuoteMate") because this is a
  * customer-facing artifact.
  */
+/**
+ * One PDF showing several competing OPTIONS for the same job.
+ *
+ * A tradie pricing "either a multi-head system, or two independent splits"
+ * sends one document with a price against each, and the customer picks. The
+ * document therefore has exactly one rule that matters: EVERY OPTION CARRIES
+ * ITS OWN TOTAL AND THE DOCUMENT CARRIES NONE. Adding them would state a
+ * price nobody was offered — the same mistake that made sectioned options
+ * charge for both, printed on the customer's copy.
+ *
+ * The job details, validity, terms and footer appear once: it is one job.
+ * Each option repeats only its own priced middle, through the same
+ * buildQuotePricingHTML the single-quote document uses, so the two can never
+ * disagree about how a quote is laid out.
+ *
+ * Accepting still happens per option, through that option's own link — see
+ * shared/document/quoteOptions.ts.
+ */
+export function buildQuoteOptionsPdfHtml(
+  quotes: QuotePdfData[],
+  business: BusinessPdfData,
+  options?: { watermark?: string },
+): string {
+  const templateId: PdfTemplateId = business.pdfTemplate || 'professional';
+  const watermark = options?.watermark;
+  // The options describe one job for one customer, so the framing comes from
+  // the first and is printed once.
+  const lead = quotes[0];
+
+  const optionBlocks = quotes.map((quote, i) => `
+      <div class="section-wrapper" style="page-break-inside: avoid;">
+        <h3>Option ${i + 1}${quote.quoteNumber ? ` &middot; ${escapeHtml(quote.quoteNumber)}` : ''}</h3>
+        ${buildQuotePricingHTML(quote)}
+      </div>
+  `).join('');
+
+  return `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no" />
+      <style>
+        ${printMediaCSS}
+        ${getTemplateCSS(templateId, business.brandColor)}
+        ${watermark ? buildWatermarkCSS() : ''}
+      </style>
+    </head>
+    <body>
+      ${watermark ? buildWatermarkHTML(watermark) : ''}
+      <div class="content-wrapper">
+      <div class="header document-header">
+        ${buildBusinessHeaderHTML(business, { omitCredentials: showcasesCredentials(templateId) })}
+        <div class="header-meta">
+          ${showcasesCredentials(templateId) ? buildBusinessCredentialsHTML(business) : ''}
+          <h2>QUOTATION</h2>
+          <div class="document-date">${escapeHtml(lead.quoteDate)}</div>
+          ${buildHeaderRecipientHTML({
+            label: 'Prepared for',
+            name: lead.customerName,
+            address: lead.jobAddress,
+            email: lead.customerEmail,
+            phone: lead.customerPhone,
+          })}
+        </div>
+      </div>
+
+      <div class="info-section">
+        <h3>Job Details</h3>
+        <p><strong>${escapeHtml(lead.job.name)}</strong></p>
+        <p>${formatMultiline(lead.job.description)}</p>
+      </div>
+
+      <div class="info-section">
+        <h3>Your options</h3>
+        <p>${quotes.length} ways to do this job, priced separately. Choose the one
+        that suits and accept it — you are only ever charged for the option you
+        pick, never the total of them.</p>
+      </div>
+
+      ${optionBlocks}
+
+      <div style="margin-top: 40px; font-size: 12px; color: #666666;">
+        <p>This quote is valid for 30 days from the date of issue.</p>
+      </div>
+
+      ${buildTermsHTML(lead.terms)}
+      </div>
+
+      <div class="pdf-footer">
+        <p>${escapeHtml(business.businessName)}</p>
+      </div>
+    </body>
+    </html>
+    `;
+}
+
 export function buildReportPdfHtml(data: ReportPdfData, business: BusinessPdfData): string {
   const templateId: PdfTemplateId = business.pdfTemplate || 'professional';
 
