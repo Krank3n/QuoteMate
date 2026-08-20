@@ -78,6 +78,44 @@ describe('quotesSupersededByAccepting', () => {
     expect(quotesSupersededByAccepting(accepted, all)).toEqual(['live']);
   });
 
+  it('refuses to withdraw a quote the customer can still PAY', () => {
+    // Nothing voids a Square link — they lapse on their own TTL — so
+    // cancelling behind a payable URL sets a trap: the payment lands on a
+    // cancelled quote, where every job aggregate skips it. A quote someone can
+    // still pay is not off the table.
+    const accepted = q({ id: 'opt-1' });
+    const all = [accepted, q({ id: 'payable', squarePaymentLinkUrl: 'https://square.test/pay' })];
+
+    expect(quotesSupersededByAccepting(accepted, all)).toEqual([]);
+  });
+
+  it('sees a payable link in the unified shape too', () => {
+    const accepted = q({ id: 'opt-1' });
+    const all = [
+      accepted,
+      q({ id: 'payable', activePaymentLink: { url: 'https://square.test/pay' } }),
+    ];
+
+    expect(quotesSupersededByAccepting(accepted, all)).toEqual([]);
+  });
+
+  it('sees a deposit link', () => {
+    const accepted = q({ id: 'opt-1' });
+    const all = [accepted, q({ id: 'payable', depositPaymentLinkUrl: 'https://square.test/dep' })];
+
+    expect(quotesSupersededByAccepting(accepted, all)).toEqual([]);
+  });
+
+  it('still withdraws an option with no way to pay it', () => {
+    const accepted = q({ id: 'opt-1' });
+    const all = [
+      accepted,
+      q({ id: 'plain', activePaymentLink: null, squarePaymentLinkUrl: null }),
+    ];
+
+    expect(quotesSupersededByAccepting(accepted, all)).toEqual(['plain']);
+  });
+
   it('skips a quote the customer has paid a deposit on', () => {
     const accepted = q({ id: 'opt-1' });
     const all = [accepted, q({ id: 'deposit-paid', depositPaid: 500 })];

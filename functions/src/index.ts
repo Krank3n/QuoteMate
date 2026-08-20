@@ -14641,6 +14641,34 @@ export const squareWebhook = functions.https.onRequest(async (req, res) => {
         : newDepositPaid;
       const wasAlreadyAccepted = quote.status === 'accepted' || !!quote.respondedAt;
 
+      // Paid after being withdrawn. A superseded quote option is the way this
+      // happens: nothing voids a Square link, so the customer can still hit
+      // the URL behind a quote we have cancelled. quotesSupersededByAccepting
+      // now refuses to cancel a quote carrying a live link, which should stop
+      // it — but a link minted after the supersede, or a stale read, can still
+      // land here, so this is the safety net rather than the guard.
+      //
+      // The money is recorded either way: it has been taken, and losing it is
+      // never an option.
+      //
+      // It will not show up on the JOB, though, and that is worth knowing. The
+      // mirror refuses to un-cancel a document (`cancelled` outranks
+      // `quote_accepted`, so it strips the stage and keeps the rest), and
+      // computeJobAggregates counts money only on live documents — both
+      // deliberate. So the payment sits on the document while the job reads
+      // unpaid. That is why this is logged as a warning rather than left to
+      // the normal acceptance path: it needs a human.
+      const wasWithdrawn = quote.status === 'cancelled';
+      if (wasWithdrawn) {
+        functions.logger.warn('[quoteOptions] payment_on_withdrawn_quote', {
+          userId,
+          quoteId,
+          jobId: quote.jobId,
+          paymentId: payment.id,
+          amount: paidAmountDollars,
+        });
+      }
+
       // Record T&C acceptance against the snapshot taken at send time.
       // Legal basis: the customer received the PDF containing these terms
       // and completing payment = accepting them (flagged in the email copy).

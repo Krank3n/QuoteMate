@@ -76,10 +76,15 @@ export function computeJobAggregates(
 
   const totalInvoiced = invoices.reduce((sum, d) => sum + num(d.total), 0);
 
-  // Money that has actually moved is summed across everything live: a payment
-  // against a losing option is still a payment, and hiding it would make the
-  // job look unpaid. (An option carrying money is never superseded either —
-  // see quotesSupersededByAccepting.)
+  // Money that has actually moved is summed across the live documents. A
+  // cancelled one contributes nothing by deliberate design — see the test that
+  // pins it. That has one known cost, in a corner this module cannot fix
+  // alone: nothing voids a Square link, so a customer can pay one behind a
+  // quote that was later withdrawn, and the mirror will not un-cancel the
+  // document (`cancelled` outranks `quote_accepted`). The payment lands on the
+  // document and is skipped here. quotesSupersededByAccepting therefore
+  // refuses to cancel a quote that still carries a payable link, which keeps
+  // the app from creating that state itself.
   const totalPaid = live.reduce((sum, d) => sum + num(d.paidTotal), 0);
 
   // Owing follows the same rule as quoting: every invoice, but only the quote

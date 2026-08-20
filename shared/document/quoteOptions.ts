@@ -34,6 +34,11 @@
  */
 export interface SupersedableQuote {
   id: string;
+  /** Unified Document — the link currently offered to the customer. */
+  activePaymentLink?: { url?: string | null } | null;
+  /** Legacy `quotes` shape. */
+  squarePaymentLinkUrl?: string | null;
+  depositPaymentLinkUrl?: string | null;
   jobId?: string | null;
   /** Unified Document. Absent on legacy quote records, which are all quotes. */
   type?: 'quote' | 'invoice';
@@ -64,6 +69,16 @@ function isAccepted(doc: SupersedableQuote): boolean {
 }
 
 /**
+ * A Square link the customer can still hit. Square links are deliberately
+ * never voided — they are left to lapse on their own TTL (see
+ * createOrRotatePaymentLink) — so one that exists is one that can still take
+ * money.
+ */
+function hasLivePaymentLink(doc: SupersedableQuote): boolean {
+  return !!(doc.activePaymentLink?.url || doc.squarePaymentLinkUrl || doc.depositPaymentLinkUrl);
+}
+
+/**
  * The other quotes on this job that accepting `accepted` should take off the
  * table. Returns ids, so callers can write in whatever shape they own.
  *
@@ -79,6 +94,14 @@ function isAccepted(doc: SupersedableQuote): boolean {
  *    destroy live billing.
  *  - anything already cancelled — nothing to do, and rewriting it would churn
  *    `updatedAt` and reorder the job's documents.
+ *  - anything carrying a live Square PAY LINK. Nothing voids those — they are
+ *    left to lapse on their own TTL — so the customer can still hit the URL
+ *    after we have quietly withdrawn the quote behind it. Cancelling under a
+ *    payable link is what makes that trap: the payment lands on a cancelled
+ *    quote, and every money aggregate skips cancelled documents, so it would
+ *    not even count. A quote someone can still pay is not off the table, and
+ *    the app should not pretend otherwise. The tradie can cancel it by hand
+ *    once they know.
  *  - anything a customer has PAID on, deposit included. If money has moved
  *    against an option, that option is not hypothetical any more; cancelling
  *    it under the tradie would orphan a real payment. Two options with
@@ -111,6 +134,7 @@ export function quotesSupersededByAccepting(
       && !isCancelled(doc)
       && !isAccepted(doc)
       && !hasMoneyOnIt(doc)
+      && !hasLivePaymentLink(doc)
     ))
     .map((doc) => doc.id);
 }
