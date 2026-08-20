@@ -58,11 +58,12 @@ function sanitizeDisplayName(name: string): string {
 }
 
 // Domains that are guaranteed to bounce or are forbidden by RFC 2606.
-// privaterelay.appleid.com is Apple's Hide-My-Email — when the user revokes
-// the relay (or the account was a Sign-in-with-Apple throwaway) every send
-// hard-bounces and chews through sender reputation.
+// privaterelay.appleid.com (Apple Hide-My-Email) is deliberately NOT here:
+// the sender domain carries Apple's relay SPF include and 57 of 77 attempted
+// relay sends delivered (Aug 2026 emailLog audit) — the old blanket ban muted
+// 50 real users. Individually revoked relays hard-bounce once and are then
+// suppressed per-address (see hasHardBounce below).
 const UNSENDABLE_DOMAINS = new Set([
-  'privaterelay.appleid.com',
   'example.com',
   'example.org',
   'example.net',
@@ -85,6 +86,32 @@ export function classifyUnsendable(to: string): string | null {
   if (UNSENDABLE_DOMAINS.has(domain)) return `unsendable-domain:${domain}`;
   if (ASSET_DOMAIN_EXTS.some(ext => domain.endsWith(ext))) return 'asset-filename';
   return null;
+}
+
+// A hard bounce (recorded on the emailLog row by the Brevo webhook) marks the
+// address dead — typically a revoked Apple relay. Soft bounces don't count:
+// full mailboxes recover.
+export function hasHardBounce(rows: Array<{ bounceType?: unknown }>): boolean {
+  return rows.some((r) => r.bounceType === 'hard');
+}
+
+// The skip is silent on purpose: the original bounced row already documents
+// the dead address in the admin email log, and sweep jobs re-attempt daily
+// (cooldown stamps are only written on successful sends), so logging each
+// skip would recreate the daily blocked-row noise 2f6eb24 removed.
+async function hasPriorHardBounce(to: string): Promise<boolean> {
+  try {
+    const prior = await admin.firestore().collection('emailLog')
+      .where('to', '==', to)
+      .select('bounceType')
+      .limit(100)
+      .get();
+    return hasHardBounce(prior.docs.map((d) => d.data()));
+  } catch (err: any) {
+    // Fail-open: Brevo keeps its own hard-bounce suppression list as backstop.
+    console.warn('sendEmail: hard-bounce lookup failed', err?.message);
+    return false;
+  }
 }
 
 // Shared email wrapper (base layout for all emails)
@@ -332,6 +359,11 @@ export async function sendEmail(options: SendEmailOptions): Promise<boolean> {
       console.info(`sendEmail: user ${userId} opted out of ${category}`);
       return false;
     }
+  }
+
+  if (await hasPriorHardBounce(to)) {
+    console.info(`sendEmail: skipping ${to} — prior hard bounce on record`);
+    return false;
   }
 
   // Pre-create log doc — status: 'pending' until Brevo accepts, then 'sent'.

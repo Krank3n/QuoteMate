@@ -20,8 +20,8 @@ const NOW = new Date('2026-07-14T00:00:00Z');
 const daysAgo = (n: number) => new Date(NOW.getTime() - n * DAY_MS);
 
 describe('isUnreachableEmail', () => {
-  it('flags Apple private relay addresses', () => {
-    expect(isUnreachableEmail('x9zk2@privaterelay.appleid.com')).toBe(true);
+  it('treats Apple private relay as reachable (Aug 2026: 57/77 relay sends delivered; the blanket ban muted 50 real users)', () => {
+    expect(isUnreachableEmail('x9zk2@privaterelay.appleid.com')).toBe(false);
   });
 
   it('flags test domains and missing emails', () => {
@@ -40,8 +40,14 @@ describe('reEngagementVerdict', () => {
 
   it('never retries an unreachable address (the daily blocked-row regression)', () => {
     expect(
-      reEngagementVerdict({ email: 'abc123@privaterelay.appleid.com', ...inactive }, NOW),
+      reEngagementVerdict({ email: 'abc123@example.com', ...inactive }, NOW),
     ).toEqual({ send: false, reason: 'unreachable' });
+  });
+
+  it('re-engages Apple private relay users (relay delivers; revoked relays are suppressed per-address in sendEmail)', () => {
+    expect(
+      reEngagementVerdict({ email: 'abc123@privaterelay.appleid.com', ...inactive }, NOW),
+    ).toEqual({ send: true });
   });
 
   it('skips users with no recorded activity', () => {
