@@ -1,4 +1,4 @@
-import { computeJobAggregates, representativeQuote } from './aggregate';
+import { computeJobAggregates, representativeQuote, quotedRange } from './aggregate';
 import type { JobDocument } from './types';
 
 const JOB = { id: 'job1' as const };
@@ -268,5 +268,64 @@ describe('three options', () => {
     ];
 
     expect(computeJobAggregates(JOB, docs).totalQuoted).toBe(300);
+  });
+});
+
+describe('quotedRange', () => {
+  it('spreads two undecided options', () => {
+    const docs = [
+      doc({ id: 'a', stage: 'quote_sent', total: 972.4 }),
+      doc({ id: 'b', stage: 'quote_sent', total: 1458.6 }),
+    ];
+
+    expect(quotedRange(docs)).toEqual({ min: 972.4, max: 1458.6 });
+  });
+
+  it('is null once one is accepted — that IS the price', () => {
+    const docs = [
+      doc({ id: 'a', stage: 'quote_accepted', total: 972.4 }),
+      doc({ id: 'b', stage: 'quote_sent', total: 1458.6 }),
+    ];
+
+    expect(quotedRange(docs)).toBeNull();
+  });
+
+  it('is null for a single quote', () => {
+    expect(quotedRange([doc({ id: 'a', total: 100 })])).toBeNull();
+  });
+
+  it('is null when the options happen to cost the same', () => {
+    // A range with identical ends is a number written twice.
+    const docs = [doc({ id: 'a', total: 500 }), doc({ id: 'b', total: 500 })];
+
+    expect(quotedRange(docs)).toBeNull();
+  });
+
+  it('ignores superseded options', () => {
+    const docs = [
+      doc({ id: 'a', stage: 'quote_sent', total: 100 }),
+      doc({ id: 'gone', stage: 'cancelled', total: 9999 }),
+    ];
+
+    expect(quotedRange(docs)).toBeNull();
+  });
+
+  it('spans three options end to end', () => {
+    const docs = [
+      doc({ id: 'a', stage: 'quote_sent', total: 300 }),
+      doc({ id: 'b', stage: 'draft', total: 100 }),
+      doc({ id: 'c', stage: 'draft', total: 200 }),
+    ];
+
+    expect(quotedRange(docs)).toEqual({ min: 100, max: 300 });
+  });
+
+  it('does not depend on the order it is given', () => {
+    const docs = [
+      doc({ id: 'a', stage: 'quote_sent', total: 1458.6 }),
+      doc({ id: 'b', stage: 'quote_sent', total: 972.4 }),
+    ];
+
+    expect(quotedRange(docs)).toEqual(quotedRange([...docs].reverse()));
   });
 });

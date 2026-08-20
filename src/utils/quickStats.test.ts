@@ -93,3 +93,51 @@ describe('quickStats', () => {
     expect(quickStats([null as any])).toEqual(empty);
   });
 });
+
+describe('a job quoted two ways', () => {
+  const opt = (over: Record<string, any> = {}): any => ({
+    id: 'q1', type: 'quote', stage: 'quote_sent', jobId: 'job-1', total: 100, ...over,
+  });
+
+  it('counts one opportunity, not one per option', () => {
+    const stats = quickStats([
+      opt({ id: 'a', total: 972.4, updatedAt: 2 }),
+      opt({ id: 'b', total: 1458.6, updatedAt: 1 }),
+    ]);
+
+    expect(stats.sentQuotes).toBe(1);
+  });
+
+  it('values it at one option, never the sum', () => {
+    // 972.40 + 1458.60 = 2,431.00 — money the customer will never pay, on a
+    // job whose dearest option is 1,458.60.
+    const stats = quickStats([
+      opt({ id: 'a', total: 972.4, updatedAt: 2 }),
+      opt({ id: 'b', total: 1458.6, updatedAt: 1 }),
+    ]);
+
+    expect(stats.pipelineValue).toBe(972.4);
+    expect(stats.pipelineValue).not.toBe(2431);
+  });
+
+  it('still counts quotes on DIFFERENT jobs separately', () => {
+    const stats = quickStats([
+      opt({ id: 'a', jobId: 'job-1', total: 100 }),
+      opt({ id: 'b', jobId: 'job-2', total: 200 }),
+    ]);
+
+    expect(stats.sentQuotes).toBe(2);
+    expect(stats.pipelineValue).toBe(300);
+  });
+
+  it('treats a quote with no job as standing alone', () => {
+    // No siblings, so nothing for it to be an alternative to.
+    const stats = quickStats([
+      opt({ id: 'a', jobId: undefined, total: 100 }),
+      opt({ id: 'b', jobId: undefined, total: 200 }),
+    ]);
+
+    expect(stats.sentQuotes).toBe(2);
+    expect(stats.pipelineValue).toBe(300);
+  });
+});

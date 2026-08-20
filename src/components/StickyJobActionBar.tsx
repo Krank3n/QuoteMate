@@ -178,17 +178,31 @@ function invoiceBalanceOwed(doc: Document | null): boolean {
  *   paid up front still has the work ahead of it.
  */
 /**
+ * Actions that pick ONE of a job's quotes and commit to it — by putting it in
+ * front of the customer, by agreeing it, or by billing it. Each resolves to
+ * whichever document pickPrimaryDoc lands on, which the bar cannot name.
+ */
+const COMMITS_TO_A_PRICE: ReadonlySet<JobActionId> = new Set<JobActionId>([
+  'sendQuote',
+  'resendQuote',
+  'markApproved',
+  'generateInvoice',
+]);
+
+/**
  * The bar's actions for a job.
  *
- * `competingOptions` withholds the two that COMMIT TO A PRICE. Each resolves
+ * `competingOptions` withholds the ones that COMMIT TO A PRICE. Each resolves
  * to ONE document — whichever pickPrimaryDoc lands on — which the bar cannot
  * name, so on a job showing two equal options they become big primary buttons
  * that silently pick one: Send puts an arbitrary option in front of the
- * customer, and Generate Invoice bills for it.
+ * customer, Mark Approved agrees it on the customer's behalf, and Generate
+ * Invoice bills for it.
  *
- * Both stay reachable against a document the tradie has actually pointed at —
+ * All stay reachable against a document the tradie has actually pointed at —
  * every option card carries its own Send, and each card's status sheet its own
- * Convert to Invoice. With nothing left to offer, the bar hides itself.
+ * Mark as Accepted and Convert to Invoice. With nothing left to offer, the bar
+ * hides itself.
  */
 export function resolveJobActions(
   stage: JobStage,
@@ -198,9 +212,7 @@ export function resolveJobActions(
 ): ActionSpec[] {
   const actions = resolveJobActionsInner(stage, primaryDoc, stillBooked);
   if (!competingOptions) return actions;
-  return actions.filter((a) => (
-    a.id !== 'sendQuote' && a.id !== 'resendQuote' && a.id !== 'generateInvoice'
-  ));
+  return actions.filter((a) => !COMMITS_TO_A_PRICE.has(a.id));
 }
 
 function resolveJobActionsInner(

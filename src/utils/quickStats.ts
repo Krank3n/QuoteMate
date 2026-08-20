@@ -14,11 +14,12 @@
 
 import type { Document } from '../types/document';
 import { isAwaitingResponse, isWon } from './documentStages';
+import { representativeQuote } from '../../shared/job/aggregate';
 
 export interface QuickStats {
-  /** Count of quotes sent and not yet answered. */
+  /** Jobs with a quote sent and not yet answered — one per job, not per option. */
   sentQuotes: number;
-  /** Total value of those unanswered quotes. */
+  /** Their value, counting one quote per job. */
   pipelineValue: number;
   /** Count of jobs accepted or further along. */
   acceptedQuotes: number;
@@ -29,14 +30,31 @@ export function quickStats(documents: Document[]): QuickStats {
   let pipelineValue = 0;
   let acceptedQuotes = 0;
 
+  // Competing options on one job are alternatives, not separate pipeline. Two
+  // prices for the same work are one opportunity worth one of them — counting
+  // both put $2,431.00 on the tile for a job the customer will pay at most
+  // $1,458.60 for. Group by job and let one quote speak for it, the same rule
+  // the job header and job card use (shared/job/aggregate.ts).
+  //
+  // A document with no job stands alone: it has no siblings to be an
+  // alternative to.
+  const awaitingByJob = new Map<string, Document[]>();
+
   for (const doc of documents || []) {
     if (!doc) continue;
     if (isAwaitingResponse(doc.stage)) {
-      sentQuotes++;
-      pipelineValue += Number(doc.total) || 0;
+      const key = doc.jobId || `doc:${doc.id}`;
+      const group = awaitingByJob.get(key) ?? [];
+      group.push(doc);
+      awaitingByJob.set(key, group);
     } else if (isWon(doc.stage)) {
       acceptedQuotes++;
     }
+  }
+
+  for (const group of awaitingByJob.values()) {
+    sentQuotes++;
+    pipelineValue += Number(representativeQuote(group as any)?.total) || 0;
   }
 
   // Two decimals — summing floats otherwise shows $7,355.4299999 on a tile.

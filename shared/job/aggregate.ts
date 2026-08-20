@@ -57,6 +57,34 @@ export function representativeQuote<T extends QuoteLike>(
   ))[0];
 }
 
+/**
+ * The spread of a job's competing options, when nothing has been chosen yet.
+ *
+ * A single headline figure is a lie on a job quoted two ways. It has to pick
+ * one, cannot say which, and — worst of it — CHANGES when the tradie edits the
+ * other option, because the pick is "most recently touched". Watching the job's
+ * value jump from $972.40 to $1,458.60 for opening the other card is the kind
+ * of thing that makes someone distrust every number on the screen.
+ *
+ * So while the customer is still deciding, the honest answer is a range. Once
+ * one option is accepted there is nothing to spread — that IS the price — and
+ * this returns null so callers fall back to the single figure.
+ *
+ * Null also for one quote, or several that happen to cost the same: a range
+ * with identical ends is just a number written twice.
+ */
+export function quotedRange(
+  quotes: QuoteLike[],
+): { min: number; max: number } | null {
+  const live = quotes.filter((q) => q.stage !== 'cancelled');
+  if (live.length < 2) return null;
+  if (live.some((q) => q.stage === 'quote_accepted')) return null;
+  const totals = live.map((q) => num(q.total));
+  const min = Math.min(...totals);
+  const max = Math.max(...totals);
+  return min === max ? null : { min, max };
+}
+
 export function computeJobAggregates(
   job: Pick<Job, 'id'>,
   docs: JobDocument[],
