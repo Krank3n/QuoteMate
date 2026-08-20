@@ -105,13 +105,28 @@ describe('quotesSupersededByAccepting', () => {
     expect(quotesSupersededByAccepting(accepted, all)).toEqual(['zeroes', 'nulls']);
   });
 
-  it('supersedes an already-accepted sibling that carries no money', () => {
-    // The accept that just happened is the newer statement of intent, and two
-    // accepted quotes on one job is the ambiguity this exists to remove.
+  it('REFUSES to supersede an already-accepted sibling', () => {
+    // The race this closes: a customer holding two links accepts both within
+    // the same window. Each accept writes its own quote then cancels the
+    // other, and one interleaving leaves BOTH cancelled — a job that has lost
+    // the sale after the customer said yes twice. Two accepted quotes is
+    // untidy; a human can see and resolve it.
     const accepted = q({ id: 'opt-2', stage: 'quote_accepted' });
     const all = [q({ id: 'opt-1', stage: 'quote_accepted' }), accepted];
 
-    expect(quotesSupersededByAccepting(accepted, all)).toEqual(['opt-1']);
+    expect(quotesSupersededByAccepting(accepted, all)).toEqual([]);
+  });
+
+  it('refuses in the legacy status shape too, which is where the race runs', () => {
+    // The acceptance-link handler works on `users/{uid}/quotes`.
+    const accepted: SupersedableQuote = { id: 'opt-2', jobId: 'job-1', status: 'accepted' };
+    const all: SupersedableQuote[] = [
+      { id: 'opt-1', jobId: 'job-1', status: 'accepted' },
+      { id: 'opt-3', jobId: 'job-1', status: 'sent' },
+      accepted,
+    ];
+
+    expect(quotesSupersededByAccepting(accepted, all)).toEqual(['opt-3']);
   });
 
   it('reads the legacy quotes shape, which has status and no type', () => {

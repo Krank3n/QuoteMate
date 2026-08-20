@@ -59,6 +59,10 @@ function hasMoneyOnIt(doc: SupersedableQuote): boolean {
   return (Number(doc.paidTotal) || 0) > 0 || (Number(doc.depositPaid) || 0) > 0;
 }
 
+function isAccepted(doc: SupersedableQuote): boolean {
+  return doc.stage === 'quote_accepted' || doc.status === 'accepted';
+}
+
 /**
  * The other quotes on this job that accepting `accepted` should take off the
  * table. Returns ids, so callers can write in whatever shape they own.
@@ -81,9 +85,16 @@ function hasMoneyOnIt(doc: SupersedableQuote): boolean {
  *    deposits is a mess a human has to resolve, and quietly cancelling one
  *    hides it.
  *
- * An already-accepted sibling IS superseded (when no money has moved): the
- * accept that just happened is the newer statement of intent, and leaving two
- * accepted quotes on a job is exactly the ambiguity this prevents.
+ *  - anything ALREADY ACCEPTED. Tidier would be to supersede it as a stale
+ *    statement of intent, and that is what this did first — until the race it
+ *    opens was worked through. A customer holding two links can accept both
+ *    within the same window: each accept writes its own quote, then cancels
+ *    the other, and the interleaving where both supersedes land last leaves a
+ *    job whose two acceptances have cancelled each other and NO live quote at
+ *    all. Refusing to cancel an accepted sibling collapses that to "both
+ *    accepted" — the outcome without this feature, and one a human can see and
+ *    resolve. Two accepted quotes is untidy; two silently cancelled ones after
+ *    the customer said yes twice is a job that has lost the sale.
  */
 export function quotesSupersededByAccepting(
   accepted: SupersedableQuote,
@@ -98,6 +109,7 @@ export function quotesSupersededByAccepting(
       && doc.jobId === jobId
       && !isInvoice(doc)
       && !isCancelled(doc)
+      && !isAccepted(doc)
       && !hasMoneyOnIt(doc)
     ))
     .map((doc) => doc.id);
