@@ -200,3 +200,90 @@ describe('supersedeOtherQuotesOnJob', () => {
     expect(second).toEqual([]);
   });
 });
+
+describe('the whole option lifecycle', () => {
+  /** Every live quote on the job, in id order. */
+  const liveOn = (jobId: string) => useStore.getState().documents
+    .filter((d) => d.jobId === jobId && d.type === 'quote' && d.stage !== 'cancelled')
+    .map((d) => d.id)
+    .sort();
+
+  it('walks one quote → two options → three → accept one → the rest off the table', async () => {
+    const store = () => useStore.getState();
+
+    // One quote. Not an option set.
+    expect(liveOn('job-1')).toEqual(['opt-1']);
+
+    // Add a second, then a third — each off the original.
+    const second = await store().addQuoteOptionToJob('opt-1');
+    const third = await store().addQuoteOptionToJob('opt-1');
+    expect(liveOn('job-1')).toHaveLength(3);
+    expect(second.id).not.toBe(third.id);
+    expect(second.stage).toBe('draft');
+    expect(third.stage).toBe('draft');
+
+    // The customer picks the middle one.
+    const superseded = await store().supersedeOtherQuotesOnJob(second.id);
+
+    expect(superseded.sort()).toEqual(['opt-1', third.id].sort());
+    expect(liveOn('job-1')).toEqual([second.id]);
+  });
+
+  it('leaves a third option alone when it has money on it', async () => {
+    const store = () => useStore.getState();
+    const second = await store().addQuoteOptionToJob('opt-1');
+    const third = await store().addQuoteOptionToJob('opt-1');
+    // A deposit landed against the third — a human committed to it.
+    useStore.setState({
+      documents: useStore.getState().documents.map((d) => (
+        d.id === third.id ? { ...d, depositPaid: 250 } : d
+      )),
+    } as any);
+
+    const superseded = await store().supersedeOtherQuotesOnJob(second.id);
+
+    expect(superseded).toEqual(['opt-1']);
+    expect(liveOn('job-1')).toEqual([second.id, third.id].sort());
+  });
+
+  it('can add an option off a REJECTED quote — a cheaper alternative is the point', async () => {
+    useStore.setState({ documents: [doc({ stage: 'quote_rejected' })] } as any);
+
+    const option = await useStore.getState().addQuoteOptionToJob('opt-1');
+
+    expect(option.stage).toBe('draft');
+    expect(option.jobId).toBe('job-1');
+  });
+
+  it('never supersedes across jobs, however many options each carries', async () => {
+    useStore.setState({
+      documents: [
+        doc({ id: 'a1', jobId: 'job-1' }),
+        doc({ id: 'a2', jobId: 'job-1' }),
+        doc({ id: 'b1', jobId: 'job-2' }),
+        doc({ id: 'b2', jobId: 'job-2' }),
+      ],
+    } as any);
+
+    await useStore.getState().supersedeOtherQuotesOnJob('a1');
+
+    expect(liveOn('job-1')).toEqual(['a1']);
+    expect(liveOn('job-2')).toEqual(['b1', 'b2']);
+  });
+
+  it('leaves the job’s invoice alone when an option wins', async () => {
+    useStore.setState({
+      documents: [
+        doc({ id: 'opt-1' }),
+        doc({ id: 'opt-2' }),
+        doc({ id: 'inv-1', type: 'invoice', stage: 'invoice_sent' }),
+      ],
+    } as any);
+
+    const superseded = await useStore.getState().supersedeOtherQuotesOnJob('opt-1');
+
+    expect(superseded).toEqual(['opt-2']);
+    expect(useStore.getState().documents.find((d) => d.id === 'inv-1')?.stage)
+      .toBe('invoice_sent');
+  });
+});

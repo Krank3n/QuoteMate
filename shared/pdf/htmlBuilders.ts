@@ -1122,9 +1122,9 @@ export function buildQuoteOptionsPdfHtml(
 
       <div class="info-section">
         <h3>Your options</h3>
-        <p>${quotes.length} ways to do this job, priced separately. Choose the one
-        that suits and accept it — you are only ever charged for the option you
-        pick, never the total of them.</p>
+        <p>${quotes.length === 1 ? 'One way' : `${quotes.length} ways`} to do this
+        job, priced separately. Choose the one that suits and accept it — you are
+        only ever charged for the option you pick, never the total of them.</p>
       </div>
 
       ${optionBlocks}

@@ -122,6 +122,7 @@ describe('a quote document with options', () => {
 
     expect(html).toContain('Option 3');
     expect(html).toContain('$7,000.00');
+    expect(html).toContain('3 ways');
   });
 
   it('lays each option out exactly as the single-quote document would', () => {
@@ -135,5 +136,68 @@ describe('a quote document with options', () => {
     // Same totals block, same TOTAL.
     expect(optionsDoc).toContain('$6,675.02');
     expect(single).toContain('$6,675.02');
+  });
+});
+
+describe('options built from sectioned quotes', () => {
+  // Jake's shape: labour split across named sections rather than materials.
+  const sectioned = (name: string, total: number): QuotePdfData => option({
+    quoteNumber: name,
+    materials: [],
+    materialsSubtotal: 0,
+    sections: [{
+      name: 'Install', laborHours: 8, multiplier: 1, laborHoursTotal: 8,
+      laborRate: 100, laborUnit: 'hours', laborTotal: 800,
+    }],
+    laborTotal: 800,
+    subtotal: 800,
+    total,
+  });
+
+  it('gives each sectioned option its own total', () => {
+    const html = buildQuoteOptionsPdfHtml([sectioned('QU-A', 880), sectioned('QU-B', 990)], business);
+
+    expect(html).toContain('$880.00');
+    expect(html).toContain('$990.00');
+    expect(html).not.toContain('1,870.00');
+  });
+
+  it('renders each option’s labour section', () => {
+    const html = buildQuoteOptionsPdfHtml([sectioned('QU-A', 880)], business);
+
+    expect(html).toContain('Install');
+  });
+});
+
+describe('options document edge cases', () => {
+  it('renders a single option without pretending there are more', () => {
+    const html = buildQuoteOptionsPdfHtml([OPTION_A], business);
+
+    expect(html).toContain('Option 1');
+    expect(html).not.toContain('Option 2');
+    // …and says so in English, rather than "1 ways".
+    expect(html).toContain('One way');
+    expect(html).not.toContain('1 ways');
+  });
+
+  it('carries the watermark onto the whole sheet', () => {
+    // One artefact — it cannot be half-stamped.
+    const html = buildQuoteOptionsPdfHtml([OPTION_A, OPTION_B], business, {
+      watermark: 'UPGRADE TO SEND',
+    });
+
+    expect(html).toContain('UPGRADE TO SEND');
+  });
+
+  it('omits the watermark when none is asked for', () => {
+    const html = buildQuoteOptionsPdfHtml([OPTION_A, OPTION_B], business);
+
+    expect(html).not.toContain('UPGRADE TO SEND');
+  });
+
+  it('takes the customer framing from the first option', () => {
+    const html = buildQuoteOptionsPdfHtml([OPTION_A, OPTION_B], business);
+
+    expect(html.split('Barb').length - 1).toBe(1);
   });
 });

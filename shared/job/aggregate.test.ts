@@ -248,3 +248,25 @@ describe('representativeQuote', () => {
     expect(docs.map((d) => d.id)).toEqual(before);
   });
 });
+
+describe('three options', () => {
+  it('still quotes exactly one of them', () => {
+    const docs = [
+      doc({ id: 'a', stage: 'quote_sent', total: 100, updatedAt: 3 }),
+      doc({ id: 'b', stage: 'draft', total: 200, updatedAt: 2 }),
+      doc({ id: 'c', stage: 'draft', total: 300, updatedAt: 1 }),
+    ];
+
+    expect(computeJobAggregates(JOB, docs).totalQuoted).toBe(100);
+  });
+
+  it('lets the accepted one win over two newer siblings', () => {
+    const docs = [
+      doc({ id: 'a', stage: 'quote_sent', total: 100, updatedAt: 9 }),
+      doc({ id: 'b', stage: 'quote_sent', total: 200, updatedAt: 8 }),
+      doc({ id: 'c', stage: 'quote_accepted', total: 300, updatedAt: 1 }),
+    ];
+
+    expect(computeJobAggregates(JOB, docs).totalQuoted).toBe(300);
+  });
+});
