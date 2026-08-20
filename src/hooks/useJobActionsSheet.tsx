@@ -16,6 +16,7 @@ import type { Job, JobStage } from '../../shared/job/types';
 import type { Document } from '../types/document';
 import { useJobStore } from '../store/useJobStore';
 import { useStore } from '../store/useStore';
+import { liveQuoteOptions } from '../../shared/document/quoteOptions';
 import {
   JobActionsSheet,
   type JobAction,
@@ -505,6 +506,12 @@ export function useJobActionsSheet(
         onDismiss={() => setActionsJob(null)}
         job={actionsJob}
         primaryDoc={actionsJob ? primaryDocForJob(actionsJob) : null}
+        competingOptions={
+          !!actionsJob
+          && liveQuoteOptions(
+            documents.filter((d) => d.jobId === actionsJob.id) as any,
+          ).length > 1
+        }
         xeroConnected={!!xeroConnection}
         onSelect={handleActionSelect}
         onSelectStage={handleStageSelect}

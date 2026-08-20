@@ -1011,6 +1011,7 @@ export function ViewJobScreen() {
         job={job}
         primaryDoc={primaryDoc ?? null}
         xeroConnected={!!xeroConnection}
+        competingOptions={competingOptions}
         onSelect={handleActionSelect}
       />
 

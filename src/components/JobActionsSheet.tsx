@@ -90,12 +90,27 @@ interface JobActionsSheetProps {
    * which would leave a job marked Scheduled with no date on it.
    */
   onSchedule?: (job: Job) => void;
+  /**
+   * True when the job carries competing quote options.
+   *
+   * The rows here act on ONE document — whichever `primaryDocForJob` picks —
+   * and cannot say which. That is harmless for Export or Follow Up, where the
+   * tradie sees what they got. It is not harmless for the two rows that COMMIT
+   * TO A PRICE: Send puts one arbitrary option in front of the customer, and
+   * Convert to Invoice bills for it. While the customer has not chosen,
+   * neither is the app's call to make — so both are withheld, and each option
+   * carries its own Send on the job screen instead. Accepting one supersedes
+   * the rest, the job stops being an option set, and both rows come back.
+   */
+  competingOptions?: boolean;
 }
 
 interface RowCtx {
   job: Job;
   primaryDoc: Document | null;
   xeroConnected: boolean;
+  /** The job carries more than one live quote — see competingOptions below. */
+  competingOptions: boolean;
 }
 
 interface RowDef {
@@ -174,7 +189,7 @@ export const ROWS: RowDef[] = [
     label: 'Send',
     sub: 'Email / SMS / Share / PDF',
     icon: 'send-outline',
-    when: ({ primaryDoc }) => !!primaryDoc,
+    when: ({ primaryDoc, competingOptions }) => !!primaryDoc && !competingOptions,
   },
   {
     id: 'convertToInvoice',
@@ -183,7 +198,7 @@ export const ROWS: RowDef[] = [
     icon: 'file-swap-outline',
     // Quotes only, and never re-offer once invoiced — conversion is
     // one-way and the idempotent path already guards double-taps.
-    when: ({ primaryDoc }) => canConvert(primaryDoc),
+    when: ({ primaryDoc, competingOptions }) => canConvert(primaryDoc) && !competingOptions,
   },
   {
     id: 'addOption',
@@ -268,6 +283,7 @@ export function JobActionsSheet({
   onSelectStage,
   depositPaid,
   onSchedule,
+  competingOptions = false,
 }: JobActionsSheetProps) {
   const styles = useStyles();
   const themeColors = useThemeColors();
@@ -286,6 +302,7 @@ export function JobActionsSheet({
     job,
     primaryDoc: primaryDoc ?? null,
     xeroConnected: !!xeroConnected,
+    competingOptions,
   };
   const rows = ROWS.filter((r) => r.when(ctx));
 
