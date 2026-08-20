@@ -62,6 +62,14 @@ interface JobScopeCardProps {
   /** What the Job knows and this document can't — see PaymentContext. On a
    *  cash job the Job stage is the only record that the money came in. */
   paymentContext?: PaymentContext;
+  /**
+   * Send THIS document. Supplied only when the card is one of several
+   * competing options on a job: the sticky action bar can send one quote, and
+   * on a job with two it cannot say which without naming it. Omitted on the
+   * ordinary one-quote job, where the sticky bar is unambiguous and a second
+   * Send button would just be clutter.
+   */
+  onSend?: (doc: Document) => void;
 }
 
 // Android needs explicit opt-in for LayoutAnimation, otherwise the
@@ -147,6 +155,7 @@ export function JobScopeCard({
   onStagePress,
   onPaymentPress,
   paymentContext,
+  onSend,
 }: JobScopeCardProps) {
   const styles = useStyles();
   const themeColors = useThemeColors();
@@ -362,26 +371,49 @@ export function JobScopeCard({
         </View>
       ) : null}
 
-      <Pressable
-        onPress={handlePreview}
-        disabled={previewing}
-        style={({ pressed }) => [
-          styles.previewButton,
-          pressed && styles.actionButtonPressed,
-          previewing && styles.actionButtonDisabled,
-        ]}
-      >
-        {previewing ? (
-          <ActivityIndicator size="small" color={themeColors.accentText} />
-        ) : (
-          <MaterialCommunityIcons
-            name={'file-eye-outline' as any}
-            size={16}
-            color={themeColors.accentText}
-          />
-        )}
-        <Text style={styles.actionLabel}>Preview PDF</Text>
-      </Pressable>
+      <View style={onSend ? styles.actionRow : undefined}>
+        <Pressable
+          onPress={handlePreview}
+          disabled={previewing}
+          style={({ pressed }) => [
+            styles.previewButton,
+            onSend && styles.actionButtonHalf,
+            pressed && styles.actionButtonPressed,
+            previewing && styles.actionButtonDisabled,
+          ]}
+        >
+          {previewing ? (
+            <ActivityIndicator size="small" color={themeColors.accentText} />
+          ) : (
+            <MaterialCommunityIcons
+              name={'file-eye-outline' as any}
+              size={16}
+              color={themeColors.accentText}
+            />
+          )}
+          <Text style={styles.actionLabel}>Preview PDF</Text>
+        </Pressable>
+
+        {onSend ? (
+          <Pressable
+            onPress={() => onSend(doc)}
+            style={({ pressed }) => [
+              styles.sendButton,
+              styles.actionButtonHalf,
+              pressed && styles.actionButtonPressed,
+            ]}
+          >
+            <MaterialCommunityIcons
+              name={'send-outline' as any}
+              size={16}
+              color={themeColors.onAccent ?? '#12161C'}
+            />
+            <Text style={[styles.actionLabel, styles.sendLabel]}>
+              {doc.sentAt ? 'Send again' : 'Send'}
+            </Text>
+          </Pressable>
+        ) : null}
+      </View>
 
       {alertNode}
     </View>
@@ -761,6 +793,18 @@ const useStyles = makeStyles((t) => ({
     fontWeight: '700',
     color: t.colors.text,
   },
+  actionRow: { flexDirection: 'row', gap: 8 },
+  actionButtonHalf: { flex: 1 },
+  sendButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: t.colors.accent,
+  },
+  sendLabel: { color: t.colors.onAccent ?? '#12161C', fontWeight: '700' },
   previewButton: {
     flexDirection: 'row',
     alignItems: 'center',

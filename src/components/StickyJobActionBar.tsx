@@ -37,10 +37,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { Job, JobStage } from '../../shared/job/types';
 import type { Document } from '../types/document';
+import { pickPrimaryDoc } from '../utils/pickPrimaryDoc';
 import type { Tokens } from '../theme';
 import { makeStyles, useThemeColors } from '../theme';
 import { selectionTap, lightTap } from '../utils/haptics';
 import { isStillBooked } from '../utils/jobBuckets';
+
+export { pickPrimaryDoc };
 
 export type JobActionId =
   | 'createQuote'
@@ -131,20 +134,8 @@ interface StickyJobActionBarProps {
   primaryDoc: Document | null;
   onAction: (id: JobActionId) => void;
   pending?: JobActionId | null;
-}
-
-/** Pick the primary actionable doc: any invoice beats the latest quote. */
-export function pickPrimaryDoc(docs: Document[]): Document | null {
-  if (docs.length === 0) return null;
-  const invoices = docs.filter((d) => d.type === 'invoice');
-  if (invoices.length > 0) {
-    return [...invoices].sort(
-      (a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0),
-    )[0];
-  }
-  return [...docs].sort(
-    (a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0),
-  )[0];
+  /** True when the job carries more than one live quote — see the filter below. */
+  competingOptions?: boolean;
 }
 
 /**
@@ -186,13 +177,50 @@ function invoiceBalanceOwed(doc: Document | null): boolean {
  *   isStillBooked. Only matters once the money is in: a job the customer
  *   paid up front still has the work ahead of it.
  */
+/**
+ * Actions that pick ONE of a job's quotes and commit to it — by putting it in
+ * front of the customer, by agreeing it, or by billing it. Each resolves to
+ * whichever document pickPrimaryDoc lands on, which the bar cannot name.
+ */
+const COMMITS_TO_A_PRICE: ReadonlySet<JobActionId> = new Set<JobActionId>([
+  'sendQuote',
+  'resendQuote',
+  'markApproved',
+  'generateInvoice',
+]);
+
+/**
+ * The bar's actions for a job.
+ *
+ * `competingOptions` withholds the ones that COMMIT TO A PRICE. Each resolves
+ * to ONE document — whichever pickPrimaryDoc lands on — which the bar cannot
+ * name, so on a job showing two equal options they become big primary buttons
+ * that silently pick one: Send puts an arbitrary option in front of the
+ * customer, Mark Approved agrees it on the customer's behalf, and Generate
+ * Invoice bills for it.
+ *
+ * All stay reachable against a document the tradie has actually pointed at —
+ * every option card carries its own Send, and each card's status sheet its own
+ * Mark as Accepted and Convert to Invoice. With nothing left to offer, the bar
+ * hides itself.
+ */
 export function resolveJobActions(
+  stage: JobStage,
+  primaryDoc: Document | null,
+  stillBooked = false,
+  competingOptions = false,
+): ActionSpec[] {
+  const actions = resolveJobActionsInner(stage, primaryDoc, stillBooked);
+  if (!competingOptions) return actions;
+  return actions.filter((a) => !COMMITS_TO_A_PRICE.has(a.id));
+}
+
+function resolveJobActionsInner(
   stage: JobStage,
   primaryDoc: Document | null,
   stillBooked = false,
 ): ActionSpec[] {
   if (stage === 'cancelled' || stage === 'closed') return [];
-
   // No doc attached yet — kick the tradie straight into the quote wizard.
   if (!primaryDoc) {
     return [
@@ -366,11 +394,14 @@ export function StickyJobActionBar({
   primaryDoc,
   onAction,
   pending,
+  competingOptions,
 }: StickyJobActionBarProps) {
   const styles = useStyles();
   const themeColors = useThemeColors();
   const insets = useSafeAreaInsets();
-  const actions = resolveJobActions(job.stage, primaryDoc, isStillBooked(job));
+  const actions = resolveJobActions(
+    job.stage, primaryDoc, isStillBooked(job), competingOptions,
+  );
 
   if (actions.length === 0) return null;
 

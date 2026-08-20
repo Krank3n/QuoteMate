@@ -24,6 +24,7 @@ import { imageMimeFromBase64 } from './imageMime';
 import { Platform, Alert } from 'react-native';
 import {
   buildQuotePdfHtml,
+  buildQuoteOptionsPdfHtml,
   buildInvoicePdfHtml,
   buildReportPdfHtml,
   toPdfMaterials,
@@ -240,6 +241,64 @@ export function generatePdfFilename(
  * Build the PDF HTML for a unified Document. Branches on `doc.type` to call
  * the matching shared HTML builder.
  */
+/**
+ * Document → the shape the PDF builders read.
+ *
+ * Extracted because a job quoted several ways renders each option through the
+ * SAME mapping (see generateOptionsPDF). Inline, the options document would
+ * have needed its own copy, and the two would have drifted on exactly the
+ * fields that decide what money a customer sees.
+ */
+function toQuotePdfData(
+  doc: Document,
+  businessSettings: BusinessSettings | null,
+  plan: ReturnType<ReturnType<typeof useStore.getState>['getEffectivePlan']>,
+): QuotePdfData {
+  const squarePaymentLinkUrl = doc.squarePaymentLinkUrl;
+  return {
+    customerName: doc.customerName,
+    customerEmail: doc.customerEmail,
+    customerPhone: doc.customerPhone,
+    jobAddress: doc.jobAddress,
+    quoteNumber: doc.number,
+    quoteDate: format(new Date(doc.updatedAt), 'dd MMMM yyyy'),
+    job: doc.job,
+    materials: toPdfMaterials(doc.materials),
+    materialsSubtotal: doc.materialsSubtotal,
+    laborHours: doc.laborHours,
+    laborRate: doc.laborRate,
+    laborUnit: doc.laborUnit,
+    labourDisplayUnit: doc.labourDisplayUnit,
+    laborTotal: doc.laborTotal,
+    laborExtraHours: doc.laborExtraHours,
+    sections: toPdfSections(doc.sections),
+    subtotal: doc.subtotal,
+    markup: doc.markup,
+    markupAmount: doc.markupAmount,
+    laborMarkup: doc.laborMarkup ?? doc.markup,
+    showMarkup: doc.showMarkup !== undefined
+      ? doc.showMarkup === true
+      : businessSettings?.showMarkup === true,
+    priceDetail: resolvePriceDetail(doc, businessSettings),
+    requireDeposit: (doc as any).requireDeposit === true,
+    depositPercentage: (doc as any).depositPercentage,
+    depositAmount: (doc as any).depositAmount,
+    travelAdjustment: doc.travelAdjustment,
+    gst: doc.gst,
+    total: doc.total,
+    pricesIncludeGst: doc.pricesIncludeGst ?? businessSettings?.pricesIncludeGst === true,
+    gstRegistered: doc.gstRegistered,
+    notes: doc.notes,
+    showLaborHours: businessSettings?.showLaborHours,
+    showLaborBreakdown: doc.showLaborBreakdown !== false,
+    paymentMethods: businessSettings?.paymentMethods,
+    plan,
+    squarePaymentLinkUrl,
+    surchargePaymentFees: businessSettings?.surchargePaymentFees === true,
+    terms: doc.termsSnapshot || businessSettings?.termsAndConditions,
+  };
+}
+
 export async function generateDocumentPDF(
   doc: Document,
   businessSettings: BusinessSettings | null,
@@ -322,48 +381,7 @@ export async function generateDocumentPDF(
     return buildInvoicePdfHtml(pdfData, business, pdfOptions);
   }
 
-  const pdfData: QuotePdfData = {
-    customerName: doc.customerName,
-    customerEmail: doc.customerEmail,
-    customerPhone: doc.customerPhone,
-    jobAddress: doc.jobAddress,
-    quoteNumber: doc.number,
-    quoteDate: format(new Date(doc.updatedAt), 'dd MMMM yyyy'),
-    job: doc.job,
-    materials: toPdfMaterials(doc.materials),
-    materialsSubtotal: doc.materialsSubtotal,
-    laborHours: doc.laborHours,
-    laborRate: doc.laborRate,
-    laborUnit: doc.laborUnit,
-    labourDisplayUnit: doc.labourDisplayUnit,
-    laborTotal: doc.laborTotal,
-    laborExtraHours: doc.laborExtraHours,
-    sections: toPdfSections(doc.sections),
-    subtotal: doc.subtotal,
-    markup: doc.markup,
-    markupAmount: doc.markupAmount,
-    laborMarkup: doc.laborMarkup ?? doc.markup,
-    showMarkup: doc.showMarkup !== undefined
-      ? doc.showMarkup === true
-      : businessSettings?.showMarkup === true,
-    priceDetail: resolvePriceDetail(doc, businessSettings),
-    requireDeposit: (doc as any).requireDeposit === true,
-    depositPercentage: (doc as any).depositPercentage,
-    depositAmount: (doc as any).depositAmount,
-    travelAdjustment: doc.travelAdjustment,
-    gst: doc.gst,
-    total: doc.total,
-    pricesIncludeGst: doc.pricesIncludeGst ?? businessSettings?.pricesIncludeGst === true,
-    gstRegistered: doc.gstRegistered,
-    notes: doc.notes,
-    showLaborHours: businessSettings?.showLaborHours,
-    showLaborBreakdown: doc.showLaborBreakdown !== false,
-    paymentMethods: businessSettings?.paymentMethods,
-    plan,
-    squarePaymentLinkUrl,
-    surchargePaymentFees: businessSettings?.surchargePaymentFees === true,
-    terms: doc.termsSnapshot || businessSettings?.termsAndConditions,
-  };
+  const pdfData = toQuotePdfData(doc, businessSettings, plan);
   return buildQuotePdfHtml(pdfData, business, pdfOptions);
 }
 
@@ -774,6 +792,77 @@ export async function exportReportPDF(
  * step — this is pure look-at-it. Use when the tradie wants to see
  * what the customer will see before committing to send.
  */
+/**
+ * One PDF for a job quoted several ways: an option per block, a TOTAL each,
+ * and no grand total. See shared/pdf/htmlBuilders.buildQuoteOptionsPdfHtml.
+ */
+export async function generateOptionsPDF(
+  docs: Document[],
+  businessSettings: BusinessSettings | null,
+  options?: { isPro?: boolean },
+): Promise<string> {
+  if (docs.length === 0) throw new Error('No options to render');
+  const business = await prepareBusinessPdfData(businessSettings, options?.isPro);
+  const plan = useStore.getState().getEffectivePlan();
+
+  // Same gate as the single document: an expired free user can preview, but
+  // not walk away with a clean copy to text their customer. Any option still
+  // in draft carries the whole document into the watermark — the sheet is one
+  // artefact and cannot be half-stamped.
+  let watermark: string | undefined;
+  if (
+    plan === 'free'
+    && useStore.getState().isTrialExpired()
+    && docs.some((d) => d.stage === 'draft')
+  ) {
+    try {
+      const sq = await checkSquareConnection();
+      if (!sq.connected) watermark = 'UPGRADE TO SEND';
+    } catch {
+      watermark = 'UPGRADE TO SEND';
+    }
+  }
+
+  return buildQuoteOptionsPdfHtml(
+    docs.map((d) => toQuotePdfData(d, businessSettings, plan)),
+    business,
+    watermark ? { watermark } : undefined,
+  );
+}
+
+/** Preview the options document. Mirrors previewDocumentPDF's platform handling. */
+export async function previewOptionsPDF(
+  docs: Document[],
+  businessSettings: BusinessSettings | null,
+  options?: { isPro?: boolean; printWindow?: Window | null },
+): Promise<void> {
+  const reserved = options?.printWindow ?? reservePrintWindow();
+  const html = await generateOptionsPDF(docs, businessSettings, options);
+  if (Platform.OS === 'web') {
+    writeToPrintWindow(reserved, html, 'Preview', false);
+    return;
+  }
+  if (Platform.OS === 'ios') {
+    try {
+      await Print.printAsync({ html });
+    } catch (error) {
+      if (!isPrintDismissal(error)) throw error;
+    }
+    return;
+  }
+  try {
+    await Promise.race([
+      Print.printAsync({ html }),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('PDF preview timed out')), 25000),
+      ),
+    ]);
+  } catch (error) {
+    if (isPrintDismissal(error)) return;
+    throw error;
+  }
+}
+
 export async function previewDocumentPDF(
   doc: Document,
   businessSettings: BusinessSettings | null,

@@ -242,11 +242,18 @@ export function isRecoveredDocId(docId: string | null | undefined): boolean {
  * something). Primary signal is stage !== 'draft'; sentAt is only a fallback
  * because ~35% of sent-stage docs never recorded a sentAt. A missing stage is
  * treated as 'draft'.
+ *
+ * `cancelled` is the exception, and needs its sentAt like a draft does. A
+ * cancelled document may never have gone anywhere: quote options make that
+ * routine, because accepting one supersedes the rest and an option the tradie
+ * wrote but never sent lands on 'cancelled'. Counting those would flip a
+ * tradie from "never sent a quote" to "sent" on the strength of a draft they
+ * withdrew — and that split is the number the whole funnel is read against.
  */
 export function isActivatingDoc(doc: { stage?: unknown; sentAt?: unknown } | null | undefined): boolean {
   if (!doc) return false;
   const stage = typeof doc.stage === 'string' && doc.stage ? doc.stage : 'draft';
-  if (stage !== 'draft') return true;
+  if (stage !== 'draft' && stage !== 'cancelled') return true;
   return doc.sentAt !== undefined && doc.sentAt !== null;
 }
 

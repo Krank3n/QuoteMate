@@ -6,6 +6,8 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { generateId } from '../utils/generateId';
+import { cloneDocument } from '../utils/cloneDocument';
+import { quotesSupersededByAccepting } from '../../shared/document/quoteOptions';
 import { withOrigin } from '../utils/materialOrigin';
 import { Quote, BusinessSettings, Material, SubscriptionStatus, Invoice, PaymentMethod, ReferralInfo, XeroConnection, XeroSyncStatus, Contact } from '../types';
 import { Document, DocumentPayment, DocumentPaymentMethod } from '../types/document';
@@ -265,6 +267,17 @@ interface AppState {
     sourceDocumentId: string,
     newJobId: string,
   ) => Promise<Document>;
+  /**
+   * Add a second quote to the SAME job — an alternative price for the same
+   * work ("multi-head, or two splits"). Returns the new draft so the caller
+   * can open it for editing. See shared/document/quoteOptions.ts.
+   */
+  addQuoteOptionToJob: (sourceDocumentId: string) => Promise<Document>;
+  /**
+   * Take the other options on this job off the table once one is accepted.
+   * Returns the ids it cancelled. Safe to call when there are none.
+   */
+  supersedeOtherQuotesOnJob: (acceptedDocumentId: string) => Promise<string[]>;
 
   // Mate assistant — chat history lives client-only in v1. The model never
   // writes here directly; it returns Proposal payloads that applyProposal
@@ -2870,82 +2883,53 @@ export const useStore = create<AppState>((set, get) => ({
   duplicateDocumentForJob: async (sourceDocumentId: string, newJobId: string) => {
     const source = get().getDocumentById(sourceDocumentId);
     if (!source) throw new Error('Source document not found');
-    const now = Date.now();
-    // Fresh quote number for the new visit — the source's number still
-    // refers to the original.
+    // Fresh number for the new visit — the source's still refers to the old one.
     const nextNumber = await get().getNextQuoteNumber();
-    // Regenerate ids on nested collections so nothing aliases back to the
-    // original; reset money + pay-link state so the new visit starts clean.
-    const clone: Document = {
-      ...source,
-      id: generateId(),
+    const clone = cloneDocument(source, {
+      kind: 'repeat_visit',
       jobId: newJobId,
-      type: 'quote',
-      stage: 'quote_accepted',
+      id: generateId(),
       number: nextNumber,
-      // Fresh lifecycle timestamps — the old ones refer to the old visit.
-      createdAt: now,
-      updatedAt: now,
-      sentAt: undefined,
-      acceptedAt: now,
-      invoicedAt: undefined,
-      issueDate: undefined,
-      dueDate: undefined,
-      // Money state — nothing has moved yet on this new visit.
-      depositPaid: 0,
-      depositPaidAt: undefined,
-      paidTotal: 0,
-      paidInFullAt: undefined,
-      payments: [],
-      // Pay-link state — new visit needs new links.
-      depositPaymentLinkId: undefined,
-      depositPaymentLinkUrl: undefined,
-      depositPaymentLinkCreatedAt: undefined,
-      depositSquarePaymentId: undefined,
-      squarePaymentLinkId: undefined,
-      squarePaymentLinkUrl: undefined,
-      squarePaymentId: undefined,
-      squarePaidAt: undefined,
-      activePaymentLink: undefined,
-      archivedPaymentLinks: undefined,
-      // Xero state belongs to the source invoice, not to this new visit.
-      xeroInvoiceId: undefined,
-      xeroSyncStatus: undefined,
-      xeroSyncedAt: undefined,
-      xeroSyncError: undefined,
-      legacyInvoiceId: undefined,
-      legacyQuoteId: undefined,
-      // Re-id nested rows so edits on one don't splash onto the other.
-      materials: (source.materials ?? []).map((m) => ({ ...m, id: generateId() })),
-      sections: (source.sections ?? []).map((s) => ({ ...s, id: generateId() })),
-      // Photos are visit-specific; drop them.
-      photos: [],
-      // Draft email body/subject — stale for a new visit.
-      draftEmailBody: undefined,
-      draftEmailSubject: undefined,
-    };
-    // If the source was an invoice, its `total` had any paid deposit
-    // subtracted (see convertDocumentToInvoice). Add it back so the cloned
-    // quote represents the full job value, not the residual.
-    const depositCredit =
-      source.type === 'invoice'
-        ? (source.payments ?? [])
-            .filter((p) => p.kind === 'deposit')
-            .reduce((acc, p) => acc + (Number(p.amount) || 0), 0)
-        : 0;
-    const restoredTotal = (Number(source.total) || 0) + depositCredit;
-    const finalDoc: Document = {
-      ...clone,
-      materialsSubtotal: Number(source.materialsSubtotal) || 0,
-      laborTotal: Number(source.laborTotal) || 0,
-      subtotal: Number(source.subtotal) || 0,
-      markupAmount: Number(source.markupAmount) || 0,
-      gst: Number(source.gst) || 0,
-      total: restoredTotal,
-      balanceDue: restoredTotal,
-    };
-    await get().saveDocument(finalDoc);
-    return finalDoc;
+      now: Date.now(),
+      nextId: generateId,
+    });
+    await get().saveDocument(clone);
+    return clone;
+  },
+
+  addQuoteOptionToJob: async (sourceDocumentId: string) => {
+    const source = get().getDocumentById(sourceDocumentId);
+    if (!source) throw new Error('Source document not found');
+    // An option only means anything relative to a job — it is the second
+    // answer to the same question. Without one there are no siblings to
+    // supersede on accept, so the whole mechanism is inert.
+    if (!source.jobId) throw new Error('This quote is not attached to a job yet');
+    const nextNumber = await get().getNextQuoteNumber();
+    const option = cloneDocument(source, {
+      kind: 'quote_option',
+      jobId: source.jobId,
+      id: generateId(),
+      number: nextNumber,
+      now: Date.now(),
+      nextId: generateId,
+    });
+    await get().saveDocument(option);
+    return option;
+  },
+
+  supersedeOtherQuotesOnJob: async (acceptedDocumentId: string) => {
+    const accepted = get().getDocumentById(acceptedDocumentId);
+    if (!accepted) return [];
+    const ids = quotesSupersededByAccepting(accepted as any, get().documents as any);
+    for (const id of ids) {
+      const doc = get().getDocumentById(id);
+      if (!doc) continue;
+      // Straight through saveDocument rather than applyStageChange: this is
+      // bookkeeping on documents the tradie did not touch, and routing it
+      // back through the stage helper would recurse into this very function.
+      await get().saveDocument({ ...doc, stage: 'cancelled', updatedAt: Date.now() });
+    }
+    return ids;
   },
 
   // Mate assistant ---------------------------------------------------------

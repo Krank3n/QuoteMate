@@ -77,7 +77,7 @@ export function SendDocumentDialog({
   const quote: Quote = useMemo(() => documentToQuote(doc), [doc]);
   const invoice: Invoice = useMemo(() => documentToInvoice(doc), [doc]);
 
-  const { subscriptionStatus, saveDraft, saveQuote, saveInvoice, createInvoiceFromQuote, getEffectivePlan } = useStore();
+  const { subscriptionStatus, saveDraft, saveQuote, saveInvoice, createInvoiceFromQuote, getEffectivePlan, supersedeOtherQuotesOnJob } = useStore();
   const isTrialActive = !!(
     subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired
   );
@@ -350,7 +350,10 @@ export function SendDocumentDialog({
       const deliveredDoc = currentTerms && !doc.termsSnapshot
         ? { ...doc, termsSnapshot: currentTerms, termsVersionHash: hashTerms(currentTerms) }
         : doc;
-      await markDocumentSent(deliveredDoc, method, { saveQuote, saveInvoice, createInvoiceFromQuote });
+      await markDocumentSent(deliveredDoc, method, {
+        saveQuote, saveInvoice, createInvoiceFromQuote,
+        supersedeOtherQuotes: supersedeOtherQuotesOnJob,
+      });
     } catch {
       // Best-effort audit; ignore.
       return;

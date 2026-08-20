@@ -96,6 +96,10 @@ describe('activation — stage !== draft is primary, sentAt only a fallback', ()
     expect(isActivatingDoc({ stage: 'draft' })).toBe(false);
     expect(isActivatingDoc({ stage: 'quote_sent' })).toBe(true);
     expect(isActivatingDoc({})).toBe(false);
+    // A cancelled doc needs its sentAt like a draft does. Superseding an
+    // option the tradie never sent must not read as a send — see the helper.
+    expect(isActivatingDoc({ stage: 'cancelled' })).toBe(false);
+    expect(isActivatingDoc({ stage: 'cancelled', sentAt: 123 })).toBe(true);
     expect(isActivatingDoc(null)).toBe(false);
   });
   it('isActivatingDoc: a sent-stage doc with NO sentAt still counts (35% lack sentAt)', () => {

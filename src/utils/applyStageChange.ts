@@ -17,6 +17,18 @@ export interface ApplyStageChangeHelpers {
   saveInvoice: (i: Invoice) => Promise<void>;
   createInvoiceFromQuote: (q: Quote) => Promise<Invoice>;
   navigation?: { navigate: (route: string, params?: any) => void };
+  /**
+   * Takes the job's OTHER quote options off the table when one is accepted.
+   * See shared/document/quoteOptions.ts for why that has to happen: a job
+   * left holding two live quotes cannot say which one the customer agreed to.
+   *
+   * Required, not optional, on purpose. Several screens drive this helper with
+   * a caller-supplied target, so any of them can land on quote_accepted; an
+   * optional field would let a new call site silently skip the supersede and
+   * leave exactly the ambiguity this exists to prevent. Making it required
+   * means the compiler catches that instead of a customer.
+   */
+  supersedeOtherQuotes: (acceptedDocumentId: string) => Promise<unknown>;
 }
 
 /** Map a DocumentStage to the legacy Quote['status'], if one applies. */
@@ -99,6 +111,19 @@ export async function applyStageChange(
     ? { sentAt: Date.now(), sendMethod }
     : {};
   await helpers.saveQuote({ ...quote, status, updatedAt: new Date(), ...firstSend });
+
+  // One option winning means the others are off the table. Deliberately AFTER
+  // the accepted quote is saved: if this throws, the accept must still stand —
+  // a tradie who tapped "Mark Approved" has recorded a real decision, and
+  // failing the whole transition over sibling bookkeeping would lose it.
+  if (target === 'quote_accepted') {
+    try {
+      await helpers.supersedeOtherQuotes(doc.id);
+    } catch {
+      // Best-effort. The job shows both quotes until the next accept or an
+      // explicit cancel; nothing is lost, and the accept already landed.
+    }
+  }
 }
 
 /**

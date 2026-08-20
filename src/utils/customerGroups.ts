@@ -30,6 +30,7 @@
 
 import type { Job } from '../../shared/job/types';
 import type { Document } from '../types/document';
+import { representativeQuote } from '../../shared/job/aggregate';
 import { jobStatusTimestamp, sortJobsForList } from './jobTimeline';
 import { normalizePhoneTail } from './textMatch';
 
@@ -376,19 +377,23 @@ export function computeCustomerRollup(
       }
     }
 
-    for (const d of docsByJob.get(jobId) ?? []) {
-      if (!d || d.stage === 'cancelled') continue;
+    const live = (docsByJob.get(jobId) ?? []).filter((d) => d && d.stage !== 'cancelled');
+    for (const d of live) {
       docCount += 1;
       const total = Number(d.total) || 0;
       const paid = Number(d.paidTotal) || 0;
       totalPaid += paid;
-      if (d.type === 'quote') totalQuoted += total;
       if (d.type === 'invoice') {
         totalInvoiced += total;
         const balance = total - paid;
         if (balance > EPSILON) owed += balance;
       }
     }
+    // One quote per job, never the sum — competing options are alternatives
+    // and only one can ever be accepted. See shared/job/aggregate.ts.
+    totalQuoted += Number(
+      representativeQuote(live.filter((d) => d.type === 'quote'))?.total,
+    ) || 0;
   }
 
   return {

@@ -31,7 +31,7 @@ import { useNavigation } from '@react-navigation/native';
 
 import type { Job, JobDocument } from '../../shared/job/types';
 import type { Document } from '../types/document';
-import { computeJobAggregates } from '../../shared/job/aggregate';
+import { computeJobAggregates, quotedRange } from '../../shared/job/aggregate';
 import { makeStyles, useThemeColors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
 import { selectionTap, lightTap } from '../utils/haptics';
@@ -113,6 +113,14 @@ export function JobDetailHeader({
       documents as unknown as JobDocument[],
     ),
     [job.id, documents],
+  );
+  // Two undecided options have no single value, and picking one silently is
+  // worse than it sounds: the pick is "most recently touched", so the job's
+  // headline CHANGES when the tradie opens the other card. Show the spread
+  // until the customer decides. See shared/job/aggregate.ts.
+  const range = useMemo(
+    () => quotedRange(documents.filter((d) => d.jobId === job.id && d.type === 'quote') as any),
+    [documents, job.id],
   );
   const headlineAmount =
     totals.totalInvoiced > 0
@@ -215,7 +223,9 @@ export function JobDetailHeader({
                   accessibilityLabel="View job preview"
                 >
                   <Text style={styles.headlinePrice} numberOfLines={1}>
-                    {formatCurrency(headlineAmount)}
+                    {range
+                      ? `${formatCurrency(range.min)} – ${formatCurrency(range.max)}`
+                      : formatCurrency(headlineAmount)}
                   </Text>
                 </Pressable>
               ) : null}
