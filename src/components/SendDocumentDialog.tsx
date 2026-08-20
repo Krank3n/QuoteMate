@@ -26,7 +26,7 @@ import { format } from 'date-fns';
 import { Quote, Invoice, BusinessSettings } from '../types';
 import { Document, SendMethod } from '../types/document';
 import { documentToQuote, documentToInvoice } from '../types/documentAdapter';
-import { formatCurrency } from '../utils/quoteCalculator';
+import { formatCurrency, updateQuoteCalculations } from '../utils/quoteCalculator';
 import { exportDocumentPDF } from '../utils/pdfGenerator';
 import { markDocumentSent } from '../utils/applyStageChange';
 import { maybePromptForPushPermission } from '../services/pushPermissionPrompt';
@@ -50,6 +50,18 @@ import { hasCustomerEmail } from '../utils/sendFlow';
 import { cleanSmsRecipient, openSmsComposer } from '../utils/smsComposer';
 import { generateAcceptanceLink } from '../services/quoteAcceptanceService';
 import { hashTerms } from '../../shared/pdf/terms/defaultAuTradie';
+import { isRecoveredDocId } from '../../shared/document/recovered';
+
+/**
+ * The figures a send is going out on. `changed` is true when the settling
+ * recalculation moved the total off what the screen had been showing — the
+ * signal that any email body drafted earlier now names a stale figure.
+ */
+interface SettledFigures {
+  quote: Quote;
+  doc: Document;
+  changed: boolean;
+}
 
 interface SendDocumentDialogProps {
   visible: boolean;
@@ -76,6 +88,42 @@ export function SendDocumentDialog({
   const isInvoice = doc.type === 'invoice';
   const quote: Quote = useMemo(() => documentToQuote(doc), [doc]);
   const invoice: Invoice = useMemo(() => documentToInvoice(doc), [doc]);
+
+  // A quote is re-costed on its way to Firestore — saveQuote runs
+  // updateQuoteCalculations, which derives labour from the sections when a
+  // quote has them and from the top-level laborHours × laborRate when it
+  // doesn't. The customer's acceptance link renders the SAVED quote, never
+  // this screen's copy, so any figure composed from `quote.total` here can be
+  // contradicted by the page the customer opens: a quote whose top-level
+  // laborHours had fallen out of step with its sections went out as a
+  // $6,389.02 SMS against a $7,819.02 quote page.
+  //
+  // So settle the figures through the same path the save runs BEFORE anything
+  // customer-facing is composed, and quote from the settled record.
+  const recalculatedQuote: Quote = useMemo(
+    () => (isInvoice ? quote : updateQuoteCalculations(quote)),
+    [isInvoice, quote],
+  );
+  // Two exemptions, for opposite reasons.
+  //
+  // Invoices: saveInvoice persists what it is given rather than re-costing it,
+  // so an invoice's saved copy already matches this screen's — there is nothing
+  // to settle.
+  //
+  // `recovered-` quotes: their stored total is the only real figure they carry
+  // (the rest is placeholder lines that were never meant to add up to it), so
+  // recomputing would move a historical record downwards in front of a
+  // customer. See shared/document/recovered.ts.
+  const totalMoved =
+    !isInvoice
+    && !isRecoveredDocId(doc.id)
+    && Math.abs(recalculatedQuote.total - quote.total) >= 0.01;
+  const [settled, setSettled] = useState<{ quote: Quote; doc: Document } | null>(null);
+  // What every customer-facing surface in this dialog quotes from: the
+  // screen's copy until the send flow settles the figures, the settled record
+  // once it has.
+  const activeQuote = settled?.quote ?? quote;
+  const activeDoc = settled?.doc ?? doc;
 
   const { subscriptionStatus, saveDraft, saveQuote, saveInvoice, createInvoiceFromQuote, getEffectivePlan } = useStore();
   const isTrialActive = !!(
@@ -128,7 +176,7 @@ export function SendDocumentDialog({
 
   // generate/fallback come from the shared source so a body warmed on
   // JobPreview is exactly what this flow would have produced on tap.
-  const bodySource = buildEmailBodySource(doc, businessSettings);
+  const bodySource = buildEmailBodySource(activeDoc, businessSettings);
 
   const emailHandler: EmailHandler = isInvoice
     ? {
@@ -139,17 +187,77 @@ export function SendDocumentDialog({
         persistSubject: (subject) => { saveInvoice({ ...invoice, draftEmailSubject: subject }); },
       }
     : {
-        draftBody: quote.draftEmailBody,
-        draftSubject: quote.draftEmailSubject,
+        draftBody: activeQuote.draftEmailBody,
+        draftSubject: activeQuote.draftEmailSubject,
         ...bodySource,
-        persistBody: (body) => { saveDraft({ ...quote, draftEmailBody: body }); },
-        persistSubject: (subject) => { saveDraft({ ...quote, draftEmailSubject: subject }); },
+        persistBody: (body) => { saveDraft({ ...activeQuote, draftEmailBody: body }); },
+        persistSubject: (subject) => { saveDraft({ ...activeQuote, draftEmailSubject: subject }); },
       };
 
   const closeAll = () => {
     setActionSheetVisible(false);
     setEmailPreviewVisible(false);
     onDismiss();
+  };
+
+  /**
+   * Settle the figures every customer-facing surface here will quote from —
+   * the SMS body, the share text, the email body and the exported PDF — so
+   * none of them can name a total the saved quote (and therefore the
+   * customer's acceptance link) disagrees with.
+   *
+   * A price never moves silently: when the recalculation lands somewhere
+   * other than the number the tradie has been looking at, they confirm it
+   * before anything goes out. Returns null when they back out.
+   */
+  const settleTotals = async (): Promise<SettledFigures | null> => {
+    if (settled) return { ...settled, changed: true };
+    if (!totalMoved) return { quote, doc, changed: false };
+
+    trackEvent('send_total_recalculated', {
+      doc_type: docType,
+      shown_total: quote.total,
+      settled_total: recalculatedQuote.total,
+    });
+    const confirmed = await new Promise<boolean>((resolve) => {
+      Alert.alert(
+        'Total has changed',
+        `This quote comes to ${formatCurrency(recalculatedQuote.total)}, not `
+          + `${formatCurrency(quote.total)}. The figure on screen was out of date — `
+          + 'have a look at the labour and sections before it goes to your customer.',
+        [
+          { text: 'Back to quote', style: 'cancel', onPress: () => resolve(false) },
+          { text: `Send ${formatCurrency(recalculatedQuote.total)}`, onPress: () => resolve(true) },
+        ],
+        { cancelable: false },
+      );
+    });
+    if (!confirmed) {
+      setActionSheetVisible(false);
+      onDismiss();
+      return null;
+    }
+
+    // Persist before composing so the saved quote — the one the acceptance
+    // link renders — already holds the figure we are about to quote.
+    await saveDraft(recalculatedQuote);
+    // Carry the settled money across onto the Document rather than
+    // re-projecting it, so nothing that only exists on the unified doc
+    // (stage, payments, type) is lost on the way through.
+    const settledDoc: Document = {
+      ...doc,
+      materials: recalculatedQuote.materials,
+      sections: recalculatedQuote.sections,
+      job: recalculatedQuote.job,
+      materialsSubtotal: recalculatedQuote.materialsSubtotal,
+      laborTotal: recalculatedQuote.laborTotal,
+      subtotal: recalculatedQuote.subtotal,
+      markupAmount: recalculatedQuote.markupAmount,
+      gst: recalculatedQuote.gst,
+      total: recalculatedQuote.total,
+    };
+    setSettled({ quote: recalculatedQuote, doc: settledDoc });
+    return { quote: recalculatedQuote, doc: settledDoc, changed: true };
   };
 
   /**
@@ -160,9 +268,14 @@ export function SendDocumentDialog({
    * Square API error, not an entitlement issue. Pro / trial users always
    * pass without a network round-trip.
    */
-  const passesDeliveryGate = async (): Promise<boolean> => {
+  const passesDeliveryGate = async (settledQuote: Quote): Promise<boolean> => {
+    // Takes the settled quote rather than reading `activeQuote`: callers settle
+    // inside the same invocation, so the state that would update it has not
+    // re-rendered this closure yet. On the free tier this gate mints a Square
+    // payment link for the quote's amount, so a stale figure here bills the
+    // customer the wrong money.
     const gate = await ensureCanDeliver(
-      isInvoice ? { kind: 'invoice', doc: invoice } : { kind: 'quote', doc: quote }
+      isInvoice ? { kind: 'invoice', doc: invoice } : { kind: 'quote', doc: settledQuote }
     );
     if (gate.ok) return true;
     setActionSheetVisible(false);
@@ -185,14 +298,25 @@ export function SendDocumentDialog({
   };
 
   const handleEmailOption = async () => {
-    if (!(await passesDeliveryGate())) return;
+    const settledNow = await settleTotals();
+    if (!settledNow) return;
+    if (!(await passesDeliveryGate(settledNow.quote))) return;
     setActionSheetVisible(false);
     trackEvent('send_method_chosen', { method: 'email', doc_type: docType });
+
+    // Every shortcut below reuses a body composed before the figures settled,
+    // and a quote email names its total in the prose. Once the total has
+    // moved, all of them are stale — the seeded copy, the persisted draft and
+    // the warmed body alike — so none may be reused. Compose fresh against
+    // the settled doc instead.
+    const source = settledNow.changed
+      ? buildEmailBodySource(settledNow.doc, businessSettings)
+      : emailHandler;
 
     // Coming back from "More ways to send" — `emailBody` already holds this
     // session's copy, hand-edits and all. Reseeding from the (frozen) doc
     // prop here would silently throw those edits away and send the old text.
-    if (seededDocIdRef.current === doc.id) {
+    if (!settledNow.changed && seededDocIdRef.current === doc.id) {
       setEmailPreviewVisible(true);
       trackEvent('email_preview_opened', { doc_type: docType, prefilled: true, wait_ms: 0 });
       return;
@@ -202,11 +326,11 @@ export function SendDocumentDialog({
 
     // Body written on a previous open, or warmed on JobPreview: straight into
     // the preview, no wait at all.
-    if (emailHandler.draftBody) {
+    if (!settledNow.changed && emailHandler.draftBody) {
       openPreviewWithBody(emailHandler.draftBody, true, 0);
       return;
     }
-    const warmed = getWarmedEmailBody(doc);
+    const warmed = settledNow.changed ? null : getWarmedEmailBody(doc);
     if (warmed) {
       openPreviewWithBody(warmed, true, 0);
       emailHandler.persistBody(warmed);
@@ -220,15 +344,15 @@ export function SendDocumentDialog({
       // A warm-up already running for this doc is the common case when the
       // tradie sends straight off JobPreview — wait on it rather than paying
       // for a second generation of the same email.
-      const warming = whenEmailDraftWarm(doc);
+      const warming = settledNow.changed ? null : whenEmailDraftWarm(doc);
       if (warming) await warming;
-      const body = getWarmedEmailBody(doc)
-        ?? (isPro ? await emailHandler.generate() : emailHandler.fallback());
+      const body = (settledNow.changed ? null : getWarmedEmailBody(doc))
+        ?? (isPro ? await source.generate() : source.fallback());
       setEmailBody(body);
       seededDocIdRef.current = doc.id;
       emailHandler.persistBody(body);
     } catch {
-      const fallback = emailHandler.fallback();
+      const fallback = source.fallback();
       setEmailBody(fallback);
       seededDocIdRef.current = doc.id;
       emailHandler.persistBody(fallback);
@@ -252,6 +376,9 @@ export function SendDocumentDialog({
       setActionSheetVisible(false);
       setEmailPreviewVisible(false);
       setPayLinkOfferVisible(false);
+      // Drop the settled figures with the flow that settled them. The next
+      // open re-derives them from whatever the doc looks like by then.
+      setSettled(null);
       emailSentRef.current = false;
       seededDocIdRef.current = null;
       return;
@@ -312,7 +439,7 @@ export function SendDocumentDialog({
     // Persist body + subject together so a single write covers both edits
     // and they stay in sync on reopen.
     const trimmedSubject = emailSubject.trim();
-    const subjectChanged = trimmedSubject !== (isInvoice ? invoice.draftEmailSubject : quote.draftEmailSubject) && trimmedSubject !== '';
+    const subjectChanged = trimmedSubject !== (isInvoice ? invoice.draftEmailSubject : activeQuote.draftEmailSubject) && trimmedSubject !== '';
     if (isInvoice) {
       const bodyChanged = emailBody && emailBody !== (invoice.draftEmailBody || '');
       if (bodyChanged || subjectChanged) {
@@ -323,10 +450,10 @@ export function SendDocumentDialog({
         });
       }
     } else {
-      const bodyChanged = emailBody && emailBody !== (quote.draftEmailBody || '');
+      const bodyChanged = emailBody && emailBody !== (activeQuote.draftEmailBody || '');
       if (bodyChanged || subjectChanged) {
         saveDraft({
-          ...quote,
+          ...activeQuote,
           ...(bodyChanged ? { draftEmailBody: emailBody } : {}),
           ...(subjectChanged ? { draftEmailSubject: trimmedSubject } : {}),
         });
@@ -337,19 +464,26 @@ export function SendDocumentDialog({
   // Record a non-email delivery (SMS / Share / Export) against the doc so its
   // first-send audit is captured. Fully self-contained: a marking failure is
   // swallowed — it must never surface an error to the user mid-send.
-  const recordSend = async (method: SendMethod) => {
+  /**
+   * `sendDoc` is passed in rather than read off `activeDoc`: the settle runs
+   * inside the same handler invocation that later calls us, so the state it
+   * set has not re-rendered this closure yet. The figures would still come out
+   * right — saveQuote re-costs whatever it is handed — but only by accident,
+   * and this write is the one that stamps the send.
+   */
+  const recordSend = async (method: SendMethod, sendDoc: Document) => {
     // Only a doc still in draft actually transitions here; anything already
     // sent/accepted no-ops inside markDocumentSent. Capture that up front so
     // we only notify the host on a real draft→sent move (and never on failure).
-    const wasDraft = doc.stage === 'draft';
+    const wasDraft = sendDoc.stage === 'draft';
     try {
       // Non-email sends do not pass through the email backend's snapshot
       // step. Preserve the exact terms in force when the document leaves so
       // later settings edits cannot rewrite what the customer accepted.
       const currentTerms = businessSettings?.termsAndConditions?.trim();
-      const deliveredDoc = currentTerms && !doc.termsSnapshot
-        ? { ...doc, termsSnapshot: currentTerms, termsVersionHash: hashTerms(currentTerms) }
-        : doc;
+      const deliveredDoc = currentTerms && !sendDoc.termsSnapshot
+        ? { ...sendDoc, termsSnapshot: currentTerms, termsVersionHash: hashTerms(currentTerms) }
+        : sendDoc;
       await markDocumentSent(deliveredDoc, method, { saveQuote, saveInvoice, createInvoiceFromQuote });
     } catch {
       // Best-effort audit; ignore.
@@ -360,7 +494,7 @@ export function SendDocumentDialog({
     // Offer push now that a real customer has the document. No-ops if the
     // tradie already granted or already declined once.
     void maybePromptForPushPermission().catch(() => {});
-    if (wasDraft) onMarkedSent?.(doc, method);
+    if (wasDraft) onMarkedSent?.(sendDoc, method);
   };
 
   const handleSendSMS = async () => {
@@ -371,7 +505,9 @@ export function SendDocumentDialog({
       Alert.alert('No phone on file', 'Add a phone number to the customer to send an SMS.');
       return;
     }
-    if (!(await passesDeliveryGate())) return;
+    const settledNow = await settleTotals();
+    if (!settledNow) return;
+    if (!(await passesDeliveryGate(settledNow.quote))) return;
     trackEvent('send_method_chosen', { method: 'sms', doc_type: docType });
 
     // A quote SMS must carry the quote itself, not merely announce a total.
@@ -394,9 +530,9 @@ export function SendDocumentDialog({
     }
 
     setActionSheetVisible(false);
-    const customerName = isInvoice ? invoice.customerName : quote.customerName;
-    const jobName = isInvoice ? invoice.job.name : quote.job.name;
-    const total = isInvoice ? invoice.total : quote.total;
+    const customerName = isInvoice ? invoice.customerName : settledNow.quote.customerName;
+    const jobName = isInvoice ? invoice.job.name : settledNow.quote.job.name;
+    const total = isInvoice ? invoice.total : settledNow.quote.total;
     const businessName = businessSettings?.businessName || 'us';
     const invoicePayLine = invoice.squarePaymentLinkUrl
       ? `\n\nView and pay online:\n${invoice.squarePaymentLinkUrl}`
@@ -422,7 +558,7 @@ export function SendDocumentDialog({
             {
               text: 'Mark as sent',
               onPress: async () => {
-                await recordSend('sms');
+                await recordSend('sms', settledNow.doc);
                 onDismiss();
               },
             },
@@ -442,7 +578,7 @@ export function SendDocumentDialog({
             {
               text: 'Mark as sent',
               onPress: async () => {
-                await recordSend('sms');
+                await recordSend('sms', settledNow.doc);
                 onDismiss();
               },
             },
@@ -451,7 +587,7 @@ export function SendDocumentDialog({
         );
         return;
       }
-      await recordSend('sms');
+      await recordSend('sms', settledNow.doc);
       onDismiss();
     } catch {
       // Keep the send sheet available for a retry or another delivery method.
@@ -461,16 +597,18 @@ export function SendDocumentDialog({
   };
 
   const handleShareFromDialog = async () => {
-    if (!(await passesDeliveryGate())) return;
+    const settledNow = await settleTotals();
+    if (!settledNow) return;
+    if (!(await passesDeliveryGate(settledNow.quote))) return;
     setActionSheetVisible(false);
     trackEvent('send_method_chosen', { method: 'share', doc_type: docType });
     try {
       const message = isInvoice
         ? `Invoice for ${invoice.customerName}\n${invoice.job.name}\nTotal: ${formatCurrency(invoice.total)}\nDue: ${format(new Date(invoice.dueDate), 'dd MMM yyyy')}`
-        : `Quote for ${quote.customerName}\n${quote.job.name}\nTotal: ${formatCurrency(quote.total)}`;
+        : `Quote for ${settledNow.quote.customerName}\n${settledNow.quote.job.name}\nTotal: ${formatCurrency(settledNow.quote.total)}`;
       const result = await Share.share({ message, title: isInvoice ? 'Share Invoice' : 'Share Quote' });
       if (result.action === Share.sharedAction) {
-        await recordSend('share');
+        await recordSend('share', settledNow.doc);
       }
     } catch {
       Alert.alert('Error', `Could not share ${isInvoice ? 'invoice' : 'quote'}`);
@@ -479,12 +617,14 @@ export function SendDocumentDialog({
   };
 
   const handleExportFromDialog = async () => {
-    if (!(await passesDeliveryGate())) return;
+    const settledNow = await settleTotals();
+    if (!settledNow) return;
+    if (!(await passesDeliveryGate(settledNow.quote))) return;
     setActionSheetVisible(false);
     trackEvent('send_method_chosen', { method: 'export_pdf', doc_type: docType });
     try {
-      await exportDocumentPDF(doc, businessSettings, 'export', { isPro });
-      await recordSend('export_pdf');
+      await exportDocumentPDF(settledNow.doc, businessSettings, 'export', { isPro });
+      await recordSend('export_pdf', settledNow.doc);
     } catch {
       Alert.alert('Error', 'Failed to export PDF. Please try again.');
     }
@@ -502,8 +642,11 @@ export function SendDocumentDialog({
     if (isAttachingPayLink) return;
     setIsAttachingPayLink(true);
     try {
+      // Settled, not the screen's copy: this mints a Square link for a real
+      // amount — the deposit, or the full quote total — so a stale figure here
+      // puts a Pay Now button on the customer's page for the wrong money.
       const result = await attachTrialPayLink(
-        isInvoice ? { kind: 'invoice', doc: invoice } : { kind: 'quote', doc: quote }
+        isInvoice ? { kind: 'invoice', doc: invoice } : { kind: 'quote', doc: activeQuote }
       );
       trackEvent('pay_link_optin_tapped', {
         doc_type: docType,
@@ -553,7 +696,7 @@ export function SendDocumentDialog({
       <DocumentEmailPreviewModal
         visible={emailPreviewVisible}
         onDismiss={handleEmailPreviewDismiss}
-        doc={doc}
+        doc={activeDoc}
         businessSettings={businessSettings}
         emailBody={emailBody}
         onEmailBodyChange={setEmailBody}

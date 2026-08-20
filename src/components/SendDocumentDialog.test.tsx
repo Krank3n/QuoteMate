@@ -13,7 +13,7 @@
  */
 import React from 'react';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, fireEvent, screen, waitFor } from '@testing-library/react';
+import { render, fireEvent, screen, waitFor, act } from '@testing-library/react';
 import { Alert } from 'react-native';
 
 vi.mock('react-native', () => ({
@@ -144,14 +144,19 @@ function doc(overrides: Partial<Document> = {}): Document {
     customerEmail: 'sam@example.com',
     job: { name: 'Deck restain', description: 'Sand and restain' },
     payments: [],
-    materials: [],
+    // Self-consistent on purpose: the dialog now re-costs a quote before it
+    // quotes a figure at a customer, so a fixture whose stored total doesn't
+    // match its own line items would trip the settle prompt in every test.
+    // 200 materials + 480 labour = 680, +$20 material markup = 700, +GST = 770.
+    materials: [{ id: 'm1', name: 'Decking oil', quantity: 4, unit: 'each', price: 50, totalPrice: 200 }],
     laborRate: 80,
     laborHours: 6,
     laborTotal: 480,
     materialsSubtotal: 200,
     markup: 10,
+    laborMarkup: 0,
     markupAmount: 20,
-    subtotal: 700,
+    subtotal: 680,
     gst: 70,
     total: 770,
     draftEmailBody: 'Warmed on JobPreview',
@@ -554,5 +559,280 @@ describe('the free-tier send gate', () => {
 
     await waitFor(() => expect(eventProps('send_gate_shown')).toEqual({ doc_type: 'quote' }));
     expect(screen.queryByTestId('preview')).toBeNull();
+  });
+});
+
+describe('settling the total before it reaches a customer', () => {
+  /**
+   * Aug 2026, QU-178711. A tradie quoted a Daikin multi-head replacement with
+   * three sections (8h + 8h + 2h at $100) while the quote's top-level
+   * laborHours still read 8. calculateDocumentTotals derives labour from the
+   * sections when a quote has them and from laborHours × laborRate when it
+   * doesn't — so the screen's copy carried $6,389.02 (labour $800) while
+   * saveQuote, which re-costs on the way out, landed on $7,819.02 (labour
+   * $1,800). The SMS was composed from the screen's copy and the acceptance
+   * link renders the saved one, so the customer was quoted $6,389.02 by text
+   * and shown $7,819.02 when they opened it.
+   */
+  const drifting = (overrides: Partial<Document> = {}) => doc({
+    customerEmail: undefined,
+    customerPhone: '0421617499',
+    job: { name: 'Daikin multi head replacement', description: 'Like-for-like replacement' },
+    materials: [
+      { id: 'm1', name: 'Daikin multi head', quantity: 1, unit: 'each', price: 3723.5, totalPrice: 3723.5 },
+      { id: 'm2', name: 'Decommission old system', quantity: 1, unit: 'each', price: 150, totalPrice: 150 },
+      { id: 'm3', name: 'Consumables', quantity: 1, unit: 'each', price: 100, totalPrice: 100 },
+    ],
+    sections: [
+      { id: 's1', name: 'Option 1', laborHours: 8, laborRate: 100, laborUnit: 'hours', multiplier: 1, laborTotal: 800 },
+      { id: 's2', name: 'Option 2', laborHours: 4, laborRate: 100, laborUnit: 'hours', multiplier: 2, laborTotal: 800 },
+      { id: 's3', name: 'Decommission', laborHours: 2, laborRate: 100, laborUnit: 'hours', multiplier: 1, laborTotal: 200 },
+    ],
+    laborRate: 100,
+    laborHours: 8,
+    laborExtraHours: 0,
+    markup: 20,
+    laborMarkup: 30,
+    gstRegistered: true,
+    pricesIncludeGst: false,
+    // The stale figures the screen was showing — labour costed off the
+    // top-level 8 hours instead of the sections' 18.
+    laborTotal: 800,
+    materialsSubtotal: 3973.5,
+    markupAmount: 1034.7,
+    subtotal: 4773.5,
+    gst: 580.82,
+    total: 6389.02,
+    draftEmailBody: 'Your quote comes to $6,389.02.',
+    ...overrides,
+  } as Partial<Document>);
+
+  /** Press a button on the settle-confirm alert. */
+  async function answerSettlePrompt(choice: 'send' | 'back') {
+    await waitFor(() => expect(
+      vi.mocked(Alert.alert).mock.calls.find(([title]) => title === 'Total has changed'),
+    ).toBeTruthy());
+    const buttons = vi.mocked(Alert.alert).mock.calls
+      .find(([title]) => title === 'Total has changed')?.[2] as any[];
+    const button = choice === 'send'
+      ? buttons.find((b) => String(b.text).startsWith('Send'))
+      : buttons.find((b) => b.style === 'cancel');
+    await act(async () => { button.onPress(); });
+  }
+
+  it('quotes the SMS at the recalculated total, not the stale one on screen', async () => {
+    renderDialog({ doc: drifting() });
+    await waitFor(() => expect(screen.getByTestId('sheet')).toBeTruthy());
+
+    fireEvent.click(screen.getByText('SMS'));
+    await answerSettlePrompt('send');
+
+    await waitFor(() => expect(sms.openSmsComposer).toHaveBeenCalled());
+    const message = sms.openSmsComposer.mock.calls[0][1] as string;
+    expect(message).toContain('Total: $7,819.02');
+    expect(message).not.toContain('6,389.02');
+  });
+
+  it('persists the recalculated quote before minting the link the customer opens', async () => {
+    renderDialog({ doc: drifting() });
+    await waitFor(() => expect(screen.getByTestId('sheet')).toBeTruthy());
+
+    fireEvent.click(screen.getByText('SMS'));
+    await answerSettlePrompt('send');
+    await waitFor(() => expect(acceptance.generateAcceptanceLink).toHaveBeenCalled());
+
+    // The acceptance page reads the SAVED quote, so the save has to land
+    // first or the link still serves the figure the SMS just contradicted.
+    const saved = store.state.saveDraft.mock.calls[0][0];
+    expect(saved.total).toBe(7819.02);
+    expect(saved.laborTotal).toBe(1800);
+    expect(store.state.saveDraft.mock.invocationCallOrder[0])
+      .toBeLessThan(acceptance.generateAcceptanceLink.mock.invocationCallOrder[0]);
+  });
+
+  it('never moves the price silently — backing out sends nothing and saves nothing', async () => {
+    renderDialog({ doc: drifting() });
+    await waitFor(() => expect(screen.getByTestId('sheet')).toBeTruthy());
+
+    fireEvent.click(screen.getByText('SMS'));
+    await answerSettlePrompt('back');
+
+    expect(sms.openSmsComposer).not.toHaveBeenCalled();
+    expect(acceptance.generateAcceptanceLink).not.toHaveBeenCalled();
+    expect(store.state.saveDraft).not.toHaveBeenCalled();
+  });
+
+  it('reports the gap it found so these can be counted', async () => {
+    renderDialog({ doc: drifting() });
+    await waitFor(() => expect(screen.getByTestId('sheet')).toBeTruthy());
+
+    fireEvent.click(screen.getByText('SMS'));
+    await answerSettlePrompt('send');
+
+    expect(eventProps('send_total_recalculated')).toEqual({
+      doc_type: 'quote',
+      shown_total: 6389.02,
+      settled_total: 7819.02,
+    });
+  });
+
+  it('shares the recalculated total too', async () => {
+    renderDialog({ doc: drifting() });
+    await waitFor(() => expect(screen.getByTestId('sheet')).toBeTruthy());
+
+    fireEvent.click(screen.getByText('Share'));
+    await answerSettlePrompt('send');
+
+    const { Share } = await import('react-native');
+    await waitFor(() => expect(vi.mocked(Share.share)).toHaveBeenCalled());
+    expect(vi.mocked(Share.share).mock.calls[0][0].message).toContain('$7,819.02');
+  });
+
+  it('exports the PDF from the recalculated document', async () => {
+    renderDialog({ doc: drifting() });
+    await waitFor(() => expect(screen.getByTestId('sheet')).toBeTruthy());
+
+    fireEvent.click(screen.getByText('Export PDF'));
+    await answerSettlePrompt('send');
+
+    const { exportDocumentPDF } = await import('../utils/pdfGenerator');
+    await waitFor(() => expect(vi.mocked(exportDocumentPDF)).toHaveBeenCalled());
+    expect(vi.mocked(exportDocumentPDF).mock.calls[0][0].total).toBe(7819.02);
+  });
+
+  it('rewrites an email body that was drafted against the old figure', async () => {
+    // A quote email names its total in the prose, so the draft written before
+    // the settle is as wrong as the SMS was.
+    renderDialog({ doc: drifting({ customerEmail: 'barb@example.com' }) });
+    await answerSettlePrompt('send');
+
+    await waitFor(() => expect(screen.getByTestId('preview')).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId('preview-body').textContent)
+      .toBe('Written quote email'));
+    expect(llm.generateQuoteEmail).toHaveBeenCalledWith(
+      expect.objectContaining({ total: 7819.02 }),
+    );
+  });
+
+  it('leaves a quote whose figures already agree alone — no prompt, no extra write', async () => {
+    renderDialog({ doc: doc({ customerEmail: undefined, customerPhone: '0421617499' }) });
+    await waitFor(() => expect(screen.getByTestId('sheet')).toBeTruthy());
+
+    fireEvent.click(screen.getByText('SMS'));
+
+    await waitFor(() => expect(sms.openSmsComposer).toHaveBeenCalled());
+    expect(vi.mocked(Alert.alert).mock.calls.find(([title]) => title === 'Total has changed'))
+      .toBeUndefined();
+    expect(store.state.saveDraft).not.toHaveBeenCalled();
+    expect(sms.openSmsComposer.mock.calls[0][1]).toContain('Total: $770.00');
+  });
+
+  it('mints the Pay Now link against the settled total, not the screen\'s', async () => {
+    // attachTrialPayLink asks Square for a link for a real amount (deposit, or
+    // the full quote total). A stale figure here puts a Pay Now button on the
+    // customer's page for money the quote no longer says.
+    renderDialog({ doc: drifting({ customerEmail: 'barb@example.com' }) });
+    await answerSettlePrompt('send');
+    await waitFor(() => expect(screen.getByTestId('preview')).toBeTruthy());
+    fireEvent.click(screen.getByText('stub-sent'));
+    fireEvent.click(screen.getByText('stub-close'));
+
+    fireEvent.click(screen.getByText('Set it up'));
+
+    await waitFor(() => expect(guard.attachTrialPayLink).toHaveBeenCalledTimes(1));
+    expect(guard.attachTrialPayLink.mock.calls[0][0].doc.total).toBe(7819.02);
+  });
+
+  it('settles an invoice by leaving it alone — saveInvoice does not re-cost', async () => {
+    renderDialog({
+      doc: drifting({ type: 'invoice', customerPhone: '0421617499', dueDate: 0 } as any),
+    });
+    await waitFor(() => expect(screen.getByTestId('sheet')).toBeTruthy());
+
+    fireEvent.click(screen.getByText('SMS'));
+
+    await waitFor(() => expect(sms.openSmsComposer).toHaveBeenCalled());
+    expect(vi.mocked(Alert.alert).mock.calls.find(([title]) => title === 'Total has changed'))
+      .toBeUndefined();
+    expect(sms.openSmsComposer.mock.calls[0][1]).toContain('Total: $6,389.02');
+  });
+});
+
+describe('quotes the settle must not touch', () => {
+  /**
+   * `recovered-` docs are the 2026-07 account-reclaim reconstructions: the
+   * grand total is real (read off the email that went out) but the lines under
+   * it are placeholders that were never meant to add up to it. Recomputing one
+   * would move a historical record — downwards, in front of a customer.
+   */
+  it('leaves a recovered- quote on its stored total', async () => {
+    renderDialog({
+      doc: doc({
+        id: 'recovered-QU-177680',
+        customerEmail: undefined,
+        customerPhone: '0421617499',
+        materials: [
+          { id: 'r1', name: 'Materials (recovered)', quantity: 1, unit: 'each', price: 3932.37, totalPrice: 3932.37 },
+          { id: 'r2', name: 'Labour (recovered)', quantity: 1, unit: 'each', price: 1170, totalPrice: 1170 },
+        ],
+        laborRate: 0,
+        laborHours: 0,
+        laborTotal: 0,
+        markup: 0,
+        laborMarkup: 0,
+        materialsSubtotal: 5104.37,
+        subtotal: 5104.37,
+        gst: 518.09,
+        total: 5698.95,
+      }),
+    });
+    await waitFor(() => expect(screen.getByTestId('sheet')).toBeTruthy());
+
+    fireEvent.click(screen.getByText('SMS'));
+
+    await waitFor(() => expect(sms.openSmsComposer).toHaveBeenCalled());
+    expect(vi.mocked(Alert.alert).mock.calls.find(([title]) => title === 'Total has changed'))
+      .toBeUndefined();
+    expect(store.state.saveDraft).not.toHaveBeenCalled();
+    // The figure the customer was actually quoted, not the one its placeholder
+    // lines recompute to ($5,612.61).
+    expect(sms.openSmsComposer.mock.calls[0][1]).toContain('Total: $5,698.95');
+  });
+});
+
+describe('the free-tier gate settles first too', () => {
+  /**
+   * On the free tier ensureCanDeliver mints a Square payment link for the
+   * quote's amount before anything can go out. It runs inside the same handler
+   * invocation as the settle, so reading the figure off component state would
+   * hand it the pre-settle number and bill the customer the wrong money.
+   */
+  it('gates on the settled total, not the stale one', async () => {
+    store.state.getEffectivePlan = () => 'free';
+    renderDialog({
+      doc: doc({
+        customerEmail: undefined,
+        customerPhone: '0421617499',
+        materials: [{ id: 'm1', name: 'Decking oil', quantity: 4, unit: 'each', price: 50, totalPrice: 200 }],
+        laborRate: 80,
+        laborHours: 6,
+        markup: 10,
+        laborMarkup: 0,
+        total: 500, // stale: recomputes to 770
+      }),
+    });
+    await waitFor(() => expect(screen.getByTestId('sheet')).toBeTruthy());
+
+    fireEvent.click(screen.getByText('SMS'));
+
+    await waitFor(() => expect(
+      vi.mocked(Alert.alert).mock.calls.find(([t]) => t === 'Total has changed'),
+    ).toBeTruthy());
+    const buttons = vi.mocked(Alert.alert).mock.calls
+      .find(([t]) => t === 'Total has changed')?.[2] as any[];
+    await act(async () => { buttons.find((b) => String(b.text).startsWith('Send')).onPress(); });
+
+    await waitFor(() => expect(guard.ensureCanDeliver).toHaveBeenCalled());
+    expect(guard.ensureCanDeliver.mock.calls[0][0].doc.total).toBe(770);
   });
 });
