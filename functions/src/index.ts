@@ -179,6 +179,7 @@ export { onJobWriteSyncCal } from './googleCalendarSync';
 export { requestKatieDemoCall, getKatieSignupLink, katieRecoveryDrip } from './callKatie';
 import { quoteRecordToDocumentRecord, invoiceRecordToDocumentRecord } from './shared/document/adapter';
 import { supersedeSiblingQuotes } from './quoteOptions.helpers';
+import { isQuoteOpenForResponse } from './shared/document/quoteOptions';
 import { getAussieMessage, AussieEvent } from './aussieNotifications';
 import {
   decidePush,
@@ -6497,6 +6498,19 @@ export const getQuoteForAcceptance = functions.https.onRequest((req, res) => {
         return;
       }
 
+      // Withdrawn, so there is nothing to show. Most often this is a quote
+      // option the customer did not pick: they hold a link for every option
+      // they were sent, and accepting one supersedes the rest. Deliberately
+      // NOT the alreadyResponded branch — they never responded to this one.
+      // See shared/document/quoteOptions.ts.
+      if (!isQuoteOpenForResponse(foundQuote)) {
+        res.status(410).json({
+          success: false,
+          error: 'This quote is no longer current. Please get in touch for an up-to-date one.',
+        });
+        return;
+      }
+
       // Check if already responded
       if (foundQuote.respondedAt) {
         res.status(200).json({
@@ -6658,6 +6672,18 @@ export const respondToQuote = functions.https.onRequest((req, res) => {
 
       if (!foundQuoteRef || !foundQuote) {
         res.status(404).json({ success: false, error: 'Quote not found' });
+        return;
+      }
+
+      // A superseded option must not be acceptable. Without this the customer
+      // could accept option 1, then option 2 from an older email, and the
+      // second accept would supersede the first — leaving the agreed price
+      // decided by which link got clicked last.
+      if (!isQuoteOpenForResponse(foundQuote)) {
+        res.status(400).json({
+          success: false,
+          error: 'This quote is no longer current. Please get in touch for an up-to-date one.',
+        });
         return;
       }
 

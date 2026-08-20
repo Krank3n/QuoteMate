@@ -57,6 +57,8 @@ function source(over: Partial<Document> = {}): Document {
     depositPaymentLinkUrl: 'https://square.test/deposit',
     squarePaymentLinkUrl: 'https://square.test/full',
     squarePaymentId: 'sq-1',
+    termsSnapshot: 'Old terms, frozen when the source was sent.',
+    termsVersionHash: 'abc123',
     draftEmailBody: 'Your quote comes to $6,389.02.',
     draftEmailSubject: 'Quotation',
     ...over,
@@ -162,6 +164,14 @@ describe('what no clone may ever inherit', () => {
         expect(clone().depositPaymentLinkUrl).toBeUndefined();
         expect(clone().squarePaymentLinkUrl).toBeUndefined();
         expect(clone().squarePaymentId).toBeUndefined();
+      });
+
+      it('carries no terms snapshot, which is stamped at send time', () => {
+        // recordSend only stamps terms on a document that has none, so an
+        // inherited snapshot does not just look stale — it stops the clone
+        // ever getting the tradie's current terms.
+        expect(clone().termsSnapshot).toBeUndefined();
+        expect(clone().termsVersionHash).toBeUndefined();
       });
 
       it('drops the drafted email, which names the source total', () => {

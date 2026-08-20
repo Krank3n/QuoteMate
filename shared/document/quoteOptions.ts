@@ -104,21 +104,6 @@ export function quotesSupersededByAccepting(
 }
 
 /**
- * Whether a job is carrying more than one live quote — the state that makes
- * "which one did they say yes to?" a real question. Drives the UI hint that
- * tells the tradie these are competing options rather than separate work.
- */
-export function liveQuoteCount(
-  jobId: string | null | undefined,
-  all: ReadonlyArray<SupersedableQuote>,
-): number {
-  if (!jobId) return 0;
-  return all.filter((doc) => (
-    doc.jobId === jobId && !isInvoice(doc) && !isCancelled(doc)
-  )).length;
-}
-
-/**
  * Whether to offer "add another option" on this document.
  *
  * A second price for the same job is only meaningful while the job is still
@@ -139,4 +124,22 @@ export function canAddQuoteOption(doc?: SupersedableQuote | null): boolean {
   const state = doc.stage ?? doc.status;
   return state === 'draft' || state === 'quote_sent' || state === 'sent'
     || state === 'quote_rejected' || state === 'rejected';
+}
+
+/**
+ * Whether a quote can still be opened and answered through its acceptance
+ * link.
+ *
+ * A cancelled quote cannot. That matters most for options: the customer holds
+ * a link for EVERY option they were sent, and accepting one supersedes the
+ * rest — but the superseded links are still sitting in their inbox. Without
+ * this, they could accept a second option minutes later, and the supersede on
+ * that accept would cancel the first, leaving the tradie with a job whose
+ * agreed price depends on which email got clicked last.
+ *
+ * It is the right answer for an ordinary cancelled quote too: a tradie who
+ * withdrew a price does not want it accepted an hour later.
+ */
+export function isQuoteOpenForResponse(doc: SupersedableQuote): boolean {
+  return !isCancelled(doc);
 }

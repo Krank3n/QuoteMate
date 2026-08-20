@@ -99,6 +99,14 @@ export function cloneDocument(source: Document, opts: CloneOptions): Document {
     // Same site, same day: an option keeps the photos. A repeat visit is a
     // different day and its own photos.
     photos: isOption ? (source.photos ?? []) : [],
+    // The terms snapshot is taken at SEND time and frozen so later settings
+    // edits cannot rewrite what the customer accepted. A clone has not been
+    // sent, so it has no snapshot of its own — and inheriting the source's
+    // actively blocks it getting one, because recordSend only stamps terms
+    // when the document has none. The clone would go out under whatever the
+    // tradie's terms said the day the ORIGINAL was sent.
+    termsSnapshot: undefined,
+    termsVersionHash: undefined,
     // The body names the source's total, so it is wrong for both kinds.
     draftEmailBody: undefined,
     draftEmailSubject: undefined,

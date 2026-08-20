@@ -10,8 +10,8 @@ import { describe, it, expect } from 'vitest';
 
 import {
   quotesSupersededByAccepting,
-  liveQuoteCount,
   canAddQuoteOption,
+  isQuoteOpenForResponse,
   type SupersedableQuote,
 } from './quoteOptions';
 
@@ -150,25 +150,6 @@ describe('quotesSupersededByAccepting', () => {
   });
 });
 
-describe('liveQuoteCount', () => {
-  it('counts the quotes still on the table for a job', () => {
-    const all = [
-      q({ id: 'a' }),
-      q({ id: 'b', stage: 'draft' }),
-      q({ id: 'c', stage: 'cancelled' }),
-      q({ id: 'inv', type: 'invoice', stage: 'invoice_sent' }),
-      q({ id: 'elsewhere', jobId: 'job-2' }),
-    ];
-
-    expect(liveQuoteCount('job-1', all)).toBe(2);
-  });
-
-  it('is zero without a job', () => {
-    expect(liveQuoteCount(null, [q({ id: 'a' })])).toBe(0);
-    expect(liveQuoteCount(undefined, [q({ id: 'a' })])).toBe(0);
-  });
-});
-
 describe('canAddQuoteOption', () => {
   const cases: Array<[string, SupersedableQuote | null | undefined, boolean]> = [
     ['a draft quote — pricing A then B back to back is the point', q({ id: 'a', stage: 'draft' }), true],
@@ -192,5 +173,21 @@ describe('canAddQuoteOption', () => {
   it('reads the legacy status shape too', () => {
     expect(canAddQuoteOption({ id: 'a', jobId: 'job-1', status: 'sent' })).toBe(true);
     expect(canAddQuoteOption({ id: 'a', jobId: 'job-1', status: 'accepted' })).toBe(false);
+  });
+});
+
+describe('isQuoteOpenForResponse', () => {
+  it('lets a sent quote be answered', () => {
+    expect(isQuoteOpenForResponse(q({ id: 'a', stage: 'quote_sent' }))).toBe(true);
+  });
+
+  it('closes a superseded option, whose link is still in the customer’s inbox', () => {
+    // Otherwise they accept option 1, then option 2 an hour later, and the
+    // agreed price is whichever email got clicked last.
+    expect(isQuoteOpenForResponse(q({ id: 'a', stage: 'cancelled' }))).toBe(false);
+  });
+
+  it('closes a cancelled quote in the legacy status shape', () => {
+    expect(isQuoteOpenForResponse({ id: 'a', status: 'cancelled' })).toBe(false);
   });
 });
