@@ -134,6 +134,8 @@ interface StickyJobActionBarProps {
   primaryDoc: Document | null;
   onAction: (id: JobActionId) => void;
   pending?: JobActionId | null;
+  /** True when the job carries more than one live quote — see the filter below. */
+  competingOptions?: boolean;
 }
 
 /**
@@ -355,11 +357,20 @@ export function StickyJobActionBar({
   primaryDoc,
   onAction,
   pending,
+  competingOptions,
 }: StickyJobActionBarProps) {
   const styles = useStyles();
   const themeColors = useThemeColors();
   const insets = useSafeAreaInsets();
-  const actions = resolveJobActions(job.stage, primaryDoc, isStillBooked(job));
+  let actions = resolveJobActions(job.stage, primaryDoc, isStillBooked(job));
+  // A job carrying competing options has no single quote to send. The bar acts
+  // on ONE document (the most recently touched), which it cannot name — so on
+  // a screen showing two equal options it would be a big primary button that
+  // silently picks one. Each option card carries its own Send instead; drop
+  // the ambiguous one here. If nothing else applies the bar hides itself.
+  if (competingOptions) {
+    actions = actions.filter((a) => a.id !== 'sendQuote' && a.id !== 'resendQuote');
+  }
 
   if (actions.length === 0) return null;
 

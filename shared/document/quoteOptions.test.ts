@@ -11,6 +11,7 @@ import { describe, it, expect } from 'vitest';
 import {
   quotesSupersededByAccepting,
   canAddQuoteOption,
+  liveQuoteOptions,
   isQuoteOpenForResponse,
   type SupersedableQuote,
 } from './quoteOptions';
@@ -189,5 +190,43 @@ describe('isQuoteOpenForResponse', () => {
 
   it('closes a cancelled quote in the legacy status shape', () => {
     expect(isQuoteOpenForResponse({ id: 'a', status: 'cancelled' })).toBe(false);
+  });
+});
+
+describe('liveQuoteOptions', () => {
+  it('returns the quotes still on the table', () => {
+    const docs = [q({ id: 'a' }), q({ id: 'b', stage: 'draft' })];
+
+    expect(liveQuoteOptions(docs).map((d) => d.id)).toEqual(['a', 'b']);
+  });
+
+  it('drops invoices — an invoice is not a competing price', () => {
+    const docs = [q({ id: 'a' }), q({ id: 'inv', type: 'invoice', stage: 'invoice_sent' })];
+
+    expect(liveQuoteOptions(docs).map((d) => d.id)).toEqual(['a']);
+  });
+
+  it('drops superseded options', () => {
+    const docs = [q({ id: 'a' }), q({ id: 'gone', stage: 'cancelled' })];
+
+    expect(liveQuoteOptions(docs).map((d) => d.id)).toEqual(['a']);
+  });
+
+  it('gives one entry for the ordinary job, so it is not an option set', () => {
+    // The screen treats >1 as an option set; a single quote must never trip it.
+    expect(liveQuoteOptions([q({ id: 'only' })])).toHaveLength(1);
+  });
+
+  it('is empty for a job whose only document is an invoice', () => {
+    expect(liveQuoteOptions([q({ id: 'inv', type: 'invoice', stage: 'paid' })])).toEqual([]);
+  });
+
+  it('does not mutate its input', () => {
+    const docs = [q({ id: 'a' }), q({ id: 'b' })];
+    const before = docs.map((d) => d.id);
+
+    liveQuoteOptions(docs);
+
+    expect(docs.map((d) => d.id)).toEqual(before);
   });
 });

@@ -104,6 +104,21 @@ export function quotesSupersededByAccepting(
 }
 
 /**
+ * The quotes still on the table for a job — its competing options.
+ *
+ * More than one means the job is an OPTION SET, which changes how the job
+ * screen presents it (every option gets an equal card, and the sticky action
+ * bar stops offering a Send it cannot attribute to one of them). Invoices are
+ * not options, and a superseded quote is no longer on the table.
+ *
+ * One definition, because the screen renders the list and the action bar asks
+ * the question, and the two must never disagree about what an option set is.
+ */
+export function liveQuoteOptions<T extends SupersedableQuote>(docs: ReadonlyArray<T>): T[] {
+  return docs.filter((d) => !isInvoice(d) && !isCancelled(d));
+}
+
+/**
  * Whether to offer "add another option" on this document.
  *
  * A second price for the same job is only meaningful while the job is still

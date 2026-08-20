@@ -31,6 +31,7 @@ import { reportService } from '../services/reportService';
 import { resumableReportId, reportRowMeta } from './ServiceReport/reportDraft';
 import { ServiceReportCard } from '../components/ServiceReportCard';
 import type { ServiceReport } from '../../shared/report/types';
+import { liveQuoteOptions } from '../../shared/document/quoteOptions';
 import { StageSheet } from '../components/StageSheet';
 import { JobStageSheet, stageMetaFor } from '../components/JobStageSheet';
 import {
@@ -191,6 +192,13 @@ export function ViewJobScreen() {
   // the guard returned early, and that effect went missing mid-render —
   // "Rendered fewer hooks than expected" (ViewJobScreen.tsx:69), a red box on
   // dev and a crash in release, on the delete path of any job.
+  // More than one live quote on the job = competing options. Drives both the
+  // symmetric option cards and the sticky bar stepping back from an
+  // ambiguous Send. See shared/document/quoteOptions.ts.
+  const competingOptions = useMemo(
+    () => liveQuoteOptions(attachedDocs as any).length > 1,
+    [attachedDocs],
+  );
   const primaryDoc = job?.primaryDocumentId
     ? documents.find((d) => d.id === job.primaryDocumentId) ?? actionableDoc
     : actionableDoc;
@@ -954,6 +962,7 @@ export function ViewJobScreen() {
             onStagePress={setDocStageSheetDoc}
             onPaymentPress={handlePaymentChipPress}
             onConvertToInvoice={handleConvertToInvoice}
+            onSendDoc={setSendDialogDoc}
             jobIsPaid={job.stage === 'paid'}
             extra={<>{serviceReportRows}{reeceOrderEntry}</>}
           />
@@ -976,6 +985,7 @@ export function ViewJobScreen() {
             onStagePress={setDocStageSheetDoc}
             onPaymentPress={handlePaymentChipPress}
             onConvertToInvoice={handleConvertToInvoice}
+            onSendDoc={setSendDialogDoc}
             jobIsPaid={job.stage === 'paid'}
             extra={<>{serviceReportRows}{reeceOrderEntry}</>}
           />
@@ -1008,6 +1018,7 @@ export function ViewJobScreen() {
         primaryDoc={primaryDoc ?? null}
         onAction={handleJobAction}
         pending={pendingAction}
+        competingOptions={competingOptions}
       />
 
       <JobStageSheet
@@ -1131,6 +1142,8 @@ interface ScopeBlockProps {
   onStagePress: (doc: Document) => void;
   onPaymentPress: (doc: Document) => void;
   onConvertToInvoice: (doc: Document) => void;
+  /** Opens the send flow for one specific option. */
+  onSendDoc: (doc: Document) => void;
   /** Optional slot rendered between the primary doc card and the
    *  "Also on this job" section. Used for the Order-from-Reece entry. */
   extra?: React.ReactNode;
@@ -1146,6 +1159,7 @@ function ScopeBlock({
   onStagePress,
   onPaymentPress,
   onConvertToInvoice,
+  onSendDoc,
   extra,
   jobIsPaid,
 }: ScopeBlockProps) {
@@ -1174,20 +1188,66 @@ function ScopeBlock({
       </WebContainer>
     );
   }
+  // Competing options get a symmetric list instead of one promoted card.
+  //
+  // The primary/secondary split says "this is the document, and here are some
+  // others". That is right for a quote and the invoice it became — same work,
+  // further along. It is wrong for two prices for the SAME work, where neither
+  // outranks the other and the tradie's job is to compare them: showing one in
+  // full and the other as a footnote hides the two things that distinguish
+  // them (their price and how far each has got), and "Also on this job" reads
+  // as ADDITIONAL work — the very misreading that made sectioned options look
+  // like they added up.
+  //
+  // So when a job carries more than one live quote, no card is promoted —
+  // every option gets the SAME full card. Compacting them into rows was tried
+  // and was worse: the card's rows are the working surface (materials, labour,
+  // preview), and an option you cannot price or preview without drilling in is
+  // not really on the table. Each of those controls is per-quote, so repeating
+  // them per card is correct rather than redundant. The ordinary one-quote job
+  // is untouched.
+  const allDocs = [primaryDoc, ...secondaryDocs];
+  const liveQuotes = liveQuoteOptions(allDocs as any) as unknown as Document[];
+  const isOptionSet = liveQuotes.length > 1;
+  const restDocs = isOptionSet
+    ? allDocs.filter((d) => !liveQuotes.includes(d))
+    : secondaryDocs;
+
   return (
     <WebContainer>
-      <JobScopeCard
-        doc={primaryDoc}
-        onEdit={onEdit}
-        onStagePress={onStagePress}
-        onPaymentPress={onPaymentPress}
-        paymentContext={{ jobIsPaid }}
-      />
+      {isOptionSet ? (
+        <View style={styles.optionSetWrap}>
+          <Text style={styles.secondaryDocsLabel}>Options</Text>
+          <Text style={styles.optionSetHint}>
+            Alternative prices for the same job. Your customer picks one, and
+            accepting it takes the others off the table.
+          </Text>
+          {liveQuotes.map((doc) => (
+            <JobScopeCard
+              key={doc.id}
+              doc={doc}
+              onEdit={onEdit}
+              onStagePress={onStagePress}
+              onPaymentPress={onPaymentPress}
+              paymentContext={{ jobIsPaid }}
+              onSend={onSendDoc}
+            />
+          ))}
+        </View>
+      ) : (
+        <JobScopeCard
+          doc={primaryDoc}
+          onEdit={onEdit}
+          onStagePress={onStagePress}
+          onPaymentPress={onPaymentPress}
+          paymentContext={{ jobIsPaid }}
+        />
+      )}
       {extra}
-      {secondaryDocs.length > 0 ? (
+      {restDocs.length > 0 ? (
         <View style={styles.secondaryDocsWrap}>
           <Text style={styles.secondaryDocsLabel}>Also on this job</Text>
-          {secondaryDocs.map((doc) => (
+          {restDocs.map((doc) => (
             <DocumentRow
               key={doc.id}
               doc={doc}
@@ -1226,6 +1286,15 @@ const useStyles = makeStyles((t) => ({
     fontSize: 14,
     color: t.colors.textMuted,
     textAlign: 'center',
+  },
+  optionSetWrap: { marginTop: 4, gap: 8 },
+  optionSetHint: {
+    fontSize: 12,
+    color: t.colors.textMuted,
+    marginHorizontal: 20,
+    marginTop: -4,
+    marginBottom: 2,
+    lineHeight: 16,
   },
   notesAddButton: {
     flexDirection: 'row',
