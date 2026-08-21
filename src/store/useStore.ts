@@ -47,6 +47,7 @@ import { TRIAL_MS } from '../utils/trialConfig';
 import { trackEvent } from '../services/analyticsService';
 import { maybeRequestReview } from '../services/storeReviewService';
 import { ensureJobForDocument, ensureJobForQuote, useJobStore } from './useJobStore';
+import { canRunMatePipeline } from './planGates';
 import type { CustomerEditPlan } from '../utils/customerEdit';
 import { auth } from '../config/firebase';
 import { searchLocalSources } from '../services/localMaterialSearch';
@@ -314,7 +315,10 @@ interface AppState {
 
 export type ApplyProposalResult =
   | { ok: true; navigate?: NavigateHint; note?: string; review?: QuoteReview }
-  | { ok: false; error: string };
+  // `code` names machine-readable failures the screen branches on
+  // (currently only 'PLAN_GATED' → Paywall); `error` stays the line shown
+  // to the tradie.
+  | { ok: false; error: string; code?: string };
 
 export type NavigateHint =
   | { kind: 'job_preview'; quoteId: string }
@@ -3058,6 +3062,19 @@ export const useStore = create<AppState>((set, get) => ({
       return fetched || undefined;
     };
 
+    // Same paywall as the wizard's pricing step: the proposals below run the
+    // materials + pricing pipeline, which free (post-trial) users don't get —
+    // chat must not become the bypass. Checked before any pipeline call or
+    // quote mint; the screen routes 'PLAN_GATED' to the Paywall.
+    const planGate = (): ApplyProposalResult | null =>
+      canRunMatePipeline(get().getEffectivePlan())
+        ? null
+        : {
+            ok: false,
+            code: 'PLAN_GATED',
+            error: "Auto-pricing isn't in the free plan — you can add materials and prices yourself, or go Pro and I'll sort it.",
+          };
+
     try {
       switch (proposal.type) {
         case 'propose_create_contact': {
@@ -3182,6 +3199,8 @@ export const useStore = create<AppState>((set, get) => ({
         }
 
         case 'propose_draft_quote': {
+          const gated = planGate();
+          if (gated) return gated;
           // Resolve customer. If customerId was provided, prefer the local
           // contacts cache, then fall back to a direct Firestore fetch —
           // find_customer reads from server-side users/{uid}/contacts, so a
@@ -3423,6 +3442,8 @@ export const useStore = create<AppState>((set, get) => ({
         }
 
         case 'propose_add_line_item': {
+          const gated = planGate();
+          if (gated) return gated;
           // Try the user's supplier book FIRST — if the line item the
           // assistant is adding matches a saved supplier rate, price it
           // inline so the tradie doesn't have to wait for the pricing
@@ -3685,6 +3706,8 @@ export const useStore = create<AppState>((set, get) => ({
         }
 
         case 'propose_reprice': {
+          const gated = planGate();
+          if (gated) return gated;
           // Re-run the pricing pipeline (price fetch + reconcile) on an EXISTING
           // quote/invoice to fix the rows review_quote flagged. We wipe the price
           // off the flagged rows first (fetchPrices skips anything already

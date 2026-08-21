@@ -875,6 +875,11 @@ export function AssistantScreen() {
           conversation.id,
           result.error || 'Apply failed without an error message.',
         );
+        // Free plan tapped a pipeline card — the fix is the paywall, not a
+        // retry, so open it over the chat as well as marking the card failed.
+        if (result.code === 'PLAN_GATED') {
+          navigation.navigate('Paywall', { source: 'mate' });
+        }
         // Tell the model too. It has no other way to know the card failed —
         // it only ever saw `{ ok: true, proposalId }` from the tool call —
         // which is how a tradie ended up tapping the same broken "mark paid"
@@ -1083,6 +1088,7 @@ export function AssistantScreen() {
       updateMessage,
       updateProposalStatus,
       handleNavigate,
+      navigation,
     ],
   );
 
