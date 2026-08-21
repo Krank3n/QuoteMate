@@ -46,7 +46,7 @@ import {
   getWarmedEmailBody,
   whenEmailDraftWarm,
 } from '../utils/emailDraft';
-import { hasCustomerEmail } from '../utils/sendFlow';
+import { hasCustomerEmail, orderSendOptions, type SendChannel } from '../utils/sendFlow';
 import { cleanSmsRecipient, openSmsComposer } from '../utils/smsComposer';
 import { generateAcceptanceLink } from '../services/quoteAcceptanceService';
 import { hashTerms } from '../../shared/pdf/terms/defaultAuTradie';
@@ -676,9 +676,19 @@ export function SendDocumentDialog({
     onDismiss();
   };
 
+  // Email leads unless there's no address to use — a phone-only customer
+  // (CustomerDetails only ever required email OR phone) was being offered
+  // Email at the top of the sheet with nothing behind it. Same four rows
+  // either way; see orderSendOptions.
+  const channelRows: Record<SendChannel, ActionSheetOption> = {
+    email: { icon: 'email-outline', label: 'Email', onPress: handleEmailOption },
+    sms: { icon: 'message-text', label: isPreparingSms ? 'Preparing SMS…' : 'SMS', onPress: handleSendSMS },
+  };
   const sendOptions: ActionSheetOption[] = [
-    { icon: 'email-outline', label: 'Email', onPress: handleEmailOption },
-    { icon: 'message-text', label: isPreparingSms ? 'Preparing SMS…' : 'SMS', onPress: handleSendSMS },
+    ...orderSendOptions({
+      hasEmail: hasCustomerEmail(doc),
+      hasPhone: !!cleanSmsRecipient(doc.customerPhone || ''),
+    }).map((channel) => channelRows[channel]),
     { icon: 'share-variant', label: 'Share', onPress: handleShareFromDialog },
     { icon: 'file-pdf-box', label: 'Export PDF', onPress: handleExportFromDialog },
   ];

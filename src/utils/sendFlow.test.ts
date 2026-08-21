@@ -5,7 +5,7 @@
  */
 import { describe, it, expect } from 'vitest';
 
-import { hasCustomerEmail, isEmailAddress, isSelfSend } from './sendFlow';
+import { hasCustomerEmail, isEmailAddress, isSelfSend, orderSendOptions } from './sendFlow';
 
 describe('hasCustomerEmail', () => {
   it('is true for a doc carrying a usable address', () => {
@@ -57,5 +57,30 @@ describe('isSelfSend', () => {
     expect(isSelfSend('', 'jo@trade.com.au')).toBe(false);
     expect(isSelfSend('sam@example.com', '')).toBe(false);
     expect(isSelfSend('sam@example.com', undefined)).toBe(false);
+  });
+});
+
+describe('orderSendOptions', () => {
+  it('leads with SMS for a phone-only customer', () => {
+    expect(orderSendOptions({ hasEmail: false, hasPhone: true })).toEqual(['sms', 'email']);
+  });
+
+  it('leads with Email whenever there is an address on file', () => {
+    expect(orderSendOptions({ hasEmail: true, hasPhone: false })).toEqual(['email', 'sms']);
+    expect(orderSendOptions({ hasEmail: true, hasPhone: true })).toEqual(['email', 'sms']);
+  });
+
+  // Nothing on file: the email preview lets the tradie type an address,
+  // the SMS row has nowhere to send. Email keeps the lead.
+  it('leads with Email when we have neither', () => {
+    expect(orderSendOptions({ hasEmail: false, hasPhone: false })).toEqual(['email', 'sms']);
+  });
+
+  it('never drops or duplicates a channel', () => {
+    for (const hasEmail of [true, false]) {
+      for (const hasPhone of [true, false]) {
+        expect([...orderSendOptions({ hasEmail, hasPhone })].sort()).toEqual(['email', 'sms']);
+      }
+    }
   });
 });

@@ -63,6 +63,7 @@ import {
 // finished a sendable quote, got a "done deal" celebration, and never sent.
 import { pickSuccessMessage } from './jobPreviewCopy';
 import { buildPreviewQuoteSave } from './previewQuoteSave';
+import { resolvePreviewFooterActions } from './previewFooterActions';
 import { GridBackground } from '../../components/GridBackground';
 import { resolvePriceDetail } from '../../../shared/document/priceDetail';
 
@@ -363,6 +364,13 @@ export function JobPreviewScreen() {
     if (currentQuote) return quoteToDocument(currentQuote);
     return null;
   }, [workingDoc?.id, documents, currentInvoice, currentQuote]);
+
+  // Footer contents. Derived from liveDoc alone so the `viewing` bail-out in
+  // the mount effect above can't change what the footer offers.
+  const footerActions = useMemo(
+    () => resolvePreviewFooterActions({ doc: liveDoc, platform: Platform.OS }),
+    [liveDoc],
+  );
 
   // After a Quote → Invoice convert, liveDoc.type flips to 'invoice' and
   // liveDoc.number gets the new INV-NNN. The route param `mode` and the
@@ -757,21 +765,15 @@ export function JobPreviewScreen() {
           {/* Take Payment — in-person capture path. Same shared sheet
               the ViewJob sticky bar uses: quote → deposit (or full),
               invoice → balance. Lets the tradie tap a card before the
-              customer walks off.
-              iOS gating: hidden until Tap to Pay is approved and a Square
-              reader is available for App Review demo. */}
-          {liveDoc && Platform.OS !== 'ios' ? (
+              customer walks off. Held back until the doc has actually been
+              sent, and on iOS until Tap to Pay clears App Review — see
+              resolvePreviewFooterActions. */}
+          {liveDoc && footerActions.payment ? (
             <View style={styles.bottomButtonHalfWrapper}>
               <FooterButton
                 mode="outlined"
                 icon="credit-card-outline"
-                label={
-                  liveDoc.type === 'invoice'
-                    ? 'Take Payment'
-                    : (liveDoc.depositAmount ?? 0) > 0
-                      ? 'Take Deposit'
-                      : 'Tap to Pay'
-                }
+                label={footerActions.payment.label}
                 onPress={async () => {
                   // No Square gate here — the sheet's manual "Record a
                   // payment" row must work with zero Square setup; the
@@ -803,12 +805,12 @@ export function JobPreviewScreen() {
             </View>
           ) : null}
           <View style={styles.bottomButtonHalfWrapper}>
-            {liveDoc ? (
+            {liveDoc && footerActions.send ? (
               <SendDocumentButton
                 doc={liveDoc}
                 businessSettings={businessSettings}
                 buttonMode="contained"
-                buttonLabel={liveDoc.type === 'invoice' ? 'Send Invoice' : 'Send Quote'}
+                buttonLabel={footerActions.send.label}
                 buttonIcon="send"
                 buttonStyle={styles.sendButtonShape}
               />

@@ -33,3 +33,26 @@ export function isSelfSend(recipient: string, ownerEmail?: string | null): boole
   const own = (ownerEmail || '').trim().toLowerCase();
   return !!to && !!own && to === own;
 }
+
+/** The two channels whose order changes with what's on file. */
+export type SendChannel = 'email' | 'sms';
+
+/**
+ * Which channel the send sheet leads with. Email is the dominant path and
+ * stays first whenever there's an address to use — but CustomerDetails only
+ * ever required email OR phone, so a phone-only customer was being offered
+ * Email at the top of the sheet with nothing behind it. When email is the
+ * one thing we don't have and SMS is the one thing we do, SMS leads.
+ *
+ * With neither on file the order is moot; Email stays first, since the
+ * preview lets the tradie type an address and SMS can't ask for a number.
+ */
+export function orderSendOptions({
+  hasEmail,
+  hasPhone,
+}: {
+  hasEmail: boolean;
+  hasPhone: boolean;
+}): SendChannel[] {
+  return !hasEmail && hasPhone ? ['sms', 'email'] : ['email', 'sms'];
+}

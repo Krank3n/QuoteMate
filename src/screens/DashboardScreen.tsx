@@ -44,6 +44,7 @@ import { StageSheet } from '../components/StageSheet';
 import { applyStageChange } from '../utils/applyStageChange';
 import type { Document, DocumentStage } from '../types/document';
 import { pickDashboardDraft, excludeDraftJob } from '../utils/dashboardDraft';
+import { resolveDraftBannerAction } from '../utils/draftBannerAction';
 import { pickFollowUpNudge, pruneSnoozes, NUDGE_SNOOZE_MS, type FollowUpNudge } from '../utils/followUpNudge';
 import { FollowUpNudgeBanner } from '../components/FollowUpNudgeBanner';
 import { auth } from '../config/firebase';
@@ -351,6 +352,11 @@ export function DashboardScreen() {
   // the home screen's top slot forever.
   const inProgressDraft = useMemo(() => pickDashboardDraft(quotes), [quotes]);
 
+  // A draft parked on the preview step is finished work waiting on a send,
+  // not unfinished wizard work — the banner offers the send instead of the
+  // pencil. See draftBannerAction.ts.
+  const draftAction = resolveDraftBannerAction(inProgressDraft);
+
   // Translate the wizard step they left off on into a "what's needed
   // next" hint shown on the draft banner. Mirrors the screens in the
   // NewJob stack (see RootNavigator).
@@ -509,6 +515,14 @@ export function DashboardScreen() {
 
   const handleContinueDraft = (draft: Quote) => {
     lightTap();
+    // Finished draft → straight to the send sheet. openSendDocId is the
+    // existing primitive (Mate's send proposal uses it): ViewJob opens
+    // SendDocumentDialog for that doc, so the money-settling and the
+    // free-tier gate still run.
+    if (resolveDraftBannerAction(draft).kind === 'send') {
+      navigation.navigate('ViewJob' as never, { jobId: draft.jobId, openSendDocId: draft.id } as never);
+      return;
+    }
     setCurrentQuote(draft);
     navigation.navigate('NewJob' as never, { screen: draft.draftStep || 'Details' } as never);
   };
@@ -751,12 +765,12 @@ export function DashboardScreen() {
           <TouchableOpacity
             onPress={() => handleContinueDraft(inProgressDraft)}
             activeOpacity={0.7}
-            accessibilityLabel={`Continue draft for ${inProgressDraft.job.name || 'Untitled'}`}
+            accessibilityLabel={`${draftAction.kind === 'send' ? 'Send quote' : 'Continue draft'} for ${inProgressDraft.job.name || 'Untitled'}`}
           >
             <Surface style={styles.draftBanner}>
               <View style={styles.draftBannerContent}>
                 <RNAnimated.View style={[styles.draftIconCircle, { backgroundColor: themeColors.accentSubtle, transform: [{ rotate: draftWiggle.interpolate({ inputRange: [0, 0.25, 0.5, 0.75, 1], outputRange: ['0deg', '-6deg', '0deg', '6deg', '0deg'] }) }] }]}>
-                  <MaterialCommunityIcons name="pencil-outline" size={20} color={themeColors.accentText} />
+                  <MaterialCommunityIcons name={draftAction.icon as any} size={20} color={themeColors.accentText} />
                 </RNAnimated.View>
                 <View style={styles.draftBannerText}>
                   <Text style={styles.draftBannerTitle} numberOfLines={1}>
@@ -764,7 +778,11 @@ export function DashboardScreen() {
                   </Text>
                   <Text style={styles.draftBannerSubtitle} numberOfLines={1}>
                     {[
-                      draftStepLabel ? `Next: ${draftStepLabel}` : 'Continue draft',
+                      // No "Next:" on the send case — it isn't the next step
+                      // of anything, it's the finish line.
+                      draftStepLabel
+                        ? (draftAction.kind === 'send' ? draftStepLabel : `Next: ${draftStepLabel}`)
+                        : 'Continue draft',
                       draftEditedAgo ? `edited ${draftEditedAgo}` : null,
                     ].filter(Boolean).join(' · ')}
                   </Text>

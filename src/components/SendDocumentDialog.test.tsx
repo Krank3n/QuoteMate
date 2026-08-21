@@ -236,12 +236,32 @@ describe('opening the send flow', () => {
 });
 
 describe('the sheet itself', () => {
+  const sheetLabels = () =>
+    Array.from(screen.getByTestId('sheet').querySelectorAll('button')).map((b) => b.textContent);
+
   it('offers exactly the four delivery channels, Email first', async () => {
     renderDialog({ doc: doc({ customerEmail: undefined }) });
 
     await waitFor(() => expect(screen.getByTestId('sheet')).toBeTruthy());
-    const labels = Array.from(screen.getByTestId('sheet').querySelectorAll('button')).map((b) => b.textContent);
-    expect(labels).toEqual(['Email', 'SMS', 'Share', 'Export PDF']);
+    expect(sheetLabels()).toEqual(['Email', 'SMS', 'Share', 'Export PDF']);
+  });
+
+  // CustomerDetails only ever required email OR phone, so a phone-only
+  // customer is a legal customer — and the sheet was leading with a channel
+  // that had nothing behind it.
+  it('leads with SMS when the customer is phone-only', async () => {
+    renderDialog({ doc: doc({ customerEmail: undefined, customerPhone: '0412 345 678' }) });
+
+    await waitFor(() => expect(screen.getByTestId('sheet')).toBeTruthy());
+    expect(sheetLabels()).toEqual(['SMS', 'Email', 'Share', 'Export PDF']);
+  });
+
+  it('keeps Email first when both are on file', async () => {
+    store.state.getEffectivePlan = () => 'free'; // free plan keeps the sheet up
+    renderDialog({ doc: doc({ customerPhone: '0412 345 678' }) });
+
+    await waitFor(() => expect(screen.getByTestId('sheet')).toBeTruthy());
+    expect(sheetLabels()).toEqual(['Email', 'SMS', 'Share', 'Export PDF']);
   });
 
   it('no longer puts the pay-link upsell in front of the send', async () => {
