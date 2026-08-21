@@ -36,8 +36,9 @@
  *     whose trials lapsed weeks or months ago.
  *   - Send-once flags live in users/{uid}/settings/emailState (one field per
  *     step — see SEND_ONCE_FIELD), stamped only on successful sends.
- *     sendEmail() itself enforces the marketing opt-out and blocks unsendable
- *     domains; isUnreachableEmail() skips the Apple-relay class up front.
+ *     sendEmail() itself enforces the marketing opt-out, blocks unsendable
+ *     domains, and skips addresses with a hard bounce on record;
+ *     isUnreachableEmail() mirrors the domain check up front.
  *   - Founding-spots numbers come from config/foundingOffer (computed from
  *     real billed subs). Doc missing or cap filled → the founding copy is
  *     suppressed, never invented.
