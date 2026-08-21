@@ -10,6 +10,7 @@ import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { generateId } from '../utils/generateId';
+import { attachmentMimeFromBytes } from '../utils/imageMime';
 import { trimLogoWhitespace } from '../utils/logoTrim';
 import { storage } from '../config/firebase';
 
@@ -52,6 +53,11 @@ export async function compressImage(
     );
     return result.uri;
   } catch (error) {
+    // Deliberate fallback: manipulateAsync can't decode every input (the web
+    // canvas can't rasterize a PDF). uploadQuotePhoto types the final bytes
+    // from their magic numbers, so an undecodable-but-supported file (a PDF
+    // plan) still uploads correctly and anything else is rejected there —
+    // never silently stored under the wrong content type.
     return uri;
   }
 }
@@ -267,8 +273,38 @@ export async function uploadBusinessCredentialLogo(
 }
 
 /**
+ * File types the quote pipeline can carry end-to-end: the photo grid can show
+ * them (PDFs get a document tile) and the materials analyze can send them to
+ * the vision models. GIF is viewable but the two vision providers don't both
+ * accept it, so it's rejected up front rather than silently dropped at
+ * pricing time.
+ */
+const UPLOADABLE_PHOTO_EXTENSIONS: Record<string, string> = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+  'application/pdf': 'pdf',
+};
+
+// PDFs skip compression entirely, so cap them at what the analyze pipeline
+// will actually read (mirrors MAX_PDF_ATTACHMENT_BYTES server-side). Better
+// to refuse at upload than to accept a plan the pricing run silently drops.
+export const MAX_PDF_UPLOAD_BYTES = 14_000_000;
+
+/** A picked file the quote pipeline can't carry (wrong type or too big). */
+export class UnsupportedPhotoError extends Error {
+  constructor(
+    message = "That file type isn't supported. Add a photo (JPG or PNG) or a PDF plan — a screenshot of a plan works too."
+  ) {
+    super(message);
+    this.name = 'UnsupportedPhotoError';
+  }
+}
+
+/**
  * Save a photo for use in a quote.
  * Compresses, uploads to Firebase Storage, and returns the public download URL.
+ * Throws UnsupportedPhotoError when the picked file isn't a photo or PDF.
  */
 export async function uploadQuotePhoto(
   userId: string,
@@ -279,10 +315,53 @@ export async function uploadQuotePhoto(
   const compressedUri = await compressImage(photoUri, opts);
 
   const blob = await uriToBlob(compressedUri);
+
+  // Web only: the file input lets arbitrary files through (accept="image/*"
+  // is a hint the OS dialog doesn't enforce) and compressImage falls back to
+  // the ORIGINAL bytes when the canvas can't decode them — so type the upload
+  // from its magic bytes. Storing raw PDF bytes as .jpg once 400'd both
+  // vision providers and broke materials analysis for the whole quote. Native
+  // pickers only ever produce real images, and RN blobs can't slice-read
+  // reliably, so native keeps the JPEG fast path.
+  let contentType = 'image/jpeg';
+  let extension = 'jpg';
+  if (Platform.OS === 'web') {
+    const header = new Uint8Array(await blob.slice(0, 16).arrayBuffer());
+    const sniffed = attachmentMimeFromBytes(header);
+    const sniffedExtension = sniffed ? UPLOADABLE_PHOTO_EXTENSIONS[sniffed] : undefined;
+    if (!sniffed || !sniffedExtension) {
+      throw new UnsupportedPhotoError();
+    }
+    if (sniffed === 'application/pdf' && blob.size > MAX_PDF_UPLOAD_BYTES) {
+      throw new UnsupportedPhotoError(
+        'That PDF is too big to read. Keep plans under 14MB, or add a screenshot of the key pages instead.'
+      );
+    }
+    contentType = sniffed;
+    extension = sniffedExtension;
+  }
+
   const photoId = generateId();
-  const storageRef = ref(storage, `users/${userId}/quote-photos/${photoId}.jpg`);
-  await uploadBytes(storageRef, blob, { contentType: 'image/jpeg' });
+  const storageRef = ref(storage, `users/${userId}/quote-photos/${photoId}.${extension}`);
+  await uploadBytes(storageRef, blob, { contentType });
   return getDownloadURL(storageRef);
+}
+
+/**
+ * Best-effort sniff of a picked local file's mime, so the grid can render a
+ * PDF tile during upload instead of a broken <Image>. Web only (blob: URIs
+ * carry no extension and native pickers only produce images); returns null
+ * on native or any failure.
+ */
+export async function sniffLocalPhotoMime(uri: string): Promise<string | null> {
+  if (Platform.OS !== 'web') return null;
+  try {
+    const blob = await (await fetch(uri)).blob();
+    const header = new Uint8Array(await blob.slice(0, 16).arrayBuffer());
+    return attachmentMimeFromBytes(header);
+  } catch {
+    return null;
+  }
 }
 
 /**

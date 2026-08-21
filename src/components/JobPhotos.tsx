@@ -21,8 +21,9 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import * as ImagePicker from 'expo-image-picker';
 import { makeStyles, useThemeColors } from '../theme';
 import { QuotePhoto } from '../types';
-import { uploadQuotePhoto, deleteQuotePhoto } from '../services/photoService';
+import { uploadQuotePhoto, deleteQuotePhoto, sniffLocalPhotoMime, UnsupportedPhotoError } from '../services/photoService';
 import { detectIsPlan } from '../services/planDetection';
+import { isPdfUrl } from '../utils/imageMime';
 import { generateId } from '../utils/generateId';
 import { auth } from '../config/firebase';
 import { PhotoAnnotator } from './PhotoAnnotator';
@@ -45,6 +46,7 @@ const MAX_PHOTOS = 5;
 interface LocalPhoto extends QuotePhoto {
   localUri?: string;   // Local file URI for immediate preview
   uploading?: boolean; // Whether upload is in progress
+  localIsPdf?: boolean; // Sniffed pre-upload so a pending PDF gets its tile, not a broken <Image>
 }
 
 interface JobPhotosProps {
@@ -97,9 +99,10 @@ export function JobPhotos({ photos, onPhotosChange, hideHeader }: JobPhotosProps
     // native "Plan or drawing" option), otherwise auto-detect so we never have
     // to ask the user. Detection is web-only and best-effort; a miss just
     // changes upload resolution, not correctness.
-    const planFlags = await Promise.all(
-      uris.map(uri => (opts.isPlan ? Promise.resolve(true) : detectIsPlan(uri))),
-    );
+    const [planFlags, localMimes] = await Promise.all([
+      Promise.all(uris.map(uri => (opts.isPlan ? Promise.resolve(true) : detectIsPlan(uri)))),
+      Promise.all(uris.map(uri => sniffLocalPhotoMime(uri))),
+    ]);
 
     const pendingPhotos: LocalPhoto[] = uris.map((uri, i) => ({
       id: generateId(),
@@ -108,6 +111,7 @@ export function JobPhotos({ photos, onPhotosChange, hideHeader }: JobPhotosProps
       uploading: true,
       annotated: false,
       isPlan: planFlags[i],
+      localIsPdf: localMimes[i] === 'application/pdf',
     }));
 
     setLocalPhotos(prev => [...prev, ...pendingPhotos]);
@@ -119,6 +123,7 @@ export function JobPhotos({ photos, onPhotosChange, hideHeader }: JobPhotosProps
     // historically hit XHR/blob races on some devices.
     let committed: QuotePhoto[] = [...photos];
     let anyFailed = false;
+    let unsupportedMessage: string | null = null;
 
     for (const pending of pendingPhotos) {
       try {
@@ -128,16 +133,26 @@ export function JobPhotos({ photos, onPhotosChange, hideHeader }: JobPhotosProps
         onPhotosChange(committed);
       } catch (err) {
         setLocalPhotos(prev => prev.filter(p => p.id !== pending.id));
-        anyFailed = true;
+        if (err instanceof UnsupportedPhotoError) {
+          unsupportedMessage = err.message;
+        } else {
+          anyFailed = true;
+        }
         console.warn('[JobPhotos] upload failed', err);
       }
     }
 
-    if (anyFailed) {
+    // A batch can fail both ways at once (one unsupported file + one network
+    // failure) — report everything, or the tradie retries the wrong thing.
+    if (unsupportedMessage || anyFailed) {
+      const messages = [
+        ...(unsupportedMessage ? [unsupportedMessage] : []),
+        ...(anyFailed ? ['One or more photos could not be uploaded. Please try again.'] : []),
+      ];
       showAlert({
         type: 'error',
-        title: 'Upload Failed',
-        message: 'One or more photos could not be uploaded. Please try again.',
+        title: unsupportedMessage && !anyFailed ? 'File Not Supported' : 'Upload Problem',
+        message: messages.join('\n\n'),
       });
     }
   };
@@ -340,7 +355,7 @@ export function JobPhotos({ photos, onPhotosChange, hideHeader }: JobPhotosProps
             <Text style={styles.optional}>optional</Text>
           </View>
           <Text style={styles.hint}>
-            Add site photos or plans to help with AI analysis and show clients the scope
+            Add site photos or plans (PDF works) to help size the job and show clients the scope
           </Text>
         </>
       )}
@@ -348,19 +363,37 @@ export function JobPhotos({ photos, onPhotosChange, hideHeader }: JobPhotosProps
       <View style={styles.grid}>
         {allPhotos.map((photo) => {
           const displayUri = photo.localUri || photo.storageUrl;
+          // PDF plans can't render in an <Image> or the annotator — show a
+          // document tile and open the file itself on tap. Pending uploads
+          // carry the sniffed flag since they have no storageUrl yet.
+          const isPdf = photo.localIsPdf || isPdfUrl(photo.storageUrl);
           return (
             <View key={photo.id} style={styles.photoWrapper}>
               <TouchableOpacity
-                onPress={() => !photo.uploading && setAnnotatingPhoto(photo)}
+                onPress={() => {
+                  if (photo.uploading) return;
+                  if (isPdf) {
+                    Linking.openURL(photo.storageUrl).catch(() => {});
+                    return;
+                  }
+                  setAnnotatingPhoto(photo);
+                }}
                 activeOpacity={0.8}
               >
-                <Image source={{ uri: displayUri }} style={styles.photo} />
+                {isPdf ? (
+                  <View style={[styles.photo, styles.pdfTile]}>
+                    <MaterialCommunityIcons name="file-document-outline" size={26} color={themeColors.textMuted} />
+                    <Text style={styles.pdfTileLabel}>PDF plan</Text>
+                  </View>
+                ) : (
+                  <Image source={{ uri: displayUri }} style={styles.photo} />
+                )}
                 {photo.uploading && (
                   <View style={styles.uploadingOverlay}>
                     <ActivityIndicator size="small" color="#fff" />
                   </View>
                 )}
-                {!photo.uploading && !photo.annotated && (
+                {!photo.uploading && !photo.annotated && !isPdf && (
                   <View style={styles.annotateHint}>
                     <MaterialCommunityIcons name="draw" size={10} color="rgba(255,255,255,0.8)" />
                   </View>
@@ -481,6 +514,15 @@ const useStyles = makeStyles((t) => ({
     height: 90,
     borderRadius: 10,
     backgroundColor: t.colors.surfaceOverlay,
+  },
+  pdfTile: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 4,
+  },
+  pdfTileLabel: {
+    fontSize: 11,
+    color: t.colors.textMuted,
   },
   uploadingOverlay: {
     ...StyleSheet.absoluteFillObject,

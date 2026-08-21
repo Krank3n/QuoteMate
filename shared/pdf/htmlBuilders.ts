@@ -8,6 +8,7 @@ import { formatCurrency } from './formatCurrency';
 import { printMediaCSS, getTemplateCSS } from './templates';
 import { PASSTHROUGH_SURCHARGE_PCT } from './squareFees';
 import { resolveGstMode, NO_GST_NOTE } from '../document/gstMode';
+import { isPdfUrl } from '../media/pdfUrl';
 import {
   normaliseLabourToHours,
   hoursForDisplay,
@@ -1055,7 +1056,11 @@ export function buildReportPdfHtml(data: ReportPdfData, business: BusinessPdfDat
     ? (() => {
         const imgs = data.photos!
           .map((p) => p.dataUri || p.url)
-          .filter((src): src is string => !!src)
+          // PDF plan attachments can't render in an <img>; the app-side
+          // renderer already drops them (its byte sniff returns null), so
+          // skip them here too or the emailed report diverges from the
+          // phone-shared one with a broken-image box.
+          .filter((src): src is string => !!src && !isPdfUrl(src))
           .map((src) => `<div class="report-photo"><img src="${src}" alt="Service photo" /></div>`)
           .join('');
         return imgs

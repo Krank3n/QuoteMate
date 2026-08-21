@@ -1,6 +1,7 @@
 import * as admin from 'firebase-admin';
 import fetch from 'node-fetch';
 import { PASSTHROUGH_SURCHARGE_PCT } from './shared/pdf';
+import { isPdfUrl } from './shared/media/pdfUrl';
 import { NEXT_PRICE_AUD } from './foundingOffer';
 import { NO_GST_NOTE } from './shared/document/gstMode';
 import {
@@ -2074,8 +2075,12 @@ export function renderPricingRows(input: PricingRowsInput): string {
 function renderPhotosSection(photoUrls: string[] | undefined): string {
   const esc = escapeHtml;
   // Only embed http(s) URLs; legacy quotes may hold local file:// or blob:
-  // URIs that the recipient's mail client cannot resolve.
-  const remotePhotoUrls = (photoUrls || []).filter(url => /^https?:\/\//i.test(url));
+  // URIs that the recipient's mail client cannot resolve. PDF plans are
+  // excluded too — an <img> can't render them and they're quoting inputs,
+  // not customer-facing site photos (same rule as the acceptance page).
+  const remotePhotoUrls = (photoUrls || []).filter(
+    url => /^https?:\/\//i.test(url) && !isPdfUrl(url)
+  );
   if (!remotePhotoUrls.length) return '';
   const photoImgs = remotePhotoUrls.map(url =>
     `<td style="padding:4px;"><img src="${esc(url)}" width="160" style="display:block;width:160px;height:120px;object-fit:cover;border-radius:8px;" /></td>`

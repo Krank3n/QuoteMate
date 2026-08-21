@@ -93,6 +93,11 @@ export { generatePresenterClip } from './generatePresenterClip';
 export { adminAssistantCosts, reportAssistantLiveUsage } from './assistantCosts';
 export { reportPriceFetchUsage } from './featureUsage';
 import { recordMaterialsRecommend } from './featureUsage';
+import {
+  LlmAttachment,
+  MAX_PDF_ATTACHMENT_BYTES,
+  normalizeLlmAttachments,
+} from './llmAttachments';
 import { userRateLimitKey } from './rateLimitKey';
 import {
   APPLY_CODE_MESSAGES,
@@ -1808,7 +1813,10 @@ const ALLOWED_IMAGE_HOSTS = new Set([
   'storage.googleapis.com',
 ]);
 const MAX_FETCH_IMAGES = 10;
-const MAX_IMAGE_BYTES = 8_000_000; // ~8 MB per image
+// Fetch guard only — normalizeLlmAttachments applies the real type-aware
+// caps afterwards. This just avoids base64-ing a download nothing can use
+// (PDFs get the largest per-file allowance, so that's the ceiling here).
+const MAX_IMAGE_BYTES = MAX_PDF_ATTACHMENT_BYTES;
 
 /**
  * Fetch image URLs (Firebase Storage download URLs) and return their base64.
@@ -1849,15 +1857,15 @@ async function fetchStorageImagesAsBase64(urls: any[]): Promise<string[]> {
 async function callGeminiForMaterials(
   apiKey: string,
   prompt: string,
-  photoBase64?: string[],
+  attachments?: LlmAttachment[],
 ): Promise<any> {
   const parts: any[] = [];
-  if (Array.isArray(photoBase64) && photoBase64.length > 0) {
-    for (const b64 of photoBase64) {
+  if (Array.isArray(attachments) && attachments.length > 0) {
+    for (const a of attachments) {
       parts.push({
         inline_data: {
-          mime_type: 'image/jpeg',
-          data: b64,
+          mime_type: a.mediaType,
+          data: a.data,
         },
       });
     }
@@ -1867,7 +1875,7 @@ async function callGeminiForMaterials(
   // When images are attached the model may also return a floorplanAnalysis
   // (scale, per-zone area breakdown) alongside the materials, so give it more
   // headroom; the Claude fallback already runs at 32k.
-  const hasImages = Array.isArray(photoBase64) && photoBase64.length > 0;
+  const hasImages = Array.isArray(attachments) && attachments.length > 0;
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MATERIALS_MODEL}:generateContent?key=${apiKey}`;
   const response = await fetch(url, {
     method: 'POST',
@@ -1903,11 +1911,11 @@ async function callGeminiForMaterials(
  */
 async function callGeminiForBlindTakeoff(
   apiKey: string,
-  photoBase64: string[],
+  attachments: LlmAttachment[],
 ): Promise<any> {
   const prompt = `You are measuring an architectural drawing. You have NO other context about the job — deliberately. Measure only what you can see.
 
-For the attached image that is an architectural plan, floorplan, or scaled drawing (ignore ordinary site photos; if none is a plan, return {"detected": false}):
+For the attached file (image or PDF) that is an architectural plan, floorplan, or scaled drawing (ignore ordinary site photos; if none is a plan, return {"detected": false}):
 - CALIBRATE from the drawing itself, strongest reference first: (1) a clearly labelled dimension (small circled/annotated numbers; a dimensioned structural grid bay counts — if the grid is evenly spaced and one bay is dimensioned, apply that spacing across the drawing and count bays to derive overall length AND width; source "known_dimension"); (2) a printed scale bar you can measure against (source "scale_bar"). A bare ratio like "1:100" with nothing to measure against is NOT usable alone.
 - Measure the outer bounding box of the building ("footprintDims", longer side is "lengthM"), the floor area two independent ways (outer footprint minus notches/cutouts, and sum of zone areas) and reconcile into "totalAreaM2", the outer boundary "perimeterM", and per-zone areas ("zones"). When the drawing's legend tags regions with a finish/area code (e.g. a finishes plan), set each zone's "code" to that printed code so same-finish areas can be totalled; otherwise use the printed room number.
 - Per zone, when the drawing lets you measure it: include "perimeterM" (that zone's internal boundary length) and "openingsDeductionM" (summed width of doorways/openings in that boundary). Omit both rather than guess.
@@ -1917,8 +1925,8 @@ For the attached image that is an architectural plan, floorplan, or scaled drawi
 Return ONLY valid JSON:
 { "detected": true, "scale": "1:100", "calibration": { "source": "known_dimension|scale_bar", "basisMm": 2520, "note": "name the exact reference measured against" }, "footprintDims": { "lengthM": 0, "widthM": 0 }, "totalAreaM2": 0, "perimeterM": 0, "zones": [ { "label": "...", "code": "...", "areaM2": 0, "perimeterM": 0, "openingsDeductionM": 0 } ], "assumptions": "...", "confidence": "medium" }`;
 
-  const parts: any[] = photoBase64.map((b64) => ({
-    inline_data: { mime_type: 'image/jpeg', data: b64 },
+  const parts: any[] = attachments.map((a) => ({
+    inline_data: { mime_type: a.mediaType, data: a.data },
   }));
   parts.push({ text: prompt });
 
@@ -1947,17 +1955,19 @@ Return ONLY valid JSON:
 async function callClaudeForMaterials(
   apiKey: string,
   prompt: string,
-  photoBase64?: string[],
+  attachments?: LlmAttachment[],
 ): Promise<any> {
   const messageContent: any[] = [];
-  if (Array.isArray(photoBase64) && photoBase64.length > 0) {
-    for (const b64 of photoBase64) {
+  if (Array.isArray(attachments) && attachments.length > 0) {
+    for (const a of attachments) {
+      // PDFs ride as document blocks (same shape the extraction path uses);
+      // everything else is a plain image block with its true media type.
       messageContent.push({
-        type: 'image',
+        type: a.mediaType === 'application/pdf' ? 'document' : 'image',
         source: {
           type: 'base64',
-          media_type: 'image/jpeg',
-          data: b64,
+          media_type: a.mediaType,
+          data: a.data,
         },
       });
     }
@@ -1996,7 +2006,10 @@ async function callClaudeForMaterials(
  * Analyze Job Description — Gemini 3 Pro Preview primary, Claude Opus 4.6 fallback.
  * This Cloud Function acts as a proxy to avoid CORS issues on web.
  */
-export const analyzeJobDescription = functions.runWith({ timeoutSeconds: 420 }).https.onRequest((req, res) => {
+// 512MB: up to ~14MB of raw attachments exist as Buffers AND base64 strings
+// at once while the provider payloads are built — the 256MB default was sized
+// for compressed photos only.
+export const analyzeJobDescription = functions.runWith({ timeoutSeconds: 420, memory: '512MB' }).https.onRequest((req, res) => {
   corsHandler(req, res, async () => {
     if (req.method !== 'POST') {
       res.status(405).send('Method Not Allowed');
@@ -2027,15 +2040,30 @@ export const analyzeJobDescription = functions.runWith({ timeoutSeconds: 420 }).
         return;
       }
 
-      // Effective image set: any client-provided base64 (native local files)
-      // plus Storage URLs fetched server-side (the usual case, and what makes
-      // photo/floorplan analysis work on the web app without CORS).
+      // Effective attachment set: any client-provided base64 (native local
+      // files) plus Storage URLs fetched server-side (the usual case, and what
+      // makes photo/floorplan analysis work on the web app without CORS).
+      // Every payload is typed from its magic bytes — Storage contentType has
+      // been wrong before (raw PDFs stored as .jpg) and a single mislabelled
+      // file used to 400 both providers and kill the whole analyze.
       const photoBase64: string[] = Array.isArray(photoBase64Input)
         ? photoBase64Input.filter((b: any) => typeof b === 'string')
         : [];
       if (Array.isArray(photoUrls) && photoUrls.length > 0) {
         const fetched = await fetchStorageImagesAsBase64(photoUrls);
         photoBase64.push(...fetched);
+      }
+      const { attachments, dropped } = normalizeLlmAttachments(photoBase64);
+      for (const d of dropped) {
+        // index is into the combined base64 list (fetch skips don't appear in
+        // it), so log the counts too or a prod incident can't be traced back.
+        console.warn('[analyze attachments] dropped attachment', {
+          uid: decodedToken.uid,
+          index: d.index,
+          reason: d.reason,
+          inputCount: photoBase64.length,
+          requestedUrls: Array.isArray(photoUrls) ? photoUrls.length : 0,
+        });
       }
 
       // Get API keys from Firebase config.
@@ -2257,8 +2285,8 @@ Guidelines:
 - Consider the suggested materials but don't limit yourself to only those
 - Think about what a professional ${tradeContext?.nicheName || 'tradie'} would need for this job
 
-FLOORPLAN ANALYSIS (only when one of the attached images is an architectural plan, floorplan, or scaled drawing — NOT an ordinary site photo):
-- First classify each attached image as a PLAN or a SITE PHOTO. Treat ordinary photos exactly as before; only fill "floorplanAnalysis" when at least one image is a plan/drawing. If no plan is attached, OMIT "floorplanAnalysis" entirely.
+FLOORPLAN ANALYSIS (only when one of the attached files is an architectural plan, floorplan, or scaled drawing — NOT an ordinary site photo; plans may arrive as images OR PDF documents):
+- First classify each attached file as a PLAN or a SITE PHOTO. Treat ordinary photos exactly as before; only fill "floorplanAnalysis" when at least one file is a plan/drawing (a PDF of drawings counts). If no plan is attached, OMIT "floorplanAnalysis" entirely.
 - This is trade-agnostic: read the geometry, don't assume a trade. The same output serves flooring, tiling, painting, concreting, landscaping, fencing, roofing, etc.
 - CALIBRATE FIRST, then measure everything FROM that scale — do not eyeball areas. Establish one real-world scale from the strongest reference ON THE DRAWING ITSELF, in this order, and you MUST record it in "calibration" (source + a short note stating the scale you derived):
   1. a clearly labelled dimension on the drawing (treat a known structural grid spacing as a labelled dimension — if the grid is evenly spaced and any one bay is dimensioned, apply that spacing across the whole drawing, and count grid bays to derive the overall length AND width rather than eyeballing edge positions; use source "known_dimension");
@@ -2279,8 +2307,8 @@ FLOORPLAN ANALYSIS (only when one of the attached images is an architectural pla
 
 Return ONLY valid JSON, no other text.`;
 
-      const finalPrompt = Array.isArray(photoBase64) && photoBase64.length > 0
-        ? `${prompt}\n\nI've attached ${photoBase64.length} image(s). Examine each carefully. If an image is an ordinary site photo, use it to understand the scope and identify visible materials. If an image is an architectural plan, floorplan, or scaled drawing, ALSO follow the FLOORPLAN ANALYSIS instructions above — read the scale and extract areas/perimeter, and use them to ground your material quantities.`
+      const finalPrompt = attachments.length > 0
+        ? `${prompt}\n\nI've attached ${attachments.length} file(s) — site photos and/or plan documents (a plan may arrive as a PDF). Examine each carefully. If a file is an ordinary site photo, use it to understand the scope and identify visible materials. If a file is an architectural plan, floorplan, or scaled drawing — including a PDF plan — ALSO follow the FLOORPLAN ANALYSIS instructions above — read the scale and extract areas/perimeter, and use them to ground your material quantities.`
         : prompt;
 
       // Try Gemini 3 Pro Preview first (primary — better image understanding)
@@ -2289,7 +2317,7 @@ Return ONLY valid JSON, no other text.`;
 
       if (geminiApiKey) {
         try {
-          parsed = await callGeminiForMaterials(geminiApiKey, finalPrompt, photoBase64);
+          parsed = await callGeminiForMaterials(geminiApiKey, finalPrompt, attachments);
         } catch (err: any) {
           primaryError = err;
           console.warn('Gemini primary call failed, falling back to Claude Opus:', err.message);
@@ -2302,7 +2330,7 @@ Return ONLY valid JSON, no other text.`;
           throw primaryError || new Error('Gemini failed and no Anthropic fallback key configured');
         }
         try {
-          parsed = await callClaudeForMaterials(anthropicApiKey, finalPrompt, photoBase64);
+          parsed = await callClaudeForMaterials(anthropicApiKey, finalPrompt, attachments);
         } catch (fallbackErr: any) {
           // Log full errors server-side; return short summary to client
           console.error('Gemini primary error:', primaryError?.message);
@@ -2400,11 +2428,11 @@ Return ONLY valid JSON, no other text.`;
       if (
         floorplanAnalysis &&
         isAnchorLaundered(floorplanAnalysis) &&
-        photoBase64.length > 0 &&
+        attachments.length > 0 &&
         geminiApiKey
       ) {
         try {
-          const blind = await callGeminiForBlindTakeoff(geminiApiKey, photoBase64);
+          const blind = await callGeminiForBlindTakeoff(geminiApiKey, attachments);
           const merged = mergeBlindTakeoff(floorplanAnalysis, blind);
           if (merged !== floorplanAnalysis) {
             console.log('[floorplan anchor] blind re-measure applied', {
@@ -2455,6 +2483,9 @@ Return ONLY valid JSON, no other text.`;
         flags: aiFlags,
         ...(jobQualityTier && { jobQualityTier }),
         ...(floorplanAnalysis && { floorplanAnalysis }),
+        // Surfaced so the client can tell a "plan too big / unreadable" run
+        // from a genuinely plan-less one instead of silently pricing blind.
+        ...(dropped.length > 0 && { droppedAttachments: dropped }),
       });
     } catch (error: any) {
       recordMaterialsRecommend({
@@ -6137,30 +6168,48 @@ export const generateQuoteAcceptanceLink = functions.https.onRequest((req, res) 
 async function fetchPhotoAttachments(
   photoUrls: string[]
 ): Promise<Array<{ name: string; content: string }>> {
-  const attachments: Array<{ name: string; content: string }> = [];
-
   // Only fetch remote URLs — legacy quotes may carry local file:// URIs
   const remoteUrls = photoUrls.filter((url) => /^https?:\/\//i.test(url));
 
   const results = await Promise.allSettled(
-    remoteUrls.map(async (url, index) => {
+    remoteUrls.map(async (url) => {
       const response = await fetch(url);
       if (!response.ok) return null;
 
       const contentType = response.headers.get('content-type') || 'image/jpeg';
-      const ext = contentType.includes('png') ? 'png' : 'jpg';
+      const isPdf = contentType.includes('pdf');
+      const ext = isPdf ? 'pdf'
+        : contentType.includes('png') ? 'png'
+        : contentType.includes('webp') ? 'webp'
+        : 'jpg';
       const buffer = await response.buffer();
-      return {
-        name: `Job_Photo_${index + 1}.${ext}`,
-        content: buffer.toString('base64'),
-      };
+      return { isPdf, ext, bytes: buffer.length, content: buffer.toString('base64') };
     })
   );
 
+  // Photos and plans get their own counters, and attaching stops at the email
+  // budget — Brevo rejects the whole send around 10MB of attachments, and a
+  // quote that arrives without one photo beats a quote that never arrives.
+  const MAX_EMAIL_ATTACHMENT_BYTES = 7_000_000;
+  const attachments: Array<{ name: string; content: string }> = [];
+  let photoCount = 0;
+  let planCount = 0;
+  let totalBytes = 0;
   for (const result of results) {
-    if (result.status === 'fulfilled' && result.value) {
-      attachments.push(result.value);
+    if (result.status !== 'fulfilled' || !result.value) continue;
+    const file = result.value;
+    if (totalBytes + file.bytes > MAX_EMAIL_ATTACHMENT_BYTES) {
+      console.warn('[email attachments] skipping attachment over email budget', {
+        bytes: file.bytes,
+        totalBytes,
+      });
+      continue;
     }
+    totalBytes += file.bytes;
+    attachments.push({
+      name: file.isPdf ? `Plan_${++planCount}.pdf` : `Job_Photo_${++photoCount}.${file.ext}`,
+      content: file.content,
+    });
   }
 
   return attachments;
@@ -7501,10 +7550,12 @@ export function generateAcceptancePage(token: string): string {
           '</div>'
         : '';
 
-      // Photos — skip non-http(s) URLs (legacy local file:// URIs)
+      // Photos — skip non-http(s) URLs (legacy local file:// URIs) and PDF
+      // plan attachments (an <img> can't render a PDF; plans are quoting
+      // inputs, not customer-facing site photos).
       var photosHtml = '';
       var remotePhotoUrls = (quote.photoUrls || []).filter(function(url) {
-        return /^https?:\\/\\//i.test(url);
+        return /^https?:\\/\\//i.test(url) && !/\\.pdf($|\\?)/i.test(url);
       });
       if (remotePhotoUrls.length > 0) {
         var imgs = remotePhotoUrls.map(function(url) {
