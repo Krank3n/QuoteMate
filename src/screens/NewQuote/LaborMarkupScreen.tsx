@@ -782,11 +782,9 @@ export function LaborMarkupScreen() {
           </Text>
         </View>
 
-        {currentQuote.gstRegistered !== false && (
+        {currentQuote.gstRegistered !== false && currentQuote.pricesIncludeGst !== true && (
           <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>
-              {currentQuote.pricesIncludeGst === true ? 'Includes GST' : 'GST (10%)'}
-            </Text>
+            <Text style={styles.summaryLabel}>GST (10%)</Text>
             <Text style={styles.summaryValue}>
               {formatCurrency(calculation.gst)}
             </Text>
@@ -801,6 +799,11 @@ export function LaborMarkupScreen() {
             {formatCurrency(calculation.total)}
           </Text>
         </View>
+        {/* Inclusive GST is disclosure, not an addend — below the total,
+            matching the PDF, the acceptance page and TotalsSection. */}
+        {currentQuote.gstRegistered !== false && currentQuote.pricesIncludeGst === true && (
+          <Text style={styles.summaryLabel}>Total includes GST of {formatCurrency(calculation.gst)}</Text>
+        )}
       </Surface>
         </WebContainer>
         </ScrollView>

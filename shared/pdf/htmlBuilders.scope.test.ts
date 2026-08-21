@@ -149,7 +149,7 @@ describe('PDF Project Scope table', () => {
     expect(html).toContain('<th class="scope-total">Line Total</th>');
     // The itemised table's columns must be gone — that is the whole point.
     expect(html).not.toContain('<th>Quantity</th>');
-    expect(html).not.toContain('<th>Unit Price</th>');
+    expect(html).not.toContain('Unit Price');
   });
 
   it('numbers the scope rows 1, 2, 3', () => {
@@ -245,7 +245,7 @@ describe('PDF Project Scope table', () => {
     });
     const html = buildQuotePdfHtml(mixed, business);
     expect(html).toContain('<th>Quantity</th>');
-    expect(html).toContain('<th>Unit Price</th>');
+    expect(html).toContain('<th class="num">Unit Price</th>');
     expect(html).toContain('<h3>Materials</h3>');
     expect(html).not.toContain('<th>Project Scope</th>');
   });
@@ -257,10 +257,10 @@ describe('PDF Project Scope table', () => {
         { name: 'Paint', quantity: 4, unit: 'each', price: 95, totalPrice: 380 },
       ],
     );
-    expect(html).toContain('<td>Prep<div class="scope-body">Cover and protect.</div></td>\n      <td></td>\n      <td></td>\n      <td>$500.00</td>');
+    expect(html).toContain('<td>Prep<div class="scope-body">Cover and protect.</div></td>\n      <td></td>\n      <td class="num"></td>\n      <td class="num">$500.00</td>');
     // The real material still shows both.
     expect(html).toContain('<td>4 each</td>');
-    expect(html).toContain('<td>$95.00</td>');
+    expect(html).toContain('<td class="num">$95.00</td>');
   });
 
   it('appends labour rows to the scope table when the doc also carries labour hours', () => {
@@ -298,13 +298,13 @@ describe('PDF Project Scope table', () => {
     );
     expect(html).toBe(
       '\n      <table>\n        \n    <thead>\n      <tr>\n        <th>Item</th>\n' +
-      '        <th>Quantity</th>\n        <th>Unit Price</th>\n        <th>Total</th>\n' +
+      '        <th>Quantity</th>\n        <th class="num">Unit Price</th>\n        <th class="num">Total</th>\n' +
       '      </tr>\n    </thead>\n        <tbody>\n          \n    <tr>\n' +
-      '      <td>Merbau Decking 90x19mm</td>\n      <td>12 m</td>\n      <td>$9.35</td>\n' +
-      '      <td>$112.20</td>\n    </tr>\n    <tr>\n      <td>Galvanised Screws 65mm</td>\n' +
-      '      <td>2 box</td>\n      <td>$26.40</td>\n      <td>$52.80</td>\n    </tr>\n' +
+      '      <td>Merbau Decking 90x19mm</td>\n      <td>12 m</td>\n      <td class="num">$9.35</td>\n' +
+      '      <td class="num">$112.20</td>\n    </tr>\n    <tr>\n      <td>Galvanised Screws 65mm</td>\n' +
+      '      <td>2 box</td>\n      <td class="num">$26.40</td>\n      <td class="num">$52.80</td>\n    </tr>\n' +
       '          <tr class="total-row">\n            <td colspan="3">Materials Subtotal</td>\n' +
-      '            <td>$165.00</td>\n          </tr>\n        </tbody>\n      </table>',
+      '            <td class="num">$165.00</td>\n          </tr>\n        </tbody>\n      </table>',
     );
   });
 });

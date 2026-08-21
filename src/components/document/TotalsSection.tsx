@@ -46,7 +46,6 @@ export function TotalsSection({
   const showTravel = travelAdjustmentAmount > 0;
   const gstMode = resolveGstMode({ gstRegistered, pricesIncludeGst });
   const subtotalLabel = gstMode === 'exclusive' ? 'Subtotal (ex GST)' : 'Subtotal';
-  const gstLabel = gstMode === 'inclusive' ? 'Includes GST' : 'GST (10%)';
 
   return (
     <Surface style={[documentStyles.totalSection, style]}>
@@ -70,9 +69,9 @@ export function TotalsSection({
           <Text style={documentStyles.summaryValue}>{formatCurrency(travelAdjustmentAmount)}</Text>
         </View>
       )}
-      {gstMode !== 'none' && (
+      {gstMode === 'exclusive' && (
         <View style={documentStyles.summaryRow}>
-          <Text style={documentStyles.summaryLabel}>{gstLabel}</Text>
+          <Text style={documentStyles.summaryLabel}>GST (10%)</Text>
           <Text style={documentStyles.summaryValue}>{formatCurrency(gst)}</Text>
         </View>
       )}
@@ -81,6 +80,11 @@ export function TotalsSection({
         <Text style={documentStyles.totalLabel}>TOTAL</Text>
         <Text style={documentStyles.totalValue}>{formatCurrency(total)}</Text>
       </View>
+      {/* Inclusive GST is disclosure, not an addend — below the total, same
+          as the PDF and the acceptance page, so no reader sums it. */}
+      {gstMode === 'inclusive' && (
+        <Text style={styles.noGstNote}>Total includes GST of {formatCurrency(gst)}</Text>
+      )}
       {gstMode === 'none' && (
         <Text style={styles.noGstNote}>{NO_GST_NOTE}</Text>
       )}

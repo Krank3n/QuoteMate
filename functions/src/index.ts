@@ -7641,8 +7641,11 @@ export function generateAcceptancePage(token: string): string {
         var sub = quote.subtotal + (quote.markupAmount || 0) + (quote.travelAdjustmentAmount || 0);
         summaryRows += '<div class="totals-row"><span>' + (gstMode === 'exclusive' ? 'Subtotal (ex GST)' : 'Subtotal') + '</span><span>' + formatCurrency(sub) + '</span></div>';
       }
-      if (gstMode !== 'none') {
-        summaryRows += '<div class="totals-row"><span>' + (gstMode === 'inclusive' ? 'Includes GST' : 'GST (10%)') + '</span><span>' + formatCurrency(quote.gst) + '</span></div>';
+      // Exclusive GST is an addend, so it sits in the stack; inclusive GST is
+      // disclosure only and renders BELOW the total (same as the PDF), where
+      // it can't be misread as one more figure to sum.
+      if (gstMode === 'exclusive') {
+        summaryRows += '<div class="totals-row"><span>GST (10%)</span><span>' + formatCurrency(quote.gst) + '</span></div>';
       }
 
       var notesHtml = quote.notes
@@ -7705,6 +7708,7 @@ export function generateAcceptancePage(token: string): string {
             '<div class="totals">' +
               summaryRows +
               '<div class="totals-row grand"><span>Total</span><span class="amount">' + formatCurrency(quote.total) + '</span></div>' +
+              (gstMode === 'inclusive' ? '<div class="gst-note">Total includes GST of ' + formatCurrency(quote.gst) + '</div>' : '') +
               (gstMode === 'none' ? '<div class="gst-note">No GST has been charged.</div>' : '') +
             '</div>' +
           '</div>' +
@@ -12407,7 +12411,9 @@ export const xeroBulkSync = functions.runWith({ timeoutSeconds: 300 }).https.onR
           Date: formatDate(invoice.issueDate),
           DueDate: formatDate(invoice.dueDate),
           Status: xeroStatus,
-          LineAmountTypes: invGstRegistered ? 'Exclusive' : 'NoTax',
+          // Mirrors the single-invoice path: an inclusive-priced invoice sent
+          // as 'Exclusive' had Xero adding another 10% on top of the totals.
+          LineAmountTypes: !invGstRegistered ? 'NoTax' : invoice.pricesIncludeGst === true ? 'Inclusive' : 'Exclusive',
           LineItems: lineItems,
           CurrencyCode: 'AUD',
         };

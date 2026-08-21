@@ -86,4 +86,40 @@ describe('renderPricingRows — GST registration', () => {
     expect(notRegistered).toContain('Balance Due');
     expect(notRegistered).toContain('No GST has been charged.');
   });
+
+  it('inclusive prices: GST leaves the addition stack and becomes a note under the total', () => {
+    // Subtotal already includes GST, so a GST row in the stack invited the
+    // reader to sum Subtotal + GST and overshoot — the email showed numbers
+    // that visibly didn't add up. Same treatment as the PDF and the
+    // acceptance page.
+    const html = renderPricingRows({ ...base, pricesIncludeGst: true, subtotal: 330 });
+    expect(html).not.toContain('>GST<');
+    expect(html).toContain('Total includes GST of $30.00');
+    expect(html).toContain('Total (inc GST)');
+    // The disclosure sits below the total, not above it.
+    expect(html.indexOf('Total includes GST of')).toBeGreaterThan(html.indexOf('Total (inc GST)'));
+  });
+
+  it("inclusive + priceDetail 'total': no empty Summary header, disclosure still shows", () => {
+    // With the GST row gone from the stack, an inclusive-mode "total only"
+    // email has no breakdown rows at all — the Summary header must collapse
+    // (its guard used gstRegistered, which would have rendered a header over
+    // an empty box), while the legally-required GST disclosure survives in
+    // the total card.
+    const html = renderPricingRows({ ...base, pricesIncludeGst: true, subtotal: 330, priceDetail: 'total' });
+    expect(html).not.toContain('>Summary<');
+    expect(html).toContain('Total includes GST of $30.00');
+    expect(html).toContain('$330.00');
+  });
+
+  it('inclusive + deposit credit: Balance Due label, deposit row, and the disclosure names the invoice total', () => {
+    // Under a BALANCE DUE figure, "Total includes GST of $X" would read as
+    // the GST inside the balance — so the note names the pre-deposit invoice
+    // total the GST actually belongs to.
+    const html = renderPricingRows({ ...base, pricesIncludeGst: true, subtotal: 330, depositCredit: 100, total: 230 });
+    expect(html).toContain('Balance Due');
+    expect(html).toContain('Deposit already paid');
+    expect(html).not.toContain('>GST<');
+    expect(html).toContain('Invoice total $330.00 includes GST of $30.00');
+  });
 });

@@ -205,6 +205,13 @@ describe('quote email — accept / decline', () => {
   it('uses the business brand colour for the primary button', () => {
     expect(quote()).toContain('background:#1d4ed8');
   });
+
+  it('drops the hardcoded 30-day validity line when the tradie has terms', () => {
+    // The PDF defers to the tradie's T&Cs (which may say 14 days); the email
+    // body must not contradict the attachment.
+    expect(quote()).toContain('valid for 30 days');
+    expect(quote({ hasTerms: true })).not.toContain('valid for 30 days');
+  });
 });
 
 describe('document email — escaping', () => {
