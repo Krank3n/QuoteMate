@@ -62,24 +62,31 @@ describe('isSelfSend', () => {
 
 describe('orderSendOptions', () => {
   it('leads with SMS for a phone-only customer', () => {
-    expect(orderSendOptions({ hasEmail: false, hasPhone: true })).toEqual(['sms', 'email']);
+    expect(orderSendOptions({ hasEmail: false, canSms: true })).toEqual(['sms', 'email']);
   });
 
   it('leads with Email whenever there is an address on file', () => {
-    expect(orderSendOptions({ hasEmail: true, hasPhone: false })).toEqual(['email', 'sms']);
-    expect(orderSendOptions({ hasEmail: true, hasPhone: true })).toEqual(['email', 'sms']);
+    expect(orderSendOptions({ hasEmail: true, canSms: false })).toEqual(['email', 'sms']);
+    expect(orderSendOptions({ hasEmail: true, canSms: true })).toEqual(['email', 'sms']);
   });
 
-  // Nothing on file: the email preview lets the tradie type an address,
+  // Nothing to send to: the email preview lets the tradie type an address,
   // the SMS row has nowhere to send. Email keeps the lead.
   it('leads with Email when we have neither', () => {
-    expect(orderSendOptions({ hasEmail: false, hasPhone: false })).toEqual(['email', 'sms']);
+    expect(orderSendOptions({ hasEmail: false, canSms: false })).toEqual(['email', 'sms']);
+  });
+
+  // canSms is "can this be finished", not "is there a number". On web the
+  // SMS path copies the message and announces it through Alert.alert, which
+  // react-native-web no-ops — so it must never be the lead row.
+  it('never leads with a channel that cannot be completed', () => {
+    expect(orderSendOptions({ hasEmail: false, canSms: false })).toEqual(['email', 'sms']);
   });
 
   it('never drops or duplicates a channel', () => {
     for (const hasEmail of [true, false]) {
-      for (const hasPhone of [true, false]) {
-        expect([...orderSendOptions({ hasEmail, hasPhone })].sort()).toEqual(['email', 'sms']);
+      for (const canSms of [true, false]) {
+        expect([...orderSendOptions({ hasEmail, canSms })].sort()).toEqual(['email', 'sms']);
       }
     }
   });

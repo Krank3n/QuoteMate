@@ -16,10 +16,22 @@ export interface DraftBannerAction {
   icon: string;
 }
 
+/**
+ * @param canOpenSend Whether the send destination actually exists yet. The
+ *   banner is fed by `quotes`, which is AsyncStorage-backed and therefore
+ *   present offline and on the first frame of a cold launch — but the send
+ *   route needs the JOB and the unified DOCUMENT, both Firestore-only, and
+ *   the Document is minted by a server-side mirror trigger. So a freshly
+ *   finished draft can be on screen seconds before anything it would open
+ *   exists. Callers pass false in that window and the card falls back to
+ *   resume — styling and route together — rather than promising a send the
+ *   tap can't deliver.
+ */
 export function resolveDraftBannerAction(
   draft: { draftStep?: string; jobId?: string } | null | undefined,
+  canOpenSend = true,
 ): DraftBannerAction {
-  if (draft?.draftStep === 'JobPreview' && draft.jobId) {
+  if (canOpenSend && draft?.draftStep === 'JobPreview' && draft.jobId) {
     return { kind: 'send', icon: 'send-outline' };
   }
   return { kind: 'resume', icon: 'pencil-outline' };

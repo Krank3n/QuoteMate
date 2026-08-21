@@ -352,11 +352,6 @@ export function DashboardScreen() {
   // the home screen's top slot forever.
   const inProgressDraft = useMemo(() => pickDashboardDraft(quotes), [quotes]);
 
-  // A draft parked on the preview step is finished work waiting on a send,
-  // not unfinished wizard work — the banner offers the send instead of the
-  // pencil. See draftBannerAction.ts.
-  const draftAction = resolveDraftBannerAction(inProgressDraft);
-
   // Translate the wizard step they left off on into a "what's needed
   // next" hint shown on the draft banner. Mirrors the screens in the
   // NewJob stack (see RootNavigator).
@@ -471,6 +466,32 @@ export function DashboardScreen() {
     [jobs, inProgressDraft?.jobId],
   );
 
+  // A draft parked on the preview step is finished work waiting on a send,
+  // not unfinished wizard work — the banner offers the send instead of the
+  // pencil, but only once the send actually has somewhere to land.
+  //
+  // The banner is fed by `quotes` (AsyncStorage-backed, so present offline
+  // and on the first frame of a cold launch); the send route needs the Job
+  // and the unified Document, which are Firestore-only and the Document is
+  // minted by a server-side mirror. Both lookups below are reactive — this
+  // sits under the `jobs` subscription above and `documentsForStats` — so
+  // the card upgrades itself to the send the moment they land. See
+  // draftBannerAction.ts.
+  const getJobById = useJobStore((s) => s.getJobById);
+  const draftAction = resolveDraftBannerAction(
+    inProgressDraft,
+    !!inProgressDraft
+      && documentsForStats.some((d) => d.id === inProgressDraft.id)
+      && !!getJobById(inProgressDraft.jobId || ''),
+  );
+  // Same card language as FollowUpNudgeBanner's unsent_quote nudge: accent
+  // for "this is ready to go", warning for "this still wants work". Without
+  // it the two states were the same amber card with a different glyph.
+  const draftTone =
+    draftAction.kind === 'send'
+      ? { accent: themeColors.accent, accentBg: themeColors.accentSubtle }
+      : { accent: themeColors.warning, accentBg: themeColors.warningSubtle };
+
   const [stageSheetJob, setStageSheetJob] = useState<Job | null>(null);
   const [scheduleSheetJob, setScheduleSheetJob] = useState<Job | null>(null);
   // Stable identities — these go into memo'd JobCards; fresh closures every
@@ -518,8 +539,9 @@ export function DashboardScreen() {
     // Finished draft → straight to the send sheet. openSendDocId is the
     // existing primitive (Mate's send proposal uses it): ViewJob opens
     // SendDocumentDialog for that doc, so the money-settling and the
-    // free-tier gate still run.
-    if (resolveDraftBannerAction(draft).kind === 'send') {
+    // free-tier gate still run. Reads the same draftAction the card is
+    // rendered from, so the tap can never promise more than the card does.
+    if (draftAction.kind === 'send') {
       navigation.navigate('ViewJob' as never, { jobId: draft.jobId, openSendDocId: draft.id } as never);
       return;
     }
@@ -765,18 +787,19 @@ export function DashboardScreen() {
           <TouchableOpacity
             onPress={() => handleContinueDraft(inProgressDraft)}
             activeOpacity={0.7}
+            accessibilityRole="button"
             accessibilityLabel={`${draftAction.kind === 'send' ? 'Send quote' : 'Continue draft'} for ${inProgressDraft.job.name || 'Untitled'}`}
           >
-            <Surface style={styles.draftBanner}>
+            <Surface style={[styles.draftBanner, { borderLeftColor: draftTone.accent }]}>
               <View style={styles.draftBannerContent}>
-                <RNAnimated.View style={[styles.draftIconCircle, { backgroundColor: themeColors.accentSubtle, transform: [{ rotate: draftWiggle.interpolate({ inputRange: [0, 0.25, 0.5, 0.75, 1], outputRange: ['0deg', '-6deg', '0deg', '6deg', '0deg'] }) }] }]}>
-                  <MaterialCommunityIcons name={draftAction.icon as any} size={20} color={themeColors.accentText} />
+                <RNAnimated.View style={[styles.draftIconCircle, { backgroundColor: draftTone.accentBg, transform: [{ rotate: draftWiggle.interpolate({ inputRange: [0, 0.25, 0.5, 0.75, 1], outputRange: ['0deg', '-6deg', '0deg', '6deg', '0deg'] }) }] }]}>
+                  <MaterialCommunityIcons name={draftAction.icon as any} size={20} color={draftTone.accent} />
                 </RNAnimated.View>
                 <View style={styles.draftBannerText}>
                   <Text style={styles.draftBannerTitle} numberOfLines={1}>
                     {inProgressDraft.job.name || 'Untitled'}{inProgressDraft.customerName ? ` — ${inProgressDraft.customerName}` : ''}
                   </Text>
-                  <Text style={styles.draftBannerSubtitle} numberOfLines={1}>
+                  <Text style={styles.draftBannerSubtitle} numberOfLines={2}>
                     {[
                       // No "Next:" on the send case — it isn't the next step
                       // of anything, it's the finish line.
@@ -787,7 +810,7 @@ export function DashboardScreen() {
                     ].filter(Boolean).join(' · ')}
                   </Text>
                 </View>
-                <MaterialCommunityIcons name="chevron-right" size={24} color={themeColors.accentText} />
+                <MaterialCommunityIcons name="chevron-right" size={24} color={draftTone.accent} />
               </View>
             </Surface>
           </TouchableOpacity>
@@ -795,6 +818,7 @@ export function DashboardScreen() {
             style={styles.draftDeleteButton}
             onPress={handleDeleteDraft}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            accessibilityRole="button"
             accessibilityLabel="Delete draft"
           >
             <MaterialCommunityIcons name="close-circle" size={22} color={themeColors.error} />
@@ -1097,8 +1121,8 @@ const useStyles = makeStyles((t) => ({
     borderRadius: 12,
     backgroundColor: t.colors.surfaceRaised,
     elevation: 2,
+    // borderLeftColor is set per-render from draftTone.
     borderLeftWidth: 3,
-    borderLeftColor: t.colors.warning,
   },
   draftBannerContent: {
     flexDirection: 'row',

@@ -716,8 +716,19 @@ export function AssistantScreen() {
           // It keys off jobId, so resolve the doc to its job and pass
           // openSendDocId so ViewJob auto-opens the send sheet for this doc.
           const doc = useStore.getState().getDocumentById(hint.documentId);
-          if (!doc?.jobId) return;
-          navigation.navigate('ViewJob', { jobId: doc.jobId, openSendDocId: doc.id });
+          if (doc?.jobId) {
+            navigation.navigate('ViewJob', { jobId: doc.jobId, openSendDocId: doc.id });
+            break;
+          }
+          // No job to open — a doc whose Job hasn't been created or synced yet.
+          // Bailing here flipped the card to "Applied" and did nothing at all,
+          // so fall back to the wizard's preview, which has its own Send. Only
+          // when we can seed currentQuote from it: navigating without that
+          // would show whichever quote was last in the wizard.
+          const quote = quotes.find((q) => q.id === hint.documentId);
+          if (!quote) return;
+          setCurrentQuote(quote);
+          navigation.navigate('NewJob', { screen: 'JobPreview' });
           break;
         }
         case 'open_contact':

@@ -42,17 +42,23 @@ export type SendChannel = 'email' | 'sms';
  * stays first whenever there's an address to use — but CustomerDetails only
  * ever required email OR phone, so a phone-only customer was being offered
  * Email at the top of the sheet with nothing behind it. When email is the
- * one thing we don't have and SMS is the one thing we do, SMS leads.
+ * one thing we don't have and SMS is the one thing we can finish, SMS leads.
  *
- * With neither on file the order is moot; Email stays first, since the
- * preview lets the tradie type an address and SMS can't ask for a number.
+ * With neither the order is moot; Email stays first, since the preview lets
+ * the tradie type an address and SMS can't ask for a number.
+ *
+ * @param canSms SMS can actually be COMPLETED here — not just "there's a
+ *   number on file". Web is the case that forces the distinction: it can't
+ *   open a composer, so it copies the message and relies on an Alert.alert
+ *   to say so, and react-native-web's Alert.alert is a no-op. Leading with a
+ *   row that ends in a silent dead end is worse than leading with Email.
  */
 export function orderSendOptions({
   hasEmail,
-  hasPhone,
+  canSms,
 }: {
   hasEmail: boolean;
-  hasPhone: boolean;
+  canSms: boolean;
 }): SendChannel[] {
-  return !hasEmail && hasPhone ? ['sms', 'email'] : ['email', 'sms'];
+  return !hasEmail && canSms ? ['sms', 'email'] : ['email', 'sms'];
 }

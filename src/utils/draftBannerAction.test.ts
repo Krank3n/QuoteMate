@@ -31,4 +31,22 @@ describe('resolveDraftBannerAction', () => {
       icon: 'pencil-outline',
     });
   });
+
+  // The banner's own data (`quotes`) is AsyncStorage-backed; the job and the
+  // unified document behind the send route are Firestore-only, and the
+  // document is minted by a server-side mirror. Offering a send before both
+  // have landed is a dead tap — "Job not found", or nothing at all.
+  it('resumes when the send destination has not landed yet', () => {
+    expect(resolveDraftBannerAction({ draftStep: 'JobPreview', jobId: 'job-1' }, false)).toEqual({
+      kind: 'resume',
+      icon: 'pencil-outline',
+    });
+  });
+
+  it('offers the send once the destination is there', () => {
+    expect(resolveDraftBannerAction({ draftStep: 'JobPreview', jobId: 'job-1' }, true)).toEqual({
+      kind: 'send',
+      icon: 'send-outline',
+    });
+  });
 });

@@ -22,7 +22,7 @@ function doc(overrides: Partial<Document> = {}): Document {
 
 const PLATFORMS = ['android', 'web'] as const;
 
-describe('resolvePreviewFooterActions — a doc that has never left draft', () => {
+describe('resolvePreviewFooterActions — a quote that has never left draft', () => {
   it.each(PLATFORMS)('gives Send the whole footer on %s', (platform) => {
     const actions = resolvePreviewFooterActions({ doc: doc(), platform });
 
@@ -37,13 +37,16 @@ describe('resolvePreviewFooterActions — a doc that has never left draft', () =
     expect(actions.send).toEqual({ label: 'Send Quote' });
   });
 
-  it('holds the payment slot back for an unsent invoice too', () => {
+  // Invoices are the exception. The work is done, the tradie is standing in
+  // front of the customer, and convertDocumentToInvoice leaves the new
+  // invoice on stage 'draft' — so "draft" here does NOT mean unseen.
+  it('keeps the pair for a draft invoice', () => {
     const actions = resolvePreviewFooterActions({
       doc: doc({ type: 'invoice' }),
       platform: 'android',
     });
 
-    expect(actions.payment).toBeNull();
+    expect(actions.payment).toEqual({ label: 'Take Payment' });
     expect(actions.send).toEqual({ label: 'Send Invoice' });
   });
 

@@ -21,6 +21,7 @@ import {
   TextInput,
   Menu,
   ActivityIndicator,
+  Snackbar,
 } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -41,6 +42,7 @@ import { FooterButton } from '../../components/FooterButton';
 import { DocumentSentBanner } from '../../components/DocumentSentBanner';
 import { TakePaymentSheet, type TakePaymentTarget } from '../../components/TakePaymentSheet';
 import { reconcileNextNumber } from '../../utils/nextNumber';
+import { applyStageChange } from '../../utils/applyStageChange';
 import { successTap } from '../../utils/haptics';
 import { WebContainer } from '../../components/WebContainer';
 import {
@@ -98,6 +100,7 @@ export function JobPreviewScreen() {
   const invoices = useStore((s) => s.invoices);
   const saveQuote = useStore((s) => s.saveQuote);
   const saveInvoice = useStore((s) => s.saveInvoice);
+  const createInvoiceFromQuote = useStore((s) => s.createInvoiceFromQuote);
   const updateQuote = useStore((s) => s.updateQuote);
   const updateInvoice = useStore((s) => s.updateInvoice);
   const setCurrentQuote = useStore((s) => s.setCurrentQuote);
@@ -111,6 +114,7 @@ export function JobPreviewScreen() {
 
   const [notes, setNotes] = useState(workingDoc?.notes || '');
   const [takePaymentTarget, setTakePaymentTarget] = useState<TakePaymentTarget | null>(null);
+  const [markedSentDocId, setMarkedSentDocId] = useState<string | null>(null);
   const savedNotesRef = useRef(workingDoc?.notes || '');
   const [refNumber, setRefNumber] = useState<string>(
     isInvoiceMode
@@ -371,6 +375,28 @@ export function JobPreviewScreen() {
     () => resolvePreviewFooterActions({ doc: liveDoc, platform: Platform.OS }),
     [liveDoc],
   );
+
+  // Same Undo affordance ViewJob has. SMS / Share / Export PDF move the doc
+  // to its sent stage with nothing on screen to say so — and Android can't
+  // tell us whether the share sheet was actually completed, so a cancelled
+  // share marks a quote sent. Rewinds through the same applyStageChange path
+  // the StageSheet uses for a sent→draft downgrade.
+  const handleUndoMarkedSent = async () => {
+    const docId = markedSentDocId;
+    setMarkedSentDocId(null);
+    const current = documents.find((d) => d.id === docId);
+    if (!current) return;
+    try {
+      await applyStageChange(current, 'draft', {
+        saveQuote,
+        saveInvoice,
+        createInvoiceFromQuote,
+        navigation,
+      });
+    } catch {
+      Alert.alert('Undo failed', 'Something went wrong. Please try again.');
+    }
+  };
 
   // After a Quote → Invoice convert, liveDoc.type flips to 'invoice' and
   // liveDoc.number gets the new INV-NNN. The route param `mode` and the
@@ -813,6 +839,7 @@ export function JobPreviewScreen() {
                 buttonLabel={footerActions.send.label}
                 buttonIcon="send"
                 buttonStyle={styles.sendButtonShape}
+                onMarkedSent={(sent) => setMarkedSentDocId(sent.id)}
               />
             ) : null}
           </View>
@@ -829,6 +856,15 @@ export function JobPreviewScreen() {
         }
         ensureSquareConnected={() => ensureSquareConnectedForPayment(navigation)}
       />
+
+      <Snackbar
+        visible={!!markedSentDocId}
+        onDismiss={() => setMarkedSentDocId(null)}
+        duration={6000}
+        action={{ label: 'Undo', onPress: handleUndoMarkedSent }}
+      >
+        Marked as sent
+      </Snackbar>
 
       {/* Banner overlay — rendered last so it's on top. Deliberately no
           confetti: the celebration belongs on send success, not save. */}
