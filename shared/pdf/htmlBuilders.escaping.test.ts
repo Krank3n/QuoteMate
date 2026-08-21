@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { generateMaterialsHTML, buildQuotePdfHtml } from './htmlBuilders';
+import { generateMaterialsHTML, generatePaymentMethodsHTML, buildQuotePdfHtml } from './htmlBuilders';
 import type { QuotePdfData, BusinessPdfData } from './types';
 
 const business: BusinessPdfData = { businessName: 'Test Trades', logoHtml: '' };
@@ -50,5 +50,60 @@ describe('PDF escaping', () => {
     const html = buildQuotePdfHtml(quote, business);
     expect(html).toContain('Access via side gate &lt;north&gt; &amp; shed');
     expect(html).not.toContain('<north>');
+  });
+
+  it('keeps line breaks in the notes block', () => {
+    // Notes used to be escaped without the newline treatment the job
+    // description got, so a tradie's bullet-per-line notes collapsed into one
+    // run-on sentence on the customer's copy.
+    const quote: QuotePdfData = {
+      customerName: 'A Customer',
+      quoteDate: '10 July 2026',
+      job: { name: 'Job', description: 'Work' },
+      materials: [{ name: 'Thing', quantity: 1, unit: 'each', price: 10, totalPrice: 10 }],
+      materialsSubtotal: 10,
+      laborTotal: 0,
+      subtotal: 10,
+      markup: 0,
+      markupAmount: 0,
+      gst: 1,
+      total: 11,
+      notes: 'Power off at 7am\nDog in yard',
+    };
+    const html = buildQuotePdfHtml(quote, business);
+    expect(html).toContain('Power off at 7am<br>Dog in yard');
+  });
+
+  it('escapes every tradie-typed payment method field', () => {
+    // These were the only unescaped user text on the document: an "&" in an
+    // account name corrupted the section, and markup could inject HTML into a
+    // customer-facing PDF.
+    const html = generatePaymentMethodsHTML({
+      showOnDocuments: true,
+      bankAccount: { enabled: true, accountName: 'Smith & Sons <Plumbing>', bsb: '<062-000>', accountNumber: '12 & 34' },
+      payId: { enabled: true, payIdType: 'email', payIdValue: 'pay<at>smith&sons.au' },
+      bpay: { enabled: true, billerCode: '<12345>', referenceNumber: 'REF&1' },
+      paypal: { enabled: true, email: 'paypal<script>@x.com' },
+      other: { enabled: true, instructions: 'Cash <preferred>\nSee & ask for Dave' },
+    });
+    expect(html).toContain('Smith &amp; Sons &lt;Plumbing&gt;');
+    expect(html).toContain('&lt;062-000&gt;');
+    expect(html).toContain('pay&lt;at&gt;smith&amp;sons.au');
+    expect(html).toContain('&lt;12345&gt;');
+    expect(html).toContain('REF&amp;1');
+    expect(html).toContain('paypal&lt;script&gt;@x.com');
+    // Instructions keep their line breaks AND their escaping.
+    expect(html).toContain('Cash &lt;preferred&gt;<br>See &amp; ask for Dave');
+    expect(html).not.toContain('<script>');
+    expect(html).not.toContain('<Plumbing>');
+  });
+
+  it('escapes the Square pay-now URL in both the href and the printed fallback', () => {
+    const html = generatePaymentMethodsHTML(
+      { showOnDocuments: true },
+      { squarePaymentLinkUrl: 'https://square.link/u/x"><script>alert(1)</script>' },
+    );
+    expect(html).not.toContain('<script>');
+    expect(html).toContain('&quot;&gt;&lt;script&gt;');
   });
 });

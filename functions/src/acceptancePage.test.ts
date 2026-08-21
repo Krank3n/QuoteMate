@@ -55,6 +55,16 @@ describe('generateAcceptancePage', () => {
     expect(script).toContain('Line Total');
   });
 
+  it('discloses inclusive GST below the total, matching the PDF', () => {
+    // Same rule as buildSummaryHTML: exclusive GST is an addend and sits in
+    // the stack; inclusive GST is disclosure only and renders under the
+    // total, where it can't be misread as one more figure to sum.
+    const script = inlineScript(generateAcceptancePage('a'.repeat(64)));
+    expect(script).toContain("gstMode === 'exclusive'");
+    expect(script).toContain('Total includes GST of ');
+    expect(script).not.toContain("'Includes GST'");
+  });
+
   it('gives the scope row number its own column, not the right-aligned Qty one', () => {
     // Reusing .qty put the digit flush against the title ("1Rinnai B26...")
     // because .line-items td carries zero horizontal padding.

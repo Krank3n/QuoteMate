@@ -73,14 +73,18 @@ describe('buildQuotePdfHtml — GST modes', () => {
     expect(html).not.toContain('No GST has been charged.');
   });
 
-  it('inclusive: shows plain Subtotal and an Includes GST disclosure', () => {
+  it('inclusive: shows plain Subtotal and an includes-GST disclosure below the total', () => {
     const html = buildQuotePdfHtml(
       quoteData({ pricesIncludeGst: true, gst: 30, total: 330 }),
       business,
     );
-    expect(html).toContain('Includes GST');
+    expect(html).toContain('Total includes GST of $30.00');
     expect(html).not.toContain('Subtotal (ex GST)');
     expect(html).not.toContain('No GST has been charged.');
+    // Disclosure, not an addend: it must sit BELOW the total line, where the
+    // customer cannot read it as one more figure to sum.
+    expect(html.indexOf('Total includes GST of')).toBeGreaterThan(html.indexOf('<span>TOTAL</span>'));
+    expect(html).not.toContain('<span>GST (10%)</span>');
   });
 
   it('not registered: no GST row at all and a "No GST has been charged" note', () => {
@@ -89,7 +93,7 @@ describe('buildQuotePdfHtml — GST modes', () => {
       business,
     );
     expect(html).not.toContain('GST (10%)');
-    expect(html).not.toContain('Includes GST');
+    expect(html).not.toMatch(/includes GST/i);
     expect(html).not.toContain('Subtotal (ex GST)');
     expect(html).toContain('No GST has been charged.');
     // Total is the plain subtotal — no 10% anywhere.
@@ -102,7 +106,7 @@ describe('buildQuotePdfHtml — GST modes', () => {
       quoteData({ gstRegistered: false, pricesIncludeGst: true, gst: 0, total: 300 }),
       business,
     );
-    expect(html).not.toContain('Includes GST');
+    expect(html).not.toMatch(/includes GST/i);
     expect(html).toContain('No GST has been charged.');
   });
 });

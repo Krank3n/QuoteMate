@@ -3,7 +3,7 @@ import fetch from 'node-fetch';
 import { PASSTHROUGH_SURCHARGE_PCT } from './shared/pdf';
 import { isPdfUrl } from './shared/media/pdfUrl';
 import { NEXT_PRICE_AUD } from './foundingOffer';
-import { NO_GST_NOTE } from './shared/document/gstMode';
+import { NO_GST_NOTE, resolveGstMode } from './shared/document/gstMode';
 import {
   resolvePriceDetail,
   showsLineItems,
@@ -1607,6 +1607,7 @@ interface QuoteEmailData {
   // false = business not GST-registered: hide the GST row and the
   // "(inc GST)" total label, and show a "No GST has been charged" note.
   gstRegistered?: boolean;
+  pricesIncludeGst?: boolean;
   acceptanceUrl?: string;
   photoUrls?: string[];
   // Deposit shown to the customer above the Accept button so they know what
@@ -1982,6 +1983,11 @@ export interface PricingRowsInput {
   // false = not GST-registered: no GST row, plain "Total" label, "No GST
   // has been charged" note under the total.
   gstRegistered?: boolean;
+  // true = prices are GST-inclusive: the GST row leaves the addition stack
+  // (Subtotal + GST would overshoot the total) and becomes a "Total includes
+  // GST of $X" note under the total — same treatment as the PDF and the
+  // acceptance page.
+  pricesIncludeGst?: boolean;
   accent: string;
   // When set and > 0, render a "Deposit already paid" line and rename the
   // total label to "Balance due". Invoice-only.
@@ -2013,6 +2019,7 @@ export interface PricingRowsInput {
 export function renderPricingRows(input: PricingRowsInput): string {
   const { materialsSubtotal, laborTotal, subtotal, gst, total, accent, depositCredit } = input;
   const gstRegistered = input.gstRegistered !== false;
+  const gstMode = resolveGstMode(input);
   const hasDeposit = !!(depositCredit && depositCredit > 0);
   // Same three modes as the PDF, resolved by the same function, so the email
   // body and the attachment can't disagree about what the customer may see.
@@ -2061,7 +2068,7 @@ export function renderPricingRows(input: PricingRowsInput): string {
   // to break down. Rendering the "Summary" header over an empty box looked
   // like a bug, so the card collapses to the total on its own. Mirrors the row
   // conditions below exactly — a row must never render outside this guard.
-  const hasBreakdownRows = showMaterials || showLabor || showSubtotalRow || showTravel || gstRegistered || hasDeposit;
+  const hasBreakdownRows = showMaterials || showLabor || showSubtotalRow || showTravel || gstMode === 'exclusive' || hasDeposit;
   const breakdownSection = hasBreakdownRows
     ? `
       <tr>
@@ -2072,7 +2079,7 @@ export function renderPricingRows(input: PricingRowsInput): string {
             ${showLabor ? row('Labour', formatMoney(laborTotal)) : ''}
             ${showSubtotalRow ? row('Subtotal', formatMoney(subtotal)) : ''}
             ${showTravel ? row(`Travel adjustment (${travelPercent}%)`, formatMoney(travelAmount)) : ''}
-            ${gstRegistered ? row('GST', formatMoney(gst)) : ''}
+            ${gstMode === 'exclusive' ? row('GST', formatMoney(gst)) : ''}
             ${hasDeposit ? `
             <tr>
               <td style="padding:11px 0;color:#059669;font-size:14px;border-bottom:1px solid #eef0f3;">Deposit already paid</td>
@@ -2093,6 +2100,10 @@ export function renderPricingRows(input: PricingRowsInput): string {
               <td style="color:#111827;font-size:13px;font-weight:700;letter-spacing:0.6px;text-transform:uppercase;vertical-align:bottom;">${hasDeposit ? 'Balance Due' : gstRegistered ? 'Total (inc GST)' : 'Total'}</td>
               <td style="color:${accent};font-size:26px;font-weight:800;text-align:right;font-variant-numeric:tabular-nums;letter-spacing:-0.5px;line-height:1.1;vertical-align:bottom;">${formatMoney(total)}</td>
             </tr>
+            ${gstMode === 'inclusive' ? `
+            <tr>
+              <td colspan="2" style="color:#6b7280;font-size:12px;padding-top:6px;">Total includes GST of ${formatMoney(gst)}</td>
+            </tr>` : ''}
             ${gstRegistered ? '' : `
             <tr>
               <td colspan="2" style="color:#6b7280;font-size:12px;padding-top:6px;">${NO_GST_NOTE}</td>
@@ -2358,6 +2369,7 @@ export function buildDocumentEmailHtml(data: DocumentEmailData): string {
     gst: data.gst,
     total: data.total,
     gstRegistered: data.gstRegistered,
+    pricesIncludeGst: data.pricesIncludeGst,
     accent,
     depositCredit: isInvoice ? data.depositCredit : undefined,
     priceDetail: data.priceDetail,
@@ -2479,6 +2491,7 @@ interface InvoiceEmailData {
   travelAdjustmentAmount?: number;
   // See QuoteEmailData.gstRegistered.
   gstRegistered?: boolean;
+  pricesIncludeGst?: boolean;
   invoiceNumber?: string;
   dueDate: string; // ISO date string
   payNowUrl?: string; // Square hosted payment link (only present when tradie has Square connected)

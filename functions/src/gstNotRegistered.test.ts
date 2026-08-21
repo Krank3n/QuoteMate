@@ -86,4 +86,17 @@ describe('renderPricingRows — GST registration', () => {
     expect(notRegistered).toContain('Balance Due');
     expect(notRegistered).toContain('No GST has been charged.');
   });
+
+  it('inclusive prices: GST leaves the addition stack and becomes a note under the total', () => {
+    // Subtotal already includes GST, so a GST row in the stack invited the
+    // reader to sum Subtotal + GST and overshoot — the email showed numbers
+    // that visibly didn't add up. Same treatment as the PDF and the
+    // acceptance page.
+    const html = renderPricingRows({ ...base, pricesIncludeGst: true, subtotal: 330 });
+    expect(html).not.toContain('>GST<');
+    expect(html).toContain('Total includes GST of $30.00');
+    expect(html).toContain('Total (inc GST)');
+    // The disclosure sits below the total, not above it.
+    expect(html.indexOf('Total includes GST of')).toBeGreaterThan(html.indexOf('Total (inc GST)'));
+  });
 });

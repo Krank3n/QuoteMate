@@ -254,7 +254,9 @@ function TemplatePreview({ templateId, businessName, brandColor, gstMode }: { te
       tableBorderStyle: 'filled',
     },
     tradesman: {
-      pageBg: '#FDFCF8',
+      // White, matching the PDF: a body tint can never reach the printed
+      // page's margins, so the paper tone was dropped from the template.
+      pageBg: '#FFFFFF',
       headerBg: 'transparent',
       headerTextColor: '#1C1917',
       accentColor: '#374151',
@@ -275,17 +277,32 @@ function TemplatePreview({ templateId, businessName, brandColor, gstMode }: { te
   };
 
   const c = { ...configs[templateId] };
-  // Apply brand color override
+  // Apply brand color override — mirroring the PDF's --accent override
+  // exactly (see shared/pdf/templates.ts): the brand colour reaches accents
+  // only, never body text.
   if (brandColor) {
     c.accentColor = brandColor;
-    c.headerTextColor = templateId === 'bold' ? c.headerTextColor : brandColor;
-    c.tableHeaderBg = templateId === 'clean' ? c.tableHeaderBg : brandColor;
-    if (templateId === 'professional') {
+    if (templateId === 'professional' || templateId === 'accredited') {
+      // Accent headings, header rule and filled table headers.
+      c.headerTextColor = brandColor;
+      c.headerBorderColor = brandColor;
+      c.tableHeaderBg = brandColor;
+    } else if (templateId === 'bold') {
+      // The dark header plate and filled table headers take the colour;
+      // text stays white-on-plate / dark-on-white.
+      c.headerBg = brandColor;
+      c.tableHeaderBg = brandColor;
+    } else if (templateId === 'tradesman') {
+      // Only the double rules take the colour.
       c.headerBorderColor = brandColor;
     }
+    // clean: the colour reaches only the small section labels and the
+    // payment plate's edge — the header stays monochrome.
   }
   const scale = PREVIEW_WIDTH / 420; // Scale factor relative to a ~420pt "page"
   const font = c.fontFamily ? { fontFamily: c.fontFamily } : {};
+  const totalColor =
+    templateId === 'professional' || templateId === 'accredited' ? c.accentColor : c.bodyTextColor;
 
   const sampleSections = [
     {
@@ -452,19 +469,14 @@ function TemplatePreview({ templateId, businessName, brandColor, gstMode }: { te
           !c.summaryBorder && templateId === 'clean' && { borderTopWidth: 0.5 * scale, borderTopColor: '#E5E7EB', paddingHorizontal: 0 },
           !c.summaryBorder && templateId === 'tradesman' && { borderTopWidth: 1.5 * scale, borderBottomWidth: 1.5 * scale, borderColor: c.accentColor, paddingHorizontal: 0 },
         ]}>
-          {(gstMode === 'inclusive'
+          {(gstMode === 'inclusive' || gstMode === 'none'
             ? [
-                { label: 'Subtotal', value: '$1,217.90' },
-                { label: 'Includes GST', value: '$110.72' },
+                { label: 'Subtotal', value: gstMode === 'none' ? '$1,107.18' : '$1,217.90' },
               ]
-            : gstMode === 'none'
-              ? [
-                  { label: 'Subtotal', value: '$1,107.18' },
-                ]
-              : [
-                  { label: 'Subtotal (ex GST)', value: '$1,107.18' },
-                  { label: 'GST (10%)', value: '$110.72' },
-                ]
+            : [
+                { label: 'Subtotal (ex GST)', value: '$1,107.18' },
+                { label: 'GST (10%)', value: '$110.72' },
+              ]
           ).map((row, i) => (
             <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 2 * scale }}>
               <Text style={{ color: c.bodyTextColor, fontSize: 5 * scale, ...font }}>{row.label}</Text>
@@ -472,10 +484,16 @@ function TemplatePreview({ templateId, businessName, brandColor, gstMode }: { te
             </View>
           ))}
           <View style={{ borderTopWidth: 0.5 * scale, borderTopColor: c.bodyTextColor + '30', marginVertical: 2 * scale }} />
+          {/* TOTAL takes the accent only where the PDF's .grand-total does
+              (professional/accredited); the others render it in dark text. */}
           <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-            <Text style={{ color: c.accentColor, fontSize: 7 * scale, fontWeight: '800', ...font }}>TOTAL</Text>
-            <Text style={{ color: c.accentColor, fontSize: 7 * scale, fontWeight: '800', ...font }}>{gstMode === 'none' ? '$1,107.18' : '$1,217.90'}</Text>
+            <Text style={{ color: totalColor, fontSize: 7 * scale, fontWeight: '800', ...font }}>TOTAL</Text>
+            <Text style={{ color: totalColor, fontSize: 7 * scale, fontWeight: '800', ...font }}>{gstMode === 'none' ? '$1,107.18' : '$1,217.90'}</Text>
           </View>
+          {/* Disclosure lines sit BELOW the total, matching the PDF. */}
+          {gstMode === 'inclusive' && (
+            <Text style={{ color: c.bodyTextColor, fontSize: 4.5 * scale, marginTop: 2 * scale, ...font }}>Total includes GST of $110.72</Text>
+          )}
           {gstMode === 'none' && (
             <Text style={{ color: c.bodyTextColor, fontSize: 4.5 * scale, marginTop: 2 * scale, ...font }}>{NO_GST_NOTE}</Text>
           )}

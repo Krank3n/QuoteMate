@@ -84,10 +84,58 @@ describe('PDF sections', () => {
     );
     expect(html).not.toContain('Other');
     // The unsectioned line is still there, still priced, just not under an
-    // invented heading.
+    // invented heading — and, being a single line with its money visible, it
+    // gets no "Subtotal" row restating that money either.
     expect(html).toContain('Consumables');
-    expect(html).toContain('<td colspan="3">Subtotal</td>');
+    expect(html).not.toContain('<td colspan="3">Subtotal</td>');
     expect(html).toContain('<td colspan="3">Demolition Subtotal</td>');
+  });
+
+  it('keeps the unsectioned Subtotal row once the group has two lines', () => {
+    const html = generateMaterialsHTML(
+      [
+        material('Skip bin', 'Demolition', 300),
+        material('Consumables', undefined, 40),
+        material('Fuel', undefined, 25),
+      ],
+      0,
+      [labourSection('Demolition', 340)],
+    );
+    expect(html).toContain('<td colspan="3">Subtotal</td>');
+    expect(html).toContain('$65.00');
+  });
+
+  it('keeps the unsectioned Subtotal row for a single line when per-line money is hidden', () => {
+    // In 'summary' mode the subtotal row IS the only money on the group.
+    const html = generateMaterialsHTML(
+      [material('Skip bin', 'Demolition', 300), material('Consumables', undefined, 40)],
+      0,
+      [labourSection('Demolition', 340)],
+      { perLineMoney: false },
+    );
+    expect(html).toContain('>Subtotal</td>');
+    expect(html).toContain('$40.00');
+  });
+
+  it('renders the section band as a caption, never inside the repeating thead', () => {
+    // Anything inside <thead> repeats after every page break; a repeated
+    // section band above a spilled subtotal row printed as a duplicated
+    // empty section.
+    const html = generateMaterialsHTML(
+      [material('Skip bin', 'Demolition', 300)],
+      0,
+      [labourSection('Demolition', 340)],
+    );
+    expect(html).toContain('<caption class="section-label">Demolition</caption>');
+    expect(html).not.toContain('th colspan="4" class="section-label"');
+  });
+
+  it('prints no "All Materials Subtotal" — the summary block already carries it', () => {
+    const html = buildQuotePdfHtml(quoteData(), business);
+    expect(html).not.toContain('All Materials Subtotal');
+    // The figure still reaches the customer, once, in the summary.
+    expect(html).toContain('<span>Materials Subtotal</span>');
+    expect(html).toContain('$500.00');
   });
 
   it('renders a section description under its heading', () => {

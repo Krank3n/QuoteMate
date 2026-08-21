@@ -21,7 +21,7 @@ export const PDF_TEMPLATES: PdfTemplateInfo[] = [
   {
     id: 'bold',
     name: 'Bold',
-    description: 'Full-bleed dark header, uppercase type and a strong bordered summary card',
+    description: 'Full-width dark header, uppercase type and a strong bordered summary card',
     accentColor: '#1F2937',
   },
   {
@@ -33,7 +33,7 @@ export const PDF_TEMPLATES: PdfTemplateInfo[] = [
   {
     id: 'tradesman',
     name: 'Tradesman',
-    description: 'Premium letterpress feel with warm paper tone, small-caps and double rules',
+    description: 'Premium letterpress feel with serif small caps and double rules',
     accentColor: '#374151',
   },
 ];
@@ -45,18 +45,15 @@ export const printMediaCSS = `
      font request froze Preview PDF. Every template's font stack falls back
      to Helvetica/Arial, which is visually near-identical on A4. */
   html, body {
-    min-height: 100%;
     margin: 0;
   }
-  body {
-    display: flex;
-    flex-direction: column;
-  }
-  .content-wrapper {
-    flex: 1;
-  }
+  /* The footer is a sign-off, not a bottom-pinned strip. The old flex
+     margin-top:auto trick never worked in paged media (body min-height
+     resolves against the viewport, not the printed page), so the footer
+     rendered mid-page pretending to be pinned. In-flow with a fixed gap it
+     reads as intentional. */
   .pdf-footer {
-    margin-top: auto;
+    margin-top: 28px;
     padding-top: 16px;
     font-size: 8px;
     font-weight: 600;
@@ -67,6 +64,13 @@ export const printMediaCSS = `
   }
   .pdf-footer p {
     margin: 0;
+  }
+  /* Money columns. Right-aligned as on any ledger, so the units digits line
+     up down the page — the single strongest "this is a real document" cue a
+     table can give. Builders put it on every cell AND header that holds a
+     quantity-priced figure. */
+  .num {
+    text-align: right;
   }
   .header {
     display: flex;
@@ -226,14 +230,76 @@ export const printMediaCSS = `
     opacity: .72;
     overflow-wrap: anywhere;
   }
+  /* The section band is a <caption>, not a header row: a caption renders once
+     at the top of its table, while anything in <thead> repeats after every
+     page break — which printed a duplicate "section" band with no rows under
+     it whenever a table split. */
+  caption.section-label {
+    caption-side: top;
+    text-align: left;
+  }
   /* A section's own scope text, printed under its heading. Inherits the
-     section-label colour so it reads as part of the same band. */
+     section-label colour so it reads as part of the same band — but NOT its
+     letterform styling: templates that set the band in tracked uppercase
+     (clean, tradesman) were shouting whole scope paragraphs. */
   .section-scope {
     margin-top: 3px;
     font-size: 10px;
     font-weight: 400;
     line-height: 1.4;
     opacity: .9;
+    text-transform: none;
+    letter-spacing: normal;
+    font-variant: normal;
+  }
+  /* Fallback line when a document has no materials at all. Inherits the
+     template's text colour rather than hardcoding a grey. */
+  .materials-empty {
+    font-style: italic;
+    opacity: .7;
+    margin: 10px 0;
+  }
+  /* Muted disclosure lines in the summary block: the "No GST has been
+     charged" note and the inclusive-GST disclosure under the total. The
+     compound selectors out-rank the templates' own .summary-row rules, which
+     are concatenated after this sheet and would otherwise win on order. */
+  .summary-note,
+  .summary-row.summary-note {
+    font-size: 0.85em;
+    font-weight: 400;
+    opacity: .75;
+  }
+  /* Credits on an invoice (deposit already paid, amount paid). One green for
+     every template — it reads "money off", not "brand". */
+  .summary-row.credit-row {
+    color: #15803D;
+  }
+  /* Amount due / due date lines inside the merged invoice payment box. */
+  .payment-info {
+    margin-bottom: 12px;
+  }
+  .payment-info p {
+    margin: 2px 0;
+  }
+  /* Terms & Conditions. Colour comes from the template's body text via
+     opacity, so the block stays palette-correct on every template. */
+  .terms-section {
+    margin-top: 24px;
+    padding-top: 14px;
+    border-top: 1px solid rgba(107, 114, 128, .35);
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  .terms-section h3 {
+    margin: 0 0 10px 0;
+  }
+  .terms-body {
+    font-size: 11px;
+    line-height: 1.5;
+    opacity: .85;
+  }
+  .terms-body p {
+    margin: 0 0 8px 0;
   }
   /* Project Scope table — rendered when every line on the document is a
      lump-sum scope line (see isScopeQuote in htmlBuilders). Declared once,
@@ -291,50 +357,73 @@ export const printMediaCSS = `
     .info-section, .summary, .section-wrapper {
       page-break-before: auto;
       break-before: auto;
-      margin-top: 20px;
+      margin-top: 12px;
     }
     tr {
       page-break-inside: avoid;
       break-inside: avoid;
+    }
+    /* Keep a subtotal glued to at least one of the rows it sums. Without
+       this, the subtotal alone could spill onto the next page under a
+       freshly repeated column header — which reads as a broken empty
+       section. (Verified in Chromium print; engines that ignore it just
+       fall back to the old break.) */
+    .total-row {
+      page-break-before: avoid;
+      break-before: avoid;
     }
     table {
       page-break-before: auto;
       break-before: auto;
       page-break-inside: auto;
       break-inside: auto;
-      margin-top: 15px;
+      margin-top: 8px;
     }
     table thead {
       display: table-header-group;
     }
     .section-wrapper {
-      padding-top: 10px;
-      padding-bottom: 10px;
+      padding-top: 4px;
+      padding-bottom: 4px;
     }
     .section-wrapper::after {
       content: "";
       display: block;
-      margin-bottom: 20px;
+      margin-bottom: 8px;
     }
   }
 `;
 
+/*
+ * Brand colour is a CSS custom property, not a find-and-replace.
+ *
+ * The old mechanism string-replaced every occurrence of the template's accent
+ * hex with the brand colour — but in Bold that hex was ALSO the body text
+ * colour, so an amber brand turned every item name and price amber, and in
+ * Clean it doubled as the muted contact-line grey. Each stylesheet now
+ * declares `--accent` on body and uses var(--accent) ONLY where the brand
+ * colour is meant to reach; text colours are literal hexes the override can
+ * never touch. (The in-app preview already worked this way — see
+ * PDFTemplateScreen — so preview and PDF finally agree.)
+ */
+
 const professionalCSS = `
   body {
+    --accent: #059669;
     font-family: 'Roboto', 'Helvetica Neue', Helvetica, Arial, sans-serif;
     padding: 24px;
     color: #1a1a1a;
     font-size: 12px;
   }
   .section-label {
-    background-color: #059669;
+    background-color: var(--accent);
     color: white;
     font-size: 11px;
-    padding-top: 10px;
-    padding-bottom: 5px;
+    font-weight: 600;
+    padding: 10px 10px 5px 10px;
   }
   .header {
-    border-bottom: 3px solid #059669;
+    border-bottom: 3px solid var(--accent);
     padding-bottom: 16px;
     margin-bottom: 22px;
   }
@@ -355,7 +444,7 @@ const professionalCSS = `
     flex: 1;
   }
   .header h1 {
-    color: #059669;
+    color: var(--accent);
     margin: 0 0 8px 0;
     font-size: 24px;
     line-height: 1.1;
@@ -375,7 +464,7 @@ const professionalCSS = `
     font-size: 16px;
   }
   .info-section h3 {
-    color: #059669;
+    color: var(--accent);
     margin-bottom: 8px;
     font-size: 14px;
   }
@@ -393,7 +482,7 @@ const professionalCSS = `
     margin-bottom: 16px;
   }
   th {
-    background-color: #059669;
+    background-color: var(--accent);
     color: white;
     padding: 8px 10px;
     text-align: left;
@@ -409,12 +498,16 @@ const professionalCSS = `
     font-weight: bold;
     background-color: #f5f5f5;
   }
-  .grand-total {
+  /* Compound with .summary-row: these rows carry both classes, and the
+     template's own .summary-row rule (same specificity, declared later)
+     silently won on source order — the TOTAL line had never actually
+     rendered its intended styling on any template. */
+  .summary-row.grand-total {
     font-size: 16px;
-    color: #059669;
+    color: var(--accent);
     font-weight: bold;
   }
-  .balance-due {
+  .summary-row.balance-due {
     font-size: 14px;
     color: #dc3545;
     font-weight: bold;
@@ -437,7 +530,7 @@ const professionalCSS = `
     font-size: 12px;
   }
   h3 {
-    color: #059669;
+    color: var(--accent);
     margin-bottom: 8px;
     font-size: 14px;
   }
@@ -448,7 +541,7 @@ const professionalCSS = `
     margin-top: 22px;
     padding: 16px 18px;
     background-color: #f0f9ff;
-    border: 2px solid #059669;
+    border: 2px solid var(--accent);
     border-radius: 8px;
   }
   .payment-box h3 {
@@ -458,7 +551,7 @@ const professionalCSS = `
     margin-top: 22px;
     padding: 16px 18px;
     background-color: #f0f9ff;
-    border: 2px solid #059669;
+    border: 2px solid var(--accent);
     border-radius: 8px;
   }
   .payment-methods-section h3 {
@@ -480,23 +573,23 @@ const professionalCSS = `
     line-height: 1.5;
   }
   .payment-method strong {
-    color: #059669;
+    color: var(--accent);
   }
 `;
 
 const cleanCSS = `
   .section-label {
     background-color: transparent;
-    color: #6B7280;
+    color: var(--accent);
     font-size: 9px;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 2.5px;
-    padding-top: 14px;
-    padding-bottom: 8px;
+    padding: 14px 10px 8px 10px;
     border-bottom: 1px solid #111827;
   }
   body {
+    --accent: #6B7280;
     font-family: 'Roboto', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Helvetica, sans-serif;
     padding: 36px 32px;
     color: #111827;
@@ -601,13 +694,13 @@ const cleanCSS = `
     border-bottom: none;
     padding-top: 14px;
   }
-  .grand-total {
+  .summary-row.grand-total {
     font-size: 20px;
     color: #111827;
     font-weight: 300;
     letter-spacing: -0.3px;
   }
-  .balance-due {
+  .summary-row.balance-due {
     font-size: 14px;
     color: #B91C1C;
     font-weight: 600;
@@ -647,7 +740,7 @@ const cleanCSS = `
     padding: 20px 22px;
     background-color: #FAFAF9;
     border: none;
-    border-left: 2px solid #6B7280;
+    border-left: 2px solid var(--accent);
     border-radius: 0;
   }
   .payment-box h3 {
@@ -660,7 +753,7 @@ const cleanCSS = `
     padding: 20px 22px;
     background-color: #FAFAF9;
     border: none;
-    border-left: 2px solid #6B7280;
+    border-left: 2px solid var(--accent);
     border-radius: 0;
   }
   .payment-methods-section h3 {
@@ -692,17 +785,16 @@ const cleanCSS = `
 
 const boldCSS = `
   .section-label {
-    background-color: #1F2937;
+    background-color: var(--accent);
     color: white;
     font-size: 10px;
     font-weight: 800;
     text-transform: uppercase;
     letter-spacing: 1.8px;
-    padding-top: 10px;
-    padding-bottom: 7px;
-    padding-left: 12px;
+    padding: 10px 12px 7px 12px;
   }
   body {
+    --accent: #1F2937;
     font-family: 'Roboto', 'Helvetica Neue', Helvetica, Arial, sans-serif;
     padding: 0;
     color: #111827;
@@ -710,7 +802,7 @@ const boldCSS = `
     font-size: 12px;
   }
   .header {
-    background-color: #1F2937;
+    background-color: var(--accent);
     color: #FFFFFF;
     padding: 24px 28px 26px 28px;
     margin-bottom: 28px;
@@ -721,6 +813,9 @@ const boldCSS = `
     align-items: center;
     gap: 20px;
   }
+  /* Solid white plate: most tradie logos are drawn for white paper, and dark
+     artwork disappeared entirely against the near-black header behind the old
+     translucent wash. */
   .logo {
     width: auto;
     max-width: 220px;
@@ -729,8 +824,8 @@ const boldCSS = `
     object-fit: contain;
     flex-shrink: 0;
     border-radius: 8px;
-    background-color: rgba(255, 255, 255, 0.06);
-    padding: 5px;
+    background-color: #FFFFFF;
+    padding: 6px;
     box-sizing: border-box;
   }
   .header-text {
@@ -763,7 +858,7 @@ const boldCSS = `
     text-transform: uppercase;
     letter-spacing: 2px;
     padding-bottom: 8px;
-    border-bottom: 2px solid #1F2937;
+    border-bottom: 2px solid var(--accent);
   }
   .info-section h3 {
     color: #1F2937;
@@ -788,7 +883,7 @@ const boldCSS = `
     background-color: #FFFFFF;
   }
   th {
-    background-color: #1F2937;
+    background-color: var(--accent);
     color: white;
     padding: 10px;
     text-align: left;
@@ -816,17 +911,20 @@ const boldCSS = `
     border-bottom: none;
     padding: 12px 10px;
   }
-  .grand-total {
+  /* Dark, not white: this row renders inside the white summary card. The
+     old #FFFFFF was written for the dark total-row table cells and only
+     survived because the cascade bug kept the rule from ever applying. */
+  .summary-row.grand-total {
     font-size: 18px;
-    color: #FFFFFF;
+    color: #111827;
     font-weight: 900;
     letter-spacing: -0.2px;
   }
-  .balance-due {
+  .summary-row.balance-due {
     font-size: 14px;
-    color: #FCA5A5;
+    color: #B91C1C;
     font-weight: 800;
-    border-top: 2px solid #FCA5A5;
+    border-top: 2px solid #B91C1C;
     padding-top: 8px;
     margin-top: 8px;
   }
@@ -835,7 +933,7 @@ const boldCSS = `
     padding: 20px 24px;
     background-color: #FFFFFF;
     border-radius: 0;
-    border: 2px solid #1F2937;
+    border: 2px solid var(--accent);
     box-shadow: 0 4px 12px rgba(17, 24, 39, 0.06);
   }
   .summary-row {
@@ -869,7 +967,7 @@ const boldCSS = `
     padding: 20px 24px;
     background-color: #F9FAFB;
     border: none;
-    border-top: 5px solid #1F2937;
+    border-top: 5px solid var(--accent);
     border-radius: 0;
   }
   .payment-box h3 {
@@ -880,7 +978,7 @@ const boldCSS = `
     padding: 20px 24px;
     background-color: #F9FAFB;
     border: none;
-    border-top: 5px solid #1F2937;
+    border-top: 5px solid var(--accent);
     border-radius: 0;
   }
   .payment-methods-section h3 {
@@ -900,7 +998,7 @@ const boldCSS = `
     border-radius: 0;
     font-size: 12px;
     line-height: 1.55;
-    border-left: 3px solid #1F2937;
+    border-left: 3px solid var(--accent);
   }
   .payment-method strong {
     color: #1F2937;
@@ -919,22 +1017,26 @@ const tradesmanCSS = `
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 2.5px;
-    padding-top: 12px;
-    padding-bottom: 6px;
-    border-top: 3px double #374151;
+    padding: 12px 8px 6px 8px;
+    border-top: 3px double var(--accent);
     border-bottom: 1px solid #A8A29E;
     font-variant: small-caps;
   }
+  /* White paper, not a tinted page: the old #FDFCF8 body tint could never
+     reach the printed page's margins, so every page carried a visible cream
+     rectangle floating in a white frame. The warmth now lives in the summary
+     and payment plates, which sit inside the content area by design. */
   body {
+    --accent: #374151;
     font-family: Georgia, 'Times New Roman', Times, serif;
     padding: 32px 28px;
     color: #1C1917;
-    background-color: #FDFCF8;
+    background-color: #FFFFFF;
     line-height: 1.55;
     font-size: 12px;
   }
   .header {
-    border-bottom: 3px double #374151;
+    border-bottom: 3px double var(--accent);
     padding-bottom: 18px;
     margin-bottom: 24px;
   }
@@ -1018,8 +1120,8 @@ const tradesmanCSS = `
     font-size: 11px;
     text-transform: uppercase;
     letter-spacing: 1.6px;
-    border-top: 3px double #374151;
-    border-bottom: 3px double #374151;
+    border-top: 3px double var(--accent);
+    border-bottom: 3px double var(--accent);
     font-variant: small-caps;
   }
   td {
@@ -1031,21 +1133,21 @@ const tradesmanCSS = `
   .total-row {
     font-weight: 700;
     background-color: transparent;
-    border-top: 3px double #374151;
+    border-top: 3px double var(--accent);
   }
   .total-row td {
     color: #1C1917;
     border-bottom: none;
     padding-top: 11px;
   }
-  .grand-total {
+  .summary-row.grand-total {
     font-size: 18px;
     color: #1C1917;
     font-weight: 700;
     font-variant: small-caps;
     letter-spacing: 1.2px;
   }
-  .balance-due {
+  .summary-row.balance-due {
     font-size: 14px;
     color: #991B1B;
     font-weight: 700;
@@ -1061,8 +1163,8 @@ const tradesmanCSS = `
     background-color: #FAF7EE;
     border-radius: 0;
     border: none;
-    border-top: 3px double #374151;
-    border-bottom: 3px double #374151;
+    border-top: 3px double var(--accent);
+    border-bottom: 3px double var(--accent);
   }
   .summary-row {
     display: flex;
@@ -1086,8 +1188,8 @@ const tradesmanCSS = `
     padding: 18px 22px;
     background-color: #FAF7EE;
     border: none;
-    border-top: 3px double #374151;
-    border-bottom: 3px double #374151;
+    border-top: 3px double var(--accent);
+    border-bottom: 3px double var(--accent);
     border-radius: 0;
   }
   .payment-box h3 {
@@ -1103,8 +1205,8 @@ const tradesmanCSS = `
     padding: 18px 22px;
     background-color: #FAF7EE;
     border: none;
-    border-top: 3px double #374151;
-    border-bottom: 3px double #374151;
+    border-top: 3px double var(--accent);
+    border-bottom: 3px double var(--accent);
     border-radius: 0;
   }
   .payment-methods-section h3 {
@@ -1190,7 +1292,7 @@ const templateCSSMap: Record<PdfTemplateId, string> = {
   accredited: accreditedCSS,
 };
 
-/** Map of template ID to its default accent color for brand color replacement */
+/** Map of template ID to its default accent color */
 const templateAccentMap: Record<PdfTemplateId, string> = {
   professional: '#059669',
   clean: '#6B7280',
@@ -1199,12 +1301,16 @@ const templateAccentMap: Record<PdfTemplateId, string> = {
   accredited: '#059669',
 };
 
+/** Hex colours only (3/4/6/8 digits) — brandColor is interpolated into a stylesheet. */
+const SAFE_CSS_COLOR = /^#(?:[0-9A-Fa-f]{3,4}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/;
+
 export function getTemplateCSS(templateId: PdfTemplateId, brandColor?: string): string {
-  let css = templateCSSMap[templateId] || professionalCSS;
-  if (brandColor) {
-    const defaultAccent = templateAccentMap[templateId];
-    // Replace all occurrences of the template's default accent with the brand color
-    css = css.split(defaultAccent).join(brandColor);
+  const css = templateCSSMap[templateId] || professionalCSS;
+  if (brandColor && SAFE_CSS_COLOR.test(brandColor)) {
+    // Override the accent custom property only. Appended, so it wins the
+    // cascade over the template's own --accent declaration — and can never
+    // touch a text colour, which are all literal hexes.
+    return `${css}\n  body { --accent: ${brandColor}; }\n`;
   }
   return css;
 }

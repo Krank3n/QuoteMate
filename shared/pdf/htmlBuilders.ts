@@ -97,6 +97,14 @@ function buildWatermarkHTML(text: string): string {
   `;
 }
 
+/**
+ * The number always prints, even beside badge artwork that may carry it
+ * baked-in: `label`, `number` and the uploaded logo are independent fields,
+ * so nothing guarantees the artwork shows the licence number — and a licence
+ * number appearing nowhere on the document is far worse than it appearing
+ * twice. Only the LABEL is suppressed next to a logo (the artwork is the
+ * label).
+ */
 export function buildBusinessCredentialsHTML(business: BusinessPdfData): string {
   const credentials = (business.credentials || []).filter(
     (credential) => credential.label?.trim() || credential.number?.trim() || credential.logoHtml,
@@ -180,12 +188,15 @@ export function buildTermsHTML(terms: string | undefined): string {
     .split(/\n\s*\n/)
     .map((p) => escapeHtml(p.trim()).replace(/\n/g, '<br>'))
     .filter(Boolean)
-    .map((p) => `<p style="margin: 0 0 8px 0;">${p}</p>`)
+    .map((p) => `<p>${p}</p>`)
     .join('');
+  // Styling lives in printMediaCSS (.terms-section / .terms-body): the body
+  // colour comes from the template via opacity, so the block stays
+  // palette-correct on the warm serif template as well as the grey ones.
   return `
-      <div class="terms-section" style="margin-top: 32px; padding-top: 16px; border-top: 1px solid #e5e7eb; page-break-inside: avoid;">
-        <h3 style="margin: 0 0 12px 0;">Terms &amp; Conditions</h3>
-        <div style="font-size: 11px; color: #4b5563; line-height: 1.5;">${paras}</div>
+      <div class="terms-section">
+        <h3>Terms &amp; Conditions</h3>
+        <div class="terms-body">${paras}</div>
       </div>`;
 }
 
@@ -216,7 +227,7 @@ export function generateMaterialsHTML(
   // it used to reach the customer as an empty "1 each · $0.00".
   const materials = allMaterials.filter((m) => !!m.name?.trim());
   if (materials.length === 0) {
-    return `<p style="color: #666666; font-style: italic; margin: 10px 0;">No materials required - Labour only</p>`;
+    return `<p class="materials-empty">No materials required &mdash; labour only</p>`;
   }
 
   const multiplier = markupPercent > 0 ? (1 + markupPercent / 100) : 1;
@@ -228,22 +239,22 @@ export function generateMaterialsHTML(
   const perLineMoney = options?.perLineMoney !== false;
   const columns = perLineMoney ? 4 : 2;
 
+  // Money cells and their headers carry .num (right-aligned): amounts line up
+  // down the page as on any ledger. With per-line money hidden there are no
+  // columns to label — an "Item" header over a bare list of names was filler,
+  // so the summary presentation renders no thead at all (the section caption
+  // is the heading).
   const tableHeader = perLineMoney
     ? `
     <thead>
       <tr>
         <th>Item</th>
         <th>Quantity</th>
-        <th>Unit Price</th>
-        <th>Total</th>
+        <th class="num">Unit Price</th>
+        <th class="num">Total</th>
       </tr>
     </thead>`
-    : `
-    <thead>
-      <tr>
-        <th colspan="2">Item</th>
-      </tr>
-    </thead>`;
+    : '';
 
   // Mixed document: a work item inside the itemised table. It has no unit
   // price and its quantity is a bookkeeping 1, so both cells stay empty
@@ -263,8 +274,8 @@ export function generateMaterialsHTML(
     <tr>
       <td>${escapeHtml(m.name)}${scope}</td>
       <td>${isWork ? '' : `${m.quantity} ${escapeHtml(m.unit)}`}</td>
-      <td>${isWork ? '' : formatCurrency(m.price * multiplier)}</td>
-      <td>${formatCurrency(m.totalPrice * lineMarkupMultiplier(m, multiplier))}</td>
+      <td class="num">${isWork ? '' : formatCurrency(m.price * multiplier)}</td>
+      <td class="num">${formatCurrency(m.totalPrice * lineMarkupMultiplier(m, multiplier))}</td>
     </tr>`;
   };
 
@@ -278,7 +289,7 @@ export function generateMaterialsHTML(
           ${materials.map(materialRow).join('')}
           <tr class="total-row">
             <td${columns > 2 ? ` colspan="${columns - 1}"` : ''}>Materials Subtotal</td>
-            <td>${formatCurrency(displaySubtotal)}</td>
+            <td class="num">${formatCurrency(displaySubtotal)}</td>
           </tr>
         </tbody>
       </table>`;
@@ -323,39 +334,42 @@ export function generateMaterialsHTML(
     // No invented "Other" heading: a material that belongs to no section is
     // shown as itself, exactly as the in-app list shows it, rather than under
     // a group name the tradie never created.
-    const labelRow = key
+    //
+    // The band is a <caption>, NOT a header row: everything inside <thead>
+    // repeats after a page break, and a repeated section band over a spilled
+    // subtotal row printed as a duplicated empty section.
+    const captionHtml = key
       ? `
-          <tr>
-            <th colspan="${columns}" class="section-label">${sectionName}${
-              description ? `<div class="section-scope">${formatMultiline(description)}</div>` : ''
-            }</th>
-          </tr>`
+        <caption class="section-label">${sectionName}${
+          description ? `<div class="section-scope">${formatMultiline(description)}</div>` : ''
+        }</caption>`
       : '';
 
-    html += `
-      <table>
-        <thead>${labelRow}${tableHeader.replace('<thead>', '').replace('</thead>', '')}
-        </thead>
-        <tbody>
-          ${sectionMaterials.map(materialRow).join('')}
+    // A lone unsectioned line with its money visible needs no "Subtotal" row —
+    // it would restate the line total immediately above it. When per-line
+    // money is hidden the subtotal row IS the money, so it stays.
+    const skipSubtotal = !key && sectionMaterials.length === 1 && perLineMoney;
+    const subtotalRow = skipSubtotal
+      ? ''
+      : `
           <tr class="total-row">
             <td${columns > 2 ? ` colspan="${columns - 1}"` : ''}>${key ? `${sectionName} Subtotal` : 'Subtotal'}</td>
-            <td>${formatCurrency(sectionTotal)}</td>
-          </tr>
+            <td class="num">${formatCurrency(sectionTotal)}</td>
+          </tr>`;
+
+    html += `
+      <table>${captionHtml}${tableHeader}
+        <tbody>
+          ${sectionMaterials.map(materialRow).join('')}${subtotalRow}
         </tbody>
       </table>`;
   });
 
-  html += `
-    <table>
-      <tbody>
-        <tr class="total-row">
-          <td${columns > 2 ? ` colspan="${columns - 1}"` : ''}><strong>All Materials Subtotal</strong></td>
-          <td><strong>${formatCurrency(displaySubtotal)}</strong></td>
-        </tr>
-      </tbody>
-    </table>`;
-
+  // No trailing "All Materials Subtotal" table: the summary block right below
+  // restates the materials total (itemised), and in 'summary' mode the section
+  // subtotals already carry the money. It printed the same figure twice within
+  // a few centimetres — and, as its own two-cell table, never lined up with
+  // the money column above it.
   return html;
 }
 
@@ -463,16 +477,19 @@ export function generateScopeHTML(
  * more than the quoted total.
  */
 function generateSquarePayNowHTML(url: string, surchargeOn: boolean): string {
+  // Square-minted, but escaped like everything else — a quote in the URL
+  // would otherwise break out of the href attribute.
+  const safeUrl = escapeHtml(url).replace(/"/g, '&quot;');
   const surchargeLine = surchargeOn
     ? `<div style="margin-top: 4px; font-size: 10px; color: #888; font-style: italic;">Card payments include a ${PASSTHROUGH_SURCHARGE_PCT}% processing fee.</div>`
     : '';
   return `
     <div class="payment-method square-pay-now">
       <strong>Pay Online</strong><br>
-      <a href="${url}" class="square-pay-button" style="display: inline-block; margin-top: 6px; padding: 10px 18px; background: #006AFF; color: #ffffff; text-decoration: none; border-radius: 6px; font-weight: 700;">
+      <a href="${safeUrl}" class="square-pay-button" style="display: inline-block; margin-top: 6px; padding: 10px 18px; background: #006AFF; color: #ffffff; text-decoration: none; border-radius: 6px; font-weight: 700;">
         Pay with Square
       </a>
-      <div style="margin-top: 6px; font-size: 11px; color: #555;">${url}</div>
+      <div style="margin-top: 6px; font-size: 11px; color: #555;">${safeUrl}</div>
       ${surchargeLine}
     </div>
   `;
@@ -484,6 +501,14 @@ function generateSquarePayNowHTML(url: string, surchargeOn: boolean): string {
  * On the free plan, only the Square "Pay Now" block renders — bank /
  * PayID / BPAY / PayPal / other are intentionally suppressed so every paid
  * quote funnels through Square (where the platform fee is collected).
+ *
+ * Every field here is tradie-typed text and is escaped like the rest of the
+ * document — an "&" in an account name used to corrupt the section.
+ *
+ * `infoHtml` (already-safe HTML) lets the invoice put its amount-due / due-date
+ * lines INSIDE this box instead of stacking a second "Payment Information" box
+ * above it saying the same numbers again; when it renders, the box is titled
+ * plain "Payment".
  */
 export function generatePaymentMethodsHTML(
   pm: any,
@@ -491,6 +516,7 @@ export function generatePaymentMethodsHTML(
     plan?: 'trial' | 'free' | 'pro';
     squarePaymentLinkUrl?: string;
     surchargePaymentFees?: boolean;
+    infoHtml?: string;
   }
 ): string {
   const plan = options?.plan;
@@ -520,9 +546,9 @@ export function generatePaymentMethodsHTML(
       sections.push(`
         <div class="payment-method">
           <strong>Bank Transfer</strong><br>
-          ${pm.bankAccount.accountName ? `Account Name: ${pm.bankAccount.accountName}<br>` : ''}
-          ${pm.bankAccount.bsb ? `BSB: ${pm.bankAccount.bsb}<br>` : ''}
-          ${pm.bankAccount.accountNumber ? `Account: ${pm.bankAccount.accountNumber}` : ''}
+          ${pm.bankAccount.accountName ? `Account Name: ${escapeHtml(String(pm.bankAccount.accountName))}<br>` : ''}
+          ${pm.bankAccount.bsb ? `BSB: ${escapeHtml(String(pm.bankAccount.bsb))}<br>` : ''}
+          ${pm.bankAccount.accountNumber ? `Account: ${escapeHtml(String(pm.bankAccount.accountNumber))}` : ''}
         </div>
       `);
     }
@@ -534,7 +560,7 @@ export function generatePaymentMethodsHTML(
       sections.push(`
         <div class="payment-method">
           <strong>PayID</strong><br>
-          ${payIdLabel}: ${pm.payId.payIdValue}
+          ${payIdLabel}: ${escapeHtml(String(pm.payId.payIdValue))}
         </div>
       `);
     }
@@ -545,8 +571,8 @@ export function generatePaymentMethodsHTML(
       sections.push(`
         <div class="payment-method">
           <strong>BPAY</strong><br>
-          ${pm.bpay.billerCode ? `Biller Code: ${pm.bpay.billerCode}<br>` : ''}
-          ${pm.bpay.referenceNumber ? `Reference: ${pm.bpay.referenceNumber}` : ''}
+          ${pm.bpay.billerCode ? `Biller Code: ${escapeHtml(String(pm.bpay.billerCode))}<br>` : ''}
+          ${pm.bpay.referenceNumber ? `Reference: ${escapeHtml(String(pm.bpay.referenceNumber))}` : ''}
         </div>
       `);
     }
@@ -556,7 +582,7 @@ export function generatePaymentMethodsHTML(
       sections.push(`
         <div class="payment-method">
           <strong>PayPal</strong><br>
-          ${pm.paypal.email}
+          ${escapeHtml(String(pm.paypal.email))}
         </div>
       `);
     }
@@ -566,7 +592,7 @@ export function generatePaymentMethodsHTML(
       sections.push(`
         <div class="payment-method">
           <strong>Other Payment Options</strong><br>
-          ${pm.other.instructions.replace(/\n/g, '<br>')}
+          ${formatMultiline(String(pm.other.instructions))}
         </div>
       `);
     }
@@ -574,9 +600,11 @@ export function generatePaymentMethodsHTML(
 
   if (sections.length === 0) return '';
 
+  const infoHtml = options?.infoHtml;
   return `
     <div class="payment-methods-section">
-      <h3>Payment Methods</h3>
+      <h3>${infoHtml ? 'Payment' : 'Payment Methods'}</h3>
+      ${infoHtml ? `<div class="payment-info">${infoHtml}</div>` : ''}
       <div class="payment-methods-grid">
         ${sections.join('')}
       </div>
@@ -717,11 +745,11 @@ function buildLaborHTML(rawData: QuotePdfData): string {
           <tbody>
             ${rows.map(r => `<tr>
               <td>${r.label}</td>
-              <td style="text-align: right;">${formatCurrency(r.amount)}</td>
+              <td class="num">${formatCurrency(r.amount)}</td>
             </tr>`).join('')}
             ${hasSections && showBreakdown ? `<tr class="total-row">
               <td>Labour Total</td>
-              <td style="text-align: right;">${formatCurrency(displayLaborTotal)}</td>
+              <td class="num">${formatCurrency(displayLaborTotal)}</td>
             </tr>` : ''}
           </tbody>
         </table>
@@ -745,11 +773,12 @@ function buildSummaryHTML(data: QuotePdfData, paidAmount?: number, amountDue?: n
   const gstMode = resolveGstMode(data);
   // Under exclusive mode the GST line is *added* to reach the total, so it
   // sits above the divider as a separate addend. Under inclusive mode it's
-  // disclosure only — shown beneath the line items, not added to anything.
-  // A business that isn't GST-registered gets no GST row at all, just the
-  // "No GST has been charged" note.
+  // disclosure only, so it renders BELOW the total ("Total includes GST of
+  // …") — in the addition stack it read as an addend and invited the
+  // customer to sum it. A business that isn't GST-registered gets no GST row
+  // at all, just the "No GST has been charged" note.
   const subtotalLabel = gstMode === 'exclusive' ? 'Subtotal (ex GST)' : 'Subtotal';
-  const gstLabel = gstMode === 'inclusive' ? 'Includes GST' : 'GST (10%)';
+  const gstLabel = 'GST (10%)';
 
   // The Materials/Labour split is 'itemised' only. In 'summary' the section
   // totals in the table already carry it, and in scope mode every line IS a
@@ -796,14 +825,14 @@ function buildSummaryHTML(data: QuotePdfData, paidAmount?: number, amountDue?: n
           <span>${formatCurrency(data.subtotal * (data.travelAdjustment / 100))}</span>
         </div>
         ` : ''}
-        ${gstMode !== 'none' ? `
+        ${gstMode === 'exclusive' ? `
         <div class="summary-row">
           <span>${gstLabel}</span>
           <span>${formatCurrency(data.gst)}</span>
         </div>
         ` : ''}
         ${depositCredit && depositCredit > 0 ? `
-        <div class="summary-row" style="color: #28a745;">
+        <div class="summary-row credit-row">
           <span>Deposit already paid</span>
           <span>-${formatCurrency(depositCredit)}</span>
         </div>
@@ -813,14 +842,20 @@ function buildSummaryHTML(data: QuotePdfData, paidAmount?: number, amountDue?: n
           <span>${depositCredit && depositCredit > 0 ? 'BALANCE DUE' : 'TOTAL'}</span>
           <span>${formatCurrency(data.total)}</span>
         </div>
+        ${gstMode === 'inclusive' ? `
+        <div class="summary-row summary-note">
+          <span>Total includes GST of ${formatCurrency(data.gst)}</span>
+          <span></span>
+        </div>
+        ` : ''}
         ${gstMode === 'none' ? `
-        <div class="summary-row" style="font-size: 0.85em; color: #666;">
+        <div class="summary-row summary-note">
           <span>${NO_GST_NOTE}</span>
           <span></span>
         </div>
         ` : ''}
         ${paidAmount && paidAmount > 0 ? `
-        <div class="summary-row" style="color: #28a745;">
+        <div class="summary-row credit-row">
           <span>Amount Paid</span>
           <span>-${formatCurrency(paidAmount)}</span>
         </div>
@@ -955,13 +990,15 @@ export function buildQuotePdfHtml(
 
       ${buildPaymentScheduleHTML(quote)}
 
-      ${quote.notes ? `<div class="info-section"><h3>Notes</h3><p>${escapeHtml(quote.notes)}</p></div>` : ''}
+      ${quote.notes ? `<div class="info-section"><h3>Notes</h3><p>${formatMultiline(quote.notes)}</p></div>` : ''}
 
       ${generatePaymentMethodsHTML(quote.paymentMethods, { plan: quote.plan, squarePaymentLinkUrl: quote.squarePaymentLinkUrl, surchargePaymentFees: quote.surchargePaymentFees })}
 
-      <div style="margin-top: 40px; font-size: 12px; color: #666666;">
+      ${quote.terms?.trim() ? '' : `
+      <div class="summary-note" style="margin-top: 24px;">
         <p>This quote is valid for 30 days from the date of issue.</p>
       </div>
+      `}
 
       ${buildTermsHTML(quote.terms)}
       </div>
@@ -1196,6 +1233,25 @@ export function buildInvoicePdfHtml(
   const paidAmount = invoice.paidAmount || 0;
   const amountDue = invoice.total - paidAmount;
 
+  // One payment box, not two. When the payment-methods section renders, the
+  // amount-due / due-date lines ride inside it; a separate "Payment
+  // Information" box above it restated the same figures a third time on the
+  // page. The standalone box remains for invoices with no methods to show.
+  const paymentInfoHtml = `
+        <p><strong>Amount Due:</strong> ${formatCurrency(amountDue)}</p>
+        <p><strong>Due Date:</strong> ${escapeHtml(invoice.dueDate)}</p>
+        ${invoice.invoiceNumber ? `<p>Please reference invoice number ${escapeHtml(invoice.invoiceNumber)} with your payment.</p>` : ''}`;
+  const methodsHtml = generatePaymentMethodsHTML(invoice.paymentMethods, {
+    plan: invoice.plan,
+    squarePaymentLinkUrl: invoice.squarePaymentLinkUrl,
+    surchargePaymentFees: invoice.surchargePaymentFees,
+    infoHtml: paymentInfoHtml,
+  });
+  const paymentBlockHtml = methodsHtml || `
+      <div class="payment-box">
+        <h3>Payment Information</h3>${paymentInfoHtml}
+      </div>`;
+
   return `
     <!DOCTYPE html>
     <html>
@@ -1248,16 +1304,9 @@ export function buildInvoicePdfHtml(
 
       ${buildSummaryHTML(invoice, paidAmount, amountDue, invoice.depositCredit)}
 
-      ${invoice.notes ? `<div class="info-section"><h3>Notes</h3><p>${escapeHtml(invoice.notes)}</p></div>` : ''}
+      ${invoice.notes ? `<div class="info-section"><h3>Notes</h3><p>${formatMultiline(invoice.notes)}</p></div>` : ''}
 
-      <div class="payment-box">
-        <h3>Payment Information</h3>
-        <p><strong>Amount Due:</strong> ${formatCurrency(amountDue)}</p>
-        <p><strong>Due Date:</strong> ${invoice.dueDate}</p>
-        ${invoice.invoiceNumber ? `<p>Please reference invoice number ${invoice.invoiceNumber} with your payment.</p>` : ''}
-      </div>
-
-      ${generatePaymentMethodsHTML(invoice.paymentMethods, { plan: invoice.plan, squarePaymentLinkUrl: invoice.squarePaymentLinkUrl, surchargePaymentFees: invoice.surchargePaymentFees })}
+      ${paymentBlockHtml}
 
       ${buildTermsHTML(invoice.terms)}
       </div>
