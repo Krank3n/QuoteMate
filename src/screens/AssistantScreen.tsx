@@ -24,11 +24,12 @@ import {
 import type { AppStateStatus } from 'react-native';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import Svg, { Path, Defs, LinearGradient, Stop } from 'react-native-svg';
-import { useNavigation, useFocusEffect } from '@react-navigation/native';
+import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import type { NavigationProp } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { makeStyles, useThemeColors } from '../theme';
 import { useStore, NavigateHint } from '../store/useStore';
+import { trackEvent } from '../services/analyticsService';
 import { useDemoPlayback } from '../demo/demoPlayback';
 import { sendAssistantTurn } from '../services/assistantService';
 import { openVoiceSession, VoiceSession } from '../services/assistant/voiceSession';
@@ -507,6 +508,11 @@ export function AssistantScreen() {
   const themeColors = useThemeColors();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<NavigationProp<any>>();
+  const route = useRoute<any>();
+  // Ref mirror of route so the focus-count effect below can read the latest
+  // params without re-running (and re-firing) when setParams clears them.
+  const routeRef = useRef(route);
+  routeRef.current = route;
   const conversations = useStore((s) => s.conversations);
   const currentConversationId = useStore((s) => s.currentConversationId);
   const startConversation = useStore((s) => s.startConversation);
@@ -595,6 +601,25 @@ export function AssistantScreen() {
   useEffect(() => {
     if (!currentConversationId) startConversation();
   }, [currentConversationId, startConversation]);
+
+  // One assistant_opened per focus visit. The dashboard door navigates here
+  // with { source: 'dashboard_door' }; the param is cleared after counting so
+  // a later tab-bar visit reads as 'tab'. The route ref (not a dep) keeps the
+  // setParams clear from re-running this and double-counting the visit.
+  const openCountedRef = useRef(false);
+  useFocusEffect(
+    useCallback(() => {
+      if (!openCountedRef.current) {
+        openCountedRef.current = true;
+        const fromDoor = routeRef.current?.params?.source === 'dashboard_door';
+        trackEvent('assistant_opened', { source: fromDoor ? 'dashboard_door' : 'tab' });
+        if (fromDoor) navigation.setParams({ source: undefined } as never);
+      }
+      return () => {
+        openCountedRef.current = false;
+      };
+    }, [navigation]),
+  );
 
   // Drive the inline waveform's overall amplitude. On web while listening the
   // mic chunk callback feeds real RMS in (see openVoiceMode); for every other

@@ -106,7 +106,9 @@ interface AppState {
   clearSyncError: () => void;
 
   // Quote operations
-  createNewQuote: () => void;
+  // `source` lands on the quote_started event — 'mate' when the Apply path
+  // mints the quote, 'new_quote' (default) everywhere else.
+  createNewQuote: (source?: 'new_quote' | 'mate') => void;
   setCurrentQuote: (quote: Quote | null) => void;
   saveQuote: (quote: Quote) => Promise<void>;
   saveDraft: (quote: Quote) => Promise<void>;
@@ -611,11 +613,11 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   // Create new quote
-  createNewQuote: () => {
+  createNewQuote: (source = 'new_quote') => {
     const { businessSettings, startTrialIfNeeded } = get();
     // Start trial on first quote creation, not on save
     startTrialIfNeeded();
-    trackEvent('quote_started', { source: 'new_quote' });
+    trackEvent('quote_started', { source });
     const newQuote: Quote = {
       id: generateId(),
       createdAt: new Date(),
@@ -3244,7 +3246,7 @@ export const useStore = create<AppState>((set, get) => ({
 
           // Mint a new quote so business defaults (labour rate, markup, GST)
           // are stamped from settings.
-          get().createNewQuote();
+          get().createNewQuote('mate');
           const fresh = get().currentQuote;
           if (!fresh) return { ok: false, error: 'Failed to create draft quote.' };
 

@@ -49,8 +49,16 @@ export type AnalyticsEvent =
   // optional_fields_filled, the 2026-07 audit's strongest activation signal.
   | 'onboarding_completed'
   // First touch of the core value proposition — fires the moment a draft
-  // starts. Tells us whether the app's onboarding actually hooks them.
+  // starts. `source` distinguishes the wizard ('new_quote') from a quote
+  // Mate minted on Apply ('mate').
   | 'quote_started'
+  // One of the two dashboard doors after the Mate-first flip. `door` is
+  // mate | wizard — the read on whether the primary slot actually pulls.
+  | 'dashboard_door_tapped'
+  // The Mate tab gained focus, once per focus visit. `source` is
+  // dashboard_door | tab, so door-driven visits are separable from
+  // tab-bar habit.
+  | 'assistant_opened'
   // Persistent dashboard / job-screen nudge after trial expires + no Square.
   | 'trial_expired_banner_shown'
   // The hard gate at Send. Fires when SendGateModal opens — funnel's last
