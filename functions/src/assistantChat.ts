@@ -19,7 +19,7 @@
 // turn; tool-loop continuations pass countTurn=false, so a reply with three
 // tool calls still costs exactly one turn.
 
-import * as functions from 'firebase-functions';
+import * as functions from 'firebase-functions/v1';
 import fetch from 'node-fetch';
 import cors from 'cors';
 import {

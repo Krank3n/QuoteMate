@@ -26,7 +26,7 @@
  *   - Existing brevoEmailWebhook is extended to flip lead status on
  *     opens/clicks/unsubscribes/bounces.
  */
-import * as functions from 'firebase-functions';
+import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
 import { promises as dns } from 'dns';
 import fetch from 'node-fetch';

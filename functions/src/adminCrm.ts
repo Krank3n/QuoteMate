@@ -7,7 +7,7 @@
  *     protected by ADMIN_DASHBOARD_KEY.
  *   - All other endpoints are onCall and require `context.auth.token.admin === true`.
  */
-import * as functions from 'firebase-functions';
+import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
 import { sendEmail, getUserEmail } from './email';
 import { applyBrevoEventToLead } from './leadOutreach';

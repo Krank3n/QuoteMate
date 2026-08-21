@@ -10,7 +10,7 @@
 // assistantUsage turn, regardless of how many text or voice turns the
 // resulting Live session goes on to serve.
 
-import * as functions from 'firebase-functions';
+import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
 import fetch from 'node-fetch';
 import cors from 'cors';

@@ -15,7 +15,7 @@
  * Copy rule (mirrors CallKatieScreen): describe what Katie *does*. Never call
  * it "AI".
  */
-import * as functions from 'firebase-functions';
+import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
 import fetch from 'node-fetch';
 import * as crypto from 'crypto';
