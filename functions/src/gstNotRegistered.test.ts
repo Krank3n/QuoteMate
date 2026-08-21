@@ -99,4 +99,24 @@ describe('renderPricingRows — GST registration', () => {
     // The disclosure sits below the total, not above it.
     expect(html.indexOf('Total includes GST of')).toBeGreaterThan(html.indexOf('Total (inc GST)'));
   });
+
+  it("inclusive + priceDetail 'total': no empty Summary header, disclosure still shows", () => {
+    // With the GST row gone from the stack, an inclusive-mode "total only"
+    // email has no breakdown rows at all — the Summary header must collapse
+    // (its guard used gstRegistered, which would have rendered a header over
+    // an empty box), while the legally-required GST disclosure survives in
+    // the total card.
+    const html = renderPricingRows({ ...base, pricesIncludeGst: true, subtotal: 330, priceDetail: 'total' });
+    expect(html).not.toContain('>Summary<');
+    expect(html).toContain('Total includes GST of $30.00');
+    expect(html).toContain('$330.00');
+  });
+
+  it('inclusive + deposit credit: Balance Due label with the deposit row and the disclosure', () => {
+    const html = renderPricingRows({ ...base, pricesIncludeGst: true, subtotal: 330, depositCredit: 100, total: 230 });
+    expect(html).toContain('Balance Due');
+    expect(html).toContain('Deposit already paid');
+    expect(html).not.toContain('>GST<');
+    expect(html).toContain('Total includes GST of $30.00');
+  });
 });
