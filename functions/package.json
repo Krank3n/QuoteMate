@@ -15,7 +15,7 @@
     "audit:replay-priced": "npx ts-node scripts/replayRecentQuotesWithPrices.ts"
   },
   "engines": {
-    "node": "20"
+    "node": "22"
   },
   "dependencies": {
     "@apple/app-store-server-library": "^3.1.0",

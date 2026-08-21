@@ -193,7 +193,7 @@ firebase functions:config:get
 ## Troubleshooting
 
 ### Function won't deploy
-- Check Node.js version (should be 18)
+- Check Node.js version (should be 22)
 - Run `npm install` in functions directory
 - Check `firebase.json` configuration
 
