@@ -288,10 +288,11 @@ function TemplatePreview({ templateId, businessName, brandColor, gstMode }: { te
       c.headerBorderColor = brandColor;
       c.tableHeaderBg = brandColor;
     } else if (templateId === 'bold') {
-      // The dark header plate and filled table headers take the colour;
-      // text stays white-on-plate / dark-on-white.
+      // The dark header plate, filled table headers and the summary card's
+      // border take the colour; text stays white-on-plate / dark-on-white.
       c.headerBg = brandColor;
       c.tableHeaderBg = brandColor;
+      c.summaryBorder = brandColor;
     } else if (templateId === 'tradesman') {
       // Only the double rules take the colour.
       c.headerBorderColor = brandColor;
@@ -384,7 +385,7 @@ function TemplatePreview({ templateId, businessName, brandColor, gstMode }: { te
               <View style={{ width: 2.5 * scale, height: 8 * scale, backgroundColor: c.accentColor, marginRight: 5 * scale, borderRadius: 1 }} />
             )}
             <Text style={{
-              color: c.accentColor,
+              color: totalColor,
               fontSize: 7.5 * scale,
               fontWeight: '600',
               ...font,
@@ -402,7 +403,7 @@ function TemplatePreview({ templateId, businessName, brandColor, gstMode }: { te
               <View style={{ width: 2.5 * scale, height: 8 * scale, backgroundColor: c.accentColor, marginRight: 5 * scale, borderRadius: 1 }} />
             )}
             <Text style={{
-              color: c.accentColor,
+              color: totalColor,
               fontSize: 7.5 * scale,
               fontWeight: '600',
               ...font,
@@ -422,7 +423,7 @@ function TemplatePreview({ templateId, businessName, brandColor, gstMode }: { te
                       : { borderTopWidth: 1.5 * scale, borderBottomWidth: 0.5 * scale, borderColor: c.accentColor },
                     { paddingVertical: 2.5 * scale, paddingHorizontal: 4 * scale },
                   ]}>
-                    <Text style={{ color: c.tableBorderStyle === 'filled' ? '#FFFFFF' : c.accentColor, fontSize: 5.5 * scale, fontWeight: '700', ...font }}>{section.label}</Text>
+                    <Text style={{ color: c.tableBorderStyle === 'filled' ? '#FFFFFF' : templateId === 'tradesman' ? c.bodyTextColor : c.accentColor, fontSize: 5.5 * scale, fontWeight: '700', ...font }}>{section.label}</Text>
                   </View>
                   {/* Section rows */}
                   {section.items.map((item, i) => (

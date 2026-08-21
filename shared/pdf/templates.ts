@@ -1306,11 +1306,14 @@ const SAFE_CSS_COLOR = /^#(?:[0-9A-Fa-f]{3,4}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/;
 
 export function getTemplateCSS(templateId: PdfTemplateId, brandColor?: string): string {
   const css = templateCSSMap[templateId] || professionalCSS;
-  if (brandColor && SAFE_CSS_COLOR.test(brandColor)) {
+  // Trimmed first — the email path (safeBrandColor) trims too, and an
+  // untrimmed stored value must not silently unbrand the PDF alone.
+  const brand = brandColor?.trim();
+  if (brand && SAFE_CSS_COLOR.test(brand)) {
     // Override the accent custom property only. Appended, so it wins the
     // cascade over the template's own --accent declaration — and can never
     // touch a text colour, which are all literal hexes.
-    return `${css}\n  body { --accent: ${brandColor}; }\n`;
+    return `${css}\n  body { --accent: ${brand}; }\n`;
   }
   return css;
 }

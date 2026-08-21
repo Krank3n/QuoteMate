@@ -2102,7 +2102,11 @@ export function renderPricingRows(input: PricingRowsInput): string {
             </tr>
             ${gstMode === 'inclusive' ? `
             <tr>
-              <td colspan="2" style="color:#6b7280;font-size:12px;padding-top:6px;">Total includes GST of ${formatMoney(gst)}</td>
+              <td colspan="2" style="color:#6b7280;font-size:12px;padding-top:6px;">${
+                hasDeposit
+                  ? `Invoice total ${formatMoney(total + depositCredit!)} includes GST of ${formatMoney(gst)}`
+                  : `Total includes GST of ${formatMoney(gst)}`
+              }</td>
             </tr>` : ''}
             ${gstRegistered ? '' : `
             <tr>
@@ -2422,7 +2426,7 @@ export function buildDocumentEmailHtml(data: DocumentEmailData): string {
       ${attachmentNote} If you have any questions, just reply to this email.
     </p>`
     : `<p style="color:#374151;font-size:15px;line-height:1.7;margin:24px 0 0;">
-      This quote is valid for 30 days. ${attachmentNote} If you have any questions, just reply to this email.
+      ${data.hasTerms ? '' : 'This quote is valid for 30 days. '}${attachmentNote} If you have any questions, just reply to this email.
     </p>`;
 
   const content = `

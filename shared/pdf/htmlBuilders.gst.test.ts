@@ -143,6 +143,19 @@ describe('buildInvoicePdfHtml — GST modes', () => {
     expect(html).toContain('GST (10%)');
     expect(html).not.toContain('No GST has been charged.');
   });
+
+  it('inclusive + deposit credit: the disclosure names the invoice total, not the balance', () => {
+    // The grand row reads BALANCE DUE when a deposit credit exists, so a bare
+    // "Total includes GST of $X" directly beneath it would read as the GST
+    // inside the balance.
+    const html = buildInvoicePdfHtml(
+      invoiceData({ pricesIncludeGst: true, subtotal: 330, gst: 30, total: 230, depositCredit: 100 }),
+      business,
+    );
+    expect(html).toContain('BALANCE DUE');
+    expect(html).toContain('Invoice total $330.00 includes GST of $30.00');
+    expect(html).not.toContain('<span>Total includes GST of');
+  });
 });
 
 describe('accredited template — credential placement', () => {

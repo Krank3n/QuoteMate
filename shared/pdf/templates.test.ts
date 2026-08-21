@@ -153,4 +153,10 @@ describe('page chrome', () => {
     expect(getTemplateCSS('professional', '#abcdef1')).toBe(getTemplateCSS('professional'));
     expect(getTemplateCSS('professional', '#abc')).toContain('--accent: #abc;');
   });
+
+  it('trims a whitespace-padded brand colour instead of dropping it', () => {
+    // The email path (safeBrandColor) trims; an untrimmed stored value must
+    // not silently unbrand the PDF alone.
+    expect(getTemplateCSS('professional', ' #C2410C ')).toContain('--accent: #C2410C;');
+  });
 });

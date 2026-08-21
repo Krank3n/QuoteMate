@@ -112,11 +112,14 @@ describe('renderPricingRows — GST registration', () => {
     expect(html).toContain('$330.00');
   });
 
-  it('inclusive + deposit credit: Balance Due label with the deposit row and the disclosure', () => {
+  it('inclusive + deposit credit: Balance Due label, deposit row, and the disclosure names the invoice total', () => {
+    // Under a BALANCE DUE figure, "Total includes GST of $X" would read as
+    // the GST inside the balance — so the note names the pre-deposit invoice
+    // total the GST actually belongs to.
     const html = renderPricingRows({ ...base, pricesIncludeGst: true, subtotal: 330, depositCredit: 100, total: 230 });
     expect(html).toContain('Balance Due');
     expect(html).toContain('Deposit already paid');
     expect(html).not.toContain('>GST<');
-    expect(html).toContain('Total includes GST of $30.00');
+    expect(html).toContain('Invoice total $330.00 includes GST of $30.00');
   });
 });

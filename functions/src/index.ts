@@ -12411,7 +12411,9 @@ export const xeroBulkSync = functions.runWith({ timeoutSeconds: 300 }).https.onR
           Date: formatDate(invoice.issueDate),
           DueDate: formatDate(invoice.dueDate),
           Status: xeroStatus,
-          LineAmountTypes: invGstRegistered ? 'Exclusive' : 'NoTax',
+          // Mirrors the single-invoice path: an inclusive-priced invoice sent
+          // as 'Exclusive' had Xero adding another 10% on top of the totals.
+          LineAmountTypes: !invGstRegistered ? 'NoTax' : invoice.pricesIncludeGst === true ? 'Inclusive' : 'Exclusive',
           LineItems: lineItems,
           CurrencyCode: 'AUD',
         };

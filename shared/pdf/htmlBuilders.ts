@@ -844,7 +844,13 @@ function buildSummaryHTML(data: QuotePdfData, paidAmount?: number, amountDue?: n
         </div>
         ${gstMode === 'inclusive' ? `
         <div class="summary-row summary-note">
-          <span>Total includes GST of ${formatCurrency(data.gst)}</span>
+          <span>${
+            depositCredit && depositCredit > 0
+              // Under BALANCE DUE the bare wording would read as GST inside
+              // the balance; name the invoice total the GST belongs to.
+              ? `Invoice total ${formatCurrency(data.total + depositCredit)} includes GST of ${formatCurrency(data.gst)}`
+              : `Total includes GST of ${formatCurrency(data.gst)}`
+          }</span>
           <span></span>
         </div>
         ` : ''}
