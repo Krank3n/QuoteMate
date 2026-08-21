@@ -45,6 +45,7 @@ interface JobLike {
   scheduledStartDate?: number;
   scheduledEndDate?: number;
   googleCalendarEventId?: string;
+  googleCalendarSyncError?: { at?: number; message?: string };
 }
 
 export const onJobWriteSyncCal = functions.firestore
@@ -81,7 +82,11 @@ export const onJobWriteSyncCal = functions.firestore
       (before?.customerName || '') !== (after.customerName || '');
     const addressChanged = (before?.jobAddress || '') !== (after.jobAddress || '');
     const descriptionChanged = (before?.description || '') !== (after.description || '');
-    const endChanged = Number(before?.scheduledEndDate) !== Number(after.scheduledEndDate);
+    // `|| 0` matters: Number(undefined) is NaN and NaN !== NaN, so without it
+    // any job lacking an end date always counts as "changed" — the write-backs
+    // below then re-fire this trigger in an infinite loop.
+    const endChanged =
+      (Number(before?.scheduledEndDate) || 0) !== (Number(after.scheduledEndDate) || 0);
     if (
       beforeMs === afterMs &&
       !titleChanged &&
@@ -110,7 +115,12 @@ export const onJobWriteSyncCal = functions.firestore
     // broken — mintAccessTokenForUser handles the dead-grant cleanup.
     const tokenSnap = await mintAccessTokenForUser(userId);
     if (!tokenSnap) {
-      await stampError(userId, jobId, 'Calendar connection expired — reconnect in Settings.');
+      await stampError(
+        userId,
+        jobId,
+        'Calendar connection expired — reconnect in Settings.',
+        after.googleCalendarSyncError,
+      );
       return;
     }
 
@@ -141,7 +151,7 @@ export const onJobWriteSyncCal = functions.firestore
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       functions.logger.warn('[gcal] sync failed', { userId, jobId, message });
-      await stampError(userId, jobId, message);
+      await stampError(userId, jobId, message, after.googleCalendarSyncError);
     }
   });
 
@@ -250,13 +260,23 @@ async function safeDeleteEvent(userId: string, eventId: string): Promise<void> {
   }
 }
 
-async function stampError(userId: string, jobId: string, message: string): Promise<void> {
+async function stampError(
+  userId: string,
+  jobId: string,
+  message: string,
+  current?: { at?: number; message?: string },
+): Promise<void> {
   const stamp = { at: Date.now(), message };
   await Promise.all([
-    db()
-      .doc(`users/${userId}/jobs/${jobId}`)
-      .set({ googleCalendarSyncError: stamp }, { merge: true })
-      .catch(() => undefined),
+    // Writing the job doc re-fires onJobWriteSyncCal, so skip it when the
+    // same error is already stamped — otherwise repeated failures churn
+    // writes for no user-visible gain.
+    current?.message === message
+      ? Promise.resolve()
+      : db()
+          .doc(`users/${userId}/jobs/${jobId}`)
+          .set({ googleCalendarSyncError: stamp }, { merge: true })
+          .catch(() => undefined),
     calendarIntegrationRef(userId)
       .set({ lastSyncError: stamp }, { merge: true })
       .catch(() => undefined),
