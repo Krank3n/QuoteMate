@@ -18,6 +18,7 @@ import {
   ScrollView,
   Pressable,
   Image,
+  Linking,
   Modal,
   Dimensions,
   StatusBar,
@@ -29,6 +30,7 @@ import type { Job, JobPhoto } from '../../shared/job/types';
 import type { Document } from '../types/document';
 import { makeStyles, useThemeColors } from '../theme';
 import { selectionTap } from '../utils/haptics';
+import { isPdfUrl } from '../utils/imageMime';
 
 interface JobPhotoStripProps {
   job: Job;
@@ -63,19 +65,28 @@ export function JobPhotoStrip({ job, documents }: JobPhotoStripProps) {
   const styles = useStyles();
   const themeColors = useThemeColors();
   const photos = useMemo(() => aggregatePhotos(job, documents), [job, documents]);
+  // The lightbox only pages through renderable images — PDF plans open in
+  // the browser instead, so they'd be blank frames and dead chevrons there.
+  const imagePhotos = useMemo(() => photos.filter(p => !isPdfUrl(p.storageUrl)), [photos]);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
 
   if (photos.length === 0) return null;
 
   const open = (i: number) => {
     selectionTap();
-    setLightboxIndex(i);
+    const photo = photos[i];
+    if (isPdfUrl(photo?.storageUrl)) {
+      Linking.openURL(photo.storageUrl).catch(() => {});
+      return;
+    }
+    const imageIndex = imagePhotos.indexOf(photo);
+    if (imageIndex >= 0) setLightboxIndex(imageIndex);
   };
   const close = () => setLightboxIndex(null);
   const advance = (delta: number) => {
     if (lightboxIndex == null) return;
     const next = lightboxIndex + delta;
-    if (next < 0 || next >= photos.length) return;
+    if (next < 0 || next >= imagePhotos.length) return;
     setLightboxIndex(next);
   };
 
@@ -96,11 +107,22 @@ export function JobPhotoStrip({ job, documents }: JobPhotoStripProps) {
             onPress={() => open(idx)}
             style={({ pressed }) => [styles.thumbWrap, pressed && styles.thumbPressed]}
           >
-            <Image
-              source={{ uri: photo.thumbnailUrl || photo.storageUrl }}
-              style={styles.thumb}
-              resizeMode="cover"
-            />
+            {isPdfUrl(photo.storageUrl) ? (
+              <View style={styles.pdfThumb}>
+                <MaterialCommunityIcons
+                  name={'file-document-outline' as any}
+                  size={24}
+                  color={themeColors.textMuted}
+                />
+                <Text style={styles.pdfThumbLabel}>PDF</Text>
+              </View>
+            ) : (
+              <Image
+                source={{ uri: photo.thumbnailUrl || photo.storageUrl }}
+                style={styles.thumb}
+                resizeMode="cover"
+              />
+            )}
             {photo.annotated ? (
               <View style={styles.annotatedBadge}>
                 <MaterialCommunityIcons
@@ -115,7 +137,7 @@ export function JobPhotoStrip({ job, documents }: JobPhotoStripProps) {
       </ScrollView>
 
       <Lightbox
-        photos={photos}
+        photos={imagePhotos}
         index={lightboxIndex}
         onClose={close}
         onAdvance={advance}
@@ -246,6 +268,18 @@ const useStyles = makeStyles((t) => ({
   thumb: {
     width: '100%',
     height: '100%',
+  },
+  pdfThumb: {
+    width: '100%',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+  },
+  pdfThumbLabel: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: t.colors.textMuted,
   },
   annotatedBadge: {
     position: 'absolute',
