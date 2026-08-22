@@ -7,7 +7,7 @@
  * we re-read the sub doc and merge only the missing fields.
  */
 
-import * as functions from 'firebase-functions';
+import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
 
 import { deriveTrialBootstrapWrite, toMillis } from './trialBootstrap.helpers';

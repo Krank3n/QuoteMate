@@ -43,7 +43,7 @@
  *     real billed subs). Doc missing or cap filled → the founding copy is
  *     suppressed, never invented.
  */
-import * as functions from 'firebase-functions';
+import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
 import { listAllAuthUsers } from './authUsers.helpers';
 import { isUnreachableEmail } from './reEngagement.helpers';

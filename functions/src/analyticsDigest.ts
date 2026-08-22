@@ -13,7 +13,7 @@
  * Property access management — NOT the ga-reader SA used by adminTrafficStats,
  * which has no Firestore role.
  */
-import * as functions from 'firebase-functions';
+import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
 import { BetaAnalyticsDataClient } from '@google-analytics/data';
 import { sendEmail } from './email';

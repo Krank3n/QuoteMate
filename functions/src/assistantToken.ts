@@ -10,11 +10,12 @@
 // assistantUsage turn, regardless of how many text or voice turns the
 // resulting Live session goes on to serve.
 
-import * as functions from 'firebase-functions';
+import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
 import fetch from 'node-fetch';
 import cors from 'cors';
 import { todayKey, reserveTurnUpdate, refundTurnUpdate, Plan } from './assistantQuota.helpers';
+import { decideRateLimitWindow } from './rateLimitWindow';
 import { userRateLimitKey } from './rateLimitKey';
 
 const corsHandler = cors({ origin: true });
@@ -54,11 +55,9 @@ export async function checkRateLimit(key: string, cfg: RateLimitConfig, res: fun
   try {
     const ok = await db().runTransaction(async (tx) => {
       const snap = await tx.get(ref);
-      let timestamps: number[] = snap.data()?.timestamps ?? [];
-      timestamps = timestamps.filter((t) => t > now - cfg.windowMs);
-      if (timestamps.length >= cfg.maxRequests) return false;
-      timestamps.push(now);
-      tx.set(ref, { timestamps, updatedAt: admin.firestore.FieldValue.serverTimestamp() });
+      const decision = decideRateLimitWindow(snap.data()?.timestamps, now, cfg);
+      if (!decision.allowed) return false;
+      tx.set(ref, { timestamps: decision.timestamps, updatedAt: admin.firestore.FieldValue.serverTimestamp() });
       return true;
     });
     if (!ok) { res.status(429).json({ error: 'Too many requests. Please try again later.' }); return false; }

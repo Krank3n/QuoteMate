@@ -124,9 +124,9 @@ describe('sendAssistantTurn transport', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it('does NOT retry a 429 rate limit', async () => {
+  it('chat 429 throws LiveRateLimitError and does not retry', async () => {
     fetchMock.mockResolvedValueOnce(errorResponse(429));
-    await expect(sendAssistantTurn({ history })).rejects.toBeInstanceOf(LiveOfflineError);
+    await expect(sendAssistantTurn({ history })).rejects.toBeInstanceOf(LiveRateLimitError);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 

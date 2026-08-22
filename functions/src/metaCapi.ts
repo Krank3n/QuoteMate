@@ -12,7 +12,7 @@
  * before the pixel exists and start relaying the moment env vars land.
  * Payloads are untrusted browser input — allow-listed and length-capped.
  */
-import * as functions from 'firebase-functions';
+import * as functions from 'firebase-functions/v1';
 import { createHash } from 'crypto';
 
 export const CAPI_EVENT_NAMES = ['SignupStart', 'Lead', 'PageView'] as const;

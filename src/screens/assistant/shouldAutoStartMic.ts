@@ -13,8 +13,15 @@ export type VoiceState = 'idle' | 'connecting' | 'listening' | 'thinking';
 // belt to its braces.)
 export const AUTO_START_COOLDOWN_MS = 7000;
 
+// Single source of truth for the setting's default: auto-start is opt-IN,
+// so undefined counts as OFF. Every read of autoStartMicOnMate goes through
+// this — a raw `!== false` check silently flips the default back to ON.
+export function resolveAutoStartMic(v?: boolean): boolean {
+  return v === true;
+}
+
 export interface ShouldAutoStartParams {
-  // Resolved setting (autoStartMicOnMate !== false → default ON).
+  // Resolved setting (resolveAutoStartMic — only an explicit true opts in).
   enabled: boolean;
   voiceState: VoiceState;
   // Mic permission already granted — never prompt to auto-start.

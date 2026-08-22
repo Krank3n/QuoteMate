@@ -119,7 +119,11 @@ export default {
     splash: {
       image: "./assets/splash.png",
       resizeMode: "contain",
-      backgroundColor: "#0A0E16"
+      // Must match the navy baked into the logo art (assets/logo-lrg-margin.png)
+      // and the iOS SplashScreenBackground colorset — any other value draws a
+      // visible square tile around the logo. Same colour is hardcoded in
+      // src/components/SplashOverlay.tsx so the native→JS handoff is invisible.
+      backgroundColor: "#1E293B"
     },
     assetBundlePatterns: [
       "**/*"

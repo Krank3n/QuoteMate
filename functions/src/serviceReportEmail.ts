@@ -13,7 +13,7 @@
 // module only exports the core sender and the onRequest handler.
 
 import * as admin from 'firebase-admin';
-import * as functions from 'firebase-functions';
+import * as functions from 'firebase-functions/v1';
 import cors from 'cors';
 import { verifyAuth } from './assistantToken';
 import { sendEmail, getUserEmail } from './email';
