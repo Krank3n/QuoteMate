@@ -216,7 +216,7 @@ export function reviewQuoteMaterials(
       materialId: m.id,
       name: m.name,
       kind,
-      detail: m.description?.trim() || DEFAULT_DETAIL[kind],
+      detail: (typeof m.description === 'string' && m.description.trim()) || DEFAULT_DETAIL[kind],
       price: m.price,
       quantity: m.quantity,
       unit: m.unit,
