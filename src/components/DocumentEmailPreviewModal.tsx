@@ -780,6 +780,11 @@ export function DocumentEmailPreviewModal({
           primaryButtonText="Done"
           primaryButtonAction={onDismiss}
         />
+        {/* Transient alert — never celebrates. The only success it carries is
+            a TEST send: a rehearsal into the tradie's own inbox that leaves
+            the doc a draft. Two of the Jul 2026 audit's users test-sent, read
+            the celebration as "done", and never sent for real. The confetti
+            belongs to the real-send modal above. */}
         <AlertModal
           visible={alertVisible}
           onDismiss={() => setAlertVisible(false)}
@@ -789,7 +794,7 @@ export function DocumentEmailPreviewModal({
           message={alertMessage}
           primaryButtonText="OK"
           primaryButtonAction={() => setAlertVisible(false)}
-          showConfetti={alertType === 'success'}
+          showConfetti={false}
         />
         {/* $0-row guard. The warning stays — it catches real mistakes — but
             retreat is no longer the default button: these tradies do not

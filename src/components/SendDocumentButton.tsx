@@ -12,7 +12,7 @@ import { StyleSheet } from 'react-native';
 import { Button } from 'react-native-paper';
 
 import { Quote, BusinessSettings } from '../types';
-import { Document } from '../types/document';
+import { Document, SendMethod } from '../types/document';
 import { documentToQuote } from '../types/documentAdapter';
 import { SendDocumentDialog } from './SendDocumentDialog';
 
@@ -23,6 +23,13 @@ interface SendDocumentButtonProps {
   buttonLabel?: string;
   buttonIcon?: string;
   buttonStyle?: any;
+  /**
+   * Forwarded straight to the dialog: fires when a silent SMS / Share /
+   * Export send moves the doc out of draft. Hosts use it for the "Marked as
+   * sent" Undo — without it those channels flip the stage with nothing on
+   * screen to say so, or to take it back.
+   */
+  onMarkedSent?: (doc: Document, method: SendMethod) => void;
 }
 
 export function SendDocumentButton({
@@ -32,6 +39,7 @@ export function SendDocumentButton({
   buttonLabel,
   buttonIcon = 'send',
   buttonStyle,
+  onMarkedSent,
 }: SendDocumentButtonProps) {
   const isInvoice = doc.type === 'invoice';
   const quote: Quote = useMemo(() => documentToQuote(doc), [doc]);
@@ -65,6 +73,7 @@ export function SendDocumentButton({
         onDismiss={() => setDialogVisible(false)}
         doc={doc}
         businessSettings={businessSettings}
+        onMarkedSent={onMarkedSent}
       />
     </>
   );

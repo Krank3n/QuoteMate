@@ -324,12 +324,13 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
   {
     name: 'propose_send_quote',
     description:
-      'Propose sending an existing quote or invoice to the customer. Apply opens the send preview — the tradie still confirms the recipient and taps Send; you never send it yourself. You CAN pre-write the email: pass draftEmailBody (and optionally draftEmailSubject) and it lands in the preview ready to edit. NEVER use this without first calling get_quote — you must show the recipient and total on the card.',
+      'Propose sending an existing quote or invoice to the customer. Apply opens the send preview — the tradie still confirms the recipient and taps Send; you never send it yourself. You CAN pre-write the email: pass draftEmailBody (and optionally draftEmailSubject) and it lands in the preview ready to edit. NEVER use this without first calling get_quote — pass recipientEmail and displayTotal so the card shows both.',
     parameters: {
       type: 'object',
       properties: {
         quoteId: { type: 'string' },
         recipientEmail: { type: 'string', description: "Pre-fill the recipient. Defaults to the customer's email; the field stays editable in the preview." },
+        displayTotal: { type: 'number', description: 'Total in AUD to show on the card (from get_quote, for display only).' },
         draftEmailBody: {
           type: 'string',
           description:

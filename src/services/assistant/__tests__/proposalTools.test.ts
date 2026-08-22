@@ -93,6 +93,24 @@ describe('buildProposal propose_send_quote', () => {
     expect(send.draftEmailBody).toBeUndefined();
     expect(send.draftEmailSubject).toBeUndefined();
   });
+
+  // The prompt and the tool schema both promise the card shows recipient AND
+  // total; the card can only do that if buildProposal carries the figure.
+  it('carries the total through for the card', () => {
+    const { proposal } = buildProposal('propose_send_quote', 'tool_send_3', {
+      quoteId: 'doc_send_3',
+      recipientEmail: 'katie@example.com',
+      displayTotal: 1183.5,
+    });
+    expect((proposal as SendQuoteProposal).displayTotal).toBe(1183.5);
+  });
+
+  it('leaves the total undefined rather than inventing one', () => {
+    const { proposal } = buildProposal('propose_send_quote', 'tool_send_4', {
+      quoteId: 'doc_send_4',
+    });
+    expect((proposal as SendQuoteProposal).displayTotal).toBeUndefined();
+  });
 });
 
 describe('buildProposal propose_update_customer', () => {

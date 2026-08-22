@@ -33,3 +33,32 @@ export function isSelfSend(recipient: string, ownerEmail?: string | null): boole
   const own = (ownerEmail || '').trim().toLowerCase();
   return !!to && !!own && to === own;
 }
+
+/** The two channels whose order changes with what's on file. */
+export type SendChannel = 'email' | 'sms';
+
+/**
+ * Which channel the send sheet leads with. Email is the dominant path and
+ * stays first whenever there's an address to use — but CustomerDetails only
+ * ever required email OR phone, so a phone-only customer was being offered
+ * Email at the top of the sheet with nothing behind it. When email is the
+ * one thing we don't have and SMS is the one thing we can finish, SMS leads.
+ *
+ * With neither the order is moot; Email stays first, since the preview lets
+ * the tradie type an address and SMS can't ask for a number.
+ *
+ * @param canSms SMS can actually be COMPLETED here — not just "there's a
+ *   number on file". Web is the case that forces the distinction: it can't
+ *   open a composer, so it copies the message and relies on an Alert.alert
+ *   to say so, and react-native-web's Alert.alert is a no-op. Leading with a
+ *   row that ends in a silent dead end is worse than leading with Email.
+ */
+export function orderSendOptions({
+  hasEmail,
+  canSms,
+}: {
+  hasEmail: boolean;
+  canSms: boolean;
+}): SendChannel[] {
+  return !hasEmail && canSms ? ['sms', 'email'] : ['email', 'sms'];
+}

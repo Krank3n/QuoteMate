@@ -51,13 +51,18 @@ vi.mock('react-native-paper', () => {
     ActivityIndicator: () => null,
   };
 });
-// Renders the two buttons with their hierarchy visible to assertions.
+// Renders the two buttons with their hierarchy visible to assertions, plus
+// whether the modal would celebrate. `data-confetti` mirrors AlertModal's own
+// `enableConfetti` rule (explicit prop wins, otherwise success celebrates).
 vi.mock('./AlertModal', () => ({
-  AlertModal: ({ visible, title, primaryButtonText, primaryButtonAction, secondaryButtonText, secondaryButtonAction }: any) =>
+  AlertModal: ({ visible, type, showConfetti, title, primaryButtonText, primaryButtonAction, secondaryButtonText, secondaryButtonAction }: any) =>
     visible
       ? React.createElement(
           'div',
-          { 'data-testid': 'alert' },
+          {
+            'data-testid': 'alert',
+            'data-confetti': String(showConfetti !== undefined ? showConfetti : type === 'success'),
+          },
           React.createElement('span', null, title),
           React.createElement('button', { 'data-role': 'primary', onClick: primaryButtonAction }, primaryButtonText),
           secondaryButtonText
@@ -243,6 +248,18 @@ describe('Test Send', () => {
     // A test is not a send: it must never be counted as one.
     expect(tracked.mock.calls.map(([e]) => e)).not.toContain('quote_send_succeeded');
   });
+
+  // Two of the audit's users test-sent and never sent for real. A rehearsal
+  // into your own inbox leaves the doc a draft — celebrating it tells the
+  // tradie the job's over.
+  it('does not celebrate — the doc is still a draft', async () => {
+    renderModal();
+
+    fireEvent.click(screen.getByText('Send a test to myself'));
+
+    await waitFor(() => expect(screen.getByText('Test Sent')).toBeTruthy());
+    expect(screen.getByTestId('alert').getAttribute('data-confetti')).toBe('false');
+  });
 });
 
 describe('the $0 line-item guard', () => {
@@ -305,6 +322,15 @@ describe('a successful send', () => {
 
     await waitFor(() => expect(eventProps('quote_send_succeeded')).toBeTruthy());
     expect(eventProps('quote_send_succeeded').to_self).toBe(true);
+  });
+
+  it('still celebrates — this is the one that earns it', async () => {
+    renderModal();
+
+    fireEvent.click(screen.getByText('Send Quote'));
+
+    await waitFor(() => expect(screen.getByText('Quote Sent!')).toBeTruthy());
+    expect(screen.getByTestId('alert').getAttribute('data-confetti')).toBe('true');
   });
 
   it('does not count as an abandonment when the confirmation is closed', async () => {

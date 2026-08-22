@@ -16,11 +16,17 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, fireEvent, screen, waitFor, act } from '@testing-library/react';
 import { Alert } from 'react-native';
 
+// Platform.OS is switchable: the SMS row's viability depends on it (web can
+// only copy the message and announce it through a no-op Alert.alert).
+const rn = vi.hoisted(() => ({ platformOS: 'android' }));
 vi.mock('react-native', () => ({
   Alert: { alert: vi.fn() },
   Share: { share: vi.fn(async () => ({ action: 'sharedAction' })), sharedAction: 'sharedAction' },
   Linking: { openURL: vi.fn(async () => {}) },
-  Platform: { OS: 'android', select: (o: any) => o.android ?? o.default },
+  Platform: {
+    get OS() { return rn.platformOS; },
+    select: (o: any) => o[rn.platformOS] ?? o.default,
+  },
 }));
 vi.mock('@react-navigation/native', () => ({ useNavigation: () => ({ navigate: vi.fn() }) }));
 
@@ -186,6 +192,7 @@ beforeEach(() => {
   guard.ensureCanDeliver.mockResolvedValue({ ok: true } as any);
   guard.attachTrialPayLink.mockResolvedValue({ status: 'connect_required' } as any);
   store.state.getEffectivePlan = () => 'trial';
+  rn.platformOS = 'android';
 });
 
 describe('opening the send flow', () => {
@@ -236,12 +243,52 @@ describe('opening the send flow', () => {
 });
 
 describe('the sheet itself', () => {
+  const sheetLabels = () =>
+    Array.from(screen.getByTestId('sheet').querySelectorAll('button')).map((b) => b.textContent);
+
   it('offers exactly the four delivery channels, Email first', async () => {
     renderDialog({ doc: doc({ customerEmail: undefined }) });
 
     await waitFor(() => expect(screen.getByTestId('sheet')).toBeTruthy());
-    const labels = Array.from(screen.getByTestId('sheet').querySelectorAll('button')).map((b) => b.textContent);
-    expect(labels).toEqual(['Email', 'SMS', 'Share', 'Export PDF']);
+    expect(sheetLabels()).toEqual(['Email', 'SMS', 'Share', 'Export PDF']);
+  });
+
+  // CustomerDetails only ever required email OR phone, so a phone-only
+  // customer is a legal customer — and the sheet was leading with a channel
+  // that had nothing behind it.
+  it('leads with SMS when the customer is phone-only', async () => {
+    renderDialog({ doc: doc({ customerEmail: undefined, customerPhone: '0412 345 678' }) });
+
+    await waitFor(() => expect(screen.getByTestId('sheet')).toBeTruthy());
+    expect(sheetLabels()).toEqual(['SMS', 'Email', 'Share', 'Export PDF']);
+  });
+
+  it('keeps Email first when both are on file', async () => {
+    store.state.getEffectivePlan = () => 'free'; // free plan keeps the sheet up
+    renderDialog({ doc: doc({ customerPhone: '0412 345 678' }) });
+
+    await waitFor(() => expect(screen.getByTestId('sheet')).toBeTruthy());
+    expect(sheetLabels()).toEqual(['Email', 'SMS', 'Share', 'Export PDF']);
+  });
+
+  // Web can't open a composer: openSmsComposer copies the message and says so
+  // through Alert.alert, which react-native-web no-ops. Leading a phone-only
+  // customer into that is a sheet that vanishes with nothing sent.
+  it('does not lead with SMS on web, where the composer cannot finish', async () => {
+    rn.platformOS = 'web';
+    renderDialog({ doc: doc({ customerEmail: undefined, customerPhone: '0412 345 678' }) });
+
+    await waitFor(() => expect(screen.getByTestId('sheet')).toBeTruthy());
+    expect(sheetLabels()).toEqual(['Email', 'SMS', 'Share', 'Export PDF']);
+  });
+
+  // handleSendSMS bails on "No phone on file" for anything without digits;
+  // the row must not be promoted past a gate it can't clear.
+  it('does not lead with SMS on a phone field with no digits', async () => {
+    renderDialog({ doc: doc({ customerEmail: undefined, customerPhone: '+' }) });
+
+    await waitFor(() => expect(screen.getByTestId('sheet')).toBeTruthy());
+    expect(sheetLabels()).toEqual(['Email', 'SMS', 'Share', 'Export PDF']);
   });
 
   it('no longer puts the pay-link upsell in front of the send', async () => {
