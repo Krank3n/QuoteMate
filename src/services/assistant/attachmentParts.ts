@@ -49,8 +49,17 @@ export function inlineAttachmentIds(history: ChatMessage[]): Set<string> {
   const ids = new Set<string>();
   for (let i = history.length - 1; i >= 0; i--) {
     const m = history[i];
-    if (m.role !== 'user') break;
-    for (const a of m.attachments || []) ids.add(a.id);
+    if (m.role === 'user') {
+      for (const a of m.attachments || []) ids.add(a.id);
+      continue;
+    }
+    // An assistant bubble that never carried a reply — an error placeholder, a
+    // working card, an inline quote — is UI, not a turn the model took. It
+    // can't have seen the photo, so keep walking back. Without this, a turn
+    // that failed (no signal on site, the headline case for photos) leaves the
+    // retry claiming a photo the model never received.
+    if (!m.text?.trim() && !m.proposals?.length) continue;
+    break;
   }
   return ids;
 }
@@ -110,11 +119,18 @@ export function buildAttachmentParts(
  * Assemble one message's parts. Images lead so the model reads the picture
  * before the caption that talks about it. Returns [] when there is nothing to
  * send — Gemini rejects a part whose text is empty.
+ *
+ * The two markers are deliberately different sentences. "Attached earlier"
+ * means the model DID see it, on a previous turn, and must not deny it.
+ * "Couldn't be read" means the bytes never made it and the model must say so —
+ * conflating the two is how Mate ends up confidently describing a photo it has
+ * never seen.
  */
 export function buildMessageParts(
   message: ChatMessage,
   inline: Array<{ inlineData: InlineBytes }>,
   droppedCount: number,
+  unreadableCount = 0,
 ): Array<Record<string, unknown>> {
   const parts: Array<Record<string, unknown>> = [...inline];
   const text = message.text?.trim() ? message.text : '';
@@ -122,6 +138,11 @@ export function buildMessageParts(
   if (droppedCount > 0) {
     parts.push({
       text: `[${droppedCount} photo(s) attached to this message earlier in the chat]`,
+    });
+  }
+  if (unreadableCount > 0) {
+    parts.push({
+      text: `[${unreadableCount} photo(s) on this message could not be read — you have NOT seen them. Say the photo didn't come through and ask for a closer shot of the bit that matters.]`,
     });
   }
   return parts;

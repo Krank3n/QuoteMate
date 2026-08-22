@@ -390,6 +390,42 @@ describe('attachment transport', () => {
     expect(contentsOf()).toEqual([{ role: 'user', parts: [{ text: 'this one' }] }]);
   });
 
+  it('tells the model a photo it could not read never arrived', async () => {
+    fetchMock.mockResolvedValueOnce(okChatResponse('righto'));
+    await sendAssistantTurn({
+      history: [
+        { id: '1', role: 'user', text: 'how much?', createdAt: '', attachments: [photo('p1')] },
+      ],
+      // Bytes unreadable — an oversized shot, or a file that's gone.
+      resolveAttachment: async () => null,
+    });
+    const parts = contentsOf()[0].parts;
+    expect(parts[0]).toEqual({ text: 'how much?' });
+    expect(parts[1].text).toContain('could not be read');
+    expect(parts[1].text).toContain('you have NOT seen them');
+  });
+
+  it('refuses to POST an empty contents array', async () => {
+    // A caption-less bubble whose only photo failed to upload used to build an
+    // empty request, and the server's own "contents required." 400 landed in
+    // the chat as if Mate had said it.
+    await expect(
+      sendAssistantTurn({
+        history: [
+          {
+            id: '1',
+            role: 'user',
+            text: '',
+            createdAt: '',
+            attachments: [{ ...photo('p1'), status: 'failed' }],
+          },
+        ],
+        resolveAttachment,
+      }),
+    ).rejects.toThrow(/give me a line to go on/i);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('keeps the existing text-only contents shape unchanged', async () => {
     fetchMock.mockResolvedValueOnce(okChatResponse('righto'));
     await sendAssistantTurn({ history, resolveAttachment });

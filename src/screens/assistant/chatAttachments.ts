@@ -116,15 +116,22 @@ export function markAttachmentConsumedBy(
 }
 
 /**
- * Patches stamping every attachment collectQuotePhotos just handed over, so a
- * second draft in the same chat can't inherit the first job's photos. Returns
- * one entry per message that actually changed.
+ * Patches stamping the attachments a draft actually carried, so a second draft
+ * in the same chat can't inherit the first job's photos. Returns one entry per
+ * message that changed.
+ *
+ * Pass `carriedIds` whenever the photos were collected before an await — the
+ * pipeline runs for 20-40 s and a photo that finished uploading in that window
+ * must not be swept up as though the draft had it.
  */
 export function markAttachmentsConsumed(
   messages: ChatMessage[],
   quoteId: string,
+  carriedIds?: Iterable<string>,
 ): Array<{ messageId: string; attachments: ChatAttachment[] }> {
-  const carried = new Set(collectQuotePhotos(messages).map((p) => p.id));
+  const carried = carriedIds
+    ? new Set(carriedIds)
+    : new Set(collectQuotePhotos(messages).map((p) => p.id));
   const patches: Array<{ messageId: string; attachments: ChatAttachment[] }> = [];
   for (const m of messages) {
     if (!m.attachments?.length) continue;

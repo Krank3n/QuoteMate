@@ -51,6 +51,26 @@ describe('inlineAttachmentIds', () => {
     ]);
     expect([...ids].sort()).toEqual(['p1', 'p2']);
   });
+
+  it('still inlines after a failed turn left an error bubble behind', () => {
+    // No signal on site is the headline case for photos. The retry has to send
+    // the bytes — the model never got them the first time.
+    const ids = inlineAttachmentIds([
+      userMsg('u1', 'have a look', [att('p1')]),
+      { id: 'e1', role: 'assistant', text: '', createdAt: '', errorMessage: 'Mate is offline.' },
+      userMsg('u2', 'try again'),
+    ]);
+    expect(ids.has('p1')).toBe(true);
+  });
+
+  it('does not walk past an assistant turn that actually replied', () => {
+    const ids = inlineAttachmentIds([
+      userMsg('u1', 'have a look', [att('p1')]),
+      modelMsg('a1', 'timber paling, looks rooted'),
+      userMsg('u2', 'price it up'),
+    ]);
+    expect(ids.has('p1')).toBe(false);
+  });
 });
 
 describe('buildAttachmentParts', () => {
@@ -141,5 +161,24 @@ describe('buildMessageParts', () => {
   it('returns [] for an empty-text bubble with no attachments', () => {
     expect(buildMessageParts(userMsg('u1', ''), [], 0)).toEqual([]);
     expect(buildMessageParts(userMsg('u1', '   '), [], 0)).toEqual([]);
+  });
+
+  // Conflating "you saw this last turn" with "this never arrived" is how Mate
+  // ends up confidently describing a photo it has never seen.
+  it('marks an unread photo differently from one attached earlier', () => {
+    const unread = buildMessageParts(userMsg('u1', 'how much?', [att('p1')]), [], 0, 1);
+    expect(unread[1]).toEqual({
+      text:
+        '[1 photo(s) on this message could not be read — you have NOT seen them. ' +
+        "Say the photo didn't come through and ask for a closer shot of the bit that matters.]",
+    });
+    expect(JSON.stringify(unread)).not.toContain('attached to this message earlier');
+  });
+
+  it('can report both kinds on one message', () => {
+    const parts = buildMessageParts(userMsg('u1', 'these two', [att('p1'), att('p2')]), [], 1, 1);
+    expect(parts).toHaveLength(3);
+    expect(JSON.stringify(parts[1])).toContain('attached to this message earlier');
+    expect(JSON.stringify(parts[2])).toContain('could not be read');
   });
 });

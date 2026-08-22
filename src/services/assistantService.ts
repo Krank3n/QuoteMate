@@ -190,9 +190,8 @@ export async function sendAssistantTurn({
     const atts = m.attachments || [];
     if (!m.text?.trim() && atts.length === 0) continue;
 
-    // A failed upload never reached Mate and never will — leave it out of the
-    // "attached earlier" count too, or the model is told about a photo that
-    // does not exist.
+    // A failed upload never reached Mate and never will — leave it out of both
+    // counts, or the model is told about a photo that does not exist.
     const carried = atts.filter((a) => a.status !== 'failed');
     const candidates = carried.filter((a) => inlineIds.has(a.id));
     const resolved = await Promise.all(
@@ -204,7 +203,12 @@ export async function sendAssistantTurn({
     );
     const built = buildAttachmentParts(resolved, { remainingChars });
     remainingChars -= built.usedChars;
-    const parts = buildMessageParts(m, built.parts, carried.length - built.parts.length);
+    // Two different failures, two different sentences: photos from an older
+    // turn the model has already described, versus photos on THIS turn whose
+    // bytes didn't make it (too big, unreadable, budget spent).
+    const attachedEarlier = carried.length - candidates.length;
+    const unreadable = candidates.length - built.parts.length;
+    const parts = buildMessageParts(m, built.parts, attachedEarlier, unreadable);
     if (!parts.length) continue;
 
     const role = m.role === 'assistant' ? 'model' : 'user';
@@ -214,6 +218,13 @@ export async function sendAssistantTurn({
       continue;
     }
     contents.push({ role, parts });
+  }
+
+  // Everything in the window was skippable (a caption-less bubble whose only
+  // photo failed to upload). Posting an empty contents array gets a raw
+  // "contents required." 400 rendered straight into the chat.
+  if (!contents.length) {
+    throw new LiveOfflineError("That didn't come through — give me a line to go on.");
   }
 
   const proposals: Proposal[] = [];

@@ -84,7 +84,12 @@ import { ActionSheet, ActionSheetOption } from '../components/ActionSheet';
 import { AlertModal, AlertType } from '../components/AlertModal';
 import { SupplierListCaptureModal } from '../components/SupplierListCaptureModal';
 import { auth } from '../config/firebase';
-import { uploadQuotePhoto, sniffLocalPhotoMime, UnsupportedPhotoError } from '../services/photoService';
+import {
+  compressImage,
+  uploadQuotePhoto,
+  sniffLocalPhotoMime,
+  UnsupportedPhotoError,
+} from '../services/photoService';
 import { detectIsPlan } from '../services/planDetection';
 import {
   ATTACH_LIMIT_COPY,
@@ -589,6 +594,9 @@ export function AssistantScreen() {
   const supplierImportsRef = useRef<Map<string, ExtractResult>>(new Map());
   const activeImportIdRef = useRef<string | null>(null);
   const importCardPhaseRef = useRef<string>('');
+  // The chat photo this import is reading. Only claimed once the extraction
+  // succeeds — a failed read must not eat a site photo forever.
+  const importAttachmentIdRef = useRef<string | null>(null);
   const [reviewImportId, setReviewImportId] = useState<string | null>(null);
   const reviewImportIdRef = useRef<string | null>(null);
   useEffect(() => { reviewImportIdRef.current = reviewImportId; }, [reviewImportId]);
@@ -1062,8 +1070,15 @@ export function AssistantScreen() {
 
       // Claim the photos this draft carried. Without the stamp, an unrelated
       // second job drafted in the same chat would inherit them.
+      //
+      // Read the messages FRESH and stamp only the ids the draft actually got:
+      // the pipeline ran for 20-40 s, and writing back the pre-pipeline
+      // snapshot would revert any upload that settled in the meantime.
       if (proposal.type === 'propose_draft_quote' && chatPhotos.length > 0 && mintedId) {
-        for (const patch of markAttachmentsConsumed(messagesForPhotos, mintedId)) {
+        const live =
+          useStore.getState().conversations.find((c) => c.id === conversation.id)?.messages || [];
+        const carriedIds = chatPhotos.map((p) => p.id);
+        for (const patch of markAttachmentsConsumed(live, mintedId, carriedIds)) {
           updateMessage(conversation.id, patch.messageId, { attachments: patch.attachments });
         }
       }
@@ -1299,25 +1314,46 @@ export function AssistantScreen() {
     return () => setUnconsumedAttachmentProbe(() => false);
   }, []);
 
-  // Nobody wants Mate talking over them while they edit forty rows of prices.
-  // stop() is terminal on an audio queue, so resuming means a fresh one.
+  // Nobody wants Mate talking over them while they edit forty rows of prices —
+  // and the MIC matters more than the speaker here. Left hot, worksite chatter
+  // behind the modal drives full turns, burns tokens, and can even have Mate
+  // resolve a proposal card the tradie can't see. stop() is terminal on both
+  // the queue and the capture handle, so resuming means fresh ones.
   const suspendVoiceForModal = useCallback(() => {
     narrationModeRef.current = false;
     const queue = audioQueueRef.current;
     audioQueueRef.current = null;
     matePlayingRef.current = false;
     if (queue) { try { void queue.stop(); } catch { /* noop */ } }
+    const mic = micRef.current;
+    micRef.current = null;
+    if (mic) { try { void mic.stop(); } catch { /* noop */ } }
   }, []);
 
   const resumeVoiceAfterModal = useCallback(() => {
-    if (!voiceSessionRef.current || audioQueueRef.current) return;
-    const queue = createAudioQueue();
-    queue.setOnActiveChange((active) => {
-      matePlayingRef.current = active;
-      if (active) lastVoiceActivityRef.current = Date.now();
-    });
-    audioQueueRef.current = queue;
+    if (!voiceSessionRef.current) return;
+    if (!audioQueueRef.current) {
+      const queue = createAudioQueue();
+      queue.setOnActiveChange((active) => {
+        matePlayingRef.current = active;
+        if (active) lastVoiceActivityRef.current = Date.now();
+      });
+      audioQueueRef.current = queue;
+    }
     lastVoiceActivityRef.current = Date.now();
+    if (micRef.current) return;
+    void startMicCapture((chunk) => {
+      if (!matePlayingRef.current) voiceSessionRef.current?.sendMicChunk(chunk);
+    })
+      .then((mic) => {
+        // The session may have closed while the mic was spinning up.
+        if (!voiceSessionRef.current) { void mic.stop(); return; }
+        micRef.current = mic;
+      })
+      .catch(() => {
+        // Losing the mic mid-session isn't worth an error bubble over a price
+        // list — the tradie can tap it again.
+      });
   }, []);
 
   const openSupplierReview = useCallback(
@@ -1344,20 +1380,30 @@ export function AssistantScreen() {
       const state = useStore.getState();
       const convoId = state.conversations.find((c) => c.id === state.currentConversationId)?.id;
       if (!convoId) return;
+      // One at a time — a second import would otherwise write into the first
+      // one's card and the losing extraction would vanish.
+      if (activeImportIdRef.current) {
+        appendMessage(convoId, {
+          id: generateId(),
+          role: 'assistant',
+          text: "Still reading the last one — give it a sec and I'll take the next.",
+          createdAt: new Date().toISOString(),
+        });
+        return;
+      }
 
       if (hint.source === 'attachment') {
         const messages = state.conversations.find((c) => c.id === convoId)?.messages || [];
         const attachment = mostRecentUnconsumedAttachment(messages);
         if (attachment) {
-          // Claim it first — a price list is not a site photo, and it must not
-          // also ride onto the quote.
-          for (const patch of markAttachmentConsumedBy(messages, attachment.id, 'supplier_import')) {
-            updateMessage(convoId, patch.messageId, { attachments: patch.attachments });
-          }
+          // Remember it, but DON'T claim it yet: a failed extraction would
+          // otherwise eat a site photo permanently, and nothing un-stamps it.
+          importAttachmentIdRef.current = attachment.id;
           // FileSystem.readAsStringAsync can't read https://, so a photo whose
           // local copy is gone gets pulled back into the cache first.
           const uri = await ensureLocalUri(attachment);
           if (!uri) {
+            importAttachmentIdRef.current = null;
             appendMessage(convoId, {
               id: generateId(),
               role: 'assistant',
@@ -1427,6 +1473,17 @@ export function AssistantScreen() {
     if (importer.phase !== 'reviewing' || !importer.extractedItems.length) return;
     importCardPhaseRef.current = 'ready';
     activeImportIdRef.current = null;
+    // The read worked, so the photo really was a price list — claim it now so
+    // it can't also ride onto the quote as a site photo.
+    const claimedId = importAttachmentIdRef.current;
+    importAttachmentIdRef.current = null;
+    if (claimedId) {
+      const messages =
+        useStore.getState().conversations.find((c) => c.id === conversation.id)?.messages || [];
+      for (const patch of markAttachmentConsumedBy(messages, claimedId, 'supplier_import')) {
+        updateMessage(conversation.id, patch.messageId, { attachments: patch.attachments });
+      }
+    }
     supplierImportsRef.current.set(importId, {
       supplierName: importer.extractedSupplierName,
       supplierContact: importer.extractedSupplierContact,
@@ -1456,23 +1513,34 @@ export function AssistantScreen() {
   // Extraction failed. On site, "no signal" is the likeliest cause and the
   // right advice is "keep the photo", not "try a sharper one".
   useEffect(() => {
+    if (!conversation || !importer.errorMessage) return;
+    const offline = /network|offline|internet|connection|timed out/i.test(importer.errorMessage);
+    const text = offline
+      ? "No signal — hang onto that photo and I'll read it when you're back on."
+      : importer.errorMessage;
     const importId = activeImportIdRef.current;
-    if (!importId || !conversation || !importer.errorMessage) return;
     activeImportIdRef.current = null;
     importCardPhaseRef.current = '';
-    const offline = /network|offline|internet|connection|timed out/i.test(importer.errorMessage);
-    updateMessage(conversation.id, importId, {
-      supplierImport: {
-        importId,
-        phase: 'failed',
-        error: offline
-          ? "No signal — hang onto that photo and I'll read it when you're back on."
-          : importer.errorMessage,
-      },
-      cta: { label: 'Try again', action: { type: 'open_supplier_review', importId } },
-    });
+    // Leave the photo unclaimed — a read that failed hasn't spent it.
+    importAttachmentIdRef.current = null;
+    if (importId) {
+      updateMessage(conversation.id, importId, {
+        supplierImport: { importId, phase: 'failed', error: text },
+        cta: { label: 'Try again', action: { type: 'open_supplier_review', importId } },
+      });
+    } else {
+      // No card was ever mounted — a denied permission, a picker that threw,
+      // or a save that failed. Without this the tradie taps and nothing at all
+      // happens, and Mate keeps offering as though it never ran.
+      appendMessage(conversation.id, {
+        id: generateId(),
+        role: 'assistant',
+        text,
+        createdAt: new Date().toISOString(),
+      });
+    }
     importer.clearError();
-  }, [importer.errorMessage, importer.clearError, conversation, updateMessage]);
+  }, [importer.errorMessage, importer.clearError, conversation, updateMessage, appendMessage]);
 
   // Backing out of the column mapper drops the importer to idle with no rows
   // and no error, which would leave the card spinning forever.
@@ -1528,7 +1596,13 @@ export function AssistantScreen() {
 
   useEffect(() => {
     onImportSavedRef.current = (summary: SaveSummary) => {
-      const importId = reviewImportIdRef.current;
+      // Usually the card the review modal was opened from. The contact-only
+      // path never opens a review, so it settles the still-live card instead —
+      // otherwise the idle guard below would mark a successful save "failed".
+      const importId = reviewImportIdRef.current ?? activeImportIdRef.current;
+      activeImportIdRef.current = null;
+      importCardPhaseRef.current = '';
+      importAttachmentIdRef.current = null;
       setReviewImportId(null);
       resumeVoiceAfterModal();
       // Without this the next get_job_requirements still reports an empty book
@@ -1551,6 +1625,17 @@ export function AssistantScreen() {
             cta: undefined,
           });
         }
+        const who = summary.supplierName ? ` from ${summary.supplierName}` : '';
+        if (summary.itemCount === 0) {
+          // Extraction found contact details but no prices — the group was
+          // still created, so don't call it a failure.
+          noteToMate(
+            convoId,
+            `[context] No prices came off that list, but the supplier's contact details${who} are saved. ` +
+              `Say that in one short line and offer to read a clearer photo of the prices.`,
+          );
+          return;
+        }
         // Only dangle a re-price at someone who can actually run one —
         // rewarding a successful import with a paywall is worse than silence.
         const canReprice = canRunMatePipeline(useStore.getState().getEffectivePlan());
@@ -1562,8 +1647,7 @@ export function AssistantScreen() {
             : ' Nothing on the quote in hand matched it yet — say the list is saved and move on.';
         noteToMate(
           convoId,
-          `[context] The tradie saved ${summary.itemCount} item${summary.itemCount === 1 ? '' : 's'}` +
-            (summary.supplierName ? ` from ${summary.supplierName}` : '') +
+          `[context] The tradie saved ${summary.itemCount} item${summary.itemCount === 1 ? '' : 's'}${who}` +
             ` into their supplier book.${tail}`,
         );
       })();
@@ -1614,8 +1698,8 @@ export function AssistantScreen() {
       const state = useStore.getState();
       const messages = state.conversations.find((c) => c.id === state.currentConversationId)?.messages || [];
 
-      let staged = [...pendingAttachmentsRef.current];
       const accepted: ChatAttachment[] = [];
+      let staged = [...pendingAttachmentsRef.current];
       let blocked: string | undefined;
       for (const uri of uris) {
         // A 14MB plan is ~19MB of base64 — past the 1st-gen request cap. Job
@@ -1632,9 +1716,15 @@ export function AssistantScreen() {
           blocked = gate.message;
           break;
         }
+        // Compress ONCE, here, and keep the result as the local uri. The
+        // inline bytes are read from it: a raw 12MP camera-roll JPEG is
+        // routinely 2.5-4 MB, which sails past maxBase64CharsEach and gets
+        // silently dropped from the turn. uploadQuotePhoto would have
+        // compressed for Storage anyway and thrown the result away.
+        const localUri = await compressImage(uri, { isPlan });
         const attachment: ChatAttachment = {
           id: generateId(),
-          localUri: uri,
+          localUri,
           isPlan,
           status: 'uploading',
         };
@@ -1642,8 +1732,15 @@ export function AssistantScreen() {
         staged = [...staged, attachment];
       }
       if (accepted.length) {
-        pendingAttachmentsRef.current = staged;
-        setPendingAttachments(staged);
+        // Merge against the LIVE tray, not the snapshot taken before those
+        // awaits — an upload that settled in the meantime must not be reverted
+        // to 'uploading' with its storageUrl thrown away.
+        const next = [
+          ...pendingAttachmentsRef.current.filter((p) => !accepted.some((a) => a.id === p.id)),
+          ...accepted,
+        ];
+        pendingAttachmentsRef.current = next;
+        setPendingAttachments(next);
       }
       if (blocked) showAlert({ type: 'info', title: 'Photos', message: blocked });
 
@@ -1915,6 +2012,19 @@ export function AssistantScreen() {
   const handleNewChat = useCallback(async () => {
     await stopVoiceSession();
     setInput('');
+    // Everything scoped to "this chat" has to go with it. A tradie who knocked
+    // the price-list offer back last conversation should still get offered it
+    // on the next job, and a fresh import must not measure its coverage
+    // against a quote from a chat that's gone.
+    pendingAttachmentsRef.current = [];
+    setPendingAttachments([]);
+    importOfferRef.current = { declined: false, offeredForQuote: new Set() };
+    activeQuoteIdRef.current = null;
+    supplierImportsRef.current.clear();
+    activeImportIdRef.current = null;
+    importAttachmentIdRef.current = null;
+    importCardPhaseRef.current = '';
+    setReviewImportId(null);
     newChat();
   }, [stopVoiceSession, newChat]);
 
@@ -2636,8 +2746,11 @@ export function AssistantScreen() {
   );
   const renderItem = ChatRow;
 
-  // A staged photo is enough to send on its own — a caption is optional.
-  const canSend = !!input.trim() || pendingAttachments.length > 0;
+  // A staged photo is enough to send on its own — a caption is optional. A
+  // photo whose upload FAILED is not: with no text it would build an empty
+  // request, and the tradie would be shown the server's own 400 string.
+  const canSend =
+    !!input.trim() || pendingAttachments.some((a) => a.status !== 'failed');
   const voiceActive = voiceState !== 'idle';
   const voiceAccent = voiceState === 'thinking' ? themeColors.accent : themeColors.error;
   const voiceLabel =
@@ -2820,30 +2933,30 @@ export function AssistantScreen() {
                   <MaterialCommunityIcons name="paperclip" size={20} color={themeColors.textMuted} />
                 </TouchableOpacity>
                 <TextInput
-                ref={inputRef}
-                style={styles.input}
-                value={input}
-                onChangeText={setInput}
-                placeholder="Ask Mate…"
-                placeholderTextColor={themeColors.textDisabled}
-                editable={!sending}
-                multiline
-                returnKeyType="send"
-                // iOS single-line Return fires onSubmitEditing; we keep multiline
-                // for long messages but still want Return to send. On web, Enter
-                // (without Shift) submits — Shift+Enter inserts a newline.
-                onSubmitEditing={() => submit()}
-                blurOnSubmit={false}
-                {...(Platform.OS === 'web'
-                  ? {
-                      onKeyPress: (e: any) => {
-                        if (e?.nativeEvent?.key === 'Enter' && !e?.nativeEvent?.shiftKey) {
-                          e.preventDefault?.();
-                          submit();
-                        }
-                      },
-                    }
-                  : {})}
+                  ref={inputRef}
+                  style={styles.input}
+                  value={input}
+                  onChangeText={setInput}
+                  placeholder="Ask Mate…"
+                  placeholderTextColor={themeColors.textDisabled}
+                  editable={!sending}
+                  multiline
+                  returnKeyType="send"
+                  // iOS single-line Return fires onSubmitEditing; we keep multiline
+                  // for long messages but still want Return to send. On web, Enter
+                  // (without Shift) submits — Shift+Enter inserts a newline.
+                  onSubmitEditing={() => submit()}
+                  blurOnSubmit={false}
+                  {...(Platform.OS === 'web'
+                    ? {
+                        onKeyPress: (e: any) => {
+                          if (e?.nativeEvent?.key === 'Enter' && !e?.nativeEvent?.shiftKey) {
+                            e.preventDefault?.();
+                            submit();
+                          }
+                        },
+                      }
+                    : {})}
                 />
               </>
             )}

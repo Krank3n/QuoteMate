@@ -109,6 +109,22 @@ describe('markAttachmentsConsumed', () => {
   it('returns no patches when nothing is carryable', () => {
     expect(markAttachmentsConsumed([msg('m1')], 'q1')).toEqual([]);
   });
+
+  // The pipeline runs 20-40s. A photo that finished uploading during it was
+  // never on this draft and must not be stamped as though it were.
+  it('stamps only the ids handed to it, not whatever is carryable now', () => {
+    const before = [msg('m1', [att('a')])];
+    const carriedIds = collectQuotePhotos(before).map((p) => p.id);
+    // ...meanwhile a second upload settles.
+    const after = [msg('m1', [att('a'), att('late')])];
+
+    const patches = markAttachmentsConsumed(after, 'q1', carriedIds);
+    expect(patches[0].attachments[0].consumedByQuoteId).toBe('q1');
+    expect(patches[0].attachments[1].consumedByQuoteId).toBeUndefined();
+    // The late photo is still free for the next draft.
+    const settled = [{ ...after[0], attachments: patches[0].attachments }];
+    expect(collectQuotePhotos(settled).map((p) => p.id)).toEqual(['late']);
+  });
 });
 
 // Mate only ever says "the photo they just sent" — it never names an id, so
