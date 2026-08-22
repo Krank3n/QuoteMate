@@ -194,7 +194,7 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
         customerDraft: {
           type: 'object',
           description:
-            'New customer details. Only use when find_customer returned zero matches and the tradie confirmed they want a new contact.',
+            'New customer details. Use when find_customer returned zero matches — announce the new contact in the same turn rather than waiting for a go-ahead.',
           properties: {
             name: { type: 'string' },
             phone: { type: 'string' },

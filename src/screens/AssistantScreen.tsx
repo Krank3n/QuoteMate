@@ -24,11 +24,12 @@ import {
 import type { AppStateStatus } from 'react-native';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import Svg, { Path, Defs, LinearGradient, Stop } from 'react-native-svg';
-import { useNavigation, useFocusEffect } from '@react-navigation/native';
+import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import type { NavigationProp } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { makeStyles, useThemeColors } from '../theme';
 import { useStore, NavigateHint } from '../store/useStore';
+import { trackEvent } from '../services/analyticsService';
 import { useDemoPlayback } from '../demo/demoPlayback';
 import { sendAssistantTurn } from '../services/assistantService';
 import { openVoiceSession, VoiceSession } from '../services/assistant/voiceSession';
@@ -37,7 +38,9 @@ import { rememberAppliedQuote } from '../services/assistant/quoteRefMap';
 import { startMicCapture, MicCaptureHandle, MicUnavailableError, micPermissionGranted } from '../services/assistant/mic';
 import { AudioQueue, createAudioQueue, ensureAudioMode } from '../services/assistant/audioPlayer';
 import { activateKeepAwakeAsync } from 'expo-keep-awake';
-import { shouldAutoStartMic } from './assistant/shouldAutoStartMic';
+import { shouldAutoStartMic, resolveAutoStartMic } from './assistant/shouldAutoStartMic';
+import { getMateIntro, isBlankSlate } from './assistant/mateIntro';
+import { buildGreetPrompt, withTypeInsteadHint } from './assistant/voiceCopy';
 import {
   voiceActionForAppState,
   VOICE_INACTIVE_GRACE_MS,
@@ -489,41 +492,6 @@ const useHeroStyles = makeStyles((t) => ({
   },
 }));
 
-// Empty-state intro under the mic button. Two lines:
-//   primary — one short sentence, context-aware (unfinished draft > time of day).
-//   hint    — fixed, muted, smaller. The on-rails reminder.
-// Keep both short. This sits beneath a big mic button, not a marketing page.
-function getMateIntro(
-  quotes: { status: string; updatedAt: Date; job?: { name?: string }; customerName?: string }[],
-): { primary: string; hint: string } {
-  const pick = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
-  const hint = 'I draft. You tap to confirm. Nothing saves ’til you say.';
-
-  // Most recently touched draft — surface it so the tradie can pick it up.
-  const drafts = quotes
-    .filter((q) => q.status === 'draft')
-    .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-  const draft = drafts[0];
-  if (draft) {
-    const label =
-      draft.job?.name?.trim() ||
-      (draft.customerName ? `${draft.customerName}'s job` : 'that draft quote');
-    return {
-      primary: `“${label}” is still a draft — finish it, or start something new?`,
-      hint,
-    };
-  }
-
-  // No drafts — a short time-of-day nudge.
-  const h = new Date().getHours();
-  let openers: string[];
-  if (h < 11) openers = ['Mornin’. What are we quoting?', 'G’day. What’s the job?'];
-  else if (h < 14) openers = ['What are we quoting?', 'What’s the job?'];
-  else if (h < 17) openers = ['Arvo. What are we quoting?', 'What’s next on the list?'];
-  else openers = ['Evenin’. What are we quoting?', 'What’s the job?'];
-  return { primary: pick(openers), hint };
-}
-
 // Bracketed prompt tags we feed into the Live session as user turns to
 // trigger Mate's pipeline-time narration. The model occasionally echoes
 // the tag back at the start of its spoken/text response — a known
@@ -540,6 +508,11 @@ export function AssistantScreen() {
   const themeColors = useThemeColors();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<NavigationProp<any>>();
+  const route = useRoute<any>();
+  // Ref mirror of route so the focus-count effect below can read the latest
+  // params without re-running (and re-firing) when setParams clears them.
+  const routeRef = useRef(route);
+  routeRef.current = route;
   const conversations = useStore((s) => s.conversations);
   const currentConversationId = useStore((s) => s.currentConversationId);
   const startConversation = useStore((s) => s.startConversation);
@@ -569,6 +542,9 @@ export function AssistantScreen() {
   // the status-row copy. Refs alone don't trigger re-renders.
   const [voiceMode, setVoiceMode] = useState<'sticky' | 'ptt' | null>(null);
   const listRef = useRef<FlatList<ChatItem>>(null);
+  // Composer input — the hero chips prefill it and pull focus so the tradie
+  // lands mid-sentence, not mid-hunt.
+  const inputRef = useRef<TextInput>(null);
 
   // Shared 0..1 amplitude that drives the inline waveform. On web while
   // listening it's fed real mic RMS (see openVoiceMode); otherwise a gentle
@@ -626,6 +602,25 @@ export function AssistantScreen() {
     if (!currentConversationId) startConversation();
   }, [currentConversationId, startConversation]);
 
+  // One assistant_opened per focus visit. The dashboard door navigates here
+  // with { source: 'dashboard_door' }; the param is cleared after counting so
+  // a later tab-bar visit reads as 'tab'. The route ref (not a dep) keeps the
+  // setParams clear from re-running this and double-counting the visit.
+  const openCountedRef = useRef(false);
+  useFocusEffect(
+    useCallback(() => {
+      if (!openCountedRef.current) {
+        openCountedRef.current = true;
+        const fromDoor = routeRef.current?.params?.source === 'dashboard_door';
+        trackEvent('assistant_opened', { source: fromDoor ? 'dashboard_door' : 'tab' });
+        if (fromDoor) navigation.setParams({ source: undefined } as never);
+      }
+      return () => {
+        openCountedRef.current = false;
+      };
+    }, [navigation]),
+  );
+
   // Drive the inline waveform's overall amplitude. On web while listening the
   // mic chunk callback feeds real RMS in (see openVoiceMode); for every other
   // state — connecting, thinking, or native where we get no live PCM — run a
@@ -663,7 +658,17 @@ export function AssistantScreen() {
     () => conversations.find((c) => c.id === currentConversationId),
     [conversations, currentConversationId],
   );
-  const isEmpty = !conversation || conversation.messages.length === 0;
+  // Error-only / hidden-context-only conversations still count as blank —
+  // the hero (with its capability line and the composer hint) must survive a
+  // failed voice open, or the error bubble hides the fact that typing works.
+  const isEmpty = isBlankSlate(conversation?.messages);
+  const latestError = useMemo(() => {
+    const messages = conversation?.messages ?? [];
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].errorMessage) return messages[i].errorMessage;
+    }
+    return undefined;
+  }, [conversation]);
 
   // A bit of unique Aussie flavour for the empty-state intro — riffs on an
   // unfinished draft if there is one, otherwise on the time of day. Picked
@@ -895,6 +900,11 @@ export function AssistantScreen() {
           conversation.id,
           result.error || 'Apply failed without an error message.',
         );
+        // Free plan tapped a pipeline card — the fix is the paywall, not a
+        // retry, so open it over the chat as well as marking the card failed.
+        if (result.code === 'PLAN_GATED') {
+          navigation.navigate('Paywall', { source: 'mate' });
+        }
         // Tell the model too. It has no other way to know the card failed —
         // it only ever saw `{ ok: true, proposalId }` from the tool call —
         // which is how a tradie ended up tapping the same broken "mark paid"
@@ -1103,6 +1113,7 @@ export function AssistantScreen() {
       updateMessage,
       updateProposalStatus,
       handleNavigate,
+      navigation,
     ],
   );
 
@@ -1621,7 +1632,7 @@ export function AssistantScreen() {
         onError: (err) => {
           // eslint-disable-next-line no-console
           console.warn('[Mate voice] session error', err.message);
-          appendErrorMessage(convoId!, err.message);
+          appendErrorMessage(convoId!, withTypeInsteadHint(err.message));
           void stopVoiceSession();
         },
         onClose: () => {
@@ -1690,8 +1701,10 @@ export function AssistantScreen() {
       // Fresh chat + sticky (big record button) mode: get Mate to kick things
       // off with a short, slightly cheeky Aussie greeting so the tradie hears
       // a voice the moment the session connects, instead of dead air. Skipped
-      // for PTT (the user's already talking) and for resumed conversations.
-      if (mode === 'sticky' && seedHistory.length === 0) {
+      // for PTT (the user's already talking) and for resumed conversations —
+      // but an error-only history still greets (isBlankSlate), or a retry
+      // after a failed open would connect to dead air.
+      if (mode === 'sticky' && isBlankSlate(seedHistory)) {
         const latestDraft = useStore
           .getState()
           .quotes.filter((q) => q.status === 'draft')
@@ -1700,23 +1713,7 @@ export function AssistantScreen() {
           ? latestDraft.job?.name?.trim() ||
             (latestDraft.customerName ? `${latestDraft.customerName}'s job` : '')
           : '';
-        const hour = new Date().getHours();
-        const tod =
-          hour < 6 ? 'sparrow\'s fart (pre-dawn)'
-          : hour < 11 ? 'morning'
-          : hour < 14 ? 'middle of the day / smoko'
-          : hour < 17 ? 'arvo'
-          : hour < 21 ? 'evening / knock-off'
-          : 'late night';
-        const draftHint = draftLabel
-          ? `There's an unfinished draft quote called "${draftLabel}" — you can rib them about it sitting half-done if it feels natural, or ignore it.`
-          : 'There are no unfinished drafts right now.';
-        session.sendUserText(
-          `[greet] Kick off the chat with ONE short Aussie greeting, 1–2 sentences max. ` +
-          `Dry, warm, slightly cheeky tradie humour. No emojis. Don't list options or features. ` +
-          `Time of day: ${tod}. ${draftHint} ` +
-          `End by inviting them to tell you what they need. Then stop and wait.`,
-        );
+        session.sendUserText(buildGreetPrompt({ hour: new Date().getHours(), draftLabel }));
       }
 
       // Open the mic only once the session handshake completed — earlier
@@ -1761,9 +1758,11 @@ export function AssistantScreen() {
       } catch (err: any) {
         appendErrorMessage(
           convoId!,
-          err instanceof MicUnavailableError
-            ? err.message
-            : `Mate couldn't open the mic: ${err?.message || 'unknown error'}`,
+          withTypeInsteadHint(
+            err instanceof MicUnavailableError
+              ? err.message
+              : `Mate couldn't open the mic: ${err?.message || 'unknown error'}`,
+          ),
         );
         await stopVoiceSession();
         return;
@@ -1780,7 +1779,7 @@ export function AssistantScreen() {
         err instanceof LiveAuthError
           ? err.message
           : `Voice mode is offline: ${err?.message || 'unknown error'}`;
-      appendErrorMessage(convoId!, message);
+      appendErrorMessage(convoId!, withTypeInsteadHint(message));
       await stopVoiceSession();
     }
   }, [stopVoiceSession, appendMessage, appendErrorMessage, updateMessage, startConversation, micLevel, handleApply, handleDismiss, showQuoteInChat]);
@@ -1826,16 +1825,18 @@ export function AssistantScreen() {
   }, []);
 
   // Auto-start voice mode when the Mate tab gains focus so the tradie can
-  // just start talking — but only when the setting is on (default) and mic
-  // permission is already granted, so we never trigger a fresh prompt. The
-  // cleanup tears voice down on blur/unmount (replacing the old standalone
-  // unmount effect) so the mic is never left hot in the background, and the
-  // AppState listener mutes on background and re-arms on return to
-  // foreground while the tab is still focused.
+  // just start talking — opt-IN only (every focus mints a Live token and
+  // burns a daily assistant turn, so the default lands in text), and only
+  // when mic permission is already granted, so we never trigger a fresh
+  // prompt. The cleanup tears voice down on blur/unmount (replacing the old
+  // standalone unmount effect) so the mic is never left hot in the
+  // background, and the AppState listener mutes on background and re-arms on
+  // return to foreground while the tab is still focused — it stays
+  // unconditional because it also tears down manually opened sessions.
   useFocusEffect(
     useCallback(() => {
       let cancelled = false;
-      const enabled = businessSettings?.autoStartMicOnMate !== false;
+      const enabled = resolveAutoStartMic(businessSettings?.autoStartMicOnMate);
       // Only auto-start once per focused visit. Without this, every
       // navigation Mate launches (e.g. opening a draft) blurs and re-focuses
       // this screen, tearing down and re-opening the voice session — a new
@@ -2056,7 +2057,33 @@ export function AssistantScreen() {
                       : 'Tap to talk to Mate'}
               </Text>
               <Text style={styles.heroBlurb}>{introBlurb.primary}</Text>
+              {voiceState === 'idle' && (
+                <Text style={styles.heroCapability}>{introBlurb.capability}</Text>
+              )}
               <Text style={styles.heroHint}>{introBlurb.hint}</Text>
+              {/* Blank-but-errored: the error bubble no longer replaces the
+                  hero, so surface the latest failure here instead of
+                  swallowing it. */}
+              {!!latestError && <Text style={styles.heroError}>{latestError}</Text>}
+              {voiceState === 'idle' && (
+                <View style={styles.chipRow}>
+                  {introBlurb.chips.map((chip) => (
+                    <TouchableOpacity
+                      key={chip.label}
+                      style={styles.chip}
+                      onPress={() => {
+                        // Prefill, never send — the tradie always owns the send.
+                        setInput(chip.prefill);
+                        inputRef.current?.focus();
+                      }}
+                      accessibilityRole="button"
+                      accessibilityLabel={chip.label}
+                    >
+                      <Text style={styles.chipLabel}>{chip.label}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
             </View>
           </View>
         ) : (
@@ -2113,6 +2140,7 @@ export function AssistantScreen() {
               </View>
             ) : (
               <TextInput
+                ref={inputRef}
                 style={styles.input}
                 value={input}
                 onChangeText={setInput}
@@ -2280,6 +2308,45 @@ const useStyles = makeStyles((t) => ({
     letterSpacing: 0.2,
     paddingHorizontal: 12,
     maxWidth: 360,
+  },
+  heroCapability: {
+    marginTop: 10,
+    color: t.colors.textMuted,
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: 'center',
+    paddingHorizontal: 12,
+    maxWidth: 420,
+  },
+  heroError: {
+    marginTop: 10,
+    color: t.colors.error,
+    fontSize: 12,
+    lineHeight: 17,
+    textAlign: 'center',
+    paddingHorizontal: 12,
+    maxWidth: 420,
+  },
+  chipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 16,
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+  },
+  chip: {
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: t.colors.border,
+    backgroundColor: t.colors.surface,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+  },
+  chipLabel: {
+    color: t.colors.text,
+    fontSize: 13,
+    fontWeight: '600',
   },
   introTitle: {
     color: t.colors.text,

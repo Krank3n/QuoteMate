@@ -27,6 +27,7 @@ import { FixedBottomButton } from '../../components/FixedBottomButton';
 import { AlertModal } from '../../components/AlertModal';
 import { useUnsavedChangesGuard } from '../../hooks/useUnsavedChangesGuard';
 import { checkSquareConnection } from '../../services/squareService';
+import { resolveAutoStartMic } from '../assistant/shouldAutoStartMic';
 import { defaultAuTradieTerms, hashTerms, isUnmodifiedStarterTerms } from '../../../shared/pdf/terms/defaultAuTradie';
 import { PASSTHROUGH_SURCHARGE_PCT } from '../../../shared/pdf/squareFees';
 import {
@@ -64,7 +65,7 @@ export function BusinessDefaultsScreen() {
   const [showMarkup, setShowMarkup] = useState(false);
   const [priceDetail, setPriceDetail] = useState<PriceDetail>('itemised');
   const [autoCustomerFollowUp, setAutoCustomerFollowUp] = useState(false);
-  const [autoStartMic, setAutoStartMic] = useState(true);
+  const [autoStartMic, setAutoStartMic] = useState(false);
   const [termsAndConditions, setTermsAndConditions] = useState('');
 
   const [squareConnected, setSquareConnected] = useState<boolean | null>(null);
@@ -88,7 +89,7 @@ export function BusinessDefaultsScreen() {
     // pair migrates on read with no backfill.
     const pd = resolvePriceDetail(null, businessSettings);
     const acf = businessSettings.autoCustomerFollowUpEnabled === true;
-    const asm = businessSettings.autoStartMicOnMate !== false;
+    const asm = resolveAutoStartMic(businessSettings.autoStartMicOnMate);
     const tc = businessSettings.termsAndConditions ?? '';
 
     setLaborRate(lr);
@@ -351,7 +352,7 @@ export function BusinessDefaultsScreen() {
               <View style={styles.toggleLabel}>
                 <Text style={styles.toggleTitle}>Start mic automatically on Mate</Text>
                 <Text style={styles.toggleDescription}>
-                  Opens voice mode the moment you tap into Mate, so you can just start talking. Only happens if mic access is already granted.
+                  Off by default. Turn on and Mate opens voice the moment you land on the tab — only if mic access is already granted.
                 </Text>
               </View>
               <Switch
