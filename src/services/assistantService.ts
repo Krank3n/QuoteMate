@@ -190,7 +190,11 @@ export async function sendAssistantTurn({
     const atts = m.attachments || [];
     if (!m.text?.trim() && atts.length === 0) continue;
 
-    const candidates = atts.filter((a) => inlineIds.has(a.id) && a.status !== 'failed');
+    // A failed upload never reached Mate and never will — leave it out of the
+    // "attached earlier" count too, or the model is told about a photo that
+    // does not exist.
+    const carried = atts.filter((a) => a.status !== 'failed');
+    const candidates = carried.filter((a) => inlineIds.has(a.id));
     const resolved = await Promise.all(
       candidates.map(async (a) => ({
         id: a.id,
@@ -200,7 +204,7 @@ export async function sendAssistantTurn({
     );
     const built = buildAttachmentParts(resolved, { remainingChars });
     remainingChars -= built.usedChars;
-    const parts = buildMessageParts(m, built.parts, atts.length - built.parts.length);
+    const parts = buildMessageParts(m, built.parts, carried.length - built.parts.length);
     if (!parts.length) continue;
 
     const role = m.role === 'assistant' ? 'model' : 'user';

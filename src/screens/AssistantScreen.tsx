@@ -1571,6 +1571,34 @@ export function AssistantScreen() {
   }, [countCoveredRows, noteToMate, resumeVoiceAfterModal, updateMessage]);
 
   /**
+   * Land an upload's outcome wherever the attachment has got to. A tradie who
+   * hits send mid-upload has already moved it out of the tray and onto a
+   * message — patching only the tray would leave that bubble spinning forever
+   * and the photo with no storageUrl to ride onto a quote.
+   */
+  const settleAttachment = useCallback(
+    (id: string, patch: Partial<ChatAttachment>) => {
+      if (pendingAttachmentsRef.current.some((p) => p.id === id)) {
+        pendingAttachmentsRef.current = pendingAttachmentsRef.current.map((p) =>
+          p.id === id ? { ...p, ...patch } : p,
+        );
+        setPendingAttachments((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+        return;
+      }
+      const state = useStore.getState();
+      const convo = state.conversations.find((c) => c.id === state.currentConversationId);
+      if (!convo) return;
+      for (const m of convo.messages) {
+        if (!m.attachments?.some((a) => a.id === id)) continue;
+        updateMessage(convo.id, m.id, {
+          attachments: m.attachments.map((a) => (a.id === id ? { ...a, ...patch } : a)),
+        });
+      }
+    },
+    [updateMessage],
+  );
+
+  /**
    * Stage picked photos on the composer and upload each one. Uploads run
    * SEQUENTIALLY — parallel uploadBytes calls from RN have historically hit
    * XHR/blob races on some devices (same reason JobPhotos does it this way).
@@ -1613,7 +1641,10 @@ export function AssistantScreen() {
         accepted.push(attachment);
         staged = [...staged, attachment];
       }
-      if (accepted.length) setPendingAttachments(staged);
+      if (accepted.length) {
+        pendingAttachmentsRef.current = staged;
+        setPendingAttachments(staged);
+      }
       if (blocked) showAlert({ type: 'info', title: 'Photos', message: blocked });
 
       for (const attachment of accepted) {
@@ -1621,25 +1652,22 @@ export function AssistantScreen() {
           const storageUrl = await uploadQuotePhoto(userId, attachment.localUri!, {
             isPlan: attachment.isPlan,
           });
-          setPendingAttachments((prev) =>
-            prev.map((p) => (p.id === attachment.id ? { ...p, storageUrl, status: 'ready' } : p)),
-          );
+          settleAttachment(attachment.id, { storageUrl, status: 'ready' });
         } catch (err) {
           // eslint-disable-next-line no-console
           console.warn('[Mate] attachment upload failed', err);
-          setPendingAttachments((prev) =>
-            prev.map((p) => (p.id === attachment.id ? { ...p, status: 'failed' } : p)),
-          );
+          settleAttachment(attachment.id, { status: 'failed' });
           if (err instanceof UnsupportedPhotoError) {
             showAlert({ type: 'error', title: 'File not supported', message: err.message });
           }
         }
       }
     },
-    [showAlert],
+    [showAlert, settleAttachment],
   );
 
   const removeAttachment = useCallback((id: string) => {
+    pendingAttachmentsRef.current = pendingAttachmentsRef.current.filter((p) => p.id !== id);
     setPendingAttachments((prev) => prev.filter((p) => p.id !== id));
   }, []);
 
@@ -1737,6 +1765,9 @@ export function AssistantScreen() {
         useStore.getState().conversations.find((c) => c.id === convoId)?.messages || [];
 
       setInput('');
+      // Clear the ref synchronously: an upload still in flight settles onto
+      // the message from here on, not the tray.
+      pendingAttachmentsRef.current = [];
       setPendingAttachments([]);
       const userMsg: ChatMessage = {
         id: generateId(),

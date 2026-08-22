@@ -371,6 +371,25 @@ describe('attachment transport', () => {
     expect(contentsOf()).toEqual([{ role: 'user', parts: [{ text: 'ta' }] }]);
   });
 
+  it('never mentions a photo whose upload failed', async () => {
+    fetchMock.mockResolvedValueOnce(okChatResponse('righto'));
+    await sendAssistantTurn({
+      history: [
+        {
+          id: '1',
+          role: 'user',
+          text: 'this one',
+          createdAt: '',
+          attachments: [{ ...photo('p1'), status: 'failed' }],
+        },
+      ],
+      resolveAttachment,
+    });
+    // It never reached Mate and never will — claiming it was "attached
+    // earlier" would have the model discussing a photo that doesn't exist.
+    expect(contentsOf()).toEqual([{ role: 'user', parts: [{ text: 'this one' }] }]);
+  });
+
   it('keeps the existing text-only contents shape unchanged', async () => {
     fetchMock.mockResolvedValueOnce(okChatResponse('righto'));
     await sendAssistantTurn({ history, resolveAttachment });
