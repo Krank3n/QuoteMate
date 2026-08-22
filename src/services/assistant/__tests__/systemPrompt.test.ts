@@ -115,3 +115,52 @@ describe('photo policy', () => {
     expectHouseTone(section);
   });
 });
+
+// The supplier-book offer is the easiest thing in the app to make annoying:
+// repeated every turn, or blocking a draft the tradie could have had.
+describe('supplier book policy', () => {
+  const section = promptSection('Supplier book');
+
+  it('names both flags together', () => {
+    expect(section).toContain('specialistSupply');
+    expect(section).toContain('supplierBookPopulated');
+    expect(section).toContain('they only mean something together');
+  });
+
+  it('says the pipeline checks the book before retail', () => {
+    expect(section).toContain('checks it BEFORE Bunnings and Reece');
+  });
+
+  it('the offer never blocks the draft', () => {
+    expect(section).toContain('keep drafting either way');
+    expect(section).toContain('NEVER hold the draft waiting for a price list');
+  });
+
+  it('caps at one offer per job', () => {
+    expect(section).toContain('ONE offer per job.');
+    expect(section).toContain('drop it for the rest of the conversation');
+  });
+
+  it("blames the phone, not the tradie, for an empty book", () => {
+    // syncFavoritesFromCloud is a no-op, so a reinstall reads empty even
+    // though Firestore still holds the import.
+    expect(section).toContain("I can't see a supplier list on this phone");
+    expect(section).toContain('never "you haven\'t got one"');
+  });
+
+  it("never claims a supplier-book price it didn't get", () => {
+    expect(section).toContain(
+      'Never claim a price came off the supplier book unless the pipeline told you it did.',
+    );
+  });
+
+  it('get_job_requirements schema documents supplierBookPopulated', () => {
+    const declaration = TOOL_DECLARATIONS.find((t) => t.name === 'get_job_requirements');
+    expect(declaration?.description).toContain('supplierBookPopulated');
+    expect(declaration?.description).toContain('supplierBookCoversTrade');
+  });
+
+  it('stays gender-neutral and never names the technology', () => {
+    expectHouseTone(section);
+  });
+});

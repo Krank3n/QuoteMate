@@ -1,5 +1,25 @@
 import { describe, it, expect } from 'vitest';
 import { resolveJobRequirements } from '../readTools';
+import { buildSupplierBookSnapshot } from '../../supplierBookCoverage';
+import type { FavoriteProductMapping } from '../../../types';
+
+function personalRate(
+  productName: string,
+  store = 'Metro Fencing',
+): FavoriteProductMapping {
+  return { productName, store, price: 40, isPersonalRate: true };
+}
+
+const COLORBOND_BOOK = buildSupplierBookSnapshot([
+  personalRate('Colorbond fence infill sheet 1.8m Monument'),
+  personalRate('Colorbond fence post 75 x 75 x 2.4m'),
+  personalRate('Colorbond fence top rail 2.4m'),
+]);
+
+const PLUMBING_BOOK = buildSupplierBookSnapshot([
+  personalRate('Copper pipe 15mm x 3m', 'Reece'),
+  personalRate('Basin mixer chrome', 'Reece'),
+]);
 
 describe('resolveJobRequirements', () => {
   it('returns mustAskQuestions for fencing niche', () => {
@@ -33,9 +53,62 @@ describe('resolveJobRequirements', () => {
     expect(result.specialistSupply).toBe(false);
   });
 
-  it('supplierBookPopulated is false (Phase-0 stub)', () => {
+  it('supplierBookPopulated is false when no supplier-book snapshot is supplied', () => {
     const result = resolveJobRequirements({ categoryId: 'other', nicheId: 'fencing' });
     expect(result.supplierBookPopulated).toBe(false);
+    expect(result.supplierBookSuppliers).toEqual([]);
+    expect(result.supplierBookCoversTrade).toBe(false);
+  });
+
+  it('supplierBookPopulated is true when the snapshot has imported items', () => {
+    const result = resolveJobRequirements({
+      categoryId: 'other',
+      nicheId: 'fencing',
+      supplierBook: COLORBOND_BOOK,
+    });
+    expect(result.supplierBookPopulated).toBe(true);
+  });
+
+  it('coversTrade is true for a fencing job against a Colorbond list', () => {
+    const result = resolveJobRequirements({
+      categoryId: 'other',
+      nicheId: 'fencing',
+      supplierBook: COLORBOND_BOOK,
+    });
+    expect(result.supplierBookCoversTrade).toBe(true);
+  });
+
+  it('coversTrade is false for a fencing job against a plumbing list', () => {
+    const result = resolveJobRequirements({
+      categoryId: 'other',
+      nicheId: 'fencing',
+      supplierBook: PLUMBING_BOOK,
+    });
+    expect(result.supplierBookPopulated).toBe(true);
+    expect(result.supplierBookCoversTrade).toBe(false);
+  });
+
+  it('supplierBookSuppliers echoes at most 3 names', () => {
+    const book = buildSupplierBookSnapshot([
+      personalRate('a', 'Metro Fencing'),
+      personalRate('b', 'Stratco'),
+      personalRate('c', 'Bowens'),
+      personalRate('d', 'Reece'),
+    ]);
+    const result = resolveJobRequirements({ categoryId: 'other', nicheId: 'fencing', supplierBook: book });
+    expect(result.supplierBookSuppliers).toEqual(['Metro Fencing', 'Stratco', 'Bowens']);
+  });
+
+  // Injecting a snapshot (rather than loading one) is what keeps this callable
+  // from the pure tool path with no AsyncStorage / Firestore in the graph.
+  it('resolveJobRequirements stays synchronous and does no IO', () => {
+    const result = resolveJobRequirements({
+      categoryId: 'other',
+      nicheId: 'fencing',
+      supplierBook: COLORBOND_BOOK,
+    });
+    expect(result).not.toBeInstanceOf(Promise);
+    expect(typeof (result as unknown as { then?: unknown }).then).toBe('undefined');
   });
 
   it('measurementDriven true for per_linear_m niche', () => {
