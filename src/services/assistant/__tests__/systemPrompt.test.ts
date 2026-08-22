@@ -154,6 +154,28 @@ describe('supplier book policy', () => {
     );
   });
 
+  it('Mate never reads prices off the photo itself', () => {
+    expect(section).toContain('You do NOT read the prices off it yourself');
+    expect(section).toContain('NEVER type a price into their book');
+    // Same promise made in the can't-do block, where a tradie's question
+    // about it is most likely to land.
+    expect(MATE_SYSTEM_PROMPT).toContain(
+      "You can't read prices off a photo yourself, and you never type a price into the tradie's supplier book.",
+    );
+  });
+
+  it('propose_import_supplier_list is described AND declared', () => {
+    expect(section).toContain('call propose_import_supplier_list');
+    expect(promptSection('Other tools')).toContain('propose_import_supplier_list —');
+    const declaration = TOOL_DECLARATIONS.find((t) => t.name === 'propose_import_supplier_list');
+    expect(declaration).toBeTruthy();
+    expect(declaration?.parameters.required ?? []).toEqual([]);
+  });
+
+  it('folds the post-pipeline nudge into one line naming at most two items', () => {
+    expect(section).toContain('at most ONE line naming no more than two items');
+  });
+
   it('get_job_requirements schema documents supplierBookPopulated', () => {
     const declaration = TOOL_DECLARATIONS.find((t) => t.name === 'get_job_requirements');
     expect(declaration?.description).toContain('supplierBookPopulated');

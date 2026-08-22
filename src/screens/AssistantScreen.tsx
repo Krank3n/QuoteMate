@@ -90,9 +90,23 @@ import {
   ATTACH_LIMIT_COPY,
   canAttachMore,
   collectQuotePhotos,
+  markAttachmentConsumedBy,
   markAttachmentsConsumed,
+  mostRecentUnconsumedAttachment,
 } from './assistant/chatAttachments';
 import { buildSupplierGapNote } from '../services/assistant/supplierGapNote';
+import { setUnconsumedAttachmentProbe } from '../services/assistant/proposalTools';
+import { ensureLocalUri } from '../services/assistant/attachmentBytes';
+import { useSupplierListImport, type ExtractResult } from '../hooks/useSupplierListImport';
+import type { SaveSummary } from '../hooks/useSupplierListImport';
+import { SupplierListReviewModal } from '../components/SupplierListReviewModal';
+import { SpreadsheetColumnMapperModal } from '../components/SpreadsheetColumnMapperModal';
+import { loadFavoritesFromLocal } from '../services/materialFavorites';
+import { loadGroups } from '../services/supplierGroupService';
+import { searchFavorites } from '../services/localMaterialMatcher';
+import { invalidateSupplierBookCache } from '../services/supplierBook';
+import { canRunMatePipeline } from '../store/planGates';
+import type { AssistantSheetHint } from '../store/useStore';
 
 interface AlertConfig {
   type: AlertType;
@@ -567,6 +581,35 @@ export function AssistantScreen() {
   const [photoSheetVisible, setPhotoSheetVisible] = useState(false);
   const [captureModalVisible, setCaptureModalVisible] = useState(false);
   const [alertConfig, setAlertConfig] = useState<AlertConfig | null>(null);
+
+  // --- Supplier-list import -------------------------------------------------
+  // The extracted rows live in a ref, not on the message: chat history is
+  // in-memory only so the ref has the same lifetime, and a 400-row extraction
+  // on a Firestore-mirrored message would be a 400-row write per flush.
+  const supplierImportsRef = useRef<Map<string, ExtractResult>>(new Map());
+  const activeImportIdRef = useRef<string | null>(null);
+  const importCardPhaseRef = useRef<string>('');
+  const [reviewImportId, setReviewImportId] = useState<string | null>(null);
+  const reviewImportIdRef = useRef<string | null>(null);
+  useEffect(() => { reviewImportIdRef.current = reviewImportId; }, [reviewImportId]);
+  const [importSourceSheetVisible, setImportSourceSheetVisible] = useState(false);
+  const importSupplierNameRef = useRef<string | undefined>(undefined);
+  // Deterministic nudge control. The model is not trusted to remember it said
+  // no once — a second ask about the same thing is how a helper becomes a nag.
+  const importOfferRef = useRef<{ declined: boolean; offeredForQuote: Set<string> }>({
+    declined: false,
+    offeredForQuote: new Set(),
+  });
+  // The quote the chat is working on, so a finished import can say how much of
+  // it now prices off the tradie's own list.
+  const activeQuoteIdRef = useRef<string | null>(null);
+  // Late-bound so the hook (and handleApply, which is declared first) can
+  // reach handlers defined further down.
+  const onImportSavedRef = useRef<(summary: SaveSummary) => void>(() => {});
+  const startSupplierImportRef = useRef<(hint: AssistantSheetHint) => Promise<void>>(async () => {});
+  const importer = useSupplierListImport({
+    onSaved: (summary) => onImportSavedRef.current(summary),
+  });
   const [voiceState, setVoiceState] = useState<VoiceState>('idle');
   // Ref mirror of voiceState so long-lived closures (the sticky idle
   // watchdog interval) read the current value instead of the one
@@ -925,10 +968,27 @@ export function AssistantScreen() {
         clearTimeout(narrationTimer);
       }
 
+      const mintedId = !result.ok || !result.navigate
+        ? undefined
+        : 'quoteId' in result.navigate ? result.navigate.quoteId
+        : result.navigate.kind === 'open_invoice' ? result.navigate.invoiceId
+        : undefined;
+      if (mintedId) activeQuoteIdRef.current = mintedId;
+
       // The supplier-book gap, if this run is worth mentioning at all. Text
       // chat never receives [pipeline-done] (that needs an open live session),
-      // so this rides the [context] line further down as well.
-      const gapNote = result.ok && result.supplierGap ? buildSupplierGapNote(result.supplierGap) : null;
+      // so this rides the [context] line further down as well. Suppressed once
+      // the tradie has knocked the import back, and once per quote — the model
+      // is not trusted to remember either.
+      const gapQuoteId = mintedId || (proposal.type === 'propose_reprice' ? proposal.quoteId : undefined);
+      const gapNote =
+        !importOfferRef.current.declined &&
+        !(gapQuoteId && importOfferRef.current.offeredForQuote.has(gapQuoteId)) &&
+        result.ok &&
+        result.supplierGap
+          ? buildSupplierGapNote(result.supplierGap)
+          : null;
+      if (gapNote && gapQuoteId) importOfferRef.current.offeredForQuote.add(gapQuoteId);
 
       if (narrating && liveSessionForNarration?.isOpen()) {
         const heads =
@@ -971,6 +1031,13 @@ export function AssistantScreen() {
         );
         return;
       }
+      // A sheet opens OVER the chat — never route it through handleNavigate,
+      // which would leave the conversation the import is for.
+      if (result.sheet?.kind === 'supplier_import') {
+        await startSupplierImportRef.current(result.sheet);
+        return;
+      }
+
       // Surface a note (e.g. partial success — draft created but pipeline
       // failed) before deciding what to do with the navigate hint.
       if (result.note) {
@@ -991,11 +1058,6 @@ export function AssistantScreen() {
       // documentType:'invoice' resolves to { kind:'open_invoice', invoiceId }
       // so the previous `quoteId in navigate` check missed every drafted
       // invoice and show_quote follow-ups would fail to resolve.
-      const mintedId = !result.navigate
-        ? undefined
-        : 'quoteId' in result.navigate ? result.navigate.quoteId
-        : result.navigate.kind === 'open_invoice' ? result.navigate.invoiceId
-        : undefined;
       if (mintedId) rememberAppliedQuote(proposal.id, mintedId);
 
       // Claim the photos this draft carried. Without the stamp, an unrelated
@@ -1185,8 +1247,17 @@ export function AssistantScreen() {
     (message: ChatMessage, proposal: Proposal) => {
       if (!conversation) return;
       updateProposalStatus(conversation.id, message.id, proposal.id, 'dismissed');
+      // A "no thanks" on the price-list import is final for this chat. Told to
+      // the model AND enforced here — dedupe is not something to leave to it.
+      if (proposal.type === 'propose_import_supplier_list') {
+        importOfferRef.current.declined = true;
+        noteToMate(
+          conversation.id,
+          "[context] The tradie knocked back the supplier-list import. Don't offer it again in this chat.",
+        );
+      }
     },
-    [conversation, updateProposalStatus],
+    [conversation, updateProposalStatus, noteToMate],
   );
 
   // Put a quote on screen — render it inline in the chat (job header + scope +
@@ -1198,6 +1269,8 @@ export function AssistantScreen() {
       const state = useStore.getState();
       const exists = !!(state.getDocumentById(quoteId) || state.quotes.find((q) => q.id === quoteId));
       if (!exists) return false;
+      // The quote a finished import measures its coverage against.
+      activeQuoteIdRef.current = quoteId;
       appendMessage(convoId, {
         id: generateId(),
         role: 'assistant',
@@ -1212,6 +1285,290 @@ export function AssistantScreen() {
 
   const showAlert = useCallback((config: AlertConfig) => setAlertConfig(config), []);
   const dismissAlert = useCallback(() => setAlertConfig(null), []);
+
+  // Mate only ever asks for "the photo they just sent" — it never sees or
+  // names an attachment id. The validator asks this before it lets a
+  // source:'attachment' import through.
+  useEffect(() => {
+    setUnconsumedAttachmentProbe(() => {
+      const state = useStore.getState();
+      const messages =
+        state.conversations.find((c) => c.id === state.currentConversationId)?.messages || [];
+      return !!mostRecentUnconsumedAttachment(messages);
+    });
+    return () => setUnconsumedAttachmentProbe(() => false);
+  }, []);
+
+  // Nobody wants Mate talking over them while they edit forty rows of prices.
+  // stop() is terminal on an audio queue, so resuming means a fresh one.
+  const suspendVoiceForModal = useCallback(() => {
+    narrationModeRef.current = false;
+    const queue = audioQueueRef.current;
+    audioQueueRef.current = null;
+    matePlayingRef.current = false;
+    if (queue) { try { void queue.stop(); } catch { /* noop */ } }
+  }, []);
+
+  const resumeVoiceAfterModal = useCallback(() => {
+    if (!voiceSessionRef.current || audioQueueRef.current) return;
+    const queue = createAudioQueue();
+    queue.setOnActiveChange((active) => {
+      matePlayingRef.current = active;
+      if (active) lastVoiceActivityRef.current = Date.now();
+    });
+    audioQueueRef.current = queue;
+    lastVoiceActivityRef.current = Date.now();
+  }, []);
+
+  const openSupplierReview = useCallback(
+    (importId: string) => {
+      suspendVoiceForModal();
+      setReviewImportId(importId);
+    },
+    [suspendVoiceForModal],
+  );
+
+  const closeSupplierReview = useCallback(() => {
+    setReviewImportId(null);
+    importer.cancelReview();
+    resumeVoiceAfterModal();
+  }, [importer, resumeVoiceAfterModal]);
+
+  /**
+   * Open the price-list reader over the chat. Never navigates — the import
+   * exists to fix the quote the tradie is mid-conversation about.
+   */
+  const startSupplierImport = useCallback(
+    async (hint: AssistantSheetHint) => {
+      importSupplierNameRef.current = hint.supplierName;
+      const state = useStore.getState();
+      const convoId = state.conversations.find((c) => c.id === state.currentConversationId)?.id;
+      if (!convoId) return;
+
+      if (hint.source === 'attachment') {
+        const messages = state.conversations.find((c) => c.id === convoId)?.messages || [];
+        const attachment = mostRecentUnconsumedAttachment(messages);
+        if (attachment) {
+          // Claim it first — a price list is not a site photo, and it must not
+          // also ride onto the quote.
+          for (const patch of markAttachmentConsumedBy(messages, attachment.id, 'supplier_import')) {
+            updateMessage(convoId, patch.messageId, { attachments: patch.attachments });
+          }
+          // FileSystem.readAsStringAsync can't read https://, so a photo whose
+          // local copy is gone gets pulled back into the cache first.
+          const uri = await ensureLocalUri(attachment);
+          if (!uri) {
+            appendMessage(convoId, {
+              id: generateId(),
+              role: 'assistant',
+              text: "Lost that photo — send it again and I'll read it.",
+              createdAt: new Date().toISOString(),
+            });
+            return;
+          }
+          await importer.importFromUris({
+            uris: [uri],
+            mimeType: attachment.mimeType,
+            supplierName: hint.supplierName,
+          });
+          return;
+        }
+        // Nothing spare to read — fall through and ask.
+      }
+
+      if (
+        hint.source === 'camera' ||
+        hint.source === 'gallery' ||
+        hint.source === 'pdf' ||
+        hint.source === 'spreadsheet'
+      ) {
+        await importer.startImport(hint.source);
+        return;
+      }
+      setImportSourceSheetVisible(true);
+    },
+    [importer, appendMessage, updateMessage],
+  );
+
+  useEffect(() => { startSupplierImportRef.current = startSupplierImport; }, [startSupplierImport]);
+
+  const importSourceOptions: ActionSheetOption[] = useMemo(
+    () => [
+      { icon: 'camera', label: 'Snap the price list', onPress: () => { void importer.startImport('camera'); } },
+      { icon: 'image-multiple', label: 'Pick from photos', onPress: () => { void importer.startImport('gallery'); } },
+      { icon: 'file-pdf-box', label: 'PDF price list', onPress: () => { void importer.startImport('pdf'); } },
+      { icon: 'file-document-edit-outline', label: 'Spreadsheet (CSV or Excel)', onPress: () => { void importer.startImport('spreadsheet'); } },
+    ],
+    [importer],
+  );
+
+  // Mount the card the moment extraction actually starts — not when a picker
+  // opens, or a cancelled pick would leave a card spinning forever.
+  useEffect(() => {
+    if (importer.phase !== 'extracting' || activeImportIdRef.current || !conversation) return;
+    const importId = generateId();
+    activeImportIdRef.current = importId;
+    importCardPhaseRef.current = 'extracting';
+    appendMessage(conversation.id, {
+      id: importId,
+      role: 'assistant',
+      text: '',
+      createdAt: new Date().toISOString(),
+      supplierImport: { importId, phase: 'extracting' },
+    });
+  }, [importer.phase, conversation, appendMessage]);
+
+  // Extraction landed — park the rows in the ref, flip the card, open the
+  // reader. The message id IS the import id, so updates need no lookup table.
+  useEffect(() => {
+    const importId = activeImportIdRef.current;
+    if (!importId || !conversation) return;
+    if (importCardPhaseRef.current !== 'extracting') return;
+    if (importer.phase !== 'reviewing' || !importer.extractedItems.length) return;
+    importCardPhaseRef.current = 'ready';
+    activeImportIdRef.current = null;
+    supplierImportsRef.current.set(importId, {
+      supplierName: importer.extractedSupplierName,
+      supplierContact: importer.extractedSupplierContact,
+      items: importer.extractedItems,
+    });
+    updateMessage(conversation.id, importId, {
+      supplierImport: {
+        importId,
+        phase: 'ready',
+        supplierName: importer.extractedSupplierName || undefined,
+        itemCount: importer.extractedItems.length,
+        sampleNames: importer.extractedItems.slice(0, 3).map((i) => i.name),
+      },
+      cta: { label: 'Check & save', action: { type: 'open_supplier_review', importId } },
+    });
+    openSupplierReview(importId);
+  }, [
+    importer.phase,
+    importer.extractedItems,
+    importer.extractedSupplierName,
+    importer.extractedSupplierContact,
+    conversation,
+    updateMessage,
+    openSupplierReview,
+  ]);
+
+  // Extraction failed. On site, "no signal" is the likeliest cause and the
+  // right advice is "keep the photo", not "try a sharper one".
+  useEffect(() => {
+    const importId = activeImportIdRef.current;
+    if (!importId || !conversation || !importer.errorMessage) return;
+    activeImportIdRef.current = null;
+    importCardPhaseRef.current = '';
+    const offline = /network|offline|internet|connection|timed out/i.test(importer.errorMessage);
+    updateMessage(conversation.id, importId, {
+      supplierImport: {
+        importId,
+        phase: 'failed',
+        error: offline
+          ? "No signal — hang onto that photo and I'll read it when you're back on."
+          : importer.errorMessage,
+      },
+      cta: { label: 'Try again', action: { type: 'open_supplier_review', importId } },
+    });
+    importer.clearError();
+  }, [importer.errorMessage, importer.clearError, conversation, updateMessage]);
+
+  // Backing out of the column mapper drops the importer to idle with no rows
+  // and no error, which would leave the card spinning forever.
+  useEffect(() => {
+    const importId = activeImportIdRef.current;
+    if (!importId || !conversation) return;
+    if (importer.phase !== 'idle' || importCardPhaseRef.current !== 'extracting') return;
+    if (importer.errorMessage) return;
+    activeImportIdRef.current = null;
+    importCardPhaseRef.current = '';
+    updateMessage(conversation.id, importId, {
+      supplierImport: {
+        importId,
+        phase: 'failed',
+        error: "Didn't get a price list out of that one.",
+      },
+      cta: { label: 'Try again', action: { type: 'open_supplier_review', importId } },
+    });
+  }, [importer.phase, importer.errorMessage, conversation, updateMessage]);
+
+  /**
+   * THE guard that decides whether this feature looks like it works. An
+   * imported list that silently doesn't match is indistinguishable from a
+   * broken import: the pipeline searches "Colorbond fence infill sheet 1.8m
+   * per piece" against an imported "Colorbond sheet 1.8m Monument", and below
+   * the 0.6 threshold nothing happens and the tradie can't tell why. So count
+   * the real matches and say the number.
+   */
+  const countCoveredRows = useCallback(async (quoteId: string): Promise<number> => {
+    try {
+      const state = useStore.getState();
+      const materials =
+        state.getDocumentById(quoteId)?.materials ||
+        state.quotes.find((q) => q.id === quoteId)?.materials ||
+        [];
+      if (!materials.length) return 0;
+      const [favorites, groups] = await Promise.all([
+        loadFavoritesFromLocal(),
+        loadGroups().catch(() => []),
+      ]);
+      const favList = Object.values(favorites);
+      let covered = 0;
+      for (const m of materials) {
+        const term = m.searchTerm || m.name;
+        if (!term) continue;
+        if (searchFavorites(term, favList, groups).length > 0) covered += 1;
+      }
+      return covered;
+    } catch {
+      return 0;
+    }
+  }, []);
+
+  useEffect(() => {
+    onImportSavedRef.current = (summary: SaveSummary) => {
+      const importId = reviewImportIdRef.current;
+      setReviewImportId(null);
+      resumeVoiceAfterModal();
+      // Without this the next get_job_requirements still reports an empty book
+      // and Mate re-offers the import it just finished.
+      invalidateSupplierBookCache();
+      const convoId = useStore.getState().currentConversationId;
+      if (!convoId) return;
+      const quoteId = activeQuoteIdRef.current;
+      void (async () => {
+        const coveredRows = quoteId ? await countCoveredRows(quoteId) : 0;
+        if (importId) {
+          updateMessage(convoId, importId, {
+            supplierImport: {
+              importId,
+              phase: 'saved',
+              supplierName: summary.supplierName || undefined,
+              savedCount: summary.itemCount,
+              coveredRows,
+            },
+            cta: undefined,
+          });
+        }
+        // Only dangle a re-price at someone who can actually run one —
+        // rewarding a successful import with a paywall is worse than silence.
+        const canReprice = canRunMatePipeline(useStore.getState().getEffectivePlan());
+        const tail =
+          coveredRows > 0 && quoteId
+            ? canReprice
+              ? ` ${coveredRows} row${coveredRows === 1 ? '' : 's'} on quote ${quoteId} would now price off their own list — offer propose_reprice in one short line.`
+              : ` ${coveredRows} row${coveredRows === 1 ? '' : 's'} on quote ${quoteId} would now price off their own list, but re-pricing isn't in their plan. Say the list is saved and the next quote will use it — do NOT offer a re-price.`
+            : ' Nothing on the quote in hand matched it yet — say the list is saved and move on.';
+        noteToMate(
+          convoId,
+          `[context] The tradie saved ${summary.itemCount} item${summary.itemCount === 1 ? '' : 's'}` +
+            (summary.supplierName ? ` from ${summary.supplierName}` : '') +
+            ` into their supplier book.${tail}`,
+        );
+      })();
+    };
+  }, [countCoveredRows, noteToMate, resumeVoiceAfterModal, updateMessage]);
 
   /**
    * Stage picked photos on the composer and upload each one. Uploads run
@@ -2156,9 +2513,30 @@ export function AssistantScreen() {
       if (!message.cta) return;
       if (message.cta.action.type === 'open_quote') {
         handleNavigate({ kind: 'job_preview', quoteId: message.cta.action.quoteId });
+        return;
+      }
+      if (message.cta.action.type === 'open_supplier_review') {
+        const { importId } = message.cta.action;
+        if (supplierImportsRef.current.has(importId)) {
+          openSupplierReview(importId);
+          return;
+        }
+        // The rows never landed — start over rather than reopen an empty form.
+        if (message.supplierImport?.phase === 'failed') {
+          void startSupplierImportRef.current({ kind: 'supplier_import', source: 'ask' });
+          return;
+        }
+        // Chat history is in-memory only, so the ref died with it. Say so
+        // instead of opening a reader with nothing in it.
+        if (conversation) {
+          updateMessage(conversation.id, message.id, {
+            supplierImport: { importId, phase: 'expired' },
+            cta: undefined,
+          });
+        }
       }
     },
-    [handleNavigate],
+    [handleNavigate, openSupplierReview, conversation, updateMessage],
   );
 
   const handleInlineQuoteEdit = useCallback(
@@ -2532,6 +2910,55 @@ export function AssistantScreen() {
             'Watch the shadows — Mate reads what it can see',
             "Two at a time; send them and I'll take the next lot",
           ]}
+        />
+
+        {/* Price-list reader, hosted OVER the chat. The capture + column
+            mapper + review trio is the same block SuppliersStep renders; the
+            review modal is a plain RNModal with no navigation coupling. */}
+        <SupplierListCaptureModal
+          visible={importer.captureModalVisible}
+          onCancel={importer.cancelCapture}
+          onComplete={importer.handleCaptureComplete}
+          processing={importer.phase === 'extracting'}
+          processingLabel={importer.loadingLabel}
+          counterLabel="pages"
+          tips={[
+            'Hold steady and let the autofocus settle',
+            'Get the supplier header in — it names the list',
+            'Make sure the prices and product names are sharp',
+            'Multiple pages? Snap them all before hitting Done',
+          ]}
+        />
+
+        <SpreadsheetColumnMapperModal
+          visible={importer.columnMappingVisible}
+          parsed={importer.parsedSpreadsheet}
+          initialMapping={importer.autoDetectedMapping}
+          onCancel={importer.cancelColumnMapping}
+          onConfirm={importer.applyColumnMapping}
+        />
+
+        <SupplierListReviewModal
+          visible={!!reviewImportId}
+          initialSupplierName={
+            (reviewImportId && supplierImportsRef.current.get(reviewImportId)?.supplierName) ||
+            importSupplierNameRef.current ||
+            ''
+          }
+          initialItems={
+            (reviewImportId && supplierImportsRef.current.get(reviewImportId)?.items) || []
+          }
+          existingSupplierNames={importer.existingSupplierNames}
+          saving={importer.saving}
+          onCancel={closeSupplierReview}
+          onSave={importer.handleSaveImported}
+        />
+
+        <ActionSheet
+          visible={importSourceSheetVisible}
+          onDismiss={() => setImportSourceSheetVisible(false)}
+          title="Where's the price list?"
+          options={importSourceOptions}
         />
 
         <AlertModal

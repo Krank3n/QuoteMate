@@ -83,6 +83,39 @@ export function collectQuotePhotos(messages: ChatMessage[]): QuotePhoto[] {
 }
 
 /**
+ * The newest photo nobody has spent yet. Mate never names an attachment id —
+ * it only says "the one they just sent", and this is what that means.
+ */
+export function mostRecentUnconsumedAttachment(messages: ChatMessage[]): ChatAttachment | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const attachments = messages[i].attachments;
+    if (!attachments?.length) continue;
+    for (let j = attachments.length - 1; j >= 0; j--) {
+      const a = attachments[j];
+      if (a.status === 'ready' && !a.consumedByQuoteId && !a.consumedBy) return a;
+    }
+  }
+  return null;
+}
+
+/** Claim one attachment for a purpose, so nothing else picks it up. */
+export function markAttachmentConsumedBy(
+  messages: ChatMessage[],
+  attachmentId: string,
+  consumedBy: NonNullable<ChatAttachment['consumedBy']>,
+): Array<{ messageId: string; attachments: ChatAttachment[] }> {
+  const patches: Array<{ messageId: string; attachments: ChatAttachment[] }> = [];
+  for (const m of messages) {
+    if (!m.attachments?.some((a) => a.id === attachmentId)) continue;
+    patches.push({
+      messageId: m.id,
+      attachments: m.attachments.map((a) => (a.id === attachmentId ? { ...a, consumedBy } : a)),
+    });
+  }
+  return patches;
+}
+
+/**
  * Patches stamping every attachment collectQuotePhotos just handed over, so a
  * second draft in the same chat can't inherit the first job's photos. Returns
  * one entry per message that actually changed.

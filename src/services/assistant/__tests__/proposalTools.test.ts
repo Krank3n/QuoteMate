@@ -1,5 +1,7 @@
-import { buildProposal } from '../proposalTools';
+import { afterEach } from 'vitest';
+import { buildProposal, setUnconsumedAttachmentProbe } from '../proposalTools';
 import { rememberAppliedQuote } from '../quoteRefMap';
+import type { ImportSupplierListProposal } from '../../../types/assistant';
 import type {
   RepriceQuoteProposal,
   DeleteLineItemProposal,
@@ -159,5 +161,64 @@ describe('propose_draft_quote description hygiene', () => {
       jobDescription: clean,
     });
     expect((proposal as any).jobDescription).toBe(clean);
+  });
+});
+
+// This card exists to unblock a tradie whose prices are wrong. Refusing it
+// over a bad enum would be the worst possible moment to be pedantic, so the
+// validator never errors — it coerces.
+describe('buildProposal propose_import_supplier_list', () => {
+  afterEach(() => setUnconsumedAttachmentProbe(() => false));
+
+  it('builds with no arguments at all, defaulting source to "ask"', () => {
+    const { proposal, error } = buildProposal('propose_import_supplier_list', 'tool_i0', {});
+    expect(error).toBeUndefined();
+    const p = proposal as ImportSupplierListProposal;
+    expect(p.type).toBe('propose_import_supplier_list');
+    expect(p.source).toBe('ask');
+    expect(p.supplierName).toBeUndefined();
+    expect(p.missedItems).toBeUndefined();
+  });
+
+  it('coerces an unknown source to "ask"', () => {
+    const { proposal } = buildProposal('propose_import_supplier_list', 'tool_i1', {
+      source: 'telepathy',
+      reason: 'because',
+    });
+    const p = proposal as ImportSupplierListProposal;
+    expect(p.source).toBe('ask');
+    expect(p.reason).toBeUndefined();
+  });
+
+  it('downgrades "attachment" to "ask" when nothing is attached', () => {
+    const { proposal } = buildProposal('propose_import_supplier_list', 'tool_i2', {
+      source: 'attachment',
+    });
+    expect((proposal as ImportSupplierListProposal).source).toBe('ask');
+  });
+
+  it('keeps "attachment" when the chat still holds an unspent photo', () => {
+    setUnconsumedAttachmentProbe(() => true);
+    const { proposal } = buildProposal('propose_import_supplier_list', 'tool_i3', {
+      source: 'attachment',
+    });
+    expect((proposal as ImportSupplierListProposal).source).toBe('attachment');
+  });
+
+  it('clamps missedItems to 5', () => {
+    const { proposal } = buildProposal('propose_import_supplier_list', 'tool_i4', {
+      missedItems: ['a', 'b', 'c', 'd', 'e', 'f', 'g'],
+    });
+    expect((proposal as ImportSupplierListProposal).missedItems).toEqual(['a', 'b', 'c', 'd', 'e']);
+  });
+
+  it('trims supplierName and drops it when blank', () => {
+    const named = buildProposal('propose_import_supplier_list', 'tool_i5', {
+      supplierName: '  Metro Fencing  ',
+    });
+    expect((named.proposal as ImportSupplierListProposal).supplierName).toBe('Metro Fencing');
+
+    const blank = buildProposal('propose_import_supplier_list', 'tool_i6', { supplierName: '   ' });
+    expect((blank.proposal as ImportSupplierListProposal).supplierName).toBeUndefined();
   });
 });

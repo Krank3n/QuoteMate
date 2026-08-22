@@ -14,6 +14,7 @@ import { extractSupplierPriceList as extractViaFunction } from './llmService';
 import { generateId } from '../utils/generateId';
 import { bulkSaveFavorites } from './materialFavorites';
 import { getSupplierGroupByName, loadGroups, saveGroup } from './supplierGroupService';
+import { invalidateSupplierBookCache } from './supplierBook';
 // One implementation of the local-uri read, shared with Mate's chat
 // attachments — see services/assistant/attachmentBytes.
 import { readBase64 } from './assistant/attachmentBytes';
@@ -299,6 +300,11 @@ export async function persistImportToSupplierBook(args: {
       // Don't block — items are already saved.
     }
   }
+
+  // Mate reads a cached snapshot of the book; without this the next
+  // get_job_requirements still reports it empty and Mate re-offers the import
+  // it just finished.
+  invalidateSupplierBookCache();
 
   return {
     itemCount: counts.created + counts.updated,

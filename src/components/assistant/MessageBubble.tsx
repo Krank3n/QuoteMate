@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, ActivityIndicator, Image, TouchableOpacity } from 'react-native';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { makeStyles, useThemeColors } from '../../theme';
-import { ChatAttachment, ChatMessage } from '../../types/assistant';
+import { ChatAttachment, ChatMessage, SupplierImportCard } from '../../types/assistant';
 import { useStore } from '../../store/useStore';
 import { useJobStore } from '../../store/useJobStore';
 import { quoteToDocument } from '../../types/documentAdapter';
@@ -141,6 +141,62 @@ function AttachmentStrip({ attachments }: { attachments: ChatAttachment[] }) {
   );
 }
 
+// Live state of a supplier-list import, rendered inside the bubble. The CTA
+// that opens the reader is the message's own cta, so this is text only.
+function SupplierImportRow({ card }: { card: SupplierImportCard }) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
+  const from = card.supplierName ? ` from ${card.supplierName}` : '';
+  const plural = (n: number) => (n === 1 ? 'item' : 'items');
+
+  if (card.phase === 'extracting') {
+    return (
+      <View style={styles.workingRow}>
+        <ActivityIndicator size="small" color={themeColors.accentText} />
+        <Text style={[styles.text, styles.textAssistant, styles.workingStatus]}>
+          Reading the price list…
+        </Text>
+      </View>
+    );
+  }
+
+  const icon =
+    card.phase === 'saved' ? 'check-circle'
+    : card.phase === 'ready' ? 'clipboard-list-outline'
+    : 'alert-circle-outline';
+  const tint =
+    card.phase === 'saved' ? themeColors.money
+    : card.phase === 'ready' ? themeColors.accentText
+    : themeColors.error;
+  const headline =
+    card.phase === 'ready'
+      ? `Read ${card.itemCount ?? 0} ${plural(card.itemCount ?? 0)}${from} — check & save`
+      : card.phase === 'saved'
+        ? `Saved ${card.savedCount ?? 0} ${plural(card.savedCount ?? 0)}${from}.`
+        : card.phase === 'expired'
+          ? "That list is gone from this chat — send it again and I'll read it."
+          : card.error || "Couldn't read that price list.";
+
+  return (
+    <View>
+      <View style={styles.workingRow}>
+        <MaterialCommunityIcons name={icon} size={18} color={tint} />
+        <Text style={[styles.text, styles.textAssistant, styles.workingStatus]}>{headline}</Text>
+      </View>
+      {card.phase === 'ready' && !!card.sampleNames?.length && (
+        <Text style={styles.workingDetail} numberOfLines={2}>
+          {card.sampleNames.join(' · ')}
+        </Text>
+      )}
+      {card.phase === 'saved' && !!card.coveredRows && (
+        <Text style={styles.workingDetail}>
+          {card.coveredRows} {card.coveredRows === 1 ? 'row' : 'rows'} on that quote now price off your list.
+        </Text>
+      )}
+    </View>
+  );
+}
+
 function MessageBubbleImpl({
   message,
   onCtaPress,
@@ -202,9 +258,13 @@ function MessageBubbleImpl({
         style={[
           styles.bubble,
           isUser ? styles.bubbleUser : styles.bubbleAssistant,
+          // The import card carries a spinner + status row; give it the same
+          // floor the working card gets so it can't collapse.
+          message.supplierImport ? styles.workingBubble : null,
           message.errorMessage ? styles.bubbleError : null,
         ]}
       >
+        {!!message.supplierImport && <SupplierImportRow card={message.supplierImport} />}
         {!!message.attachments?.length && <AttachmentStrip attachments={message.attachments} />}
         {!!message.text && (
           <Text style={[styles.text, isUser ? styles.textUser : styles.textAssistant]}>

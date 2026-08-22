@@ -4,7 +4,9 @@ import { describe, it, expect } from 'vitest';
 import {
   canAttachMore,
   collectQuotePhotos,
+  markAttachmentConsumedBy,
   markAttachmentsConsumed,
+  mostRecentUnconsumedAttachment,
 } from '../chatAttachments';
 import type { ChatAttachment, ChatMessage } from '../../../types/assistant';
 
@@ -106,6 +108,39 @@ describe('markAttachmentsConsumed', () => {
 
   it('returns no patches when nothing is carryable', () => {
     expect(markAttachmentsConsumed([msg('m1')], 'q1')).toEqual([]);
+  });
+});
+
+// Mate only ever says "the photo they just sent" — it never names an id, so
+// the screen has to resolve which one that is.
+describe('mostRecentUnconsumedAttachment', () => {
+  it('picks the newest photo nobody has spent', () => {
+    const messages = [msg('m1', [att('old')]), msg('m2', [att('newer'), att('newest')])];
+    expect(mostRecentUnconsumedAttachment(messages)?.id).toBe('newest');
+  });
+
+  it('skips photos already claimed by a quote or an import', () => {
+    const messages = [
+      msg('m1', [att('free')]),
+      msg('m2', [att('onQuote', { consumedByQuoteId: 'q1' }), att('imported', { consumedBy: 'supplier_import' })]),
+    ];
+    expect(mostRecentUnconsumedAttachment(messages)?.id).toBe('free');
+  });
+
+  it('is null when there is nothing spare', () => {
+    expect(mostRecentUnconsumedAttachment([msg('m1')])).toBeNull();
+    expect(mostRecentUnconsumedAttachment([msg('m1', [att('up', { status: 'uploading' })])])).toBeNull();
+  });
+});
+
+describe('markAttachmentConsumedBy', () => {
+  it('claims one photo for the import so it cannot also become a site photo', () => {
+    const messages = [msg('m1', [att('a'), att('b')])];
+    const patches = markAttachmentConsumedBy(messages, 'a', 'supplier_import');
+    expect(patches[0].attachments[0].consumedBy).toBe('supplier_import');
+    expect(patches[0].attachments[1].consumedBy).toBeUndefined();
+    const after = [{ ...messages[0], attachments: patches[0].attachments }];
+    expect(collectQuotePhotos(after).map((p) => p.id)).toEqual(['b']);
   });
 });
 

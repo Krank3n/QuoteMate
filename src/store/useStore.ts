@@ -335,11 +335,27 @@ export type ApplyProposalResult =
       review?: QuoteReview;
       /** How much of this quote the tradie's own supplier rates could price. */
       supplierGap?: SupplierGapSummary;
+      /** Open a sheet over the chat. Deliberately not a NavigateHint — this
+       *  one must NOT leave the conversation. */
+      sheet?: AssistantSheetHint;
     }
   // `code` names machine-readable failures the screen branches on
   // (currently only 'PLAN_GATED' → Paywall); `error` stays the line shown
   // to the tradie.
   | { ok: false; error: string; code?: string };
+
+/**
+ * Something the chat screen opens ON TOP of the conversation. Kept apart from
+ * NavigateHint so it can never be routed through handleNavigate — leaving the
+ * chat to import a price list would lose the thread the import is for.
+ */
+export type AssistantSheetHint = {
+  kind: 'supplier_import';
+  source: 'attachment' | 'camera' | 'gallery' | 'pdf' | 'spreadsheet' | 'ask';
+  supplierName?: string;
+  /** Read the photo already sitting in this conversation. */
+  useAttachments?: boolean;
+};
 
 export type NavigateHint =
   | { kind: 'job_preview'; quoteId: string }
@@ -3199,6 +3215,21 @@ export const useStore = create<AppState>((set, get) => ({
           }
 
           return { ok: false, error: 'Quote not found.' };
+        }
+
+        case 'propose_import_supplier_list': {
+          // Deliberately NOT plan-gated. Importing a price list is free today
+          // (onboarding runs it for free users), and paywalling the one thing
+          // that makes a free user's prices right would be backwards.
+          return {
+            ok: true,
+            sheet: {
+              kind: 'supplier_import',
+              source: proposal.source,
+              supplierName: proposal.supplierName,
+              useAttachments: proposal.source === 'attachment',
+            },
+          };
         }
 
         case 'propose_draft_quote': {
