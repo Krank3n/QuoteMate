@@ -792,7 +792,7 @@ export function DashboardScreen() {
 
       {/* The two doors — Mate primary, wizard secondary */}
       <View style={styles.actionRow}>
-        <RNAnimated.View style={{ flex: 2, transform: [{ scale: btnPulse }, { rotate: btnTilt.interpolate({ inputRange: [-1, 1], outputRange: ['-1deg', '1deg'] }) }] }}>
+        <RNAnimated.View style={{ transform: [{ scale: btnPulse }, { rotate: btnTilt.interpolate({ inputRange: [-1, 1], outputRange: ['-1deg', '1deg'] }) }] }}>
           <View style={{
             borderRadius: 12,
             overflow: 'hidden',
@@ -809,8 +809,8 @@ export function DashboardScreen() {
               mode="contained" buttonColor={themeColors.accent} textColor={themeColors.onAccent}
               icon="chat-processing"
               onPress={handleMateDoor}
-              style={styles.newQuoteButton}
-              contentStyle={styles.newQuoteButtonContent}
+              style={styles.primaryDoor}
+              contentStyle={styles.primaryDoorContent}
               accessibilityLabel="Have Mate quote it for you"
             >
               Quote it for me
@@ -819,25 +819,22 @@ export function DashboardScreen() {
           </View>
         </RNAnimated.View>
 
-        <View style={[styles.mateButtonWrapper, { flex: 1 }]}>
-          <Pressable
-            onPress={handleNewJob}
-            accessibilityRole="button"
-            accessibilityLabel="Build the quote yourself"
-            style={({ pressed }) => [styles.mateButtonGlow, pressed && styles.mateButtonPressed]}
+        <Pressable
+          onPress={handleNewJob}
+          accessibilityRole="button"
+          accessibilityLabel="Build the quote yourself"
+          style={({ pressed }) => [styles.secondaryDoor, pressed && styles.secondaryDoorPressed]}
+        >
+          <LinearGradient
+            colors={[themeColors.surfaceOverlay, themeColors.surfaceRaised]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.secondaryDoorInner}
           >
-            <LinearGradient
-              colors={[themeColors.surfaceOverlay, themeColors.surfaceRaised]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.mateButton}
-            >
-              <MaterialCommunityIcons name="plus-circle" size={20} color={themeColors.accentText} />
-              <Text style={styles.mateButtonLabel}>Build it myself</Text>
-              <ShimmerOverlay tint={themeColors.accent} intensity={0.07} duration={5000} />
-            </LinearGradient>
-          </Pressable>
-        </View>
+            <MaterialCommunityIcons name="plus-circle" size={18} color={themeColors.accentText} />
+            <Text style={styles.secondaryDoorLabel}>Build it myself</Text>
+          </LinearGradient>
+        </Pressable>
       </View>
 
       {/* Quick Stats */}
@@ -1099,38 +1096,30 @@ const useStyles = makeStyles((t) => ({
     zIndex: 10,
     elevation: 10,
   },
+  // Stacked, not side-by-side: both door labels are long enough that a
+  // shared row forced the narrower one to wrap and squashed its icon
+  // against the edge.
   actionRow: {
-    flexDirection: 'row',
     alignItems: 'stretch',
-    gap: 12,
+    gap: 10,
     marginHorizontal: 20,
     marginBottom: 24,
   },
-  newQuoteButton: {
+  primaryDoor: {
     borderRadius: 12,
   },
-  newQuoteButtonContent: {
+  primaryDoorContent: {
     paddingVertical: 14,
   },
-  mateButtonWrapper: {
-    position: 'relative',
-  },
-  mateButtonGlow: {
-    flex: 1,
+  secondaryDoor: {
     borderRadius: 12,
     backgroundColor: t.colors.surfaceRaised,
-    shadowColor: t.colors.accent,
-    shadowOffset: { width: 0, height: 0 },
-    shadowRadius: 8,
-    shadowOpacity: 0.3,
-    elevation: 4,
   },
-  mateButtonPressed: {
-    transform: [{ scale: 0.97 }],
-    shadowOpacity: 0.15,
+  secondaryDoorPressed: {
+    transform: [{ scale: 0.98 }],
+    opacity: 0.85,
   },
-  mateButton: {
-    flex: 1,
+  secondaryDoorInner: {
     borderRadius: 12,
     overflow: 'hidden',
     flexDirection: 'row',
@@ -1138,14 +1127,15 @@ const useStyles = makeStyles((t) => ({
     justifyContent: 'center',
     gap: 8,
     paddingHorizontal: 12,
-    borderWidth: 1.5,
+    paddingVertical: 11,
+    borderWidth: 1,
     borderColor: t.colors.borderStrong,
   },
-  mateButtonLabel: {
-    fontSize: 15,
+  secondaryDoorLabel: {
+    fontSize: 14,
     fontFamily: 'Archivo-Bold',
     letterSpacing: 0.3,
-    color: t.colors.text,
+    color: t.colors.textSecondary,
   },
   statsContainer: {
     flexDirection: 'row',
