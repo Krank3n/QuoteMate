@@ -180,6 +180,32 @@ export interface WorkingStatus {
   summary?: string;
 }
 
+export type ChatAttachmentStatus = 'uploading' | 'ready' | 'failed';
+
+/**
+ * A photo the tradie attached to a chat message.
+ *
+ * NEVER put base64 on this shape. Every appendMessage/updateMessage schedules
+ * a conversation sync that writes `messages` verbatim to Firestore — inline
+ * bytes would blow the 1MB document limit and re-bill on every flush. Bytes
+ * are read on demand from `localUri` at send time (attachmentBytes.ts).
+ */
+export interface ChatAttachment {
+  id: string;
+  /** file:// (native) or blob: (web) — thumbnail + inline-bytes source. */
+  localUri?: string;
+  /** From uploadQuotePhoto; the durable copy that rides onto the quote. */
+  storageUrl?: string;
+  mimeType?: string;
+  /** Captured at PLAN_MAX_WIDTH; becomes QuotePhoto.isPlan. */
+  isPlan?: boolean;
+  status: ChatAttachmentStatus;
+  /** Set once carried onto a draft so a later draft can't inherit it. */
+  consumedByQuoteId?: string;
+  /** Claim marker — a photo spent on a supplier import is not a job photo. */
+  consumedBy?: 'supplier_import' | 'job_photo';
+}
+
 export type ChatMessageCtaAction =
   | { type: 'open_quote'; quoteId: string };
 
@@ -218,6 +244,9 @@ export interface ChatMessage {
   // that failed was invisible to the model and it would cheerfully re-propose
   // the same broken action turn after turn.
   hidden?: boolean;
+  // Photos attached to this bubble. Metadata only — the bytes are read from
+  // localUri at send time, never stored here (see ChatAttachment).
+  attachments?: ChatAttachment[];
 }
 
 export interface Conversation {

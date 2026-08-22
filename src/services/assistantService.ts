@@ -20,8 +20,16 @@
 // turn regardless of how many tool hops it takes — matching the voice token mint.
 
 import { auth } from '../config/firebase';
-import { AssistantChatResponse, ChatMessage, Proposal } from '../types/assistant';
+import { AssistantChatResponse, ChatAttachment, ChatMessage, Proposal } from '../types/assistant';
 import { generateId } from '../utils/generateId';
+import {
+  ATTACHMENT_LIMITS,
+  InlineBytes,
+  buildAttachmentParts,
+  buildMessageParts,
+  inlineAttachmentIds,
+} from './assistant/attachmentParts';
+import { resolveInlineBytes } from './assistant/attachmentBytes';
 import { MATE_SYSTEM_PROMPT } from './assistant/systemPrompt';
 import { TOOL_DECLARATIONS } from './assistant/toolSchemas';
 import { dispatchToolCall } from './assistant/toolDispatcher';
@@ -87,6 +95,9 @@ interface SendTurnArgs {
   // assistant bubble; the resolved AssistantChatResponse still has the full
   // text for callers that don't care about deltas.
   onTextDelta?: (delta: string) => void;
+  // Seam for tests: the default reads bytes through expo-file-system, which
+  // can't load under vitest.
+  resolveAttachment?: (a: ChatAttachment) => Promise<InlineBytes | null>;
 }
 
 // Function-calling models occasionally *write* a tool call instead of emitting
@@ -156,25 +167,49 @@ async function callChat(
   return { parts: data.parts as GeminiPart[], model: String(data.model || 'gemini') };
 }
 
-export async function sendAssistantTurn({ history, onTextDelta }: SendTurnArgs): Promise<AssistantChatResponse> {
+export async function sendAssistantTurn({
+  history,
+  onTextDelta,
+  resolveAttachment = resolveInlineBytes,
+}: SendTurnArgs): Promise<AssistantChatResponse> {
   // Seed the conversation. Drop empty-text messages (inline quote cards, error
-  // bubbles) — Gemini rejects a part whose text is empty. Hidden "[context]"
-  // notes DO carry text and are deliberately kept: they're how the model
-  // learns what an Apply actually did.
+  // bubbles) — Gemini rejects a part whose text is empty — unless they carry
+  // photos. Hidden "[context]" notes DO carry text and are deliberately kept:
+  // they're how the model learns what an Apply actually did.
   //
   // Consecutive same-role turns get merged into one. A hidden note is written
   // as a user turn, so an apply-failed note immediately followed by the
   // tradie's next message would otherwise send two user turns back to back.
+  const window = history.slice(-MAX_HISTORY_TURNS);
+  // Photo bytes ride only on the turn they were attached — see attachmentParts.
+  const inlineIds = inlineAttachmentIds(window);
+  let remainingChars = ATTACHMENT_LIMITS.maxBase64CharsTotal;
+
   const contents: unknown[] = [];
-  for (const m of history.slice(-MAX_HISTORY_TURNS)) {
-    if (!m.text?.trim()) continue;
+  for (const m of window) {
+    const atts = m.attachments || [];
+    if (!m.text?.trim() && atts.length === 0) continue;
+
+    const candidates = atts.filter((a) => inlineIds.has(a.id) && a.status !== 'failed');
+    const resolved = await Promise.all(
+      candidates.map(async (a) => ({
+        id: a.id,
+        isPlan: a.isPlan,
+        bytes: await resolveAttachment(a),
+      })),
+    );
+    const built = buildAttachmentParts(resolved, { remainingChars });
+    remainingChars -= built.usedChars;
+    const parts = buildMessageParts(m, built.parts, atts.length - built.parts.length);
+    if (!parts.length) continue;
+
     const role = m.role === 'assistant' ? 'model' : 'user';
-    const prev = contents[contents.length - 1] as { role: string; parts: { text: string }[] } | undefined;
+    const prev = contents[contents.length - 1] as { role: string; parts: unknown[] } | undefined;
     if (prev?.role === role) {
-      prev.parts.push({ text: m.text });
+      prev.parts.push(...parts);
       continue;
     }
-    contents.push({ role, parts: [{ text: m.text }] });
+    contents.push({ role, parts });
   }
 
   const proposals: Proposal[] = [];
