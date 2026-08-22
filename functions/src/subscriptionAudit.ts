@@ -18,7 +18,7 @@
  * Results land in adminStats/subscriptionAudit; adminSubscriptionAudit serves
  * them to the dashboard (computing live when the doc is missing/stale).
  */
-import * as functions from 'firebase-functions';
+import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
 import { isBilledSub, isRestoredStorePro } from './subscription.helpers';
 

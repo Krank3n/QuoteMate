@@ -18,7 +18,7 @@
 // math is unit-testable without firebase. The recorders wrap each delta in
 // FieldValue.increment at write time.
 
-import * as functions from 'firebase-functions';
+import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
 import { todayKey } from './assistantCosts';
 

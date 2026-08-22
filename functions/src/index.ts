@@ -1,4 +1,4 @@
-import * as functions from 'firebase-functions';
+import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
 import Stripe from 'stripe';
 import cors from 'cors';
@@ -129,6 +129,7 @@ import {
 } from './passwordReset.helpers';
 import { receiptVerdict, isFirstGrantOfTransaction } from './receiptValidation.helpers';
 import { verifyAppleJws } from './appleJws.helpers';
+import { verifySquareWebhookSignature } from './squareWebhookSignature';
 import { resolveServerPlan } from './subscription.helpers';
 import {
   SQUARE_OAUTH_STATES_COLLECTION,
@@ -14535,16 +14536,13 @@ export const squareWebhook = functions.https.onRequest(async (req, res) => {
     return;
   }
 
-  const expected = crypto
-    .createHmac('sha256', SQUARE_WEBHOOK_SIGNATURE_KEY)
-    .update(SQUARE_WEBHOOK_NOTIFICATION_URL + rawBody)
-    .digest('base64');
-
-  const sigBuf = Buffer.from(signature, 'base64');
-  const expBuf = Buffer.from(expected, 'base64');
   if (
-    sigBuf.length !== expBuf.length ||
-    !crypto.timingSafeEqual(sigBuf, expBuf)
+    !verifySquareWebhookSignature({
+      signature,
+      rawBody,
+      signatureKey: SQUARE_WEBHOOK_SIGNATURE_KEY,
+      notificationUrl: SQUARE_WEBHOOK_NOTIFICATION_URL,
+    })
   ) {
     res.status(401).send('Invalid signature');
     return;

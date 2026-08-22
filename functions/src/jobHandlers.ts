@@ -18,7 +18,7 @@
  *  is unset the trigger no-ops; if it dangles, it logs and skips.
  */
 
-import * as functions from 'firebase-functions';
+import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
 import { createHash } from 'crypto';
 

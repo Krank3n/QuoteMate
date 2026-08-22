@@ -17,7 +17,7 @@
 import * as admin from 'firebase-admin';
 
 import { isAlreadyInvoiced, type ConvertCandidate } from './shared/document/convertGuard';
-import * as functions from 'firebase-functions';
+import * as functions from 'firebase-functions/v1';
 import { travelAdjustmentAmountFor } from './travelSurcharge';
 import {
   buildQuoteEmailHtml,
