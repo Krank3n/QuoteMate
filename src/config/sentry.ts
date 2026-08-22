@@ -30,9 +30,19 @@ export function shouldEnableSentry(dsn: string, isDev: boolean): boolean {
  * calls set/releasePointerCapture (fast flick, touch cancel, unmount
  * mid-gesture). No first-party frame, the browser auto-releases capture,
  * and the drag/slider interaction still completes — pure noise.
+ *
+ * Firebase Auth IndexedDB teardown: thrown deep inside the minified Auth SDK's
+ * indexedDBLocalPersistence (oi._openDb → initializeCurrentUser) when the tab
+ * or webview is closing/hidden (tab close, bfcache, backgrounding) mid-read.
+ * Web-only: native persistence is AsyncStorage, which never touches IndexedDB.
+ * It's a benign SDK-internal bootstrap race with no data loss and no reachable
+ * first-party call site — our onAuthStateChanged handler never sees it. Only
+ * the exact observed phrasing is matched so genuine IndexedDB faults (quota
+ * exceeded, corruption, permission denial, forced deletion) still report.
  */
 export const SENTRY_IGNORE_ERRORS: (string | RegExp)[] = [
   /Failed to execute '(set|release)PointerCapture' on 'Element'/,
+  /Database is closing(\/hidden)?/,
 ];
 
 export function initSentry(): void {

@@ -46,6 +46,20 @@ describe('SENTRY_IGNORE_ERRORS', () => {
     ).toBe(false);
   });
 
+  it('filters the Firebase Auth IndexedDB teardown race seen on the web build', () => {
+    // Exact production Sentry message (oi._openDb / initializeCurrentUser).
+    expect(matchesIgnoreList('Database is closing/hidden')).toBe(true);
+    expect(matchesIgnoreList('Error: Database is closing')).toBe(true);
+  });
+
+  it('does not swallow real IndexedDB failures that indicate a genuine bug', () => {
+    expect(matchesIgnoreList('IndexedDB write failed: QuotaExceededError')).toBe(false);
+    expect(matchesIgnoreList('Database deleted by request of the user')).toBe(false);
+    expect(matchesIgnoreList('The database connection is closing')).toBe(false);
+    expect(matchesIgnoreList('FirebaseError: Missing or insufficient permissions.')).toBe(false);
+    expect(matchesIgnoreList('UnknownError: Internal error opening backing store.')).toBe(false);
+  });
+
   it('is passed to Sentry.init in enabled builds', () => {
     init.mockClear();
     initSentry();
