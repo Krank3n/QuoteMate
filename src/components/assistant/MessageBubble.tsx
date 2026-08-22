@@ -1,8 +1,8 @@
-import React from 'react';
-import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, ActivityIndicator, Image, TouchableOpacity } from 'react-native';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { makeStyles, useThemeColors } from '../../theme';
-import { ChatMessage } from '../../types/assistant';
+import { ChatAttachment, ChatMessage } from '../../types/assistant';
 import { useStore } from '../../store/useStore';
 import { useJobStore } from '../../store/useJobStore';
 import { quoteToDocument } from '../../types/documentAdapter';
@@ -75,6 +75,72 @@ function InlineQuote({
   );
 }
 
+const SINGLE_THUMB = 200;
+const GRID_THUMB = 96;
+
+// One attached photo. No lightbox — the tradie already has the picture in
+// their camera roll, and a full-screen viewer over an inverted FlatList is a
+// lot of surface for a shot they took ten seconds ago.
+function AttachmentTile({ attachment, large }: { attachment: ChatAttachment; large: boolean }) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
+  // A web blob: uri is dead after a reload — fall back to the durable copy.
+  const [localBroken, setLocalBroken] = useState(false);
+  const size = large ? SINGLE_THUMB : GRID_THUMB;
+
+  if (attachment.status === 'failed') {
+    return (
+      <View
+        testID="mate-attachment-failed"
+        style={[styles.attachmentTile, styles.attachmentFailed, { width: size, height: size }]}
+      >
+        <MaterialCommunityIcons
+          name="alert-circle-outline"
+          size={large ? 32 : 22}
+          color={themeColors.error}
+        />
+        <Text style={styles.attachmentFailedLabel}>Didn't send</Text>
+      </View>
+    );
+  }
+
+  const uri = (!localBroken && attachment.localUri) || attachment.storageUrl;
+  const uploading = attachment.status === 'uploading';
+  return (
+    <View
+      testID={large ? 'mate-attachment-single' : 'mate-attachment-thumb'}
+      style={[styles.attachmentTile, { width: size, height: size }]}
+    >
+      {!!uri && (
+        <Image
+          source={{ uri }}
+          style={[styles.attachmentImage, uploading && styles.attachmentImageUploading]}
+          resizeMode="cover"
+          onError={() => setLocalBroken(true)}
+          accessibilityLabel="Attached photo"
+        />
+      )}
+      {uploading && (
+        <View testID="mate-attachment-uploading" style={styles.attachmentSpinner}>
+          <ActivityIndicator size="small" color={themeColors.accentText} />
+        </View>
+      )}
+    </View>
+  );
+}
+
+function AttachmentStrip({ attachments }: { attachments: ChatAttachment[] }) {
+  const styles = useStyles();
+  const single = attachments.length === 1;
+  return (
+    <View style={[styles.attachmentStrip, !single && styles.attachmentStripRow]}>
+      {attachments.map((a) => (
+        <AttachmentTile key={a.id} attachment={a} large={single} />
+      ))}
+    </View>
+  );
+}
+
 function MessageBubbleImpl({
   message,
   onCtaPress,
@@ -139,6 +205,7 @@ function MessageBubbleImpl({
           message.errorMessage ? styles.bubbleError : null,
         ]}
       >
+        {!!message.attachments?.length && <AttachmentStrip attachments={message.attachments} />}
         {!!message.text && (
           <Text style={[styles.text, isUser ? styles.textUser : styles.textAssistant]}>
             {message.text}
@@ -188,6 +255,42 @@ const useStyles = makeStyles((t) => ({
   text: {
     fontSize: 15,
     lineHeight: 21,
+  },
+  attachmentStrip: {
+    marginBottom: 8,
+  },
+  attachmentStripRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  attachmentTile: {
+    borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: t.colors.surfaceOverlay,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  attachmentImage: {
+    width: '100%',
+    height: '100%',
+  },
+  attachmentImageUploading: {
+    opacity: 0.5,
+  },
+  attachmentSpinner: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  attachmentFailed: {
+    borderWidth: 1,
+    borderColor: t.colors.error,
+    gap: 4,
+  },
+  attachmentFailedLabel: {
+    color: t.colors.textMuted,
+    fontSize: 12,
   },
   textUser: { color: t.colors.onAccent },
   textAssistant: { color: t.colors.text },

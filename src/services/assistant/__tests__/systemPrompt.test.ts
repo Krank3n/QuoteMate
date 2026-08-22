@@ -9,6 +9,29 @@ import { describe, it, expect } from 'vitest';
 import { MATE_SYSTEM_PROMPT } from '../systemPrompt';
 import { TOOL_DECLARATIONS } from '../toolSchemas';
 
+/**
+ * One prompt block, from its heading to the next blank line. Sections are
+ * blank-line separated, so this is exact — and it lets the tone assertions
+ * below target only the sections this feature added. A whole-prompt scan for
+ * "AI" would fail on the Identity block's "Never say you're an AI".
+ */
+export function promptSection(heading: string): string {
+  const start = MATE_SYSTEM_PROMPT.indexOf(`\n${heading}\n`);
+  expect(start, `missing prompt section: ${heading}`).toBeGreaterThan(-1);
+  const rest = MATE_SYSTEM_PROMPT.slice(start + heading.length + 2);
+  const end = rest.indexOf('\n\n');
+  return rest.slice(0, end === -1 ? undefined : end);
+}
+
+const BANNED_WORDS = ['guys', 'blokes', 'fellas', 'lads', 'folks', 'fancy'];
+
+export function expectHouseTone(section: string): void {
+  for (const word of BANNED_WORDS) {
+    expect(section.toLowerCase()).not.toContain(word);
+  }
+  expect(section).not.toMatch(/\bAI\b/);
+}
+
 describe('zero-match contact policy', () => {
   it('zero-match no longer instructs Mate to ask-and-wait before drafting', () => {
     expect(MATE_SYSTEM_PROMPT).not.toContain('Want me to draft a new contact');
@@ -39,5 +62,56 @@ describe('zero-match contact policy', () => {
     expect(description).toContain('zero matches');
     expect(description).toContain('rather than waiting for a go-ahead');
     expect(description).not.toContain('confirmed');
+  });
+});
+
+// Photos are the one input Mate can misuse badly: reading a dimension that
+// isn't printed, or describing a picture and then handing the pipeline a
+// jobDescription that never mentions it. Literal assertions so a reword can't
+// quietly drop either guard.
+describe('photo policy', () => {
+  const section = promptSection('Photos the tradie sends');
+
+  it('tells Mate it can see attached photos', () => {
+    expect(section).toContain('You can see photos attached to a message.');
+    expect(section).toContain('ONE short line');
+  });
+
+  it('treats a site photo as answering the must-ask questions it covers', () => {
+    expect(section).toContain("that question is answered — don't ask it");
+  });
+
+  it("reads a plan's printed numbers exactly", () => {
+    expect(section).toContain('Read the printed numbers and quote them exactly as printed.');
+  });
+
+  it('forbids inventing measurements', () => {
+    expect(section).toContain(
+      "NEVER invent a measurement, area, length or count you can't read off the photo.",
+    );
+    expect(section).toContain("If it isn't legible, ask.");
+  });
+
+  it("requires the photo's content in the jobDescription", () => {
+    expect(section).toContain('Put what the photo told you into the jobDescription');
+    expect(section).toContain('A photo you never described is a photo the draft never got.');
+  });
+
+  it('photos ride onto the quote on Apply', () => {
+    expect(section).toContain('Photos ride onto the quote on Apply');
+    expect(section).toContain("don't ask them to add photos again in the wizard");
+  });
+
+  it('a photo is only visible on the turn it was sent', () => {
+    expect(section).toContain("You only see a photo on the turn it's sent.");
+    expect(section).toContain("never claim it didn't arrive");
+  });
+
+  it('points PDFs at Job Photos instead', () => {
+    expect(section).toContain("You can't read a PDF in here.");
+  });
+
+  it('stays gender-neutral and never names the technology', () => {
+    expectHouseTone(section);
   });
 });

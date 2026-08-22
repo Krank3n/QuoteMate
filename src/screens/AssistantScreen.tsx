@@ -20,8 +20,11 @@ import {
   Animated,
   Easing,
   AppState,
+  Image,
+  Linking,
 } from 'react-native';
 import type { AppStateStatus } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import Svg, { Path, Defs, LinearGradient, Stop } from 'react-native-svg';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
@@ -68,6 +71,7 @@ const VOICE_IDLE_CHECK_MS = 5_000;
 import { generateId } from '../utils/generateId';
 import { releaseKeepAwake } from '../utils/keepAwake';
 import {
+  ChatAttachment,
   ChatMessage,
   Proposal,
   ProposalStatus,
@@ -76,6 +80,28 @@ import { MessageBubble } from '../components/assistant/MessageBubble';
 import { ProposalCard } from '../components/assistant/ProposalCard';
 import { WebContainer } from '../components/WebContainer';
 import { GridBackground } from '../components/GridBackground';
+import { ActionSheet, ActionSheetOption } from '../components/ActionSheet';
+import { AlertModal, AlertType } from '../components/AlertModal';
+import { SupplierListCaptureModal } from '../components/SupplierListCaptureModal';
+import { auth } from '../config/firebase';
+import { uploadQuotePhoto, sniffLocalPhotoMime, UnsupportedPhotoError } from '../services/photoService';
+import { detectIsPlan } from '../services/planDetection';
+import {
+  ATTACH_LIMIT_COPY,
+  canAttachMore,
+  collectQuotePhotos,
+  markAttachmentsConsumed,
+} from './assistant/chatAttachments';
+
+interface AlertConfig {
+  type: AlertType;
+  title: string;
+  message: string;
+  primaryButtonText?: string;
+  primaryButtonAction?: () => void;
+  secondaryButtonText?: string;
+  secondaryButtonAction?: () => void;
+}
 
 type VoiceState = 'idle' | 'connecting' | 'listening' | 'thinking';
 
@@ -532,6 +558,14 @@ export function AssistantScreen() {
 
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
+  // Photos staged for the next message. Ref-mirrored so the upload loop and
+  // submit() read the live tray rather than the render they were created in.
+  const [pendingAttachments, setPendingAttachments] = useState<ChatAttachment[]>([]);
+  const pendingAttachmentsRef = useRef<ChatAttachment[]>([]);
+  useEffect(() => { pendingAttachmentsRef.current = pendingAttachments; }, [pendingAttachments]);
+  const [photoSheetVisible, setPhotoSheetVisible] = useState(false);
+  const [captureModalVisible, setCaptureModalVisible] = useState(false);
+  const [alertConfig, setAlertConfig] = useState<AlertConfig | null>(null);
   const [voiceState, setVoiceState] = useState<VoiceState>('idle');
   // Ref mirror of voiceState so long-lived closures (the sticky idle
   // watchdog interval) read the current value instead of the one
@@ -867,10 +901,22 @@ export function AssistantScreen() {
             }, 1200)
           : null;
 
-      const result = await applyProposal(proposal, (status) => {
-        if (!workingMessageId) return;
-        updateMessage(conversation.id, workingMessageId, { working: status });
-      });
+      // Photos the tradie sent in this chat ride onto the draft so the gear
+      // generator reads them on its first pass. Snapshot the messages once —
+      // the same list is stamped consumed further down.
+      const messagesForPhotos =
+        useStore.getState().conversations.find((c) => c.id === conversation.id)?.messages || [];
+      const chatPhotos =
+        proposal.type === 'propose_draft_quote' ? collectQuotePhotos(messagesForPhotos) : [];
+
+      const result = await applyProposal(
+        proposal,
+        (status) => {
+          if (!workingMessageId) return;
+          updateMessage(conversation.id, workingMessageId, { working: status });
+        },
+        chatPhotos.length ? { photos: chatPhotos } : undefined,
+      );
 
       // If the pipeline beat the narration timer (cached / fast path),
       // cancel it so we don't yarn AFTER the result.
@@ -939,12 +985,19 @@ export function AssistantScreen() {
       // documentType:'invoice' resolves to { kind:'open_invoice', invoiceId }
       // so the previous `quoteId in navigate` check missed every drafted
       // invoice and show_quote follow-ups would fail to resolve.
-      if (result.navigate) {
-        const mintedId =
-          'quoteId' in result.navigate ? result.navigate.quoteId :
-          result.navigate.kind === 'open_invoice' ? result.navigate.invoiceId :
-          undefined;
-        if (mintedId) rememberAppliedQuote(proposal.id, mintedId);
+      const mintedId = !result.navigate
+        ? undefined
+        : 'quoteId' in result.navigate ? result.navigate.quoteId
+        : result.navigate.kind === 'open_invoice' ? result.navigate.invoiceId
+        : undefined;
+      if (mintedId) rememberAppliedQuote(proposal.id, mintedId);
+
+      // Claim the photos this draft carried. Without the stamp, an unrelated
+      // second job drafted in the same chat would inherit them.
+      if (proposal.type === 'propose_draft_quote' && chatPhotos.length > 0 && mintedId) {
+        for (const patch of markAttachmentsConsumed(messagesForPhotos, mintedId)) {
+          updateMessage(conversation.id, patch.messageId, { attachments: patch.attachments });
+        }
       }
 
       // Feed Mate the resolved quote id so it stops trying to re-find the
@@ -971,7 +1024,10 @@ export function AssistantScreen() {
                 `[context] The tradie tapped Apply on propose_draft_quote. ` +
                 `The resulting quote is ${result.navigate.quoteId} ` +
                 `("${proposal.jobName}"). Reference this id on follow-ups; ` +
-                `do not draft a new quote for the same job.`,
+                `do not draft a new quote for the same job.` +
+                (chatPhotos.length
+                  ? ` Their site photos are on it — don't ask them to add photos again.`
+                  : ''),
               );
             }
             break;
@@ -1146,10 +1202,166 @@ export function AssistantScreen() {
     [appendMessage],
   );
 
+  const showAlert = useCallback((config: AlertConfig) => setAlertConfig(config), []);
+  const dismissAlert = useCallback(() => setAlertConfig(null), []);
+
+  /**
+   * Stage picked photos on the composer and upload each one. Uploads run
+   * SEQUENTIALLY — parallel uploadBytes calls from RN have historically hit
+   * XHR/blob races on some devices (same reason JobPhotos does it this way).
+   */
+  const attachUris = useCallback(
+    async (uris: string[], opts: { isPlan?: boolean } = {}) => {
+      if (!uris.length) return;
+      const userId = auth.currentUser?.uid;
+      if (!userId) {
+        showAlert({ type: 'error', title: 'Not signed in', message: 'Sign in to send Mate a photo.' });
+        return;
+      }
+      const state = useStore.getState();
+      const messages = state.conversations.find((c) => c.id === state.currentConversationId)?.messages || [];
+
+      let staged = [...pendingAttachmentsRef.current];
+      const accepted: ChatAttachment[] = [];
+      let blocked: string | undefined;
+      for (const uri of uris) {
+        // A 14MB plan is ~19MB of base64 — past the 1st-gen request cap. Job
+        // Photos carries PDFs end-to-end; chat doesn't.
+        if ((await sniffLocalPhotoMime(uri)) === 'application/pdf') {
+          blocked = ATTACH_LIMIT_COPY.pdf;
+          continue;
+        }
+        // detectIsPlan is web-only by design, so the native sheet's explicit
+        // "Plan or drawing" option is the only route to PLAN_MAX_WIDTH there.
+        const isPlan = opts.isPlan ?? (await detectIsPlan(uri));
+        const gate = canAttachMore({ pending: staged, messages, isPlan });
+        if (!gate.ok) {
+          blocked = gate.message;
+          break;
+        }
+        const attachment: ChatAttachment = {
+          id: generateId(),
+          localUri: uri,
+          isPlan,
+          status: 'uploading',
+        };
+        accepted.push(attachment);
+        staged = [...staged, attachment];
+      }
+      if (accepted.length) setPendingAttachments(staged);
+      if (blocked) showAlert({ type: 'info', title: 'Photos', message: blocked });
+
+      for (const attachment of accepted) {
+        try {
+          const storageUrl = await uploadQuotePhoto(userId, attachment.localUri!, {
+            isPlan: attachment.isPlan,
+          });
+          setPendingAttachments((prev) =>
+            prev.map((p) => (p.id === attachment.id ? { ...p, storageUrl, status: 'ready' } : p)),
+          );
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.warn('[Mate] attachment upload failed', err);
+          setPendingAttachments((prev) =>
+            prev.map((p) => (p.id === attachment.id ? { ...p, status: 'failed' } : p)),
+          );
+          if (err instanceof UnsupportedPhotoError) {
+            showAlert({ type: 'error', title: 'File not supported', message: err.message });
+          }
+        }
+      }
+    },
+    [showAlert],
+  );
+
+  const removeAttachment = useCallback((id: string) => {
+    setPendingAttachments((prev) => prev.filter((p) => p.id !== id));
+  }, []);
+
+  const pickFromGallery = useCallback(
+    async (opts: { isPlan?: boolean } = {}) => {
+      const current = await ImagePicker.getMediaLibraryPermissionsAsync();
+      if (current.status !== 'granted') {
+        if (!current.canAskAgain) {
+          showAlert({
+            type: 'warning',
+            title: 'Photo Library Access Needed',
+            message:
+              'QuoteMate needs photo library access to send Mate a photo. You can enable it in Settings.',
+            primaryButtonText: 'Open Settings',
+            primaryButtonAction: () => {
+              dismissAlert();
+              Linking.openSettings();
+            },
+            secondaryButtonText: 'Not Now',
+            secondaryButtonAction: dismissAlert,
+          });
+          return;
+        }
+        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (status !== 'granted') return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        quality: 0.8,
+        allowsMultipleSelection: true,
+        // 0 (unlimited) keeps iOS in multi-select mode; the caps are applied
+        // in attachUris, which can explain itself.
+        selectionLimit: 0,
+      });
+      if (result.canceled || !result.assets?.length) return;
+      await attachUris(result.assets.map((a) => a.uri), opts);
+    },
+    [attachUris, showAlert, dismissAlert],
+  );
+
+  const openCameraCapture = useCallback(async () => {
+    // The capture modal handles its own permission prompt, but a previously
+    // denied camera leaves the user stuck on it — deep-link to Settings.
+    const current = await ImagePicker.getCameraPermissionsAsync();
+    if (current.status !== 'granted' && !current.canAskAgain) {
+      showAlert({
+        type: 'warning',
+        title: 'Camera Access Needed',
+        message: 'QuoteMate needs camera access to take a photo for Mate. You can enable it in Settings.',
+        primaryButtonText: 'Open Settings',
+        primaryButtonAction: () => {
+          dismissAlert();
+          Linking.openSettings();
+        },
+        secondaryButtonText: 'Not Now',
+        secondaryButtonAction: dismissAlert,
+      });
+      return;
+    }
+    setCaptureModalVisible(true);
+  }, [showAlert, dismissAlert]);
+
+  const showAttachOptions = useCallback(() => {
+    // Web auto-detects plans and has no camera sheet worth showing — go
+    // straight to the picker, same as JobPhotos.
+    if (Platform.OS === 'web') {
+      void pickFromGallery();
+      return;
+    }
+    setPhotoSheetVisible(true);
+  }, [pickFromGallery]);
+
+  const attachSheetOptions: ActionSheetOption[] = useMemo(
+    () => [
+      { icon: 'camera', label: 'Take Photo', onPress: () => { void openCameraCapture(); } },
+      { icon: 'image-multiple', label: 'Photo Library', onPress: () => { void pickFromGallery(); } },
+      { icon: 'floor-plan', label: 'Plan or drawing (hi-res)', onPress: () => { void pickFromGallery({ isPlan: true }); } },
+    ],
+    [openCameraCapture, pickFromGallery],
+  );
+
   const submit = useCallback(
     async (overrideText?: string) => {
       const text = (overrideText ?? input).trim();
-      if (!text || sending) return;
+      const pending = pendingAttachmentsRef.current;
+      // A photo with no caption is a perfectly good message.
+      if ((!text && !pending.length) || sending) return;
       // Resolve the active conversation against the current store, not the
       // closure — `currentConversationId` can point at a missing conversation
       // (e.g. right after newChat replaced the array). Always validate first.
@@ -1160,11 +1372,13 @@ export function AssistantScreen() {
         useStore.getState().conversations.find((c) => c.id === convoId)?.messages || [];
 
       setInput('');
+      setPendingAttachments([]);
       const userMsg: ChatMessage = {
         id: generateId(),
         role: 'user',
         text,
         createdAt: new Date().toISOString(),
+        ...(pending.length ? { attachments: pending } : {}),
       };
       appendMessage(convoId, userMsg);
 
@@ -2005,6 +2219,8 @@ export function AssistantScreen() {
   );
   const renderItem = ChatRow;
 
+  // A staged photo is enough to send on its own — a caption is optional.
+  const canSend = !!input.trim() || pendingAttachments.length > 0;
   const voiceActive = voiceState !== 'idle';
   const voiceAccent = voiceState === 'thinking' ? themeColors.accent : themeColors.error;
   const voiceLabel =
@@ -2121,6 +2337,39 @@ export function AssistantScreen() {
         )}
 
         <View style={[styles.composerWrap, { paddingBottom: Math.max(insets.bottom, 8) + 70 }]}>
+          {pendingAttachments.length > 0 && !voiceActive && (
+            <View style={styles.tray}>
+              {pendingAttachments.map((a) => (
+                <View key={a.id} style={styles.trayTile}>
+                  <Image
+                    source={{ uri: a.localUri || a.storageUrl }}
+                    style={[styles.trayImage, a.status !== 'ready' && styles.trayImageBusy]}
+                    resizeMode="cover"
+                    accessibilityLabel="Photo ready to send"
+                  />
+                  {a.status === 'uploading' && (
+                    <View style={styles.trayOverlay}>
+                      <ActivityIndicator size="small" color={themeColors.onAccent} />
+                    </View>
+                  )}
+                  {a.status === 'failed' && (
+                    <View style={styles.trayOverlay}>
+                      <MaterialCommunityIcons name="alert-circle-outline" size={18} color={themeColors.error} />
+                    </View>
+                  )}
+                  <TouchableOpacity
+                    style={styles.trayRemove}
+                    onPress={() => removeAttachment(a.id)}
+                    accessibilityRole="button"
+                    accessibilityLabel="Remove photo"
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <MaterialCommunityIcons name="close" size={12} color={themeColors.onAccent} />
+                  </TouchableOpacity>
+                </View>
+              ))}
+            </View>
+          )}
           <View
             style={[
               styles.composer,
@@ -2139,7 +2388,21 @@ export function AssistantScreen() {
                 </Text>
               </View>
             ) : (
-              <TextInput
+              <>
+                {/* Leads the input rather than joining the right-hand cluster:
+                    that's already two 40px buttons, and send's long-press is
+                    push-to-talk — nothing else can share it. */}
+                <TouchableOpacity
+                  style={styles.attachBtn}
+                  onPress={showAttachOptions}
+                  disabled={sending}
+                  accessibilityRole="button"
+                  accessibilityLabel="Attach a photo"
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <MaterialCommunityIcons name="paperclip" size={20} color={themeColors.textMuted} />
+                </TouchableOpacity>
+                <TextInput
                 ref={inputRef}
                 style={styles.input}
                 value={input}
@@ -2164,7 +2427,8 @@ export function AssistantScreen() {
                       },
                     }
                   : {})}
-              />
+                />
+              </>
             )}
 
             {/* Mic / stop toggle. Hidden during PTT (driven by the send button
@@ -2204,13 +2468,14 @@ export function AssistantScreen() {
                 style={({ pressed }) => [
                   styles.sendBtn,
                   voiceMode === 'ptt' && styles.sendBtnRecording,
-                  !input.trim() && voiceMode !== 'ptt' && styles.sendBtnDisabled,
+                  !canSend && voiceMode !== 'ptt' && styles.sendBtnDisabled,
                   pressed && styles.sendBtnPressed,
                 ]}
                 onPress={() => {
-                  // Tap with text → send. Tap with no text → no-op (long-press
-                  // would normally fire instead but iOS may emit onPress only).
-                  if (!input.trim() || sending) return;
+                  // Tap with something to send → send. Tap with nothing → no-op
+                  // (long-press would normally fire instead but iOS may emit
+                  // onPress only).
+                  if (!canSend || sending) return;
                   submit();
                 }}
                 onLongPress={handlePttPressIn}
@@ -2221,7 +2486,7 @@ export function AssistantScreen() {
                 accessibilityLabel={
                   voiceMode === 'ptt'
                     ? 'Recording — release to send'
-                    : input.trim()
+                    : canSend
                       ? 'Send message'
                       : 'Hold to record'
                 }
@@ -2236,6 +2501,42 @@ export function AssistantScreen() {
             )}
           </View>
         </View>
+
+        <ActionSheet
+          visible={photoSheetVisible}
+          onDismiss={() => setPhotoSheetVisible(false)}
+          title="Send Mate a photo"
+          options={attachSheetOptions}
+        />
+
+        <SupplierListCaptureModal
+          visible={captureModalVisible}
+          onCancel={() => setCaptureModalVisible(false)}
+          onComplete={async (uris) => {
+            setCaptureModalVisible(false);
+            await attachUris(uris);
+          }}
+          maxPhotos={2}
+          counterLabel="photos"
+          tips={[
+            'Step back for the whole area, then step in for the detail',
+            'Snap anything with a measurement written on it',
+            'Watch the shadows — Mate reads what it can see',
+            "Two at a time; send them and I'll take the next lot",
+          ]}
+        />
+
+        <AlertModal
+          visible={!!alertConfig}
+          onDismiss={dismissAlert}
+          type={alertConfig?.type}
+          title={alertConfig?.title || ''}
+          message={alertConfig?.message || ''}
+          primaryButtonText={alertConfig?.primaryButtonText}
+          primaryButtonAction={alertConfig?.primaryButtonAction}
+          secondaryButtonText={alertConfig?.secondaryButtonText}
+          secondaryButtonAction={alertConfig?.secondaryButtonAction}
+        />
       </WebContainer>
     </KeyboardAvoidingView>
   );
@@ -2405,6 +2706,55 @@ const useStyles = makeStyles((t) => ({
     fontSize: 15,
     paddingVertical: Platform.OS === 'ios' ? 8 : 4,
     maxHeight: 120,
+  },
+  attachBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tray: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    paddingHorizontal: 8,
+    paddingBottom: 8,
+  },
+  trayTile: {
+    width: 44,
+    height: 44,
+    borderRadius: 8,
+    overflow: 'visible',
+    backgroundColor: t.colors.surfaceOverlay,
+  },
+  trayImage: {
+    width: 44,
+    height: 44,
+    borderRadius: 8,
+  },
+  trayImageBusy: {
+    opacity: 0.5,
+  },
+  trayOverlay: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  trayRemove: {
+    position: 'absolute',
+    right: -6,
+    top: -6,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: t.colors.textMuted,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   // The voice "input" — waveform + status word — occupies the same flex slot
   // the TextInput would, centred to line up with the round buttons.

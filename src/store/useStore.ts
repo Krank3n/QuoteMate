@@ -7,7 +7,7 @@ import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { generateId } from '../utils/generateId';
 import { withOrigin } from '../utils/materialOrigin';
-import { Quote, BusinessSettings, Material, SubscriptionStatus, Invoice, PaymentMethod, ReferralInfo, XeroConnection, XeroSyncStatus, Contact } from '../types';
+import { Quote, BusinessSettings, Material, SubscriptionStatus, Invoice, PaymentMethod, ReferralInfo, XeroConnection, XeroSyncStatus, Contact, QuotePhoto } from '../types';
 import { Document, DocumentPayment, DocumentPaymentMethod } from '../types/document';
 import {
   ChatMessage,
@@ -309,10 +309,21 @@ interface AppState {
   applyProposal: (
     proposal: Proposal,
     onProgress?: (status: WorkingStatus) => void,
+    context?: ApplyProposalContext,
   ) => Promise<ApplyProposalResult>;
 
   // Cleanup
   clearAllData: () => Promise<void>;
+}
+
+/**
+ * Screen-supplied extras for an Apply. Deliberately NOT a proposal field (the
+ * model can't know Storage URLs, and proposals are Firestore-synced) and NOT
+ * store state (which would leak photos across chats).
+ */
+export interface ApplyProposalContext {
+  /** Photos the tradie sent Mate in this chat, to seed onto the draft. */
+  photos?: QuotePhoto[];
 }
 
 export type ApplyProposalResult =
@@ -3039,6 +3050,7 @@ export const useStore = create<AppState>((set, get) => ({
   applyProposal: async (
     proposal: Proposal,
     onProgress?: (status: WorkingStatus) => void,
+    context?: ApplyProposalContext,
   ): Promise<ApplyProposalResult> => {
     // Resolve a unified Document by id — local cache first, then a Firestore
     // round-trip if missing. Mate's server-side tools always return doc ids
@@ -3264,6 +3276,10 @@ export const useStore = create<AppState>((set, get) => ({
               description: proposal.jobDescription,
             },
             laborHours: proposal.estimatedDurationHours ?? fresh.laborHours,
+            // Photos the tradie sent Mate in this chat. Seeded BEFORE the
+            // analyse pass so materialsPipeline reads photos[].storageUrl on
+            // its first look at the job, not after the fact.
+            ...(context?.photos?.length ? { photos: context.photos.slice(0, 5) } : {}),
           };
           get().updateQuote(seeded);
           await get().saveDraft(get().currentQuote!);
