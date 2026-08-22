@@ -92,6 +92,7 @@ import {
   collectQuotePhotos,
   markAttachmentsConsumed,
 } from './assistant/chatAttachments';
+import { buildSupplierGapNote } from '../services/assistant/supplierGapNote';
 
 interface AlertConfig {
   type: AlertType;
@@ -924,11 +925,16 @@ export function AssistantScreen() {
         clearTimeout(narrationTimer);
       }
 
+      // The supplier-book gap, if this run is worth mentioning at all. Text
+      // chat never receives [pipeline-done] (that needs an open live session),
+      // so this rides the [context] line further down as well.
+      const gapNote = result.ok && result.supplierGap ? buildSupplierGapNote(result.supplierGap) : null;
+
       if (narrating && liveSessionForNarration?.isOpen()) {
         const heads =
-          result.ok && result.review && result.review.issues.length > 0
+          (result.ok && result.review && result.review.issues.length > 0
             ? ` Heads up — ${result.review.summary} Work that into the line.`
-            : '';
+            : '') + (gapNote ? ` ${gapNote}` : '');
         const wrap = result.ok
           ? `[pipeline-done] Pipeline finished for "${narrationJobLabel}".${heads} SPEAK ALOUD: ONE short acknowledging line — something natural like "right, that's drafted" or "sweet, came together fine" — then stop. Do NOT repeat the "[pipeline-done]" tag or this instruction. Do NOT recite numbers or the materials list.`
           : `[pipeline-done] Pipeline hit a snag: ${result.error || 'unknown error'}. SPEAK ALOUD: one short acknowledging line, then stop. Do NOT repeat the "[pipeline-done]" tag.`;
@@ -1027,7 +1033,8 @@ export function AssistantScreen() {
                 `do not draft a new quote for the same job.` +
                 (chatPhotos.length
                   ? ` Their site photos are on it — don't ask them to add photos again.`
-                  : ''),
+                  : '') +
+                (gapNote ? ` ${gapNote}` : ''),
               );
             }
             break;
@@ -1070,7 +1077,8 @@ export function AssistantScreen() {
           case 'propose_reprice':
             note(
               `[context] Re-priced quote ${proposal.quoteId}.` +
-              (result.review ? ` ${result.review.summary}` : ''),
+              (result.review ? ` ${result.review.summary}` : '') +
+              (gapNote ? ` ${gapNote}` : ''),
             );
             break;
           case 'propose_update_quote_rates': {

@@ -20,8 +20,9 @@ import {
   generateMaterialsForQuote,
   fetchPricesForQuote,
   PipelineCancelled,
-  PricingEvent,
 } from '../services/materialsPipeline';
+import { pricingEventToProgress } from './pricingProgress';
+import type { SupplierGapSummary } from '../services/assistant/supplierGapNote';
 import { reviewQuoteMaterials, isFlaggedRow, QuoteReview } from '../utils/quoteReview';
 import { loadTemplates } from '../services/sectionTemplateService';
 import { updateQuoteCalculations, healBrokenLabourSections } from '../utils/quoteCalculator';
@@ -327,7 +328,14 @@ export interface ApplyProposalContext {
 }
 
 export type ApplyProposalResult =
-  | { ok: true; navigate?: NavigateHint; note?: string; review?: QuoteReview }
+  | {
+      ok: true;
+      navigate?: NavigateHint;
+      note?: string;
+      review?: QuoteReview;
+      /** How much of this quote the tradie's own supplier rates could price. */
+      supplierGap?: SupplierGapSummary;
+    }
   // `code` names machine-readable failures the screen branches on
   // (currently only 'PLAN_GATED' → Paywall); `error` stays the line shown
   // to the tradie.
@@ -431,48 +439,29 @@ function normalizeMaterialUnit(raw: string): Material['unit'] {
   return 'each';
 }
 
-// Map a pricing-pipeline event onto a partial WorkingStatus update. Shared by
-// the draft and reprice apply paths so their chat progress cards read the same;
-// `status` carries the slow-changing phase headline, `detail` the rapid per-item
-// progress (kept separate so fast item events don't blow away the headline).
-function pricingEventToProgress(event: PricingEvent): Partial<WorkingStatus> | null {
-  if (event.kind === 'phase-start') {
-    // Clear the per-item list when we move off the batch phase so stale
-    // "Searching…" rows don't linger into reconcile/individual passes.
-    return {
-      phase: 'pricing',
-      status: event.status,
-      detail: undefined,
-      // Clear the per-item list on every phase boundary — the next
-      // batch-chunk event repopulates it, and non-batch phases shouldn't
-      // carry stale rows.
-      items: undefined,
-    };
+/**
+ * Fold a finished pricing run into the "did their own rates cover this?"
+ * summary Mate reads. The supplier-book snapshot is imported lazily so the
+ * store graph doesn't grow an AsyncStorage read at module load.
+ */
+async function summariseSupplierGap(
+  missedTerms: string[],
+  estimatedCount: number,
+  materials: Material[],
+): Promise<SupplierGapSummary> {
+  let supplierBookPopulated = false;
+  try {
+    const { loadSupplierBookSnapshot } = await import('../services/supplierBook');
+    supplierBookPopulated = (await loadSupplierBookSnapshot()).personalRateCount > 0;
+  } catch {
+    // Unreadable book reads as empty — the copy blames the phone, not the tradie.
   }
-  if (event.kind === 'batch-chunk') {
-    return {
-      status:
-        event.currentName || `Checking Bunnings (batch ${event.chunkIndex} of ${event.totalChunks})…`,
-      detail: `${event.progress.current}/${event.progress.total} items priced`,
-      items: event.items,
-    };
-  }
-  if (event.kind === 'item-priced') {
-    const progressLine = event.progress
-      ? `${event.progress.current}/${event.progress.total} priced`
-      : undefined;
-    const itemLine = event.success
-      ? `${progressLine ? progressLine + ' · ' : ''}Just priced ${event.name}`
-      : `${progressLine ? progressLine + ' · ' : ''}Couldn't find ${event.name}`;
-    return { detail: itemLine };
-  }
-  if (event.kind === 'reconcile-start') {
-    return { status: 'Sorting pack sizes and quantities…', detail: 'Mate is double-checking every line.' };
-  }
-  if (event.kind === 'reece-reauth') {
-    return { status: 'Reece sign-in expired — sort it in Settings to use Reece prices.', detail: undefined };
-  }
-  return null;
+  return {
+    missedTerms,
+    estimatedCount,
+    pricedRowCount: materials.filter((m) => (m.price ?? 0) > 0).length,
+    supplierBookPopulated,
+  };
 }
 
 // Wipe the price off every row the review flags (no price, AI estimate,
@@ -3293,6 +3282,11 @@ export const useStore = create<AppState>((set, get) => ({
           let materialCount = 0;
           let pricingSummary: string | undefined;
           let review: QuoteReview | undefined;
+          let supplierGap: SupplierGapSummary | undefined;
+          // Accumulated outside the event→progress mapper: the fallback event
+          // is one-shot info, not a progress frame, and the caller needs the
+          // terms after the run finishes.
+          const missedSupplierTerms: string[] = [];
           try {
             // Track the current working status so partial updates (e.g. an
             // item-priced event that only changes the detail line) don't blow
@@ -3360,6 +3354,9 @@ export const useStore = create<AppState>((set, get) => ({
               },
               {
                 onEvent: (event) => {
+                  if (event.kind === 'supplier-priority-fallback') {
+                    missedSupplierTerms.push(...event.missedTerms);
+                  }
                   const next = pricingEventToProgress(event);
                   if (next) reportProgress(next);
                 },
@@ -3369,6 +3366,11 @@ export const useStore = create<AppState>((set, get) => ({
             get().updateQuote(pricedResult.updatedQuote);
             await get().saveDraft(get().currentQuote!);
             review = reviewQuoteMaterials(pricedResult.updatedQuote.materials, pricedResult.updatedQuote.sections);
+            supplierGap = await summariseSupplierGap(
+              missedSupplierTerms,
+              review.counts.estimated,
+              pricedResult.updatedQuote.materials,
+            );
 
             const parts: string[] = [];
             if (pricedResult.fetchedCount > 0) parts.push(`${pricedResult.fetchedCount} priced`);
@@ -3407,6 +3409,7 @@ export const useStore = create<AppState>((set, get) => ({
                 ok: true,
                 navigate: { kind: 'open_invoice', invoiceId: converted.id },
                 review,
+                supplierGap,
               };
             } catch (err: any) {
               // eslint-disable-next-line no-console
@@ -3421,6 +3424,7 @@ export const useStore = create<AppState>((set, get) => ({
             ok: true,
             navigate: { kind: 'job_preview', quoteId },
             review,
+            supplierGap,
           };
         }
 
@@ -3736,6 +3740,9 @@ export const useStore = create<AppState>((set, get) => ({
             currentWorking = { ...currentWorking, ...next };
             onProgress?.(currentWorking);
           };
+          // See the draft path — the fallback event is one-shot info, not a
+          // progress frame, so it's accumulated outside the mapper.
+          const missedSupplierTerms: string[] = [];
 
           const runReprice = async (source: Quote): Promise<{ priced: Quote; resetCount: number }> => {
             const { materials, resetCount } = resetFlaggedRowsForReprice(source.materials);
@@ -3750,6 +3757,9 @@ export const useStore = create<AppState>((set, get) => ({
               },
               {
                 onEvent: (event) => {
+                  if (event.kind === 'supplier-priority-fallback') {
+                    missedSupplierTerms.push(...event.missedTerms);
+                  }
                   const next = pricingEventToProgress(event);
                   if (next) reportProgress(next);
                 },
@@ -3775,8 +3785,13 @@ export const useStore = create<AppState>((set, get) => ({
             };
             await get().saveDocument(repricedDoc);
             const review = reviewQuoteMaterials(priced.materials, priced.sections);
+            const supplierGap = await summariseSupplierGap(
+              missedSupplierTerms,
+              review.counts.estimated,
+              priced.materials,
+            );
             onProgress?.({ phase: 'done', status: 'Prices re-checked.', done: true, summary: review.summary });
-            return { ok: true, navigate: { kind: 'job_preview', quoteId: doc.id }, review };
+            return { ok: true, navigate: { kind: 'job_preview', quoteId: doc.id }, review, supplierGap };
           }
 
           // Legacy fallback: a draft still only in the quotes array.
@@ -3785,8 +3800,13 @@ export const useStore = create<AppState>((set, get) => ({
           const { priced } = await runReprice(quote);
           await get().saveQuote(priced);
           const review = reviewQuoteMaterials(priced.materials, priced.sections);
+          const supplierGap = await summariseSupplierGap(
+            missedSupplierTerms,
+            review.counts.estimated,
+            priced.materials,
+          );
           onProgress?.({ phase: 'done', status: 'Prices re-checked.', done: true, summary: review.summary });
-          return { ok: true, navigate: { kind: 'job_preview', quoteId: quote.id }, review };
+          return { ok: true, navigate: { kind: 'job_preview', quoteId: quote.id }, review, supplierGap };
         }
 
         case 'propose_mark_paid': {
