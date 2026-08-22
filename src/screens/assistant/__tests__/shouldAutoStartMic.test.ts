@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   shouldAutoStartMic,
+  resolveAutoStartMic,
   AUTO_START_COOLDOWN_MS,
   type ShouldAutoStartParams,
   type VoiceState,
@@ -65,20 +66,17 @@ describe('shouldAutoStartMic', () => {
 });
 
 describe('autoStartMicOnMate default resolution', () => {
-  // The screen resolves the setting as `autoStartMicOnMate !== false` so a
-  // missing/undefined value defaults the feature ON, and only an explicit
-  // false opts out.
-  const resolveEnabled = (autoStartMicOnMate?: boolean) => autoStartMicOnMate !== false;
-
-  it('defaults ON when the setting is undefined', () => {
-    expect(resolveEnabled(undefined)).toBe(true);
+  // Auto-start is opt-IN: each auto-start mints a Live token and burns a
+  // daily assistant turn, so undefined must resolve OFF.
+  it('defaults OFF when the setting is undefined', () => {
+    expect(resolveAutoStartMic(undefined)).toBe(false);
   });
 
-  it('stays ON when explicitly true', () => {
-    expect(resolveEnabled(true)).toBe(true);
+  it('ON only when explicitly true', () => {
+    expect(resolveAutoStartMic(true)).toBe(true);
   });
 
-  it('is OFF only when explicitly false', () => {
-    expect(resolveEnabled(false)).toBe(false);
+  it('OFF when explicitly false', () => {
+    expect(resolveAutoStartMic(false)).toBe(false);
   });
 });

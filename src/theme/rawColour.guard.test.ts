@@ -36,6 +36,7 @@ const ALLOWED_FILES: Array<[string, string]> = [
   ['screens/AuthScreen.tsx', 'Apple and Google sign-in buttons follow each provider brand guide'],
   ['services/notificationService.ts', 'Android notification LED colour, not a UI surface'],
   ['components/RevenueChart.tsx', 'a white highlight painted ON a coloured bar — lightens it in either theme'],
+  ['components/SplashOverlay.tsx', 'must match the navy baked into the logo art and the native splash screens — fixed in both themes'],
 ];
 
 /**

@@ -700,9 +700,10 @@ export interface BusinessSettings {
   // When on, the customerQuoteFollowUp scheduled function emails the
   // customer ~3 days after send and again ~7 days, capped at 2 nudges.
   autoCustomerFollowUpEnabled?: boolean;
-  // When on (the default — undefined counts as on), Mate auto-starts the
-  // mic on tab focus if mic permission is already granted, so voice mode is
-  // immediately live without a tap. Set false to opt out.
+  // Opt-IN — undefined counts as OFF (each auto-start mints a Live token
+  // and burns a daily assistant turn, so the tab defaults to text). When
+  // explicitly true, Mate auto-starts the mic on tab focus if mic
+  // permission is already granted. Resolve via resolveAutoStartMic.
   autoStartMicOnMate?: boolean;
   // Quote display settings
   showLaborHours?: boolean; // If true, show labor hours breakdown on quotes. Default: false (show only total)

@@ -6,7 +6,7 @@
 import 'react-native-gesture-handler';
 import React, { useEffect, useRef, useState } from 'react';
 import { initSentry, wrapRootComponent, reportIssue } from './src/config/sentry';
-import { Platform, View, Image, StyleSheet, LogBox, InteractionManager } from 'react-native';
+import { Platform, LogBox, InteractionManager } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
@@ -15,7 +15,7 @@ LogBox.ignoreLogs(['ref.measureLayout must be called with a ref to a native comp
 import { NavigationContainer, DarkTheme, LinkingOptions, createNavigationContainerRef, getStateFromPath as defaultGetStateFromPath, getPathFromState as defaultGetPathFromState } from '@react-navigation/native';
 import * as Linking from 'expo-linking';
 import { LINKING_SCREENS } from './src/navigation/linkingConfig';
-import { Provider as PaperProvider, ActivityIndicator } from 'react-native-paper';
+import { Provider as PaperProvider } from 'react-native-paper';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { onAuthStateChanged } from 'firebase/auth';
@@ -77,6 +77,7 @@ import { checkForUpdate, AppUpdateInfo } from './src/services/appUpdateService';
 import { checkDeferredLink } from './src/services/supplierDiscoveryService';
 import { applyPendingReferral, storePendingReferral } from './src/services/pendingReferral';
 import { AppUpdateSheet } from './src/components/AppUpdateSheet';
+import { SplashOverlay } from './src/components/SplashOverlay';
 
 const navigationRef = createNavigationContainerRef<any>();
 
@@ -749,24 +750,10 @@ function App() {
             {/* Splash overlay — covers the app during cold start and during
                 the brief post-sign-in data load. As an overlay (not a separate
                 React tree) the NavigationContainer underneath stays mounted,
-                so when the splash hides the app is already there. */}
-            {splashVisible && (
-              <View
-                style={[StyleSheet.absoluteFillObject, appStyles.loadingContainer]}
-                pointerEvents="auto"
-              >
-                <Image
-                  source={require('./assets/logo-scaled.png')}
-                  style={appStyles.loadingLogo}
-                  resizeMode="contain"
-                />
-                <ActivityIndicator
-                  size="large"
-                  color={appTheme.colors.accent}
-                  style={appStyles.loadingSpinner}
-                />
-              </View>
-            )}
+                so when the splash hides the app is already there. It renders
+                the same frame as the native launch screen and animates its own
+                exit — see SplashOverlay. */}
+            <SplashOverlay visible={splashVisible} />
           </PaperProvider>
         </KeyboardProvider>
       </SafeAreaProvider>
@@ -774,24 +761,9 @@ function App() {
   );
 }
 
-const useAppStyles = makeStyles((t) => ({
+const useAppStyles = makeStyles(() => ({
   flex: {
     flex: 1,
-  },
-  loadingContainer: {
-    flex: 1,
-    backgroundColor: t.colors.bg,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingLogo: {
-    width: 88,
-    height: 88,
-    borderRadius: 20,
-    marginBottom: 32,
-  },
-  loadingSpinner: {
-    marginTop: 16,
   },
 }));
 

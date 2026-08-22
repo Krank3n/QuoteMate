@@ -32,6 +32,7 @@ import {
   LiveAuthError,
   LiveOfflineError,
   LiveQuotaError,
+  LiveRateLimitError,
   fetchWithTimeout,
 } from './assistant/liveSession';
 
@@ -137,8 +138,11 @@ async function callChat(
     const data = await response.json().catch(() => ({}));
     throw new LiveQuotaError(data.error || "You've hit today's Mate limit.");
   }
+  // Subclass of LiveOfflineError, so generic offline handlers still surface
+  // the message while rate-limit-aware callers (voice reconnect loop) can
+  // single it out and stop retrying into the limit.
   if (response.status === 429) {
-    throw new LiveOfflineError('Whoa — too many requests. Wait a moment.');
+    throw new LiveRateLimitError('Whoa — too many requests. Wait a moment.');
   }
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));

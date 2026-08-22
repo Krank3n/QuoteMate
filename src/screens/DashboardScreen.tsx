@@ -50,6 +50,8 @@ import { auth } from '../config/firebase';
 import { useJobActionsSheet } from '../hooks/useJobActionsSheet';
 import { useIsAppActive } from '../hooks/useIsAppActive';
 import { lightTap, successTap } from '../utils/haptics';
+import { trackEvent } from '../services/analyticsService';
+import { pressMateDoor, pressWizardDoor } from './dashboard/doorActions';
 import { TrialBanner } from '../components/TrialBanner';
 import { LeadsPromoCard } from '../components/LeadsPromoCard';
 import { TRIAL_MS } from '../utils/trialConfig';
@@ -123,19 +125,6 @@ export function DashboardScreen() {
   const isFocused = useIsFocused();
   const isAppActive = useIsAppActive();
 
-  // Hide the "TRY" badge on the Mate button once the tradie has tapped it
-  // through to Mate at least once. Persisted so it stays hidden across app
-  // launches. Read on focus so a tap on another device / earlier session is
-  // reflected. Default true (show badge) until the stored flag says seen.
-  const [mateTrySeen, setMateTrySeen] = useState(false);
-  useEffect(() => {
-    if (!isFocused) return;
-    let cancelled = false;
-    AsyncStorage.getItem('mate_try_seen')
-      .then((v) => { if (!cancelled) setMateTrySeen(v === 'true'); })
-      .catch(() => { /* keep showing the badge if the read fails */ });
-    return () => { cancelled = true; };
-  }, [isFocused]);
   const animsRef = useRef<RNAnimated.CompositeAnimation[]>([]);
   const animTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
@@ -528,20 +517,22 @@ export function DashboardScreen() {
     setDeleteDraftModalVisible(false);
   };
 
-  // The "New Job" button on the dashboard funnels straight into the quote
-  // wizard. Customer + address + job title get captured on the wizard's
-  // existing screens, and saveDraft's ensureJobForQuote auto-creates the
-  // top-level Job once those fields have something in them — no extra
-  // intermediate sheet.
-  const handleNewJob = () => {
-    if (!canCreateQuote()) {
-      navigation.navigate('Paywall' as never, { source: 'dashboard' } as never);
-      return;
-    }
-    lightTap();
-    createNewQuote();
-    navigation.navigate('NewJob' as never);
+  // The two dashboard doors (see doorActions for the behaviour + tests).
+  // Mate is the primary — it converts when it proposes, and it mints its own
+  // quote on Apply. The wizard keeps the old flow: customer + address + job
+  // title get captured on its existing screens, and saveDraft's
+  // ensureJobForQuote auto-creates the top-level Job once those fields have
+  // something in them.
+  const doorDeps = {
+    navigate: (screen: string, params?: Record<string, unknown>) =>
+      navigation.navigate(screen as never, params as never),
+    lightTap,
+    track: trackEvent,
+    canCreateQuote,
+    createNewQuote,
   };
+  const handleMateDoor = () => pressMateDoor(doorDeps);
+  const handleNewJob = () => pressWizardDoor(doorDeps);
 
   const handleViewQuote = (quoteId: string) => {
     // Post-UX-collapse: ViewQuote/ViewInvoice are gone. Look up the
@@ -706,7 +697,11 @@ export function DashboardScreen() {
           <View style={styles.headerRow}>
             <View style={styles.headerText}>
               <Title style={styles.greeting}>
-                {GREETINGS[greetingIndex]}, {businessSettings?.businessName || 'Mate'}!
+                {/* No fallback name — "G'day, Mate!" collides with the
+                    assistant's identity now that Mate is the primary door. */}
+                {businessSettings?.businessName
+                  ? `${GREETINGS[greetingIndex]}, ${businessSettings.businessName}!`
+                  : `${GREETINGS[greetingIndex]}!`}
               </Title>
               <RNAnimated.View style={{ opacity: subtitleFade, minHeight: 40 }}>
                 <Paragraph numberOfLines={2}>{SUBTITLES[subtitleIndex]}</Paragraph>
@@ -795,7 +790,7 @@ export function DashboardScreen() {
         />
       )}
 
-      {/* New Job + Mate buttons */}
+      {/* The two doors — Mate primary, wizard secondary */}
       <View style={styles.actionRow}>
         <RNAnimated.View style={{ flex: 2, transform: [{ scale: btnPulse }, { rotate: btnTilt.interpolate({ inputRange: [-1, 1], outputRange: ['-1deg', '1deg'] }) }] }}>
           <View style={{
@@ -812,13 +807,13 @@ export function DashboardScreen() {
           }}>
             <Button
               mode="contained" buttonColor={themeColors.accent} textColor={themeColors.onAccent}
-              icon="plus-circle"
-              onPress={handleNewJob}
+              icon="chat-processing"
+              onPress={handleMateDoor}
               style={styles.newQuoteButton}
               contentStyle={styles.newQuoteButtonContent}
-              accessibilityLabel="Start a new job"
+              accessibilityLabel="Have Mate quote it for you"
             >
-              New Job
+              Quote it for me
             </Button>
           </View>
           </View>
@@ -826,16 +821,9 @@ export function DashboardScreen() {
 
         <View style={[styles.mateButtonWrapper, { flex: 1 }]}>
           <Pressable
-            onPress={async () => {
-              lightTap();
-              if (!mateTrySeen) {
-                setMateTrySeen(true);
-                await AsyncStorage.setItem('mate_try_seen', 'true');
-              }
-              navigation.navigate('Mate' as never);
-            }}
+            onPress={handleNewJob}
             accessibilityRole="button"
-            accessibilityLabel="Talk to Mate"
+            accessibilityLabel="Build the quote yourself"
             style={({ pressed }) => [styles.mateButtonGlow, pressed && styles.mateButtonPressed]}
           >
             <LinearGradient
@@ -844,16 +832,11 @@ export function DashboardScreen() {
               end={{ x: 1, y: 1 }}
               style={styles.mateButton}
             >
-              <MaterialCommunityIcons name="chat-processing" size={20} color={themeColors.accentText} />
-              <Text style={styles.mateButtonLabel}>Mate</Text>
+              <MaterialCommunityIcons name="plus-circle" size={20} color={themeColors.accentText} />
+              <Text style={styles.mateButtonLabel}>Build it myself</Text>
               <ShimmerOverlay tint={themeColors.accent} intensity={0.07} duration={5000} />
             </LinearGradient>
           </Pressable>
-          {!mateTrySeen && (
-            <View style={styles.tryBadge} pointerEvents="none">
-              <Text style={styles.tryBadgeText}>TRY</Text>
-            </View>
-          )}
         </View>
       </View>
 
@@ -1163,24 +1146,6 @@ const useStyles = makeStyles((t) => ({
     fontFamily: 'Archivo-Bold',
     letterSpacing: 0.3,
     color: t.colors.text,
-  },
-  tryBadge: {
-    position: 'absolute',
-    top: -6,
-    right: -6,
-    backgroundColor: t.colors.bg,
-    borderWidth: 1,
-    borderColor: t.colors.accentText,
-    borderRadius: 6,
-    paddingHorizontal: 4,
-    paddingVertical: 1,
-    zIndex: 1,
-  },
-  tryBadgeText: {
-    fontSize: 7,
-    fontFamily: 'Archivo-Bold',
-    letterSpacing: 0.4,
-    color: t.colors.accentText,
   },
   statsContainer: {
     flexDirection: 'row',

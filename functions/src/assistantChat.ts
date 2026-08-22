@@ -30,6 +30,7 @@ import {
   refundQuotaTurn,
   RateLimitConfig,
 } from './assistantToken';
+import { userRateLimitKey } from './rateLimitKey';
 import { recordChatUsage } from './assistantCosts';
 
 const corsHandler = cors({ origin: true });
@@ -38,9 +39,10 @@ const corsHandler = cors({ origin: true });
 // model the voice path uses — that one can't emit text.
 const CHAT_MODEL = 'gemini-3-flash-preview';
 
-// A text turn fans out into a handful of tool round-trips, so the per-call
-// ceiling sits above the token mint's (10/min). Still bounds abuse.
-const CHAT_RATE: RateLimitConfig = { maxRequests: 30, windowMs: 60_000 };
+// A text turn fans out into up to 8 tool round-trips (the client's
+// MAX_TOOL_HOPS), so 30/min capped real usage at ~4 turns/min. 60 clears
+// honest turns while still bounding abuse; the token mint stays at 10/min.
+const CHAT_RATE: RateLimitConfig = { maxRequests: 60, windowMs: 60_000 };
 
 export const assistantChat = functions
   .runWith({ timeoutSeconds: 60, memory: '256MB' })
@@ -50,7 +52,7 @@ export const assistantChat = functions
 
       const decoded = await verifyAuth(req, res);
       if (!decoded) return;
-      const ok = await checkRateLimit(`chat:${decoded.uid}`, CHAT_RATE, res);
+      const ok = await checkRateLimit(userRateLimitKey(decoded.uid, CHAT_RATE, 'chat'), CHAT_RATE, res);
       if (!ok) return;
 
       const apiKey = process.env.GEMINI_API_KEY;
