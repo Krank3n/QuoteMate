@@ -41,7 +41,12 @@ import {
   isPaymentAlreadyApplied,
   applySquarePaymentToInvoice,
   evaluatePaymentReceipt,
+  evaluateDocumentPaymentReceipt,
+  shouldSendInvoicePaidPush,
+  claimsReceipt,
+  type PaymentReceiptEvaluation,
 } from './paymentReceipt.helpers';
+import { mirrorIdForInvoice } from './documentMirror';
 import { shouldReadyToSendNudge, toMs } from './draftNudge.helpers';
 import { onboardingTipDue } from './onboardingDrip.helpers';
 export * from './adminCrm';
@@ -10900,6 +10905,114 @@ export const onQuoteViewed = functions.firestore
   });
 
 // -----------------------------------------------------------
+// Payment receipts — one delivery per payment across two collections
+//
+// Every invoice exists in the legacy `users/{uid}/invoices` collection, the
+// unified `users/{uid}/documents` collection, or both. Modern invoices
+// (convertDocumentToInvoice) are document-only; older ones and the legacy
+// fallback in createInvoiceFromQuote have a legacy row that the mirror
+// trigger projects into `documents`. Naively triggering on both collections
+// would send the customer TWO receipts for one payment on every
+// dual-written invoice.
+//
+// Ownership rule: the unified `documents` trigger is the sender. The legacy
+// triggers defer to it whenever the invoice HAS a mirror document — which,
+// post-Phase-1 dual-write, is every invoice — and remain as the fallback for
+// any legacy invoice whose mirror is missing. Deferral is safe because every
+// legacy write cascades into `documents` via onInvoiceWritten, so the
+// documents trigger always gets its turn.
+// -----------------------------------------------------------
+
+/**
+ * True when the legacy invoice has a mirror document that could ACTUALLY send
+ * the receipt itself — i.e. when the documents-collection trigger owns its
+ * notifications. Uses the mirror's own id rule so the two can't disagree.
+ *
+ * Existence alone is not enough, and getting this wrong is silent. Square
+ * reconciliation calls applyPaymentToDocument → setDocumentStage, which does
+ * a merge write of only {stage, payments, paidTotal, balanceDue, updatedAt}.
+ * When no mirror existed yet (loadDocument falls back to the legacy row
+ * rather than creating one), that write CREATES a stub carrying no `type`
+ * and no `customerEmail`. onDocumentPaymentReceived rejects it, so deferring
+ * on `snap.exists` would silence the receipt — permanently, since the stub
+ * then blocks every future payment on that invoice too. Require the fields
+ * the documents trigger needs before handing over.
+ */
+async function legacyInvoiceHasMirror(
+  userId: string,
+  invoice: Record<string, any>,
+  invoiceId: string,
+  // The two triggers need different things of the mirror: a receipt needs a
+  // customer email, the tradie's push does not. Handing the push over on the
+  // stricter test would double-push an invoice with no customer email (the
+  // legacy trigger would not defer, and the documents trigger pushes anyway).
+  need: 'receipt' | 'push',
+): Promise<boolean> {
+  try {
+    const mirrorId = mirrorIdForInvoice(invoice, invoiceId);
+    const snap = await db.doc(`users/${userId}/documents/${mirrorId}`).get();
+    if (!snap.exists) return false;
+    const mirror = snap.data() as Record<string, any>;
+    if (mirror?.type !== 'invoice') return false;
+    if (need === 'push') return true;
+    const email = typeof mirror?.customerEmail === 'string' ? mirror.customerEmail.trim() : '';
+    return email !== '';
+  } catch (err: any) {
+    // Read failure: assume no mirror and send. A missing receipt is the bug
+    // we're fixing; a duplicate is worse, but a Firestore read failing here
+    // means the documents trigger most likely didn't run either.
+    functions.logger.warn('payment_receipt_mirror_lookup_failed', {
+      userId, invoiceId, message: err?.message,
+    });
+    return false;
+  }
+}
+
+/**
+ * Load the tradie's branding and email the customer their receipt. Shared by
+ * the legacy and unified triggers so the two shapes produce an identical
+ * customer-facing email.
+ */
+async function deliverPaymentReceipt(input: {
+  userId: string;
+  receipt: PaymentReceiptEvaluation;
+  customerName?: string;
+  invoiceNumber?: string;
+  jobName?: string;
+  paidAt: Date;
+}): Promise<void> {
+  const { userId, receipt } = input;
+  const businessDoc = await db.doc(`users/${userId}/settings/business`).get();
+  const business = (businessDoc.exists ? businessDoc.data() : {}) as Record<string, any>;
+  const businessName = business.businessName || 'Your Tradie';
+  const rawLogo = business.logoStorageUrl || business.logoUri || '';
+  const logoUrl = /^https?:\/\//.test(rawLogo) ? rawLogo : undefined;
+
+  const paidDateText = input.paidAt.toLocaleDateString('en-AU', {
+    day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Australia/Sydney',
+  });
+
+  const replyToEmail = await resolveTradieReplyEmail(userId, business.email);
+  await sendPaymentReceiptEmail({
+    to: receipt.customerEmail,
+    userId,
+    business: { businessName, brandColor: business.brandColor, logoUrl },
+    replyToEmail,
+    receipt: {
+      customerName: input.customerName,
+      businessName,
+      invoiceNumber: input.invoiceNumber,
+      jobName: input.jobName,
+      amountReceived: receipt.amountReceived,
+      isFullyPaid: receipt.isFullyPaid,
+      balanceDue: receipt.balanceDue,
+      paymentMethod: receipt.paymentMethod,
+      paidDateText,
+    },
+  });
+}
+
+// -----------------------------------------------------------
 // onInvoiceStatusChanged — Firestore trigger: when invoice status changes to paid
 // -----------------------------------------------------------
 export const onInvoiceStatusChanged = functions.firestore
@@ -10914,6 +11027,10 @@ export const onInvoiceStatusChanged = functions.firestore
       return;
     }
 
+    // Mirrored invoices are the documents trigger's job — otherwise the
+    // tradie gets two "you've been paid" pushes for one payment.
+    if (await legacyInvoiceHasMirror(userId, after, invoiceId, 'push')) return;
+
     await sendAussiePush(userId, 'invoice_paid', {
       customer: after.customerName || 'A customer',
       job: after.job?.name || 'the job',
@@ -10923,9 +11040,10 @@ export const onInvoiceStatusChanged = functions.firestore
 
 // -----------------------------------------------------------
 // onInvoicePaymentReceived — Firestore trigger: email the customer a receipt
-// whenever a payment lands on an invoice. Fires on any paidAmount increase,
-// which covers every payment path — manual Record Payment (app syncs the
-// invoice doc), Square pay link, and Tap to Pay (webhook writes the doc).
+// whenever a payment lands on a legacy invoice that has no unified mirror.
+// Fires on any paidAmount increase, which covers every legacy payment path —
+// manual Record Payment (app syncs the invoice doc), Square pay link, and
+// Tap to Pay (webhook writes the doc).
 // -----------------------------------------------------------
 export const onInvoicePaymentReceived = functions.firestore
   .document('users/{userId}/invoices/{invoiceId}')
@@ -10937,41 +11055,122 @@ export const onInvoicePaymentReceived = functions.firestore
     const receipt = evaluatePaymentReceipt(before, after);
     if (!receipt) return;
 
+    // Single delivery: defer to onDocumentPaymentReceived when this invoice
+    // is mirrored into the unified collection (the normal case today).
+    if (await legacyInvoiceHasMirror(userId, after, invoiceId, 'receipt')) return;
+
     try {
-      const businessDoc = await db.doc(`users/${userId}/settings/business`).get();
-      const business = (businessDoc.exists ? businessDoc.data() : {}) as Record<string, any>;
-      const businessName = business.businessName || 'Your Tradie';
-      const rawLogo = business.logoStorageUrl || business.logoUri || '';
-      const logoUrl = /^https?:\/\//.test(rawLogo) ? rawLogo : undefined;
-
-      const paidDateValue = after.paidDate?.toDate?.() ?? new Date();
-      const paidDateText = paidDateValue.toLocaleDateString('en-AU', {
-        day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Australia/Sydney',
-      });
-
-      const replyToEmail = await resolveTradieReplyEmail(userId, business.email);
-      await sendPaymentReceiptEmail({
-        to: receipt.customerEmail,
+      await deliverPaymentReceipt({
         userId,
-        business: { businessName, brandColor: business.brandColor, logoUrl },
-        replyToEmail,
-        receipt: {
-          customerName: after.customerName,
-          businessName,
-          invoiceNumber: after.invoiceNumber,
-          jobName: after.job?.name,
-          amountReceived: receipt.amountReceived,
-          isFullyPaid: receipt.isFullyPaid,
-          balanceDue: receipt.balanceDue,
-          paymentMethod: receipt.paymentMethod,
-          paidDateText,
-        },
+        receipt,
+        customerName: after.customerName,
+        invoiceNumber: after.invoiceNumber,
+        jobName: after.job?.name,
+        paidAt: after.paidDate?.toDate?.() ?? new Date(),
       });
     } catch (err: any) {
       // Best-effort: a receipt failure must never block the payment write.
       functions.logger.warn('payment_receipt_email_failed', {
         userId, invoiceId, message: err?.message,
       });
+    }
+  });
+
+// -----------------------------------------------------------
+// onDocumentPaymentReceived — Firestore trigger on the UNIFIED collection:
+// email the customer a receipt and push the tradie when a payment lands on
+// `users/{uid}/documents/{docId}` with type 'invoice'.
+//
+// This is the path that actually carries payments today: an invoice created
+// by convertDocumentToInvoice has no legacy row at all, so the legacy
+// triggers above never saw its payments and neither the receipt nor the
+// push ever fired.
+//
+// onUpdate (not onWrite) on purpose. A document that arrives already paid is
+// a mirror/backfill projection of history, not a payment event, and must not
+// spray receipts at customers who paid months ago. It also closes the race
+// with the legacy fallback: a legacy invoice paid before its mirror exists
+// gets its receipt from onInvoicePaymentReceived, and the mirror's creation
+// can't produce a second one.
+// -----------------------------------------------------------
+export const onDocumentPaymentReceived = functions.firestore
+  .document('users/{userId}/documents/{docId}')
+  .onUpdate(async (change, context) => {
+    const before = change.before.data();
+    const after = change.after.data();
+    const { userId, docId } = context.params;
+
+    const receipt = evaluateDocumentPaymentReceipt(before, after);
+    if (receipt) {
+      try {
+        // Claim the receipt before sending. The high-water mark doubles as
+        // the idempotency key: a transaction that finds the mark already at
+        // (or past) this paid total means another invocation — a retry, or
+        // an at-least-once redelivery of this very event — already has the
+        // email in flight. Firestore triggers are at-least-once, so without
+        // this a redelivery would bill the customer's inbox twice.
+        const ref = db.doc(`users/${userId}/documents/${docId}`);
+        let previousMark = 0;
+        const claimed = await db.runTransaction(async (tx) => {
+          const snap = await tx.get(ref);
+          if (!snap.exists) return false;
+          const current = Number(snap.data()?.receiptSentPaidCents) || 0;
+          if (!claimsReceipt(current, receipt.receiptedPaidCents)) return false;
+          previousMark = current;
+          tx.update(ref, { receiptSentPaidCents: receipt.receiptedPaidCents });
+          return true;
+        });
+
+        if (claimed) {
+          try {
+            await deliverPaymentReceipt({
+              userId,
+              receipt,
+              customerName: after.customerName,
+              invoiceNumber: receipt.invoiceNumber,
+              jobName: after.job?.name,
+              paidAt: new Date(receipt.paidAtMs),
+            });
+          } catch (sendErr: any) {
+            // Claim-before-send is what makes redelivery safe, but a claim we
+            // never cashed would wedge this paid total shut forever — a
+            // transient Brevo 5xx would become a permanently missing receipt,
+            // the exact failure this trigger exists to fix. Release the claim
+            // so a retry or replay can take it, and shout: nothing else will.
+            await db.runTransaction(async (tx) => {
+              const snap = await tx.get(ref);
+              if (!snap.exists) return;
+              // Compare-and-set: only roll back OUR claim. A later payment
+              // may have already moved the mark past it.
+              if (Number(snap.data()?.receiptSentPaidCents) === receipt.receiptedPaidCents) {
+                tx.update(ref, { receiptSentPaidCents: previousMark });
+              }
+            }).catch(() => undefined);
+            throw sendErr;
+          }
+        }
+      } catch (err: any) {
+        // Best-effort: a receipt failure must never block the payment write.
+        functions.logger.error('payment_receipt_email_failed', {
+          userId, docId, message: err?.message, collection: 'documents',
+        });
+      }
+    }
+
+    // Tradie push on the stage → 'paid' edge, the unified twin of
+    // onInvoiceStatusChanged. Separate from the receipt because an invoice
+    // with no customer email still earns the tradie a notification.
+    if (shouldSendInvoicePaidPush(before, after)) {
+      try {
+        await sendAussiePush(userId, 'invoice_paid', {
+          customer: after.customerName || 'A customer',
+          job: after.job?.name || 'the job',
+        }, { invoiceId: docId });
+      } catch (err: any) {
+        functions.logger.warn('invoice_paid_push_failed', {
+          userId, docId, message: err?.message,
+        });
+      }
     }
   });
 
