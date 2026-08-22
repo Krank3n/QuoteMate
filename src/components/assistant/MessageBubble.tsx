@@ -190,7 +190,8 @@ function SupplierImportRow({ card }: { card: SupplierImportCard }) {
       )}
       {card.phase === 'saved' && !!card.coveredRows && (
         <Text style={styles.workingDetail}>
-          {card.coveredRows} {card.coveredRows === 1 ? 'row' : 'rows'} on that quote now price off your list.
+          {card.coveredRows} {card.coveredRows === 1 ? 'row' : 'rows'} on that quote now{' '}
+          {card.coveredRows === 1 ? 'prices' : 'price'} off your list.
         </Text>
       )}
     </View>

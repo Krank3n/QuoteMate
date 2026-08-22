@@ -66,3 +66,25 @@ describe('MessageBubble attachments', () => {
     expect(caption.compareDocumentPosition(thumb) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
   });
 });
+
+describe('supplier import card coverage line', () => {
+  function saved(coveredRows: number): ChatMessage {
+    return {
+      id: 'm2', role: 'assistant', text: '', createdAt: '',
+      supplierImport: {
+        importId: 'i1', phase: 'saved', supplierName: 'Metro Fencing Supplies',
+        savedCount: 8, coveredRows,
+      },
+    };
+  }
+
+  it('agrees the verb with a single covered row', () => {
+    render(<MessageBubble message={saved(1)} />);
+    expect(screen.getByText(/1 row on that quote now prices off your list\./)).toBeTruthy();
+  });
+
+  it('agrees the verb with several covered rows', () => {
+    render(<MessageBubble message={saved(6)} />);
+    expect(screen.getByText(/6 rows on that quote now price off your list\./)).toBeTruthy();
+  });
+});
