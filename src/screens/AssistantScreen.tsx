@@ -1719,8 +1719,8 @@ export function AssistantScreen() {
         // Compress ONCE, here, and keep the result as the local uri. The
         // inline bytes are read from it: a raw 12MP camera-roll JPEG is
         // routinely 2.5-4 MB, which sails past maxBase64CharsEach and gets
-        // silently dropped from the turn. uploadQuotePhoto would have
-        // compressed for Storage anyway and thrown the result away.
+        // silently dropped from the turn. uploadQuotePhoto is told not to
+        // compress again, so Storage and the model share these exact bytes.
         const localUri = await compressImage(uri, { isPlan });
         const attachment: ChatAttachment = {
           id: generateId(),
@@ -1748,6 +1748,10 @@ export function AssistantScreen() {
         try {
           const storageUrl = await uploadQuotePhoto(userId, attachment.localUri!, {
             isPlan: attachment.isPlan,
+            // Already compressed above — a second pass would re-encode an
+            // already-lossy JPEG and leave Storage worse than the bytes the
+            // model saw.
+            alreadyCompressed: true,
           });
           settleAttachment(attachment.id, { storageUrl, status: 'ready' });
         } catch (err) {
