@@ -84,7 +84,7 @@ function Body({ proposal }: { proposal: Proposal }) {
           )}
           <Text style={styles.scope} numberOfLines={6}>{proposal.jobDescription}</Text>
           <Text style={styles.dim}>
-            Apply runs the materials + pricing pipeline
+            I'll work out the materials and price them up
             {proposal.documentType === 'invoice' ? ' and converts the result to an invoice' : ''}.
             {typeof proposal.estimatedDurationHours === 'number'
               ? ` Labour seeded at ${proposal.estimatedDurationHours} h.`
@@ -96,7 +96,7 @@ function Body({ proposal }: { proposal: Proposal }) {
       return (
         <View>
           <Text style={styles.summary}>{proposal.qty} {proposal.unit} · {proposal.searchTerm}</Text>
-          <Text style={styles.dim}>Pipeline will price this on apply.</Text>
+          <Text style={styles.dim}>I'll price this one up.</Text>
         </View>
       );
     case 'propose_delete_line_item':
@@ -206,7 +206,7 @@ function Body({ proposal }: { proposal: Proposal }) {
           {typeof proposal.laborHours === 'number' && (
             <Text style={styles.dim}>Labour hours → {proposal.laborHours} h</Text>
           )}
-          <Text style={styles.dim}>Apply updates the doc and re-totals.</Text>
+          <Text style={styles.dim}>Updates the quote and re-does the totals.</Text>
         </View>
       );
     case 'propose_reprice':
@@ -218,7 +218,7 @@ function Body({ proposal }: { proposal: Proposal }) {
           {typeof proposal.displayTotal === 'number' && (
             <Text style={styles.dim}>Current total {formatCurrency(proposal.displayTotal)}.</Text>
           )}
-          <Text style={styles.dim}>Apply re-fetches prices for the flagged rows and reconciles again.</Text>
+          <Text style={styles.dim}>I'll re-check the prices on the rows that looked off.</Text>
         </View>
       );
     case 'propose_mark_paid': {
@@ -252,7 +252,7 @@ function Body({ proposal }: { proposal: Proposal }) {
           {!!proposal.notes && (
             <Text style={styles.dim}>Note: {proposal.notes}</Text>
           )}
-          <Text style={styles.dim}>Apply records the payment and flips the invoice to paid.</Text>
+          <Text style={styles.dim}>Records the payment and marks it paid.</Text>
         </View>
       );
     }
@@ -416,17 +416,24 @@ const useStyles = makeStyles((t) => ({
     marginTop: 10,
     gap: 8,
   },
+  // These two are the primary confirm in the product and sat at ~33pt. Dismiss
+  // also gets a border — bare text beside a filled red Delete invites the
+  // wrong tap.
   dismissBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: 14,
+    minHeight: 48,
+    justifyContent: 'center',
     borderRadius: 8,
+    borderWidth: 1,
+    borderColor: t.colors.border,
   },
   dismissText: { color: t.colors.textMuted, fontSize: 14, fontWeight: '500' },
   applyBtn: {
     paddingHorizontal: 16,
-    paddingVertical: 8,
+    minHeight: 48,
+    justifyContent: 'center',
     borderRadius: 8,
-    minWidth: 80,
+    minWidth: 96,
     alignItems: 'center',
   },
   applyText: { color: t.colors.alwaysLight, fontSize: 14, fontWeight: '700' },

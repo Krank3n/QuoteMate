@@ -40,8 +40,18 @@ export function iconFor(p: Proposal): string {
   }
 }
 
+/**
+ * The verb on the button that commits the action. Every type names what it
+ * actually does — "Apply" is software language sitting on the biggest
+ * decision in the app, on a screen whose front door says "Quote it for me".
+ */
 export function applyLabelFor(p: Proposal): string {
   switch (p.type) {
+    case 'propose_draft_quote':
+      return p.documentType === 'invoice' ? 'Draw it up' : 'Price it up';
+    case 'propose_add_line_item': return 'Add it';
+    case 'propose_create_contact': return 'Save contact';
+    case 'propose_update_customer': return 'Change it';
     case 'propose_send_quote': return 'Send';
     case 'propose_delete_line_item': return 'Delete';
     case 'propose_delete_quote': return 'Delete';
@@ -50,7 +60,6 @@ export function applyLabelFor(p: Proposal): string {
     case 'propose_update_quote_rates': return 'Update';
     case 'propose_mark_paid': return 'Mark paid';
     case 'propose_import_supplier_list': return 'Read list';
-    default: return 'Apply';
   }
 }
 

@@ -2,14 +2,19 @@
 // decision can be unit tested without rendering the screen.
 //
 // Four pieces:
-//   primary    — one short sentence, context-aware (unfinished draft > time
-//                of day).
-//   capability — fixed. The one line that tells a first-timer what Mate can
-//                actually do; most bounces were door-peeks at a screen that
-//                stated no capability.
-//   hint       — fixed, muted, smaller. The on-rails reminder.
-//   chips      — exactly 3 tappable examples that PREFILL the composer
-//                (never auto-send — the tradie always owns the send).
+//   primary    — the headline. One short question, time-of-day aware.
+//   draftChip  — present only when a draft is sitting unfinished. The draft is
+//                the most valuable thing on the screen, so it gets a tappable
+//                row rather than a sentence the tradie has to answer by typing
+//                the name of their own quote.
+//   chips      — 3 tappable STEMS that prefill the composer and leave the
+//                cursor at the end. Never a worked example: a 70-character
+//                prefill is more to delete than to type, and a tradie who taps
+//                and sends without reading ends up with a quote for someone
+//                who doesn't exist.
+//   capability — fixed, one line. Tells a first-timer what Mate does and that
+//                nothing saves without them; most bounces were door-peeks at a
+//                screen that stated no capability at all.
 
 export interface MateIntroChip {
   label: string;
@@ -19,26 +24,17 @@ export interface MateIntroChip {
 export interface MateIntro {
   primary: string;
   capability: string;
-  hint: string;
   chips: MateIntroChip[];
+  draftChip?: MateIntroChip;
 }
 
 const CAPABILITY =
-  "Tell me the job in plain words — I'll price the materials, draft the quote, and tee it up to send.";
-const HINT = 'I draft. You tap to confirm. Nothing saves ’til you say.';
+  "Tell me the job in plain words — I'll price it up and draft the quote. Nothing saves ’til you say.";
+
 const CHIPS: MateIntroChip[] = [
-  {
-    label: 'Quote a job',
-    prefill: 'Quote a bathroom reno for Sam at 12 Smith St — strip out, retile, new vanity and taps',
-  },
-  {
-    label: 'Invoice a job',
-    prefill: 'Invoice Dee for the deck repairs — 6 hours labour plus materials',
-  },
-  {
-    label: 'Who owes me?',
-    prefill: 'Who still owes me money on sent invoices?',
-  },
+  { label: 'Quote a job', prefill: 'Quote a job for ' },
+  { label: 'Invoice a job', prefill: 'Invoice ' },
+  { label: 'Who owes me?', prefill: 'Who still owes me money on sent invoices?' },
 ];
 
 export function getMateIntro(
@@ -47,31 +43,26 @@ export function getMateIntro(
 ): MateIntro {
   const pick = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
 
-  // Most recently touched draft — surface it so the tradie can pick it up.
-  const drafts = quotes
-    .filter((q) => q.status === 'draft')
-    .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-  const draft = drafts[0];
-  if (draft) {
-    const label =
-      draft.job?.name?.trim() ||
-      (draft.customerName ? `${draft.customerName}'s job` : 'that draft quote');
-    return {
-      primary: `“${label}” is still a draft — finish it, or start something new?`,
-      capability: CAPABILITY,
-      hint: HINT,
-      chips: CHIPS,
-    };
-  }
-
-  // No drafts — a short time-of-day nudge.
   const h = now.getHours();
   let openers: string[];
   if (h < 11) openers = ['Mornin’. What are we quoting?', 'G’day. What’s the job?'];
   else if (h < 14) openers = ['What are we quoting?', 'What’s the job?'];
   else if (h < 17) openers = ['Arvo. What are we quoting?', 'What’s next on the list?'];
   else openers = ['Evenin’. What are we quoting?', 'What’s the job?'];
-  return { primary: pick(openers), capability: CAPABILITY, hint: HINT, chips: CHIPS };
+
+  // Most recently touched draft — surfaced as a one-tap action, not a question.
+  const draft = quotes
+    .filter((q) => q.status === 'draft')
+    .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())[0];
+
+  const intro: MateIntro = { primary: pick(openers), capability: CAPABILITY, chips: CHIPS };
+  if (draft) {
+    const label =
+      draft.job?.name?.trim() ||
+      (draft.customerName ? `${draft.customerName}'s job` : 'that draft quote');
+    intro.draftChip = { label: `Finish “${label}”`, prefill: `Finish the “${label}” quote` };
+  }
+  return intro;
 }
 
 // A conversation still counts as blank when it holds nothing substantive:

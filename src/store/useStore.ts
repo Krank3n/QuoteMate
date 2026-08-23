@@ -3420,7 +3420,7 @@ export const useStore = create<AppState>((set, get) => ({
             console.warn('[Mate] pipeline failed', err);
             onProgress?.({
               phase: 'failed',
-              status: 'Pipeline hit a snag.',
+              status: "Couldn't finish pricing that one.",
               detail: err?.message,
               done: true,
             });

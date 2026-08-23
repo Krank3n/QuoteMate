@@ -10,6 +10,7 @@ import {
   View,
   Text,
   FlatList,
+  ScrollView,
   StyleSheet,
   TextInput,
   TouchableOpacity,
@@ -376,167 +377,6 @@ function MicPulse({ active, color }: { active: boolean; color: string }) {
   );
 }
 
-// Big hero record button shown front-and-centre when the chat is empty.
-// Lifted from the JobDetailsScreen voice-record UI (ripple rings + glow +
-// pulse) so the two surfaces feel related. Self-contained animation loops
-// run only while `active`; `pending` (connecting/thinking) shows a spinner
-// over the icon without the rings, so the user gets feedback while the WS
-// is handshaking but we don't fake a "recording" state that isn't true yet.
-function HeroRecordButton({
-  active,
-  pending,
-  onPress,
-  accent,
-}: {
-  active: boolean;
-  pending: boolean;
-  onPress: () => void;
-  accent: string;
-}) {
-  const styles = useStyles();
-  const themeColors = useThemeColors();
-  const heroStyles = useHeroStyles();
-  const pulseAnim = useRef(new Animated.Value(1)).current;
-  const glowAnim = useRef(new Animated.Value(0)).current;
-  const rippleAnim = useRef(new Animated.Value(0)).current;
-  const ripple2Anim = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    if (!active) {
-      Animated.parallel([
-        Animated.timing(pulseAnim, { toValue: 1, duration: 300, useNativeDriver: true }),
-        Animated.timing(glowAnim, { toValue: 0, duration: 300, useNativeDriver: true }),
-        Animated.timing(rippleAnim, { toValue: 0, duration: 300, useNativeDriver: true }),
-        Animated.timing(ripple2Anim, { toValue: 0, duration: 300, useNativeDriver: true }),
-      ]).start();
-      return;
-    }
-    const pulseLoop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulseAnim, { toValue: 1.12, duration: 900, useNativeDriver: true }),
-        Animated.timing(pulseAnim, { toValue: 1, duration: 900, useNativeDriver: true }),
-      ]),
-    );
-    const glowLoop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(glowAnim, { toValue: 1, duration: 1400, useNativeDriver: true }),
-        Animated.timing(glowAnim, { toValue: 0, duration: 1400, useNativeDriver: true }),
-      ]),
-    );
-    const rippleLoop = Animated.loop(
-      Animated.timing(rippleAnim, { toValue: 1, duration: 1800, useNativeDriver: true }),
-    );
-    const ripple2Loop = Animated.loop(
-      Animated.sequence([
-        Animated.delay(900),
-        Animated.timing(ripple2Anim, { toValue: 1, duration: 1800, useNativeDriver: true }),
-        Animated.timing(ripple2Anim, { toValue: 0, duration: 0, useNativeDriver: true }),
-      ]),
-    );
-    pulseLoop.start();
-    glowLoop.start();
-    rippleLoop.start();
-    ripple2Loop.start();
-    return () => {
-      pulseLoop.stop();
-      glowLoop.stop();
-      rippleLoop.stop();
-      ripple2Loop.stop();
-    };
-  }, [active, pulseAnim, glowAnim, rippleAnim, ripple2Anim]);
-
-  const ringStyle = (anim: Animated.Value) => ({
-    position: 'absolute' as const,
-    width: 128,
-    height: 128,
-    borderRadius: 64,
-    borderWidth: 3,
-    borderColor: accent,
-    backgroundColor: 'transparent',
-    opacity: anim.interpolate({ inputRange: [0, 1], outputRange: [0.55, 0] }),
-    transform: [
-      { scale: anim.interpolate({ inputRange: [0, 1], outputRange: [1, 1.9] }) },
-    ],
-  });
-
-  return (
-    <TouchableOpacity
-      onPress={onPress}
-      disabled={pending}
-      activeOpacity={0.85}
-      style={heroStyles.touchable}
-      accessibilityRole="button"
-      accessibilityLabel={active ? 'Stop voice mode' : 'Tap to talk to Mate'}
-    >
-      {active && (
-        <>
-          <Animated.View style={ringStyle(rippleAnim)} />
-          <Animated.View style={ringStyle(ripple2Anim)} />
-        </>
-      )}
-      <Animated.View
-        style={[
-          heroStyles.glow,
-          {
-            backgroundColor: accent,
-            shadowColor: accent,
-            opacity: active
-              ? glowAnim.interpolate({ inputRange: [0, 1], outputRange: [0.25, 0.55] })
-              : 0.18,
-          },
-        ]}
-      />
-      <Animated.View
-        style={[
-          heroStyles.button,
-          { backgroundColor: accent, shadowColor: accent, transform: [{ scale: pulseAnim }] },
-        ]}
-      >
-        {pending ? (
-          <ActivityIndicator size="large" color={themeColors.onAccent} />
-        ) : (
-          <MaterialCommunityIcons
-            name={active ? 'stop' : 'microphone'}
-            size={56}
-            color={themeColors.onAccent}
-          />
-        )}
-      </Animated.View>
-    </TouchableOpacity>
-  );
-}
-
-const useHeroStyles = makeStyles((t) => ({
-  touchable: {
-    width: 128,
-    height: 128,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  button: {
-    width: 128,
-    height: 128,
-    borderRadius: 64,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 4,
-    borderColor: t.colors.border,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.45,
-    shadowRadius: 16,
-    elevation: 12,
-  },
-  glow: {
-    position: 'absolute',
-    width: 160,
-    height: 160,
-    borderRadius: 80,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.9,
-    shadowRadius: 28,
-    elevation: 18,
-  },
-}));
 
 // Bracketed prompt tags we feed into the Live session as user turns to
 // trigger Mate's pipeline-time narration. The model occasionally echoes
@@ -1012,6 +852,15 @@ export function AssistantScreen() {
 
       if (!result.ok) {
         updateProposalStatus(conversation.id, message.id, proposal.id, 'failed');
+        // Settle the working card. The pipeline's own catch emits done:true,
+        // but every failure BEFORE the pipeline — PLAN_GATED most of all —
+        // used to return straight past it, leaving "Getting ready…" spinning
+        // forever underneath the paywall the tradie just dismissed.
+        if (workingMessageId) {
+          updateMessage(conversation.id, workingMessageId, {
+            working: { phase: 'failed', status: "Couldn't do that one.", done: true },
+          });
+        }
         // Surface the real reason in the chat so the user can see what broke
         // instead of just an opaque "Failed" badge on the card.
         // eslint-disable-next-line no-console
@@ -2778,47 +2627,50 @@ export function AssistantScreen() {
       <GridBackground />
       <WebContainer style={styles.webBody}>
         {isEmpty ? (
-          // Hero empty state — big record button front and centre. Keeps the
-          // composer mounted below so typing is still one tap away.
-          <View style={[styles.heroWrap, { paddingTop: insets.top + 8 }]}>
-            <View style={styles.heroCenter}>
-              <HeroRecordButton
-                active={voiceMode === 'sticky' && voiceState === 'listening'}
-                pending={voiceState === 'connecting' || voiceState === 'thinking'}
-                onPress={handleVoiceToggle}
-                accent={
-                  voiceState === 'listening'
-                    ? themeColors.error
-                    : voiceState === 'thinking'
-                      ? themeColors.accent
-                      : themeColors.accent
-                }
-              />
-              <Text
-                style={[
-                  styles.heroStatus,
-                  voiceState === 'listening' && { color: themeColors.error },
-                  voiceState === 'thinking' && { color: themeColors.accentText },
-                ]}
-              >
-                {voiceState === 'connecting'
-                  ? 'Connecting…'
-                  : voiceState === 'listening'
-                    ? "I'm listening — yarn away"
-                    : voiceState === 'thinking'
-                      ? "Mate's thinking…"
-                      : 'Tap to talk to Mate'}
-              </Text>
-              <Text style={styles.heroBlurb}>{introBlurb.primary}</Text>
-              {voiceState === 'idle' && (
-                <Text style={styles.heroCapability}>{introBlurb.capability}</Text>
-              )}
-              <Text style={styles.heroHint}>{introBlurb.hint}</Text>
-              {/* Blank-but-errored: the error bubble no longer replaces the
-                  hero, so surface the latest failure here instead of
-                  swallowing it. */}
-              {!!latestError && <Text style={styles.heroError}>{latestError}</Text>}
-              {voiceState === 'idle' && (
+          // Empty state, bottom-anchored so it sits just above the composer —
+          // the thing we want tapped. No hero mic: it called the very same
+          // handler as the composer mic, so it added nothing but a 128pt
+          // argument for voice on a screen that is deliberately text-first.
+          // Scrolls because at large text sizes six centred strings overflow
+          // and Android clips the chips with no way to reach them.
+          <ScrollView
+            style={styles.heroWrap}
+            contentContainerStyle={styles.heroScrollContent}
+            keyboardShouldPersistTaps="handled"
+          >
+            <MaterialCommunityIcons
+              name="chat-processing-outline"
+              size={28}
+              color={themeColors.textMuted}
+            />
+            <Text style={styles.heroBlurb}>{introBlurb.primary}</Text>
+            {/* Blank-but-errored: the error bubble no longer replaces the
+                empty state, so surface the latest failure here instead of
+                swallowing it. */}
+            {!!latestError && <Text style={styles.heroError}>{latestError}</Text>}
+            {voiceState === 'idle' && (
+              <>
+                {!!introBlurb.draftChip && (
+                  <TouchableOpacity
+                    style={styles.draftChip}
+                    onPress={() => {
+                      setInput(introBlurb.draftChip!.prefill);
+                      inputRef.current?.focus();
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel={introBlurb.draftChip.label}
+                    accessibilityHint="Fills the message box so you can edit it"
+                  >
+                    <MaterialCommunityIcons
+                      name="file-document-edit-outline"
+                      size={16}
+                      color={themeColors.accentText}
+                    />
+                    <Text style={styles.draftChipLabel} numberOfLines={1}>
+                      {introBlurb.draftChip.label}
+                    </Text>
+                  </TouchableOpacity>
+                )}
                 <View style={styles.chipRow}>
                   {introBlurb.chips.map((chip) => (
                     <TouchableOpacity
@@ -2831,14 +2683,16 @@ export function AssistantScreen() {
                       }}
                       accessibilityRole="button"
                       accessibilityLabel={chip.label}
+                      accessibilityHint="Fills the message box so you can edit it"
                     >
                       <Text style={styles.chipLabel}>{chip.label}</Text>
                     </TouchableOpacity>
                   ))}
                 </View>
-              )}
-            </View>
-          </View>
+                <Text style={styles.heroCapability}>{introBlurb.capability}</Text>
+              </>
+            )}
+          </ScrollView>
         ) : (
           <FlatList
             ref={listRef}
@@ -2990,7 +2844,11 @@ export function AssistantScreen() {
                     <MaterialCommunityIcons
                       name={voiceMode === 'sticky' ? 'stop' : 'microphone-outline'}
                       size={22}
-                      color={themeColors.onAccent}
+                      // Ghost while idle; the live/stop state keeps the filled
+                      // treatment so an open mic still reads as open.
+                      color={
+                        voiceMode === 'sticky' ? themeColors.onAccent : themeColors.textMuted
+                      }
                     />
                   )}
                 </TouchableOpacity>
@@ -3032,7 +2890,13 @@ export function AssistantScreen() {
                 <MaterialCommunityIcons
                   name={voiceMode === 'ptt' ? 'record-circle-outline' : 'arrow-up'}
                   size={22}
-                  color={themeColors.onAccent}
+                  // Near-black on the disabled grey fill is 1.47:1 — invisible
+                  // in sunlight, and that's the state the screen opens in.
+                  color={
+                    !canSend && voiceMode !== 'ptt'
+                      ? themeColors.textMuted
+                      : themeColors.onAccent
+                  }
                 />
               </Pressable>
             )}
@@ -3149,58 +3013,34 @@ const useStyles = makeStyles((t) => ({
     width: '100%',
     maxWidth: 800,
     alignSelf: 'center',
+  },
+  // Bottom-anchored: the composer is what we want tapped, so the intro sits
+  // just above it rather than floating mid-screen with equal dead air above
+  // and below. No insets.top here — the tab navigator already renders a
+  // header, so adding the safe area again cost ~50pt of nothing.
+  heroScrollContent: {
+    flexGrow: 1,
+    alignItems: 'center',
+    justifyContent: 'flex-end',
     paddingHorizontal: 24,
-  },
-  heroTop: {
-    alignItems: 'center',
-    paddingTop: 4,
-  },
-  heroBrand: {
-    color: t.colors.text,
-    fontSize: 28,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-  },
-
-  heroCenter: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingBottom: 24,
-  },
-  heroStatus: {
-    marginTop: 28,
-    fontSize: 17,
-    fontWeight: '700',
-    color: t.colors.text,
-    letterSpacing: 0.2,
-    textAlign: 'center',
+    paddingTop: 24,
+    paddingBottom: 16,
   },
   heroBlurb: {
-    marginTop: 14,
+    marginTop: 12,
     color: t.colors.text,
-    fontSize: 15,
-    lineHeight: 22,
-    fontWeight: '500',
+    fontSize: 20,
+    lineHeight: 27,
+    fontWeight: '700',
     textAlign: 'center',
     paddingHorizontal: 12,
     maxWidth: 420,
   },
-  heroHint: {
-    marginTop: 8,
-    color: t.colors.textMuted,
-    fontSize: 12,
-    lineHeight: 17,
-    textAlign: 'center',
-    letterSpacing: 0.2,
-    paddingHorizontal: 12,
-    maxWidth: 360,
-  },
   heroCapability: {
-    marginTop: 10,
+    marginTop: 16,
     color: t.colors.textMuted,
-    fontSize: 14,
-    lineHeight: 20,
+    fontSize: 13,
+    lineHeight: 19,
     textAlign: 'center',
     paddingHorizontal: 12,
     maxWidth: 420,
@@ -3214,21 +3054,47 @@ const useStyles = makeStyles((t) => ({
     paddingHorizontal: 12,
     maxWidth: 420,
   },
+  // The draft is the most valuable thing on this screen — a real job, half
+  // done. Full width so it reads as the primary action, not a fourth chip.
+  draftChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    alignSelf: 'stretch',
+    marginTop: 20,
+    minHeight: 48,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: t.colors.accent,
+    backgroundColor: t.colors.accentSubtle,
+    paddingHorizontal: 16,
+  },
+  draftChipLabel: {
+    color: t.colors.accentText,
+    fontSize: 15,
+    fontWeight: '700',
+    flexShrink: 1,
+  },
   chipRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
-    marginTop: 16,
+    marginTop: 12,
     justifyContent: 'center',
     paddingHorizontal: 12,
   },
+  // surface on bg is 1.04:1 — the fill may as well not exist. surfaceRaised
+  // with the stronger border gives the control a visible edge (WCAG 1.4.11).
   chip: {
-    borderRadius: 18,
+    borderRadius: 22,
     borderWidth: 1,
-    borderColor: t.colors.border,
-    backgroundColor: t.colors.surface,
-    paddingVertical: 8,
-    paddingHorizontal: 14,
+    borderColor: t.colors.borderStrong,
+    backgroundColor: t.colors.surfaceRaised,
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
   },
   chipLabel: {
     color: t.colors.text,
@@ -3377,8 +3243,11 @@ const useStyles = makeStyles((t) => ({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  // Ghost, not filled. Two identical orange pills side by side meant neither
+  // read as THE action; send keeps the accent, the mic matches the paperclip.
+  // Also the right visual weight for a voice path that is now opt-in.
   voiceBtn: {
-    backgroundColor: t.colors.accent,
+    backgroundColor: t.colors.surfaceOverlay,
     width: 40,
     height: 40,
     borderRadius: 20,
