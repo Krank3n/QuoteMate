@@ -184,6 +184,7 @@ export async function sendAssistantTurn({
   // Photo bytes ride only on the turn they were attached — see attachmentParts.
   const inlineIds = inlineAttachmentIds(window);
   let remainingChars = ATTACHMENT_LIMITS.maxBase64CharsTotal;
+  let remainingSlots = ATTACHMENT_LIMITS.maxPerTurn;
 
   const contents: unknown[] = [];
   for (const m of window) {
@@ -201,8 +202,12 @@ export async function sendAssistantTurn({
         bytes: await resolveAttachment(a),
       })),
     );
-    const built = buildAttachmentParts(resolved, { remainingChars });
+    // Slots are threaded like chars: the trailing run can span several user
+    // messages (a hidden [context] note splits one), and a per-message reset
+    // would let 2 photos through per message instead of 2 per request.
+    const built = buildAttachmentParts(resolved, { remainingChars, remainingSlots });
     remainingChars -= built.usedChars;
+    remainingSlots -= built.usedSlots;
     // Two different failures, two different sentences: photos from an older
     // turn the model has already described, versus photos on THIS turn whose
     // bytes didn't make it (too big, unreadable, budget spent).

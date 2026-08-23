@@ -131,4 +131,27 @@ describe('propose_draft_quote photo context', () => {
     expect(updateQuote).not.toHaveBeenCalled();
     expect(generateMaterialsForQuote).not.toHaveBeenCalled();
   });
+
+  // Seeding the photos onto the quote is only half the job — the pipeline
+  // drops them again unless isPro is set, and a plain `=== 'pro'` read there
+  // silently binned every attached plan for trial users, who are most of them.
+  it('sends the photos to the vision model on a trial plan, not just pro', async () => {
+    useStore.setState({ getEffectivePlan: () => 'trial' } as any);
+
+    await useStore.getState().applyProposal(proposal, undefined, { photos: PHOTOS });
+
+    const analysed = vi.mocked(generateMaterialsForQuote).mock.calls[0][0] as any;
+    expect(analysed.isPro).toBe(true);
+    expect(analysed.quote.photos).toEqual(PHOTOS);
+  });
+
+  it('does not send photos to the vision model when the plan cannot analyse them', async () => {
+    // Belt to the gate's braces: free never reaches here, but if the pipeline
+    // is ever reached on a non-analysing plan the photos must not ride along.
+    useStore.setState({ getEffectivePlan: () => 'pro' } as any);
+
+    await useStore.getState().applyProposal(proposal, undefined, { photos: PHOTOS });
+
+    expect((vi.mocked(generateMaterialsForQuote).mock.calls[0][0] as any).isPro).toBe(true);
+  });
 });

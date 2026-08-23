@@ -1850,8 +1850,11 @@ export function AssistantScreen() {
     async (overrideText?: string) => {
       const text = (overrideText ?? input).trim();
       const pending = pendingAttachmentsRef.current;
-      // A photo with no caption is a perfectly good message.
-      if ((!text && !pending.length) || sending) return;
+      // A photo with no caption is a perfectly good message — a photo that
+      // FAILED to upload is not. Must match `canSend`, or the Return key
+      // sends what the send button correctly refuses and the tradie gets the
+      // server's own error back.
+      if ((!text && !pending.some((a) => a.status !== 'failed')) || sending) return;
       // Resolve the active conversation against the current store, not the
       // closure — `currentConversationId` can point at a missing conversation
       // (e.g. right after newChat replaced the array). Always validate first.

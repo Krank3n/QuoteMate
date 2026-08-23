@@ -300,6 +300,22 @@ describe('attachment transport', () => {
     vi.mocked(auth).currentUser = { getIdToken: async () => 'id-token' } as any;
   });
 
+  it('caps images per request, not per message, across a split user run', async () => {
+    // A hidden [context] note (or an error bubble) splits the trailing user
+    // run into two messages. Resetting the slot budget per message would put
+    // four photos on one request and re-POST them on every tool hop.
+    fetchMock.mockResolvedValueOnce(okChatResponse('righto'));
+    await sendAssistantTurn({
+      history: [
+        { id: '1', role: 'user', text: 'these two', createdAt: '', attachments: [photo('p1'), photo('p2')] },
+        { id: '2', role: 'user', text: 'and these', createdAt: '', attachments: [photo('p3'), photo('p4')] },
+      ],
+      resolveAttachment,
+    });
+    const parts = contentsOf().flatMap((c: any) => c.parts);
+    expect(parts.filter((p: any) => p.inlineData)).toHaveLength(2);
+  });
+
   it('sends an image-only user turn as a single inlineData part', async () => {
     fetchMock.mockResolvedValueOnce(okChatResponse('righto'));
     await sendAssistantTurn({

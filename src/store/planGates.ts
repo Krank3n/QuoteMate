@@ -10,3 +10,14 @@ export type EffectivePlan = 'trial' | 'free' | 'pro';
 export function canRunMatePipeline(plan: EffectivePlan): boolean {
   return plan !== 'free';
 }
+
+/**
+ * True when the pipeline may send the quote's photos to the vision model.
+ * Mirrors the wizard, which reads `subscriptionStatus.isPro || isTrialActive`
+ * (MaterialsListScreen) — a trial user gets photo analysis there, so a trial
+ * user must get it from Mate too. Reading this as `=== 'pro'` silently drops
+ * every attached plan for trial users, which is most of them.
+ */
+export function canAnalysePhotos(plan: EffectivePlan): boolean {
+  return plan !== 'free';
+}

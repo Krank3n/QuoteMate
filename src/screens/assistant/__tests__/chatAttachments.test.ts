@@ -34,6 +34,24 @@ describe('canAttachMore', () => {
     expect(res.ok === false && res.message).toContain('five photos this chat');
   });
 
+  it('does not let a failed upload burn a chat slot', () => {
+    // Two dropouts on a bad site connection must not cost the tradie the rest
+    // of their photos — those photos provably never reached Mate.
+    const messages = [
+      msg('m1', [att('a'), att('b', { status: 'failed' })]),
+      msg('m2', [att('c', { status: 'failed' }), att('d')]),
+      msg('m3', [att('e')]),
+    ];
+    expect(canAttachMore({ pending: [], messages }).ok).toBe(true);
+  });
+
+  it('charges a sent plan two slots against the chat cap', () => {
+    const messages = [msg('m1', [att('a', { isPlan: true }), att('b')]), msg('m2', [att('c')])];
+    // 2 + 1 + 1 = 4 spent, so one more single photo fits and a plan does not.
+    expect(canAttachMore({ pending: [], messages }).ok).toBe(true);
+    expect(canAttachMore({ pending: [], messages, isPlan: true }).ok).toBe(false);
+  });
+
   it('counts a hi-res plan double', () => {
     expect(canAttachMore({ pending: [{ isPlan: true }], messages: [] }).ok).toBe(false);
     expect(canAttachMore({ pending: [], messages: [], isPlan: true }).ok).toBe(true);

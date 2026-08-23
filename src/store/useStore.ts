@@ -48,7 +48,7 @@ import { TRIAL_MS } from '../utils/trialConfig';
 import { trackEvent } from '../services/analyticsService';
 import { maybeRequestReview } from '../services/storeReviewService';
 import { ensureJobForDocument, ensureJobForQuote, useJobStore } from './useJobStore';
-import { canRunMatePipeline } from './planGates';
+import { canAnalysePhotos, canRunMatePipeline } from './planGates';
 import type { CustomerEditPlan } from '../utils/customerEdit';
 import { auth } from '../config/firebase';
 import { searchLocalSources } from '../services/localMaterialSearch';
@@ -3335,7 +3335,7 @@ export const useStore = create<AppState>((set, get) => ({
             };
             reportProgress({});
             const templates = await loadTemplates().catch(() => []);
-            const isPro = get().getEffectivePlan() === 'pro';
+            const isPro = canAnalysePhotos(get().getEffectivePlan());
 
             // ── Phase 1: analyse ──
             const analyseResult = await generateMaterialsForQuote(

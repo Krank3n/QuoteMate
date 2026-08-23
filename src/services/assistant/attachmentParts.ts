@@ -77,12 +77,14 @@ export function buildAttachmentParts(
   parts: Array<{ inlineData: InlineBytes }>;
   skipped: Array<{ id: string; reason: SkipReason }>;
   usedChars: number;
+  usedSlots: number;
 } {
   let slots = budget.remainingSlots ?? ATTACHMENT_LIMITS.maxPerTurn;
   let chars = budget.remainingChars ?? ATTACHMENT_LIMITS.maxBase64CharsTotal;
   const parts: Array<{ inlineData: InlineBytes }> = [];
   const skipped: Array<{ id: string; reason: SkipReason }> = [];
   let usedChars = 0;
+  let usedSlots = 0;
 
   for (const item of items) {
     if (!item.bytes) {
@@ -109,10 +111,11 @@ export function buildAttachmentParts(
     slots -= cost;
     chars -= size;
     usedChars += size;
+    usedSlots += cost;
     parts.push({ inlineData: item.bytes });
   }
 
-  return { parts, skipped, usedChars };
+  return { parts, skipped, usedChars, usedSlots };
 }
 
 /**

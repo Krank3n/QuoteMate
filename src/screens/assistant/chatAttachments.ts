@@ -41,8 +41,14 @@ export function canAttachMore(args: {
   if (pendingSlots + slotCost({ isPlan: args.isPlan }) > ATTACHMENT_LIMITS.maxPerTurn) {
     return { ok: false, reason: 'per_message', message: ATTACH_LIMIT_COPY.perMessage };
   }
-  const sent = args.messages.reduce((n, m) => n + (m.attachments?.length ?? 0), 0);
-  if (sent + args.pending.length + 1 > ATTACHMENT_LIMITS.maxPerChat) {
+  // A failed upload never reached Mate, so it must not burn a chat slot —
+  // two dropouts on a bad site connection would otherwise cost the tradie
+  // the rest of their photos. Plans cost the same two slots here as above.
+  const sent = args.messages.reduce(
+    (n, m) => n + (m.attachments ?? []).filter((a) => a.status !== 'failed').reduce((s, a) => s + slotCost(a), 0),
+    0,
+  );
+  if (sent + pendingSlots + slotCost({ isPlan: args.isPlan }) > ATTACHMENT_LIMITS.maxPerChat) {
     return { ok: false, reason: 'per_chat', message: ATTACH_LIMIT_COPY.perChat };
   }
   return { ok: true };
