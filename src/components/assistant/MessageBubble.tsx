@@ -1,5 +1,14 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, ActivityIndicator, Image, TouchableOpacity } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ActivityIndicator,
+  Animated,
+  Easing,
+  Image,
+  TouchableOpacity,
+} from 'react-native';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { makeStyles, useThemeColors } from '../../theme';
 import { ChatAttachment, ChatMessage, SupplierImportCard } from '../../types/assistant';
@@ -129,6 +138,37 @@ function AttachmentTile({ attachment, large }: { attachment: ChatAttachment; lar
   );
 }
 
+// Three dots breathing in sequence. Cheaper to read at a glance than a
+// spinner, and it reads as "someone is replying" rather than "the app is busy".
+function TypingDots() {
+  const styles = useStyles();
+  const dots = [useRef(new Animated.Value(0.3)).current, useRef(new Animated.Value(0.3)).current, useRef(new Animated.Value(0.3)).current];
+
+  useEffect(() => {
+    const loops = dots.map((v, i) =>
+      Animated.loop(
+        Animated.sequence([
+          Animated.delay(i * 160),
+          Animated.timing(v, { toValue: 1, duration: 320, easing: Easing.out(Easing.quad), useNativeDriver: true }),
+          Animated.timing(v, { toValue: 0.3, duration: 320, easing: Easing.in(Easing.quad), useNativeDriver: true }),
+          Animated.delay((dots.length - 1 - i) * 160),
+        ]),
+      ),
+    );
+    loops.forEach((l) => l.start());
+    return () => loops.forEach((l) => l.stop());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <View style={styles.dotRow} accessibilityLabel="Mate is replying">
+      {dots.map((v, i) => (
+        <Animated.View key={i} style={[styles.dot, { opacity: v }]} />
+      ))}
+    </View>
+  );
+}
+
 function AttachmentStrip({ attachments }: { attachments: ChatAttachment[] }) {
   const styles = useStyles();
   const single = attachments.length === 1;
@@ -253,6 +293,22 @@ function MessageBubbleImpl({
     );
   }
 
+  // The turn is in flight and nothing has streamed yet. Render the wait as
+  // the bubble itself rather than an empty blob with a second indicator
+  // underneath it.
+  if (message.thinking && !message.text) {
+    return (
+      <View style={[styles.row, styles.rowLeft]}>
+        <View style={[styles.bubble, styles.bubbleAssistant, styles.thinkingBubble]}>
+          <TypingDots />
+          <Text style={styles.thinkingLabel} numberOfLines={1}>
+            {message.thinking}
+          </Text>
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={[styles.row, isUser ? styles.rowRight : styles.rowLeft]}>
       <View
@@ -309,6 +365,27 @@ const useStyles = makeStyles((t) => ({
     borderTopLeftRadius: 4,
     borderWidth: 1,
     borderColor: t.colors.border,
+  },
+  thinkingBubble: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  dotRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  dot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: t.colors.accentText,
+  },
+  thinkingLabel: {
+    color: t.colors.textMuted,
+    fontSize: 13,
+    flexShrink: 1,
   },
   bubbleError: {
     borderColor: t.colors.error,

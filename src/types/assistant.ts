@@ -282,6 +282,14 @@ export interface ChatMessage {
   // that failed was invisible to the model and it would cheerfully re-propose
   // the same broken action turn after turn.
   hidden?: boolean;
+  /**
+   * Set on the streaming assistant bubble while a turn is in flight, and
+   * cleared the moment real text arrives. Carries a short line describing what
+   * Mate is actually doing right now (built from its tool calls — never from
+   * model reasoning). Without this the placeholder rendered as an empty grey
+   * blob for the whole wait, alongside a second "thinking" row underneath.
+   */
+  thinking?: string;
   // Photos attached to this bubble. Metadata only — the bytes are read from
   // localUri at send time, never stored here (see ChatAttachment).
   attachments?: ChatAttachment[];

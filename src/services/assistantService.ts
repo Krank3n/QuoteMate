@@ -95,6 +95,10 @@ interface SendTurnArgs {
   // assistant bubble; the resolved AssistantChatResponse still has the full
   // text for callers that don't care about deltas.
   onTextDelta?: (delta: string) => void;
+  // Called with the tool calls the model asked for, before they're dispatched.
+  // Drives the "what's it doing" line on the thinking bubble — a fact about
+  // the app, as opposed to the model's reasoning, which we never surface.
+  onToolCalls?: (calls: Array<{ name: string; args?: Record<string, unknown> }>) => void;
   // Seam for tests: the default reads bytes through expo-file-system, which
   // can't load under vitest.
   resolveAttachment?: (a: ChatAttachment) => Promise<InlineBytes | null>;
@@ -170,6 +174,7 @@ async function callChat(
 export async function sendAssistantTurn({
   history,
   onTextDelta,
+  onToolCalls,
   resolveAttachment = resolveInlineBytes,
 }: SendTurnArgs): Promise<AssistantChatResponse> {
   // Seed the conversation. Drop empty-text messages (inline quote cards, error
@@ -257,6 +262,13 @@ export async function sendAssistantTurn({
 
     // Echo the model turn verbatim (keeps thoughtSignature) before the results.
     contents.push({ role: 'model', parts });
+
+    onToolCalls?.(
+      calls.map((p) => ({
+        name: String(p.functionCall.name),
+        args: p.functionCall.args || {},
+      })),
+    );
 
     // Dispatch every functionCall in this turn concurrently, then send one
     // user turn carrying all the responses — Gemini expects the responses to

@@ -45,6 +45,7 @@ import { activateKeepAwakeAsync } from 'expo-keep-awake';
 import { shouldAutoStartMic, resolveAutoStartMic } from './assistant/shouldAutoStartMic';
 import { getMateIntro, isBlankSlate } from './assistant/mateIntro';
 import { buildGreetPrompt, withTypeInsteadHint } from './assistant/voiceCopy';
+import { DEFAULT_THINKING_LABEL, labelForToolCalls } from './assistant/thinkingLabels';
 import {
   voiceActionForAppState,
   VOICE_INACTIVE_GRACE_MS,
@@ -1744,14 +1745,22 @@ export function AssistantScreen() {
         role: 'assistant',
         text: '',
         createdAt: new Date().toISOString(),
+        thinking: DEFAULT_THINKING_LABEL,
       });
       try {
         const history = [...currentMessages, userMsg];
         const response = await sendAssistantTurn({
           history,
+          onToolCalls: (calls) => {
+            // Only while nothing has streamed — once real text lands the
+            // bubble is the reply and must not flip back to a status line.
+            if (!streamedText) {
+              updateMessage(convoId, streamingId, { thinking: labelForToolCalls(calls) });
+            }
+          },
           onTextDelta: (delta) => {
             streamedText += delta;
-            updateMessage(convoId, streamingId, { text: streamedText });
+            updateMessage(convoId, streamingId, { text: streamedText, thinking: undefined });
           },
         });
         // eslint-disable-next-line no-console
@@ -1767,6 +1776,9 @@ export function AssistantScreen() {
           proposals: response.proposals,
           proposalStatus: Object.fromEntries(response.proposals.map((p) => [p.id, 'pending' as ProposalStatus])),
           errorMessage: hasContent ? undefined : fallback,
+          // The wait is over either way — a bubble left in the thinking state
+          // would sit there breathing forever.
+          thinking: undefined,
         });
         // Render any quotes the model asked to show. Each lands as its own
         // inline card below the reply; an unresolved id gets a short nudge
@@ -1802,7 +1814,7 @@ export function AssistantScreen() {
             errorMessage,
           });
         } else {
-          updateMessage(convoId, streamingId, { text: '', errorMessage });
+          updateMessage(convoId, streamingId, { text: '', errorMessage, thinking: undefined });
         }
       } finally {
         setSending(false);
@@ -2720,12 +2732,9 @@ export function AssistantScreen() {
           />
         )}
 
-        {sending && (
-          <View style={styles.typingRow}>
-            <ActivityIndicator size="small" color={themeColors.textMuted} />
-            <Text style={styles.typing}>Mate is thinking…</Text>
-          </View>
-        )}
+        {/* No separate "thinking" row: the streaming bubble carries the wait
+            now (dots + what Mate is actually doing), so this was a second
+            indicator for one event. */}
 
         <View style={[styles.composerWrap, { paddingBottom: Math.max(insets.bottom, 8) + 70 }]}>
           {pendingAttachments.length > 0 && !voiceActive && (
@@ -2791,7 +2800,11 @@ export function AssistantScreen() {
                   accessibilityLabel="Attach a photo"
                   hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 >
-                  <MaterialCommunityIcons name="paperclip" size={20} color={themeColors.textMuted} />
+                  <MaterialCommunityIcons
+                    name="paperclip"
+                    size={22}
+                    color={sending ? themeColors.textDisabled : themeColors.textSecondary}
+                  />
                 </TouchableOpacity>
                 <TextInput
                   ref={inputRef}
@@ -2799,7 +2812,7 @@ export function AssistantScreen() {
                   value={input}
                   onChangeText={setInput}
                   placeholder="Ask Mate…"
-                  placeholderTextColor={themeColors.textDisabled}
+                  placeholderTextColor={themeColors.textMuted}
                   editable={!sending}
                   multiline
                   returnKeyType="send"
@@ -3152,17 +3165,24 @@ const useStyles = makeStyles((t) => ({
     paddingHorizontal: 12,
     paddingVertical: 6,
   },
+  // minHeight matches the 40pt buttons either side, so one line of text sits
+  // on their centre line instead of hugging the bottom of a shorter box.
   input: {
     flex: 1,
     color: t.colors.text,
     fontSize: 15,
-    paddingVertical: Platform.OS === 'ios' ? 8 : 4,
+    minHeight: 40,
+    paddingVertical: Platform.OS === 'ios' ? 10 : 8,
+    textAlignVertical: 'center',
     maxHeight: 120,
   },
+  // Same ghost circle as the mic: a bare icon floating on the composer didn't
+  // read as a button at all.
   attachBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: t.colors.surfaceOverlay,
     alignItems: 'center',
     justifyContent: 'center',
   },

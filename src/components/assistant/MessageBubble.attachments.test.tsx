@@ -88,3 +88,28 @@ describe('supplier import card coverage line', () => {
     expect(screen.getByText(/6 rows on that quote now price off your list\./)).toBeTruthy();
   });
 });
+
+// The wait used to render as an empty grey blob plus a second "Mate is
+// thinking…" row underneath — two indicators for one event, and the blob read
+// as a broken message.
+describe('thinking bubble', () => {
+  function thinking(label: string, text = ''): ChatMessage {
+    return { id: 'm3', role: 'assistant', text, createdAt: '', thinking: label };
+  }
+
+  it('renders the activity line instead of an empty bubble', () => {
+    render(<MessageBubble message={thinking('Looking up Sam…')} />);
+    expect(screen.getByText('Looking up Sam…')).toBeTruthy();
+  });
+
+  it('announces itself to a screen reader as a reply in progress', () => {
+    render(<MessageBubble message={thinking('Thinking…')} />);
+    expect(screen.getByLabelText('Mate is replying')).toBeTruthy();
+  });
+
+  it('gives way the moment real text streams in', () => {
+    render(<MessageBubble message={thinking('Thinking…', "Righto, here's the go")} />);
+    expect(screen.getByText("Righto, here's the go")).toBeTruthy();
+    expect(screen.queryByLabelText('Mate is replying')).toBeNull();
+  });
+});

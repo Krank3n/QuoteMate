@@ -448,3 +448,49 @@ describe('attachment transport', () => {
     expect(contentsOf()).toEqual([{ role: 'user', parts: [{ text: 'price up a fence' }] }]);
   });
 });
+
+// The loading line is built from the tool calls the model actually makes, so
+// the callback has to fire before they're dispatched — never from model
+// reasoning, which we don't surface at all.
+describe('tool-call reporting', () => {
+  function toolCallResponse(name: string, args: Record<string, unknown>) {
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        parts: [{ functionCall: { name, id: `${name}-1`, args } }],
+        model: 'gemini-test',
+      }),
+    } as unknown as Response;
+  }
+
+  beforeEach(() => {
+    vi.mocked(auth).currentUser = { getIdToken: async () => 'id-token' } as any;
+  });
+
+  it('reports each tool call with its name and args', async () => {
+    fetchMock
+      .mockResolvedValueOnce(toolCallResponse('find_customer', { name: 'Gigar' }))
+      .mockResolvedValueOnce(okChatResponse('found them'));
+
+    const seen: Array<Array<{ name: string }>> = [];
+    await sendAssistantTurn({
+      history: [{ id: '1', role: 'user', text: 'quote a fence for Gigar', createdAt: '' }],
+      onToolCalls: (calls) => seen.push(calls),
+    });
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0][0].name).toBe('find_customer');
+    expect(seen[0][0].args).toEqual({ name: 'Gigar' });
+  });
+
+  it('does not fire on a plain text turn', async () => {
+    fetchMock.mockResolvedValueOnce(okChatResponse('no tools needed'));
+    const onToolCalls = vi.fn();
+    await sendAssistantTurn({
+      history: [{ id: '1', role: 'user', text: 'g\'day', createdAt: '' }],
+      onToolCalls,
+    });
+    expect(onToolCalls).not.toHaveBeenCalled();
+  });
+});
