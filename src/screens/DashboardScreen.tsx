@@ -1010,6 +1010,11 @@ export function DashboardScreen() {
   );
 }
 
+// Shared by both dashboard doors so they can't drift apart: one is a paper
+// Button and the other a Pressable, and left to their own padding they
+// rendered at noticeably different heights.
+const DOOR_HEIGHT = 60;
+
 const useStyles = makeStyles((t) => ({
   // The wrapper owns the canvas so the grid can sit behind the scroller.
   gridHost: {
@@ -1108,8 +1113,10 @@ const useStyles = makeStyles((t) => ({
   primaryDoor: {
     borderRadius: 12,
   },
+  // Both doors are pinned to one height rather than each padding its way
+  // there — the wizard door is the quieter option by colour, not by size.
   primaryDoorContent: {
-    paddingVertical: 14,
+    height: DOOR_HEIGHT,
   },
   secondaryDoor: {
     borderRadius: 12,
@@ -1127,12 +1134,12 @@ const useStyles = makeStyles((t) => ({
     justifyContent: 'center',
     gap: 8,
     paddingHorizontal: 12,
-    paddingVertical: 11,
+    height: DOOR_HEIGHT,
     borderWidth: 1,
     borderColor: t.colors.borderStrong,
   },
   secondaryDoorLabel: {
-    fontSize: 14,
+    fontSize: 15,
     fontFamily: 'Archivo-Bold',
     letterSpacing: 0.3,
     color: t.colors.textSecondary,
