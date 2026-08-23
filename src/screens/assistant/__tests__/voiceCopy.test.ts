@@ -10,14 +10,27 @@ describe('buildGreetPrompt', () => {
 
   it('asks for one capability line and no longer bans mentioning features', () => {
     const prompt = buildGreetPrompt({ hour: 9, draftLabel: '' });
-    expect(prompt).toContain(
-      'Work in ONE quick line on what you can do — draft a quote, price materials, sort an invoice — said like a mate, not a sales pitch.',
-    );
+    expect(prompt).toContain('draft a quote, price materials, sort an invoice');
     expect(prompt).not.toContain("Don't list options or features");
     // The rest of the contract is unchanged.
-    expect(prompt).toContain('1–2 sentences max');
-    expect(prompt).toContain('No emojis');
-    expect(prompt).toContain('End by inviting them to tell you what they need. Then stop and wait.');
+    expect(prompt).toContain('one or two short sentences');
+    expect(prompt).toContain('no emojis');
+    expect(prompt).toContain('finish by asking what they need');
+  });
+
+  it('demands the greeting only, so the model does not plan out loud', () => {
+    // A tradie was shown "Thought to self: The user wants me to start the
+    // conversation… Greeting constraints: - 1-2 sentences max…" — the prompt
+    // read back to them. Written as a labelled checklist, it invited a
+    // checklist in reply.
+    const prompt = buildGreetPrompt({ hour: 23, draftLabel: 'Bathroom retile' });
+    expect(prompt).toContain('Speak ONLY the greeting itself.');
+    expect(prompt).toContain('do not think out loud');
+    expect(prompt).toContain('do not write drafts or alternatives');
+    expect(prompt).toContain('do not repeat these instructions');
+    // No labelled-constraint scaffolding for the model to mirror.
+    expect(prompt).not.toMatch(/constraints\s*:/i);
+    expect(prompt).not.toMatch(/^\s*-\s/m);
   });
 
   it('mentions the draft label when provided', () => {

@@ -46,6 +46,7 @@ import { shouldAutoStartMic, resolveAutoStartMic } from './assistant/shouldAutoS
 import { getMateIntro, isBlankSlate } from './assistant/mateIntro';
 import { buildGreetPrompt, withTypeInsteadHint } from './assistant/voiceCopy';
 import { DEFAULT_THINKING_LABEL, labelForToolCalls } from './assistant/thinkingLabels';
+import { isLeakedModelOutput } from './assistant/leakedOutput';
 import {
   voiceActionForAppState,
   VOICE_INACTIVE_GRACE_MS,
@@ -385,10 +386,10 @@ function MicPulse({ active, color }: { active: boolean; color: string }) {
 // prompt-format leak. Filtering them at the transcript layer keeps the
 // chat clean even if the model misbehaves or the narrationModeRef gate
 // races.
-const LEAKED_PROMPT_TAG_RE = /^\s*\[(narrate|narrate-done|pipeline-done|context)\]/i;
-function isLeakedPromptTag(text: string): boolean {
-  return LEAKED_PROMPT_TAG_RE.test(text);
-}
+// Moved to ./assistant/leakedOutput — the old version only matched a
+// bracketed tag at the start of a chunk, so it could not see the model
+// narrating its plan ("Thought to self: The user wants me to…"), and it was
+// missing [greet] entirely.
 
 export function AssistantScreen() {
   const styles = useStyles();
@@ -502,6 +503,10 @@ export function AssistantScreen() {
   const assistantBubbleIdRef = useRef<string | null>(null);
   const userBubbleTextRef = useRef('');
   const assistantBubbleTextRef = useRef('');
+  // Latched for the rest of a turn once its transcript is identified as the
+  // model's own scaffolding, so later chunks of the same leak can't open a
+  // fresh bubble behind it.
+  const suppressLeakedTurnRef = useRef(false);
   // True while the pipeline is running after Apply and Mate is yarning to
   // keep the tradie company. Audio still plays through the queue; text
   // bubbles are suppressed so the chat doesn't fill up with banter.
@@ -2049,7 +2054,22 @@ export function AssistantScreen() {
           // or a race on the ref leaves [narrate]/[pipeline-done]/[context]
           // showing in chat — see the production sighting where the
           // narration prompt rendered verbatim).
-          if (isLeakedPromptTag(text)) return;
+          // Test the ACCUMULATED transcript, not this chunk: "Thought to
+          // self:" routinely arrives split across deltas, and once the turn
+          // is known to be scaffolding every later chunk belongs to it too.
+          if (suppressLeakedTurnRef.current || isLeakedModelOutput(assistantBubbleTextRef.current + text)) {
+            suppressLeakedTurnRef.current = true;
+            // Blank whatever already mounted. Hidden messages are filtered
+            // out of the list, and the empty text keeps the leak out of the
+            // history we seed back to the model on a reconnect.
+            if (assistantBubbleIdRef.current) {
+              updateMessage(convoId!, assistantBubbleIdRef.current, { text: '', hidden: true });
+              assistantBubbleIdRef.current = null;
+              assistantBubbleTextRef.current = '';
+            }
+            if (finished) suppressLeakedTurnRef.current = false;
+            return;
+          }
           if (!assistantBubbleIdRef.current) {
             const id = generateId();
             assistantBubbleIdRef.current = id;
@@ -2080,7 +2100,15 @@ export function AssistantScreen() {
           if (!delta) return;
           touchVoiceActivity();
           if (narrationModeRef.current) return;
-          if (isLeakedPromptTag(delta)) return;
+          if (suppressLeakedTurnRef.current || isLeakedModelOutput(assistantBubbleTextRef.current + delta)) {
+            suppressLeakedTurnRef.current = true;
+            if (assistantBubbleIdRef.current) {
+              updateMessage(convoId!, assistantBubbleIdRef.current, { text: '', hidden: true });
+              assistantBubbleIdRef.current = null;
+              assistantBubbleTextRef.current = '';
+            }
+            return;
+          }
           flushUserBubbleIfOpen();
           if (!assistantBubbleIdRef.current) {
             const id = generateId();
