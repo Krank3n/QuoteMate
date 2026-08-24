@@ -1,6 +1,6 @@
 {
   "name": "@quotemate/app",
-  "version": "1.54",
+  "version": "1.55",
   "main": "index.js",
   "scripts": {
     "start": "expo start --dev-client",
