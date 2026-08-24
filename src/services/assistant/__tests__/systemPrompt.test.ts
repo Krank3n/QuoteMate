@@ -269,3 +269,19 @@ describe('supplier book policy', () => {
     expectHouseTone(section);
   });
 });
+
+// A tradie was told "tap Apply and I'll get the pipeline to price it up" —
+// parroted straight from the prompt's own worked example, on a card whose
+// button says "Price it up". The examples are what Mate imitates, so they
+// must model the real button labels and keep internal vocabulary internal.
+describe('spoken examples match the real UI', () => {
+  it('no example reply says "tap Apply"', () => {
+    expect(MATE_SYSTEM_PROMPT).not.toContain('tap Apply and');
+    expect(MATE_SYSTEM_PROMPT).toContain("hit 'Price it up' when you're ready.");
+  });
+
+  it('bans saying "Apply" and "pipeline" to the tradie outright', () => {
+    expect(MATE_SYSTEM_PROMPT).toContain('don\'t say "Apply" — no button says that any more');
+    expect(MATE_SYSTEM_PROMPT).toContain('"Pipeline" is an internal word — never say it to the tradie');
+  });
+});
