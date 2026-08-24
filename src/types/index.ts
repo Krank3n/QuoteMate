@@ -396,6 +396,11 @@ export interface Quote {
   // delivery path (email/sms/share/export). Never overwritten on re-send.
   sentAt?: number; // epoch-ms
   sendMethod?: SendMethod; // channel used for the first send
+  // Optional user-set display date (epoch-ms) — lets a quote be backdated
+  // (e.g. into the prior financial year). When set, the preview header and
+  // PDF show this date instead of updatedAt. createdAt/updatedAt are left
+  // untouched so list ordering and last-write-wins sync merges are unaffected.
+  documentDate?: number;
   draftStep?: string; // Screen name where user left off during quote flow (e.g., 'CustomerDetails')
   notes?: string;
   // Job-level quality tier inferred from the description ("premium",
@@ -855,6 +860,10 @@ export interface Invoice {
   updatedAt: Date;
   issueDate: Date;
   dueDate: Date;
+  // Optional user-set display date (epoch-ms) — see Quote.documentDate. On
+  // invoices this mirrors an edited issueDate so a backdated date survives
+  // the quote→invoice conversion and keeps rendering on the PDF.
+  documentDate?: number;
 
   // Customer (same as Quote)
   contactId?: string; // Link to Contact for live updates

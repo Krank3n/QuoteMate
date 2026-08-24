@@ -340,7 +340,7 @@ export async function pushQuoteToXeroCore(
 
   // Xero Quote expiry date — use quote's stored expiry if present, otherwise
   // 30 days from today. Required by Xero when status is SENT or ACCEPTED.
-  const issueDate = quote.issueDate || quote.createdAt || new Date();
+  const issueDate = quote.documentDate || quote.issueDate || quote.createdAt || new Date();
   const expiryDate = quote.expiryDate
     || quote.acceptanceTokenCreatedAt
     || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);

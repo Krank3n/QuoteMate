@@ -116,6 +116,89 @@ describe('photo policy', () => {
   });
 });
 
+// Aug 2026: a tradie asked how to backdate an invoice and Mate sent him to
+// controls that did not exist — "look for Edit Header or Revert to Draft", then
+// the three-dots menu. He replied "is grayed out and have tapped on but not
+// coming up" and kept hunting for ~8 turns.
+//
+// Backdating now EXISTS (documentDate + the header date badge on JobPreview),
+// so the rule is no longer "you can't" but "here is the one real control" —
+// the invented ones stay banned. Literal assertions so a reword can't quietly
+// let Mate start map-reading the app again.
+describe('never invent app UI', () => {
+  const section = promptSection("Being straight about what you can't do");
+
+  it('forbids inventing a control outright', () => {
+    expect(section).toContain('NEVER invent a button, menu, tab or screen.');
+    expect(section).toContain("You cannot see the tradie's screen");
+  });
+
+  it('whitelists the locations it may name, and names the invented ones as off-limits', () => {
+    expect(section).toContain('The ONLY app locations you may send someone to are the ones named in this prompt');
+    // The ones Mate hallucinated in the sighting that still do not exist.
+    expect(section).toContain('an "Edit" or "Revert to Draft" button');
+    expect(section).toContain('a three-dots menu');
+    expect(section).toContain('do not describe where it "usually" is');
+  });
+
+  it('the whitelist includes the date badge now that it is real', () => {
+    // JobPreviewScreen renders a TouchableOpacity (accessibilityLabel
+    // "Change document date") opening DueDateSheet title="Document date".
+    expect(section).toContain('the date badge in the header');
+    expect(section).not.toContain('a date field in a header — you do NOT know exists');
+  });
+
+  it('requires the no-tool admission in the FIRST reply', () => {
+    expect(section).toContain('say so in the FIRST reply');
+    expect(section).toContain("I can't change that from here.");
+  });
+
+  it('believes the tradie and stops after one pointer', () => {
+    expect(section).toContain('BELIEVE THEM');
+    expect(section).toContain('Never send them round the app a third time.');
+  });
+
+  it('points backdating at the real control instead of denying it', () => {
+    expect(section).toContain('Backdating IS possible');
+    expect(section).toContain('the document date sits in the header next to the quote/invoice number');
+    expect(section).toContain('Reset to today');
+    // The old denial must be gone — it became false the moment the feature
+    // shipped, and a stale "you can't" is its own wrong answer.
+    expect(section).not.toContain('You CANNOT change or backdate');
+    expect(section).not.toContain('there is nowhere in the app to tap to do it');
+  });
+
+  it('says backdating an invoice moves the due date', () => {
+    // handleDocumentDateChange recomputes dueDate off the new issueDate.
+    expect(section).toContain('this moves the due date too');
+  });
+
+  it('still owns that it has no tool for it, so the tradie does it', () => {
+    expect(section).toContain('the tradie does it themselves — you have no tool for it');
+    // Match on intent, not the substring "date" — that lives inside
+    // "up-date_customer" and every other update tool. If a date tool ever
+    // ships, this fails and the prompt should propose it rather than
+    // sending the tradie to the header.
+    const dateTool = TOOL_DECLARATIONS.find((t) =>
+      /backdate|issue date|issueDate|change the date|set the date/i.test(
+        `${t.name} ${t.description ?? ''}`,
+      ),
+    );
+    expect(dateTool, 'a date tool now exists — have Mate propose it').toBeUndefined();
+  });
+
+  it("doesn't invite a made-up manual path on a repeat failure", () => {
+    // The old wording ("offer the manual path in the app instead") was an open
+    // invitation to invent one — the exact failure this section now bans.
+    expect(section).not.toContain('offer the manual path in the app instead');
+    expect(section).toContain('only point at a manual path if it\'s one of the locations named above');
+  });
+
+  it('stays gender-neutral and never names the technology', () => {
+    expectHouseTone(section);
+  });
+});
+
 // The supplier-book offer is the easiest thing in the app to make annoying:
 // repeated every turn, or blocking a draft the tradie could have had.
 describe('supplier book policy', () => {

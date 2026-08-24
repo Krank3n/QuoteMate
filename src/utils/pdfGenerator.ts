@@ -283,7 +283,7 @@ export async function generateDocumentPDF(
       jobAddress: doc.jobAddress,
       quoteDate: format(new Date(doc.updatedAt), 'dd MMMM yyyy'),
       invoiceNumber: doc.number,
-      issueDate: format(new Date(doc.issueDate ?? doc.createdAt), 'dd MMMM yyyy'),
+      issueDate: format(new Date(doc.documentDate ?? doc.issueDate ?? doc.createdAt), 'dd MMMM yyyy'),
       dueDate: format(new Date(doc.dueDate ?? doc.createdAt), 'dd MMMM yyyy'),
       paymentTerms: formatPaymentTerms(doc.paymentTerms ?? 'net_14', doc.customPaymentDays),
       paidAmount: doc.paidTotal,
@@ -328,7 +328,8 @@ export async function generateDocumentPDF(
     customerPhone: doc.customerPhone,
     jobAddress: doc.jobAddress,
     quoteNumber: doc.number,
-    quoteDate: format(new Date(doc.updatedAt), 'dd MMMM yyyy'),
+    // A user-set documentDate (backdating) wins over the last-edit date.
+    quoteDate: format(new Date(doc.documentDate ?? doc.updatedAt), 'dd MMMM yyyy'),
     job: doc.job,
     materials: toPdfMaterials(doc.materials),
     materialsSubtotal: doc.materialsSubtotal,
