@@ -49,6 +49,10 @@ export interface Document {
   type: DocumentType; // current canonical view of this doc
   createdAt: number; // ms epoch — Firestore-friendly across web/native
   updatedAt: number;
+  // Optional user-set display date (ms epoch) for backdating — see
+  // Quote.documentDate in ./index.ts. Quote-side only; invoices edit
+  // issueDate directly.
+  documentDate?: number;
 
   // ===== Customer + job =====
   contactId?: string;

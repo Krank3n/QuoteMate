@@ -10,6 +10,7 @@ import {
   View,
   Text,
   FlatList,
+  ScrollView,
   StyleSheet,
   TextInput,
   TouchableOpacity,
@@ -20,8 +21,11 @@ import {
   Animated,
   Easing,
   AppState,
+  Image,
+  Linking,
 } from 'react-native';
 import type { AppStateStatus } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import Svg, { Path, Defs, LinearGradient, Stop } from 'react-native-svg';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
@@ -41,6 +45,8 @@ import { activateKeepAwakeAsync } from 'expo-keep-awake';
 import { shouldAutoStartMic, resolveAutoStartMic } from './assistant/shouldAutoStartMic';
 import { getMateIntro, isBlankSlate } from './assistant/mateIntro';
 import { buildGreetPrompt, withTypeInsteadHint } from './assistant/voiceCopy';
+import { DEFAULT_THINKING_LABEL, labelForToolCalls } from './assistant/thinkingLabels';
+import { isLeakedModelOutput } from './assistant/leakedOutput';
 import {
   voiceActionForAppState,
   VOICE_INACTIVE_GRACE_MS,
@@ -68,6 +74,7 @@ const VOICE_IDLE_CHECK_MS = 5_000;
 import { generateId } from '../utils/generateId';
 import { releaseKeepAwake } from '../utils/keepAwake';
 import {
+  ChatAttachment,
   ChatMessage,
   Proposal,
   ProposalStatus,
@@ -76,6 +83,48 @@ import { MessageBubble } from '../components/assistant/MessageBubble';
 import { ProposalCard } from '../components/assistant/ProposalCard';
 import { WebContainer } from '../components/WebContainer';
 import { GridBackground } from '../components/GridBackground';
+import { ActionSheet, ActionSheetOption } from '../components/ActionSheet';
+import { AlertModal, AlertType } from '../components/AlertModal';
+import { SupplierListCaptureModal } from '../components/SupplierListCaptureModal';
+import { auth } from '../config/firebase';
+import {
+  compressImage,
+  uploadQuotePhoto,
+  sniffLocalPhotoMime,
+  UnsupportedPhotoError,
+} from '../services/photoService';
+import { detectIsPlan } from '../services/planDetection';
+import {
+  ATTACH_LIMIT_COPY,
+  canAttachMore,
+  collectQuotePhotos,
+  markAttachmentConsumedBy,
+  markAttachmentsConsumed,
+  mostRecentUnconsumedAttachment,
+} from './assistant/chatAttachments';
+import { buildSupplierGapNote } from '../services/assistant/supplierGapNote';
+import { setUnconsumedAttachmentProbe } from '../services/assistant/proposalTools';
+import { ensureLocalUri } from '../services/assistant/attachmentBytes';
+import { useSupplierListImport, type ExtractResult } from '../hooks/useSupplierListImport';
+import type { SaveSummary } from '../hooks/useSupplierListImport';
+import { SupplierListReviewModal } from '../components/SupplierListReviewModal';
+import { SpreadsheetColumnMapperModal } from '../components/SpreadsheetColumnMapperModal';
+import { loadFavoritesFromLocal } from '../services/materialFavorites';
+import { loadGroups } from '../services/supplierGroupService';
+import { searchFavorites } from '../services/localMaterialMatcher';
+import { invalidateSupplierBookCache } from '../services/supplierBook';
+import { canRunMatePipeline } from '../store/planGates';
+import type { AssistantSheetHint } from '../store/useStore';
+
+interface AlertConfig {
+  type: AlertType;
+  title: string;
+  message: string;
+  primaryButtonText?: string;
+  primaryButtonAction?: () => void;
+  secondaryButtonText?: string;
+  secondaryButtonAction?: () => void;
+}
 
 type VoiceState = 'idle' | 'connecting' | 'listening' | 'thinking';
 
@@ -330,167 +379,6 @@ function MicPulse({ active, color }: { active: boolean; color: string }) {
   );
 }
 
-// Big hero record button shown front-and-centre when the chat is empty.
-// Lifted from the JobDetailsScreen voice-record UI (ripple rings + glow +
-// pulse) so the two surfaces feel related. Self-contained animation loops
-// run only while `active`; `pending` (connecting/thinking) shows a spinner
-// over the icon without the rings, so the user gets feedback while the WS
-// is handshaking but we don't fake a "recording" state that isn't true yet.
-function HeroRecordButton({
-  active,
-  pending,
-  onPress,
-  accent,
-}: {
-  active: boolean;
-  pending: boolean;
-  onPress: () => void;
-  accent: string;
-}) {
-  const styles = useStyles();
-  const themeColors = useThemeColors();
-  const heroStyles = useHeroStyles();
-  const pulseAnim = useRef(new Animated.Value(1)).current;
-  const glowAnim = useRef(new Animated.Value(0)).current;
-  const rippleAnim = useRef(new Animated.Value(0)).current;
-  const ripple2Anim = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    if (!active) {
-      Animated.parallel([
-        Animated.timing(pulseAnim, { toValue: 1, duration: 300, useNativeDriver: true }),
-        Animated.timing(glowAnim, { toValue: 0, duration: 300, useNativeDriver: true }),
-        Animated.timing(rippleAnim, { toValue: 0, duration: 300, useNativeDriver: true }),
-        Animated.timing(ripple2Anim, { toValue: 0, duration: 300, useNativeDriver: true }),
-      ]).start();
-      return;
-    }
-    const pulseLoop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulseAnim, { toValue: 1.12, duration: 900, useNativeDriver: true }),
-        Animated.timing(pulseAnim, { toValue: 1, duration: 900, useNativeDriver: true }),
-      ]),
-    );
-    const glowLoop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(glowAnim, { toValue: 1, duration: 1400, useNativeDriver: true }),
-        Animated.timing(glowAnim, { toValue: 0, duration: 1400, useNativeDriver: true }),
-      ]),
-    );
-    const rippleLoop = Animated.loop(
-      Animated.timing(rippleAnim, { toValue: 1, duration: 1800, useNativeDriver: true }),
-    );
-    const ripple2Loop = Animated.loop(
-      Animated.sequence([
-        Animated.delay(900),
-        Animated.timing(ripple2Anim, { toValue: 1, duration: 1800, useNativeDriver: true }),
-        Animated.timing(ripple2Anim, { toValue: 0, duration: 0, useNativeDriver: true }),
-      ]),
-    );
-    pulseLoop.start();
-    glowLoop.start();
-    rippleLoop.start();
-    ripple2Loop.start();
-    return () => {
-      pulseLoop.stop();
-      glowLoop.stop();
-      rippleLoop.stop();
-      ripple2Loop.stop();
-    };
-  }, [active, pulseAnim, glowAnim, rippleAnim, ripple2Anim]);
-
-  const ringStyle = (anim: Animated.Value) => ({
-    position: 'absolute' as const,
-    width: 128,
-    height: 128,
-    borderRadius: 64,
-    borderWidth: 3,
-    borderColor: accent,
-    backgroundColor: 'transparent',
-    opacity: anim.interpolate({ inputRange: [0, 1], outputRange: [0.55, 0] }),
-    transform: [
-      { scale: anim.interpolate({ inputRange: [0, 1], outputRange: [1, 1.9] }) },
-    ],
-  });
-
-  return (
-    <TouchableOpacity
-      onPress={onPress}
-      disabled={pending}
-      activeOpacity={0.85}
-      style={heroStyles.touchable}
-      accessibilityRole="button"
-      accessibilityLabel={active ? 'Stop voice mode' : 'Tap to talk to Mate'}
-    >
-      {active && (
-        <>
-          <Animated.View style={ringStyle(rippleAnim)} />
-          <Animated.View style={ringStyle(ripple2Anim)} />
-        </>
-      )}
-      <Animated.View
-        style={[
-          heroStyles.glow,
-          {
-            backgroundColor: accent,
-            shadowColor: accent,
-            opacity: active
-              ? glowAnim.interpolate({ inputRange: [0, 1], outputRange: [0.25, 0.55] })
-              : 0.18,
-          },
-        ]}
-      />
-      <Animated.View
-        style={[
-          heroStyles.button,
-          { backgroundColor: accent, shadowColor: accent, transform: [{ scale: pulseAnim }] },
-        ]}
-      >
-        {pending ? (
-          <ActivityIndicator size="large" color={themeColors.onAccent} />
-        ) : (
-          <MaterialCommunityIcons
-            name={active ? 'stop' : 'microphone'}
-            size={56}
-            color={themeColors.onAccent}
-          />
-        )}
-      </Animated.View>
-    </TouchableOpacity>
-  );
-}
-
-const useHeroStyles = makeStyles((t) => ({
-  touchable: {
-    width: 128,
-    height: 128,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  button: {
-    width: 128,
-    height: 128,
-    borderRadius: 64,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 4,
-    borderColor: t.colors.border,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.45,
-    shadowRadius: 16,
-    elevation: 12,
-  },
-  glow: {
-    position: 'absolute',
-    width: 160,
-    height: 160,
-    borderRadius: 80,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.9,
-    shadowRadius: 28,
-    elevation: 18,
-  },
-}));
 
 // Bracketed prompt tags we feed into the Live session as user turns to
 // trigger Mate's pipeline-time narration. The model occasionally echoes
@@ -498,10 +386,10 @@ const useHeroStyles = makeStyles((t) => ({
 // prompt-format leak. Filtering them at the transcript layer keeps the
 // chat clean even if the model misbehaves or the narrationModeRef gate
 // races.
-const LEAKED_PROMPT_TAG_RE = /^\s*\[(narrate|narrate-done|pipeline-done|context)\]/i;
-function isLeakedPromptTag(text: string): boolean {
-  return LEAKED_PROMPT_TAG_RE.test(text);
-}
+// Moved to ./assistant/leakedOutput — the old version only matched a
+// bracketed tag at the start of a chunk, so it could not see the model
+// narrating its plan ("Thought to self: The user wants me to…"), and it was
+// missing [greet] entirely.
 
 export function AssistantScreen() {
   const styles = useStyles();
@@ -532,6 +420,46 @@ export function AssistantScreen() {
 
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
+  // Photos staged for the next message. Ref-mirrored so the upload loop and
+  // submit() read the live tray rather than the render they were created in.
+  const [pendingAttachments, setPendingAttachments] = useState<ChatAttachment[]>([]);
+  const pendingAttachmentsRef = useRef<ChatAttachment[]>([]);
+  useEffect(() => { pendingAttachmentsRef.current = pendingAttachments; }, [pendingAttachments]);
+  const [photoSheetVisible, setPhotoSheetVisible] = useState(false);
+  const [captureModalVisible, setCaptureModalVisible] = useState(false);
+  const [alertConfig, setAlertConfig] = useState<AlertConfig | null>(null);
+
+  // --- Supplier-list import -------------------------------------------------
+  // The extracted rows live in a ref, not on the message: chat history is
+  // in-memory only so the ref has the same lifetime, and a 400-row extraction
+  // on a Firestore-mirrored message would be a 400-row write per flush.
+  const supplierImportsRef = useRef<Map<string, ExtractResult>>(new Map());
+  const activeImportIdRef = useRef<string | null>(null);
+  const importCardPhaseRef = useRef<string>('');
+  // The chat photo this import is reading. Only claimed once the extraction
+  // succeeds — a failed read must not eat a site photo forever.
+  const importAttachmentIdRef = useRef<string | null>(null);
+  const [reviewImportId, setReviewImportId] = useState<string | null>(null);
+  const reviewImportIdRef = useRef<string | null>(null);
+  useEffect(() => { reviewImportIdRef.current = reviewImportId; }, [reviewImportId]);
+  const [importSourceSheetVisible, setImportSourceSheetVisible] = useState(false);
+  const importSupplierNameRef = useRef<string | undefined>(undefined);
+  // Deterministic nudge control. The model is not trusted to remember it said
+  // no once — a second ask about the same thing is how a helper becomes a nag.
+  const importOfferRef = useRef<{ declined: boolean; offeredForQuote: Set<string> }>({
+    declined: false,
+    offeredForQuote: new Set(),
+  });
+  // The quote the chat is working on, so a finished import can say how much of
+  // it now prices off the tradie's own list.
+  const activeQuoteIdRef = useRef<string | null>(null);
+  // Late-bound so the hook (and handleApply, which is declared first) can
+  // reach handlers defined further down.
+  const onImportSavedRef = useRef<(summary: SaveSummary) => void>(() => {});
+  const startSupplierImportRef = useRef<(hint: AssistantSheetHint) => Promise<void>>(async () => {});
+  const importer = useSupplierListImport({
+    onSaved: (summary) => onImportSavedRef.current(summary),
+  });
   const [voiceState, setVoiceState] = useState<VoiceState>('idle');
   // Ref mirror of voiceState so long-lived closures (the sticky idle
   // watchdog interval) read the current value instead of the one
@@ -575,6 +503,10 @@ export function AssistantScreen() {
   const assistantBubbleIdRef = useRef<string | null>(null);
   const userBubbleTextRef = useRef('');
   const assistantBubbleTextRef = useRef('');
+  // Latched for the rest of a turn once its transcript is identified as the
+  // model's own scaffolding, so later chunks of the same leak can't open a
+  // fresh bubble behind it.
+  const suppressLeakedTurnRef = useRef(false);
   // True while the pipeline is running after Apply and Mate is yarning to
   // keep the tradie company. Audio still plays through the queue; text
   // bubbles are suppressed so the chat doesn't fill up with banter.
@@ -878,10 +810,22 @@ export function AssistantScreen() {
             }, 1200)
           : null;
 
-      const result = await applyProposal(proposal, (status) => {
-        if (!workingMessageId) return;
-        updateMessage(conversation.id, workingMessageId, { working: status });
-      });
+      // Photos the tradie sent in this chat ride onto the draft so the gear
+      // generator reads them on its first pass. Snapshot the messages once —
+      // the same list is stamped consumed further down.
+      const messagesForPhotos =
+        useStore.getState().conversations.find((c) => c.id === conversation.id)?.messages || [];
+      const chatPhotos =
+        proposal.type === 'propose_draft_quote' ? collectQuotePhotos(messagesForPhotos) : [];
+
+      const result = await applyProposal(
+        proposal,
+        (status) => {
+          if (!workingMessageId) return;
+          updateMessage(conversation.id, workingMessageId, { working: status });
+        },
+        chatPhotos.length ? { photos: chatPhotos } : undefined,
+      );
 
       // If the pipeline beat the narration timer (cached / fast path),
       // cancel it so we don't yarn AFTER the result.
@@ -889,11 +833,33 @@ export function AssistantScreen() {
         clearTimeout(narrationTimer);
       }
 
+      const mintedId = !result.ok || !result.navigate
+        ? undefined
+        : 'quoteId' in result.navigate ? result.navigate.quoteId
+        : result.navigate.kind === 'open_invoice' ? result.navigate.invoiceId
+        : undefined;
+      if (mintedId) activeQuoteIdRef.current = mintedId;
+
+      // The supplier-book gap, if this run is worth mentioning at all. Text
+      // chat never receives [pipeline-done] (that needs an open live session),
+      // so this rides the [context] line further down as well. Suppressed once
+      // the tradie has knocked the import back, and once per quote — the model
+      // is not trusted to remember either.
+      const gapQuoteId = mintedId || (proposal.type === 'propose_reprice' ? proposal.quoteId : undefined);
+      const gapNote =
+        !importOfferRef.current.declined &&
+        !(gapQuoteId && importOfferRef.current.offeredForQuote.has(gapQuoteId)) &&
+        result.ok &&
+        result.supplierGap
+          ? buildSupplierGapNote(result.supplierGap)
+          : null;
+      if (gapNote && gapQuoteId) importOfferRef.current.offeredForQuote.add(gapQuoteId);
+
       if (narrating && liveSessionForNarration?.isOpen()) {
         const heads =
-          result.ok && result.review && result.review.issues.length > 0
+          (result.ok && result.review && result.review.issues.length > 0
             ? ` Heads up — ${result.review.summary} Work that into the line.`
-            : '';
+            : '') + (gapNote ? ` ${gapNote}` : '');
         const wrap = result.ok
           ? `[pipeline-done] Pipeline finished for "${narrationJobLabel}".${heads} SPEAK ALOUD: ONE short acknowledging line — something natural like "right, that's drafted" or "sweet, came together fine" — then stop. Do NOT repeat the "[pipeline-done]" tag or this instruction. Do NOT recite numbers or the materials list.`
           : `[pipeline-done] Pipeline hit a snag: ${result.error || 'unknown error'}. SPEAK ALOUD: one short acknowledging line, then stop. Do NOT repeat the "[pipeline-done]" tag.`;
@@ -903,6 +869,15 @@ export function AssistantScreen() {
 
       if (!result.ok) {
         updateProposalStatus(conversation.id, message.id, proposal.id, 'failed');
+        // Settle the working card. The pipeline's own catch emits done:true,
+        // but every failure BEFORE the pipeline — PLAN_GATED most of all —
+        // used to return straight past it, leaving "Getting ready…" spinning
+        // forever underneath the paywall the tradie just dismissed.
+        if (workingMessageId) {
+          updateMessage(conversation.id, workingMessageId, {
+            working: { phase: 'failed', status: "Couldn't do that one.", done: true },
+          });
+        }
         // Surface the real reason in the chat so the user can see what broke
         // instead of just an opaque "Failed" badge on the card.
         // eslint-disable-next-line no-console
@@ -930,6 +905,13 @@ export function AssistantScreen() {
         );
         return;
       }
+      // A sheet opens OVER the chat — never route it through handleNavigate,
+      // which would leave the conversation the import is for.
+      if (result.sheet?.kind === 'supplier_import') {
+        await startSupplierImportRef.current(result.sheet);
+        return;
+      }
+
       // Surface a note (e.g. partial success — draft created but pipeline
       // failed) before deciding what to do with the navigate hint.
       if (result.note) {
@@ -950,12 +932,21 @@ export function AssistantScreen() {
       // documentType:'invoice' resolves to { kind:'open_invoice', invoiceId }
       // so the previous `quoteId in navigate` check missed every drafted
       // invoice and show_quote follow-ups would fail to resolve.
-      if (result.navigate) {
-        const mintedId =
-          'quoteId' in result.navigate ? result.navigate.quoteId :
-          result.navigate.kind === 'open_invoice' ? result.navigate.invoiceId :
-          undefined;
-        if (mintedId) rememberAppliedQuote(proposal.id, mintedId);
+      if (mintedId) rememberAppliedQuote(proposal.id, mintedId);
+
+      // Claim the photos this draft carried. Without the stamp, an unrelated
+      // second job drafted in the same chat would inherit them.
+      //
+      // Read the messages FRESH and stamp only the ids the draft actually got:
+      // the pipeline ran for 20-40 s, and writing back the pre-pipeline
+      // snapshot would revert any upload that settled in the meantime.
+      if (proposal.type === 'propose_draft_quote' && chatPhotos.length > 0 && mintedId) {
+        const live =
+          useStore.getState().conversations.find((c) => c.id === conversation.id)?.messages || [];
+        const carriedIds = chatPhotos.map((p) => p.id);
+        for (const patch of markAttachmentsConsumed(live, mintedId, carriedIds)) {
+          updateMessage(conversation.id, patch.messageId, { attachments: patch.attachments });
+        }
       }
 
       // Feed Mate the resolved quote id so it stops trying to re-find the
@@ -982,7 +973,11 @@ export function AssistantScreen() {
                 `[context] The tradie tapped Apply on propose_draft_quote. ` +
                 `The resulting quote is ${result.navigate.quoteId} ` +
                 `("${proposal.jobName}"). Reference this id on follow-ups; ` +
-                `do not draft a new quote for the same job.`,
+                `do not draft a new quote for the same job.` +
+                (chatPhotos.length
+                  ? ` Their site photos are on it — don't ask them to add photos again.`
+                  : '') +
+                (gapNote ? ` ${gapNote}` : ''),
               );
             }
             break;
@@ -1025,7 +1020,8 @@ export function AssistantScreen() {
           case 'propose_reprice':
             note(
               `[context] Re-priced quote ${proposal.quoteId}.` +
-              (result.review ? ` ${result.review.summary}` : ''),
+              (result.review ? ` ${result.review.summary}` : '') +
+              (gapNote ? ` ${gapNote}` : ''),
             );
             break;
           case 'propose_update_quote_rates': {
@@ -1132,8 +1128,17 @@ export function AssistantScreen() {
     (message: ChatMessage, proposal: Proposal) => {
       if (!conversation) return;
       updateProposalStatus(conversation.id, message.id, proposal.id, 'dismissed');
+      // A "no thanks" on the price-list import is final for this chat. Told to
+      // the model AND enforced here — dedupe is not something to leave to it.
+      if (proposal.type === 'propose_import_supplier_list') {
+        importOfferRef.current.declined = true;
+        noteToMate(
+          conversation.id,
+          "[context] The tradie knocked back the supplier-list import. Don't offer it again in this chat.",
+        );
+      }
     },
-    [conversation, updateProposalStatus],
+    [conversation, updateProposalStatus, noteToMate],
   );
 
   // Put a quote on screen — render it inline in the chat (job header + scope +
@@ -1145,6 +1150,8 @@ export function AssistantScreen() {
       const state = useStore.getState();
       const exists = !!(state.getDocumentById(quoteId) || state.quotes.find((q) => q.id === quoteId));
       if (!exists) return false;
+      // The quote a finished import measures its coverage against.
+      activeQuoteIdRef.current = quoteId;
       appendMessage(convoId, {
         id: generateId(),
         role: 'assistant',
@@ -1157,10 +1164,567 @@ export function AssistantScreen() {
     [appendMessage],
   );
 
+  const showAlert = useCallback((config: AlertConfig) => setAlertConfig(config), []);
+  const dismissAlert = useCallback(() => setAlertConfig(null), []);
+
+  // Mate only ever asks for "the photo they just sent" — it never sees or
+  // names an attachment id. The validator asks this before it lets a
+  // source:'attachment' import through.
+  useEffect(() => {
+    setUnconsumedAttachmentProbe(() => {
+      const state = useStore.getState();
+      const messages =
+        state.conversations.find((c) => c.id === state.currentConversationId)?.messages || [];
+      return !!mostRecentUnconsumedAttachment(messages);
+    });
+    return () => setUnconsumedAttachmentProbe(() => false);
+  }, []);
+
+  // Nobody wants Mate talking over them while they edit forty rows of prices —
+  // and the MIC matters more than the speaker here. Left hot, worksite chatter
+  // behind the modal drives full turns, burns tokens, and can even have Mate
+  // resolve a proposal card the tradie can't see. stop() is terminal on both
+  // the queue and the capture handle, so resuming means fresh ones.
+  const suspendVoiceForModal = useCallback(() => {
+    narrationModeRef.current = false;
+    const queue = audioQueueRef.current;
+    audioQueueRef.current = null;
+    matePlayingRef.current = false;
+    if (queue) { try { void queue.stop(); } catch { /* noop */ } }
+    const mic = micRef.current;
+    micRef.current = null;
+    if (mic) { try { void mic.stop(); } catch { /* noop */ } }
+  }, []);
+
+  const resumeVoiceAfterModal = useCallback(() => {
+    if (!voiceSessionRef.current) return;
+    if (!audioQueueRef.current) {
+      const queue = createAudioQueue();
+      queue.setOnActiveChange((active) => {
+        matePlayingRef.current = active;
+        if (active) lastVoiceActivityRef.current = Date.now();
+      });
+      audioQueueRef.current = queue;
+    }
+    lastVoiceActivityRef.current = Date.now();
+    if (micRef.current) return;
+    void startMicCapture((chunk) => {
+      if (!matePlayingRef.current) voiceSessionRef.current?.sendMicChunk(chunk);
+    })
+      .then((mic) => {
+        // The session may have closed while the mic was spinning up.
+        if (!voiceSessionRef.current) { void mic.stop(); return; }
+        micRef.current = mic;
+      })
+      .catch(() => {
+        // Losing the mic mid-session isn't worth an error bubble over a price
+        // list — the tradie can tap it again.
+      });
+  }, []);
+
+  const openSupplierReview = useCallback(
+    (importId: string) => {
+      suspendVoiceForModal();
+      setReviewImportId(importId);
+    },
+    [suspendVoiceForModal],
+  );
+
+  const closeSupplierReview = useCallback(() => {
+    setReviewImportId(null);
+    importer.cancelReview();
+    resumeVoiceAfterModal();
+  }, [importer, resumeVoiceAfterModal]);
+
+  /**
+   * Open the price-list reader over the chat. Never navigates — the import
+   * exists to fix the quote the tradie is mid-conversation about.
+   */
+  const startSupplierImport = useCallback(
+    async (hint: AssistantSheetHint) => {
+      importSupplierNameRef.current = hint.supplierName;
+      const state = useStore.getState();
+      const convoId = state.conversations.find((c) => c.id === state.currentConversationId)?.id;
+      if (!convoId) return;
+      // One at a time — a second import would otherwise write into the first
+      // one's card and the losing extraction would vanish.
+      if (activeImportIdRef.current) {
+        appendMessage(convoId, {
+          id: generateId(),
+          role: 'assistant',
+          text: "Still reading the last one — give it a sec and I'll take the next.",
+          createdAt: new Date().toISOString(),
+        });
+        return;
+      }
+
+      if (hint.source === 'attachment') {
+        const messages = state.conversations.find((c) => c.id === convoId)?.messages || [];
+        const attachment = mostRecentUnconsumedAttachment(messages);
+        if (attachment) {
+          // Remember it, but DON'T claim it yet: a failed extraction would
+          // otherwise eat a site photo permanently, and nothing un-stamps it.
+          importAttachmentIdRef.current = attachment.id;
+          // FileSystem.readAsStringAsync can't read https://, so a photo whose
+          // local copy is gone gets pulled back into the cache first.
+          const uri = await ensureLocalUri(attachment);
+          if (!uri) {
+            importAttachmentIdRef.current = null;
+            appendMessage(convoId, {
+              id: generateId(),
+              role: 'assistant',
+              text: "Lost that photo — send it again and I'll read it.",
+              createdAt: new Date().toISOString(),
+            });
+            return;
+          }
+          await importer.importFromUris({
+            uris: [uri],
+            mimeType: attachment.mimeType,
+            supplierName: hint.supplierName,
+          });
+          return;
+        }
+        // Nothing spare to read — fall through and ask.
+      }
+
+      if (
+        hint.source === 'camera' ||
+        hint.source === 'gallery' ||
+        hint.source === 'pdf' ||
+        hint.source === 'spreadsheet'
+      ) {
+        await importer.startImport(hint.source);
+        return;
+      }
+      setImportSourceSheetVisible(true);
+    },
+    [importer, appendMessage, updateMessage],
+  );
+
+  useEffect(() => { startSupplierImportRef.current = startSupplierImport; }, [startSupplierImport]);
+
+  const importSourceOptions: ActionSheetOption[] = useMemo(
+    () => [
+      { icon: 'camera', label: 'Snap the price list', onPress: () => { void importer.startImport('camera'); } },
+      { icon: 'image-multiple', label: 'Pick from photos', onPress: () => { void importer.startImport('gallery'); } },
+      { icon: 'file-pdf-box', label: 'PDF price list', onPress: () => { void importer.startImport('pdf'); } },
+      { icon: 'file-document-edit-outline', label: 'Spreadsheet (CSV or Excel)', onPress: () => { void importer.startImport('spreadsheet'); } },
+    ],
+    [importer],
+  );
+
+  // Mount the card the moment extraction actually starts — not when a picker
+  // opens, or a cancelled pick would leave a card spinning forever.
+  useEffect(() => {
+    if (importer.phase !== 'extracting' || activeImportIdRef.current || !conversation) return;
+    const importId = generateId();
+    activeImportIdRef.current = importId;
+    importCardPhaseRef.current = 'extracting';
+    appendMessage(conversation.id, {
+      id: importId,
+      role: 'assistant',
+      text: '',
+      createdAt: new Date().toISOString(),
+      supplierImport: { importId, phase: 'extracting' },
+    });
+  }, [importer.phase, conversation, appendMessage]);
+
+  // Extraction landed — park the rows in the ref, flip the card, open the
+  // reader. The message id IS the import id, so updates need no lookup table.
+  useEffect(() => {
+    const importId = activeImportIdRef.current;
+    if (!importId || !conversation) return;
+    if (importCardPhaseRef.current !== 'extracting') return;
+    if (importer.phase !== 'reviewing' || !importer.extractedItems.length) return;
+    importCardPhaseRef.current = 'ready';
+    activeImportIdRef.current = null;
+    // The read worked, so the photo really was a price list — claim it now so
+    // it can't also ride onto the quote as a site photo.
+    const claimedId = importAttachmentIdRef.current;
+    importAttachmentIdRef.current = null;
+    if (claimedId) {
+      const messages =
+        useStore.getState().conversations.find((c) => c.id === conversation.id)?.messages || [];
+      for (const patch of markAttachmentConsumedBy(messages, claimedId, 'supplier_import')) {
+        updateMessage(conversation.id, patch.messageId, { attachments: patch.attachments });
+      }
+    }
+    supplierImportsRef.current.set(importId, {
+      supplierName: importer.extractedSupplierName,
+      supplierContact: importer.extractedSupplierContact,
+      items: importer.extractedItems,
+    });
+    updateMessage(conversation.id, importId, {
+      supplierImport: {
+        importId,
+        phase: 'ready',
+        supplierName: importer.extractedSupplierName || undefined,
+        itemCount: importer.extractedItems.length,
+        sampleNames: importer.extractedItems.slice(0, 3).map((i) => i.name),
+      },
+      cta: { label: 'Check & save', action: { type: 'open_supplier_review', importId } },
+    });
+    openSupplierReview(importId);
+  }, [
+    importer.phase,
+    importer.extractedItems,
+    importer.extractedSupplierName,
+    importer.extractedSupplierContact,
+    conversation,
+    updateMessage,
+    openSupplierReview,
+  ]);
+
+  // Extraction failed. On site, "no signal" is the likeliest cause and the
+  // right advice is "keep the photo", not "try a sharper one".
+  useEffect(() => {
+    if (!conversation || !importer.errorMessage) return;
+    const offline = /network|offline|internet|connection|timed out/i.test(importer.errorMessage);
+    const text = offline
+      ? "No signal — hang onto that photo and I'll read it when you're back on."
+      : importer.errorMessage;
+    const importId = activeImportIdRef.current;
+    activeImportIdRef.current = null;
+    importCardPhaseRef.current = '';
+    // Leave the photo unclaimed — a read that failed hasn't spent it.
+    importAttachmentIdRef.current = null;
+    if (importId) {
+      updateMessage(conversation.id, importId, {
+        supplierImport: { importId, phase: 'failed', error: text },
+        cta: { label: 'Try again', action: { type: 'open_supplier_review', importId } },
+      });
+    } else {
+      // No card was ever mounted — a denied permission, a picker that threw,
+      // or a save that failed. Without this the tradie taps and nothing at all
+      // happens, and Mate keeps offering as though it never ran.
+      appendMessage(conversation.id, {
+        id: generateId(),
+        role: 'assistant',
+        text,
+        createdAt: new Date().toISOString(),
+      });
+    }
+    importer.clearError();
+  }, [importer.errorMessage, importer.clearError, conversation, updateMessage, appendMessage]);
+
+  // Backing out of the column mapper drops the importer to idle with no rows
+  // and no error, which would leave the card spinning forever.
+  useEffect(() => {
+    const importId = activeImportIdRef.current;
+    if (!importId || !conversation) return;
+    if (importer.phase !== 'idle' || importCardPhaseRef.current !== 'extracting') return;
+    if (importer.errorMessage) return;
+    activeImportIdRef.current = null;
+    importCardPhaseRef.current = '';
+    updateMessage(conversation.id, importId, {
+      supplierImport: {
+        importId,
+        phase: 'failed',
+        error: "Didn't get a price list out of that one.",
+      },
+      cta: { label: 'Try again', action: { type: 'open_supplier_review', importId } },
+    });
+  }, [importer.phase, importer.errorMessage, conversation, updateMessage]);
+
+  /**
+   * THE guard that decides whether this feature looks like it works. An
+   * imported list that silently doesn't match is indistinguishable from a
+   * broken import: the pipeline searches "Colorbond fence infill sheet 1.8m
+   * per piece" against an imported "Colorbond sheet 1.8m Monument", and below
+   * the 0.6 threshold nothing happens and the tradie can't tell why. So count
+   * the real matches and say the number.
+   */
+  const countCoveredRows = useCallback(async (quoteId: string): Promise<number> => {
+    try {
+      const state = useStore.getState();
+      const materials =
+        state.getDocumentById(quoteId)?.materials ||
+        state.quotes.find((q) => q.id === quoteId)?.materials ||
+        [];
+      if (!materials.length) return 0;
+      const [favorites, groups] = await Promise.all([
+        loadFavoritesFromLocal(),
+        loadGroups().catch(() => []),
+      ]);
+      const favList = Object.values(favorites);
+      let covered = 0;
+      for (const m of materials) {
+        const term = m.searchTerm || m.name;
+        if (!term) continue;
+        if (searchFavorites(term, favList, groups).length > 0) covered += 1;
+      }
+      return covered;
+    } catch {
+      return 0;
+    }
+  }, []);
+
+  useEffect(() => {
+    onImportSavedRef.current = (summary: SaveSummary) => {
+      // Usually the card the review modal was opened from. The contact-only
+      // path never opens a review, so it settles the still-live card instead —
+      // otherwise the idle guard below would mark a successful save "failed".
+      const importId = reviewImportIdRef.current ?? activeImportIdRef.current;
+      activeImportIdRef.current = null;
+      importCardPhaseRef.current = '';
+      importAttachmentIdRef.current = null;
+      setReviewImportId(null);
+      resumeVoiceAfterModal();
+      // Without this the next get_job_requirements still reports an empty book
+      // and Mate re-offers the import it just finished.
+      invalidateSupplierBookCache();
+      const convoId = useStore.getState().currentConversationId;
+      if (!convoId) return;
+      const quoteId = activeQuoteIdRef.current;
+      void (async () => {
+        const coveredRows = quoteId ? await countCoveredRows(quoteId) : 0;
+        if (importId) {
+          updateMessage(convoId, importId, {
+            supplierImport: {
+              importId,
+              phase: 'saved',
+              supplierName: summary.supplierName || undefined,
+              savedCount: summary.itemCount,
+              coveredRows,
+            },
+            cta: undefined,
+          });
+        }
+        const who = summary.supplierName ? ` from ${summary.supplierName}` : '';
+        if (summary.itemCount === 0) {
+          // Extraction found contact details but no prices — the group was
+          // still created, so don't call it a failure.
+          noteToMate(
+            convoId,
+            `[context] No prices came off that list, but the supplier's contact details${who} are saved. ` +
+              `Say that in one short line and offer to read a clearer photo of the prices.`,
+          );
+          return;
+        }
+        // Only dangle a re-price at someone who can actually run one —
+        // rewarding a successful import with a paywall is worse than silence.
+        const canReprice = canRunMatePipeline(useStore.getState().getEffectivePlan());
+        const tail =
+          coveredRows > 0 && quoteId
+            ? canReprice
+              ? ` ${coveredRows} row${coveredRows === 1 ? '' : 's'} on quote ${quoteId} would now price off their own list — offer propose_reprice in one short line.`
+              : ` ${coveredRows} row${coveredRows === 1 ? '' : 's'} on quote ${quoteId} would now price off their own list, but re-pricing isn't in their plan. Say the list is saved and the next quote will use it — do NOT offer a re-price.`
+            : ' Nothing on the quote in hand matched it yet — say the list is saved and move on.';
+        noteToMate(
+          convoId,
+          `[context] The tradie saved ${summary.itemCount} item${summary.itemCount === 1 ? '' : 's'}${who}` +
+            ` into their supplier book.${tail}`,
+        );
+      })();
+    };
+  }, [countCoveredRows, noteToMate, resumeVoiceAfterModal, updateMessage]);
+
+  /**
+   * Land an upload's outcome wherever the attachment has got to. A tradie who
+   * hits send mid-upload has already moved it out of the tray and onto a
+   * message — patching only the tray would leave that bubble spinning forever
+   * and the photo with no storageUrl to ride onto a quote.
+   */
+  const settleAttachment = useCallback(
+    (id: string, patch: Partial<ChatAttachment>) => {
+      if (pendingAttachmentsRef.current.some((p) => p.id === id)) {
+        pendingAttachmentsRef.current = pendingAttachmentsRef.current.map((p) =>
+          p.id === id ? { ...p, ...patch } : p,
+        );
+        setPendingAttachments((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+        return;
+      }
+      const state = useStore.getState();
+      const convo = state.conversations.find((c) => c.id === state.currentConversationId);
+      if (!convo) return;
+      for (const m of convo.messages) {
+        if (!m.attachments?.some((a) => a.id === id)) continue;
+        updateMessage(convo.id, m.id, {
+          attachments: m.attachments.map((a) => (a.id === id ? { ...a, ...patch } : a)),
+        });
+      }
+    },
+    [updateMessage],
+  );
+
+  /**
+   * Stage picked photos on the composer and upload each one. Uploads run
+   * SEQUENTIALLY — parallel uploadBytes calls from RN have historically hit
+   * XHR/blob races on some devices (same reason JobPhotos does it this way).
+   */
+  const attachUris = useCallback(
+    async (uris: string[], opts: { isPlan?: boolean } = {}) => {
+      if (!uris.length) return;
+      const userId = auth.currentUser?.uid;
+      if (!userId) {
+        showAlert({ type: 'error', title: 'Not signed in', message: 'Sign in to send Mate a photo.' });
+        return;
+      }
+      const state = useStore.getState();
+      const messages = state.conversations.find((c) => c.id === state.currentConversationId)?.messages || [];
+
+      const accepted: ChatAttachment[] = [];
+      let staged = [...pendingAttachmentsRef.current];
+      let blocked: string | undefined;
+      for (const uri of uris) {
+        // A 14MB plan is ~19MB of base64 — past the 1st-gen request cap. Job
+        // Photos carries PDFs end-to-end; chat doesn't.
+        if ((await sniffLocalPhotoMime(uri)) === 'application/pdf') {
+          blocked = ATTACH_LIMIT_COPY.pdf;
+          continue;
+        }
+        // detectIsPlan is web-only by design, so the native sheet's explicit
+        // "Plan or drawing" option is the only route to PLAN_MAX_WIDTH there.
+        const isPlan = opts.isPlan ?? (await detectIsPlan(uri));
+        const gate = canAttachMore({ pending: staged, messages, isPlan });
+        if (!gate.ok) {
+          blocked = gate.message;
+          break;
+        }
+        // Compress ONCE, here, and keep the result as the local uri. The
+        // inline bytes are read from it: a raw 12MP camera-roll JPEG is
+        // routinely 2.5-4 MB, which sails past maxBase64CharsEach and gets
+        // silently dropped from the turn. uploadQuotePhoto is told not to
+        // compress again, so Storage and the model share these exact bytes.
+        const localUri = await compressImage(uri, { isPlan });
+        const attachment: ChatAttachment = {
+          id: generateId(),
+          localUri,
+          isPlan,
+          status: 'uploading',
+        };
+        accepted.push(attachment);
+        staged = [...staged, attachment];
+      }
+      if (accepted.length) {
+        // Merge against the LIVE tray, not the snapshot taken before those
+        // awaits — an upload that settled in the meantime must not be reverted
+        // to 'uploading' with its storageUrl thrown away.
+        const next = [
+          ...pendingAttachmentsRef.current.filter((p) => !accepted.some((a) => a.id === p.id)),
+          ...accepted,
+        ];
+        pendingAttachmentsRef.current = next;
+        setPendingAttachments(next);
+      }
+      if (blocked) showAlert({ type: 'info', title: 'Photos', message: blocked });
+
+      for (const attachment of accepted) {
+        try {
+          const storageUrl = await uploadQuotePhoto(userId, attachment.localUri!, {
+            isPlan: attachment.isPlan,
+            // Already compressed above — a second pass would re-encode an
+            // already-lossy JPEG and leave Storage worse than the bytes the
+            // model saw.
+            alreadyCompressed: true,
+          });
+          settleAttachment(attachment.id, { storageUrl, status: 'ready' });
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.warn('[Mate] attachment upload failed', err);
+          settleAttachment(attachment.id, { status: 'failed' });
+          if (err instanceof UnsupportedPhotoError) {
+            showAlert({ type: 'error', title: 'File not supported', message: err.message });
+          }
+        }
+      }
+    },
+    [showAlert, settleAttachment],
+  );
+
+  const removeAttachment = useCallback((id: string) => {
+    pendingAttachmentsRef.current = pendingAttachmentsRef.current.filter((p) => p.id !== id);
+    setPendingAttachments((prev) => prev.filter((p) => p.id !== id));
+  }, []);
+
+  const pickFromGallery = useCallback(
+    async (opts: { isPlan?: boolean } = {}) => {
+      const current = await ImagePicker.getMediaLibraryPermissionsAsync();
+      if (current.status !== 'granted') {
+        if (!current.canAskAgain) {
+          showAlert({
+            type: 'warning',
+            title: 'Photo Library Access Needed',
+            message:
+              'QuoteMate needs photo library access to send Mate a photo. You can enable it in Settings.',
+            primaryButtonText: 'Open Settings',
+            primaryButtonAction: () => {
+              dismissAlert();
+              Linking.openSettings();
+            },
+            secondaryButtonText: 'Not Now',
+            secondaryButtonAction: dismissAlert,
+          });
+          return;
+        }
+        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (status !== 'granted') return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        quality: 0.8,
+        allowsMultipleSelection: true,
+        // 0 (unlimited) keeps iOS in multi-select mode; the caps are applied
+        // in attachUris, which can explain itself.
+        selectionLimit: 0,
+      });
+      if (result.canceled || !result.assets?.length) return;
+      await attachUris(result.assets.map((a) => a.uri), opts);
+    },
+    [attachUris, showAlert, dismissAlert],
+  );
+
+  const openCameraCapture = useCallback(async () => {
+    // The capture modal handles its own permission prompt, but a previously
+    // denied camera leaves the user stuck on it — deep-link to Settings.
+    const current = await ImagePicker.getCameraPermissionsAsync();
+    if (current.status !== 'granted' && !current.canAskAgain) {
+      showAlert({
+        type: 'warning',
+        title: 'Camera Access Needed',
+        message: 'QuoteMate needs camera access to take a photo for Mate. You can enable it in Settings.',
+        primaryButtonText: 'Open Settings',
+        primaryButtonAction: () => {
+          dismissAlert();
+          Linking.openSettings();
+        },
+        secondaryButtonText: 'Not Now',
+        secondaryButtonAction: dismissAlert,
+      });
+      return;
+    }
+    setCaptureModalVisible(true);
+  }, [showAlert, dismissAlert]);
+
+  const showAttachOptions = useCallback(() => {
+    // Web auto-detects plans and has no camera sheet worth showing — go
+    // straight to the picker, same as JobPhotos.
+    if (Platform.OS === 'web') {
+      void pickFromGallery();
+      return;
+    }
+    setPhotoSheetVisible(true);
+  }, [pickFromGallery]);
+
+  const attachSheetOptions: ActionSheetOption[] = useMemo(
+    () => [
+      { icon: 'camera', label: 'Take Photo', onPress: () => { void openCameraCapture(); } },
+      { icon: 'image-multiple', label: 'Photo Library', onPress: () => { void pickFromGallery(); } },
+      { icon: 'floor-plan', label: 'Plan or drawing (hi-res)', onPress: () => { void pickFromGallery({ isPlan: true }); } },
+    ],
+    [openCameraCapture, pickFromGallery],
+  );
+
   const submit = useCallback(
     async (overrideText?: string) => {
       const text = (overrideText ?? input).trim();
-      if (!text || sending) return;
+      const pending = pendingAttachmentsRef.current;
+      // A photo with no caption is a perfectly good message — a photo that
+      // FAILED to upload is not. Must match `canSend`, or the Return key
+      // sends what the send button correctly refuses and the tradie gets the
+      // server's own error back.
+      if ((!text && !pending.some((a) => a.status !== 'failed')) || sending) return;
       // Resolve the active conversation against the current store, not the
       // closure — `currentConversationId` can point at a missing conversation
       // (e.g. right after newChat replaced the array). Always validate first.
@@ -1171,11 +1735,16 @@ export function AssistantScreen() {
         useStore.getState().conversations.find((c) => c.id === convoId)?.messages || [];
 
       setInput('');
+      // Clear the ref synchronously: an upload still in flight settles onto
+      // the message from here on, not the tray.
+      pendingAttachmentsRef.current = [];
+      setPendingAttachments([]);
       const userMsg: ChatMessage = {
         id: generateId(),
         role: 'user',
         text,
         createdAt: new Date().toISOString(),
+        ...(pending.length ? { attachments: pending } : {}),
       };
       appendMessage(convoId, userMsg);
 
@@ -1192,14 +1761,22 @@ export function AssistantScreen() {
         role: 'assistant',
         text: '',
         createdAt: new Date().toISOString(),
+        thinking: DEFAULT_THINKING_LABEL,
       });
       try {
         const history = [...currentMessages, userMsg];
         const response = await sendAssistantTurn({
           history,
+          onToolCalls: (calls) => {
+            // Only while nothing has streamed — once real text lands the
+            // bubble is the reply and must not flip back to a status line.
+            if (!streamedText) {
+              updateMessage(convoId, streamingId, { thinking: labelForToolCalls(calls) });
+            }
+          },
           onTextDelta: (delta) => {
             streamedText += delta;
-            updateMessage(convoId, streamingId, { text: streamedText });
+            updateMessage(convoId, streamingId, { text: streamedText, thinking: undefined });
           },
         });
         // eslint-disable-next-line no-console
@@ -1215,6 +1792,9 @@ export function AssistantScreen() {
           proposals: response.proposals,
           proposalStatus: Object.fromEntries(response.proposals.map((p) => [p.id, 'pending' as ProposalStatus])),
           errorMessage: hasContent ? undefined : fallback,
+          // The wait is over either way — a bubble left in the thinking state
+          // would sit there breathing forever.
+          thinking: undefined,
         });
         // Render any quotes the model asked to show. Each lands as its own
         // inline card below the reply; an unresolved id gets a short nudge
@@ -1250,7 +1830,7 @@ export function AssistantScreen() {
             errorMessage,
           });
         } else {
-          updateMessage(convoId, streamingId, { text: '', errorMessage });
+          updateMessage(convoId, streamingId, { text: '', errorMessage, thinking: undefined });
         }
       } finally {
         setSending(false);
@@ -1316,6 +1896,19 @@ export function AssistantScreen() {
   const handleNewChat = useCallback(async () => {
     await stopVoiceSession();
     setInput('');
+    // Everything scoped to "this chat" has to go with it. A tradie who knocked
+    // the price-list offer back last conversation should still get offered it
+    // on the next job, and a fresh import must not measure its coverage
+    // against a quote from a chat that's gone.
+    pendingAttachmentsRef.current = [];
+    setPendingAttachments([]);
+    importOfferRef.current = { declined: false, offeredForQuote: new Set() };
+    activeQuoteIdRef.current = null;
+    supplierImportsRef.current.clear();
+    activeImportIdRef.current = null;
+    importAttachmentIdRef.current = null;
+    importCardPhaseRef.current = '';
+    setReviewImportId(null);
     newChat();
   }, [stopVoiceSession, newChat]);
 
@@ -1472,7 +2065,22 @@ export function AssistantScreen() {
           // or a race on the ref leaves [narrate]/[pipeline-done]/[context]
           // showing in chat — see the production sighting where the
           // narration prompt rendered verbatim).
-          if (isLeakedPromptTag(text)) return;
+          // Test the ACCUMULATED transcript, not this chunk: "Thought to
+          // self:" routinely arrives split across deltas, and once the turn
+          // is known to be scaffolding every later chunk belongs to it too.
+          if (suppressLeakedTurnRef.current || isLeakedModelOutput(assistantBubbleTextRef.current + text)) {
+            suppressLeakedTurnRef.current = true;
+            // Blank whatever already mounted. Hidden messages are filtered
+            // out of the list, and the empty text keeps the leak out of the
+            // history we seed back to the model on a reconnect.
+            if (assistantBubbleIdRef.current) {
+              updateMessage(convoId!, assistantBubbleIdRef.current, { text: '', hidden: true });
+              assistantBubbleIdRef.current = null;
+              assistantBubbleTextRef.current = '';
+            }
+            if (finished) suppressLeakedTurnRef.current = false;
+            return;
+          }
           if (!assistantBubbleIdRef.current) {
             const id = generateId();
             assistantBubbleIdRef.current = id;
@@ -1503,7 +2111,15 @@ export function AssistantScreen() {
           if (!delta) return;
           touchVoiceActivity();
           if (narrationModeRef.current) return;
-          if (isLeakedPromptTag(delta)) return;
+          if (suppressLeakedTurnRef.current || isLeakedModelOutput(assistantBubbleTextRef.current + delta)) {
+            suppressLeakedTurnRef.current = true;
+            if (assistantBubbleIdRef.current) {
+              updateMessage(convoId!, assistantBubbleIdRef.current, { text: '', hidden: true });
+              assistantBubbleIdRef.current = null;
+              assistantBubbleTextRef.current = '';
+            }
+            return;
+          }
           flushUserBubbleIfOpen();
           if (!assistantBubbleIdRef.current) {
             const id = generateId();
@@ -1945,9 +2561,30 @@ export function AssistantScreen() {
       if (!message.cta) return;
       if (message.cta.action.type === 'open_quote') {
         handleNavigate({ kind: 'job_preview', quoteId: message.cta.action.quoteId });
+        return;
+      }
+      if (message.cta.action.type === 'open_supplier_review') {
+        const { importId } = message.cta.action;
+        if (supplierImportsRef.current.has(importId)) {
+          openSupplierReview(importId);
+          return;
+        }
+        // The rows never landed — start over rather than reopen an empty form.
+        if (message.supplierImport?.phase === 'failed') {
+          void startSupplierImportRef.current({ kind: 'supplier_import', source: 'ask' });
+          return;
+        }
+        // Chat history is in-memory only, so the ref died with it. Say so
+        // instead of opening a reader with nothing in it.
+        if (conversation) {
+          updateMessage(conversation.id, message.id, {
+            supplierImport: { importId, phase: 'expired' },
+            cta: undefined,
+          });
+        }
       }
     },
-    [handleNavigate],
+    [handleNavigate, openSupplierReview, conversation, updateMessage],
   );
 
   const handleInlineQuoteEdit = useCallback(
@@ -2016,6 +2653,11 @@ export function AssistantScreen() {
   );
   const renderItem = ChatRow;
 
+  // A staged photo is enough to send on its own — a caption is optional. A
+  // photo whose upload FAILED is not: with no text it would build an empty
+  // request, and the tradie would be shown the server's own 400 string.
+  const canSend =
+    !!input.trim() || pendingAttachments.some((a) => a.status !== 'failed');
   const voiceActive = voiceState !== 'idle';
   const voiceAccent = voiceState === 'thinking' ? themeColors.accent : themeColors.error;
   const voiceLabel =
@@ -2036,47 +2678,50 @@ export function AssistantScreen() {
       <GridBackground />
       <WebContainer style={styles.webBody}>
         {isEmpty ? (
-          // Hero empty state — big record button front and centre. Keeps the
-          // composer mounted below so typing is still one tap away.
-          <View style={[styles.heroWrap, { paddingTop: insets.top + 8 }]}>
-            <View style={styles.heroCenter}>
-              <HeroRecordButton
-                active={voiceMode === 'sticky' && voiceState === 'listening'}
-                pending={voiceState === 'connecting' || voiceState === 'thinking'}
-                onPress={handleVoiceToggle}
-                accent={
-                  voiceState === 'listening'
-                    ? themeColors.error
-                    : voiceState === 'thinking'
-                      ? themeColors.accent
-                      : themeColors.accent
-                }
-              />
-              <Text
-                style={[
-                  styles.heroStatus,
-                  voiceState === 'listening' && { color: themeColors.error },
-                  voiceState === 'thinking' && { color: themeColors.accentText },
-                ]}
-              >
-                {voiceState === 'connecting'
-                  ? 'Connecting…'
-                  : voiceState === 'listening'
-                    ? "I'm listening — yarn away"
-                    : voiceState === 'thinking'
-                      ? "Mate's thinking…"
-                      : 'Tap to talk to Mate'}
-              </Text>
-              <Text style={styles.heroBlurb}>{introBlurb.primary}</Text>
-              {voiceState === 'idle' && (
-                <Text style={styles.heroCapability}>{introBlurb.capability}</Text>
-              )}
-              <Text style={styles.heroHint}>{introBlurb.hint}</Text>
-              {/* Blank-but-errored: the error bubble no longer replaces the
-                  hero, so surface the latest failure here instead of
-                  swallowing it. */}
-              {!!latestError && <Text style={styles.heroError}>{latestError}</Text>}
-              {voiceState === 'idle' && (
+          // Empty state, bottom-anchored so it sits just above the composer —
+          // the thing we want tapped. No hero mic: it called the very same
+          // handler as the composer mic, so it added nothing but a 128pt
+          // argument for voice on a screen that is deliberately text-first.
+          // Scrolls because at large text sizes six centred strings overflow
+          // and Android clips the chips with no way to reach them.
+          <ScrollView
+            style={styles.heroWrap}
+            contentContainerStyle={styles.heroScrollContent}
+            keyboardShouldPersistTaps="handled"
+          >
+            <MaterialCommunityIcons
+              name="chat-processing-outline"
+              size={28}
+              color={themeColors.textMuted}
+            />
+            <Text style={styles.heroBlurb}>{introBlurb.primary}</Text>
+            {/* Blank-but-errored: the error bubble no longer replaces the
+                empty state, so surface the latest failure here instead of
+                swallowing it. */}
+            {!!latestError && <Text style={styles.heroError}>{latestError}</Text>}
+            {voiceState === 'idle' && (
+              <>
+                {!!introBlurb.draftChip && (
+                  <TouchableOpacity
+                    style={styles.draftChip}
+                    onPress={() => {
+                      setInput(introBlurb.draftChip!.prefill);
+                      inputRef.current?.focus();
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel={introBlurb.draftChip.label}
+                    accessibilityHint="Fills the message box so you can edit it"
+                  >
+                    <MaterialCommunityIcons
+                      name="file-document-edit-outline"
+                      size={16}
+                      color={themeColors.accentText}
+                    />
+                    <Text style={styles.draftChipLabel} numberOfLines={1}>
+                      {introBlurb.draftChip.label}
+                    </Text>
+                  </TouchableOpacity>
+                )}
                 <View style={styles.chipRow}>
                   {introBlurb.chips.map((chip) => (
                     <TouchableOpacity
@@ -2089,14 +2734,16 @@ export function AssistantScreen() {
                       }}
                       accessibilityRole="button"
                       accessibilityLabel={chip.label}
+                      accessibilityHint="Fills the message box so you can edit it"
                     >
                       <Text style={styles.chipLabel}>{chip.label}</Text>
                     </TouchableOpacity>
                   ))}
                 </View>
-              )}
-            </View>
-          </View>
+                <Text style={styles.heroCapability}>{introBlurb.capability}</Text>
+              </>
+            )}
+          </ScrollView>
         ) : (
           <FlatList
             ref={listRef}
@@ -2124,14 +2771,44 @@ export function AssistantScreen() {
           />
         )}
 
-        {sending && (
-          <View style={styles.typingRow}>
-            <ActivityIndicator size="small" color={themeColors.textMuted} />
-            <Text style={styles.typing}>Mate is thinking…</Text>
-          </View>
-        )}
+        {/* No separate "thinking" row: the streaming bubble carries the wait
+            now (dots + what Mate is actually doing), so this was a second
+            indicator for one event. */}
 
         <View style={[styles.composerWrap, { paddingBottom: Math.max(insets.bottom, 8) + 70 }]}>
+          {pendingAttachments.length > 0 && !voiceActive && (
+            <View style={styles.tray}>
+              {pendingAttachments.map((a) => (
+                <View key={a.id} style={styles.trayTile}>
+                  <Image
+                    source={{ uri: a.localUri || a.storageUrl }}
+                    style={[styles.trayImage, a.status !== 'ready' && styles.trayImageBusy]}
+                    resizeMode="cover"
+                    accessibilityLabel="Photo ready to send"
+                  />
+                  {a.status === 'uploading' && (
+                    <View style={styles.trayOverlay}>
+                      <ActivityIndicator size="small" color={themeColors.onAccent} />
+                    </View>
+                  )}
+                  {a.status === 'failed' && (
+                    <View style={styles.trayOverlay}>
+                      <MaterialCommunityIcons name="alert-circle-outline" size={18} color={themeColors.error} />
+                    </View>
+                  )}
+                  <TouchableOpacity
+                    style={styles.trayRemove}
+                    onPress={() => removeAttachment(a.id)}
+                    accessibilityRole="button"
+                    accessibilityLabel="Remove photo"
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <MaterialCommunityIcons name="close" size={12} color={themeColors.onAccent} />
+                  </TouchableOpacity>
+                </View>
+              ))}
+            </View>
+          )}
           <View
             style={[
               styles.composer,
@@ -2150,32 +2827,51 @@ export function AssistantScreen() {
                 </Text>
               </View>
             ) : (
-              <TextInput
-                ref={inputRef}
-                style={styles.input}
-                value={input}
-                onChangeText={setInput}
-                placeholder="Ask Mate…"
-                placeholderTextColor={themeColors.textDisabled}
-                editable={!sending}
-                multiline
-                returnKeyType="send"
-                // iOS single-line Return fires onSubmitEditing; we keep multiline
-                // for long messages but still want Return to send. On web, Enter
-                // (without Shift) submits — Shift+Enter inserts a newline.
-                onSubmitEditing={() => submit()}
-                blurOnSubmit={false}
-                {...(Platform.OS === 'web'
-                  ? {
-                      onKeyPress: (e: any) => {
-                        if (e?.nativeEvent?.key === 'Enter' && !e?.nativeEvent?.shiftKey) {
-                          e.preventDefault?.();
-                          submit();
-                        }
-                      },
-                    }
-                  : {})}
-              />
+              <>
+                {/* Leads the input rather than joining the right-hand cluster:
+                    that's already two 40px buttons, and send's long-press is
+                    push-to-talk — nothing else can share it. */}
+                <TouchableOpacity
+                  style={styles.attachBtn}
+                  onPress={showAttachOptions}
+                  disabled={sending}
+                  accessibilityRole="button"
+                  accessibilityLabel="Attach a photo"
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <MaterialCommunityIcons
+                    name="paperclip"
+                    size={22}
+                    color={sending ? themeColors.textDisabled : themeColors.textSecondary}
+                  />
+                </TouchableOpacity>
+                <TextInput
+                  ref={inputRef}
+                  style={styles.input}
+                  value={input}
+                  onChangeText={setInput}
+                  placeholder="Ask Mate…"
+                  placeholderTextColor={themeColors.textMuted}
+                  editable={!sending}
+                  multiline
+                  returnKeyType="send"
+                  // iOS single-line Return fires onSubmitEditing; we keep multiline
+                  // for long messages but still want Return to send. On web, Enter
+                  // (without Shift) submits — Shift+Enter inserts a newline.
+                  onSubmitEditing={() => submit()}
+                  blurOnSubmit={false}
+                  {...(Platform.OS === 'web'
+                    ? {
+                        onKeyPress: (e: any) => {
+                          if (e?.nativeEvent?.key === 'Enter' && !e?.nativeEvent?.shiftKey) {
+                            e.preventDefault?.();
+                            submit();
+                          }
+                        },
+                      }
+                    : {})}
+                />
+              </>
             )}
 
             {/* Mic / stop toggle. Hidden during PTT (driven by the send button
@@ -2200,7 +2896,11 @@ export function AssistantScreen() {
                     <MaterialCommunityIcons
                       name={voiceMode === 'sticky' ? 'stop' : 'microphone-outline'}
                       size={22}
-                      color={themeColors.onAccent}
+                      // Ghost while idle; the live/stop state keeps the filled
+                      // treatment so an open mic still reads as open.
+                      color={
+                        voiceMode === 'sticky' ? themeColors.onAccent : themeColors.textMuted
+                      }
                     />
                   )}
                 </TouchableOpacity>
@@ -2215,13 +2915,14 @@ export function AssistantScreen() {
                 style={({ pressed }) => [
                   styles.sendBtn,
                   voiceMode === 'ptt' && styles.sendBtnRecording,
-                  !input.trim() && voiceMode !== 'ptt' && styles.sendBtnDisabled,
+                  !canSend && voiceMode !== 'ptt' && styles.sendBtnDisabled,
                   pressed && styles.sendBtnPressed,
                 ]}
                 onPress={() => {
-                  // Tap with text → send. Tap with no text → no-op (long-press
-                  // would normally fire instead but iOS may emit onPress only).
-                  if (!input.trim() || sending) return;
+                  // Tap with something to send → send. Tap with nothing → no-op
+                  // (long-press would normally fire instead but iOS may emit
+                  // onPress only).
+                  if (!canSend || sending) return;
                   submit();
                 }}
                 onLongPress={handlePttPressIn}
@@ -2232,7 +2933,7 @@ export function AssistantScreen() {
                 accessibilityLabel={
                   voiceMode === 'ptt'
                     ? 'Recording — release to send'
-                    : input.trim()
+                    : canSend
                       ? 'Send message'
                       : 'Hold to record'
                 }
@@ -2241,12 +2942,103 @@ export function AssistantScreen() {
                 <MaterialCommunityIcons
                   name={voiceMode === 'ptt' ? 'record-circle-outline' : 'arrow-up'}
                   size={22}
-                  color={themeColors.onAccent}
+                  // Near-black on the disabled grey fill is 1.47:1 — invisible
+                  // in sunlight, and that's the state the screen opens in.
+                  color={
+                    !canSend && voiceMode !== 'ptt'
+                      ? themeColors.textMuted
+                      : themeColors.onAccent
+                  }
                 />
               </Pressable>
             )}
           </View>
         </View>
+
+        <ActionSheet
+          visible={photoSheetVisible}
+          onDismiss={() => setPhotoSheetVisible(false)}
+          title="Send Mate a photo"
+          options={attachSheetOptions}
+        />
+
+        <SupplierListCaptureModal
+          visible={captureModalVisible}
+          onCancel={() => setCaptureModalVisible(false)}
+          onComplete={async (uris) => {
+            setCaptureModalVisible(false);
+            await attachUris(uris);
+          }}
+          maxPhotos={2}
+          counterLabel="photos"
+          tips={[
+            'Step back for the whole area, then step in for the detail',
+            'Snap anything with a measurement written on it',
+            'Watch the shadows — Mate reads what it can see',
+            "Two at a time; send them and I'll take the next lot",
+          ]}
+        />
+
+        {/* Price-list reader, hosted OVER the chat. The capture + column
+            mapper + review trio is the same block SuppliersStep renders; the
+            review modal is a plain RNModal with no navigation coupling. */}
+        <SupplierListCaptureModal
+          visible={importer.captureModalVisible}
+          onCancel={importer.cancelCapture}
+          onComplete={importer.handleCaptureComplete}
+          processing={importer.phase === 'extracting'}
+          processingLabel={importer.loadingLabel}
+          counterLabel="pages"
+          tips={[
+            'Hold steady and let the autofocus settle',
+            'Get the supplier header in — it names the list',
+            'Make sure the prices and product names are sharp',
+            'Multiple pages? Snap them all before hitting Done',
+          ]}
+        />
+
+        <SpreadsheetColumnMapperModal
+          visible={importer.columnMappingVisible}
+          parsed={importer.parsedSpreadsheet}
+          initialMapping={importer.autoDetectedMapping}
+          onCancel={importer.cancelColumnMapping}
+          onConfirm={importer.applyColumnMapping}
+        />
+
+        <SupplierListReviewModal
+          visible={!!reviewImportId}
+          initialSupplierName={
+            (reviewImportId && supplierImportsRef.current.get(reviewImportId)?.supplierName) ||
+            importSupplierNameRef.current ||
+            ''
+          }
+          initialItems={
+            (reviewImportId && supplierImportsRef.current.get(reviewImportId)?.items) || []
+          }
+          existingSupplierNames={importer.existingSupplierNames}
+          saving={importer.saving}
+          onCancel={closeSupplierReview}
+          onSave={importer.handleSaveImported}
+        />
+
+        <ActionSheet
+          visible={importSourceSheetVisible}
+          onDismiss={() => setImportSourceSheetVisible(false)}
+          title="Where's the price list?"
+          options={importSourceOptions}
+        />
+
+        <AlertModal
+          visible={!!alertConfig}
+          onDismiss={dismissAlert}
+          type={alertConfig?.type}
+          title={alertConfig?.title || ''}
+          message={alertConfig?.message || ''}
+          primaryButtonText={alertConfig?.primaryButtonText}
+          primaryButtonAction={alertConfig?.primaryButtonAction}
+          secondaryButtonText={alertConfig?.secondaryButtonText}
+          secondaryButtonAction={alertConfig?.secondaryButtonAction}
+        />
       </WebContainer>
     </KeyboardAvoidingView>
   );
@@ -2273,58 +3065,34 @@ const useStyles = makeStyles((t) => ({
     width: '100%',
     maxWidth: 800,
     alignSelf: 'center',
+  },
+  // Bottom-anchored: the composer is what we want tapped, so the intro sits
+  // just above it rather than floating mid-screen with equal dead air above
+  // and below. No insets.top here — the tab navigator already renders a
+  // header, so adding the safe area again cost ~50pt of nothing.
+  heroScrollContent: {
+    flexGrow: 1,
+    alignItems: 'center',
+    justifyContent: 'flex-end',
     paddingHorizontal: 24,
-  },
-  heroTop: {
-    alignItems: 'center',
-    paddingTop: 4,
-  },
-  heroBrand: {
-    color: t.colors.text,
-    fontSize: 28,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-  },
-
-  heroCenter: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingBottom: 24,
-  },
-  heroStatus: {
-    marginTop: 28,
-    fontSize: 17,
-    fontWeight: '700',
-    color: t.colors.text,
-    letterSpacing: 0.2,
-    textAlign: 'center',
+    paddingTop: 24,
+    paddingBottom: 16,
   },
   heroBlurb: {
-    marginTop: 14,
+    marginTop: 12,
     color: t.colors.text,
-    fontSize: 15,
-    lineHeight: 22,
-    fontWeight: '500',
+    fontSize: 20,
+    lineHeight: 27,
+    fontWeight: '700',
     textAlign: 'center',
     paddingHorizontal: 12,
     maxWidth: 420,
   },
-  heroHint: {
-    marginTop: 8,
-    color: t.colors.textMuted,
-    fontSize: 12,
-    lineHeight: 17,
-    textAlign: 'center',
-    letterSpacing: 0.2,
-    paddingHorizontal: 12,
-    maxWidth: 360,
-  },
   heroCapability: {
-    marginTop: 10,
+    marginTop: 16,
     color: t.colors.textMuted,
-    fontSize: 14,
-    lineHeight: 20,
+    fontSize: 13,
+    lineHeight: 19,
     textAlign: 'center',
     paddingHorizontal: 12,
     maxWidth: 420,
@@ -2338,21 +3106,47 @@ const useStyles = makeStyles((t) => ({
     paddingHorizontal: 12,
     maxWidth: 420,
   },
+  // The draft is the most valuable thing on this screen — a real job, half
+  // done. Full width so it reads as the primary action, not a fourth chip.
+  draftChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    alignSelf: 'stretch',
+    marginTop: 20,
+    minHeight: 48,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: t.colors.accent,
+    backgroundColor: t.colors.accentSubtle,
+    paddingHorizontal: 16,
+  },
+  draftChipLabel: {
+    color: t.colors.accentText,
+    fontSize: 15,
+    fontWeight: '700',
+    flexShrink: 1,
+  },
   chipRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
-    marginTop: 16,
+    marginTop: 12,
     justifyContent: 'center',
     paddingHorizontal: 12,
   },
+  // surface on bg is 1.04:1 — the fill may as well not exist. surfaceRaised
+  // with the stronger border gives the control a visible edge (WCAG 1.4.11).
   chip: {
-    borderRadius: 18,
+    borderRadius: 22,
     borderWidth: 1,
-    borderColor: t.colors.border,
-    backgroundColor: t.colors.surface,
-    paddingVertical: 8,
-    paddingHorizontal: 14,
+    borderColor: t.colors.borderStrong,
+    backgroundColor: t.colors.surfaceRaised,
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
   },
   chipLabel: {
     color: t.colors.text,
@@ -2410,12 +3204,68 @@ const useStyles = makeStyles((t) => ({
     paddingHorizontal: 12,
     paddingVertical: 6,
   },
+  // minHeight matches the 40pt buttons either side, so one line of text sits
+  // on their centre line instead of hugging the bottom of a shorter box.
   input: {
     flex: 1,
     color: t.colors.text,
     fontSize: 15,
-    paddingVertical: Platform.OS === 'ios' ? 8 : 4,
+    minHeight: 40,
+    paddingVertical: Platform.OS === 'ios' ? 10 : 8,
+    textAlignVertical: 'center',
     maxHeight: 120,
+  },
+  // Same ghost circle as the mic: a bare icon floating on the composer didn't
+  // read as a button at all.
+  attachBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: t.colors.surfaceOverlay,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tray: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    paddingHorizontal: 8,
+    paddingBottom: 8,
+  },
+  trayTile: {
+    width: 44,
+    height: 44,
+    borderRadius: 8,
+    overflow: 'visible',
+    backgroundColor: t.colors.surfaceOverlay,
+  },
+  trayImage: {
+    width: 44,
+    height: 44,
+    borderRadius: 8,
+  },
+  trayImageBusy: {
+    opacity: 0.5,
+  },
+  trayOverlay: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  trayRemove: {
+    position: 'absolute',
+    right: -6,
+    top: -6,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: t.colors.textMuted,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   // The voice "input" — waveform + status word — occupies the same flex slot
   // the TextInput would, centred to line up with the round buttons.
@@ -2452,8 +3302,11 @@ const useStyles = makeStyles((t) => ({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  // Ghost, not filled. Two identical orange pills side by side meant neither
+  // read as THE action; send keeps the accent, the mic matches the paperclip.
+  // Also the right visual weight for a voice path that is now opt-in.
   voiceBtn: {
-    backgroundColor: t.colors.accent,
+    backgroundColor: t.colors.surfaceOverlay,
     width: 40,
     height: 40,
     borderRadius: 20,

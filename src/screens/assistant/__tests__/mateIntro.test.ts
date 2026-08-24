@@ -24,7 +24,7 @@ const OPENERS = [
 ];
 
 describe('getMateIntro', () => {
-  it('surfaces the most recently touched draft in the primary line', () => {
+  it('offers the most recently touched draft as a tappable chip', () => {
     const intro = getMateIntro(
       [
         quote({ status: 'draft', updatedAt: new Date('2026-08-10'), job: { name: 'Old deck' } }),
@@ -33,22 +33,35 @@ describe('getMateIntro', () => {
       ],
       NOON,
     );
-    expect(intro.primary).toContain('Kitchen paint');
-    expect(intro.primary).toContain('still a draft');
+    // A sentence asking "finish it, or start something new?" can only be
+    // answered by typing the name of your own quote. A chip answers itself.
+    expect(intro.draftChip?.label).toContain('Kitchen paint');
+    expect(intro.draftChip?.prefill).toContain('Kitchen paint');
+    expect(intro.draftChip?.label).toMatch(/^Finish/);
   });
 
-  it('falls back to a time-of-day opener when no drafts exist', () => {
-    const intro = getMateIntro([quote()], NOON);
-    expect(OPENERS).toContain(intro.primary);
+  it('names the customer when the draft has no job name', () => {
+    const intro = getMateIntro([quote({ status: 'draft', customerName: 'Dee' })], NOON);
+    expect(intro.draftChip?.label).toContain("Dee's job");
   });
 
-  it('always returns the fixed hint and a capability line', () => {
+  it('offers no draft chip when nothing is unfinished', () => {
+    expect(getMateIntro([quote()], NOON).draftChip).toBeUndefined();
+  });
+
+  it('always uses a time-of-day opener as the headline', () => {
+    expect(OPENERS).toContain(getMateIntro([quote()], NOON).primary);
+    expect(OPENERS).toContain(
+      getMateIntro([quote({ status: 'draft', job: { name: 'Fence' } })], NOON).primary,
+    );
+  });
+
+  it('always returns the one-line capability', () => {
     const withDraft = getMateIntro([quote({ status: 'draft', job: { name: 'Fence' } })], NOON);
     const without = getMateIntro([], NOON);
     for (const intro of [withDraft, without]) {
-      expect(intro.hint).toBe('I draft. You tap to confirm. Nothing saves ’til you say.');
       expect(intro.capability).toBe(
-        "Tell me the job in plain words — I'll price the materials, draft the quote, and tee it up to send.",
+        "Tell me the job in plain words — I'll price it up and draft the quote. Nothing saves ’til you say.",
       );
     }
   });
@@ -62,6 +75,16 @@ describe('getMateIntro', () => {
     }
   });
 
+  it('prefills stems to type into, not worked examples to delete', () => {
+    // A 70-character example is more to delete than to type, and one tapped
+    // and sent unread mints a quote for a customer who does not exist.
+    const intro = getMateIntro([], NOON);
+    const quoteChip = intro.chips.find((c) => c.label === 'Quote a job')!;
+    expect(quoteChip.prefill.length).toBeLessThan(24);
+    expect(quoteChip.prefill).toMatch(/ $/); // cursor lands after a trailing space
+    expect(intro.chips.some((c) => /Smith St|\bSam\b|\bDee\b/.test(c.prefill))).toBe(false);
+  });
+
   it('no copy anywhere contains the word "AI"', () => {
     // Hard rule: tradies dismiss the app the moment copy says "AI".
     const withDraft = getMateIntro([quote({ status: 'draft', job: { name: 'Fence' } })], NOON);
@@ -69,7 +92,7 @@ describe('getMateIntro', () => {
     const allStrings = [withDraft, without].flatMap((intro) => [
       intro.primary,
       intro.capability,
-      intro.hint,
+      ...(intro.draftChip ? [intro.draftChip.label, intro.draftChip.prefill] : []),
       ...intro.chips.flatMap((c) => [c.label, c.prefill]),
     ]);
     for (const s of allStrings) {

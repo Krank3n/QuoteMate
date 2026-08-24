@@ -14,7 +14,8 @@ export type ProposalType =
   | 'propose_convert_to_invoice'
   | 'propose_reprice'
   | 'propose_update_quote_rates'
-  | 'propose_mark_paid';
+  | 'propose_mark_paid'
+  | 'propose_import_supplier_list';
 
 export interface BaseProposal {
   id: string;
@@ -151,6 +152,20 @@ export interface UpdateQuoteRatesProposal extends BaseProposal {
   displayName?: string;
 }
 
+// Read a supplier's price list into the tradie's own book. Every field is
+// optional on the wire so the card can never dead-end on a missing argument —
+// the validator fills the gaps and the screen asks for whatever's left.
+export interface ImportSupplierListProposal extends BaseProposal {
+  type: 'propose_import_supplier_list';
+  supplierName?: string;
+  /** Where the list is coming from. 'ask' lets the screen offer the choices. */
+  source: 'attachment' | 'camera' | 'gallery' | 'pdf' | 'spreadsheet' | 'ask';
+  /** Why it came up — display + telemetry only. */
+  reason?: 'no_retail_coverage' | 'pricing_fell_back' | 'tradie_asked';
+  /** Up to 5 rows the pipeline couldn't price off the book, for the card body. */
+  missedItems?: string[];
+}
+
 export type Proposal =
   | DraftQuoteProposal
   | AddLineItemProposal
@@ -162,7 +177,8 @@ export type Proposal =
   | ConvertToInvoiceProposal
   | RepriceQuoteProposal
   | UpdateQuoteRatesProposal
-  | MarkPaidProposal;
+  | MarkPaidProposal
+  | ImportSupplierListProposal;
 
 export type ProposalStatus = 'pending' | 'applied' | 'dismissed' | 'failed';
 
@@ -184,8 +200,56 @@ export interface WorkingStatus {
   summary?: string;
 }
 
+/**
+ * The in-chat state of one supplier-list import.
+ *
+ * Kept tiny on purpose — counts and at most three sample names. It's mirrored
+ * to Firestore with the rest of the conversation, and a 400-row extraction
+ * would be a 400-row write on every flush. The full ExtractResult lives in a
+ * ref on the chat screen, which has the same lifetime as the (in-memory)
+ * history, so a resurrected card reads 'expired' rather than lying.
+ */
+export interface SupplierImportCard {
+  importId: string;
+  phase: 'extracting' | 'ready' | 'saved' | 'failed' | 'expired';
+  supplierName?: string;
+  itemCount?: number;
+  sampleNames?: string[];
+  savedCount?: number;
+  /** Rows on the quote in hand that now price off the tradie's own list. */
+  coveredRows?: number;
+  error?: string;
+}
+
+export type ChatAttachmentStatus = 'uploading' | 'ready' | 'failed';
+
+/**
+ * A photo the tradie attached to a chat message.
+ *
+ * NEVER put base64 on this shape. Every appendMessage/updateMessage schedules
+ * a conversation sync that writes `messages` verbatim to Firestore — inline
+ * bytes would blow the 1MB document limit and re-bill on every flush. Bytes
+ * are read on demand from `localUri` at send time (attachmentBytes.ts).
+ */
+export interface ChatAttachment {
+  id: string;
+  /** file:// (native) or blob: (web) — thumbnail + inline-bytes source. */
+  localUri?: string;
+  /** From uploadQuotePhoto; the durable copy that rides onto the quote. */
+  storageUrl?: string;
+  mimeType?: string;
+  /** Captured at PLAN_MAX_WIDTH; becomes QuotePhoto.isPlan. */
+  isPlan?: boolean;
+  status: ChatAttachmentStatus;
+  /** Set once carried onto a draft so a later draft can't inherit it. */
+  consumedByQuoteId?: string;
+  /** Claim marker — a photo spent on a supplier import is not a job photo. */
+  consumedBy?: 'supplier_import' | 'job_photo';
+}
+
 export type ChatMessageCtaAction =
-  | { type: 'open_quote'; quoteId: string };
+  | { type: 'open_quote'; quoteId: string }
+  | { type: 'open_supplier_review'; importId: string };
 
 export interface ChatMessageCta {
   label: string;
@@ -222,6 +286,19 @@ export interface ChatMessage {
   // that failed was invisible to the model and it would cheerfully re-propose
   // the same broken action turn after turn.
   hidden?: boolean;
+  /**
+   * Set on the streaming assistant bubble while a turn is in flight, and
+   * cleared the moment real text arrives. Carries a short line describing what
+   * Mate is actually doing right now (built from its tool calls — never from
+   * model reasoning). Without this the placeholder rendered as an empty grey
+   * blob for the whole wait, alongside a second "thinking" row underneath.
+   */
+  thinking?: string;
+  // Photos attached to this bubble. Metadata only — the bytes are read from
+  // localUri at send time, never stored here (see ChatAttachment).
+  attachments?: ChatAttachment[];
+  // When present, the bubble renders the supplier-list import card.
+  supplierImport?: SupplierImportCard;
 }
 
 export interface Conversation {

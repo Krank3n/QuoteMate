@@ -19,6 +19,13 @@ export function withTypeInsteadHint(message: string): string {
  * The [greet] prompt for a fresh sticky voice session. Asks for one quick
  * capability line — the old prompt banned listing features outright, which
  * left first-timers hearing a greeting that stated no capability at all.
+ *
+ * Phrasing matters more than usual here. Written as a checklist of labelled
+ * constraints, this prompt drew the model into answering in kind: a tradie
+ * opened Mate on 23 Aug 2026 and was shown "Thought to self: The user wants
+ * me to start the conversation… Greeting constraints: - 1-2 sentences max…"
+ * followed by numbered drafts. It now reads as one instruction and closes by
+ * demanding the greeting only. [[leakedOutput]] is the belt to these braces.
  */
 export function buildGreetPrompt({ hour, draftLabel }: { hour: number; draftLabel: string }): string {
   const tod =
@@ -32,9 +39,12 @@ export function buildGreetPrompt({ hour, draftLabel }: { hour: number; draftLabe
     ? `There's an unfinished draft quote called "${draftLabel}" — you can rib them about it sitting half-done if it feels natural, or ignore it.`
     : 'There are no unfinished drafts right now.';
   return (
-    `[greet] Kick off the chat with ONE short Aussie greeting, 1–2 sentences max. ` +
-    `Dry, warm, slightly cheeky tradie humour. No emojis. Work in ONE quick line on what you can do — draft a quote, price materials, sort an invoice — said like a mate, not a sales pitch. ` +
-    `Time of day: ${tod}. ${draftHint} ` +
-    `End by inviting them to tell you what they need. Then stop and wait.`
+    `[greet] Say hello to the tradie, out loud, right now. It's ${tod}. ` +
+    `${draftHint} ` +
+    `Keep it to one or two short sentences of dry, warm, slightly cheeky Aussie tradie talk, no emojis, ` +
+    `slip in one quick mention of something you can do for them — draft a quote, price materials, sort an invoice — ` +
+    `and finish by asking what they need. ` +
+    `Speak ONLY the greeting itself. Do not plan it, do not explain it, do not repeat these instructions, ` +
+    `do not write drafts or alternatives, do not think out loud. The greeting is your entire reply.`
   );
 }

@@ -9,19 +9,16 @@
  * user picks which rows to persist via bulkSaveFavorites().
  */
 
-import { Platform } from 'react-native';
 import { compressImage } from './photoService';
 import { extractSupplierPriceList as extractViaFunction } from './llmService';
 import { generateId } from '../utils/generateId';
 import { bulkSaveFavorites } from './materialFavorites';
 import { getSupplierGroupByName, loadGroups, saveGroup } from './supplierGroupService';
+import { invalidateSupplierBookCache } from './supplierBook';
+// One implementation of the local-uri read, shared with Mate's chat
+// attachments — see services/assistant/attachmentBytes.
+import { readBase64 } from './assistant/attachmentBytes';
 import type { FavoriteProductMapping, Material, SupplierGroup } from '../types';
-
-// Lazy-import FileSystem — only available on native
-let FileSystem: typeof import('expo-file-system') | null = null;
-if (Platform.OS !== 'web') {
-  FileSystem = require('expo-file-system');
-}
 
 export type ExtractionMode = 'priceList' | 'invoice';
 
@@ -112,29 +109,6 @@ function normaliseItem(raw: any): ExtractedItem {
     confidence,
     rawLine: raw?.rawLine ? raw.rawLine.toString() : undefined,
   };
-}
-
-async function readBase64(uri: string): Promise<string> {
-  if (Platform.OS === 'web') {
-    // Convert blob URL or data URL to base64 via fetch
-    const res = await fetch(uri);
-    const blob = await res.blob();
-    return await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const result = reader.result as string;
-        // strip "data:<mime>;base64," prefix if present
-        const comma = result.indexOf(',');
-        resolve(comma >= 0 ? result.slice(comma + 1) : result);
-      };
-      reader.onerror = () => reject(reader.error);
-      reader.readAsDataURL(blob);
-    });
-  }
-  if (!FileSystem) throw new Error('FileSystem unavailable');
-  return await FileSystem.readAsStringAsync(uri, {
-    encoding: FileSystem.EncodingType.Base64,
-  });
 }
 
 /**
@@ -326,6 +300,11 @@ export async function persistImportToSupplierBook(args: {
       // Don't block — items are already saved.
     }
   }
+
+  // Mate reads a cached snapshot of the book; without this the next
+  // get_job_requirements still reports it empty and Mate re-offers the import
+  // it just finished.
+  invalidateSupplierBookCache();
 
   return {
     itemCount: counts.created + counts.updated,

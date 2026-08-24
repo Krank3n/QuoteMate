@@ -117,3 +117,22 @@ describe('uploadQuotePhoto (web)', () => {
     expect(refMock.mock.calls[0][1]).toMatch(/\.png$/);
   });
 });
+
+// Mate's chat compresses up front so the model and Storage share one set of
+// bytes; a second pass inside uploadQuotePhoto would re-encode an already
+// lossy JPEG and degrade the copy the vision model reads plan dimensions off.
+describe('alreadyCompressed', () => {
+  it('skips the compression pass when the caller has already run it', async () => {
+    vi.mocked(manipulateAsync).mockClear();
+    serveBlob(JPEG_BYTES);
+    await uploadQuotePhoto('u1', 'file:///pre-compressed.jpg', { alreadyCompressed: true });
+    expect(manipulateAsync).not.toHaveBeenCalled();
+  });
+
+  it('still compresses when the caller has not', async () => {
+    vi.mocked(manipulateAsync).mockClear();
+    serveBlob(JPEG_BYTES);
+    await uploadQuotePhoto('u1', 'file:///raw.jpg');
+    expect(manipulateAsync).toHaveBeenCalled();
+  });
+});

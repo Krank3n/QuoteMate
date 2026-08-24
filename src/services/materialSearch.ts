@@ -179,7 +179,7 @@ export async function runMaterialSearch(
         if (aiResult.price) {
           remoteResults = [{
             productName: aiResult.productName || query,
-            description: 'AI reckons about this much',
+            description: 'Rough guess — worth checking',
             itemNumber: '',
             brand: '',
             price: aiResult.price,

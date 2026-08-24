@@ -1,8 +1,17 @@
-import React from 'react';
-import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ActivityIndicator,
+  Animated,
+  Easing,
+  Image,
+  TouchableOpacity,
+} from 'react-native';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { makeStyles, useThemeColors } from '../../theme';
-import { ChatMessage } from '../../types/assistant';
+import { ChatAttachment, ChatMessage, SupplierImportCard } from '../../types/assistant';
 import { useStore } from '../../store/useStore';
 import { useJobStore } from '../../store/useJobStore';
 import { quoteToDocument } from '../../types/documentAdapter';
@@ -75,6 +84,160 @@ function InlineQuote({
   );
 }
 
+const SINGLE_THUMB = 200;
+const GRID_THUMB = 96;
+
+// One attached photo. No lightbox — the tradie already has the picture in
+// their camera roll, and a full-screen viewer over an inverted FlatList is a
+// lot of surface for a shot they took ten seconds ago.
+function AttachmentTile({ attachment, large }: { attachment: ChatAttachment; large: boolean }) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
+  // A web blob: uri is dead after a reload — fall back to the durable copy.
+  const [localBroken, setLocalBroken] = useState(false);
+  const size = large ? SINGLE_THUMB : GRID_THUMB;
+
+  if (attachment.status === 'failed') {
+    return (
+      <View
+        testID="mate-attachment-failed"
+        style={[styles.attachmentTile, styles.attachmentFailed, { width: size, height: size }]}
+      >
+        <MaterialCommunityIcons
+          name="alert-circle-outline"
+          size={large ? 32 : 22}
+          color={themeColors.error}
+        />
+        <Text style={styles.attachmentFailedLabel}>Didn't send</Text>
+      </View>
+    );
+  }
+
+  const uri = (!localBroken && attachment.localUri) || attachment.storageUrl;
+  const uploading = attachment.status === 'uploading';
+  return (
+    <View
+      testID={large ? 'mate-attachment-single' : 'mate-attachment-thumb'}
+      style={[styles.attachmentTile, { width: size, height: size }]}
+    >
+      {!!uri && (
+        <Image
+          source={{ uri }}
+          style={[styles.attachmentImage, uploading && styles.attachmentImageUploading]}
+          resizeMode="cover"
+          onError={() => setLocalBroken(true)}
+          accessibilityLabel="Attached photo"
+        />
+      )}
+      {uploading && (
+        <View testID="mate-attachment-uploading" style={styles.attachmentSpinner}>
+          <ActivityIndicator size="small" color={themeColors.accentText} />
+        </View>
+      )}
+    </View>
+  );
+}
+
+// Three dots breathing in sequence. Cheaper to read at a glance than a
+// spinner, and it reads as "someone is replying" rather than "the app is busy".
+function TypingDots() {
+  const styles = useStyles();
+  const dots = [useRef(new Animated.Value(0.3)).current, useRef(new Animated.Value(0.3)).current, useRef(new Animated.Value(0.3)).current];
+
+  useEffect(() => {
+    const loops = dots.map((v, i) =>
+      Animated.loop(
+        Animated.sequence([
+          Animated.delay(i * 160),
+          Animated.timing(v, { toValue: 1, duration: 320, easing: Easing.out(Easing.quad), useNativeDriver: true }),
+          Animated.timing(v, { toValue: 0.3, duration: 320, easing: Easing.in(Easing.quad), useNativeDriver: true }),
+          Animated.delay((dots.length - 1 - i) * 160),
+        ]),
+      ),
+    );
+    loops.forEach((l) => l.start());
+    return () => loops.forEach((l) => l.stop());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <View style={styles.dotRow} accessibilityLabel="Mate is replying">
+      {dots.map((v, i) => (
+        <Animated.View key={i} style={[styles.dot, { opacity: v }]} />
+      ))}
+    </View>
+  );
+}
+
+function AttachmentStrip({ attachments }: { attachments: ChatAttachment[] }) {
+  const styles = useStyles();
+  const single = attachments.length === 1;
+  return (
+    <View style={[styles.attachmentStrip, !single && styles.attachmentStripRow]}>
+      {attachments.map((a) => (
+        <AttachmentTile key={a.id} attachment={a} large={single} />
+      ))}
+    </View>
+  );
+}
+
+// Live state of a supplier-list import, rendered inside the bubble. The CTA
+// that opens the reader is the message's own cta, so this is text only.
+function SupplierImportRow({ card }: { card: SupplierImportCard }) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
+  const from = card.supplierName ? ` from ${card.supplierName}` : '';
+  const plural = (n: number) => (n === 1 ? 'item' : 'items');
+
+  if (card.phase === 'extracting') {
+    return (
+      <View style={styles.workingRow}>
+        <ActivityIndicator size="small" color={themeColors.accentText} />
+        <Text style={[styles.text, styles.textAssistant, styles.workingStatus]}>
+          Reading the price list…
+        </Text>
+      </View>
+    );
+  }
+
+  const icon =
+    card.phase === 'saved' ? 'check-circle'
+    : card.phase === 'ready' ? 'clipboard-list-outline'
+    : 'alert-circle-outline';
+  const tint =
+    card.phase === 'saved' ? themeColors.money
+    : card.phase === 'ready' ? themeColors.accentText
+    : themeColors.error;
+  const headline =
+    card.phase === 'ready'
+      ? `Read ${card.itemCount ?? 0} ${plural(card.itemCount ?? 0)}${from} — check & save`
+      : card.phase === 'saved'
+        ? `Saved ${card.savedCount ?? 0} ${plural(card.savedCount ?? 0)}${from}.`
+        : card.phase === 'expired'
+          ? "That list is gone from this chat — send it again and I'll read it."
+          : card.error || "Couldn't read that price list.";
+
+  return (
+    <View>
+      <View style={styles.workingRow}>
+        <MaterialCommunityIcons name={icon} size={18} color={tint} />
+        <Text style={[styles.text, styles.textAssistant, styles.workingStatus]}>{headline}</Text>
+      </View>
+      {card.phase === 'ready' && !!card.sampleNames?.length && (
+        <Text style={styles.workingDetail} numberOfLines={2}>
+          {card.sampleNames.join(' · ')}
+        </Text>
+      )}
+      {card.phase === 'saved' && !!card.coveredRows && (
+        <Text style={styles.workingDetail}>
+          {card.coveredRows} {card.coveredRows === 1 ? 'row' : 'rows'} on that quote now{' '}
+          {card.coveredRows === 1 ? 'prices' : 'price'} off your list.
+        </Text>
+      )}
+    </View>
+  );
+}
+
 function MessageBubbleImpl({
   message,
   onCtaPress,
@@ -130,15 +293,36 @@ function MessageBubbleImpl({
     );
   }
 
+  // The turn is in flight and nothing has streamed yet. Render the wait as
+  // the bubble itself rather than an empty blob with a second indicator
+  // underneath it.
+  if (message.thinking && !message.text) {
+    return (
+      <View style={[styles.row, styles.rowLeft]}>
+        <View style={[styles.bubble, styles.bubbleAssistant, styles.thinkingBubble]}>
+          <TypingDots />
+          <Text style={styles.thinkingLabel} numberOfLines={1}>
+            {message.thinking}
+          </Text>
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={[styles.row, isUser ? styles.rowRight : styles.rowLeft]}>
       <View
         style={[
           styles.bubble,
           isUser ? styles.bubbleUser : styles.bubbleAssistant,
+          // The import card carries a spinner + status row; give it the same
+          // floor the working card gets so it can't collapse.
+          message.supplierImport ? styles.workingBubble : null,
           message.errorMessage ? styles.bubbleError : null,
         ]}
       >
+        {!!message.supplierImport && <SupplierImportRow card={message.supplierImport} />}
+        {!!message.attachments?.length && <AttachmentStrip attachments={message.attachments} />}
         {!!message.text && (
           <Text style={[styles.text, isUser ? styles.textUser : styles.textAssistant]}>
             {message.text}
@@ -182,12 +366,69 @@ const useStyles = makeStyles((t) => ({
     borderWidth: 1,
     borderColor: t.colors.border,
   },
+  thinkingBubble: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  dotRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  dot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: t.colors.accentText,
+  },
+  thinkingLabel: {
+    color: t.colors.textMuted,
+    fontSize: 13,
+    flexShrink: 1,
+  },
   bubbleError: {
     borderColor: t.colors.error,
   },
   text: {
     fontSize: 15,
     lineHeight: 21,
+  },
+  attachmentStrip: {
+    marginBottom: 8,
+  },
+  attachmentStripRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  attachmentTile: {
+    borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: t.colors.surfaceOverlay,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  attachmentImage: {
+    width: '100%',
+    height: '100%',
+  },
+  attachmentImageUploading: {
+    opacity: 0.5,
+  },
+  attachmentSpinner: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  attachmentFailed: {
+    borderWidth: 1,
+    borderColor: t.colors.error,
+    gap: 4,
+  },
+  attachmentFailedLabel: {
+    color: t.colors.textMuted,
+    fontSize: 12,
   },
   textUser: { color: t.colors.onAccent },
   textAssistant: { color: t.colors.text },

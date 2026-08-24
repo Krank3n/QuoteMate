@@ -20,8 +20,16 @@
 // turn regardless of how many tool hops it takes — matching the voice token mint.
 
 import { auth } from '../config/firebase';
-import { AssistantChatResponse, ChatMessage, Proposal } from '../types/assistant';
+import { AssistantChatResponse, ChatAttachment, ChatMessage, Proposal } from '../types/assistant';
 import { generateId } from '../utils/generateId';
+import {
+  ATTACHMENT_LIMITS,
+  InlineBytes,
+  buildAttachmentParts,
+  buildMessageParts,
+  inlineAttachmentIds,
+} from './assistant/attachmentParts';
+import { resolveInlineBytes } from './assistant/attachmentBytes';
 import { MATE_SYSTEM_PROMPT } from './assistant/systemPrompt';
 import { TOOL_DECLARATIONS } from './assistant/toolSchemas';
 import { dispatchToolCall } from './assistant/toolDispatcher';
@@ -87,6 +95,13 @@ interface SendTurnArgs {
   // assistant bubble; the resolved AssistantChatResponse still has the full
   // text for callers that don't care about deltas.
   onTextDelta?: (delta: string) => void;
+  // Called with the tool calls the model asked for, before they're dispatched.
+  // Drives the "what's it doing" line on the thinking bubble — a fact about
+  // the app, as opposed to the model's reasoning, which we never surface.
+  onToolCalls?: (calls: Array<{ name: string; args?: Record<string, unknown> }>) => void;
+  // Seam for tests: the default reads bytes through expo-file-system, which
+  // can't load under vitest.
+  resolveAttachment?: (a: ChatAttachment) => Promise<InlineBytes | null>;
 }
 
 // Function-calling models occasionally *write* a tool call instead of emitting
@@ -156,25 +171,70 @@ async function callChat(
   return { parts: data.parts as GeminiPart[], model: String(data.model || 'gemini') };
 }
 
-export async function sendAssistantTurn({ history, onTextDelta }: SendTurnArgs): Promise<AssistantChatResponse> {
+export async function sendAssistantTurn({
+  history,
+  onTextDelta,
+  onToolCalls,
+  resolveAttachment = resolveInlineBytes,
+}: SendTurnArgs): Promise<AssistantChatResponse> {
   // Seed the conversation. Drop empty-text messages (inline quote cards, error
-  // bubbles) — Gemini rejects a part whose text is empty. Hidden "[context]"
-  // notes DO carry text and are deliberately kept: they're how the model
-  // learns what an Apply actually did.
+  // bubbles) — Gemini rejects a part whose text is empty — unless they carry
+  // photos. Hidden "[context]" notes DO carry text and are deliberately kept:
+  // they're how the model learns what an Apply actually did.
   //
   // Consecutive same-role turns get merged into one. A hidden note is written
   // as a user turn, so an apply-failed note immediately followed by the
   // tradie's next message would otherwise send two user turns back to back.
+  const window = history.slice(-MAX_HISTORY_TURNS);
+  // Photo bytes ride only on the turn they were attached — see attachmentParts.
+  const inlineIds = inlineAttachmentIds(window);
+  let remainingChars = ATTACHMENT_LIMITS.maxBase64CharsTotal;
+  let remainingSlots = ATTACHMENT_LIMITS.maxPerTurn;
+
   const contents: unknown[] = [];
-  for (const m of history.slice(-MAX_HISTORY_TURNS)) {
-    if (!m.text?.trim()) continue;
+  for (const m of window) {
+    const atts = m.attachments || [];
+    if (!m.text?.trim() && atts.length === 0) continue;
+
+    // A failed upload never reached Mate and never will — leave it out of both
+    // counts, or the model is told about a photo that does not exist.
+    const carried = atts.filter((a) => a.status !== 'failed');
+    const candidates = carried.filter((a) => inlineIds.has(a.id));
+    const resolved = await Promise.all(
+      candidates.map(async (a) => ({
+        id: a.id,
+        isPlan: a.isPlan,
+        bytes: await resolveAttachment(a),
+      })),
+    );
+    // Slots are threaded like chars: the trailing run can span several user
+    // messages (a hidden [context] note splits one), and a per-message reset
+    // would let 2 photos through per message instead of 2 per request.
+    const built = buildAttachmentParts(resolved, { remainingChars, remainingSlots });
+    remainingChars -= built.usedChars;
+    remainingSlots -= built.usedSlots;
+    // Two different failures, two different sentences: photos from an older
+    // turn the model has already described, versus photos on THIS turn whose
+    // bytes didn't make it (too big, unreadable, budget spent).
+    const attachedEarlier = carried.length - candidates.length;
+    const unreadable = candidates.length - built.parts.length;
+    const parts = buildMessageParts(m, built.parts, attachedEarlier, unreadable);
+    if (!parts.length) continue;
+
     const role = m.role === 'assistant' ? 'model' : 'user';
-    const prev = contents[contents.length - 1] as { role: string; parts: { text: string }[] } | undefined;
+    const prev = contents[contents.length - 1] as { role: string; parts: unknown[] } | undefined;
     if (prev?.role === role) {
-      prev.parts.push({ text: m.text });
+      prev.parts.push(...parts);
       continue;
     }
-    contents.push({ role, parts: [{ text: m.text }] });
+    contents.push({ role, parts });
+  }
+
+  // Everything in the window was skippable (a caption-less bubble whose only
+  // photo failed to upload). Posting an empty contents array gets a raw
+  // "contents required." 400 rendered straight into the chat.
+  if (!contents.length) {
+    throw new LiveOfflineError("That didn't come through — give me a line to go on.");
   }
 
   const proposals: Proposal[] = [];
@@ -202,6 +262,13 @@ export async function sendAssistantTurn({ history, onTextDelta }: SendTurnArgs):
 
     // Echo the model turn verbatim (keeps thoughtSignature) before the results.
     contents.push({ role: 'model', parts });
+
+    onToolCalls?.(
+      calls.map((p) => ({
+        name: String(p.functionCall.name),
+        args: p.functionCall.args || {},
+      })),
+    );
 
     // Dispatch every functionCall in this turn concurrently, then send one
     // user turn carrying all the responses — Gemini expects the responses to

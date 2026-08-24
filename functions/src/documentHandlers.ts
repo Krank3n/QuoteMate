@@ -480,7 +480,8 @@ export function buildQuotePdfHtmlForQuote(
       customerPhone: quote.customerPhone,
       jobAddress: quote.jobAddress,
       quoteNumber: quote.quoteNumber,
-      quoteDate: fmtAuDate(quote.updatedAt),
+      // A user-set documentDate (backdating) wins over the last-edit date.
+      quoteDate: fmtAuDate(quote.documentDate || quote.updatedAt),
       job: quote.job || { name: 'Job', description: '' },
       materials: toPdfMaterials(quote.materials),
       materialsSubtotal: quote.materialsSubtotal || 0,
@@ -1016,7 +1017,7 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
       quoteNumber: invoice.invoiceNumber,
       quoteDate: fmtAuDate(invoice.updatedAt),
       invoiceNumber: invoice.invoiceNumber,
-      issueDate: fmtAuDate(invoice.issueDate || invoice.createdAt),
+      issueDate: fmtAuDate(invoice.documentDate || invoice.issueDate || invoice.createdAt),
       dueDate: fmtAuDate(invoice.dueDate),
       paymentTerms: invoice.paymentTerms,
       paidAmount: invoice.paidAmount || 0,

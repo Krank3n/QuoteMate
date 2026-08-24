@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { makeStyles, useThemeColors } from '../../theme';
 import { Proposal, ProposalStatus } from '../../types/assistant';
+import { applyLabelFor, iconFor, titleFor } from './proposalCardCopy';
 
 interface Props {
   proposal: Proposal;
@@ -24,7 +25,7 @@ function ProposalCardImpl({ proposal, status, onApply, onDismiss }: Props) {
     proposal.type === 'propose_delete_line_item' ||
     proposal.type === 'propose_delete_quote';
   const applyColor = isDestructive ? themeColors.error : themeColors.money;
-  const applyLabel = labelFor(proposal);
+  const applyLabel = applyLabelFor(proposal);
   const applied = status === 'applied';
   const dismissed = status === 'dismissed';
   const failed = status === 'failed';
@@ -32,7 +33,11 @@ function ProposalCardImpl({ proposal, status, onApply, onDismiss }: Props) {
   return (
     <View style={[styles.card, applied && styles.cardApplied, dismissed && styles.cardDismissed]}>
       <View style={styles.headerRow}>
-        <MaterialCommunityIcons name={iconFor(proposal)} size={18} color={themeColors.textMuted} />
+        <MaterialCommunityIcons
+          name={iconFor(proposal) as React.ComponentProps<typeof MaterialCommunityIcons>['name']}
+          size={18}
+          color={themeColors.textMuted}
+        />
         <Text style={styles.title}>{titleFor(proposal)}</Text>
       </View>
 
@@ -67,53 +72,6 @@ function ProposalCardImpl({ proposal, status, onApply, onDismiss }: Props) {
   );
 }
 
-function titleFor(p: Proposal): string {
-  switch (p.type) {
-    case 'propose_draft_quote':
-      return p.documentType === 'invoice' ? 'Draft invoice' : 'Draft quote';
-    case 'propose_add_line_item': return 'Add line item';
-    case 'propose_delete_line_item': return 'Delete line item';
-    case 'propose_delete_quote':
-      return p.displayDocType === 'invoice' ? 'Delete invoice' : 'Delete quote';
-    case 'propose_create_contact': return 'New contact';
-    case 'propose_update_customer': return 'Change customer';
-    case 'propose_send_quote': return 'Send quote';
-    case 'propose_convert_to_invoice': return 'Convert to invoice';
-    case 'propose_reprice': return 'Re-price quote';
-    case 'propose_update_quote_rates': return 'Update rates';
-    case 'propose_mark_paid': return 'Mark invoice paid';
-  }
-}
-
-function iconFor(p: Proposal): React.ComponentProps<typeof MaterialCommunityIcons>['name'] {
-  switch (p.type) {
-    case 'propose_draft_quote': return 'file-document-edit-outline';
-    case 'propose_add_line_item': return 'plus-circle-outline';
-    case 'propose_delete_line_item': return 'trash-can-outline';
-    case 'propose_delete_quote': return 'file-remove-outline';
-    case 'propose_create_contact': return 'account-plus-outline';
-    case 'propose_update_customer': return 'account-switch-outline';
-    case 'propose_send_quote': return 'send-outline';
-    case 'propose_convert_to_invoice': return 'cash-multiple';
-    case 'propose_reprice': return 'refresh';
-    case 'propose_update_quote_rates': return 'tune-variant';
-    case 'propose_mark_paid': return 'check-decagram-outline';
-  }
-}
-
-function labelFor(p: Proposal): string {
-  switch (p.type) {
-    case 'propose_send_quote': return 'Send';
-    case 'propose_delete_line_item': return 'Delete';
-    case 'propose_delete_quote': return 'Delete';
-    case 'propose_convert_to_invoice': return 'Convert';
-    case 'propose_reprice': return 'Re-price';
-    case 'propose_update_quote_rates': return 'Update';
-    case 'propose_mark_paid': return 'Mark paid';
-    default: return 'Apply';
-  }
-}
-
 function Body({ proposal }: { proposal: Proposal }) {
   const styles = useStyles();
   const themeColors = useThemeColors();
@@ -127,7 +85,7 @@ function Body({ proposal }: { proposal: Proposal }) {
           )}
           <Text style={styles.scope} numberOfLines={6}>{proposal.jobDescription}</Text>
           <Text style={styles.dim}>
-            Apply runs the materials + pricing pipeline
+            I'll work out the materials and price them up
             {proposal.documentType === 'invoice' ? ' and converts the result to an invoice' : ''}.
             {typeof proposal.estimatedDurationHours === 'number'
               ? ` Labour seeded at ${proposal.estimatedDurationHours} h.`
@@ -139,7 +97,7 @@ function Body({ proposal }: { proposal: Proposal }) {
       return (
         <View>
           <Text style={styles.summary}>{proposal.qty} {proposal.unit} · {proposal.searchTerm}</Text>
-          <Text style={styles.dim}>Pipeline will price this on apply.</Text>
+          <Text style={styles.dim}>I'll price this one up.</Text>
         </View>
       );
     case 'propose_delete_line_item':
@@ -254,7 +212,7 @@ function Body({ proposal }: { proposal: Proposal }) {
           {typeof proposal.laborHours === 'number' && (
             <Text style={styles.dim}>Labour hours → {proposal.laborHours} h</Text>
           )}
-          <Text style={styles.dim}>Apply updates the doc and re-totals.</Text>
+          <Text style={styles.dim}>Updates the quote and re-does the totals.</Text>
         </View>
       );
     case 'propose_reprice':
@@ -266,7 +224,7 @@ function Body({ proposal }: { proposal: Proposal }) {
           {typeof proposal.displayTotal === 'number' && (
             <Text style={styles.dim}>Current total {formatCurrency(proposal.displayTotal)}.</Text>
           )}
-          <Text style={styles.dim}>Apply re-fetches prices for the flagged rows and reconciles again.</Text>
+          <Text style={styles.dim}>I'll re-check the prices on the rows that looked off.</Text>
         </View>
       );
     case 'propose_mark_paid': {
@@ -300,7 +258,29 @@ function Body({ proposal }: { proposal: Proposal }) {
           {!!proposal.notes && (
             <Text style={styles.dim}>Note: {proposal.notes}</Text>
           )}
-          <Text style={styles.dim}>Apply records the payment and flips the invoice to paid.</Text>
+          <Text style={styles.dim}>Records the payment and marks it paid.</Text>
+        </View>
+      );
+    }
+    case 'propose_import_supplier_list': {
+      const sourceLine =
+        proposal.source === 'attachment' ? 'Reads the price list you just sent.'
+        : proposal.source === 'camera' ? 'Opens the camera to snap the price list.'
+        : proposal.source === 'gallery' ? 'Pick the price list out of your photos.'
+        : proposal.source === 'pdf' ? 'Pick a PDF price list.'
+        : proposal.source === 'spreadsheet' ? 'Pick a CSV or Excel price list.'
+        : 'Photo, PDF or spreadsheet — whatever you have.';
+      return (
+        <View>
+          <Text style={styles.summary}>
+            {proposal.supplierName ? proposal.supplierName : 'Your supplier prices'}
+          </Text>
+          {!!proposal.missedItems?.length && (
+            <Text style={styles.dim} numberOfLines={2}>
+              Would cover: {proposal.missedItems.slice(0, 3).join(', ')}
+            </Text>
+          )}
+          <Text style={styles.dim}>{sourceLine} You check every row before it saves.</Text>
         </View>
       );
     }
@@ -442,17 +422,24 @@ const useStyles = makeStyles((t) => ({
     marginTop: 10,
     gap: 8,
   },
+  // These two are the primary confirm in the product and sat at ~33pt. Dismiss
+  // also gets a border — bare text beside a filled red Delete invites the
+  // wrong tap.
   dismissBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: 14,
+    minHeight: 48,
+    justifyContent: 'center',
     borderRadius: 8,
+    borderWidth: 1,
+    borderColor: t.colors.border,
   },
   dismissText: { color: t.colors.textMuted, fontSize: 14, fontWeight: '500' },
   applyBtn: {
     paddingHorizontal: 16,
-    paddingVertical: 8,
+    minHeight: 48,
+    justifyContent: 'center',
     borderRadius: 8,
-    minWidth: 80,
+    minWidth: 96,
     alignItems: 'center',
   },
   applyText: { color: t.colors.alwaysLight, fontSize: 14, fontWeight: '700' },

@@ -44,8 +44,13 @@ const CHAT_MODEL = 'gemini-3-flash-preview';
 // honest turns while still bounding abuse; the token mint stays at 10/min.
 const CHAT_RATE: RateLimitConfig = { maxRequests: 60, windowMs: 60_000 };
 
+// 512MB, not 256: a turn carrying two photos posts a ~6MB base64 body that
+// exists ~3x over concurrently (request buffer, parsed JSON, forwarded body).
+// An OOM kills the process BEFORE refundQuotaTurn runs, so the tradie is
+// charged a turn for nothing. analyzeJobDescription runs multi-MB base64 at
+// 512MB for the same reason.
 export const assistantChat = functions
-  .runWith({ timeoutSeconds: 60, memory: '256MB' })
+  .runWith({ timeoutSeconds: 60, memory: '512MB' })
   .https.onRequest((req, res) => {
     corsHandler(req, res, async () => {
       if (req.method !== 'POST') { res.status(405).send('Method Not Allowed'); return; }

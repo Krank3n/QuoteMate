@@ -33,6 +33,14 @@ const LOGO_JPEG_QUALITY = 0.8;
 export interface CompressOptions {
   /** Compress a plan/drawing at higher resolution so fine text stays legible. */
   isPlan?: boolean;
+  /**
+   * Skip the compression pass because the caller has already run it on this
+   * uri. Mate's chat compresses up front so the model and Storage get the
+   * same bytes; without this, uploadQuotePhoto would resize-and-re-encode an
+   * already-lossy JPEG a second time and the copy the vision model reads
+   * printed plan dimensions off would be the worse of the two.
+   */
+  alreadyCompressed?: boolean;
 }
 
 /**
@@ -312,7 +320,7 @@ export async function uploadQuotePhoto(
   opts: CompressOptions = {}
 ): Promise<string> {
   // Compress first (works on all platforms). Plans go through at higher res.
-  const compressedUri = await compressImage(photoUri, opts);
+  const compressedUri = opts.alreadyCompressed ? photoUri : await compressImage(photoUri, opts);
 
   const blob = await uriToBlob(compressedUri);
 

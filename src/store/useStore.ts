@@ -7,7 +7,7 @@ import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { generateId } from '../utils/generateId';
 import { withOrigin } from '../utils/materialOrigin';
-import { Quote, BusinessSettings, Material, SubscriptionStatus, Invoice, PaymentMethod, ReferralInfo, XeroConnection, XeroSyncStatus, Contact } from '../types';
+import { Quote, BusinessSettings, Material, SubscriptionStatus, Invoice, PaymentMethod, ReferralInfo, XeroConnection, XeroSyncStatus, Contact, QuotePhoto } from '../types';
 import { Document, DocumentPayment, DocumentPaymentMethod } from '../types/document';
 import {
   ChatMessage,
@@ -20,8 +20,9 @@ import {
   generateMaterialsForQuote,
   fetchPricesForQuote,
   PipelineCancelled,
-  PricingEvent,
 } from '../services/materialsPipeline';
+import { pricingEventToProgress } from './pricingProgress';
+import type { SupplierGapSummary } from '../services/assistant/supplierGapNote';
 import { reviewQuoteMaterials, isFlaggedRow, QuoteReview } from '../utils/quoteReview';
 import { loadTemplates } from '../services/sectionTemplateService';
 import { updateQuoteCalculations, healBrokenLabourSections } from '../utils/quoteCalculator';
@@ -47,7 +48,7 @@ import { TRIAL_MS } from '../utils/trialConfig';
 import { trackEvent } from '../services/analyticsService';
 import { maybeRequestReview } from '../services/storeReviewService';
 import { ensureJobForDocument, ensureJobForQuote, useJobStore } from './useJobStore';
-import { canRunMatePipeline } from './planGates';
+import { canAnalysePhotos, canRunMatePipeline } from './planGates';
 import type { CustomerEditPlan } from '../utils/customerEdit';
 import { auth } from '../config/firebase';
 import { searchLocalSources } from '../services/localMaterialSearch';
@@ -309,18 +310,52 @@ interface AppState {
   applyProposal: (
     proposal: Proposal,
     onProgress?: (status: WorkingStatus) => void,
+    context?: ApplyProposalContext,
   ) => Promise<ApplyProposalResult>;
 
   // Cleanup
   clearAllData: () => Promise<void>;
 }
 
+/**
+ * Screen-supplied extras for an Apply. Deliberately NOT a proposal field (the
+ * model can't know Storage URLs, and proposals are Firestore-synced) and NOT
+ * store state (which would leak photos across chats).
+ */
+export interface ApplyProposalContext {
+  /** Photos the tradie sent Mate in this chat, to seed onto the draft. */
+  photos?: QuotePhoto[];
+}
+
 export type ApplyProposalResult =
-  | { ok: true; navigate?: NavigateHint; note?: string; review?: QuoteReview }
+  | {
+      ok: true;
+      navigate?: NavigateHint;
+      note?: string;
+      review?: QuoteReview;
+      /** How much of this quote the tradie's own supplier rates could price. */
+      supplierGap?: SupplierGapSummary;
+      /** Open a sheet over the chat. Deliberately not a NavigateHint — this
+       *  one must NOT leave the conversation. */
+      sheet?: AssistantSheetHint;
+    }
   // `code` names machine-readable failures the screen branches on
   // (currently only 'PLAN_GATED' → Paywall); `error` stays the line shown
   // to the tradie.
   | { ok: false; error: string; code?: string };
+
+/**
+ * Something the chat screen opens ON TOP of the conversation. Kept apart from
+ * NavigateHint so it can never be routed through handleNavigate — leaving the
+ * chat to import a price list would lose the thread the import is for.
+ */
+export type AssistantSheetHint = {
+  kind: 'supplier_import';
+  source: 'attachment' | 'camera' | 'gallery' | 'pdf' | 'spreadsheet' | 'ask';
+  supplierName?: string;
+  /** Read the photo already sitting in this conversation. */
+  useAttachments?: boolean;
+};
 
 export type NavigateHint =
   | { kind: 'job_preview'; quoteId: string }
@@ -420,48 +455,29 @@ function normalizeMaterialUnit(raw: string): Material['unit'] {
   return 'each';
 }
 
-// Map a pricing-pipeline event onto a partial WorkingStatus update. Shared by
-// the draft and reprice apply paths so their chat progress cards read the same;
-// `status` carries the slow-changing phase headline, `detail` the rapid per-item
-// progress (kept separate so fast item events don't blow away the headline).
-function pricingEventToProgress(event: PricingEvent): Partial<WorkingStatus> | null {
-  if (event.kind === 'phase-start') {
-    // Clear the per-item list when we move off the batch phase so stale
-    // "Searching…" rows don't linger into reconcile/individual passes.
-    return {
-      phase: 'pricing',
-      status: event.status,
-      detail: undefined,
-      // Clear the per-item list on every phase boundary — the next
-      // batch-chunk event repopulates it, and non-batch phases shouldn't
-      // carry stale rows.
-      items: undefined,
-    };
+/**
+ * Fold a finished pricing run into the "did their own rates cover this?"
+ * summary Mate reads. The supplier-book snapshot is imported lazily so the
+ * store graph doesn't grow an AsyncStorage read at module load.
+ */
+async function summariseSupplierGap(
+  missedTerms: string[],
+  estimatedCount: number,
+  materials: Material[],
+): Promise<SupplierGapSummary> {
+  let supplierBookPopulated = false;
+  try {
+    const { loadSupplierBookSnapshot } = await import('../services/supplierBook');
+    supplierBookPopulated = (await loadSupplierBookSnapshot()).personalRateCount > 0;
+  } catch {
+    // Unreadable book reads as empty — the copy blames the phone, not the tradie.
   }
-  if (event.kind === 'batch-chunk') {
-    return {
-      status:
-        event.currentName || `Checking Bunnings (batch ${event.chunkIndex} of ${event.totalChunks})…`,
-      detail: `${event.progress.current}/${event.progress.total} items priced`,
-      items: event.items,
-    };
-  }
-  if (event.kind === 'item-priced') {
-    const progressLine = event.progress
-      ? `${event.progress.current}/${event.progress.total} priced`
-      : undefined;
-    const itemLine = event.success
-      ? `${progressLine ? progressLine + ' · ' : ''}Just priced ${event.name}`
-      : `${progressLine ? progressLine + ' · ' : ''}Couldn't find ${event.name}`;
-    return { detail: itemLine };
-  }
-  if (event.kind === 'reconcile-start') {
-    return { status: 'Sorting pack sizes and quantities…', detail: 'Mate is double-checking every line.' };
-  }
-  if (event.kind === 'reece-reauth') {
-    return { status: 'Reece sign-in expired — sort it in Settings to use Reece prices.', detail: undefined };
-  }
-  return null;
+  return {
+    missedTerms,
+    estimatedCount,
+    pricedRowCount: materials.filter((m) => (m.price ?? 0) > 0).length,
+    supplierBookPopulated,
+  };
 }
 
 // Wipe the price off every row the review flags (no price, AI estimate,
@@ -681,6 +697,11 @@ export const useStore = create<AppState>((set, get) => ({
               sections: quote.sections,
               laborRate: quote.laborRate,
               laborHours: quote.laborHours,
+              // Carried for the same reason as in createInvoiceFromQuote:
+              // without it the sections arrive trimmed but the adjustment
+              // that paid for the trim does not, and the recompute inflates
+              // the total back up.
+              laborExtraHours: quote.laborExtraHours,
               markup: quote.markup,
               job: quote.job,
               updatedAt: new Date(),
@@ -854,6 +875,8 @@ export const useStore = create<AppState>((set, get) => ({
               sections: quote.sections,
               laborRate: quote.laborRate,
               laborHours: quote.laborHours,
+              // See saveDraft above — same carry, same reason.
+              laborExtraHours: quote.laborExtraHours,
               markup: quote.markup,
               job: quote.job,
               updatedAt: new Date(),
@@ -1575,6 +1598,13 @@ export const useStore = create<AppState>((set, get) => ({
       laborUnit: quote.laborUnit,
       labourDisplayUnit: quote.labourDisplayUnit,
       laborTotal: quote.laborTotal,
+      // The labour adjustment is part of the price, not a display detail:
+      // laborTotal is Σ(sections) + laborExtraHours × laborRate, so dropping
+      // it here left the invoice's own fields disagreeing with its total. The
+      // next recompute (updateInvoice, or any recalc on the send path) then
+      // "corrected" the total UPWARDS by the trimmed amount and quietly
+      // re-billed the customer for labour the tradie had taken off.
+      laborExtraHours: quote.laborExtraHours,
       sections: quote.sections,
       materialsSubtotal: quote.materialsSubtotal,
       markup: quote.markup,
@@ -3039,6 +3069,7 @@ export const useStore = create<AppState>((set, get) => ({
   applyProposal: async (
     proposal: Proposal,
     onProgress?: (status: WorkingStatus) => void,
+    context?: ApplyProposalContext,
   ): Promise<ApplyProposalResult> => {
     // Resolve a unified Document by id — local cache first, then a Firestore
     // round-trip if missing. Mate's server-side tools always return doc ids
@@ -3200,6 +3231,21 @@ export const useStore = create<AppState>((set, get) => ({
           return { ok: false, error: 'Quote not found.' };
         }
 
+        case 'propose_import_supplier_list': {
+          // Deliberately NOT plan-gated. Importing a price list is free today
+          // (onboarding runs it for free users), and paywalling the one thing
+          // that makes a free user's prices right would be backwards.
+          return {
+            ok: true,
+            sheet: {
+              kind: 'supplier_import',
+              source: proposal.source,
+              supplierName: proposal.supplierName,
+              useAttachments: proposal.source === 'attachment',
+            },
+          };
+        }
+
         case 'propose_draft_quote': {
           const gated = planGate();
           if (gated) return gated;
@@ -3264,6 +3310,10 @@ export const useStore = create<AppState>((set, get) => ({
               description: proposal.jobDescription,
             },
             laborHours: proposal.estimatedDurationHours ?? fresh.laborHours,
+            // Photos the tradie sent Mate in this chat. Seeded BEFORE the
+            // analyse pass so materialsPipeline reads photos[].storageUrl on
+            // its first look at the job, not after the fact.
+            ...(context?.photos?.length ? { photos: context.photos.slice(0, 5) } : {}),
           };
           get().updateQuote(seeded);
           await get().saveDraft(get().currentQuote!);
@@ -3277,6 +3327,11 @@ export const useStore = create<AppState>((set, get) => ({
           let materialCount = 0;
           let pricingSummary: string | undefined;
           let review: QuoteReview | undefined;
+          let supplierGap: SupplierGapSummary | undefined;
+          // Accumulated outside the event→progress mapper: the fallback event
+          // is one-shot info, not a progress frame, and the caller needs the
+          // terms after the run finishes.
+          const missedSupplierTerms: string[] = [];
           try {
             // Track the current working status so partial updates (e.g. an
             // item-priced event that only changes the detail line) don't blow
@@ -3294,7 +3349,7 @@ export const useStore = create<AppState>((set, get) => ({
             };
             reportProgress({});
             const templates = await loadTemplates().catch(() => []);
-            const isPro = get().getEffectivePlan() === 'pro';
+            const isPro = canAnalysePhotos(get().getEffectivePlan());
 
             // ── Phase 1: analyse ──
             const analyseResult = await generateMaterialsForQuote(
@@ -3344,6 +3399,9 @@ export const useStore = create<AppState>((set, get) => ({
               },
               {
                 onEvent: (event) => {
+                  if (event.kind === 'supplier-priority-fallback') {
+                    missedSupplierTerms.push(...event.missedTerms);
+                  }
                   const next = pricingEventToProgress(event);
                   if (next) reportProgress(next);
                 },
@@ -3353,6 +3411,11 @@ export const useStore = create<AppState>((set, get) => ({
             get().updateQuote(pricedResult.updatedQuote);
             await get().saveDraft(get().currentQuote!);
             review = reviewQuoteMaterials(pricedResult.updatedQuote.materials, pricedResult.updatedQuote.sections);
+            supplierGap = await summariseSupplierGap(
+              missedSupplierTerms,
+              review.counts.estimated,
+              pricedResult.updatedQuote.materials,
+            );
 
             const parts: string[] = [];
             if (pricedResult.fetchedCount > 0) parts.push(`${pricedResult.fetchedCount} priced`);
@@ -3371,7 +3434,7 @@ export const useStore = create<AppState>((set, get) => ({
             console.warn('[Mate] pipeline failed', err);
             onProgress?.({
               phase: 'failed',
-              status: 'Pipeline hit a snag.',
+              status: "Couldn't finish pricing that one.",
               detail: err?.message,
               done: true,
             });
@@ -3391,6 +3454,7 @@ export const useStore = create<AppState>((set, get) => ({
                 ok: true,
                 navigate: { kind: 'open_invoice', invoiceId: converted.id },
                 review,
+                supplierGap,
               };
             } catch (err: any) {
               // eslint-disable-next-line no-console
@@ -3405,6 +3469,7 @@ export const useStore = create<AppState>((set, get) => ({
             ok: true,
             navigate: { kind: 'job_preview', quoteId },
             review,
+            supplierGap,
           };
         }
 
@@ -3720,6 +3785,9 @@ export const useStore = create<AppState>((set, get) => ({
             currentWorking = { ...currentWorking, ...next };
             onProgress?.(currentWorking);
           };
+          // See the draft path — the fallback event is one-shot info, not a
+          // progress frame, so it's accumulated outside the mapper.
+          const missedSupplierTerms: string[] = [];
 
           const runReprice = async (source: Quote): Promise<{ priced: Quote; resetCount: number }> => {
             const { materials, resetCount } = resetFlaggedRowsForReprice(source.materials);
@@ -3734,6 +3802,9 @@ export const useStore = create<AppState>((set, get) => ({
               },
               {
                 onEvent: (event) => {
+                  if (event.kind === 'supplier-priority-fallback') {
+                    missedSupplierTerms.push(...event.missedTerms);
+                  }
                   const next = pricingEventToProgress(event);
                   if (next) reportProgress(next);
                 },
@@ -3759,8 +3830,13 @@ export const useStore = create<AppState>((set, get) => ({
             };
             await get().saveDocument(repricedDoc);
             const review = reviewQuoteMaterials(priced.materials, priced.sections);
+            const supplierGap = await summariseSupplierGap(
+              missedSupplierTerms,
+              review.counts.estimated,
+              priced.materials,
+            );
             onProgress?.({ phase: 'done', status: 'Prices re-checked.', done: true, summary: review.summary });
-            return { ok: true, navigate: { kind: 'job_preview', quoteId: doc.id }, review };
+            return { ok: true, navigate: { kind: 'job_preview', quoteId: doc.id }, review, supplierGap };
           }
 
           // Legacy fallback: a draft still only in the quotes array.
@@ -3769,8 +3845,13 @@ export const useStore = create<AppState>((set, get) => ({
           const { priced } = await runReprice(quote);
           await get().saveQuote(priced);
           const review = reviewQuoteMaterials(priced.materials, priced.sections);
+          const supplierGap = await summariseSupplierGap(
+            missedSupplierTerms,
+            review.counts.estimated,
+            priced.materials,
+          );
           onProgress?.({ phase: 'done', status: 'Prices re-checked.', done: true, summary: review.summary });
-          return { ok: true, navigate: { kind: 'job_preview', quoteId: quote.id }, review };
+          return { ok: true, navigate: { kind: 'job_preview', quoteId: quote.id }, review, supplierGap };
         }
 
         case 'propose_mark_paid': {

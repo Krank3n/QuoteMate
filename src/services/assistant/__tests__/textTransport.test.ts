@@ -14,7 +14,7 @@ import {
   LiveRateLimitError,
   __resetMintThrottle,
 } from '../liveSession';
-import type { ChatMessage } from '../../../types/assistant';
+import type { ChatAttachment, ChatMessage } from '../../../types/assistant';
 
 const fetchMock = vi.fn();
 
@@ -275,5 +275,222 @@ describe('history assembly', () => {
       { role: 'model', parts: [{ text: 'tap Apply' }] },
       { role: 'user', parts: [{ text: '[context] Apply FAILED' }, { text: 'why not?' }] },
     ]);
+  });
+});
+
+// Photos ride ONCE, on the turn they were attached. The tool loop re-POSTs the
+// whole contents array up to 8 times per turn, so replaying an image across the
+// 20-message window would multiply that again for a picture the model already
+// described in words.
+describe('attachment transport', () => {
+  const photo = (id: string): ChatAttachment => ({
+    id,
+    status: 'ready',
+    localUri: `file:///${id}.jpg`,
+    storageUrl: `https://s/${id}.jpg`,
+  });
+  const inline = { mimeType: 'image/jpeg', data: 'AAAA' };
+  const resolveAttachment = async () => inline;
+
+  function contentsOf(): any[] {
+    return JSON.parse((fetchMock.mock.calls[0][1] as any).body).contents;
+  }
+
+  beforeEach(() => {
+    vi.mocked(auth).currentUser = { getIdToken: async () => 'id-token' } as any;
+  });
+
+  it('caps images per request, not per message, across a split user run', async () => {
+    // A hidden [context] note (or an error bubble) splits the trailing user
+    // run into two messages. Resetting the slot budget per message would put
+    // four photos on one request and re-POST them on every tool hop.
+    fetchMock.mockResolvedValueOnce(okChatResponse('righto'));
+    await sendAssistantTurn({
+      history: [
+        { id: '1', role: 'user', text: 'these two', createdAt: '', attachments: [photo('p1'), photo('p2')] },
+        { id: '2', role: 'user', text: 'and these', createdAt: '', attachments: [photo('p3'), photo('p4')] },
+      ],
+      resolveAttachment,
+    });
+    const parts = contentsOf().flatMap((c: any) => c.parts);
+    expect(parts.filter((p: any) => p.inlineData)).toHaveLength(2);
+  });
+
+  it('sends an image-only user turn as a single inlineData part', async () => {
+    fetchMock.mockResolvedValueOnce(okChatResponse('righto'));
+    await sendAssistantTurn({
+      history: [{ id: '1', role: 'user', text: '', createdAt: '', attachments: [photo('p1')] }],
+      resolveAttachment,
+    });
+    expect(contentsOf()).toEqual([{ role: 'user', parts: [{ inlineData: inline }] }]);
+  });
+
+  it('sends inlineData alongside caption text, image first', async () => {
+    fetchMock.mockResolvedValueOnce(okChatResponse('righto'));
+    await sendAssistantTurn({
+      history: [
+        { id: '1', role: 'user', text: 'how much to replace this?', createdAt: '', attachments: [photo('p1')] },
+      ],
+      resolveAttachment,
+    });
+    expect(contentsOf()).toEqual([
+      { role: 'user', parts: [{ inlineData: inline }, { text: 'how much to replace this?' }] },
+    ]);
+  });
+
+  it('replays an older photo turn as text only', async () => {
+    fetchMock.mockResolvedValueOnce(okChatResponse('righto'));
+    await sendAssistantTurn({
+      history: [
+        { id: '1', role: 'user', text: 'have a look', createdAt: '', attachments: [photo('p1')] },
+        { id: '2', role: 'assistant', text: 'timber paling, looks rooted', createdAt: '' },
+        { id: '3', role: 'user', text: 'price it up', createdAt: '' },
+      ],
+      resolveAttachment,
+    });
+    expect(contentsOf()).toEqual([
+      {
+        role: 'user',
+        parts: [
+          { text: 'have a look' },
+          { text: '[1 photo(s) attached to this message earlier in the chat]' },
+        ],
+      },
+      { role: 'model', parts: [{ text: 'timber paling, looks rooted' }] },
+      { role: 'user', parts: [{ text: 'price it up' }] },
+    ]);
+  });
+
+  it('merges an attachment-bearing turn into the preceding user turn', async () => {
+    fetchMock.mockResolvedValueOnce(okChatResponse('righto'));
+    await sendAssistantTurn({
+      history: [
+        { id: '1', role: 'user', text: '[context] Draft applied', createdAt: '', hidden: true },
+        { id: '2', role: 'user', text: '', createdAt: '', attachments: [photo('p1')] },
+      ],
+      resolveAttachment,
+    });
+    expect(contentsOf()).toEqual([
+      { role: 'user', parts: [{ text: '[context] Draft applied' }, { inlineData: inline }] },
+    ]);
+  });
+
+  it('still drops empty-text bubbles with no attachments', async () => {
+    fetchMock.mockResolvedValueOnce(okChatResponse('righto'));
+    await sendAssistantTurn({
+      history: [
+        { id: '1', role: 'assistant', text: '', createdAt: '', inlineQuoteId: 'q1' },
+        { id: '2', role: 'user', text: 'ta', createdAt: '' },
+      ],
+      resolveAttachment,
+    });
+    expect(contentsOf()).toEqual([{ role: 'user', parts: [{ text: 'ta' }] }]);
+  });
+
+  it('never mentions a photo whose upload failed', async () => {
+    fetchMock.mockResolvedValueOnce(okChatResponse('righto'));
+    await sendAssistantTurn({
+      history: [
+        {
+          id: '1',
+          role: 'user',
+          text: 'this one',
+          createdAt: '',
+          attachments: [{ ...photo('p1'), status: 'failed' }],
+        },
+      ],
+      resolveAttachment,
+    });
+    // It never reached Mate and never will — claiming it was "attached
+    // earlier" would have the model discussing a photo that doesn't exist.
+    expect(contentsOf()).toEqual([{ role: 'user', parts: [{ text: 'this one' }] }]);
+  });
+
+  it('tells the model a photo it could not read never arrived', async () => {
+    fetchMock.mockResolvedValueOnce(okChatResponse('righto'));
+    await sendAssistantTurn({
+      history: [
+        { id: '1', role: 'user', text: 'how much?', createdAt: '', attachments: [photo('p1')] },
+      ],
+      // Bytes unreadable — an oversized shot, or a file that's gone.
+      resolveAttachment: async () => null,
+    });
+    const parts = contentsOf()[0].parts;
+    expect(parts[0]).toEqual({ text: 'how much?' });
+    expect(parts[1].text).toContain('could not be read');
+    expect(parts[1].text).toContain('you have NOT seen them');
+  });
+
+  it('refuses to POST an empty contents array', async () => {
+    // A caption-less bubble whose only photo failed to upload used to build an
+    // empty request, and the server's own "contents required." 400 landed in
+    // the chat as if Mate had said it.
+    await expect(
+      sendAssistantTurn({
+        history: [
+          {
+            id: '1',
+            role: 'user',
+            text: '',
+            createdAt: '',
+            attachments: [{ ...photo('p1'), status: 'failed' }],
+          },
+        ],
+        resolveAttachment,
+      }),
+    ).rejects.toThrow(/give me a line to go on/i);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps the existing text-only contents shape unchanged', async () => {
+    fetchMock.mockResolvedValueOnce(okChatResponse('righto'));
+    await sendAssistantTurn({ history, resolveAttachment });
+    expect(contentsOf()).toEqual([{ role: 'user', parts: [{ text: 'price up a fence' }] }]);
+  });
+});
+
+// The loading line is built from the tool calls the model actually makes, so
+// the callback has to fire before they're dispatched — never from model
+// reasoning, which we don't surface at all.
+describe('tool-call reporting', () => {
+  function toolCallResponse(name: string, args: Record<string, unknown>) {
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        parts: [{ functionCall: { name, id: `${name}-1`, args } }],
+        model: 'gemini-test',
+      }),
+    } as unknown as Response;
+  }
+
+  beforeEach(() => {
+    vi.mocked(auth).currentUser = { getIdToken: async () => 'id-token' } as any;
+  });
+
+  it('reports each tool call with its name and args', async () => {
+    fetchMock
+      .mockResolvedValueOnce(toolCallResponse('find_customer', { name: 'Gigar' }))
+      .mockResolvedValueOnce(okChatResponse('found them'));
+
+    const seen: Array<Array<{ name: string }>> = [];
+    await sendAssistantTurn({
+      history: [{ id: '1', role: 'user', text: 'quote a fence for Gigar', createdAt: '' }],
+      onToolCalls: (calls) => seen.push(calls),
+    });
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0][0].name).toBe('find_customer');
+    expect(seen[0][0].args).toEqual({ name: 'Gigar' });
+  });
+
+  it('does not fire on a plain text turn', async () => {
+    fetchMock.mockResolvedValueOnce(okChatResponse('no tools needed'));
+    const onToolCalls = vi.fn();
+    await sendAssistantTurn({
+      history: [{ id: '1', role: 'user', text: 'g\'day', createdAt: '' }],
+      onToolCalls,
+    });
+    expect(onToolCalls).not.toHaveBeenCalled();
   });
 });

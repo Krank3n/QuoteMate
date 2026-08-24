@@ -161,6 +161,8 @@ function projectShared(s: LegacyDocumentRecord, type: DocumentType): LegacyDocum
     // a legacy Timestamp/Date/ISO sentAt lands as a number in the Document.
     sentAt: toMs(s.sentAt),
     sendMethod: s.sendMethod,
+    // Optional user-set display date for backdating (quote-side).
+    documentDate: toMs(s.documentDate),
     paymentSyncError: s.paymentSyncError,
     disputeStatus: s.disputeStatus,
     disputeId: s.disputeId,
@@ -487,6 +489,7 @@ export function documentRecordToQuoteRecord(doc: DocumentRecord): LegacyDocument
     status: stageToQuoteStatus(doc.stage),
     sentAt: doc.sentAt,
     sendMethod: doc.sendMethod,
+    documentDate: doc.documentDate,
     draftStep: doc.draftStep,
     notes: doc.notes,
     aiSkipped: doc.aiSkipped,
@@ -572,6 +575,7 @@ export function documentRecordToInvoiceRecord(doc: DocumentRecord): LegacyDocume
     updatedAt: fromMsRequired(doc.updatedAt),
     issueDate: fromMs(doc.issueDate) ?? fromMsRequired(doc.createdAt),
     dueDate: fromMs(doc.dueDate) ?? fromMsRequired(doc.createdAt),
+    documentDate: doc.documentDate,
     contactId: doc.contactId,
     customerName: doc.customerName,
     customerEmail: doc.customerEmail,

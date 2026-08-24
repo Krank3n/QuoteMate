@@ -34,6 +34,7 @@ import { previewDocumentPDF } from '../../utils/pdfGenerator';
 // until the user actually requests a PDF preview.
 import { quoteToDocument, invoiceToDocument } from '../../types/documentAdapter';
 import { calculateDueDate, formatPaymentTerms } from '../../utils/invoiceCalculator';
+import { documentService } from '../../services/documentService';
 import type { PaymentTerms } from '../../types';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SendTypePill } from '../../components/SendSwitcher';
@@ -41,6 +42,7 @@ import { SendDocumentButton } from '../../components/SendDocumentButton';
 import { FooterButton } from '../../components/FooterButton';
 import { DocumentSentBanner } from '../../components/DocumentSentBanner';
 import { TakePaymentSheet, type TakePaymentTarget } from '../../components/TakePaymentSheet';
+import { DueDateSheet } from '../../components/DueDateSheet';
 import { reconcileNextNumber } from '../../utils/nextNumber';
 import { applyStageChange } from '../../utils/applyStageChange';
 import { successTap } from '../../utils/haptics';
@@ -131,7 +133,17 @@ export function JobPreviewScreen() {
     currentInvoice?.customPaymentDays?.toString() || '',
   );
   const [paymentTermsMenuVisible, setPaymentTermsMenuVisible] = useState(false);
+  // Document date editor — subtle backdating (e.g. into the prior financial
+  // year). Tapping the header date badge opens a calendar sheet.
+  const [dateSheetVisible, setDateSheetVisible] = useState(false);
   const issueDate = currentInvoice?.issueDate || new Date();
+  // Effective display date shown on the document: a user-set documentDate
+  // (backdating) wins; otherwise quotes fall back to updatedAt (what the
+  // PDF prints) and invoices to their issueDate.
+  const effectiveDocDateMs = isInvoiceMode
+    ? new Date(currentInvoice?.documentDate ?? issueDate).getTime()
+    : (currentQuote?.documentDate ??
+       new Date(workingDoc?.updatedAt ?? Date.now()).getTime());
   const dueDate = calculateDueDate(
     issueDate,
     paymentTerms,
@@ -500,6 +512,58 @@ export function JobPreviewScreen() {
     ],
   );
 
+  // Backdating. Quote → documentDate override (createdAt/updatedAt stay
+  // untouched so ordering + last-write-wins sync merges keep working).
+  // Invoice → issueDate + documentDate, with dueDate recomputed off the
+  // existing payment terms. `undefined` (the sheet's reset) restores today
+  // AND clears the stored override — writes here are stripUndefined+merge,
+  // so a bare undefined would leave the stale date on disk and the next
+  // load would resurrect it. clearDocumentFields uses deleteField().
+  const handleDocumentDateChange = useCallback(
+    (ms: number | undefined) => {
+      if (isInvoiceMode && currentInvoice) {
+        const newIssueDate = ms ? new Date(ms) : new Date();
+        const days =
+          paymentTerms === 'custom' ? parseInt(customDays) || 0 : undefined;
+        const next = {
+          ...currentInvoice,
+          issueDate: newIssueDate,
+          documentDate: newIssueDate.getTime(),
+          dueDate: calculateDueDate(newIssueDate, paymentTerms, days),
+          updatedAt: new Date(),
+        };
+        updateInvoice(next);
+        saveInvoice(next).catch(() => {});
+        if (!ms && workingDoc?.id) {
+          documentService
+            .clearDocumentFields(workingDoc.id, ['documentDate'])
+            .catch(() => {});
+        }
+      } else if (currentQuote) {
+        const next = { ...currentQuote, documentDate: ms, updatedAt: new Date() };
+        updateQuote(next);
+        saveQuote(next).catch(() => {});
+        if (!ms && workingDoc?.id) {
+          documentService
+            .clearDocumentFields(workingDoc.id, ['documentDate'])
+            .catch(() => {});
+        }
+      }
+    },
+    [
+      isInvoiceMode,
+      currentInvoice,
+      currentQuote,
+      paymentTerms,
+      customDays,
+      workingDoc?.id,
+      updateInvoice,
+      saveInvoice,
+      updateQuote,
+      saveQuote,
+    ],
+  );
+
   if (!workingDoc) {
     return null;
   }
@@ -559,16 +623,22 @@ export function JobPreviewScreen() {
                 </TouchableOpacity>
               )}
             </View>
-            <View style={styles.headerDateBadge}>
+            <TouchableOpacity
+              style={styles.headerDateBadge}
+              onPress={() => setDateSheetVisible(true)}
+              activeOpacity={0.7}
+              accessibilityLabel="Change document date"
+            >
               <MaterialCommunityIcons name="calendar-outline" size={13} color={themeColors.textMuted} />
               <Text style={styles.quoteDate}>
-                {new Date(workingDoc.createdAt).toLocaleDateString('en-AU', {
+                {new Date(effectiveDocDateMs).toLocaleDateString('en-AU', {
                   day: 'numeric',
                   month: 'short',
                   year: 'numeric',
                 })}
               </Text>
-            </View>
+              <MaterialCommunityIcons name="chevron-down" size={12} color={themeColors.textMuted} />
+            </TouchableOpacity>
           </View>
 
           {isInvoiceMode && currentInvoice ? (
@@ -855,6 +925,17 @@ export function JobPreviewScreen() {
           navigation.navigate('RecordPayment', { invoiceId })
         }
         ensureSquareConnected={() => ensureSquareConnectedForPayment(navigation)}
+      />
+
+      {/* Document date (backdating) — subtle calendar behind the header
+          date badge. Reuses the checklist due-date sheet. */}
+      <DueDateSheet
+        visible={dateSheetVisible}
+        onDismiss={() => setDateSheetVisible(false)}
+        value={effectiveDocDateMs}
+        onChange={handleDocumentDateChange}
+        title="Document date"
+        clearLabel="Reset to today"
       />
 
       <Snackbar

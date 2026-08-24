@@ -29,7 +29,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { formatDistanceToNowStrict } from 'date-fns';
 
 import type { Document } from '../types/document';
-import type { Invoice, PaymentTerms } from '../types';
+import type { Invoice, PaymentTerms, Quote } from '../types';
 import { makeStyles, useThemeColors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
 import { hoursForDisplay, rateForDisplay, valueToHours, rateToHourly } from '../../shared/document/labourUnits';
@@ -39,6 +39,8 @@ import { stageMetaFor } from './StageSheet';
 import { PaymentChip, shouldShowPaymentChip, type PaymentContext } from './PaymentChip';
 import { selectionTap } from '../utils/haptics';
 import { previewDocumentPDF } from '../utils/pdfGenerator';
+import { DueDateSheet } from './DueDateSheet';
+import { documentService } from '../services/documentService';
 import { useStore } from '../store/useStore';
 import { useAlertModal } from '../hooks/useAlertModal';
 import {
@@ -181,7 +183,39 @@ export function JobScopeCard({
   // chevron still controls everything (see handleToggle).
   const [displayExpanded, setDisplayExpanded] = useState(false);
   const [previewing, setPreviewing] = useState(false);
+  const [dateSheetVisible, setDateSheetVisible] = useState(false);
   const { showAlert, alertNode } = useAlertModal();
+  const saveDocument = useStore((s) => s.saveDocument);
+
+  // Document date (backdating). Quote → documentDate override; invoice →
+  // issueDate + documentDate with dueDate recomputed off existing terms.
+  // `undefined` (sheet reset) restores today AND clears the stored override
+  // — stripUndefined+merge would otherwise resurrect the old date on the
+  // next load. Goes through saveDocument (not saveQuote/saveInvoice) because
+  // quote→invoice converts leave no same-id legacy record to find above.
+  const handleDocumentDateChange = React.useCallback(
+    (ms: number | undefined) => {
+      const today = Date.now();
+      const target = ms ?? today;
+      const next: Document = isInvoice
+        ? {
+            ...doc,
+            issueDate: target,
+            documentDate: target,
+            dueDate: calculateDueDate(
+              new Date(target),
+              doc.paymentTerms ?? 'net_14',
+              doc.paymentTerms === 'custom' ? doc.customPaymentDays || 0 : undefined,
+            ).getTime(),
+          }
+        : { ...doc, documentDate: target };
+      saveDocument(next).catch(() => {});
+      if (!ms) {
+        documentService.clearDocumentFields(doc.id, ['documentDate']).catch(() => {});
+      }
+    },
+    [doc, isInvoice, saveDocument],
+  );
 
   const handleDisplaySettingsChange = React.useCallback(
     (partial: InvoiceDisplaySettingsChange) => {
@@ -331,6 +365,58 @@ export function JobScopeCard({
           />
         </>
       )}
+
+      {/* Document date (backdating) — tucked inside the expanded view,
+          same row chrome as PaymentTermsRow below. Lets a tradie shift a
+          doc into the prior financial year without opening the preview. */}
+      {expanded ? (
+        <>
+          <TouchableOpacity
+            activeOpacity={0.85}
+            onPress={() => {
+              selectionTap();
+              setDateSheetVisible(true);
+            }}
+            style={styles.row}
+            accessibilityRole="button"
+            accessibilityLabel="Change document date"
+          >
+            <View style={styles.rowIcon}>
+              <MaterialCommunityIcons
+                name={'calendar-outline' as any}
+                size={18}
+                color={themeColors.accentText}
+              />
+            </View>
+            <View style={styles.rowBody}>
+              <Text style={styles.rowLabel}>Document date</Text>
+              <Text style={styles.rowBodyText} numberOfLines={1}>
+                {new Date(
+                  doc.documentDate ?? (isInvoice ? doc.issueDate ?? doc.updatedAt : doc.updatedAt),
+                ).toLocaleDateString('en-AU', {
+                  day: 'numeric',
+                  month: 'short',
+                  year: 'numeric',
+                })}
+              </Text>
+            </View>
+            <MaterialCommunityIcons
+              name={'chevron-down' as any}
+              size={18}
+              color={themeColors.textDisabled}
+            />
+          </TouchableOpacity>
+
+          <DueDateSheet
+            visible={dateSheetVisible}
+            onDismiss={() => setDateSheetVisible(false)}
+            value={doc.documentDate ?? (isInvoice ? doc.issueDate : doc.updatedAt)}
+            onChange={handleDocumentDateChange}
+            title="Document date"
+            clearLabel="Reset to today"
+          />
+        </>
+      ) : null}
 
       {isInvoice && persistedRecord ? (
         <PaymentTermsRow

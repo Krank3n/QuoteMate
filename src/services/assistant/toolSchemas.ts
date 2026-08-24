@@ -33,6 +33,7 @@ export const PROPOSAL_TOOL_NAMES = [
   'propose_reprice',
   'propose_update_quote_rates',
   'propose_mark_paid',
+  'propose_import_supplier_list',
 ] as const;
 
 // Voice-only control tools. Unlike read/proposal tools these never reach
@@ -154,7 +155,7 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
   {
     name: 'get_job_requirements',
     description:
-      'Call this first when a job type is mentioned. Returns the must-ask questions for this niche, pricing method, and flags for measurement-driven and specialist-supply jobs. Use the returned mustAskQuestions — do not invent questions.',
+      "Call this first when a job type is mentioned. Returns the must-ask questions for this niche, pricing method, and flags for measurement-driven and specialist-supply jobs. Use the returned mustAskQuestions — do not invent questions. Also returns supplierBookPopulated (true when this phone can see the tradie's own imported/saved supplier rates), supplierBookSuppliers (up to 3 of those supplier names) and supplierBookCoversTrade (true when those rates would actually price this niche's core gear). specialistSupply true + supplierBookPopulated false is the one combination worth mentioning — the core materials for this job don't come off a Bunnings or Reece shelf and there's no price list on the phone to fall back on.",
     parameters: {
       type: 'object',
       properties: {
@@ -404,6 +405,38 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
         displayBalance: { type: 'number', description: 'Remaining balance in AUD that\'s about to be settled (display only).' },
       },
       required: ['quoteId'],
+    },
+  },
+  {
+    name: 'propose_import_supplier_list',
+    description:
+      "Propose reading a supplier's price list into the tradie's own supplier book, from a photo, a PDF or a spreadsheet. Use it when they say yes to the offer, hand you a price list, or ask to add their supplier's prices. Apply opens the reader right there in the chat and the tradie checks every row before anything saves — YOU never read prices off the image and you never type a price into their book. Every argument is optional: leave source off (or use 'ask') and the app offers the choices. Use source 'attachment' only when they've just sent you a photo of a price list in this chat — the app finds it, you never name it.",
+    parameters: {
+      type: 'object',
+      properties: {
+        supplierName: {
+          type: 'string',
+          description: "The supplier's name if the tradie said it (e.g. \"Metro Fencing\"). Leave it off and the reader picks it up off the list itself.",
+        },
+        source: {
+          type: 'string',
+          enum: ['attachment', 'camera', 'gallery', 'pdf', 'spreadsheet', 'ask'],
+          description:
+            "Where the list is coming from. 'attachment' = a photo already sent in this chat. 'ask' (the default) lets the app offer camera / photos / PDF / spreadsheet.",
+        },
+        reason: {
+          type: 'string',
+          enum: ['no_retail_coverage', 'pricing_fell_back', 'tradie_asked'],
+          description:
+            "Why it's being offered: the trade's gear isn't on a retail shelf, the pipeline had to fall back to Bunnings, or they asked for it.",
+        },
+        missedItems: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Up to 5 rows the pipeline could not price off their book — shown on the card so they can see what it would fix.',
+        },
+      },
+      required: [],
     },
   },
 ];

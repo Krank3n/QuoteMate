@@ -24,6 +24,8 @@ interface DueDateSheetProps {
   value?: number;
   onChange: (next: number | undefined) => void;
   title?: string;
+  /** Label for the clear/reset button. Defaults to "Clear date". */
+  clearLabel?: string;
 }
 
 const calendarThemeFor = (themeColors: Tokens) => ({
@@ -64,6 +66,7 @@ export function DueDateSheet({
   value,
   onChange,
   title = 'Due date',
+  clearLabel = 'Clear date',
 }: DueDateSheetProps) {
   const styles = useStyles();
   const themeColors = useThemeColors();
@@ -113,7 +116,7 @@ export function DueDateSheet({
             onPress={handleClear}
             style={styles.clear}
           >
-            Clear date
+            {clearLabel}
           </Button>
         ) : null}
       </View>

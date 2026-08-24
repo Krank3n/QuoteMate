@@ -10,6 +10,7 @@ import {
   DeleteLineItemProposal,
   DeleteQuoteProposal,
   DraftQuoteProposal,
+  ImportSupplierListProposal,
   MarkPaidProposal,
   Proposal,
   RepriceQuoteProposal,
@@ -28,6 +29,19 @@ export interface ProposalResult {
 function newProposalId(): string {
   return `prop_${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
+
+// Whether the chat still holds a photo nobody has spent. Registered by the
+// screen rather than imported, same pattern as quoteRefMap — the validator
+// must stay free of the store graph, and Mate never names an attachment id.
+let unconsumedAttachmentProbe: () => boolean = () => false;
+
+export function setUnconsumedAttachmentProbe(probe: () => boolean): void {
+  unconsumedAttachmentProbe = probe;
+}
+
+const IMPORT_SOURCES = ['attachment', 'camera', 'gallery', 'pdf', 'spreadsheet', 'ask'] as const;
+const IMPORT_REASONS = ['no_retail_coverage', 'pricing_fell_back', 'tradie_asked'] as const;
+const MAX_MISSED_ITEMS = 5;
 
 export function buildProposal(toolName: string, toolUseId: string, input: any): ProposalResult {
   const now = new Date().toISOString();
@@ -246,6 +260,37 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
         displayCustomerName: input.displayCustomerName ? String(input.displayCustomerName) : undefined,
         displayTotal: Number.isFinite(Number(input.displayTotal)) ? Number(input.displayTotal) : undefined,
         displayBalance: Number.isFinite(Number(input.displayBalance)) ? Number(input.displayBalance) : undefined,
+      };
+      return { proposal };
+    }
+
+    case 'propose_import_supplier_list': {
+      // Never errors. This card exists to unblock a tradie whose prices are
+      // wrong; refusing it over a bad enum would be the worst possible moment
+      // to be pedantic, so every field falls back to something usable.
+      let source = (IMPORT_SOURCES as readonly string[]).includes(input?.source)
+        ? (input.source as ImportSupplierListProposal['source'])
+        : 'ask';
+      // Mate can't see whether the photo it's thinking of is still going
+      // spare — downgrade rather than open a picker that finds nothing.
+      if (source === 'attachment' && !unconsumedAttachmentProbe()) source = 'ask';
+      const missedItems = Array.isArray(input?.missedItems)
+        ? input.missedItems
+            .map((i: unknown) => String(i ?? '').trim())
+            .filter(Boolean)
+            .slice(0, MAX_MISSED_ITEMS)
+        : undefined;
+      const proposal: ImportSupplierListProposal = {
+        id,
+        toolUseId,
+        createdAt: now,
+        type: 'propose_import_supplier_list',
+        supplierName: input?.supplierName ? String(input.supplierName).trim() || undefined : undefined,
+        source,
+        reason: (IMPORT_REASONS as readonly string[]).includes(input?.reason)
+          ? (input.reason as ImportSupplierListProposal['reason'])
+          : undefined,
+        missedItems: missedItems?.length ? missedItems : undefined,
       };
       return { proposal };
     }

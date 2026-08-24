@@ -51,6 +51,8 @@ import {
   getSupplierGroupByName,
   saveGroup,
 } from '../services/supplierGroupService';
+import { routeSupplierImport } from '../services/supplierImportRouting';
+import { invalidateSupplierBookCache } from '../services/supplierBook';
 import type { FavoriteProductMapping, Material, SupplierGroup } from '../types';
 import type { ReviewItemState } from '../components/SupplierListReviewModal';
 
@@ -121,6 +123,8 @@ export interface UseSupplierListImportResult {
   parsedSpreadsheet: ParsedSpreadsheet | null;
   autoDetectedMapping: Partial<ColumnMapping> | null;
   startImport: (source: ImportSource) => Promise<void>;
+  /** Read files the caller already holds (Mate's chat attachments). */
+  importFromUris: (args: { uris: string[]; mimeType?: string; supplierName?: string }) => Promise<void>;
   handleCaptureComplete: (uris: string[]) => Promise<void>;
   handleSaveImported: (supplierName: string, rows: ReviewItemState[]) => Promise<void>;
   applyColumnMapping: (mapping: ColumnMapping) => Promise<void>;
@@ -403,6 +407,37 @@ export function useSupplierListImport(
     [handleExtractionResult]
   );
 
+  /**
+   * Read files the caller already has in hand — Mate's chat path, where the
+   * photo came off the conversation rather than a picker this hook opened.
+   * Everything downstream is the shared handleExtractionResult.
+   */
+  const importFromUris = useCallback(
+    async (args: { uris: string[]; mimeType?: string; supplierName?: string }) => {
+      const route = routeSupplierImport(args);
+      if (route.kind === 'error') {
+        reportError(route.message);
+        setPhase('idle');
+        return;
+      }
+      setActiveSource(route.kind === 'pdf' ? 'pdf' : 'gallery');
+      setErrorMessage(undefined);
+      setPhase('extracting');
+      try {
+        const result =
+          route.kind === 'pdf'
+            ? await extractFromPdf(route.uri, args.supplierName)
+            : await extractFromPhotos(route.uris, args.supplierName);
+        await handleExtractionResult(result);
+      } catch (err: any) {
+        reportError(err?.message || 'Could not read the price list. Please try again.');
+        setPhase('idle');
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [handleExtractionResult],
+  );
+
   const handleCaptureComplete = useCallback(
     async (uris: string[]) => {
       if (!uris.length) {
@@ -571,6 +606,10 @@ export function useSupplierListImport(
         setExtractedSupplierContact(undefined);
         setExistingForDiff(undefined);
 
+        // Mate reads a cached snapshot of the book — stale here means it
+        // re-offers the import the tradie just finished.
+        invalidateSupplierBookCache();
+
         const itemCount = counts.created + counts.updated;
         opts.onSaved?.({
           supplierName: supplierName || extractedSupplierName,
@@ -607,6 +646,7 @@ export function useSupplierListImport(
     parsedSpreadsheet,
     autoDetectedMapping,
     startImport,
+    importFromUris,
     handleCaptureComplete,
     handleSaveImported,
     applyColumnMapping,

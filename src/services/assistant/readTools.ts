@@ -30,6 +30,7 @@ import { fuzzyScoreQuote } from './quoteFuzzy';
 import { getPillsForNiche } from '../../data/nichePills';
 import { NICHE_TEMPLATES } from '../../data/nicheTemplates';
 import { isSpecialistSupplyNiche } from '../../data/specialistSupplyNiches';
+import { coversProbes, type SupplierBookSnapshot } from '../supplierBookCoverage';
 // Folding rules are shared with the jobs-list search — see src/utils/textMatch.
 // If they drift, a name is findable by Mate and not by the jobs list.
 import {
@@ -519,6 +520,8 @@ export interface JobRequirementsInput {
   categoryId?: string;
   nicheId?: string;
   freeText?: string;
+  /** Injected so resolveJobRequirements stays pure and synchronous. */
+  supplierBook?: SupplierBookSnapshot;
 }
 
 export interface JobRequirementsResult {
@@ -529,6 +532,10 @@ export interface JobRequirementsResult {
   planHelps: boolean;
   specialistSupply: boolean;
   supplierBookPopulated: boolean;
+  /** Up to 3 supplier names, so Mate can say whose list it can see. */
+  supplierBookSuppliers: string[];
+  /** True when the book could actually price this niche's core gear. */
+  supplierBookCoversTrade: boolean;
 }
 
 const MEASUREMENT_DRIVEN_METHODS = new Set(['per_sqm', 'per_linear_m', 'per_cubic_m']);
@@ -583,6 +590,15 @@ export function resolveJobRequirements(input: JobRequirementsInput): JobRequirem
   const pricingMethod = template?.pricingMethod || undefined;
   const measurementDriven = !!pricingMethod && MEASUREMENT_DRIVEN_METHODS.has(pricingMethod);
 
+  // The book is "populated" only when it holds the tradie's own rates. Coverage
+  // is scored against this niche's core gear, so a plumber's list doesn't read
+  // as covering a fence.
+  const supplierBookPopulated = (input.supplierBook?.personalRateCount ?? 0) > 0;
+  const coverage =
+    input.supplierBook && supplierBookPopulated
+      ? coversProbes(input.supplierBook, template?.suggestedMaterials ?? [])
+      : { hits: [], coversTrade: false };
+
   return {
     matched: {
       categoryId: resolvedCategoryId,
@@ -594,7 +610,9 @@ export function resolveJobRequirements(input: JobRequirementsInput): JobRequirem
     measurementDriven,
     planHelps: measurementDriven,
     specialistSupply: isSpecialistSupplyNiche(resolvedCategoryId, resolvedNicheId),
-    supplierBookPopulated: false,
+    supplierBookPopulated,
+    supplierBookSuppliers: input.supplierBook?.supplierNames ?? [],
+    supplierBookCoversTrade: coverage.coversTrade,
   };
 }
 
@@ -609,7 +627,17 @@ export async function getJobRequirements(input: { category?: string; niche?: str
       niche = niche ?? (data.tradeNiche as string) ?? (data.tradeNiches as string[])?.[0];
     }
   }
-  return resolveJobRequirements({ categoryId: category, nicheId: niche, freeText: input.freeText });
+  // Imported lazily so resolveJobRequirements stays unit-testable without
+  // AsyncStorage / Firestore at import time — same reason as the contact
+  // helpers above.
+  const { loadSupplierBookSnapshot } = await import('../supplierBook');
+  const supplierBook = await loadSupplierBookSnapshot();
+  return resolveJobRequirements({
+    categoryId: category,
+    nicheId: niche,
+    freeText: input.freeText,
+    supplierBook,
+  });
 }
 
 /**
