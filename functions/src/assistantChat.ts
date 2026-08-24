@@ -1,4 +1,6 @@
-// Mate assistant — text-chat proxy to Gemini generateContent.
+// Mate assistant — text-chat proxy. The client speaks Gemini generateContent
+// wire shapes; the server routes them to the configured provider (Claude via
+// claudeChatAdapter, or the legacy Gemini path).
 //
 // Why this exists separately from assistantToken/the Live WS path:
 // the voice path runs over the Live WebSocket on a native-audio model
@@ -32,11 +34,25 @@ import {
 } from './assistantToken';
 import { userRateLimitKey } from './rateLimitKey';
 import { recordChatUsage } from './assistantCosts';
+import {
+  buildClaudeRequest,
+  claudeContentToGeminiParts,
+  claudeUsageToGeminiUsage,
+} from './claudeChatAdapter';
 
 const corsHandler = cors({ origin: true });
 
-// Text-capable flash model. Deliberately distinct from the Live native-audio
-// model the voice path uses — that one can't emit text.
+// The text brain. Claude Sonnet 5 replaced gemini-3-flash-preview after the
+// Aug 2026 audit: flash-tier instruction-following was producing empty
+// replies mid-tool-loop, chain-of-thought leaks, and name slop
+// ("Henderson" searched as "Hansen") — each one conversation-terminal in
+// prod transcripts. The wire format to the client is still Gemini-shaped
+// (see claudeChatAdapter), so reverting is: flip CHAT_PROVIDER back.
+// Voice stays on Gemini Live — Claude has no realtime-audio equivalent.
+const CHAT_PROVIDER: 'claude' | 'gemini' = 'claude';
+const CLAUDE_CHAT_MODEL = 'claude-sonnet-5';
+const CLAUDE_MAX_TOKENS = 8192;
+// Legacy Gemini text model, kept as the revert path.
 const CHAT_MODEL = 'gemini-3-flash-preview';
 
 // A text turn fans out into up to 8 tool round-trips (the client's
@@ -60,8 +76,16 @@ export const assistantChat = functions
       const ok = await checkRateLimit(userRateLimitKey(decoded.uid, CHAT_RATE, 'chat'), CHAT_RATE, res);
       if (!ok) return;
 
-      const apiKey = process.env.GEMINI_API_KEY;
-      if (!apiKey) { res.status(500).json({ error: 'Mate is offline (no API key).' }); return; }
+      // Provider resolution: Claude unless its key is missing, in which case
+      // the legacy Gemini path keeps Mate alive rather than 500ing everyone.
+      const anthropicKey = process.env.ANTHROPIC_API_KEY;
+      const geminiKey = process.env.GEMINI_API_KEY;
+      const provider: 'claude' | 'gemini' =
+        CHAT_PROVIDER === 'claude' && anthropicKey ? 'claude' : 'gemini';
+      if (provider === 'gemini' && !geminiKey) {
+        res.status(500).json({ error: 'Mate is offline (no API key).' });
+        return;
+      }
 
       const { contents, systemInstruction, tools, countTurn } = req.body || {};
       if (!Array.isArray(contents) || !contents.length) {
@@ -84,17 +108,39 @@ export const assistantChat = functions
         reservedTurn = true;
       }
 
-      const body: Record<string, unknown> = { contents };
-      if (systemInstruction) body.systemInstruction = systemInstruction;
-      if (tools) body.tools = tools;
+      // Build the upstream request. Either way the client keeps speaking
+      // Gemini shapes — for Claude, the adapter translates both directions.
+      let url: string;
+      let upstreamBody: Record<string, unknown>;
+      let headers: Record<string, string>;
+      if (provider === 'claude') {
+        url = 'https://api.anthropic.com/v1/messages';
+        headers = {
+          'Content-Type': 'application/json',
+          'x-api-key': anthropicKey!,
+          'anthropic-version': '2023-06-01',
+        };
+        upstreamBody = buildClaudeRequest({
+          model: CLAUDE_CHAT_MODEL,
+          maxTokens: CLAUDE_MAX_TOKENS,
+          contents,
+          systemInstruction,
+          tools,
+        });
+      } else {
+        url = `https://generativelanguage.googleapis.com/v1beta/models/${CHAT_MODEL}:generateContent?key=${geminiKey}`;
+        headers = { 'Content-Type': 'application/json' };
+        upstreamBody = { contents };
+        if (systemInstruction) upstreamBody.systemInstruction = systemInstruction;
+        if (tools) upstreamBody.tools = tools;
+      }
 
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${CHAT_MODEL}:generateContent?key=${apiKey}`;
-      let geminiRes: Awaited<ReturnType<typeof fetch>>;
+      let upstreamRes: Awaited<ReturnType<typeof fetch>>;
       try {
-        geminiRes = await fetch(url, {
+        upstreamRes = await fetch(url, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
+          headers,
+          body: JSON.stringify(upstreamBody),
         });
       } catch (err: any) {
         if (reservedTurn) await refundQuotaTurn(decoded.uid);
@@ -102,10 +148,10 @@ export const assistantChat = functions
         return;
       }
 
-      const text = await geminiRes.text();
-      if (!geminiRes.ok) {
+      const text = await upstreamRes.text();
+      if (!upstreamRes.ok) {
         // eslint-disable-next-line no-console
-        console.warn('[assistantChat] gemini error', geminiRes.status, text.slice(0, 300));
+        console.warn('[assistantChat]', provider, 'error', upstreamRes.status, text.slice(0, 300));
         if (reservedTurn) await refundQuotaTurn(decoded.uid);
         res.status(502).json({ error: 'Mate hit a snag — try again in a moment.' });
         return;
@@ -118,19 +164,26 @@ export const assistantChat = functions
         return;
       }
 
-      // Hand the model turn's parts straight back. They may contain text and/or
-      // functionCall parts (each carrying a thoughtSignature the client must
-      // echo verbatim on the next round-trip so the thinking model keeps its
-      // reasoning context).
-      const parts = parsed?.candidates?.[0]?.content?.parts || [];
+      // Hand the model turn's parts back in the Gemini shape the client
+      // echoes verbatim. For Claude, thinking blocks ride the parts'
+      // thoughtSignature field so the next hop can restore them; for Gemini,
+      // functionCall parts carry their native thoughtSignature untouched.
+      const model = provider === 'claude' ? CLAUDE_CHAT_MODEL : CHAT_MODEL;
+      const parts =
+        provider === 'claude'
+          ? claudeContentToGeminiParts(parsed?.content || [], parsed?.stop_reason)
+          : parsed?.candidates?.[0]?.content?.parts || [];
+      const usageMetadata =
+        provider === 'claude'
+          ? claudeUsageToGeminiUsage(parsed?.usage)
+          : parsed?.usageMetadata || {};
 
-      // Record real token usage from Gemini for cost tracking. Best-effort —
-      // a failed write must not break the user-facing reply.
-      const usageMetadata = parsed?.usageMetadata || {};
+      // Record real token usage for cost tracking. Best-effort — a failed
+      // write must not break the user-facing reply.
       try {
         await recordChatUsage({
           uid: decoded.uid,
-          model: CHAT_MODEL,
+          model,
           usage: usageMetadata,
           countedTurn: !!countTurn,
         });
@@ -139,6 +192,6 @@ export const assistantChat = functions
         console.warn('[assistantChat] usage record failed', err?.message);
       }
 
-      res.status(200).json({ parts, model: CHAT_MODEL, usageMetadata });
+      res.status(200).json({ parts, model, usageMetadata });
     });
   });
