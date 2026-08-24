@@ -238,3 +238,29 @@ describe('buildClaudeRequest', () => {
     expect(body.tools).toBeUndefined();
   });
 });
+
+// "for now?Drafted Priya's fence" reached a real screen: Claude splits
+// replies into several text blocks and the client concatenates text parts
+// with no separator. The adapter owns the join.
+describe('text block coalescing', () => {
+  it('joins consecutive text blocks with a paragraph break', () => {
+    const parts = claudeContentToGeminiParts([
+      { type: 'text', text: 'Got a phone for her, or leave it for now?' },
+      { type: 'text', text: "Drafted Priya's Colorbond fence." },
+    ]);
+    expect(parts).toEqual([
+      { text: "Got a phone for her, or leave it for now?\n\nDrafted Priya's Colorbond fence." },
+    ]);
+  });
+
+  it('does not merge text across an intervening tool call', () => {
+    const parts = claudeContentToGeminiParts([
+      { type: 'text', text: 'Looking that up.' },
+      { type: 'tool_use', id: 't1', name: 'find_customer', input: {} },
+      { type: 'text', text: 'Righto.' },
+    ]);
+    expect(parts).toHaveLength(3);
+    expect(parts[0]).toEqual({ text: 'Looking that up.' });
+    expect(parts[2]).toEqual({ text: 'Righto.' });
+  });
+});

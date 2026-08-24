@@ -161,7 +161,16 @@ export function claudeContentToGeminiParts(
   const parts: GeminiPart[] = [];
   for (const b of content) {
     if (b.type === 'text' && typeof b.text === 'string' && b.text.length) {
-      parts.push({ text: b.text });
+      // Claude often splits a reply into several text blocks (around tool
+      // calls, or just paragraphs). The client concatenates text parts with
+      // NO separator — "for now?Drafted Priya's fence" reached a real screen
+      // — so coalesce them here with a paragraph break instead.
+      const prev = parts[parts.length - 1];
+      if (prev && typeof prev.text === 'string' && !prev.functionCall) {
+        prev.text = `${prev.text}\n\n${b.text}`;
+      } else {
+        parts.push({ text: b.text });
+      }
     } else if (b.type === 'tool_use') {
       parts.push({
         functionCall: {
