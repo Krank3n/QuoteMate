@@ -33,6 +33,9 @@ export interface ModelPricing {
   outputPerM: number;
   /** USD per 1M cached input tokens (context cache hit). */
   cachedInputPerM: number;
+  /** USD per 1M cache-WRITE input tokens. Claude bills writes at a premium
+   *  over plain input; unset means writes bill at inputPerM (Gemini). */
+  cacheWritePerM?: number;
   /** USD per 1M input audio tokens. Only set for Live audio models. */
   inputAudioPerM?: number;
   /** USD per 1M output audio tokens. Only set for Live audio models. */
@@ -45,6 +48,15 @@ export const PRICING: Record<string, ModelPricing> = {
     inputPerM: 0.30,
     outputPerM: 2.50,
     cachedInputPerM: 0.075,
+  },
+  // Text chat brain since Aug 2026 (see assistantChat CHAT_PROVIDER).
+  // Standard Sonnet 5 rates — the $2/$10 intro window ends 2026-08-31, so
+  // record at the post-intro price rather than under-counting from day one.
+  'claude-sonnet-5': {
+    inputPerM: 3.00,
+    outputPerM: 15.00,
+    cachedInputPerM: 0.30,
+    cacheWritePerM: 3.75,
   },
   // Voice Live model used by assistantToken → client WS.
   'gemini-3.1-flash-live-preview': {
@@ -74,19 +86,24 @@ export interface GeminiUsageMetadata {
   totalTokenCount?: number;
   thoughtsTokenCount?: number;
   cachedContentTokenCount?: number;
+  /** Claude only (mapped by claudeChatAdapter) — prompt tokens that were
+   *  WRITTEN to cache this call, billed above the plain input rate. */
+  cacheWriteTokenCount?: number;
 }
 
 export function costMicrosForChat(model: string, u: GeminiUsageMetadata): number {
   const p = pricingFor(model);
   const promptTotal = u.promptTokenCount || 0;
   const cached = u.cachedContentTokenCount || 0;
-  const billedInput = Math.max(0, promptTotal - cached);
+  const cacheWrite = u.cacheWriteTokenCount || 0;
+  const billedInput = Math.max(0, promptTotal - cached - cacheWrite);
   const output = u.candidatesTokenCount || 0;
   const thoughts = u.thoughtsTokenCount || 0;
   // Gemini bills thoughts at the output rate (they're model-generated tokens).
   const usd =
     (billedInput * p.inputPerM) +
     (cached * p.cachedInputPerM) +
+    (cacheWrite * (p.cacheWritePerM ?? p.inputPerM)) +
     ((output + thoughts) * p.outputPerM);
   return Math.round(usd); // tokens * pricePerM already = micros
 }

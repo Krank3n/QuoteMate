@@ -1786,7 +1786,14 @@ export function AssistantScreen() {
           usage: response.usage,
         });
         const hasContent = !!(response.text && response.text.trim()) || response.proposals.length > 0;
-        const fallback = '(Mate returned an empty reply — check the Firebase Functions logs for assistantToken.)';
+        // Tradie-facing, not dev-facing — the old string told users to "check
+        // the Firebase Functions logs". The console.warn below keeps the
+        // debugging breadcrumb.
+        const fallback = "That one didn't come through — give it another go.";
+        if (!hasContent) {
+          // eslint-disable-next-line no-console
+          console.warn('[Mate] empty reply from assistantChat', response.usage?.model);
+        }
         updateMessage(convoId, streamingId, {
           text: response.text?.trim() || (response.proposals.length > 0 ? 'Here you go — tap Apply.' : ''),
           proposals: response.proposals,
