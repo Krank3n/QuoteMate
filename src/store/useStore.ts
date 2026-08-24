@@ -697,6 +697,11 @@ export const useStore = create<AppState>((set, get) => ({
               sections: quote.sections,
               laborRate: quote.laborRate,
               laborHours: quote.laborHours,
+              // Carried for the same reason as in createInvoiceFromQuote:
+              // without it the sections arrive trimmed but the adjustment
+              // that paid for the trim does not, and the recompute inflates
+              // the total back up.
+              laborExtraHours: quote.laborExtraHours,
               markup: quote.markup,
               job: quote.job,
               updatedAt: new Date(),
@@ -870,6 +875,8 @@ export const useStore = create<AppState>((set, get) => ({
               sections: quote.sections,
               laborRate: quote.laborRate,
               laborHours: quote.laborHours,
+              // See saveDraft above — same carry, same reason.
+              laborExtraHours: quote.laborExtraHours,
               markup: quote.markup,
               job: quote.job,
               updatedAt: new Date(),
@@ -1591,6 +1598,13 @@ export const useStore = create<AppState>((set, get) => ({
       laborUnit: quote.laborUnit,
       labourDisplayUnit: quote.labourDisplayUnit,
       laborTotal: quote.laborTotal,
+      // The labour adjustment is part of the price, not a display detail:
+      // laborTotal is Σ(sections) + laborExtraHours × laborRate, so dropping
+      // it here left the invoice's own fields disagreeing with its total. The
+      // next recompute (updateInvoice, or any recalc on the send path) then
+      // "corrected" the total UPWARDS by the trimmed amount and quietly
+      // re-billed the customer for labour the tradie had taken off.
+      laborExtraHours: quote.laborExtraHours,
       sections: quote.sections,
       materialsSubtotal: quote.materialsSubtotal,
       markup: quote.markup,
