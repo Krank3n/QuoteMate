@@ -24,7 +24,7 @@
  *
  * Output: storeStats/{YYYYMMDD} docs { date, playInstalls?, appleUnits?, updatedAt }.
  */
-import * as functions from 'firebase-functions';
+import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
 import * as crypto from 'crypto';
 import * as zlib from 'zlib';

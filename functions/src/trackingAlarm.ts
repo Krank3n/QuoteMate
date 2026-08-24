@@ -14,7 +14,7 @@
  *
  * Runs as the default App Engine SA (GA property Viewer, same as the digest).
  */
-import * as functions from 'firebase-functions';
+import * as functions from 'firebase-functions/v1';
 import { BetaAnalyticsDataClient } from '@google-analytics/data';
 import { sendEmail } from './email';
 

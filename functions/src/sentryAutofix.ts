@@ -17,7 +17,7 @@
  *  - GITHUB_AGENT_TOKEN      fine-grained PAT: Issues RW + Actions RW on the repo
  *  - SENTRY_AUTOFIX_DAILY_CAP optional, default 3
  */
-import * as functions from 'firebase-functions';
+import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
 import {
   verifySentrySignature,

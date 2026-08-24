@@ -93,6 +93,10 @@ export interface SendQuoteProposal extends BaseProposal {
   type: 'propose_send_quote';
   quoteId: string;
   recipientEmail?: string;
+  // Display-only. The prompt and the tool schema both promise the card shows
+  // "recipient + total"; without this it only ever showed the recipient, so
+  // the tradie was approving a send with no figure in front of them.
+  displayTotal?: number;
   // Mate-written email copy. When set, Apply persists it onto the document so
   // the send preview opens pre-filled with it (the modal reads draftEmailBody
   // / draftEmailSubject) instead of auto-generating a body.

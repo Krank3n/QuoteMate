@@ -13,7 +13,7 @@
  * Veo runs as a long-running operation (≈1–3 min), so the function polls within
  * its extended timeout and returns the clip inline (clips are a few MB).
  */
-import * as functions from 'firebase-functions';
+import * as functions from 'firebase-functions/v1';
 import fetch from 'node-fetch';
 import cors from 'cors';
 import { verifyAuth, checkRateLimit, RateLimitConfig } from './assistantToken';

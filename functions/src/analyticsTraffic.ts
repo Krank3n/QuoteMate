@@ -9,7 +9,7 @@
  * Viewer access on the GA4 property. The Data API client picks that identity up
  * through Application Default Credentials — no key file in code.
  */
-import * as functions from 'firebase-functions';
+import * as functions from 'firebase-functions/v1';
 import { BetaAnalyticsDataClient } from '@google-analytics/data';
 import { AB_TEST_START, abStartDate } from './analyticsTraffic.helpers';
 

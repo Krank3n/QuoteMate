@@ -13,7 +13,7 @@
 //
 // NOT registered in index.ts here — the Wiring phase exports it.
 
-import * as functions from 'firebase-functions';
+import * as functions from 'firebase-functions/v1';
 import fetch from 'node-fetch';
 import cors from 'cors';
 import { verifyAuth, checkRateLimit, RateLimitConfig } from './assistantToken';

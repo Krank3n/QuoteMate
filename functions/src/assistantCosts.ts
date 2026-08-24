@@ -15,7 +15,7 @@
 // migration — they're applied at write time, so historical rows keep their
 // original cost; only new writes pick up the change.
 
-import * as functions from 'firebase-functions';
+import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
 
 const db = () => admin.firestore();

@@ -211,6 +211,7 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
         type: 'propose_send_quote',
         quoteId: resolveQuoteId(input.quoteId),
         recipientEmail: input.recipientEmail ? String(input.recipientEmail) : undefined,
+        displayTotal: Number.isFinite(Number(input.displayTotal)) ? Number(input.displayTotal) : undefined,
         draftEmailBody: input.draftEmailBody ? String(input.draftEmailBody) : undefined,
         draftEmailSubject: input.draftEmailSubject ? String(input.draftEmailSubject) : undefined,
       };

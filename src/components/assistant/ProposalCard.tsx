@@ -19,8 +19,9 @@ function formatCurrency(n: number): string {
 function ProposalCardImpl({ proposal, status, onApply, onDismiss }: Props) {
   const styles = useStyles();
   const themeColors = useThemeColors();
+  // Sending isn't destructive — it's the whole point. A red Apply put it in
+  // the same visual bracket as Delete Quote, on the card Mate now offers most.
   const isDestructive =
-    proposal.type === 'propose_send_quote' ||
     proposal.type === 'propose_delete_line_item' ||
     proposal.type === 'propose_delete_quote';
   const applyColor = isDestructive ? themeColors.error : themeColors.money;
@@ -163,9 +164,14 @@ function Body({ proposal }: { proposal: Proposal }) {
     case 'propose_send_quote':
       return (
         <View>
-          <Text style={styles.warningBanner}>Opens the send preview — you confirm the recipient and tap send.</Text>
+          {/* dim, not warningBanner — that style is for destructive warnings,
+              and this is the card we most want tapped. */}
+          <Text style={styles.dim}>Opens the send preview — you confirm the recipient and tap send.</Text>
           {!!proposal.recipientEmail && (
             <Text style={styles.summary}>To: {proposal.recipientEmail}</Text>
+          )}
+          {typeof proposal.displayTotal === 'number' && (
+            <Text style={styles.dim}>Total {formatCurrency(proposal.displayTotal)}.</Text>
           )}
           {(!!proposal.draftEmailSubject || !!proposal.draftEmailBody) && (
             <View style={styles.emailPreview}>
