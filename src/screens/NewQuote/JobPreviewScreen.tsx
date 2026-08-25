@@ -68,6 +68,9 @@ import {
 import { pickSuccessMessage } from './jobPreviewCopy';
 import { buildPreviewQuoteSave } from './previewQuoteSave';
 import { resolvePreviewFooterActions } from './previewFooterActions';
+import { useAlertModal } from '../../hooks/useAlertModal';
+import { formatCurrency } from '../../utils/quoteCalculator';
+import { paymentCopy } from '../../constants/paymentCopy';
 import { GridBackground } from '../../components/GridBackground';
 import { resolvePriceDetail } from '../../../shared/document/priceDetail';
 
@@ -78,6 +81,7 @@ export function JobPreviewScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const mode = useDocumentMode();
+  const { showAlert, alertNode } = useAlertModal();
   // `viewing: true` means we landed here from a price tap on an
   // existing job (JobCard / JobDetailHeader), not from finishing the
   // wizard. Suppresses the "Quote saved!" celebration + auto-save so
@@ -920,12 +924,23 @@ export function JobPreviewScreen() {
         visible={!!takePaymentTarget}
         target={takePaymentTarget}
         onDismiss={() => setTakePaymentTarget(null)}
-        onError={(message) => Alert.alert('Payment error', message)}
+        onError={(message) =>
+          showAlert({ type: 'error', title: paymentCopy.paymentErrorTitle, message })
+        }
+        onSuccess={({ amount }) =>
+          showAlert({
+            type: 'success',
+            title: paymentCopy.paymentReceivedTitle,
+            message: `${formatCurrency(amount)} charged to card.`,
+          })
+        }
         onRecordManualPayment={(invoiceId) =>
           navigation.navigate('RecordPayment', { invoiceId })
         }
         ensureSquareConnected={() => ensureSquareConnectedForPayment(navigation)}
       />
+
+      {alertNode}
 
       {/* Document date (backdating) — subtle calendar behind the header
           date badge. Reuses the checklist due-date sheet. */}

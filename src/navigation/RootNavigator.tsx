@@ -531,14 +531,16 @@ export function RootNavigator() {
         name="RecordPayment"
         component={RecordPaymentScreen}
         options={{
-          presentation: 'modal',
-          headerShown: true,
-          headerStyle: {
-            backgroundColor: themeColors.surface,
-          },
-          headerTintColor: themeColors.text,
-          headerTitleStyle: { fontFamily: 'Archivo-Bold' },
-          title: 'Record Payment',
+          // A sheet-screen: the route exists so any screen can
+          // navigate('RecordPayment'), but the visible surface is the shared
+          // BottomSheet the screen portals in. The card stays invisible and
+          // motionless — BottomSheet owns entry/exit animation, and the
+          // previous screen shows through the backdrop.
+          presentation: 'transparentModal',
+          headerShown: false,
+          animation: 'none',
+          gestureEnabled: false,
+          cardStyle: { backgroundColor: 'transparent' },
         }}
       />
       <RootStack.Screen

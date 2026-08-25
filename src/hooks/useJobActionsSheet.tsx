@@ -43,6 +43,8 @@ import { ensureSquareConnectedForPayment } from '../utils/quoteDeliveryGuard';
 import { applyStageChange } from '../utils/applyStageChange';
 import { applyJobStageChange } from '../utils/applyJobStageChange';
 import { useAlertModal } from './useAlertModal';
+import { formatCurrency } from '../utils/quoteCalculator';
+import { paymentCopy } from '../constants/paymentCopy';
 
 interface UseJobActionsSheetOptions {
   /** Optional callback fired after a job is duplicated, before navigating
@@ -505,7 +507,16 @@ export function useJobActionsSheet(
         visible={!!takePaymentTarget}
         target={takePaymentTarget}
         onDismiss={() => setTakePaymentTarget(null)}
-        onError={(message) => Alert.alert('Payment error', message)}
+        onError={(message) =>
+          showAlert({ type: 'error', title: paymentCopy.paymentErrorTitle, message })
+        }
+        onSuccess={({ amount }) =>
+          showAlert({
+            type: 'success',
+            title: paymentCopy.paymentReceivedTitle,
+            message: `${formatCurrency(amount)} charged to card.`,
+          })
+        }
         onRecordManualPayment={(invoiceId) =>
           navigation.navigate('RecordPayment', { invoiceId })
         }

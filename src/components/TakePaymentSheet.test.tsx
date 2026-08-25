@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * Regression tests for the manual "Record a payment" path in TakePaymentSheet.
+ * Regression tests for the manual "Record Payment" path in TakePaymentSheet.
  *
  * Before Jul 2026 the sheet offered Square methods only, and its entry
  * points were gated on a Square connection — so a tradie who never
@@ -23,6 +23,21 @@ vi.mock('react-native-paper', () => ({
   Button: ({ children, onPress }: any) =>
     React.createElement('button', { onClick: onPress }, children),
 }));
+// The shared sheet chassis has its own lifecycle tests; a shim keeps this
+// file on the payment logic (and out of Portal/safe-area dependency graphs).
+vi.mock('./BottomSheet', () => ({
+  BottomSheet: ({ visible, title, subtitle, children }: any) =>
+    visible
+      ? React.createElement(
+          'div',
+          null,
+          React.createElement('span', null, title),
+          React.createElement('span', null, subtitle),
+          children,
+        )
+      : null,
+}));
+vi.mock('../utils/haptics', () => ({ selectionTap: () => {} }));
 vi.mock('../services/storeReviewService', () => ({
   maybeRequestReview: vi.fn(async () => {}),
 }));
@@ -111,12 +126,12 @@ function depositField(baseElement: HTMLElement): HTMLInputElement {
   return input;
 }
 
-describe('TakePaymentSheet manual "Record a payment" row', () => {
+describe('TakePaymentSheet manual "Record Payment" row', () => {
   it('renders for an invoice target and fires onRecordManualPayment with the invoice id', () => {
     const onRecordManualPayment = vi.fn();
     const { getByText, props } = renderSheet({ onRecordManualPayment });
 
-    fireEvent.click(getByText('Record a payment'));
+    fireEvent.click(getByText('Record Payment'));
 
     expect(onRecordManualPayment).toHaveBeenCalledWith('inv-42');
     expect(props.onDismiss).toHaveBeenCalled();
@@ -127,12 +142,12 @@ describe('TakePaymentSheet manual "Record a payment" row', () => {
       target: depositTarget,
       onRecordManualPayment: vi.fn(),
     });
-    expect(queryByText('Record a payment')).toBeNull();
+    expect(queryByText('Record Payment')).toBeNull();
   });
 
   it('does not render when no handler is wired', () => {
     const { queryByText } = renderSheet();
-    expect(queryByText('Record a payment')).toBeNull();
+    expect(queryByText('Record Payment')).toBeNull();
   });
 
   it('works without any Square gate — no ensureSquareConnected prop required', () => {
@@ -141,7 +156,7 @@ describe('TakePaymentSheet manual "Record a payment" row', () => {
       onRecordManualPayment,
       ensureSquareConnected: undefined,
     });
-    fireEvent.click(getByText('Record a payment'));
+    fireEvent.click(getByText('Record Payment'));
     expect(onRecordManualPayment).toHaveBeenCalledWith('inv-42');
   });
 });
@@ -331,5 +346,62 @@ describe('TakePaymentSheet adjustable deposit', () => {
     fireEvent.click(getByText('Share Pay Link'));
     await waitFor(() => expect(props.onError).toHaveBeenCalledTimes(1));
     expect(squareService.mintQuoteDepositPaymentLink).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Success and dialog conventions (Aug 2026 consistency pass): a completed
+ * card charge tells the host so it can show the themed success dialog, a
+ * customer backing out stays silent, and the terms dialog carries a single
+ * primary action (header X + Android back dismiss it).
+ */
+describe('TakePaymentSheet success + dialog conventions', () => {
+  it('fires onSuccess with the charged amount after a successful card charge, after dismissing', async () => {
+    tapToPay.state = { enabled: true };
+    const onSuccess = vi.fn();
+    const { getByText, props } = renderSheet({
+      onSuccess,
+      ensureSquareConnected: vi.fn(async () => true),
+    });
+
+    fireEvent.click(getByText('Tap to Pay / Card Entry'));
+
+    await waitFor(() =>
+      expect(onSuccess).toHaveBeenCalledWith({ kind: 'card_charge', amount: 1200 }),
+    );
+    // Dismiss first — the host's success dialog opens over the closing sheet.
+    expect((props.onDismiss as any).mock.invocationCallOrder[0]).toBeLessThan(
+      onSuccess.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('does not fire onSuccess (or onError) when the customer cancels at the Square sheet', async () => {
+    tapToPay.state = { enabled: true };
+    (squarePayments.takeInAppPayment as any).mockRejectedValueOnce(
+      new Error('Payment canceled by user'),
+    );
+    const onSuccess = vi.fn();
+    const { getByText, props } = renderSheet({
+      onSuccess,
+      ensureSquareConnected: vi.fn(async () => true),
+    });
+
+    fireEvent.click(getByText('Tap to Pay / Card Entry'));
+
+    await waitFor(() => expect(squarePayments.takeInAppPayment).toHaveBeenCalled());
+    expect(onSuccess).not.toHaveBeenCalled();
+    expect(props.onError).not.toHaveBeenCalled();
+  });
+
+  it('terms dialog offers a single primary action and no text Close button', async () => {
+    tapToPay.state = { enabled: true };
+    const { getByText, queryByText } = renderSheet({
+      target: { ...invoiceTarget, terms: 'Payment due in 7 days.' },
+    });
+
+    fireEvent.click(getByText('View'));
+
+    await waitFor(() => expect(getByText('Customer agrees')).toBeTruthy());
+    expect(queryByText('Close')).toBeNull();
   });
 });
