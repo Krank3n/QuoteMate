@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { reviewQuoteMaterials, isFlaggedRow, buildPresendWarning, detectAnchorLaunderedIssues } from './quoteReview';
+import { reviewQuoteMaterials, isFlaggedRow, buildPresendWarning, detectAnchorLaunderedIssues, detectImplausibleCostIssues, topLinesSummary, priceResettableIds } from './quoteReview';
 import type { Material, QuoteSection } from '../types';
 
 // Minimal Material factory — only the fields the classifier reads matter; the
@@ -342,5 +342,152 @@ describe('weak product match (QU-178711)', () => {
   it('still lets a clean quote through', () => {
     const clean = towelBar({ weakProductMatch: undefined, priceConfidence: 'high', description: undefined });
     expect(buildPresendWarning(reviewQuoteMaterials([clean]))).toBeNull();
+  });
+});
+
+// The exact QU-178763 quote: 11 m² of wet-area floor tiling priced $16,942.97,
+// every row a "real" high-confidence price, review_quote reporting ALL CLEAN —
+// so when the tradie said "way too high", Mate answered "genuinely that much
+// tile". Tile and adhesive both carried the identical $187.25 unit price (one
+// matched product stamped on two lines) and the adhesive line held $8,239.
+function tilingFixture(): { materials: Material[]; sections: QuoteSection[] } {
+  const sections = [sec({ id: 'tile', name: 'Floor Tiling (per m²)', multiplier: 11, laborHours: 1.5 })];
+  const materials = [
+    mat({ id: 'tile', name: 'Matte Porcelain Floor Tile 600x600mm', section: 'Floor Tiling (per m²)', quantity: 11, price: 187.25, priceConfidence: 'high' }),
+    mat({ id: 'adhesive', name: 'Flexible Floor Tile Adhesive', section: 'Floor Tiling (per m²)', quantity: 44, price: 187.25, priceConfidence: 'high' }),
+    mat({ id: 'grout', name: 'Tile Grout Charcoal 5kg', section: 'Floor Tiling (per m²)', quantity: 3, price: 24.5, priceConfidence: 'high' }),
+    mat({ id: 'silicone', name: 'Wet Area Silicone', section: 'Floor Tiling (per m²)', quantity: 2, price: 12.9, priceConfidence: 'high' }),
+  ];
+  return { materials, sections };
+}
+
+describe('detectImplausibleCostIssues — QU-178763 (the $16,942 tiling job)', () => {
+  it('flags both twin-priced rows and the money-dominant adhesive', () => {
+    const { materials, sections } = tilingFixture();
+    const issues = detectImplausibleCostIssues(materials, sections);
+    const ids = issues.map((i) => i.materialId).sort();
+    expect(ids).toEqual(['adhesive', 'tile']);
+  });
+
+  it('names the twin on the identical-price pair', () => {
+    const { materials, sections } = tilingFixture();
+    const tile = detectImplausibleCostIssues(materials, sections).find((i) => i.materialId === 'tile');
+    expect(tile?.detail).toContain('same $187.25 unit price');
+    expect(tile?.detail).toContain('Flexible Floor Tile Adhesive');
+  });
+
+  it('calls out the helper product carrying the biggest money', () => {
+    const { materials, sections } = tilingFixture();
+    const adhesive = detectImplausibleCostIssues(materials, sections).find((i) => i.materialId === 'adhesive');
+    expect(adhesive?.detail).toMatch(/of the materials money/);
+    expect(adhesive?.detail).toMatch(/per m²/);
+  });
+
+  it('review no longer reports the quote clean, and the summary leads with the money', () => {
+    const { materials, sections } = tilingFixture();
+    const review = reviewQuoteMaterials(materials, sections);
+    expect(review.counts.implausibleCost).toBe(2);
+    expect(review.summary).toContain("carrying money that can't be right");
+  });
+
+  it('gates the send', () => {
+    const { materials, sections } = tilingFixture();
+    const warning = buildPresendWarning(reviewQuoteMaterials(materials, sections));
+    expect(warning).not.toBeNull();
+    expect(warning!.message).toContain('Flexible Floor Tile Adhesive');
+    expect(warning!.message).toContain('$8239.00');
+  });
+});
+
+describe('detectImplausibleCostIssues — stays quiet on honest quotes', () => {
+  it('lets the main material dominate (Colorbond sheets ARE most of a fence)', () => {
+    // Priya's real fence: sheets ~$1,100 of ~$1,514 materials. Dominance of
+    // the PRIMARY product is normal — only auxiliary dominance is a tell.
+    const materials = [
+      mat({ id: 'sheets', name: 'Colorbond Fence Sheet 1.8m Monument', quantity: 23, price: 48.5, priceConfidence: 'high' }),
+      mat({ id: 'posts', name: 'Fence Post 2400mm Galvanised', quantity: 9, price: 22, priceConfidence: 'high' }),
+      mat({ id: 'concrete', name: 'Concrete Rapid Set 20kg', quantity: 10, price: 9.8, priceConfidence: 'high' }),
+    ];
+    expect(detectImplausibleCostIssues(materials, [])).toEqual([]);
+  });
+
+  it('ignores identical prices on cheap rows (two $3.40 post caps are fine)', () => {
+    const materials = [
+      mat({ id: 'a', name: 'Post Cap Black', quantity: 10, price: 3.4 }),
+      mat({ id: 'b', name: 'Post Cap Monument', quantity: 10, price: 3.4 }),
+      mat({ id: 'c', name: 'Colorbond Sheet', quantity: 20, price: 48.5 }),
+    ];
+    expect(detectImplausibleCostIssues(materials, [])).toEqual([]);
+  });
+
+  it('ignores twin prices that are a small share of the quote', () => {
+    // Two same-priced premium items on a big quote — plausible, and not where
+    // the money is. The share floor keeps this quiet.
+    const materials = [
+      mat({ id: 'a', name: 'Frameless Shower Screen', quantity: 1, price: 89 }),
+      mat({ id: 'b', name: 'Vanity Unit 900mm', quantity: 1, price: 89 }),
+      mat({ id: 'main', name: 'Floor & Wall Tiles', quantity: 40, price: 45 }),
+    ];
+    expect(detectImplausibleCostIssues(materials, [])).toEqual([]);
+  });
+
+  it('never flags a manual override — that is the tradie\'s own number', () => {
+    const materials = [
+      mat({ id: 'a', name: 'Structural Adhesive', quantity: 100, price: 187.25, manualPriceOverride: true }),
+      mat({ id: 'b', name: 'Timber', quantity: 5, price: 20 }),
+    ];
+    expect(detectImplausibleCostIssues(materials, [])).toEqual([]);
+  });
+
+  it('leaves an honest adhesive line alone', () => {
+    // 3 bags of adhesive on an 11 m² job — real coverage, real money.
+    const { sections } = tilingFixture();
+    const materials = [
+      mat({ id: 'tile', name: 'Matte Porcelain Floor Tile 600x600mm', section: 'Floor Tiling (per m²)', quantity: 11, price: 52, priceConfidence: 'high' }),
+      mat({ id: 'adhesive', name: 'Flexible Floor Tile Adhesive 20kg', section: 'Floor Tiling (per m²)', quantity: 3, price: 32.5, priceConfidence: 'high' }),
+    ];
+    expect(detectImplausibleCostIssues(materials, sections)).toEqual([]);
+  });
+});
+
+describe('topLinesSummary', () => {
+  it('names the biggest lines with their money', () => {
+    const { materials } = tilingFixture();
+    expect(topLinesSummary(materials)).toBe(
+      'Biggest lines: Flexible Floor Tile Adhesive $8,239.00, Matte Porcelain Floor Tile 600x600mm $2,059.75.',
+    );
+  });
+
+  it('returns empty for no priced materials', () => {
+    expect(topLinesSummary([])).toBe('');
+    expect(topLinesSummary([mat({ id: 'w', name: 'Prep', kind: 'work', price: 0 })])).toBe('');
+  });
+});
+
+describe('priceResettableIds — the reprice Mate offers must actually reset the rows', () => {
+  it('includes detector-flagged twins whose per-row metadata says high confidence', () => {
+    // QU-178763: isFlaggedRow returned false for all three $187.25 rows, so
+    // the offered reprice reset ZERO rows and re-checked the same wrong total.
+    const { materials, sections } = tilingFixture();
+    const ids = priceResettableIds(materials, sections);
+    expect(ids.has('tile')).toBe(true);
+    expect(ids.has('adhesive')).toBe(true);
+  });
+
+  it('excludes inflated-quantity rows — their price is fine, the quantity is the problem', () => {
+    const { materials, sections } = roofFixture();
+    const review = reviewQuoteMaterials(materials, sections);
+    const inflatedIds = review.issues.filter((i) => i.kind === 'inflated_quantity').map((i) => i.materialId);
+    expect(inflatedIds.length).toBeGreaterThan(0);
+    const ids = priceResettableIds(materials, sections);
+    for (const id of inflatedIds) expect(ids.has(id)).toBe(false);
+  });
+
+  it('returns nothing for a clean quote', () => {
+    const materials = [
+      mat({ id: 'a', name: 'Decking Board', quantity: 30, price: 12.5, priceConfidence: 'high' }),
+      mat({ id: 'b', name: 'Joist Timber', quantity: 10, price: 22, priceConfidence: 'high' }),
+    ];
+    expect(priceResettableIds(materials, []).size).toBe(0);
   });
 });

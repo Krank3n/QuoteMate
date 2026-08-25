@@ -233,7 +233,7 @@ describe('supplier book policy', () => {
 
   it("never claims a supplier-book price it didn't get", () => {
     expect(section).toContain(
-      'Never claim a price came off the supplier book unless the pipeline told you it did.',
+      'Never claim a price came off the supplier book unless the pricing engine told you it did.',
     );
   });
 

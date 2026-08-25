@@ -494,3 +494,33 @@ describe('tool-call reporting', () => {
     expect(onToolCalls).not.toHaveBeenCalled();
   });
 });
+
+// "Kicking off a reprice on those.Card's up" reached a real screen — hop 1's
+// text and hop 2's were butted together with no separator. The server-side
+// adapter coalesces blocks within one reply; only the client sees across hops.
+describe('cross-hop text joining', () => {
+  it('separates text from different hops with a paragraph break', async () => {
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          parts: [
+            { text: 'Kicking off a reprice on those.' },
+            { functionCall: { name: 'propose_reprice', id: 'r1', args: { quoteId: 'q1' } } },
+          ],
+          model: 'gemini-test',
+        }),
+      } as unknown as Response)
+      .mockResolvedValueOnce(okChatResponse("Card's up — hit re-price."));
+
+    const res = await sendAssistantTurn({ history });
+    expect(res.text).toBe("Kicking off a reprice on those.\n\nCard's up — hit re-price.");
+  });
+
+  it('adds no break within a single hop', async () => {
+    fetchMock.mockResolvedValueOnce(okChatResponse('One clean reply.'));
+    const res = await sendAssistantTurn({ history });
+    expect(res.text).toBe('One clean reply.');
+  });
+});

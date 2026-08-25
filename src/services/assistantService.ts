@@ -250,10 +250,17 @@ export async function sendAssistantTurn({
     const parts = res.parts;
 
     // A turn can carry a text preamble alongside its tool calls — surface it.
+    // Text from DIFFERENT hops gets a paragraph break between: "Kicking off a
+    // reprice on those.Card's up" reached a real screen because hop 1's text
+    // and hop 2's were butted together with no separator. (The server-side
+    // adapter coalesces blocks within one reply; it can't see across hops.)
+    let firstTextThisHop = true;
     for (const part of parts) {
       if (typeof part.text === 'string' && part.text) {
-        textBuf += part.text;
-        onTextDelta?.(part.text);
+        const glue = firstTextThisHop && textBuf.length ? '\n\n' : '';
+        firstTextThisHop = false;
+        textBuf += glue + part.text;
+        onTextDelta?.(glue + part.text);
       }
     }
 

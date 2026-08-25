@@ -1,13 +1,20 @@
 /**
- * Referral Screen
+ * Referral Screen — link-first, no visible code.
  *
- * Two distinct experiences:
+ * The QM- referral code still exists as the attribution token INSIDE the link
+ * and QR (https://quotemateapp.au/ref/QM-AB2CD3), but no human reads or types
+ * it any more:
+ *  - the link is created automatically the first time this screen opens;
+ *  - the recipient taps the link/QR and attribution is parked + applied after
+ *    sign-in (src/services/pendingReferral.ts) — there is no code-entry form.
+ *
+ * Two experiences remain:
  * - Affiliates: QR-first layout with earnings dashboard and commission tracking
- * - Regular users: referral code sharing to help mates discover the app
+ * - Regular users: a share card so mates can discover the app
  *
  * ── App Store compliance notes (read before changing copy) ────────────────
- * A referral code is ATTRIBUTION ONLY. It never unlocks, discounts, or extends
- * a subscription, and this screen must never imply that it does (Guideline
+ * A referral is ATTRIBUTION ONLY. It never unlocks, discounts, or extends a
+ * subscription, and this screen must never imply that it does (Guideline
  * 3.1.1 — no purchases or entitlements outside IAP; 3.1.3 — no external
  * purchase CTAs).
  *
@@ -18,19 +25,16 @@
  * "average". Projections are labelled as illustrative, which keeps them clear
  * of Guideline 2.3.1 (accurate metadata / no misleading claims).
  *
- * The affiliate-recruitment material (game plan, tips, WhatsApp contact) is
- * shown ONLY to approved affiliates. Presenting an earn-money programme to
- * every user turns the app into an unreviewed income-opportunity pitch, and the
- * WhatsApp button was an off-platform contact CTA on a monetisation screen.
+ * The affiliate-recruitment material (tips, earnings talk) is shown ONLY to
+ * approved affiliates. Presenting an earn-money programme to every user turns
+ * the app into an unreviewed income-opportunity pitch.
  */
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   View,
-  StyleSheet,
   ScrollView,
   TouchableOpacity,
-  TextInput,
   Share,
   Platform,
   ActivityIndicator,
@@ -47,25 +51,19 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import QRCode from 'react-native-qrcode-svg';
 import * as Clipboard from 'expo-clipboard';
-import { useRoute } from '@react-navigation/native';
 
 import { makeStyles, useThemeColors } from '../../theme';
 import { WebContainer } from '../../components/WebContainer';
-import { AlertModal, AlertType } from '../../components/AlertModal';
 import { ReferralInfo, AffiliateEarning } from '../../types';
 import { firestoreService } from '../../services/firestoreService';
 import { auth } from '../../config/firebase';
-import { useStore } from '../../store/useStore';
 import { GridBackground } from '../../components/GridBackground';
 import {
-  applyCodeEligibility,
   buildSharePayload,
   commissionPerUserCents,
   displayCommissionRate,
   earningsProjection,
-  extractReferralCode,
   formatCents,
-  isValidReferralCode,
   referralLink as buildReferralLink,
 } from '../../utils/referral';
 
@@ -79,42 +77,18 @@ export function ReferralScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [loadingEarnings, setLoadingEarnings] = useState(false);
-  const [codeInput, setCodeInput] = useState('');
-  const [applyingCode, setApplyingCode] = useState(false);
-  const [generatingCode, setGeneratingCode] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const [showCode, setShowCode] = useState(false);
-  const [modal, setModal] = useState<{ visible: boolean; type: AlertType; title: string; message: string }>({
-    visible: false, type: 'info', title: '', message: '',
-  });
-
-  // Gate the apply-code form on real entitlement state: the backend refuses a
-  // code once the account is paying, so offering the form to a Pro user is a
-  // guaranteed dead end.
-  const isPro = useStore((s) => s.subscriptionStatus?.isPro === true);
-
-  // Deep link: https://quotemateapp.au/ref/QM-AB2CD3 routes here with the code
-  // as a param (see the `linking` config in App.tsx). Pre-fill it so the tradie
-  // taps Apply instead of retyping a code off someone else's phone.
-  const route = useRoute();
-  const deepLinkCode = extractReferralCode((route.params as { code?: string } | undefined)?.code);
-
-  useEffect(() => {
-    if (deepLinkCode && isValidReferralCode(deepLinkCode)) {
-      setCodeInput(deepLinkCode);
-    }
-  }, [deepLinkCode]);
-
-  const showModal = (type: AlertType, title: string, message: string) => {
-    setModal({ visible: true, type, title, message });
-  };
+  const [generatingLink, setGeneratingLink] = useState(false);
+  const [generateFailed, setGenerateFailed] = useState(false);
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
+  // One automatic creation attempt per mount; the retry card covers failures.
+  const autoGenAttempted = useRef(false);
 
   const loadReferralInfo = useCallback(async () => {
     try {
       const info = await firestoreService.loadReferralInfo();
       setReferralInfo(info);
     } catch (error) {
-      // Non-fatal: the screen renders its empty state and the user can retry
+      // Non-fatal: the screen renders its setup state and the user can retry
       // with pull-to-refresh.
     } finally {
       setLoading(false);
@@ -143,10 +117,38 @@ export function ReferralScreen() {
     }
   }, []);
 
+  /**
+   * The link IS the feature, so it's created silently rather than behind a
+   * "Get my code" button. generateReferralCode is idempotent server-side — it
+   * returns the existing code if one was already claimed.
+   */
+  const ensureLink = useCallback(async () => {
+    if (!auth.currentUser) return;
+    setGeneratingLink(true);
+    setGenerateFailed(false);
+    try {
+      const functions = getFunctions();
+      const generateReferralCode = httpsCallable(functions, 'generateReferralCode');
+      await generateReferralCode();
+      // Re-read the profile instead of fabricating one locally, so an existing
+      // affiliate keeps their dashboard fields intact.
+      await loadReferralInfo();
+    } catch (error) {
+      setGenerateFailed(true);
+    } finally {
+      setGeneratingLink(false);
+    }
+  }, [loadReferralInfo]);
+
   useEffect(() => { loadReferralInfo(); }, [loadReferralInfo]);
   useEffect(() => {
     if (referralInfo?.isAffiliate) loadEarnings();
   }, [referralInfo?.isAffiliate, loadEarnings]);
+  useEffect(() => {
+    if (loading || referralInfo?.referralCode || autoGenAttempted.current) return;
+    autoGenAttempted.current = true;
+    void ensureLink();
+  }, [loading, referralInfo?.referralCode, ensureLink]);
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -161,8 +163,7 @@ export function ReferralScreen() {
   const referralLink = referralCode ? buildReferralLink(referralCode) : '';
 
   // null when the user has no genuine commission rate — the UI then shows no
-  // percentage at all instead of an invented default (the old screen fell back
-  // to 80% for everyone, including non-affiliates).
+  // percentage at all instead of an invented default.
   const commissionRate = displayCommissionRate(referralInfo);
   const commissionPercent = commissionRate !== null ? Math.round(commissionRate * 100) : null;
 
@@ -173,99 +174,25 @@ export function ReferralScreen() {
   const perUserIos = commissionRate !== null ? commissionPerUserCents('ios', commissionRate) : 0;
   const perUserWeb = commissionRate !== null ? commissionPerUserCents('web', commissionRate) : 0;
 
-  const eligibility = applyCodeEligibility(referralInfo, isPro);
-  const normalisedInput = extractReferralCode(codeInput);
-  const inputLooksValid = isValidReferralCode(normalisedInput);
-
   // ── Handlers ──
 
-  const handleGenerateCode = async () => {
-    if (!auth.currentUser) {
-      showModal('warning', 'Sign In Required', 'Please sign in to get your referral code.');
-      return;
-    }
-    setGeneratingCode(true);
-    try {
-      const functions = getFunctions();
-      const generateReferralCode = httpsCallable(functions, 'generateReferralCode');
-      const result = await generateReferralCode();
-      const data = result.data as { referralCode?: string };
-      if (!data?.referralCode) throw new Error('No code returned');
-      // Re-read the profile instead of fabricating one locally: the old code
-      // overwrote isAffiliate/commissionRate/earnings with zeros in local
-      // state, so an existing affiliate who tapped this lost their dashboard
-      // until the next app launch.
-      await loadReferralInfo();
-    } catch (error: any) {
-      showModal('error', 'Something went wrong', 'Could not create your referral code. Please try again.');
-    } finally {
-      setGeneratingCode(false);
-    }
-  };
-
-  const handleCopyCode = async () => {
+  const handleCopyLink = async () => {
     if (!referralLink) return;
     try {
-      // expo-clipboard works on native AND web. The old code only ever copied
-      // on web (`Platform.OS === 'web' && navigator.clipboard`), so on iOS and
-      // Android the button showed "Copied!" while the clipboard was untouched.
       await Clipboard.setStringAsync(referralLink);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      setCopyState('copied');
     } catch {
-      showModal('error', 'Could not copy', 'Copying failed. You can still use Share instead.');
+      setCopyState('failed');
     }
+    setTimeout(() => setCopyState('idle'), 2000);
   };
 
   const handleShare = async () => {
-    if (!referralCode || !referralLink) return;
+    if (!referralLink) return;
     try {
-      await Share.share(buildSharePayload(referralCode, referralLink, Platform.OS));
+      await Share.share(buildSharePayload(referralLink, Platform.OS));
     } catch (error) {
       // User dismissed the share sheet, or no share target — nothing to do.
-    }
-  };
-
-  const handleApplyCode = async () => {
-    const code = extractReferralCode(codeInput);
-    if (!code) {
-      showModal('warning', 'Enter a Code', 'Please enter your mate\'s referral code.');
-      return;
-    }
-    if (!isValidReferralCode(code)) {
-      showModal('warning', 'Check the Code', 'Referral codes look like QM-AB2CD3. Double-check it with your mate.');
-      return;
-    }
-    if (!auth.currentUser) {
-      showModal('warning', 'Sign In Required', 'Please sign in to apply a referral code.');
-      return;
-    }
-
-    setApplyingCode(true);
-    try {
-      const functions = getFunctions();
-      const applyReferralCode = httpsCallable(functions, 'applyReferralCode');
-      await applyReferralCode({ referralCode: code });
-      showModal(
-        'success',
-        'Code Applied',
-        'Your mate is now credited for referring you. Nice one!'
-      );
-      setCodeInput('');
-      await loadReferralInfo();
-    } catch (error: any) {
-      // The backend sends precise, user-ready messages for every rejection
-      // (unknown code, own code, already applied, already subscribed, outside
-      // the attribution window). Surfacing them beats the old substring
-      // sniffing, which mislabelled anything it didn't recognise.
-      const message = typeof error?.message === 'string' && error.message.trim()
-        ? error.message
-        : 'Could not apply that code. Please try again.';
-      const isExpected = ['not-found', 'invalid-argument', 'already-exists', 'failed-precondition']
-        .includes(error?.code?.replace?.('functions/', '') || '');
-      showModal(isExpected ? 'warning' : 'error', isExpected ? 'Code Not Applied' : 'Something went wrong', message);
-    } finally {
-      setApplyingCode(false);
     }
   };
 
@@ -301,23 +228,32 @@ export function ReferralScreen() {
 
   // ── Shared blocks ──
 
-  const renderGenerateCode = () => (
-    <TouchableOpacity
-      style={styles.generateButton}
-      onPress={handleGenerateCode}
-      disabled={generatingCode}
-      accessibilityRole="button"
-      accessibilityLabel="Get my referral code"
-    >
-      {generatingCode ? (
-        <ActivityIndicator size="small" color={themeColors.onAccent} />
+  // No link yet: it's being created automatically, or creation failed and the
+  // user can retry. Either way there is nothing for them to configure.
+  const renderLinkSetup = () => (
+    <Surface style={styles.card}>
+      {generateFailed && !generatingLink ? (
+        <>
+          <Text style={styles.hint}>
+            Couldn&apos;t set up your referral link. Check your connection and try again.
+          </Text>
+          <TouchableOpacity
+            style={styles.generateButton}
+            onPress={ensureLink}
+            accessibilityRole="button"
+            accessibilityLabel="Retry setting up your referral link"
+          >
+            <MaterialCommunityIcons name="refresh" size={20} color={themeColors.onAccent} />
+            <Text style={styles.generateButtonText}>Try Again</Text>
+          </TouchableOpacity>
+        </>
       ) : (
-        <MaterialCommunityIcons name="qrcode" size={20} color={themeColors.onAccent} />
+        <View style={styles.setupRow}>
+          <ActivityIndicator size="small" color={themeColors.accentText} />
+          <Text style={styles.setupText}>Setting up your referral link...</Text>
+        </View>
       )}
-      <Text style={styles.generateButtonText}>
-        {generatingCode ? 'Generating...' : 'Get My Referral Code'}
-      </Text>
-    </TouchableOpacity>
+    </Surface>
   );
 
   const renderQrCard = (subtitle: React.ReactNode) => (
@@ -346,106 +282,22 @@ export function ReferralScreen() {
           <Text style={styles.shareButtonText}>Share Link</Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={styles.codeToggleButton}
-          onPress={() => { handleCopyCode(); setShowCode(true); }}
+          style={styles.copyButton}
+          onPress={handleCopyLink}
           accessibilityRole="button"
-          accessibilityLabel="Copy your referral link and show your code"
+          accessibilityLabel="Copy your referral link"
         >
           <MaterialCommunityIcons
-            name={copied ? 'check' : 'content-copy'} size={20}
-            color={copied ? themeColors.money : themeColors.accent}
+            name={copyState === 'copied' ? 'check' : 'content-copy'} size={20}
+            color={copyState === 'copied' ? themeColors.money : themeColors.accent}
           />
-          <Text style={[styles.codeToggleText, copied && { color: themeColors.money }]}>
-            {copied ? 'Copied!' : 'Copy'}
+          <Text style={[styles.copyButtonText, copyState === 'copied' && { color: themeColors.money }]}>
+            {copyState === 'copied' ? 'Copied!' : copyState === 'failed' ? 'Copy failed' : 'Copy'}
           </Text>
         </TouchableOpacity>
       </View>
-
-      {showCode && (
-        <View style={styles.codeBox}>
-          <Text style={styles.codeText} selectable>{referralCode}</Text>
-        </View>
-      )}
     </Surface>
   );
-
-  const renderFeaturePills = () => (
-    <View style={styles.adFeaturePills}>
-      {[
-        { icon: 'robot' as const, label: 'AI-Powered' },
-        { icon: 'currency-usd' as const, label: 'Live Pricing' },
-        { icon: 'file-document-outline' as const, label: 'GST Ready' },
-        { icon: 'wifi-off' as const, label: 'Offline' },
-      ].map((feature, index) => (
-        <View key={index} style={styles.adFeaturePill}>
-          <MaterialCommunityIcons name={feature.icon} size={14} color={themeColors.accentText} />
-          <Text style={styles.adFeaturePillText}>{feature.label}</Text>
-        </View>
-      ))}
-    </View>
-  );
-
-  const renderApplyCode = () => {
-    // Already attributed — confirm it and stop. No form to submit.
-    if (!eligibility.canApply) {
-      if (eligibility.reason === 'already_referred') {
-        return (
-          <Surface style={styles.card}>
-            <View style={styles.referredByRow}>
-              <MaterialCommunityIcons name="check-circle" size={20} color={themeColors.money} />
-              <Text style={styles.referredByText}>You were referred by a mate</Text>
-            </View>
-          </Surface>
-        );
-      }
-      // Pro user: the server will reject an apply, so explain rather than
-      // showing a form that cannot succeed.
-      return null;
-    }
-
-    return (
-      <Surface style={styles.card}>
-        <Title style={styles.sectionTitle}>Got a Referral Code?</Title>
-        <Text style={styles.hint}>
-          If a mate gave you their code, pop it in below so they get credited.
-          It doesn&apos;t change your price or your plan.
-        </Text>
-        <View style={styles.inputRow}>
-          <TextInput
-            style={styles.textInput}
-            placeholder="QM-AB2CD3"
-            placeholderTextColor={themeColors.textMuted}
-            value={codeInput}
-            onChangeText={setCodeInput}
-            autoCapitalize="characters"
-            autoCorrect={false}
-            autoComplete="off"
-            spellCheck={false}
-            // A pasted link is normalised for us, so allow room for one.
-            maxLength={64}
-            returnKeyType="done"
-            onSubmitEditing={() => { if (inputLooksValid) handleApplyCode(); }}
-            editable={!applyingCode}
-            accessibilityLabel="Referral code"
-          />
-          <TouchableOpacity
-            style={[styles.applyButton, !inputLooksValid && styles.applyButtonDisabled]}
-            onPress={handleApplyCode}
-            disabled={applyingCode || !inputLooksValid}
-            accessibilityRole="button"
-            accessibilityLabel="Apply referral code"
-          >
-            {applyingCode
-              ? <ActivityIndicator size="small" color={themeColors.onAccent} />
-              : <Text style={styles.applyButtonText}>Apply</Text>}
-          </TouchableOpacity>
-        </View>
-        {codeInput.trim().length > 0 && !inputLooksValid && (
-          <Text style={styles.inputHelp}>Codes look like QM-AB2CD3 — you can paste the whole link too.</Text>
-        )}
-      </Surface>
-    );
-  };
 
   // ════════════════════════════════════════
   // AFFILIATE SCREEN
@@ -466,7 +318,6 @@ export function ReferralScreen() {
             {referralCode ? (
               <>
                 {renderQrCard(null)}
-                {renderFeaturePills()}
 
                 {/* ── Your earnings ── */}
                 <Surface style={styles.card}>
@@ -530,7 +381,7 @@ export function ReferralScreen() {
                     <Title style={styles.sectionTitle}>How Your Commission Works</Title>
                     <Text style={styles.gameplanIntro}>
                       You earn {commissionPercent}% of the net revenue on every subscription payment
-                      from someone who signed up with your code — for as long as they stay
+                      from someone who signed up with your link — for as long as they stay
                       subscribed. Net revenue is what&apos;s left after the app store or card
                       processor takes their cut, which is why the amount differs by platform.
                     </Text>
@@ -609,7 +460,7 @@ export function ReferralScreen() {
                     <ActivityIndicator size="small" color={themeColors.accentText} />
                   ) : earnings.length === 0 ? (
                     <Text style={styles.hint}>
-                      No commission yet. Earnings appear here once someone who used your code
+                      No commission yet. Earnings appear here once someone who used your link
                       completes a subscription payment.
                     </Text>
                   ) : (
@@ -648,23 +499,10 @@ export function ReferralScreen() {
                 </TouchableOpacity>
               </>
             ) : (
-              <Surface style={styles.card}>
-                <Title style={styles.sectionTitle}>Get Your Affiliate Code</Title>
-                <Text style={styles.hint}>
-                  Create your code to start sharing QuoteMate and earning commission.
-                </Text>
-                {renderGenerateCode()}
-              </Surface>
+              renderLinkSetup()
             )}
           </WebContainer>
         </ScrollView>
-
-        <AlertModal
-          visible={modal.visible}
-          onDismiss={() => setModal(m => ({ ...m, visible: false }))}
-          type={modal.type} title={modal.title} message={modal.message}
-          showConfetti={modal.type === 'success'}
-        />
       </View>
     );
   }
@@ -693,60 +531,28 @@ export function ReferralScreen() {
                   </Text>
                 </View>
               )}
-              {renderFeaturePills()}
+
+              {(referralInfo?.totalReferrals ?? 0) > 0 && (
+                <View style={styles.statsRow}>
+                  <View style={styles.statItem}>
+                    <Text style={styles.statValue}>{referralInfo?.totalReferrals ?? 0}</Text>
+                    <Text style={styles.statLabel}>Mates referred</Text>
+                  </View>
+                </View>
+              )}
+
+              {/* Attribution-only, stated plainly (Guideline 3.1.1) — nobody
+                  should expect a discount that does not exist. */}
+              <Text style={styles.attributionNote}>
+                Your link keeps track of who you&apos;ve referred. It doesn&apos;t change
+                anyone&apos;s price or plan.
+              </Text>
             </>
           ) : (
-            <Surface style={styles.heroCard}>
-              <MaterialCommunityIcons name="account-plus" size={48} color={themeColors.accentText} />
-              <Title style={styles.heroTitle}>Refer a Mate</Title>
-              <Text style={styles.heroText}>
-                Create your referral code and share QuoteMate with other tradies.
-              </Text>
-              {renderGenerateCode()}
-            </Surface>
-          )}
-
-          {renderApplyCode()}
-
-          {/* How it works — states plainly that a code is attribution only, so
-              nobody expects a discount that does not exist. */}
-          <Surface style={styles.card}>
-            <Title style={styles.sectionTitle}>How It Works</Title>
-            {[
-              { step: '1', text: 'Share your code or QR with other tradies' },
-              { step: '2', text: 'They download QuoteMate and enter your code' },
-              { step: '3', text: 'You can see how many mates you\'ve referred here' },
-            ].map((item) => (
-              <View key={item.step} style={styles.stepRow}>
-                <View style={styles.stepCircle}>
-                  <Text style={styles.stepNumber}>{item.step}</Text>
-                </View>
-                <Text style={styles.stepText}>{item.text}</Text>
-              </View>
-            ))}
-            <Text style={styles.disclaimer}>
-              Referral codes are for keeping track of who told who about QuoteMate. They
-              don&apos;t change the price of a subscription or add anything to your plan.
-            </Text>
-          </Surface>
-
-          {referralCode && (
-            <View style={styles.statsRow}>
-              <View style={styles.statItem}>
-                <Text style={styles.statValue}>{referralInfo?.totalReferrals ?? 0}</Text>
-                <Text style={styles.statLabel}>Mates referred</Text>
-              </View>
-            </View>
+            renderLinkSetup()
           )}
         </WebContainer>
       </ScrollView>
-
-      <AlertModal
-        visible={modal.visible}
-        onDismiss={() => setModal(m => ({ ...m, visible: false }))}
-        type={modal.type} title={modal.title} message={modal.message}
-        showConfetti={modal.type === 'success'}
-      />
     </View>
   );
 }
@@ -797,6 +603,17 @@ const useStyles = makeStyles((t) => ({
     fontWeight: '700',
     color: t.colors.onAccent,
   },
+  setupRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    paddingVertical: 8,
+  },
+  setupText: {
+    fontSize: 15,
+    color: t.colors.textSecondary,
+  },
   hint: {
     fontSize: 14,
     color: t.colors.textSecondary,
@@ -809,102 +626,15 @@ const useStyles = makeStyles((t) => ({
     lineHeight: 18,
     marginTop: 14,
   },
-  inputRow: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  inputHelp: {
+  attributionNote: {
     fontSize: 12,
-    color: t.colors.warning,
-    marginTop: 8,
-  },
-  textInput: {
-    flex: 1,
-    backgroundColor: t.colors.bg,
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 16,
-    color: t.colors.text,
-    borderWidth: 1,
-    borderColor: t.colors.border,
-    letterSpacing: 1,
-    ...(Platform.OS === 'web' && { outlineStyle: 'none' as any }),
-  },
-  applyButton: {
-    backgroundColor: t.colors.accent,
-    paddingHorizontal: 20,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minWidth: 88,
-  },
-  applyButtonDisabled: {
-    opacity: 0.5,
-  },
-  applyButtonText: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: t.colors.onAccent,
-  },
-  referredByRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  referredByText: {
-    fontSize: 15,
-    color: t.colors.money,
-    fontWeight: '600',
-  },
-  stepRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 14,
-    gap: 12,
-  },
-  stepCircle: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: t.colors.accentSubtle,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  stepNumber: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: t.colors.accentText,
-  },
-  stepText: {
-    fontSize: 14,
-    color: t.colors.textSecondary,
-    flex: 1,
+    color: t.colors.textMuted,
+    lineHeight: 18,
+    textAlign: 'center',
+    paddingHorizontal: 12,
   },
 
   // ── Regular referral screen ──
-  heroCard: {
-    padding: 24,
-    marginBottom: 16,
-    borderRadius: 12,
-    elevation: 2,
-    backgroundColor: t.colors.surfaceRaised,
-    alignItems: 'center',
-  },
-  heroTitle: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: t.colors.text,
-    textAlign: 'center',
-    marginTop: 12,
-  },
-  heroText: {
-    fontSize: 15,
-    color: t.colors.textSecondary,
-    textAlign: 'center',
-    lineHeight: 22,
-    marginTop: 8,
-  },
   statsRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -953,28 +683,6 @@ const useStyles = makeStyles((t) => ({
     marginTop: 14,
     marginBottom: 4,
   },
-  adFeaturePills: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
-    gap: 8,
-    marginBottom: 16,
-  },
-  adFeaturePill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: t.colors.surfaceRaised,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 20,
-    gap: 6,
-    elevation: 1,
-  },
-  adFeaturePillText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: t.colors.text,
-  },
   regularQrSubtext: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1017,7 +725,7 @@ const useStyles = makeStyles((t) => ({
     fontWeight: '700',
     color: t.colors.onAccent,
   },
-  codeToggleButton: {
+  copyButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -1027,30 +735,10 @@ const useStyles = makeStyles((t) => ({
     borderRadius: 10,
     gap: 6,
   },
-  codeToggleText: {
+  copyButtonText: {
     fontSize: 16,
     fontWeight: '700',
     color: t.colors.accentText,
-  },
-  codeBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: t.colors.bg,
-    borderRadius: 10,
-    padding: 14,
-    marginTop: 12,
-    borderWidth: 2,
-    borderColor: t.colors.accentSubtle,
-    borderStyle: 'dashed',
-    gap: 10,
-    width: '100%',
-  },
-  codeText: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: t.colors.accentText,
-    letterSpacing: 2,
   },
 
   // ── Affiliate earnings ──

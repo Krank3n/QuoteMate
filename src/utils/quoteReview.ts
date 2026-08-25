@@ -26,7 +26,8 @@ export type QuoteIssueKind =
   | 'estimated'
   | 'low_confidence'
   | 'inflated_quantity'
-  | 'weak_match';
+  | 'weak_match'
+  | 'implausible_cost';
 
 export interface QuoteIssue {
   materialId: string;
@@ -49,6 +50,9 @@ export interface QuoteReview {
     inflatedQuantity: number;
     /** Rows priced off a product that barely resembles the request. */
     weakMatch: number;
+    /** Rows carrying money that can't be right for what they are (see
+     *  detectImplausibleCostIssues). */
+    implausibleCost: number;
     /** Total flagged rows — equals issues.length. */
     total: number;
   };
@@ -62,6 +66,7 @@ const DEFAULT_DETAIL: Record<QuoteIssueKind, string> = {
   low_confidence: 'Low-confidence price — worth a quick check.',
   inflated_quantity: 'Quantity looks scaled from the job size, not real coverage — verify before sending.',
   weak_match: 'The product we priced barely matches this line — it may be the wrong item.',
+  implausible_cost: 'This line carries money that looks wrong for what it is — check the price and quantity.',
 };
 
 /**
@@ -99,6 +104,7 @@ function buildSummary(issues: QuoteIssue[], counts: QuoteReview['counts']): stri
   if (issues.length === 0) return 'All good — every line came back with a real price.';
 
   const parts: string[] = [];
+  if (counts.implausibleCost) parts.push(`${counts.implausibleCost} carrying money that can't be right`);
   if (counts.inflatedQuantity) parts.push(`${counts.inflatedQuantity} with an inflated quantity`);
   if (counts.weakMatch) parts.push(`${counts.weakMatch} possibly the wrong product`);
   if (counts.unpriced) parts.push(`${counts.unpriced} with no price`);
@@ -199,6 +205,168 @@ export function detectAnchorLaunderedIssues(
   return issues;
 }
 
+// --- Implausible-cost detection (QU-178763) --------------------------------
+//
+// The fabricated-total family the flag system was blind to: an 11 m² floor-
+// tiling job priced $16,942.97, every row carrying a "real" high-confidence
+// price. Two fingerprints survived to the stored quote, and review_quote told
+// the tradie the number was legit — "not a pricing glitch, just genuinely that
+// much tile" — because nothing below looked at the MONEY, only the match
+// metadata. Deterministic, like the anchor-launder detector above.
+
+// (a) Identical-unit-price pair: the tile AND its adhesive both priced at
+// exactly $187.25 — one product's price stamped onto two different lines.
+// Two different products landing on the same cent at a substantial price is
+// vanishingly rare honestly, but common when a match went wrong. The share
+// floor keeps two $3.40 post caps or two same-priced paint colours quiet.
+const TWIN_PRICE_MIN = 75;
+const TWIN_PRICE_MIN_COMBINED_SHARE = 0.4;
+
+// (b) An AUXILIARY line (adhesive, grout, screws — the stuff that serves the
+// main material) carrying the biggest money on the quote. $8,239 of tile
+// adhesive against $2,060 of tiles; the $81k bathroom's 10,850 kg of
+// adhesive was 92% of materials. The main material dominating is normal
+// (Colorbond sheets ARE most of a fence) — the helper dominating never is.
+const AUX_RE = /\b(adhesive|glue|grout|sealant|silicone|caulk|screws?|nails?|fixings?|fasteners?|tape|caps?|brackets?|cleaner|additive)\b/i;
+const AUX_DOMINANT_MIN_TOTAL = 500;
+const AUX_DOMINANT_MIN_SHARE = 0.35;
+
+// (c) Per-m² spend cap on auxiliary lines when the section carries a real
+// area: $749/m² of adhesive is not a price any product explains.
+const AUX_PER_AREA_MIN_MULTIPLIER = 5;
+const AUX_PER_AREA_MAX_DOLLARS = 80;
+
+function lineTotal(m: Material): number {
+  return (m.price || 0) * (m.quantity || 0);
+}
+
+/** Rows eligible for money-sanity checks: real products the pipeline priced.
+ *  Manual overrides are the tradie's own numbers; work items are lump sums. */
+function costCheckable(m: Material): boolean {
+  return m.kind !== 'work' && !m.manualPriceOverride && m.price > 0;
+}
+
+/**
+ * Detect rows whose MONEY can't be right, whatever the match metadata says.
+ * Returns at most one issue per row; reasons compound into the detail.
+ */
+export function detectImplausibleCostIssues(
+  materials: Material[] | undefined | null,
+  sections?: QuoteSection[] | null,
+): QuoteIssue[] {
+  const mats = (materials ?? []).filter(costCheckable);
+  if (mats.length < 2) return [];
+  const materialsTotal = mats.reduce((n, m) => n + lineTotal(m), 0);
+  if (materialsTotal <= 0) return [];
+
+  const reasons = new Map<string, string[]>();
+  const note = (m: Material, why: string) => {
+    const existing = reasons.get(m.id) || [];
+    existing.push(why);
+    reasons.set(m.id, existing);
+  };
+
+  // (a) identical-unit-price pairs
+  const byPrice = new Map<string, Material[]>();
+  for (const m of mats) {
+    if (m.price < TWIN_PRICE_MIN) continue;
+    const key = m.price.toFixed(2);
+    byPrice.set(key, [...(byPrice.get(key) || []), m]);
+  }
+  for (const group of byPrice.values()) {
+    if (group.length < 2) continue;
+    const combined = group.reduce((n, m) => n + lineTotal(m), 0);
+    if (combined / materialsTotal < TWIN_PRICE_MIN_COMBINED_SHARE) continue;
+    for (const m of group) {
+      const twins = group.filter((g) => g.id !== m.id).map((g) => `“${g.name}”`);
+      note(
+        m,
+        `same $${m.price.toFixed(2)} unit price as ${twins.join(' and ')} — different products almost never price identically, so one of them matched the wrong item`,
+      );
+    }
+  }
+
+  // (b) auxiliary line dominating the materials money
+  for (const m of mats) {
+    if (!AUX_RE.test(m.name)) continue;
+    const total = lineTotal(m);
+    if (total < AUX_DOMINANT_MIN_TOTAL) continue;
+    if (total / materialsTotal < AUX_DOMINANT_MIN_SHARE) continue;
+    note(
+      m,
+      `$${total.toFixed(2)} of ${m.name.toLowerCase()} is ${Math.round((total / materialsTotal) * 100)}% of the materials money — the helper product should never be the biggest line, so the quantity or the matched product is off`,
+    );
+  }
+
+  // (c) auxiliary spend per m² in an area-scaled section
+  for (const s of sections ?? []) {
+    if (!(s.multiplier >= AUX_PER_AREA_MIN_MULTIPLIER)) continue;
+    for (const m of mats) {
+      if (m.section !== s.name || !AUX_RE.test(m.name)) continue;
+      const perArea = lineTotal(m) / s.multiplier;
+      if (perArea <= AUX_PER_AREA_MAX_DOLLARS) continue;
+      note(
+        m,
+        `works out to $${perArea.toFixed(0)} per m² of ${m.name.toLowerCase()} — no real product costs that much per square metre`,
+      );
+    }
+  }
+
+  const issues: QuoteIssue[] = [];
+  for (const m of mats) {
+    const why = reasons.get(m.id);
+    if (!why?.length) continue;
+    issues.push({
+      materialId: m.id,
+      name: m.name,
+      kind: 'implausible_cost',
+      detail: `${why.join('; ')}. Check it before this reaches a customer.`,
+      price: m.price,
+      quantity: m.quantity,
+      unit: m.unit,
+    });
+  }
+  return issues;
+}
+
+/**
+ * Row ids whose PRICE should be wiped for a re-price. The per-row metadata
+ * flags (isFlaggedRow) miss detector-level verdicts: QU-178763's three
+ * $187.25 twins were all priceConfidence 'high', so a reprice reset ZERO
+ * rows and "re-checked" the same wrong total. Inflated-quantity rows are
+ * deliberately excluded — their price is fine, their quantity is the
+ * problem, and wiping the price would just re-buy the same mistake.
+ */
+export function priceResettableIds(
+  materials: Material[] | undefined | null,
+  sections?: QuoteSection[] | null,
+): Set<string> {
+  const review = reviewQuoteMaterials(materials, sections);
+  return new Set(
+    review.issues.filter((i) => i.kind !== 'inflated_quantity').map((i) => i.materialId),
+  );
+}
+
+/**
+ * The two or three lines carrying the most money, as one plain sentence.
+ * Deterministic, for surfaces that show the tradie where the total lives —
+ * an $8,239 adhesive line names itself the moment someone reads it out.
+ */
+export function topLinesSummary(
+  materials: Material[] | undefined | null,
+  count = 2,
+): string {
+  const rows = (materials ?? [])
+    .filter((m) => m.kind !== 'work' && lineTotal(m) > 0)
+    .sort((a, b) => lineTotal(b) - lineTotal(a))
+    .slice(0, count);
+  if (!rows.length) return '';
+  const parts = rows.map(
+    (m) => `${m.name} $${lineTotal(m).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+  );
+  return `Biggest lines: ${parts.join(', ')}.`;
+}
+
 /**
  * Scan a quote's materials and report the rows the pipeline already flagged.
  * Deterministic — no network, no model, safe to call after every pricing pass.
@@ -223,12 +391,22 @@ export function reviewQuoteMaterials(
     });
   }
 
-  // Inflated-quantity is the more actionable verdict, so it leads and wins the
-  // dedupe: a laundered row is almost always also low-confidence priced, and we
-  // don't want to list the same material twice.
-  const inflated = detectAnchorLaunderedIssues(materials, sections);
-  const inflatedIds = new Set(inflated.map((i) => i.materialId));
-  const issues = [...inflated, ...rowIssues.filter((i) => !inflatedIds.has(i.materialId))];
+  // Detector-level issues lead and win the dedupe — they carry the more
+  // actionable story (a laundered or money-implausible row is usually also
+  // low-confidence priced, and we don't want the same material listed twice).
+  // Implausible-cost outranks inflated-quantity: "this line carries $8,239"
+  // beats "this quantity looks scaled".
+  const implausible = detectImplausibleCostIssues(materials, sections);
+  const implausibleIds = new Set(implausible.map((i) => i.materialId));
+  const inflated = detectAnchorLaunderedIssues(materials, sections).filter(
+    (i) => !implausibleIds.has(i.materialId),
+  );
+  const detectorIds = new Set([...implausibleIds, ...inflated.map((i) => i.materialId)]);
+  const issues = [
+    ...implausible,
+    ...inflated,
+    ...rowIssues.filter((i) => !detectorIds.has(i.materialId)),
+  ];
 
   const counts = {
     unpriced: issues.filter((i) => i.kind === 'unpriced').length,
@@ -236,6 +414,7 @@ export function reviewQuoteMaterials(
     lowConfidence: issues.filter((i) => i.kind === 'low_confidence').length,
     inflatedQuantity: issues.filter((i) => i.kind === 'inflated_quantity').length,
     weakMatch: issues.filter((i) => i.kind === 'weak_match').length,
+    implausibleCost: issues.filter((i) => i.kind === 'implausible_cost').length,
     total: issues.length,
   };
 
@@ -273,11 +452,30 @@ export function buildPresendWarning(
   const unpriced = review.issues.filter((i) => i.kind === 'unpriced');
   const inflated = review.issues.filter((i) => i.kind === 'inflated_quantity');
   const weak = review.issues.filter((i) => i.kind === 'weak_match');
-  if (unpriced.length === 0 && inflated.length === 0 && weak.length === 0) return null;
+  const implausible = review.issues.filter((i) => i.kind === 'implausible_cost');
+  if (unpriced.length === 0 && inflated.length === 0 && weak.length === 0 && implausible.length === 0) {
+    return null;
+  }
 
   const lines: string[] = [];
 
+  // Money that can't be right leads — it's the fabricated-total family, the
+  // one that costs a customer relationship if it goes out (QU-178763: $8,239
+  // of tile adhesive on an 11 m² job, every flag green).
+  if (implausible.length > 0) {
+    const shown = implausible
+      .slice(0, 3)
+      .map((i) => `• ${i.name} (${i.quantity} × $${i.price.toFixed(2)} = $${(i.quantity * i.price).toFixed(2)})`);
+    const more = implausible.length - shown.length;
+    lines.push(
+      `${implausible.length} ${implausible.length === 1 ? 'line carries' : 'lines carry'} money that doesn't look right for what ${implausible.length === 1 ? 'it is' : 'they are'} — check ${implausible.length === 1 ? 'it' : 'them'} before sending:`,
+      ...shown,
+      ...(more > 0 ? [`(+${more} more)`] : []),
+    );
+  }
+
   if (unpriced.length > 0) {
+    if (lines.length > 0) lines.push('');
     const visible = options.materialsShownToCustomer !== false;
     const consequence = visible
       ? `will show as $0 on the customer's ${docLabel}`
@@ -322,7 +520,7 @@ export function buildPresendWarning(
     }
   }
 
-  const pricesNeedALook = unpriced.length > 0 || weak.length > 0;
+  const pricesNeedALook = unpriced.length > 0 || weak.length > 0 || implausible.length > 0;
   const title =
     pricesNeedALook && inflated.length > 0
       ? 'Some prices and quantities need a look'

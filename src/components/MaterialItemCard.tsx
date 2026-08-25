@@ -5,6 +5,7 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
+import { sectionUnitWord } from './sectionUnitWord';
 import { View, StyleSheet, TouchableOpacity, Pressable, Image, Platform, TextInput as RNTextInput, ActivityIndicator, Animated, Easing } from 'react-native';
 import { Text, Menu, Divider } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
@@ -212,12 +213,9 @@ function MaterialItemCardImpl({
           ) : null
         ) : (
           <Text style={styles.itemUnitPrice}>
-            {material.templateBaseQuantity ? (() => {
-              // Derive unit word from section name: "Fence Bay" → "/bay", "Deck Section" → "/section"
-              const sectionWords = (material.section || '').split(/\s+/);
-              const unitWord = sectionWords.length > 0 ? sectionWords[sectionWords.length - 1].toLowerCase() : 'unit';
-              return `${material.templateBaseQuantity}/${unitWord} · `;
-            })() : ''}{formatCurrency(material.price)}
+            {material.templateBaseQuantity
+              ? `${material.templateBaseQuantity}/${sectionUnitWord(material.section)} · `
+              : ''}{formatCurrency(material.price)}
             {readOnly && material.unit ? ` / ${material.unit}` : ' ea.'}
             {material.packSize && material.packUnit && material.requiredQty
               ? `  ·  ${material.packSize} ${material.packUnit}/pack (need ${material.requiredQty} ${material.packUnit})`

@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import {
-  applyCodeEligibility,
   buildShareMessage,
   buildSharePayload,
   commissionPerUserCents,
@@ -72,6 +71,17 @@ describe('extractReferralCode', () => {
     expect(extractReferralCode('https://quotemateapp.au/ref/QM-AB2CD3')).toBe('QM-AB2CD3');
     expect(extractReferralCode('https://quotemateapp.au/ref/QM-AB2CD3/')).toBe('QM-AB2CD3');
     expect(extractReferralCode('check this out https://quotemateapp.au/ref/qm-ab2cd3?utm=x')).toBe('QM-AB2CD3');
+  });
+
+  it('pulls the code out of the web-app handoff query form', () => {
+    // The landing page's "try it on the web" CTA carries the code as ?ref=
+    // because /app is a static bundle where a /ref/ path 404s on load.
+    expect(extractReferralCode('https://quotemateapp.au/app?ref=QM-AB2CD3')).toBe('QM-AB2CD3');
+    expect(extractReferralCode('https://quotemateapp.au/app?utm_source=x&ref=qm-ab2cd3#top')).toBe('QM-AB2CD3');
+  });
+
+  it('prefers the path form when both are present', () => {
+    expect(extractReferralCode('https://quotemateapp.au/ref/QM-AB2CD3?ref=QM-ZZZZZZ')).toBe('QM-AB2CD3');
   });
 
   it('still accepts a bare code', () => {
@@ -151,26 +161,6 @@ describe('earningsProjection', () => {
   });
 });
 
-describe('applyCodeEligibility', () => {
-  it('allows a fresh free user to apply a code', () => {
-    expect(applyCodeEligibility(info(), false)).toEqual({ canApply: true });
-  });
-
-  it('blocks a user who already has a referrer', () => {
-    expect(applyCodeEligibility(info({ referredBy: 'someone' }), false)).toEqual({
-      canApply: false,
-      reason: 'already_referred',
-    });
-  });
-
-  it('blocks a Pro user — the server rejects it, so do not show the form', () => {
-    expect(applyCodeEligibility(info(), true)).toEqual({
-      canApply: false,
-      reason: 'already_subscribed',
-    });
-  });
-});
-
 describe('share copy (App Store Guideline 3.1.1)', () => {
   const link = referralLink('QM-AB2CD3');
 
@@ -178,23 +168,27 @@ describe('share copy (App Store Guideline 3.1.1)', () => {
     expect(link).toBe('https://quotemateapp.au/ref/QM-AB2CD3');
   });
 
-  it('promises the recipient nothing a code cannot deliver', () => {
-    const message = buildShareMessage('QM-AB2CD3', link);
+  it('promises the recipient nothing a referral cannot deliver', () => {
+    const message = buildShareMessage(link);
     for (const forbidden of ['free month', 'discount', '% off', 'unlock', 'credit', 'reward', 'bonus']) {
       expect(message.toLowerCase()).not.toContain(forbidden);
     }
   });
 
-  it('includes both the link and the code', () => {
-    const message = buildShareMessage('QM-AB2CD3', link);
+  it('carries attribution in the link alone — no code to retype', () => {
+    const message = buildShareMessage(link);
     expect(message).toContain(link);
-    expect(message).toContain('QM-AB2CD3');
+    // The code lives inside the URL only; outside it there must be no bare
+    // code and no mention of one — tapping the link is the whole job.
+    const withoutLink = message.replace(link, '');
+    expect(withoutLink).not.toContain('QM-');
+    expect(withoutLink.toLowerCase()).not.toContain('code');
   });
 
   it('passes the URL separately on iOS so Messages renders a real link', () => {
-    const ios = buildSharePayload('QM-AB2CD3', link, 'ios');
+    const ios = buildSharePayload(link, 'ios');
     expect(ios.url).toBe(link);
-    const android = buildSharePayload('QM-AB2CD3', link, 'android');
+    const android = buildSharePayload(link, 'android');
     expect(android.url).toBeUndefined();
     expect(android.message).toContain(link);
   });

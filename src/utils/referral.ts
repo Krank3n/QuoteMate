@@ -51,15 +51,19 @@ export function isValidReferralCode(code: string): boolean {
 }
 
 /**
- * Accept a full referral link as well as a bare code — people paste
- * "https://quotemateapp.au/ref/QM-AB2CD3" out of a text message far more often
- * than they retype the code.
+ * Accept a full referral link as well as a bare code. Two link shapes carry a
+ * code:
+ *   - https://quotemateapp.au/ref/QM-AB2CD3        (share links / QR codes)
+ *   - https://quotemateapp.au/app?ref=QM-AB2CD3    (the landing page's "try it
+ *     on the web" CTA — /app is a static bundle, so a /ref/ path there would
+ *     404 on load; the query form survives the redirect)
  */
 export function extractReferralCode(input: string | null | undefined): string {
   if (typeof input !== 'string') return '';
   const trimmed = input.trim();
-  const fromLink = trimmed.match(/\/ref\/([^/?#\s]+)/i);
-  return normaliseReferralCode(fromLink ? fromLink[1] : trimmed);
+  const fromPath = trimmed.match(/\/ref\/([^/?#\s]+)/i);
+  const fromQuery = trimmed.match(/[?&]ref=([^&#\s]+)/i);
+  return normaliseReferralCode(fromPath ? fromPath[1] : fromQuery ? fromQuery[1] : trimmed);
 }
 
 /**
@@ -115,25 +119,6 @@ export function earningsProjection(
   return userCounts.map((users) => ({ users, amountCents: users * perUser }));
 }
 
-export type ReferralEligibility =
-  | { canApply: true }
-  | { canApply: false; reason: 'already_referred' | 'already_subscribed' };
-
-/**
- * Whether to show the "enter a mate's code" form.
- *
- * Mirrors the server's evaluateApplyCode preconditions so a Pro user isn't
- * offered a form whose submission the backend will always reject.
- */
-export function applyCodeEligibility(
-  info: ReferralInfo | null | undefined,
-  isPro: boolean
-): ReferralEligibility {
-  if (info?.referredBy) return { canApply: false, reason: 'already_referred' };
-  if (isPro) return { canApply: false, reason: 'already_subscribed' };
-  return { canApply: true };
-}
-
 export function referralLink(code: string, baseUrl = 'https://quotemateapp.au/ref/'): string {
   return `${baseUrl}${encodeURIComponent(code)}`;
 }
@@ -141,27 +126,28 @@ export function referralLink(code: string, baseUrl = 'https://quotemateapp.au/re
 /**
  * Share copy.
  *
- * Deliberately makes NO offer to the recipient: a referral code grants nothing,
- * so promising a discount/free month would be both false and an
- * outside-of-IAP inducement (Guideline 3.1.1). Affiliates get the same
- * recipient-facing promise as everyone else — their commission is our cost, not
- * something the recipient pays or receives.
+ * Deliberately makes NO offer to the recipient: a referral grants nothing, so
+ * promising a discount/free month would be both false and an outside-of-IAP
+ * inducement (Guideline 3.1.1). Affiliates get the same recipient-facing
+ * promise as everyone else — their commission is our cost, not something the
+ * recipient pays or receives.
+ *
+ * The link alone carries attribution (it embeds the code), so no code is
+ * spelled out for the recipient to retype — tapping the link is the whole job.
  */
-export function buildShareMessage(code: string, link: string): string {
+export function buildShareMessage(link: string): string {
   return (
     'I use QuoteMate to write up quotes and invoices on the tools — reckon you\'d get a lot out of it.\n\n' +
-    `Grab it here: ${link}\n` +
-    `My referral code: ${code}`
+    `Grab it here: ${link}`
   );
 }
 
 /** iOS puts a `url` field in its own slot; Android only reads `message`. */
 export function buildSharePayload(
-  code: string,
   link: string,
   platform: string
 ): { message: string; url?: string; title?: string } {
-  const message = buildShareMessage(code, link);
+  const message = buildShareMessage(link);
   if (platform === 'ios') {
     // On iOS a URL inside `message` gets flattened into the text by some
     // targets; passing it separately lets Messages/Mail render a real link.
@@ -173,14 +159,4 @@ export function buildSharePayload(
 export function formatCents(cents: number): string {
   const safe = Number.isFinite(cents) ? cents : 0;
   return `$${(safe / 100).toFixed(2)}`;
-}
-
-/**
- * Map a callable error message to user-facing copy. The server sends precise
- * messages; this keeps the client resilient if an older build sees a new code.
- */
-export function applyCodeErrorMessage(raw: string | null | undefined): string {
-  const message = (raw || '').trim();
-  if (!message) return 'Could not apply that code. Please try again.';
-  return message;
 }

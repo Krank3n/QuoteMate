@@ -202,7 +202,7 @@ export function SettingsScreen() {
           id: 'referral',
           title: isAffiliate ? 'Affiliate Program' : 'Refer a Mate',
           subtitle: isAffiliate
-            ? 'Your code, earnings and payouts'
+            ? 'Your link, earnings and payouts'
             : 'Share QuoteMate with other tradies',
           icon: 'gift',
           screen: 'Referral',

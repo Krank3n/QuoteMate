@@ -7,7 +7,7 @@ import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { generateId } from '../utils/generateId';
 import { withOrigin } from '../utils/materialOrigin';
-import { Quote, BusinessSettings, Material, SubscriptionStatus, Invoice, PaymentMethod, ReferralInfo, XeroConnection, XeroSyncStatus, Contact, QuotePhoto } from '../types';
+import { Quote, BusinessSettings, Material, QuoteSection, SubscriptionStatus, Invoice, PaymentMethod, ReferralInfo, XeroConnection, XeroSyncStatus, Contact, QuotePhoto } from '../types';
 import { Document, DocumentPayment, DocumentPaymentMethod } from '../types/document';
 import {
   ChatMessage,
@@ -23,7 +23,7 @@ import {
 } from '../services/materialsPipeline';
 import { pricingEventToProgress } from './pricingProgress';
 import type { SupplierGapSummary } from '../services/assistant/supplierGapNote';
-import { reviewQuoteMaterials, isFlaggedRow, QuoteReview } from '../utils/quoteReview';
+import { reviewQuoteMaterials, isFlaggedRow, priceResettableIds, topLinesSummary, QuoteReview } from '../utils/quoteReview';
 import { loadTemplates } from '../services/sectionTemplateService';
 import { updateQuoteCalculations, healBrokenLabourSections } from '../utils/quoteCalculator';
 import { normaliseLabourToHours } from '../../shared/document/labourUnits';
@@ -481,14 +481,23 @@ async function summariseSupplierGap(
 }
 
 // Wipe the price off every row the review flags (no price, AI estimate,
-// low-confidence, weak product match) so fetchPrices re-fetches them — it skips
-// any row already at price > 0. Manual overrides and confident rows are never
-// flagged, so they're left exactly as they were. requiredQty is preserved so
-// pack rounding still works.
-function resetFlaggedRowsForReprice(materials: Material[]): { materials: Material[]; resetCount: number } {
+// low-confidence, weak product match, implausible money) so fetchPrices
+// re-fetches them — it skips any row already at price > 0. Manual overrides
+// and confident rows are never flagged, so they're left exactly as they were.
+// requiredQty is preserved so pack rounding still works.
+//
+// Selection runs the FULL review, not just per-row metadata: QU-178763's
+// three $187.25 twins were all priceConfidence 'high', so the old
+// isFlaggedRow selection reset zero rows and the reprice Mate offered
+// "re-checked" the same wrong $16,942.97.
+function resetFlaggedRowsForReprice(
+  materials: Material[],
+  sections?: QuoteSection[] | null,
+): { materials: Material[]; resetCount: number } {
+  const resettable = priceResettableIds(materials, sections);
   let resetCount = 0;
   const next = materials.map((m) => {
-    if (!isFlaggedRow(m)) return m;
+    if (!isFlaggedRow(m) && !resettable.has(m.id)) return m;
     resetCount++;
     // weakProductMatch goes too: it describes the product this row WAS priced
     // against, and that product is being thrown away. Leaving it set would
@@ -3422,6 +3431,12 @@ export const useStore = create<AppState>((set, get) => ({
             if (pricedResult.failedCount > 0) parts.push(`${pricedResult.failedCount} need pricing`);
             if (pricedResult.skippedCount > 0) parts.push(`${pricedResult.skippedCount} already priced`);
             pricingSummary = parts.join(' · ') || 'Nothing to price.';
+            // Name where the money actually landed. QU-178763 carried $8,239
+            // of tile adhesive with every flag green — a wrong line usually
+            // exposes itself the moment its dollar figure is put in front of
+            // the tradie, so the done card always says it.
+            const topLines = topLinesSummary(pricedResult.updatedQuote.materials);
+            if (topLines) pricingSummary = `${pricingSummary}\n${topLines}`;
 
             onProgress?.({
               phase: 'done',
@@ -3790,7 +3805,7 @@ export const useStore = create<AppState>((set, get) => ({
           const missedSupplierTerms: string[] = [];
 
           const runReprice = async (source: Quote): Promise<{ priced: Quote; resetCount: number }> => {
-            const { materials, resetCount } = resetFlaggedRowsForReprice(source.materials);
+            const { materials, resetCount } = resetFlaggedRowsForReprice(source.materials, source.sections);
             reportProgress({
               status: resetCount > 0 ? `Re-pricing ${resetCount} row${resetCount === 1 ? '' : 's'}…` : 'Re-checking prices…',
             });
