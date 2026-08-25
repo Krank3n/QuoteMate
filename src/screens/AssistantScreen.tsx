@@ -14,7 +14,6 @@ import {
   StyleSheet,
   TextInput,
   TouchableOpacity,
-  KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
   Pressable,
@@ -30,7 +29,15 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import Svg, { Path, Defs, LinearGradient, Stop } from 'react-native-svg';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import type { NavigationProp } from '@react-navigation/native';
+import { useHeaderHeight } from '@react-navigation/elements';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+// The react-native KeyboardAvoidingView is a silent no-op here: it needed
+// behavior=undefined on Android, and the app-wide KeyboardProvider switches
+// Android to edge-to-edge keyboard handling, which also disables the
+// adjustResize window shrink the screen used to lean on — so the keyboard
+// simply covered the composer. keyboard-controller's KAV is driven by the
+// same provider and animates on the UI thread on both platforms.
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { makeStyles, useThemeColors } from '../theme';
 import { useStore, NavigateHint } from '../store/useStore';
 import { trackEvent } from '../services/analyticsService';
@@ -46,6 +53,7 @@ import { shouldAutoStartMic, resolveAutoStartMic } from './assistant/shouldAutoS
 import { getMateIntro, isBlankSlate } from './assistant/mateIntro';
 import { buildGreetPrompt, withTypeInsteadHint } from './assistant/voiceCopy';
 import { GREET_RETRY_MS, shouldRetryGreet } from './assistant/greetWatchdog';
+import { composerClosedPadding, mateKeyboardOffset } from './assistant/composerKeyboard';
 import { DEFAULT_THINKING_LABEL, labelForToolCalls } from './assistant/thinkingLabels';
 import { isLeakedModelOutput } from './assistant/leakedOutput';
 import {
@@ -396,6 +404,7 @@ export function AssistantScreen() {
   const styles = useStyles();
   const themeColors = useThemeColors();
   const insets = useSafeAreaInsets();
+  const headerHeight = useHeaderHeight();
   const navigation = useNavigation<NavigationProp<any>>();
   const route = useRoute<any>();
   // Ref mirror of route so the focus-count effect below can read the latest
@@ -2748,8 +2757,12 @@ export function AssistantScreen() {
   return (
     <KeyboardAvoidingView
       style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+      behavior="padding"
+      enabled={Platform.OS !== 'web'}
+      // Negative on most devices: under-pad by the tab-bar clearance the
+      // composer no longer needs while the keyboard hides the tab bar, so the
+      // input lands KEYBOARD_GAP above the keys. See composerKeyboard.ts.
+      keyboardVerticalOffset={mateKeyboardOffset(headerHeight, insets.bottom)}
     >
       <GridBackground />
       <WebContainer style={styles.webBody}>
@@ -2851,7 +2864,7 @@ export function AssistantScreen() {
             now (dots + what Mate is actually doing), so this was a second
             indicator for one event. */}
 
-        <View style={[styles.composerWrap, { paddingBottom: Math.max(insets.bottom, 8) + 70 }]}>
+        <View style={[styles.composerWrap, { paddingBottom: composerClosedPadding(insets.bottom) }]}>
           {pendingAttachments.length > 0 && !voiceActive && (
             <View style={styles.tray}>
               {pendingAttachments.map((a) => (

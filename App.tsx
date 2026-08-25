@@ -77,9 +77,25 @@ import { checkForUpdate, AppUpdateInfo } from './src/services/appUpdateService';
 import { checkDeferredLink } from './src/services/supplierDiscoveryService';
 import { applyPendingReferral, storePendingReferral } from './src/services/pendingReferral';
 import { AppUpdateSheet } from './src/components/AppUpdateSheet';
+import { keyboardToolbarVisibleForRoute } from './src/screens/assistant/composerKeyboard';
 import { SplashOverlay } from './src/components/SplashOverlay';
 
 const navigationRef = createNavigationContainerRef<any>();
+
+// iOS-only keyboard accessory (prev/next/Done). Kept off the Mate tab: the
+// chat composer sits flush above the keyboard there, and the toolbar would
+// render directly on top of it. Subscribes to the nav ref itself so route
+// changes re-render this leaf, not the whole App tree.
+function RouteAwareKeyboardToolbar() {
+  const [routeName, setRouteName] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    const update = () => setRouteName(navigationRef.getCurrentRoute()?.name);
+    update();
+    return navigationRef.addListener('state', update);
+  }, []);
+  if (!keyboardToolbarVisibleForRoute(routeName)) return null;
+  return <KeyboardToolbar />;
+}
 
 // SPA route restore (web only). The app is served from /app on a static host
 // with no per-route files, so a hard refresh of /app/<route> 404s and the
@@ -739,7 +755,7 @@ function App() {
                 <NewOnboardingScreen />
               )}
             </NavigationContainer>
-            {Platform.OS === 'ios' && <KeyboardToolbar />}
+            {Platform.OS === 'ios' && <RouteAwareKeyboardToolbar />}
             {showUpdateSheet && updateInfo && (
               <AppUpdateSheet
                 visible={showUpdateSheet}
