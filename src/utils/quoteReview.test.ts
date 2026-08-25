@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { reviewQuoteMaterials, isFlaggedRow, buildPresendWarning, detectAnchorLaunderedIssues, detectImplausibleCostIssues, topLinesSummary, priceResettableIds } from './quoteReview';
+import { reviewQuoteMaterials, isFlaggedRow, buildPresendWarning, detectAnchorLaunderedIssues, detectImplausibleCostIssues, topLinesSummary, priceResettableIds, wipeStillImplausibleRows } from './quoteReview';
 import type { Material, QuoteSection } from '../types';
 
 // Minimal Material factory — only the fields the classifier reads matter; the
@@ -489,5 +489,43 @@ describe('priceResettableIds — the reprice Mate offers must actually reset the
       mat({ id: 'b', name: 'Joist Timber', quantity: 10, price: 22, priceConfidence: 'high' }),
     ];
     expect(priceResettableIds(materials, []).size).toBe(0);
+  });
+});
+
+describe('wipeStillImplausibleRows — the reprice dead-end becomes a hand-off', () => {
+  it('wipes rows that came back just as implausible as they went in', () => {
+    // QU-178763: the re-fetch re-matched the same cached product, so the
+    // $187.25 twins re-priced to the exact same $187.25.
+    const { materials, sections } = tilingFixture();
+    const resetIds = new Set(['tile', 'adhesive']);
+    const { materials: next, wipedCount, wipedNames } = wipeStillImplausibleRows(resetIds, materials, sections);
+    expect(wipedCount).toBe(2);
+    expect(wipedNames).toContain('Flexible Floor Tile Adhesive');
+    const adhesive = next.find((m) => m.id === 'adhesive')!;
+    expect(adhesive.price).toBe(0);
+    expect(adhesive.description).toContain('set this one yourself');
+    // Wiped rows now classify as unpriced — the pre-send gate holds.
+    const review = reviewQuoteMaterials(next, sections);
+    expect(review.counts.unpriced).toBeGreaterThanOrEqual(2);
+  });
+
+  it('leaves a row alone when the re-fetch fixed it', () => {
+    const { sections } = tilingFixture();
+    // Same reset set, but the re-fetch came back with sane prices.
+    const fixed = [
+      mat({ id: 'tile', name: 'Matte Porcelain Floor Tile 600x600mm', section: 'Floor Tiling (per m²)', quantity: 11, price: 52, priceConfidence: 'high' }),
+      mat({ id: 'adhesive', name: 'Flexible Floor Tile Adhesive 20kg', section: 'Floor Tiling (per m²)', quantity: 3, price: 32.5, priceConfidence: 'high' }),
+    ];
+    const { wipedCount } = wipeStillImplausibleRows(new Set(['tile', 'adhesive']), fixed, sections);
+    expect(wipedCount).toBe(0);
+  });
+
+  it('never wipes a row that was not part of the reset', () => {
+    // Still-implausible rows OUTSIDE the reset set belong to the next review
+    // pass, not this wipe — resetting what we didn't touch would surprise.
+    const { materials, sections } = tilingFixture();
+    const { materials: next, wipedCount } = wipeStillImplausibleRows(new Set(['grout']), materials, sections);
+    expect(wipedCount).toBe(0);
+    expect(next.find((m) => m.id === 'adhesive')!.price).toBe(187.25);
   });
 });

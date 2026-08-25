@@ -113,3 +113,19 @@ describe('thinking bubble', () => {
     expect(screen.queryByLabelText('Mate is replying')).toBeNull();
   });
 });
+
+// A dropped-signal send keeps the tradie's message and offers a retry. The
+// error bubble must actually render that button — error text alone was the
+// old dead end.
+describe('failed turn retry CTA', () => {
+  it('renders Send again on an error bubble that carries the retry action', () => {
+    const failed: ChatMessage = {
+      id: 'm4', role: 'assistant', text: '', createdAt: '',
+      errorMessage: 'Mate is offline — try again in a moment.',
+      cta: { label: 'Send again', action: { type: 'retry_send' } },
+    };
+    render(<MessageBubble message={failed} />);
+    expect(screen.getByText('Mate is offline — try again in a moment.')).toBeTruthy();
+    expect(screen.getByText('Send again')).toBeTruthy();
+  });
+});

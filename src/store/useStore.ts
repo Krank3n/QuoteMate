@@ -23,7 +23,7 @@ import {
 } from '../services/materialsPipeline';
 import { pricingEventToProgress } from './pricingProgress';
 import type { SupplierGapSummary } from '../services/assistant/supplierGapNote';
-import { reviewQuoteMaterials, isFlaggedRow, priceResettableIds, topLinesSummary, QuoteReview } from '../utils/quoteReview';
+import { reviewQuoteMaterials, isFlaggedRow, priceResettableIds, topLinesSummary, wipeStillImplausibleRows, QuoteReview } from '../utils/quoteReview';
 import { loadTemplates } from '../services/sectionTemplateService';
 import { updateQuoteCalculations, healBrokenLabourSections } from '../utils/quoteCalculator';
 import { normaliseLabourToHours } from '../../shared/document/labourUnits';
@@ -493,12 +493,14 @@ async function summariseSupplierGap(
 function resetFlaggedRowsForReprice(
   materials: Material[],
   sections?: QuoteSection[] | null,
-): { materials: Material[]; resetCount: number } {
+): { materials: Material[]; resetCount: number; resetIds: Set<string> } {
   const resettable = priceResettableIds(materials, sections);
   let resetCount = 0;
+  const resetIds = new Set<string>();
   const next = materials.map((m) => {
     if (!isFlaggedRow(m) && !resettable.has(m.id)) return m;
     resetCount++;
+    resetIds.add(m.id);
     // weakProductMatch goes too: it describes the product this row WAS priced
     // against, and that product is being thrown away. Leaving it set would
     // keep warning about a match that no longer exists if the re-fetch fails.
@@ -511,7 +513,7 @@ function resetFlaggedRowsForReprice(
       weakProductMatch: undefined,
     };
   });
-  return { materials: next, resetCount };
+  return { materials: next, resetCount, resetIds };
 }
 
 // Cached map keyed on the documents array identity. Rebuilt whenever the
@@ -3805,7 +3807,7 @@ export const useStore = create<AppState>((set, get) => ({
           const missedSupplierTerms: string[] = [];
 
           const runReprice = async (source: Quote): Promise<{ priced: Quote; resetCount: number }> => {
-            const { materials, resetCount } = resetFlaggedRowsForReprice(source.materials, source.sections);
+            const { materials, resetCount, resetIds } = resetFlaggedRowsForReprice(source.materials, source.sections);
             reportProgress({
               status: resetCount > 0 ? `Re-pricing ${resetCount} row${resetCount === 1 ? '' : 's'}…` : 'Re-checking prices…',
             });
@@ -3825,7 +3827,25 @@ export const useStore = create<AppState>((set, get) => ({
                 },
               },
             );
-            return { priced: updateQuoteCalculations(priced.updatedQuote), resetCount };
+            // The re-fetch is deterministic — same term, same cache, same wrong
+            // product. A row reset for implausible money that comes back just
+            // as implausible gets wiped to $0 with an honest description
+            // instead of looping the same bad match (QU-178763 re-priced its
+            // $187.25 twins to the exact same $187.25).
+            const wiped = wipeStillImplausibleRows(
+              resetIds,
+              priced.updatedQuote.materials,
+              priced.updatedQuote.sections,
+            );
+            if (wiped.wipedCount > 0) {
+              reportProgress({
+                detail: `${wiped.wipedCount} row${wiped.wipedCount === 1 ? '' : 's'} kept coming back wrong — price wiped for you to set.`,
+              });
+            }
+            return {
+              priced: updateQuoteCalculations({ ...priced.updatedQuote, materials: wiped.materials }),
+              resetCount,
+            };
           };
 
           // Preferred path: unified Document (covers both quotes and invoices).

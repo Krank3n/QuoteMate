@@ -1722,55 +1722,15 @@ export function AssistantScreen() {
     [openCameraCapture, pickFromGallery],
   );
 
-  const submit = useCallback(
-    async (overrideText?: string) => {
-      const text = (overrideText ?? input).trim();
-      const pending = pendingAttachmentsRef.current;
-      // A photo with no caption is a perfectly good message — a photo that
-      // FAILED to upload is not. Must match `canSend`, or the Return key
-      // sends what the send button correctly refuses and the tradie gets the
-      // server's own error back.
-      if ((!text && !pending.some((a) => a.status !== 'failed')) || sending) return;
-      // Resolve the active conversation against the current store, not the
-      // closure — `currentConversationId` can point at a missing conversation
-      // (e.g. right after newChat replaced the array). Always validate first.
-      const storeState = useStore.getState();
-      let convoId = storeState.conversations.find((c) => c.id === storeState.currentConversationId)?.id;
-      if (!convoId) convoId = startConversation();
-      const currentMessages =
-        useStore.getState().conversations.find((c) => c.id === convoId)?.messages || [];
-
-      setInput('');
-      // Clear the ref synchronously: an upload still in flight settles onto
-      // the message from here on, not the tray.
-      pendingAttachmentsRef.current = [];
-      setPendingAttachments([]);
-      const userMsg: ChatMessage = {
-        id: generateId(),
-        role: 'user',
-        text,
-        createdAt: new Date().toISOString(),
-        ...(pending.length ? { attachments: pending } : {}),
-      };
-      appendMessage(convoId, userMsg);
-
+  // The back half of a send: stream one assistant turn into an existing
+  // bubble. Shared by submit and the "Send again" retry — the retry re-uses
+  // the failed bubble and the history it already has, so a dropped-signal
+  // send never eats the tradie's typed message.
+  const driveTurn = useCallback(
+    async (convoId: string, streamingId: string, history: ChatMessage[]) => {
       setSending(true);
-      // Mount an empty assistant bubble up-front so streaming text deltas
-      // from the Live session land in a stable target message id. If the
-      // turn errors out, we either replace it with an error message or
-      // (on partial responses) leave the partial text and append the error
-      // separately.
-      const streamingId = generateId();
       let streamedText = '';
-      appendMessage(convoId, {
-        id: streamingId,
-        role: 'assistant',
-        text: '',
-        createdAt: new Date().toISOString(),
-        thinking: DEFAULT_THINKING_LABEL,
-      });
       try {
-        const history = [...currentMessages, userMsg];
         const response = await sendAssistantTurn({
           history,
           onToolCalls: (calls) => {
@@ -1834,6 +1794,7 @@ export function AssistantScreen() {
           : `Mate hit a snag: ${err?.message || 'unknown error'}`;
         // If we got partial streamed text, keep it visible and append a
         // separate error bubble. Otherwise replace the empty placeholder.
+        const retryCta = { label: 'Send again', action: { type: 'retry_send' as const } };
         if (streamedText) {
           appendMessage(convoId, {
             id: generateId(),
@@ -1841,16 +1802,91 @@ export function AssistantScreen() {
             text: '',
             createdAt: new Date().toISOString(),
             errorMessage,
+            cta: retryCta,
           });
         } else {
-          updateMessage(convoId, streamingId, { text: '', errorMessage, thinking: undefined });
+          updateMessage(convoId, streamingId, {
+            text: '',
+            errorMessage,
+            thinking: undefined,
+            cta: retryCta,
+          });
         }
       } finally {
         setSending(false);
       }
     },
-    [appendMessage, updateMessage, conversation, currentConversationId, input, sending, startConversation, showQuoteInChat],
+    [appendMessage, updateMessage, showQuoteInChat],
   );
+
+  // "Send again" on a failed turn: clear the error off the bubble and drive
+  // the turn again over the history that's already there. No new user
+  // message — the original one never left the conversation.
+  const retryTurn = useCallback(
+    (convoId: string, messageId: string) => {
+      if (sending) return;
+      updateMessage(convoId, messageId, {
+        errorMessage: undefined,
+        cta: undefined,
+        text: '',
+        thinking: DEFAULT_THINKING_LABEL,
+      });
+      const history =
+        useStore.getState().conversations.find((c) => c.id === convoId)?.messages || [];
+      void driveTurn(convoId, messageId, history);
+    },
+    [sending, updateMessage, driveTurn],
+  );
+
+  const submit = useCallback(
+    async (overrideText?: string) => {
+      const text = (overrideText ?? input).trim();
+      const pending = pendingAttachmentsRef.current;
+      // A photo with no caption is a perfectly good message — a photo that
+      // FAILED to upload is not. Must match `canSend`, or the Return key
+      // sends what the send button correctly refuses and the tradie gets the
+      // server's own error back.
+      if ((!text && !pending.some((a) => a.status !== 'failed')) || sending) return;
+      // Resolve the active conversation against the current store, not the
+      // closure — `currentConversationId` can point at a missing conversation
+      // (e.g. right after newChat replaced the array). Always validate first.
+      const storeState = useStore.getState();
+      let convoId = storeState.conversations.find((c) => c.id === storeState.currentConversationId)?.id;
+      if (!convoId) convoId = startConversation();
+      const currentMessages =
+        useStore.getState().conversations.find((c) => c.id === convoId)?.messages || [];
+
+      setInput('');
+      // Clear the ref synchronously: an upload still in flight settles onto
+      // the message from here on, not the tray.
+      pendingAttachmentsRef.current = [];
+      setPendingAttachments([]);
+      const userMsg: ChatMessage = {
+        id: generateId(),
+        role: 'user',
+        text,
+        createdAt: new Date().toISOString(),
+        ...(pending.length ? { attachments: pending } : {}),
+      };
+      appendMessage(convoId, userMsg);
+
+      // Mount an empty assistant bubble up-front so streaming text deltas
+      // land in a stable target message id. If the turn errors out, the
+      // bubble carries the error and a "Send again" CTA (retry re-drives the
+      // turn into this same bubble — the user message stays in history).
+      const streamingId = generateId();
+      appendMessage(convoId, {
+        id: streamingId,
+        role: 'assistant',
+        text: '',
+        createdAt: new Date().toISOString(),
+        thinking: DEFAULT_THINKING_LABEL,
+      });
+      await driveTurn(convoId, streamingId, [...currentMessages, userMsg]);
+    },
+    [appendMessage, conversation, currentConversationId, input, sending, startConversation, driveTurn],
+  );
+
 
   // Bump the idle watchdog. Called from every signal that means the
   // session is still in use — server-side VAD picked up speech, Mate is
@@ -2599,6 +2635,10 @@ export function AssistantScreen() {
         handleNavigate({ kind: 'job_preview', quoteId: message.cta.action.quoteId });
         return;
       }
+      if (message.cta.action.type === 'retry_send') {
+        if (conversation) retryTurn(conversation.id, message.id);
+        return;
+      }
       if (message.cta.action.type === 'open_supplier_review') {
         const { importId } = message.cta.action;
         if (supplierImportsRef.current.has(importId)) {
@@ -2620,7 +2660,7 @@ export function AssistantScreen() {
         }
       }
     },
-    [handleNavigate, openSupplierReview, conversation, updateMessage],
+    [handleNavigate, openSupplierReview, conversation, updateMessage, retryTurn],
   );
 
   const handleInlineQuoteEdit = useCallback(
@@ -2888,7 +2928,7 @@ export function AssistantScreen() {
                   onChangeText={setInput}
                   placeholder="Ask Mate…"
                   placeholderTextColor={themeColors.textMuted}
-                  editable={!sending}
+                  editable
                   multiline
                   returnKeyType="send"
                   // iOS single-line Return fires onSubmitEditing; we keep multiline

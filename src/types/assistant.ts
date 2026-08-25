@@ -249,7 +249,11 @@ export interface ChatAttachment {
 
 export type ChatMessageCtaAction =
   | { type: 'open_quote'; quoteId: string }
-  | { type: 'open_supplier_review'; importId: string };
+  | { type: 'open_supplier_review'; importId: string }
+  /** Re-drive a failed turn into the same bubble. The user's message never
+   *  left the conversation, so no payload is needed — dropped signal must
+   *  not eat what the tradie typed. */
+  | { type: 'retry_send' };
 
 export interface ChatMessageCta {
   label: string;

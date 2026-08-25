@@ -348,6 +348,45 @@ export function priceResettableIds(
 }
 
 /**
+ * After a re-price, wipe the rows that came back just as implausible as they
+ * went in. The re-fetch is deterministic (same search term, same cache, same
+ * wrong product), so a reprice alone can loop the same bad match forever —
+ * QU-178763's $187.25 twins re-priced to the exact same $187.25. A row that
+ * was reset for implausible money and still shows implausible money gets its
+ * price wiped to $0 with an honest description: the tradie sets it or deletes
+ * the line, the review flags it 'unpriced', and the pre-send gate holds.
+ */
+export function wipeStillImplausibleRows(
+  resetIds: ReadonlySet<string>,
+  materials: Material[],
+  sections?: QuoteSection[] | null,
+): { materials: Material[]; wipedCount: number; wipedNames: string[] } {
+  if (!resetIds.size) return { materials, wipedCount: 0, wipedNames: [] };
+  const stillBad = new Set(
+    detectImplausibleCostIssues(materials, sections)
+      .map((i) => i.materialId)
+      .filter((id) => resetIds.has(id)),
+  );
+  if (!stillBad.size) return { materials, wipedCount: 0, wipedNames: [] };
+  const wipedNames: string[] = [];
+  const next = materials.map((m) => {
+    if (!stillBad.has(m.id)) return m;
+    wipedNames.push(m.name);
+    return {
+      ...m,
+      price: 0,
+      totalPrice: 0,
+      priceConfidence: undefined,
+      pricingSource: undefined,
+      weakProductMatch: undefined,
+      description:
+        "Re-pricing kept landing on a price that can't be right — set this one yourself or delete the line.",
+    };
+  });
+  return { materials: next, wipedCount: wipedNames.length, wipedNames };
+}
+
+/**
  * The two or three lines carrying the most money, as one plain sentence.
  * Deterministic, for surfaces that show the tradie where the total lives —
  * an $8,239 adhesive line names itself the moment someone reads it out.
