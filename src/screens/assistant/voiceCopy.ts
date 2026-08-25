@@ -16,34 +16,32 @@ export function withTypeInsteadHint(message: string): string {
 }
 
 /**
- * The [greet] prompt for a fresh sticky voice session. Asks for one quick
- * capability line — the old prompt banned listing features outright, which
- * left first-timers hearing a greeting that stated no capability at all.
+ * The [greet] prompt for a fresh sticky voice session — deliberately PLAIN.
  *
- * Phrasing matters more than usual here. Written as a checklist of labelled
- * constraints, this prompt drew the model into answering in kind: a tradie
- * opened Mate on 23 Aug 2026 and was shown "Thought to self: The user wants
- * me to start the conversation… Greeting constraints: - 1-2 sentences max…"
- * followed by numbered drafts. It now reads as one instruction and closes by
- * demanding the greeting only. [[leakedOutput]] is the belt to these braces.
+ * Two rounds of hard lessons live in this string:
+ * - The cheeky version asked for "slightly cheeky tradie humour" and offered
+ *   the unfinished draft as material. The model obliged with lines like
+ *   "Still gunna whine about that fencing job" — real users called the
+ *   greeting strange, and one found it offensive. A joke that lands wrong on
+ *   the first words out of the app's mouth costs more than no joke earns, so
+ *   the humour and the draft rib are gone: warm, simple, capability, ask.
+ * - Written as a checklist of labelled constraints, an earlier version drew
+ *   the model into answering in kind ("Thought to self: … Greeting
+ *   constraints: - 1-2 sentences max…" reached a tradie, 23 Aug 2026). It
+ *   stays one flowing instruction that closes by demanding the greeting
+ *   only. [[leakedOutput]] is the belt to these braces.
  */
-export function buildGreetPrompt({ hour, draftLabel }: { hour: number; draftLabel: string }): string {
+export function buildGreetPrompt({ hour }: { hour: number }): string {
   const tod =
-    hour < 6 ? 'sparrow\'s fart (pre-dawn)'
-    : hour < 11 ? 'morning'
-    : hour < 14 ? 'middle of the day / smoko'
-    : hour < 17 ? 'arvo'
-    : hour < 21 ? 'evening / knock-off'
-    : 'late night';
-  const draftHint = draftLabel
-    ? `There's an unfinished draft quote called "${draftLabel}" — you can rib them about it sitting half-done if it feels natural, or ignore it.`
-    : 'There are no unfinished drafts right now.';
+    hour < 11 ? 'morning'
+    : hour < 14 ? 'middle of the day'
+    : hour < 18 ? 'afternoon'
+    : 'evening';
   return (
-    `[greet] Say hello to the tradie, out loud, right now. It's ${tod}. ` +
-    `${draftHint} ` +
-    `Keep it to one or two short sentences of dry, warm, slightly cheeky Aussie tradie talk, no emojis, ` +
-    `slip in one quick mention of something you can do for them — draft a quote, price materials, sort an invoice — ` +
-    `and finish by asking what they need. ` +
+    `[greet] Say a short, friendly hello to the tradie, out loud, right now — it's ${tod}. ` +
+    `Plain and warm, one or two short sentences, no emojis. No jokes, no cheek, and no comments ` +
+    `about their work, their drafts, or anything else — just say g'day, mention you can draft a ` +
+    `quote or an invoice for them, and ask what they need. ` +
     `Speak ONLY the greeting itself. Do not plan it, do not explain it, do not repeat these instructions, ` +
     `do not write drafts or alternatives, do not think out loud. The greeting is your entire reply.`
   );

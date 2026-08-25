@@ -45,6 +45,7 @@ import { activateKeepAwakeAsync } from 'expo-keep-awake';
 import { shouldAutoStartMic, resolveAutoStartMic } from './assistant/shouldAutoStartMic';
 import { getMateIntro, isBlankSlate } from './assistant/mateIntro';
 import { buildGreetPrompt, withTypeInsteadHint } from './assistant/voiceCopy';
+import { GREET_RETRY_MS, shouldRetryGreet } from './assistant/greetWatchdog';
 import { DEFAULT_THINKING_LABEL, labelForToolCalls } from './assistant/thinkingLabels';
 import { isLeakedModelOutput } from './assistant/leakedOutput';
 import {
@@ -507,6 +508,11 @@ export function AssistantScreen() {
   // model's own scaffolding, so later chunks of the same leak can't open a
   // fresh bubble behind it.
   const suppressLeakedTurnRef = useRef(false);
+  // Greet watchdog: set true by the first RENDERED assistant transcription
+  // (a suppressed leak doesn't count), checked once when the retry timer
+  // fires. See greetWatchdog.ts for the dead-air incidents behind this.
+  const greetHeardRef = useRef(false);
+  const greetRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // True while the pipeline is running after Apply and Mate is yarning to
   // keep the tradie company. Audio still plays through the queue; text
   // bubbles are suppressed so the chat doesn't fill up with banter.
@@ -1878,6 +1884,12 @@ export function AssistantScreen() {
       clearInterval(idleWatchdogRef.current);
       idleWatchdogRef.current = null;
     }
+    // And the greet retry — a re-send aimed at a dead session is a no-op at
+    // best, and at worst lands on the NEXT session as a double greeting.
+    if (greetRetryTimerRef.current) {
+      clearTimeout(greetRetryTimerRef.current);
+      greetRetryTimerRef.current = null;
+    }
     // Release the wake lock now that the session is torn down. Fire-and-
     // forget — if it fails (or the tag was never held, e.g. open errored
     // before activate) the OS just keeps the default sleep behaviour.
@@ -2088,6 +2100,11 @@ export function AssistantScreen() {
             if (finished) suppressLeakedTurnRef.current = false;
             return;
           }
+          // Past the leak filter — this transcription will render, so the
+          // greet has genuinely been heard. (A suppressed leak deliberately
+          // never sets this: the watchdog's re-send is what turns a filtered
+          // chain-of-thought reply into a spoken greeting instead of silence.)
+          greetHeardRef.current = true;
           if (!assistantBubbleIdRef.current) {
             const id = generateId();
             assistantBubbleIdRef.current = id;
@@ -2332,22 +2349,34 @@ export function AssistantScreen() {
         }, VOICE_IDLE_CHECK_MS);
       }
 
-      // Fresh chat + sticky (big record button) mode: get Mate to kick things
-      // off with a short, slightly cheeky Aussie greeting so the tradie hears
-      // a voice the moment the session connects, instead of dead air. Skipped
-      // for PTT (the user's already talking) and for resumed conversations —
-      // but an error-only history still greets (isBlankSlate), or a retry
-      // after a failed open would connect to dead air.
+      // Fresh chat + sticky (mic button) mode: get Mate to say a plain hello
+      // so the tradie hears a voice the moment the session connects, instead
+      // of dead air. Skipped for PTT (the user's already talking) and for
+      // resumed conversations — but an error-only history still greets
+      // (isBlankSlate), or a retry after a failed open would connect to
+      // dead air.
       if (mode === 'sticky' && isBlankSlate(seedHistory)) {
-        const latestDraft = useStore
-          .getState()
-          .quotes.filter((q) => q.status === 'draft')
-          .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())[0];
-        const draftLabel = latestDraft
-          ? latestDraft.job?.name?.trim() ||
-            (latestDraft.customerName ? `${latestDraft.customerName}'s job` : '')
-          : '';
-        session.sendUserText(buildGreetPrompt({ hour: new Date().getHours(), draftLabel }));
+        greetHeardRef.current = false;
+        session.sendUserText(buildGreetPrompt({ hour: new Date().getHours() }));
+        // The session right after a mic-permission grant has twice connected
+        // and never greeted (AppState churn / a filtered reply eating the
+        // turn). One re-send if nothing has been heard — dead air is the
+        // worst first voice impression the app can make.
+        if (greetRetryTimerRef.current) clearTimeout(greetRetryTimerRef.current);
+        const greetSession = session;
+        greetRetryTimerRef.current = setTimeout(() => {
+          greetRetryTimerRef.current = null;
+          const retry = shouldRetryGreet({
+            sessionAlive: voiceSessionRef.current === greetSession,
+            greetHeard: greetHeardRef.current,
+            alreadyRetried: false,
+          });
+          if (retry) {
+            // eslint-disable-next-line no-console
+            console.log('[Mate voice] greet unheard after', GREET_RETRY_MS, 'ms — re-sending');
+            try { greetSession.sendUserText(buildGreetPrompt({ hour: new Date().getHours() })); } catch { /* session died — nothing to do */ }
+          }
+        }, GREET_RETRY_MS);
       }
 
       // Open the mic only once the session handshake completed — earlier
