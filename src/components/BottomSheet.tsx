@@ -46,6 +46,11 @@ interface BottomSheetProps {
   footer?: React.ReactNode;
   /** Optional overlay rendered inside the sheet (e.g. GrainOverlay) */
   overlay?: React.ReactNode;
+  /**
+   * Fires once the close animation has finished, just before unmount.
+   * Lets a navigation-hosted sheet goBack() only after the slide-out.
+   */
+  onClosed?: () => void;
 }
 
 export function BottomSheet({
@@ -59,8 +64,12 @@ export function BottomSheet({
   maxHeightRatio = 0.85,
   footer,
   overlay,
+  onClosed,
 }: BottomSheetProps) {
   const styles = useStyles();
+  // Ref so a re-render mid-close-animation can't stale-capture the callback.
+  const onClosedRef = useRef(onClosed);
+  onClosedRef.current = onClosed;
 
   const safeInsets = useSafeAreaInsets();
   const slideAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
@@ -89,7 +98,17 @@ export function BottomSheet({
     [slideAnim, backdropAnim],
   );
 
-  const shouldRender = useSheetBackHandler(visible, onDismiss, runCloseAnimation);
+  const closeAndNotify = useCallback(
+    (onFinished: () => void) => {
+      runCloseAnimation(() => {
+        onFinished();
+        onClosedRef.current?.();
+      });
+    },
+    [runCloseAnimation],
+  );
+
+  const shouldRender = useSheetBackHandler(visible, onDismiss, closeAndNotify);
 
   useEffect(() => {
     if (visible) {
@@ -232,7 +251,7 @@ export function useStaggeredEntrance(count: number, visible: boolean, delay = 10
 const useStyles = makeStyles((t) => ({
   backdrop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    backgroundColor: t.colors.backdrop,
     zIndex: 1000,
   },
   sheetWrapper: {
