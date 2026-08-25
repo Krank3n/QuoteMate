@@ -18,6 +18,7 @@ import {
 } from './readTools';
 import { buildProposal } from './proposalTools';
 import { resolveQuoteId } from './quoteRefMap';
+import { gateShowQuote } from './showQuoteGate';
 import { isProposalTool, isReadTool } from './toolSchemas';
 
 export interface ToolCallInput {
@@ -87,10 +88,14 @@ export async function dispatchToolCall(call: ToolCallInput): Promise<ToolCallOut
     if (!input?.quoteId) {
       return { name, id, response: { error: 'show_quote requires quoteId.' } };
     }
-    // Resolve a proposalId → minted doc id if the model reused one; the screen
-    // confirms the id actually exists and overrides the response.
-    const quoteId = resolveQuoteId(String(input.quoteId));
-    return { name, id, response: { ok: true }, view: { kind: 'show_quote', quoteId } };
+    // Resolve a proposalId → minted doc id if the model reused one, then let
+    // the screen's registered lookup confirm the id actually renders — an
+    // in-turn error the model can act on beats an ok it has to apologise for.
+    const gate = gateShowQuote(resolveQuoteId(String(input.quoteId)));
+    if (!gate.ok) {
+      return { name, id, response: { error: gate.error } };
+    }
+    return { name, id, response: { ok: true }, view: { kind: 'show_quote', quoteId: gate.quoteId } };
   }
 
   if (isProposalTool(name)) {

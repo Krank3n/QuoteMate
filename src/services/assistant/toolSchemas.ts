@@ -113,7 +113,7 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
   {
     name: 'get_quote',
     description:
-      'Fetch the full quote or invoice by id. Use this after find_customer or list_recent_quotes when you need line items, totals, recipient email, or status to answer a question or build a propose_* payload.',
+      'Fetch the full quote or invoice by id. Use this after find_customer or list_recent_quotes when you need line items, totals, recipient email, or status to answer a question or build a propose_* payload. Also your source when the tradie asks you to list the materials (read back the biggest lines by value), or names a line to remove/change — their wording may be speech-to-text slop, so match the closest line and read it back to confirm.',
     parameters: {
       type: 'object',
       properties: {
@@ -244,7 +244,7 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
   {
     name: 'propose_delete_line_item',
     description:
-      'Propose deleting a SINGLE LINE from an existing quote or invoice (one material row, not the whole document). Apply prompts the tradie to confirm. Use the material id from get_quote — never invent one. Always call get_quote first so the card can show the line name + total being removed. For deleting the entire quote/invoice itself, use propose_delete_quote instead.',
+      'Propose deleting a SINGLE LINE from an existing quote or invoice (one material row, not the whole document). Apply prompts the tradie to confirm. Use the material id from get_quote — never invent one. Always call get_quote first so the card can show the line name + total being removed. The line name the tradie says may be speech-to-text slop ("weight belt" for "weed mat") — match the closest line yourself and read it back; never ask them to open the quote to find it for you. For deleting the entire quote/invoice itself, use propose_delete_quote instead.',
     parameters: {
       type: 'object',
       properties: {

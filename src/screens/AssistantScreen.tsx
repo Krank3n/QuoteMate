@@ -113,6 +113,7 @@ import {
 } from './assistant/chatAttachments';
 import { buildSupplierGapNote } from '../services/assistant/supplierGapNote';
 import { setUnconsumedAttachmentProbe } from '../services/assistant/proposalTools';
+import { setRenderableQuoteProbe } from '../services/assistant/showQuoteGate';
 import { ensureLocalUri } from '../services/assistant/attachmentBytes';
 import { useSupplierListImport, type ExtractResult } from '../hooks/useSupplierListImport';
 import type { SaveSummary } from '../hooks/useSupplierListImport';
@@ -136,6 +137,23 @@ interface AlertConfig {
 }
 
 type VoiceState = 'idle' | 'connecting' | 'listening' | 'thinking';
+
+// The exact lookup the inline quote card renders from, plus the store's own
+// legacy-id bridge (a doc converted from a quote keeps the quote's id while
+// its legacy mirror gets a fresh one — same both-ways-round lookup as
+// recordInvoicePayment). Returns the id the card can actually render, or null.
+function resolveRenderableQuoteId(quoteId: string): string | null {
+  const state = useStore.getState();
+  const doc = state.getDocumentById(quoteId) || state.getDocumentByLegacyId(quoteId);
+  if (doc) return doc.id;
+  if (state.quotes.some((q) => q.id === quoteId)) return quoteId;
+  // The tradie says "QU-178763" out loud, so the model passes it — accept the
+  // human-readable number rather than bouncing Mate to list_recent_quotes.
+  const byNumber = state.documents.find(
+    (d) => d.number?.toUpperCase() === quoteId.toUpperCase(),
+  );
+  return byNumber ? byNumber.id : null;
+}
 
 interface ChatItem {
   key: string;
@@ -1162,22 +1180,30 @@ export function AssistantScreen() {
   // quote/invoice so the caller can say so instead of pretending it worked.
   const showQuoteInChat = useCallback(
     (convoId: string, quoteId: string): boolean => {
-      const state = useStore.getState();
-      const exists = !!(state.getDocumentById(quoteId) || state.quotes.find((q) => q.id === quoteId));
-      if (!exists) return false;
+      const renderable = resolveRenderableQuoteId(quoteId);
+      if (!renderable) return false;
       // The quote a finished import measures its coverage against.
-      activeQuoteIdRef.current = quoteId;
+      activeQuoteIdRef.current = renderable;
       appendMessage(convoId, {
         id: generateId(),
         role: 'assistant',
         text: '',
         createdAt: new Date().toISOString(),
-        inlineQuoteId: quoteId,
+        inlineQuoteId: renderable,
       });
       return true;
     },
     [appendMessage],
   );
+
+  // show_quote used to be answered { ok: true } before anyone checked the id
+  // rendered, so Mate would say "here it is" and the card never appeared.
+  // Register the render lookup with the dispatcher so the tool call fails
+  // inside the turn instead and Mate recovers on its own.
+  useEffect(() => {
+    setRenderableQuoteProbe(resolveRenderableQuoteId);
+    return () => setRenderableQuoteProbe(null);
+  }, []);
 
   const showAlert = useCallback((config: AlertConfig) => setAlertConfig(config), []);
   const dismissAlert = useCallback(() => setAlertConfig(null), []);

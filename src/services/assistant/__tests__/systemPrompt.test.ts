@@ -285,3 +285,30 @@ describe('spoken examples match the real UI', () => {
     expect(MATE_SYSTEM_PROMPT).toContain('"Pipeline" is an internal word — never say it to the tradie');
   });
 });
+
+// Tom's own 25 Aug voice session (Katie's deck): asked to list the materials
+// — refused; said "weight belt" (STT for "weed mat") — was told to go look
+// it up himself; asked for the PDF — told it can't be shown, with the
+// Preview PDF button sitting on the card. Three deflections, three rules.
+describe('answers instead of deflecting (25 Aug session)', () => {
+  it('lists materials when asked instead of pointing at the screen', () => {
+    expect(MATE_SYSTEM_PROMPT).toContain(
+      'when they ASK you to list or read out the materials, do it — never refuse',
+    );
+    expect(MATE_SYSTEM_PROMPT).toContain('biggest three or four lines by dollar value');
+  });
+
+  it('resolves STT-mangled line names itself, never sends the tradie to look', () => {
+    expect(MATE_SYSTEM_PROMPT).toContain('"weight belt" for "weed mat"');
+    expect(MATE_SYSTEM_PROMPT).toContain(
+      'NEVER ask them to open the quote and find it for you',
+    );
+    const declaration = TOOL_DECLARATIONS.find((t) => t.name === 'propose_delete_line_item');
+    expect(declaration?.description).toContain('speech-to-text slop');
+  });
+
+  it('points at the card\'s own Preview PDF button instead of claiming inability', () => {
+    expect(MATE_SYSTEM_PROMPT).toContain('tap Preview PDF on the card');
+    expect(MATE_SYSTEM_PROMPT).toContain("Never claim you can't show a PDF");
+  });
+});
