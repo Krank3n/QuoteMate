@@ -21,6 +21,7 @@ import { formatCurrency } from '../utils/quoteCalculator';
 import { BottomSheet } from './BottomSheet';
 import { isEditablePayment } from '../utils/editablePayment';
 import { selectionTap } from '../utils/haptics';
+import { paymentCopy } from '../constants/paymentCopy';
 
 interface PaymentSheetProps {
   /** Opens the editor for a manually recorded payment. Omit and rows stay read-only. */
@@ -162,7 +163,7 @@ export function PaymentSheet({ visible, onDismiss, doc, onRecordPayment, onEditP
           }}
           style={styles.recordButton}
         >
-          Record a payment
+          {paymentCopy.recordPayment}
         </Button>
       ) : null}
     </BottomSheet>
