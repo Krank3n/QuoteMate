@@ -63,6 +63,7 @@ import { cascadeDeleteJob, pickPaidDocs } from '../utils/deleteJobWithDocs';
 import { formatScheduledDateLong } from '../utils/formatSchedule';
 import { selectionTap, lightTap } from '../utils/haptics';
 import { useAlertModal } from '../hooks/useAlertModal';
+import { paymentCopy } from '../constants/paymentCopy';
 import { GridBackground } from '../components/GridBackground';
 
 export function ViewJobScreen() {
@@ -1037,7 +1038,14 @@ export function ViewJobScreen() {
         target={takePaymentTarget}
         onDismiss={() => setTakePaymentTarget(null)}
         onError={(message) =>
-          showAlert({ type: 'error', title: 'Payment error', message })
+          showAlert({ type: 'error', title: paymentCopy.paymentErrorTitle, message })
+        }
+        onSuccess={({ amount }) =>
+          showAlert({
+            type: 'success',
+            title: paymentCopy.paymentReceivedTitle,
+            message: `${formatCurrency(amount)} charged to card.`,
+          })
         }
         onRecordManualPayment={(invoiceId) =>
           navigation.navigate('RecordPayment', { invoiceId })
