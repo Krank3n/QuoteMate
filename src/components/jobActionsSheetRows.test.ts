@@ -84,11 +84,49 @@ describe('JobActionsSheet — Record a payment row', () => {
     expect(recordRow.when(ctx(null))).toBe(false);
   });
 
-  it('does NOT gate on Square or platform, unlike Take Payment', () => {
-    // Take Payment is Android-only while iOS Tap to Pay is pending approval.
+  it('does NOT gate on Square or platform', () => {
     // Recording a transfer you already received needs neither a reader nor a
-    // Square account, so it must reach iOS too.
+    // Square account, so it must reach every platform.
     const src = recordRow.when.toString();
+    expect(src).not.toContain('Platform');
+  });
+});
+
+/**
+ * "Take Payment" — the collect-now door (tap to pay / Square pay link).
+ *
+ * Gated on money, not platform (Aug 2026). It used to be `any doc, Android
+ * only`: a settled invoice still offered Take Payment after Record had gone,
+ * and iPhones got neither — even though the Square pay link is server-minted
+ * and works everywhere. Only the tap-to-pay row INSIDE the sheet waits on
+ * Apple approval, and it gates itself via config/squareTapToPay.
+ */
+const takeRow = ROWS.find((r: any) => r.id === 'takePayment')!;
+
+describe('JobActionsSheet — Take Payment row', () => {
+  it('shows while an invoice still owes money', () => {
+    expect(takeRow.when(ctx({ type: 'invoice', stage: 'invoice_sent', total: 972.4, paidTotal: 0 }))).toBe(true);
+    expect(takeRow.when(ctx({ type: 'invoice', stage: 'partially_paid', total: 972.4, paidTotal: 400 }))).toBe(true);
+  });
+
+  it('shows on quotes with money left to collect — deposits go through the same sheet', () => {
+    expect(takeRow.when(ctx({ type: 'quote', stage: 'quote_sent', total: 972.4, paidTotal: 0 }))).toBe(true);
+    expect(takeRow.when(ctx({ type: 'quote', stage: 'quote_accepted', total: 972.4, paidTotal: 300 }))).toBe(true);
+  });
+
+  it('hides once there is nothing left to collect', () => {
+    expect(takeRow.when(ctx({ type: 'invoice', stage: 'paid', total: 972.4, paidTotal: 972.4 }))).toBe(false);
+    expect(takeRow.when(ctx({ type: 'quote', stage: 'quote_accepted', total: 972.4, paidTotal: 972.4 }))).toBe(false);
+    expect(takeRow.when(ctx({ type: 'quote', stage: 'draft', total: 0 }))).toBe(false);
+  });
+
+  it('hides on cancelled docs and jobs with no doc', () => {
+    expect(takeRow.when(ctx({ type: 'invoice', stage: 'cancelled', total: 972.4, paidTotal: 0 }))).toBe(false);
+    expect(takeRow.when(ctx(null))).toBe(false);
+  });
+
+  it('no longer gates on platform — the pay link works on iPhone', () => {
+    const src = takeRow.when.toString();
     expect(src).not.toContain('Platform');
   });
 });

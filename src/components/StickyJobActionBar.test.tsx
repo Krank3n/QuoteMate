@@ -181,19 +181,47 @@ describe('sticky bar — banking a payment on an unpaid invoice', () => {
   });
 });
 
-describe('sticky bar — iOS, where card payments are still gated', () => {
-  it('offers Log Payment on iOS too: no reader or Square account needed', async () => {
+/**
+ * iOS takes the same money path as everyone else (Aug 2026).
+ *
+ * Only the tap-to-pay flow waits on Apple approval, and the in-sheet row
+ * gates that itself (config/squareTapToPay). Hiding the whole Take Payment
+ * button on iOS also took away the Square pay link — an iPhone tradie on a
+ * part-paid invoice had no way to collect the rest by card at all.
+ */
+describe('sticky bar — iOS shares the invoice money path', () => {
+  async function resolveOnIos(doc: any) {
     vi.resetModules();
     vi.doMock('react-native', async () => {
       const actual: any = await vi.importActual('react-native');
       return { ...actual, Platform: { OS: 'ios', select: (o: any) => o.ios ?? o.default } };
     });
     const { resolveJobActions: resolveIos } = await import('./StickyJobActionBar');
-    const ids = resolveIos('in_progress', {
-      id: 'inv1', type: 'invoice', stage: 'invoice_sent', total: 972.4, paidTotal: 0,
-    } as any).map((a: any) => a.id);
-    expect(ids).toContain('recordPayment');
+    const actions = resolveIos('in_progress', doc);
     vi.doUnmock('react-native');
     vi.resetModules();
+    return actions;
+  }
+
+  it('leads with Take Payment on a sent, unpaid invoice — the pay link works on iPhone', async () => {
+    const actions = await resolveOnIos({
+      id: 'inv1', type: 'invoice', stage: 'invoice_sent', total: 972.4, paidTotal: 0,
+    });
+    expect(actions[0]).toMatchObject({ id: 'takeFinalPayment', label: 'Take Payment', tone: 'primary' });
+    expect(actions.map((a: any) => a.id)).toContain('recordPayment');
+  });
+
+  it('offers Take Remaining on a part-paid invoice', async () => {
+    const actions = await resolveOnIos({
+      id: 'inv1', type: 'invoice', stage: 'partially_paid', total: 972.4, paidTotal: 400,
+    });
+    expect(actions[0]).toMatchObject({ id: 'takeFinalPayment', label: 'Take Remaining' });
+  });
+
+  it('still offers Log Payment alongside: no reader or Square account needed', async () => {
+    const actions = await resolveOnIos({
+      id: 'inv1', type: 'invoice', stage: 'invoice_sent', total: 972.4, paidTotal: 0,
+    });
+    expect(actions.map((a: any) => a.id)).toContain('recordPayment');
   });
 });

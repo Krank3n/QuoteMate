@@ -228,25 +228,12 @@ export function resolveJobActions(
   }
   if (isInvoiceUnpaid || (isInvoice && invoiceBalanceOwed(primaryDoc))) {
     const followUp = invoiceFollowUp(primaryDoc.sentAt, primaryDoc.dueDate);
-    // iOS gating: takeFinalPayment is hidden until Tap to Pay is approved
-    // and a Square reader is available for App Review demo. On iOS, surface
-    // the followUp as the primary action (or a generic Send Reminder).
-    if (Platform.OS === 'ios') {
-      // Collecting by card is hidden on iOS until Tap to Pay clears review,
-      // but banking a transfer that already landed needs no reader and no
-      // Square account — so iOS gets the Log Payment slot too. Without it an
-      // iPhone tradie had no button on this bar for the commonest thing
-      // they do after sending an invoice.
-      return [
-        {
-          id: 'followUpInvoice',
-          label: followUp ? followUpLabel(followUp, primaryDoc.sentAt) : 'Send Reminder',
-          icon: followUp === 'overdue' ? 'alert-circle-outline' : 'bell-outline',
-          tone: followUp ? toneForFollowUp(followUp) : 'primary',
-        },
-        { id: 'recordPayment', label: 'Log Payment', icon: 'cash-multiple', tone: 'ghost' },
-      ];
-    }
+    // iOS included: Take Payment opens TakePaymentSheet, whose pay-link path
+    // is server-minted and works on every platform — only the in-sheet Tap
+    // to Pay row waits on Apple approval, and it gates itself (remote flag
+    // config/squareTapToPay). iOS used to hide this button entirely, which
+    // also took the pay link away: an iPhone tradie on a part-paid invoice
+    // had no way to collect the rest by card at all.
     const primary: ActionSpec = isPartiallyPaid
       ? { id: 'takeFinalPayment', label: 'Take Remaining', icon: 'credit-card-outline', tone: 'primary' }
       : { id: 'takeFinalPayment', label: 'Take Payment', icon: 'credit-card-outline', tone: 'primary' };
@@ -278,9 +265,9 @@ export function resolveJobActions(
     ];
   }
 
-  // Quote is the primary doc. iOS gating: hide tapToPayDraft / takeDeposit
-  // until Tap to Pay is approved and a Square reader is available for App
-  // Review demo. Fall back to Mark Approved / Resend.
+  // Quote is the primary doc. Take Deposit shows on every platform — the
+  // sheet's pay-link path needs no reader. Only tapToPayDraft stays hidden
+  // on iOS: its label promises the one flow Apple hasn't approved yet.
   const isIos = Platform.OS === 'ios';
   if (isDraft) {
     if (isUnfinishedDraftQuote(primaryDoc)) {
@@ -298,7 +285,7 @@ export function resolveJobActions(
   }
   if (isQuoteSent) {
     const followUp = quoteFollowUp(primaryDoc.sentAt);
-    const showDeposit = !isIos && depositOwed(primaryDoc);
+    const showDeposit = depositOwed(primaryDoc);
     // Fresh (< 2 days) — no follow-up yet; lead with the approval path.
     if (!followUp) {
       if (showDeposit) {

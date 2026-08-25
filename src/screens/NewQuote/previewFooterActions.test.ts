@@ -73,34 +73,44 @@ describe('resolvePreviewFooterActions — once the doc is out the door', () => {
     expect(actions.send).toEqual({ label: 'Send Quote' });
   });
 
-  it('keeps iOS send-only, where Tap to Pay is still gated', () => {
+  // The pay link is server-minted Square checkout, so iOS gets the slot
+  // too — only the label differs: "Tap to Pay" promises the one flow Apple
+  // hasn't approved yet, so iOS says "Take Payment" instead. (The in-sheet
+  // Tap to Pay row self-gates via the config/squareTapToPay flag.)
+  it('restores the slot on iOS as Take Payment, never Tap to Pay', () => {
     const actions = resolvePreviewFooterActions({
       doc: doc({ stage: 'quote_sent', sentAt: 1 }),
       platform: 'ios',
     });
 
-    expect(actions.payment).toBeNull();
+    expect(actions.payment).toEqual({ label: 'Take Payment' });
     expect(actions.send).toEqual({ label: 'Send Quote' });
   });
 
-  it('labels the slot Take Deposit when a deposit is owed', () => {
-    const actions = resolvePreviewFooterActions({
-      doc: doc({ stage: 'quote_sent', sentAt: 1, depositAmount: 500 }),
-      platform: 'android',
-    });
+  it.each([...PLATFORMS, 'ios'] as const)(
+    'labels the slot Take Deposit when a deposit is owed on %s',
+    (platform) => {
+      const actions = resolvePreviewFooterActions({
+        doc: doc({ stage: 'quote_sent', sentAt: 1, depositAmount: 500 }),
+        platform,
+      });
 
-    expect(actions.payment).toEqual({ label: 'Take Deposit' });
-  });
+      expect(actions.payment).toEqual({ label: 'Take Deposit' });
+    },
+  );
 
-  it('labels the slot Take Payment on an invoice', () => {
-    const actions = resolvePreviewFooterActions({
-      doc: doc({ type: 'invoice', stage: 'invoice_sent', sentAt: 1 }),
-      platform: 'android',
-    });
+  it.each([...PLATFORMS, 'ios'] as const)(
+    'labels the slot Take Payment on an invoice on %s',
+    (platform) => {
+      const actions = resolvePreviewFooterActions({
+        doc: doc({ type: 'invoice', stage: 'invoice_sent', sentAt: 1 }),
+        platform,
+      });
 
-    expect(actions.payment).toEqual({ label: 'Take Payment' });
-    expect(actions.send).toEqual({ label: 'Send Invoice' });
-  });
+      expect(actions.payment).toEqual({ label: 'Take Payment' });
+      expect(actions.send).toEqual({ label: 'Send Invoice' });
+    },
+  );
 });
 
 describe('resolvePreviewFooterActions — nothing to act on', () => {

@@ -11,8 +11,11 @@
  * that's when taking a deposit is a real next move. Invoices keep the pair
  * throughout — see isUnsentQuote.
  *
- * iOS keeps its existing gating — takePayment stays hidden there until
- * Tap to Pay clears App Review.
+ * iOS gets the payment slot too: TakePaymentSheet's pay-link path is
+ * server-minted Square checkout and works on every platform. Only the
+ * in-sheet Tap to Pay row waits on Apple approval (it self-gates via the
+ * config/squareTapToPay flag), so the iOS slot never carries the
+ * "Tap to Pay" label — that's the one flow it can't deliver yet.
  */
 import type { PlatformOSType } from 'react-native';
 
@@ -55,7 +58,7 @@ export function resolvePreviewFooterActions({
     label: doc.type === 'invoice' ? 'Send Invoice' : 'Send Quote',
   };
 
-  if (platform === 'ios' || isUnsentQuote(doc)) return { payment: null, send };
+  if (isUnsentQuote(doc)) return { payment: null, send };
 
   return {
     payment: {
@@ -64,7 +67,9 @@ export function resolvePreviewFooterActions({
           ? 'Take Payment'
           : (doc.depositAmount ?? 0) > 0
             ? 'Take Deposit'
-            : 'Tap to Pay',
+            : platform === 'ios'
+              ? 'Take Payment'
+              : 'Tap to Pay',
     },
     send,
   };

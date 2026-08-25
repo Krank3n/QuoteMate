@@ -123,11 +123,19 @@ export function canConvert(doc?: Document | null): boolean {
 // Take Payment and Follow Up sit at the top — those are the
 // everyday actions; everything else (edit, send, archive, delete)
 // is less frequent.
+/** Money still collectable on the doc — an invoice balance or the unpaid
+ *  part of a quote (deposit or full, TakePaymentSheet offers both). Same
+ *  sub-cent tolerance as derivePaymentState. */
+function docOwes(doc?: Document | null): boolean {
+  if (!doc || doc.stage === 'cancelled') return false;
+  const total = Number(doc.total) || 0;
+  return total > 0 && total - (Number(doc.paidTotal) || 0) > 0.005;
+}
+
 /** Money still outstanding on an invoice — the only state where "I've been
  *  paid" is a sentence the tradie can truthfully write. */
 function invoiceOwes(doc?: Document | null): boolean {
-  if (!doc || doc.type !== 'invoice' || doc.stage === 'cancelled') return false;
-  return (Number(doc.total) || 0) - (Number(doc.paidTotal) || 0) > 0.005;
+  return !!doc && doc.type === 'invoice' && docOwes(doc);
 }
 
 export const ROWS: RowDef[] = [
@@ -148,13 +156,20 @@ export const ROWS: RowDef[] = [
   {
     id: 'takePayment',
     label: 'Take Payment',
-    sub: 'Tap to pay or share the Square link',
+    // On iOS the tap-to-pay flow is still pending Apple approval, but the
+    // Square pay link is minted server-side and works everywhere — so the
+    // door stays open and only promises what the platform can do. The
+    // in-sheet Tap to Pay row gates itself (config/squareTapToPay flag).
+    sub:
+      Platform.OS === 'ios'
+        ? 'Share the Square pay link'
+        : 'Tap to pay or share the Square link',
     icon: 'credit-card-outline',
-    // iOS payments are gated off until Tap to Pay is approved and a Square
-    // reader is available for App Review demo. Re-enable by removing the
-    // Platform.OS check here and restoring the iOS usage strings in
-    // plugins/withSquareSDK.js IOS_USAGE_STRINGS.
-    when: ({ primaryDoc }) => !!primaryDoc && Platform.OS === 'android',
+    // Same money gate as Record a payment, widened to quotes: hidden once
+    // there is nothing left to collect. It used to be `any doc, Android
+    // only` — so a settled invoice still offered Take Payment while Record
+    // had already gone, and iPhones got neither.
+    when: ({ primaryDoc }) => docOwes(primaryDoc),
   },
   {
     id: 'followUp',
