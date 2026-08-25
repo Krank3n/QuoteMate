@@ -529,3 +529,31 @@ describe('wipeStillImplausibleRows — the reprice dead-end becomes a hand-off',
     expect(next.find((m) => m.id === 'adhesive')!.price).toBe(187.25);
   });
 });
+
+describe('wipeStillImplausibleRows — bars the product from winning again', () => {
+  it('records the wiped match identity and unlinks the product from the row', () => {
+    const { materials, sections } = tilingFixture();
+    const withIds = materials.map((m) =>
+      m.id === 'adhesive'
+        ? { ...m, bunningsItemNumber: '0087125', productUrl: 'https://b/adhesive-187' }
+        : m,
+    );
+    const { materials: next } = wipeStillImplausibleRows(new Set(['adhesive']), withIds, sections);
+    const adhesive = next.find((m) => m.id === 'adhesive')!;
+    expect(adhesive.excludedProducts).toEqual(['0087125', 'https://b/adhesive-187']);
+    // A $0 row must not keep pointing at the wrong product page.
+    expect(adhesive.bunningsItemNumber).toBeUndefined();
+    expect(adhesive.productUrl).toBeUndefined();
+  });
+
+  it('accumulates exclusions across repeated wipes without duplicates', () => {
+    const { materials, sections } = tilingFixture();
+    const second = materials.map((m) =>
+      m.id === 'adhesive'
+        ? { ...m, bunningsItemNumber: '0099999', excludedProducts: ['0087125'] }
+        : m,
+    );
+    const { materials: next } = wipeStillImplausibleRows(new Set(['adhesive']), second, sections);
+    expect(next.find((m) => m.id === 'adhesive')!.excludedProducts).toEqual(['0087125', '0099999']);
+  });
+});

@@ -42,6 +42,15 @@ export interface Material {
   packSize?: number;
   packUnit?: Material['unit'];
   bunningsItemNumber?: string;
+  /**
+   * Product identities (item numbers / product URLs) this row must never be
+   * matched to again. Written by the reprice wipe when a match kept coming
+   * back with implausible money (QU-178763's $187.25 twins re-priced to the
+   * exact same $187.25 — the ranking is deterministic, so without exclusion
+   * a re-fetch can only re-pick the same wrong product). Read by
+   * pickBestCandidate via the pipeline's excludeProducts option.
+   */
+  excludedProducts?: string[];
   // Reece-specific identifiers, populated when pricingSource is the Reece API.
   // Both are required to build a valid /au/order-gateway/orders payload, so
   // the "Order from Reece" button only enables when these are present on at

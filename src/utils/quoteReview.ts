@@ -372,6 +372,14 @@ export function wipeStillImplausibleRows(
   const next = materials.map((m) => {
     if (!stillBad.has(m.id)) return m;
     wipedNames.push(m.name);
+    // Remember the identity of the product that kept winning, so the next
+    // re-fetch is barred from re-picking it (pickBestCandidate's
+    // excludeProducts) — and unlink it from the row: a $0 line pointing at
+    // the wrong product page would send the tradie to the wrong shelf.
+    const identity = [m.bunningsItemNumber, m.reeceItemNumber, m.productUrl].filter(
+      (v): v is string => !!v,
+    );
+    const excludedProducts = Array.from(new Set([...(m.excludedProducts || []), ...identity]));
     return {
       ...m,
       price: 0,
@@ -379,6 +387,10 @@ export function wipeStillImplausibleRows(
       priceConfidence: undefined,
       pricingSource: undefined,
       weakProductMatch: undefined,
+      bunningsItemNumber: undefined,
+      reeceItemNumber: undefined,
+      productUrl: undefined,
+      ...(excludedProducts.length ? { excludedProducts } : {}),
       description:
         "Re-pricing kept landing on a price that can't be right — set this one yourself or delete the line.",
     };

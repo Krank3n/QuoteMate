@@ -28,6 +28,10 @@ export interface RankableCandidate {
   productName?: string;
   brand?: string;
   confidence?: 'high' | 'medium' | 'low';
+  /** Identity fields, when the source provides them — exclusion matches on
+   *  these so a re-price can be told "anything but THAT product again". */
+  itemNumber?: string;
+  productUrl?: string;
 }
 
 export interface RankerMaterial {
@@ -39,6 +43,15 @@ export interface RankerMaterial {
 export interface PickOptions {
   /** Job-level tier fallback when the material doesn't carry its own. */
   jobQualityTier?: QualityTier;
+  /**
+   * Product identities (item numbers / product URLs) that must not win, no
+   * matter how well they rank. The ranking is deterministic, so a reprice
+   * over the same candidates re-picks the same product forever; a row whose
+   * match was wiped for implausible money passes its old identity here so
+   * the re-fetch has to find something else — or honestly return null and
+   * fall to the estimate/flag path.
+   */
+  excludeProducts?: ReadonlySet<string>;
 }
 
 /**
@@ -601,6 +614,15 @@ export function pickBestCandidate<T extends RankableCandidate>(
   options: PickOptions = {},
 ): T | null {
   if (!candidates || candidates.length === 0) return null;
+  const excluded = options.excludeProducts;
+  if (excluded?.size) {
+    candidates = candidates.filter(
+      (c) =>
+        !(c.itemNumber && excluded.has(c.itemNumber)) &&
+        !(c.productUrl && excluded.has(c.productUrl)),
+    );
+    if (candidates.length === 0) return null;
+  }
   const query = material.searchTerm || material.name || '';
   const hadPricedCandidates = candidates.some((c) => typeof c.price === 'number' && c.price > 0);
   const inCategory = candidates.filter((c) =>

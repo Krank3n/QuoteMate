@@ -55,6 +55,12 @@ import {
 } from './bunningsScraperClient';
 import { searchMaterialPrice } from './webSearchPricing';
 import { pickBestCandidate, isSemanticallyCompatible, type RankableCandidate } from './candidateRanker';
+
+// Identities this row must never match again (see Material.excludedProducts —
+// written by the reprice wipe when a match kept returning implausible money).
+const excludeSetFor = (m: Material): ReadonlySet<string> | undefined =>
+  m.excludedProducts?.length ? new Set(m.excludedProducts) : undefined;
+
 import { summarizePriceFetchOutcome } from './priceFetchTelemetry';
 import { matchEvidence, stampMatchConfidence } from '../utils/matchEvidence';
 import { withOrigin } from '../utils/materialOrigin';
@@ -784,7 +790,7 @@ async function fetchPricesForQuoteInner(
         name: m.name,
         searchTerm: m.searchTerm,
         qualityTier: m.qualityTier,
-      }, { jobQualityTier }) as (typeof hits[number]) | null;
+      }, { jobQualityTier, excludeProducts: excludeSetFor(m) }) as (typeof hits[number]) | null;
       const top = ranked || hits[0];
       m.price = supplierPriceForGstMode(top.price, gstInclusive);
       m.manualPriceOverride = false;
@@ -897,7 +903,7 @@ async function fetchPricesForQuoteInner(
         pickBestCandidate(
           validReeceCandidates as unknown as RankableCandidate[],
           { name: m.name, searchTerm: m.searchTerm, qualityTier: m.qualityTier },
-          { jobQualityTier },
+          { jobQualityTier, excludeProducts: excludeSetFor(m) },
         ) as unknown as (typeof candidates[number]) | null
         || candidates[0];
       if (!result || !result.price || !result.itemNumber) {
@@ -1076,7 +1082,7 @@ async function fetchPricesForQuoteInner(
               // Bunnings tends to be the cheapest/most-popular SKU. See
               // candidateRanker for the tier-bias math.
               const product =
-                pickBestCandidate(candidates as RankableCandidate[], material, { jobQualityTier }) as ScraperProduct | null;
+                pickBestCandidate(candidates as RankableCandidate[], material, { jobQualityTier, excludeProducts: excludeSetFor(material) }) as ScraperProduct | null;
               if (candidates.length > 0) candidatesByMaterialId.set(material.id, candidates);
               const ok = !!(product && product.price > 0);
               if (ok && product) {
@@ -1167,7 +1173,7 @@ async function fetchPricesForQuoteInner(
         // as the batch path above. The supplier ranker put a budget SKU
         // first; we want the one that matches this material's quality tier.
         const product =
-          pickBestCandidate(candidates as RankableCandidate[], material, { jobQualityTier }) as ScraperProduct | null;
+          pickBestCandidate(candidates as RankableCandidate[], material, { jobQualityTier, excludeProducts: excludeSetFor(material) }) as ScraperProduct | null;
 
         if (product && product.price > 0) {
           material.price = supplierPriceForGstMode(product.price, gstInclusive);

@@ -9,6 +9,8 @@ import {
   quoteStageOfDoc,
   quoteStageRank,
   safeRatio,
+  startOfWeekAest,
+  WEEK_COHORT_COUNT,
   type FunnelUserInput,
 } from './adminFunnel.helpers';
 
@@ -348,5 +350,63 @@ describe('wizard steps — where the trial→sent collapse actually happens', ()
     ).cohorts['28'];
     expect(cohort.signups).toBe(1);
     expect(cohort.reachedPreview).toBe(1);
+  });
+});
+
+describe('week segments + recent payers — a conversion is visible the day it happens', () => {
+  // NOW is Thursday 2026-07-02 00:00 UTC = Thursday 10:00 AEST, so the current
+  // week began Monday 2026-06-29 00:00 AEST = Sunday 2026-06-28 14:00 UTC.
+  const WEEK_START = Date.parse('2026-06-28T14:00:00.000Z');
+
+  it('startOfWeekAest finds the AEST Monday, not the UTC one', () => {
+    expect(startOfWeekAest(NOW)).toBe(WEEK_START);
+    // Monday 00:00 AEST exactly is its own week start…
+    expect(startOfWeekAest(WEEK_START)).toBe(WEEK_START);
+    // …and one ms earlier belongs to the previous week.
+    expect(startOfWeekAest(WEEK_START - 1)).toBe(WEEK_START - 7 * DAY);
+  });
+
+  const billedSub = (trialStart: number, periodStart: number) => ({
+    isPro: true,
+    platform: 'android',
+    productId: 'quotemate_pro',
+    trialStartedAt: iso(trialStart),
+    currentPeriodStart: iso(periodStart),
+  });
+
+  // Signed up 37 days ago, converted YESTERDAY — the case that made the 7d
+  // cohort read "Paying 0" while the founder had a brand-new customer.
+  const convertedYesterday = user({
+    uid: 'new-payer',
+    signupAt: NOW - 37 * DAY,
+    sub: billedSub(NOW - 37 * DAY, NOW - 1 * DAY),
+  });
+  const signedUpThisWeek = user({ uid: 'fresh', signupAt: NOW - 1 * DAY });
+  const signedUpLastWeek = user({ uid: 'lastweek', signupAt: WEEK_START - 3 * DAY });
+  const out = computeFunnelStats([convertedYesterday, signedUpThisWeek, signedUpLastWeek], NOW);
+
+  it('the 7d cohort still (correctly) shows no paying members…', () => {
+    expect(out.cohorts['7'].paying).toBe(0);
+  });
+  it('…but recentPayers surfaces the conversion, newest billing first', () => {
+    expect(out.recentPayers.map((p) => p.uid)).toEqual(['new-payer']);
+    expect(out.recentPayers[0].periodStart).toBe(NOW - 1 * DAY);
+    expect(out.recentPayers[0].signupAt).toBe(NOW - 37 * DAY);
+    expect(out.recentPayers[0].restored).toBe(false);
+  });
+
+  it('buckets signups into Mon–Sun AEST weeks, newest week first', () => {
+    expect(out.weekCohorts).toHaveLength(WEEK_COHORT_COUNT);
+    expect(out.weekCohorts[0].start).toBe(WEEK_START);
+    expect(out.weekCohorts[0].signups).toBe(1); // 'fresh'
+    expect(out.weekCohorts[1].signups).toBe(1); // 'lastweek'
+    expect(out.weekCohorts[5].signups).toBe(1); // 'new-payer', 37d ago
+    expect(out.weekCohorts[5].paying).toBe(1);
+  });
+
+  it('marks a week mature only once ALL its members have had trial + lag time', () => {
+    expect(out.weekCohorts[0].matureForPaid).toBe(false); // current week
+    expect(out.weekCohorts[1].matureForPaid).toBe(false); // ended 3.6d ago
+    expect(out.weekCohorts[5].matureForPaid).toBe(true); // ended >17d ago
   });
 });

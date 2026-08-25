@@ -17,6 +17,16 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 // tradies who signed up in the last N days, how far did they get?".
 export const COHORT_WINDOW_DAYS = [7, 28, 90] as const;
 
+// Week-by-week signup segments — the "is this month's cohort better than last
+// month's?" view a trailing window can't answer. Weeks run Mon–Sun in the
+// founder's timezone (AEST, UTC+10 — Queensland has no DST, so a fixed offset
+// is correct year-round).
+export const WEEK_COHORT_COUNT = 8;
+export const AEST_OFFSET_MS = 10 * 60 * 60 * 1000;
+// Newest-billing-first payer list. Everyone shows (there are single digits of
+// payers); the cap only guards the payload if that ever changes.
+export const RECENT_PAYERS_CAP = 12;
+
 // A signup cohort can only contain paid conversions once its members have had
 // time to finish a trial and be billed. Below this, `paying` is structurally
 // near-zero and the rate is meaningless rather than bad — the UI says so
@@ -181,6 +191,39 @@ export interface FunnelCohort extends FunnelSteps {
   activationRate: number;
 }
 
+/** One calendar-week signup segment (Mon–Sun, AEST). */
+export interface WeekCohort extends FunnelSteps {
+  /** Monday 00:00 AEST, ms epoch (inclusive). */
+  start: number;
+  /** The following Monday 00:00 AEST, ms epoch (exclusive). */
+  end: number;
+  /** True once the WHOLE week is older than a trial + billing lag — until
+   *  then `paying` is structurally understated, not genuinely bad. */
+  matureForPaid: boolean;
+  trialToPaid: number;
+  activationRate: number;
+}
+
+/**
+ * A paying subscriber, newest billing period first — so a conversion is
+ * visible the day it happens, whatever cohort the tradie signed up in. (The
+ * cohort funnels hide exactly this: someone who signs up, trials for a
+ * fortnight and converts appears as `paying` only in windows that reach back
+ * to their SIGNUP date.)
+ */
+export interface RecentPayerRow {
+  uid: string;
+  email: string | null;
+  businessName: string | null;
+  signupAt: number | null;
+  platform: string | null;
+  /** Start of the current billing period — the first charge for a new payer,
+   *  the latest renewal for an established one. */
+  periodStart: number | null;
+  /** True for incident-restored store subs awaiting receipt re-sync. */
+  restored: boolean;
+}
+
 export interface FunnelPayload {
   funnel: FunnelSteps;
   conversion: {
@@ -192,6 +235,10 @@ export interface FunnelPayload {
   /** Same funnel recomputed over signup cohorts, keyed by window in days.
    *  Lets the dashboard time-slice the app funnel without a second query. */
   cohorts: Record<string, FunnelCohort>;
+  /** Week-by-week signup segments, newest week first. */
+  weekCohorts: WeekCohort[];
+  /** Every paying subscriber, newest billing period first. */
+  recentPayers: RecentPayerRow[];
   // Trialing users with <= EXPIRING_TRIAL_DAYS left, regardless of activity.
   // (The expiringTrialsInactive list below is the inactive subset that needs a nudge.)
   expiringTrials: number;
@@ -207,6 +254,18 @@ export interface FunnelPayload {
 export function safeRatio(numerator: number, denominator: number): number {
   if (!denominator || denominator <= 0) return 0;
   return numerator / denominator;
+}
+
+/** Monday 00:00 AEST on or before `at`, as ms epoch. */
+export function startOfWeekAest(at: number): number {
+  const shifted = new Date(at + AEST_OFFSET_MS);
+  const daysFromMonday = (shifted.getUTCDay() + 6) % 7;
+  const mondayMidnightShifted = Date.UTC(
+    shifted.getUTCFullYear(),
+    shifted.getUTCMonth(),
+    shifted.getUTCDate() - daysFromMonday
+  );
+  return mondayMidnightShifted - AEST_OFFSET_MS;
 }
 
 /**
@@ -276,6 +335,7 @@ export function computeFunnelStats(inputs: FunnelUserInput[], now: number = Date
   let expiringTrials = 0;
   const neverSentQuote: FunnelActionRow[] = [];
   const expiringTrialsInactive: FunnelActionRow[] = [];
+  const payers: RecentPayerRow[] = [];
 
   // Per-user step flags, derived exactly once. Both the all-time funnel and
   // every cohort aggregate from this, so the windowed numbers can never drift
@@ -284,6 +344,8 @@ export function computeFunnelStats(inputs: FunnelUserInput[], now: number = Date
 
   for (const u of inputs) {
     const f = deriveSubFields(u.sub, now);
+    const billed = isBilledSub(u.sub);
+    const restored = !billed && isRestoredStorePro(u.sub, now);
 
     marks.push({
       signupAt: u.signupAt,
@@ -295,9 +357,21 @@ export function computeFunnelStats(inputs: FunnelUserInput[], now: number = Date
       quoteStage: maxQuoteStage(u.quoteStage, u.hasSentDoc ? 'sent' : 'none'),
       // Headcount includes incident-restored store subs (their Apple/Google
       // billing kept running; only the Firestore billing record is missing).
-      payingBilled: isBilledSub(u.sub),
-      payingRestored: !isBilledSub(u.sub) && isRestoredStorePro(u.sub, now),
+      payingBilled: billed,
+      payingRestored: restored,
     });
+
+    if (billed || restored) {
+      payers.push({
+        uid: u.uid,
+        email: u.email,
+        businessName: u.businessName ?? null,
+        signupAt: u.signupAt,
+        platform: typeof u.sub?.platform === 'string' ? u.sub.platform : null,
+        periodStart: f.currentPeriodStart,
+        restored,
+      });
+    }
 
     // Actionable: signed up, past the grace window, never sent anything.
     if (
@@ -339,6 +413,30 @@ export function computeFunnelStats(inputs: FunnelUserInput[], now: number = Date
     };
   }
 
+  // Week segments, newest first. The current (partial) week is included —
+  // the UI labels it rather than hiding fresh signups.
+  const weekCohorts: WeekCohort[] = [];
+  const thisWeekStart = startOfWeekAest(now);
+  for (let i = 0; i < WEEK_COHORT_COUNT; i++) {
+    const start = thisWeekStart - i * 7 * DAY_MS;
+    const end = start + 7 * DAY_MS;
+    const steps = aggregateSteps(
+      marks.filter((m) => m.signupAt !== null && m.signupAt >= start && m.signupAt < end)
+    );
+    weekCohorts.push({
+      ...steps,
+      start,
+      end,
+      matureForPaid: now - end >= PAID_MATURITY_DAYS * DAY_MS,
+      trialToPaid: safeRatio(steps.paying, steps.startedTrial),
+      activationRate: safeRatio(steps.sentQuote, steps.signups),
+    });
+  }
+
+  const recentPayers = payers
+    .sort((a, b) => (b.periodStart || b.signupAt || 0) - (a.periodStart || a.signupAt || 0))
+    .slice(0, RECENT_PAYERS_CAP);
+
   return {
     funnel,
     conversion: {
@@ -346,6 +444,8 @@ export function computeFunnelStats(inputs: FunnelUserInput[], now: number = Date
       activationRate: safeRatio(funnel.sentQuote, funnel.signups),
     },
     cohorts,
+    weekCohorts,
+    recentPayers,
     expiringTrials,
     actionable: {
       neverSentQuote: sortAndCap(neverSentQuote),

@@ -573,3 +573,40 @@ describe('spec-mismatch gate — the QU-178270/178227/178239 audit failures', ()
     ], { searchTerm: 'Fuel Allowance' })).toBeNull();
   });
 });
+
+// The ranking is deterministic — a reprice over the same candidates re-picks
+// the same product forever. excludeProducts is how a wiped row says "anything
+// but THAT one again", and an all-excluded field must return null (the honest
+// estimate/flag path), never fall back to the excluded winner.
+describe('pickBestCandidate — excludeProducts', () => {
+  const tileish = (over: Record<string, unknown>) => ({
+    price: 50,
+    productName: 'Matte Porcelain Floor Tile 600x600mm',
+    confidence: 'high' as const,
+    ...over,
+  });
+
+  it('refuses the excluded item number even when it would win', () => {
+    const bad = tileish({ price: 187.25, itemNumber: '0087125' });
+    const good = tileish({ price: 52, itemNumber: '0012345' });
+    const picked = pickBestCandidate([bad, good], { searchTerm: 'matte porcelain floor tile 600x600' }, {
+      excludeProducts: new Set(['0087125']),
+    });
+    expect(picked?.itemNumber).toBe('0012345');
+  });
+
+  it('matches exclusion by productUrl when there is no item number', () => {
+    const bad = tileish({ price: 187.25, productUrl: 'https://b/tile-187' });
+    const picked = pickBestCandidate([bad], { searchTerm: 'matte porcelain floor tile 600x600' }, {
+      excludeProducts: new Set(['https://b/tile-187']),
+    });
+    expect(picked).toBeNull();
+  });
+
+  it('changes nothing when no exclusions are passed', () => {
+    const only = tileish({ itemNumber: '0087125' });
+    expect(
+      pickBestCandidate([only], { searchTerm: 'matte porcelain floor tile 600x600' }, {}),
+    ).toBe(only);
+  });
+});
