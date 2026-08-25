@@ -58,6 +58,24 @@ const ABSURD_QUANTITY_BY_UNIT: Record<string, number> = {
 };
 
 /**
+ * Thin-layer consumables — products spread over a surface in millimetres.
+ * Real-world densities: tile adhesive 3–6 kg/m², grout 0.5–2, render up to
+ * ~30 for a thick coat. The $81k bathroom happened because the model emitted
+ * a GRAMS-per-m² figure (350) as kg-per-m² and the flat kg ceiling above
+ * (calibrated for legitimate bulk — crusher dust, slab concrete at 240+
+ * kg/m²) let 350 × 31 m² = 10,850 kg sail through. Density is only absurd
+ * relative to what the product IS, so this guard is name-scoped: no
+ * thin-layer product spreads at more than ~40 kg per work unit, while
+ * concrete and road base legitimately do.
+ */
+const THIN_LAYER_NAME_RE =
+  /\b(adhesive|glue|grout|sealant|silicone|caulk|render|levell?ing compound|primer|additive)\b/i;
+const THIN_LAYER_MAX_KG_PER_UNIT = 40;
+// Only meaningful when the section multiplier is a real area/spread count —
+// a per-unit density against multiplier 1 is just a total, judged above.
+const THIN_LAYER_MIN_MULTIPLIER = 10;
+
+/**
  * Units that count discrete objects you buy off a shelf. Half a paver or
  * 0.3 of a screw is meaningless, so these round to whole numbers.
  */
@@ -231,6 +249,30 @@ export function validateAndRepairAiOutput(
       // (83 m³ of pavers) is a UNIT error; the absurd volume is a symptom of
       // it, not a second independent fault. Both counts still increment, so
       // no signal is lost — only the single pricingSource label is at stake.
+      if (next.pricingSource !== 'invalid_unit') {
+        next = { ...next, pricingSource: 'absurd_quantity' };
+      }
+    }
+    // Thin-layer density guard: a per-unit kg figure no adhesive/grout/render
+    // could spread at. Catches the grams-emitted-as-kg family the flat kg
+    // ceiling can't see (350 "kg"/m² of tile adhesive → 10,850 kg → $49,541
+    // on an 11 m² bathroom). Flag-only, like everything here — value
+    // rewriting is how QU-178694 happened.
+    if (
+      unit === 'kg' &&
+      multiplier >= THIN_LAYER_MIN_MULTIPLIER &&
+      name &&
+      THIN_LAYER_NAME_RE.test(name) &&
+      Number.isFinite(qty) &&
+      qty > THIN_LAYER_MAX_KG_PER_UNIT
+    ) {
+      absurdQuantityCount++;
+      log.warn('[ai-validate] thin-layer density beyond any real product', {
+        name,
+        perUnitKg: qty,
+        sectionMultiplier: multiplier,
+        ceiling: THIN_LAYER_MAX_KG_PER_UNIT,
+      });
       if (next.pricingSource !== 'invalid_unit') {
         next = { ...next, pricingSource: 'absurd_quantity' };
       }

@@ -739,3 +739,63 @@ describe('detectLaunderedSections', () => {
     expect(flags.launderedSections).toEqual([]);
   });
 });
+
+// The $81k bathroom: 350 g/m² of tile adhesive emitted as kg/m², × 31 m²
+// = 10,850 kg = $49,541, under the flat 50-tonne kg ceiling (which is
+// calibrated for legitimate bulk). Density is only absurd relative to what
+// the product IS, so the guard is name-scoped to thin-layer consumables.
+describe('thin-layer density guard', () => {
+  const adhesive = (qty: number, over: Record<string, unknown> = {}) => ({
+    name: 'Rubber Modified Tile Adhesive',
+    unit: 'kg',
+    quantity: qty,
+    price: 4.5,
+    section: 'Tiling',
+    sectionLaborHours: 1.5,
+    sectionMultiplier: 31,
+    ...over,
+  });
+
+  it('flags the grams-as-kg adhesive that built the $81k bathroom', () => {
+    const { materials, flags } = validateAndRepairAiOutput([adhesive(350)], silent);
+    expect(flags.hasAbsurdQuantity).toBe(true);
+    expect(materials[0].pricingSource).toBe('absurd_quantity');
+  });
+
+  it('leaves a real adhesive density alone (4 kg per m²)', () => {
+    const { flags } = validateAndRepairAiOutput([adhesive(4)], silent);
+    expect(flags.hasAbsurdQuantity).toBe(false);
+  });
+
+  it('leaves thick render alone (30 kg per m² is a real coat)', () => {
+    const { flags } = validateAndRepairAiOutput(
+      [adhesive(30, { name: 'Acrylic Render' })],
+      silent,
+    );
+    expect(flags.hasAbsurdQuantity).toBe(false);
+  });
+
+  it('never judges slab-type bulk by thin-layer rules', () => {
+    // A 100mm slab really is ~240 kg of concrete per m².
+    const { flags } = validateAndRepairAiOutput(
+      [adhesive(240, { name: 'Ready-mix Concrete' })],
+      silent,
+    );
+    expect(flags.hasAbsurdQuantity).toBe(false);
+  });
+
+  it('ignores densities in non-area sections (multiplier 1 totals)', () => {
+    // 100 kg of adhesive as a whole-job total against multiplier 1 is judged
+    // by the flat ceiling, not the per-m² density rule.
+    const { flags } = validateAndRepairAiOutput(
+      [adhesive(100, { sectionMultiplier: 1 })],
+      silent,
+    );
+    expect(flags.hasAbsurdQuantity).toBe(false);
+  });
+
+  it('does not value-rewrite — the quantity survives for downstream detectors', () => {
+    const { materials } = validateAndRepairAiOutput([adhesive(350)], silent);
+    expect(materials[0].quantity).toBe(350);
+  });
+});
