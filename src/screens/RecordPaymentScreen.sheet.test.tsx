@@ -223,9 +223,34 @@ describe('RecordPaymentScreen sheet-screen', () => {
 
     fireEvent.click(getByRole('button', { name: /Remove this payment/ }));
     expect(lastAlert()).toMatchObject({ type: 'warning', title: 'Remove this payment?' });
+    // AlertModal only renders a Cancel when BOTH text and action are given —
+    // a destructive confirm must never ship with "Remove" as its only button.
+    expect(lastAlert().secondaryButtonText).toBe('Cancel');
+    expect(typeof lastAlert().secondaryButtonAction).toBe('function');
 
     await act(async () => lastAlert().primaryButtonAction());
     expect(state.deleteDocumentPayment).toHaveBeenCalledWith('doc-1', 'pay-1');
+    expect(sheet.props.visible).toBe(false);
+  });
+
+  it('cent-rounds the prefilled full-balance amount before writing', async () => {
+    // total - paidTotal carries IEEE noise: 999.99 - 333.33 = 666.6600000000001.
+    state.documents = [
+      { ...invoiceDoc, total: 999.99, paidTotal: 333.33, payments: [] },
+    ];
+    const { getByRole } = render(<RecordPaymentScreen />);
+
+    fireEvent.click(getByRole('button', { name: /Record Payment/ }));
+
+    await waitFor(() => expect(state.recordDocumentPayment).toHaveBeenCalled());
+    expect(state.recordDocumentPayment.mock.calls[0][1]).toBe(666.66);
+  });
+
+  it('offers a Cancel escape in the form — the backdrop is unreachable with the keyboard up', () => {
+    const { getByRole } = render(<RecordPaymentScreen />);
+
+    fireEvent.click(getByRole('button', { name: /^Cancel$/ }));
+
     expect(sheet.props.visible).toBe(false);
   });
 

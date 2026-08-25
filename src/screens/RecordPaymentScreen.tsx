@@ -133,8 +133,11 @@ export function RecordPaymentScreen() {
     ? maxAmountForEdit(document, editingPayment)
     : amountDue;
 
+  // Cent-round the prefill: amountDue is a float subtraction (total -
+  // paidTotal) and its IEEE noise would otherwise ride the accept-the-default
+  // path straight into the ledger and the Xero push.
   const [amount, setAmount] = useState<number>(
-    editingPayment ? Number(editingPayment.amount) || 0 : amountDue,
+    Math.round((editingPayment ? Number(editingPayment.amount) || 0 : amountDue) * 100) / 100,
   );
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(
     LEDGER_METHOD_TO_FORM[editingPayment?.method ?? ''] ?? 'bank_transfer',
@@ -153,7 +156,7 @@ export function RecordPaymentScreen() {
   useEffect(() => {
     // Don't stomp the value being edited when the doc reloads.
     if (invoiceKey && !editingPayment) {
-      setAmount(amountDue);
+      setAmount(Math.round(amountDue * 100) / 100);
     }
   }, [invoiceKey, amountDue, editingPayment]);
 
@@ -192,6 +195,10 @@ export function RecordPaymentScreen() {
       message: 'The invoice balance goes back up by this amount.',
       primaryButtonText: 'Remove',
       secondaryButtonText: paymentCopy.cancel,
+      // AlertModal renders the secondary button only when BOTH text and
+      // action are present — without this no-op, a destructive confirm
+      // ships with "Remove" as its only button.
+      secondaryButtonAction: () => {},
       // Keeps-open so a failure can swap in the error dialog without the
       // auto-dismiss wiping it.
       primaryKeepsOpen: true,
@@ -290,6 +297,7 @@ export function RecordPaymentScreen() {
         <Button mode="text" onPress={dismiss}>
           {paymentCopy.close}
         </Button>
+        {alertNode}
       </BottomSheet>
     );
   }
@@ -446,6 +454,12 @@ export function RecordPaymentScreen() {
           Remove this payment
         </Button>
       ) : null}
+
+      {/* Explicit way out — with the keyboard up the sheet translates past
+          the top of the screen and the backdrop can't be tapped at all. */}
+      <Button mode="text" onPress={dismiss} disabled={isSubmitting}>
+        {paymentCopy.cancel}
+      </Button>
 
       {/* Portal-hosted, so position in the tree only sets mount order —
           after the sheet, which puts the dialog on top (ScheduleJobSheet's

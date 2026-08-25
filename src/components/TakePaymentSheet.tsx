@@ -168,8 +168,10 @@ export function TakePaymentSheet({
   // Reset the acknowledgement + modal state whenever the sheet opens so
   // previous ticks don't carry over. On-open rather than on-close: the sheet
   // stays rendered through the close animation, and resetting then would
-  // visibly untick the checkbox mid-slide.
-  React.useEffect(() => {
+  // visibly untick the checkbox mid-slide. Layout effect so the reset commits
+  // before paint — a plain effect would let one frame of the previous
+  // target's override/tick reach the screen on reopen.
+  React.useLayoutEffect(() => {
     if (visible) {
       setTermsAcknowledged(false);
       setTermsModalVisible(false);
