@@ -114,7 +114,9 @@ import {
 import { buildSupplierGapNote } from '../services/assistant/supplierGapNote';
 import { setUnconsumedAttachmentProbe } from '../services/assistant/proposalTools';
 import { setRenderableQuoteProbe } from '../services/assistant/showQuoteGate';
+import { setPendingProposalProbe } from '../services/assistant/pendingProposalGate';
 import { findSupersededProposals } from './assistant/proposalSupersede';
+import { findPendingProposal } from './assistant/pendingProposal';
 import { ensureLocalUri } from '../services/assistant/attachmentBytes';
 import { useSupplierListImport, type ExtractResult } from '../hooks/useSupplierListImport';
 import type { SaveSummary } from '../hooks/useSupplierListImport';
@@ -1206,6 +1208,20 @@ export function AssistantScreen() {
     return () => setRenderableQuoteProbe(null);
   }, []);
 
+  // A typed "yes"/"nah" resolves the waiting card like a tap. The dispatcher
+  // gates the control tools through this probe, so the model learns in-turn
+  // when nothing is waiting instead of claiming it applied something.
+  useEffect(() => {
+    setPendingProposalProbe((proposalId) => {
+      const state = useStore.getState();
+      const messages =
+        state.conversations.find((c) => c.id === state.currentConversationId)?.messages || [];
+      const found = findPendingProposal(messages, proposalId);
+      return found ? { messageId: found.message.id, proposalId: found.proposal.id } : null;
+    });
+    return () => setPendingProposalProbe(null);
+  }, []);
+
   const showAlert = useCallback((config: AlertConfig) => setAlertConfig(config), []);
   const dismissAlert = useCallback(() => setAlertConfig(null), []);
 
@@ -1827,6 +1843,22 @@ export function AssistantScreen() {
             });
           }
         }
+        // Cards the tradie confirmed/cancelled in words — resolve each pinned
+        // card exactly as its button tap would. Re-check it's still pending:
+        // the tradie may have tapped it themselves while the turn ran.
+        for (const action of response.controlActions || []) {
+          const msgs =
+            useStore.getState().conversations.find((c) => c.id === convoId)?.messages || [];
+          const target = msgs.find((m) => m.id === action.messageId);
+          const prop = target?.proposals?.find((p) => p.id === action.proposalId);
+          if (!target || !prop) continue;
+          if ((target.proposalStatus?.[prop.id] ?? 'pending') !== 'pending') continue;
+          if (action.decision === 'apply') {
+            await handleApply(target, prop);
+          } else {
+            handleDismiss(target, prop);
+          }
+        }
       } catch (err: any) {
         // eslint-disable-next-line no-console
         console.warn('[Mate] error', err?.name, err?.message);
@@ -1861,7 +1893,7 @@ export function AssistantScreen() {
         setSending(false);
       }
     },
-    [appendMessage, updateMessage, showQuoteInChat, updateProposalStatus],
+    [appendMessage, updateMessage, showQuoteInChat, updateProposalStatus, handleApply, handleDismiss],
   );
 
   // "Send again" on a failed turn: clear the error off the bubble and drive
@@ -2287,22 +2319,7 @@ export function AssistantScreen() {
           // pins a specific one. We stash it and act on turnComplete so the
           // spoken reply finishes first.
           const convo = useStore.getState().conversations.find((c) => c.id === convoId);
-          const findPending = (): { message: ChatMessage; proposal: Proposal } | null => {
-            if (!convo) return null;
-            for (let i = convo.messages.length - 1; i >= 0; i--) {
-              const m = convo.messages[i];
-              if (!m.proposals?.length) continue;
-              const status = m.proposalStatus || {};
-              for (let j = m.proposals.length - 1; j >= 0; j--) {
-                const p = m.proposals[j];
-                if ((status[p.id] || 'pending') !== 'pending') continue;
-                if (proposalId && p.id !== proposalId) continue;
-                return { message: m, proposal: p };
-              }
-            }
-            return null;
-          };
-          const found = findPending();
+          const found = findPendingProposal(convo?.messages || [], proposalId);
           if (!found) {
             return {
               ok: false,

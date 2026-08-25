@@ -332,3 +332,20 @@ describe('pending drafts are not quotes (birdhouse convo, 25 Aug 2026)', () => {
     expect(prompt).toContain('never the first answer');
   });
 });
+
+describe('typed confirmations (25 Aug 2026)', () => {
+  // The control tools now ride both surfaces — a typed "yes" must resolve
+  // the waiting card, so the prompt can no longer call them voice-only.
+  it('card confirmation is its own BOTH-surfaces section, not a Voice-mode bullet', () => {
+    // First live replay: with the rule buried under the "Voice mode" heading,
+    // the text model ignored it and re-proposed the draft twice instead of
+    // applying — while claiming "pricing's running".
+    expect(MATE_SYSTEM_PROMPT).toContain('Confirming cards (typed in the chat or spoken — BOTH surfaces)');
+    expect(MATE_SYSTEM_PROMPT).toContain('do NOT call propose_draft_quote (or any propose_*) again for the same thing');
+    expect(MATE_SYSTEM_PROMPT).not.toContain('exist only in voice');
+    const voiceIdx = MATE_SYSTEM_PROMPT.indexOf('\nVoice mode\n');
+    const confirmIdx = MATE_SYSTEM_PROMPT.indexOf('Confirming cards');
+    expect(confirmIdx).toBeGreaterThan(-1);
+    expect(confirmIdx).toBeLessThan(voiceIdx);
+  });
+});

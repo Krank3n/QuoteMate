@@ -15,6 +15,7 @@ import {
   __resetMintThrottle,
 } from '../liveSession';
 import type { ChatAttachment, ChatMessage } from '../../../types/assistant';
+import { setPendingProposalProbe } from '../pendingProposalGate';
 
 const fetchMock = vi.fn();
 
@@ -522,5 +523,82 @@ describe('cross-hop text joining', () => {
     fetchMock.mockResolvedValueOnce(okChatResponse('One clean reply.'));
     const res = await sendAssistantTurn({ history });
     expect(res.text).toBe('One clean reply.');
+  });
+});
+
+// Typed confirmations (25 Aug 2026): the control tools used to exist only in
+// voice, so a typed "go ahead" dead-ended with Mate pointing at the button.
+describe('typed confirmations (control tools)', () => {
+  beforeEach(() => {
+    vi.mocked(auth).currentUser = { getIdToken: async () => 'id-token' } as any;
+  });
+  afterEach(() => setPendingProposalProbe(null));
+
+  function toolCallResponse(name: string, args: any = {}) {
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        parts: [{ functionCall: { name, args, id: 'fc1' } }],
+        model: 'claude-test',
+      }),
+    } as unknown as Response;
+  }
+
+  it('offers the control tools to the text model', async () => {
+    fetchMock.mockResolvedValueOnce(okChatResponse('righto'));
+    await sendAssistantTurn({ history });
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as any).body);
+    const names = body.tools[0].functionDeclarations.map((d: any) => d.name);
+    expect(names).toContain('apply_pending_proposal');
+    expect(names).toContain('cancel_pending_proposal');
+  });
+
+  it('a typed "yes" pins the waiting card and surfaces a controlAction', async () => {
+    setPendingProposalProbe(() => ({ messageId: 'm9', proposalId: 'prop_9' }));
+    fetchMock
+      .mockResolvedValueOnce(toolCallResponse('apply_pending_proposal'))
+      .mockResolvedValueOnce(okChatResponse('Done — pricing it up now.'));
+    const res = await sendAssistantTurn({ history });
+    expect(res.controlActions).toEqual([
+      { decision: 'apply', messageId: 'm9', proposalId: 'prop_9' },
+    ]);
+    // The model was told ok inside the turn.
+    const secondBody = JSON.parse((fetchMock.mock.calls[1][1] as any).body);
+    const fr = secondBody.contents.at(-1).parts[0].functionResponse;
+    expect(fr.response).toEqual({ ok: true });
+  });
+
+  it('a typed "nah" surfaces a cancel controlAction', async () => {
+    setPendingProposalProbe(() => ({ messageId: 'm9', proposalId: 'prop_9' }));
+    fetchMock
+      .mockResolvedValueOnce(toolCallResponse('cancel_pending_proposal'))
+      .mockResolvedValueOnce(okChatResponse('No worries, binned it.'));
+    const res = await sendAssistantTurn({ history });
+    expect(res.controlActions).toEqual([
+      { decision: 'cancel', messageId: 'm9', proposalId: 'prop_9' },
+    ]);
+  });
+
+  it('tells the model in-turn when no card is waiting', async () => {
+    setPendingProposalProbe(() => null);
+    fetchMock
+      .mockResolvedValueOnce(toolCallResponse('apply_pending_proposal'))
+      .mockResolvedValueOnce(okChatResponse('Nothing waiting, mate.'));
+    const res = await sendAssistantTurn({ history });
+    expect(res.controlActions).toEqual([]);
+    const secondBody = JSON.parse((fetchMock.mock.calls[1][1] as any).body);
+    const fr = secondBody.contents.at(-1).parts[0].functionResponse;
+    expect(fr.response.error).toBe('No card is waiting to confirm.');
+  });
+
+  it('dedupes a repeated apply across hops — one card, one apply', async () => {
+    setPendingProposalProbe(() => ({ messageId: 'm9', proposalId: 'prop_9' }));
+    fetchMock
+      .mockResolvedValueOnce(toolCallResponse('apply_pending_proposal'))
+      .mockResolvedValueOnce(toolCallResponse('apply_pending_proposal'))
+      .mockResolvedValueOnce(okChatResponse('Done.'));
+    const res = await sendAssistantTurn({ history });
+    expect(res.controlActions).toHaveLength(1);
   });
 });

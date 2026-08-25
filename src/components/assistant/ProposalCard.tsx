@@ -442,7 +442,10 @@ const useStyles = makeStyles((t) => ({
     minWidth: 96,
     alignItems: 'center',
   },
-  applyText: { color: t.colors.alwaysLight, fontSize: 14, fontWeight: '700' },
+  // Dark ink on the green/red fill — white on the money green is ~2.8:1 and
+  // unreadable in sunlight; onAccent is the theme's on-fill pairing (onError
+  // maps to it too, so the destructive red button matches).
+  applyText: { color: t.colors.onAccent, fontSize: 14, fontWeight: '700' },
   statusRow: {
     flexDirection: 'row',
     alignItems: 'center',

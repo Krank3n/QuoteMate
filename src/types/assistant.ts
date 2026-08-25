@@ -319,6 +319,10 @@ export interface AssistantChatResponse {
   // Document ids the model asked to display inline (via show_quote). The chat
   // screen renders each as an inline quote card once the turn resolves.
   showQuoteIds?: string[];
+  // Cards the model confirmed/cancelled in words via the control tools
+  // (typed "yes"/"nah"). The screen resolves each exactly as its button tap
+  // would, once the turn resolves.
+  controlActions?: Array<{ decision: 'apply' | 'cancel'; messageId: string; proposalId: string }>;
   usage: {
     inputTokens: number;
     outputTokens: number;

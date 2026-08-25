@@ -19,7 +19,8 @@ import {
 import { buildProposal } from './proposalTools';
 import { resolveQuoteId } from './quoteRefMap';
 import { gateShowQuote } from './showQuoteGate';
-import { isProposalTool, isReadTool } from './toolSchemas';
+import { gateControlAction } from './pendingProposalGate';
+import { isControlTool, isProposalTool, isReadTool } from './toolSchemas';
 
 export interface ToolCallInput {
   name: string;
@@ -35,6 +36,15 @@ export interface ViewAction {
   quoteId: string;
 }
 
+// A typed "yes"/"nah" the model routed through the control tools. The gate
+// pinned the exact card at dispatch time; the screen resolves it after the
+// turn — the same Apply / Dismiss the card's buttons run.
+export interface ControlAction {
+  decision: 'apply' | 'cancel';
+  messageId: string;
+  proposalId: string;
+}
+
 export interface ToolCallOutput {
   name: string;
   id: string;
@@ -46,6 +56,9 @@ export interface ToolCallOutput {
   // When a view tool (show_quote) was called, the action the screen should
   // carry out. The screen validates the id and overrides `response`.
   view?: ViewAction;
+  // When a control tool confirmed/cancelled a waiting card (text path only —
+  // the voice session intercepts control tools before they reach here).
+  control?: ControlAction;
 }
 
 export async function dispatchToolCall(call: ToolCallInput): Promise<ToolCallOutput> {
@@ -82,6 +95,20 @@ export async function dispatchToolCall(call: ToolCallInput): Promise<ToolCallOut
     } catch (err: any) {
       return { name, id, response: { error: err?.message || 'Tool execution failed.' } };
     }
+  }
+
+  if (isControlTool(name)) {
+    // Typed "yes"/"nah" in the text chat. The voice session intercepts these
+    // before dispatch; here the screen-registered probe pins the waiting card
+    // so the model learns in-turn when nothing is up.
+    const decision = name === 'apply_pending_proposal' ? 'apply' : 'cancel';
+    const gate = gateControlAction(input?.proposalId ? String(input.proposalId) : undefined);
+    // eslint-disable-next-line no-console
+    console.log('[Mate] control', decision, gate.ok ? gate.ref : gate.error);
+    if (!gate.ok) {
+      return { name, id, response: { error: gate.error } };
+    }
+    return { name, id, response: { ok: true }, control: { decision, ...gate.ref } };
   }
 
   if (name === 'show_quote') {

@@ -31,7 +31,7 @@ import {
 } from './assistant/attachmentParts';
 import { resolveInlineBytes } from './assistant/attachmentBytes';
 import { MATE_SYSTEM_PROMPT } from './assistant/systemPrompt';
-import { TOOL_DECLARATIONS } from './assistant/toolSchemas';
+import { CONTROL_TOOL_DECLARATIONS, TOOL_DECLARATIONS } from './assistant/toolSchemas';
 import { dispatchToolCall } from './assistant/toolDispatcher';
 import {
   CHAT_TIMEOUT_MS,
@@ -145,7 +145,9 @@ async function callChat(
   const response = await postChatWithRetry(idToken, JSON.stringify({
     contents,
     systemInstruction: { parts: [{ text: MATE_SYSTEM_PROMPT }] },
-    tools: [{ functionDeclarations: TOOL_DECLARATIONS }],
+    // Control tools included: a typed "yes" resolves the waiting card the
+    // same way a spoken one does in voice.
+    tools: [{ functionDeclarations: [...TOOL_DECLARATIONS, ...CONTROL_TOOL_DECLARATIONS] }],
     countTurn,
   }));
 
@@ -241,6 +243,10 @@ export async function sendAssistantTurn({
   // Document ids the model asked to show on screen via show_quote. The chat
   // screen renders each inline once the turn resolves.
   const showQuoteIds: string[] = [];
+  // Cards the model confirmed/cancelled in words (control tools). Deduped by
+  // proposal id — a model that repeats the call across hops (the card's
+  // status hasn't changed yet mid-turn) must not double-apply it.
+  const controlActions: NonNullable<AssistantChatResponse['controlActions']> = [];
   let textBuf = '';
   let model = 'gemini';
 
@@ -292,6 +298,9 @@ export async function sendAssistantTurn({
     for (const r of results) {
       if (r.proposal) proposals.push(r.proposal);
       if (r.view?.kind === 'show_quote') showQuoteIds.push(r.view.quoteId);
+      if (r.control && !controlActions.some((c) => c.proposalId === r.control!.proposalId)) {
+        controlActions.push(r.control);
+      }
     }
 
     contents.push({
@@ -309,6 +318,7 @@ export async function sendAssistantTurn({
     text,
     proposals,
     showQuoteIds,
+    controlActions,
     usage: {
       inputTokens: 0,
       // generateContent reports token counts in usageMetadata, but the quota

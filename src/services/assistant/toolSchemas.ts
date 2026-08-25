@@ -441,11 +441,12 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
   },
 ];
 
-// Voice-only: added to the Live session's tool list (NOT the text path, which
-// resolves a card with a tap). When a proposal card is waiting and the tradie
-// can't tap, Mate calls one of these to accept or back out of it. The voice
-// session intercepts the call and routes it to the same Apply / dismiss the
-// card buttons run — these never reach dispatchToolCall.
+// Both surfaces: when a proposal card is waiting, a clear spoken OR typed yes
+// resolves it without a tap. The voice session intercepts these calls itself
+// (onControlAction — they never reach dispatchToolCall there); the text path
+// routes them through dispatchToolCall, where the screen-registered pending-
+// card probe pins the exact card and the screen runs the same Apply / dismiss
+// the card's buttons run.
 export const CONTROL_TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
   {
     name: 'apply_pending_proposal',
