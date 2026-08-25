@@ -132,7 +132,7 @@ export default {
       supportsTablet: true,
       bundleIdentifier: "com.hansendev.quotemate",
       usesAppleSignIn: true,
-      buildNumber: "92",
+      buildNumber: "93",
       // Universal Links. The path allow-list lives in
       // public/.well-known/apple-app-site-association (/join* and /ref/*).
       associatedDomains: ["applinks:quotemateapp.au"],
@@ -147,7 +147,7 @@ export default {
         backgroundColor: "#0A0E16"  // Dark blue-gray to match app theme
       },
       package: "com.quotemate.app",
-      versionCode: 168,
+      versionCode: 169,
       permissions: ["android.permission.RECORD_AUDIO", "android.permission.CAMERA", "android.permission.READ_CONTACTS"],
       intentFilters: [
         {
