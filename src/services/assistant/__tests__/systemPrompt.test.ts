@@ -312,3 +312,23 @@ describe('answers instead of deflecting (25 Aug session)', () => {
     expect(MATE_SYSTEM_PROMPT).toContain("Never claim you can't show a PDF");
   });
 });
+
+describe('pending drafts are not quotes (birdhouse convo, 25 Aug 2026)', () => {
+  // The model invented "quote_pending_<ts>" to update the customer on a draft
+  // nobody had applied, then told the tradie to fix it manually six times.
+  const prompt = MATE_SYSTEM_PROMPT;
+
+  it('bans inventing quote ids', () => {
+    expect(prompt).toContain('NEVER invent a quoteId');
+  });
+
+  it('routes corrections on an un-applied draft to a fresh propose_draft_quote', () => {
+    expect(prompt).toContain('call propose_draft_quote again with the corrected details');
+    expect(prompt).toContain('the fresh card replaces the stale one');
+  });
+
+  it('makes "open it manually" the last resort, not the first answer', () => {
+    expect(prompt).toContain('LAST resort');
+    expect(prompt).toContain('never the first answer');
+  });
+});

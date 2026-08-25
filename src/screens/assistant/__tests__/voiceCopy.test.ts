@@ -27,6 +27,12 @@ describe('buildGreetPrompt', () => {
     expect(prompt).not.toMatch(/cheeky|humour|rib|draft quote called/);
   });
 
+  it('bans stacked greetings — a prod greet opened "G\'day. evening." (25 Aug 2026)', () => {
+    const p = buildGreetPrompt({ hour: 20 });
+    expect(p).toContain('ONE natural hello');
+    expect(p).toContain('never two greetings stacked');
+  });
+
   it('takes no draft label — the greeting has nothing to joke about', () => {
     // Type-level pin: the signature is { hour } only. If someone re-adds
     // draftLabel the arity check below starts failing before the tone does.

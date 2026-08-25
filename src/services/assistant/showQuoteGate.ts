@@ -26,6 +26,15 @@ export type ShowQuoteGateResult =
   | { ok: true; quoteId: string }
   | { ok: false; error: string };
 
+// Same probe, reused by the proposal validators: a quote-targeting proposal
+// against an id that isn't on this device renders a card that can only fail
+// on Apply. Returns the renderable id, or the input unchanged when no probe
+// is registered (screen unmounted, tests).
+export function resolveKnownQuoteId(quoteId: string): string | null {
+  if (!probe) return quoteId;
+  return probe(quoteId);
+}
+
 export function gateShowQuote(quoteId: string): ShowQuoteGateResult {
   if (!probe) return { ok: true, quoteId };
   const renderable = probe(quoteId);

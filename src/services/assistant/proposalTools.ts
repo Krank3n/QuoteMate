@@ -19,6 +19,7 @@ import {
   UpdateQuoteRatesProposal,
 } from '../../types/assistant';
 import { resolveQuoteId } from './quoteRefMap';
+import { resolveKnownQuoteId } from './showQuoteGate';
 import { sanitizeJobDescription } from '../../utils/sanitizeJobDescription';
 
 export interface ProposalResult {
@@ -28,6 +29,27 @@ export interface ProposalResult {
 
 function newProposalId(): string {
   return `prop_${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+// A quote-targeting proposal must name a quote that actually exists on this
+// device, or the card it renders can only fail on Apply — after the model has
+// already promised the change out loud. The birdhouse convo (25 Aug 2026) had
+// the model INVENT "quote_pending_<ts>" for a draft nobody had applied, then
+// spend six turns telling the tradie to fix it manually. Failing the tool
+// call in-turn hands the model its recovery path instead. Uses the same
+// screen-registered lookup as show_quote; no probe registered (tests, screen
+// unmounted) keeps the old pass-through.
+function requireKnownQuote(toolName: string, input: any): { quoteId?: string; error?: string } {
+  if (!input?.quoteId) return { error: `${toolName} requires quoteId.` };
+  const resolved = resolveQuoteId(String(input.quoteId));
+  const known = resolveKnownQuoteId(resolved);
+  if (known) return { quoteId: known };
+  return {
+    error:
+      `No quote with id "${resolved}" exists on this phone — never invent a quoteId. ` +
+      'If the draft card has not been applied yet there is no quote to change: call propose_draft_quote again with the corrected details and the fresh card replaces the old one. ' +
+      'For a saved quote, call list_recent_quotes and use the id it returns.',
+  };
 }
 
 // Whether the chat still holds a photo nobody has spent. Registered by the
@@ -81,7 +103,8 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
     }
 
     case 'propose_update_quote_rates': {
-      if (!input?.quoteId) return { error: 'propose_update_quote_rates requires quoteId.' };
+      const known = requireKnownQuote('propose_update_quote_rates', input);
+      if (known.error) return { error: known.error };
       const num = (v: unknown): number | undefined =>
         Number.isFinite(Number(v)) && Number(v) >= 0 ? Number(v) : undefined;
       const markup = num(input.markup);
@@ -101,7 +124,7 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
         toolUseId,
         createdAt: now,
         type: 'propose_update_quote_rates',
-        quoteId: resolveQuoteId(input.quoteId),
+        quoteId: known.quoteId!,
         markup,
         laborMarkup,
         laborRate,
@@ -112,14 +135,15 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
     }
 
     case 'propose_add_line_item': {
-      if (!input?.quoteId) return { error: 'propose_add_line_item requires quoteId.' };
+      const known = requireKnownQuote('propose_add_line_item', input);
+      if (known.error) return { error: known.error };
       if (!input?.searchTerm) return { error: 'propose_add_line_item requires searchTerm — the pipeline prices it.' };
       const proposal: AddLineItemProposal = {
         id,
         toolUseId,
         createdAt: now,
         type: 'propose_add_line_item',
-        quoteId: resolveQuoteId(input.quoteId),
+        quoteId: known.quoteId!,
         searchTerm: String(input.searchTerm),
         qty: Number(input.qty) || 1,
         unit: String(input.unit || 'each'),
@@ -129,14 +153,15 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
     }
 
     case 'propose_delete_quote': {
-      if (!input?.quoteId) return { error: 'propose_delete_quote requires quoteId.' };
+      const known = requireKnownQuote('propose_delete_quote', input);
+      if (known.error) return { error: known.error };
       const docType = input.displayDocType === 'invoice' ? 'invoice' : input.displayDocType === 'quote' ? 'quote' : undefined;
       const proposal: DeleteQuoteProposal = {
         id,
         toolUseId,
         createdAt: now,
         type: 'propose_delete_quote',
-        quoteId: resolveQuoteId(input.quoteId),
+        quoteId: known.quoteId!,
         displayName: input.displayName ? String(input.displayName) : undefined,
         displayCustomerName: input.displayCustomerName ? String(input.displayCustomerName) : undefined,
         displayTotal: Number.isFinite(Number(input.displayTotal)) ? Number(input.displayTotal) : undefined,
@@ -146,7 +171,8 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
     }
 
     case 'propose_delete_line_item': {
-      if (!input?.quoteId) return { error: 'propose_delete_line_item requires quoteId.' };
+      const known = requireKnownQuote('propose_delete_line_item', input);
+      if (known.error) return { error: known.error };
       if (!input?.materialId) {
         return { error: 'propose_delete_line_item requires materialId — fetch the quote first to get it.' };
       }
@@ -155,7 +181,7 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
         toolUseId,
         createdAt: now,
         type: 'propose_delete_line_item',
-        quoteId: resolveQuoteId(input.quoteId),
+        quoteId: known.quoteId!,
         materialId: String(input.materialId),
         displayName: input.displayName ? String(input.displayName) : undefined,
         displayQty: Number.isFinite(Number(input.displayQty)) ? Number(input.displayQty) : undefined,
@@ -181,7 +207,8 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
     }
 
     case 'propose_update_customer': {
-      if (!input?.quoteId) return { error: 'propose_update_customer requires quoteId.' };
+      const known = requireKnownQuote('propose_update_customer', input);
+      if (known.error) return { error: known.error };
       if (!input.customerId && !input.customerDraft?.name) {
         return { error: 'Provide customerId (from find_customer) or customerDraft.name.' };
       }
@@ -190,7 +217,7 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
         toolUseId,
         createdAt: now,
         type: 'propose_update_customer',
-        quoteId: resolveQuoteId(input.quoteId),
+        quoteId: known.quoteId!,
         customerId: input.customerId ? String(input.customerId) : undefined,
         customerDraft: input.customerDraft?.name ? input.customerDraft : undefined,
         customerName: input.customerName
@@ -203,13 +230,14 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
     }
 
     case 'propose_send_quote': {
-      if (!input?.quoteId) return { error: 'propose_send_quote requires quoteId.' };
+      const known = requireKnownQuote('propose_send_quote', input);
+      if (known.error) return { error: known.error };
       const proposal: SendQuoteProposal = {
         id,
         toolUseId,
         createdAt: now,
         type: 'propose_send_quote',
-        quoteId: resolveQuoteId(input.quoteId),
+        quoteId: known.quoteId!,
         recipientEmail: input.recipientEmail ? String(input.recipientEmail) : undefined,
         displayTotal: Number.isFinite(Number(input.displayTotal)) ? Number(input.displayTotal) : undefined,
         draftEmailBody: input.draftEmailBody ? String(input.draftEmailBody) : undefined,
@@ -219,25 +247,27 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
     }
 
     case 'propose_convert_to_invoice': {
-      if (!input?.quoteId) return { error: 'propose_convert_to_invoice requires quoteId.' };
+      const known = requireKnownQuote('propose_convert_to_invoice', input);
+      if (known.error) return { error: known.error };
       const proposal: ConvertToInvoiceProposal = {
         id,
         toolUseId,
         createdAt: now,
         type: 'propose_convert_to_invoice',
-        quoteId: resolveQuoteId(input.quoteId),
+        quoteId: known.quoteId!,
       };
       return { proposal };
     }
 
     case 'propose_reprice': {
-      if (!input?.quoteId) return { error: 'propose_reprice requires quoteId.' };
+      const known = requireKnownQuote('propose_reprice', input);
+      if (known.error) return { error: known.error };
       const proposal: RepriceQuoteProposal = {
         id,
         toolUseId,
         createdAt: now,
         type: 'propose_reprice',
-        quoteId: resolveQuoteId(input.quoteId),
+        quoteId: known.quoteId!,
         displayName: input.displayName ? String(input.displayName) : undefined,
         displayTotal: Number.isFinite(Number(input.displayTotal)) ? Number(input.displayTotal) : undefined,
       };
@@ -245,7 +275,8 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
     }
 
     case 'propose_mark_paid': {
-      if (!input?.quoteId) return { error: 'propose_mark_paid requires quoteId.' };
+      const known = requireKnownQuote('propose_mark_paid', input);
+      if (known.error) return { error: known.error };
       const allowed = ['cash', 'bank_transfer', 'card', 'cheque', 'other'] as const;
       const method = allowed.includes(input.method) ? input.method : undefined;
       const proposal: MarkPaidProposal = {
@@ -253,7 +284,7 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
         toolUseId,
         createdAt: now,
         type: 'propose_mark_paid',
-        quoteId: resolveQuoteId(input.quoteId),
+        quoteId: known.quoteId!,
         method,
         notes: input.notes ? String(input.notes) : undefined,
         displayName: input.displayName ? String(input.displayName) : undefined,

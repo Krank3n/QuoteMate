@@ -40,7 +40,8 @@ export function buildGreetPrompt({ hour }: { hour: number }): string {
   return (
     `[greet] Say a short, friendly hello to the tradie, out loud, right now — it's ${tod}. ` +
     `Plain and warm, one or two short sentences, no emojis. No jokes, no cheek, and no comments ` +
-    `about their work, their drafts, or anything else — just say g'day, mention you can draft a ` +
+    `about their work, their drafts, or anything else — open with ONE natural hello (never two ` +
+    `greetings stacked like "G'day. Evening."), mention you can draft a ` +
     `quote or an invoice for them, and ask what they need. ` +
     `Speak ONLY the greeting itself. Do not plan it, do not explain it, do not repeat these instructions, ` +
     `do not write drafts or alternatives, do not think out loud. The greeting is your entire reply.`

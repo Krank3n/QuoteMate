@@ -3143,6 +3143,22 @@ export const useStore = create<AppState>((set, get) => ({
           // create + link. Then stamp the customer onto the document and let
           // saveDocument → ensureJobForDocument sync the linked job's
           // customerName/email/phone/address (the in-chat header reads the job).
+          //
+          // Resolve the target FIRST — a missing quote must fail before any
+          // contact work, or a failed apply still mints a stray contact (the
+          // birdhouse convo, 25 Aug 2026: repeated updates against an invented
+          // quote id would each have saved a fresh "Karl" to the book).
+          const target = await resolveDocument(proposal.quoteId);
+          const legacyQuote = target
+            ? undefined
+            : get().quotes.find((q) => q.id === proposal.quoteId);
+          const legacyInvoice =
+            target || legacyQuote
+              ? undefined
+              : get().invoices.find((i) => i.id === proposal.quoteId);
+          if (!target && !legacyQuote && !legacyInvoice) {
+            return { ok: false, error: 'Quote not found.' };
+          }
           let contact: Contact | undefined;
           if (proposal.customerId) {
             contact = get().contacts.find((c) => c.id === proposal.customerId);
@@ -3191,7 +3207,6 @@ export const useStore = create<AppState>((set, get) => ({
           };
 
           // Preferred path: unified Document (covers quotes and invoices).
-          const target = await resolveDocument(proposal.quoteId);
           if (target) {
             const nextDoc: Document = {
               ...target,
@@ -3207,7 +3222,7 @@ export const useStore = create<AppState>((set, get) => ({
           }
 
           // Legacy fallback: a draft still only in the quotes array.
-          const quote = get().quotes.find((q) => q.id === proposal.quoteId);
+          const quote = legacyQuote;
           if (quote) {
             const nextQuote: Quote = {
               ...quote,
@@ -3223,7 +3238,7 @@ export const useStore = create<AppState>((set, get) => ({
             return { ok: true, navigate: { kind: 'job_preview', quoteId: quote.id } };
           }
 
-          const invoice = get().invoices.find((i) => i.id === proposal.quoteId);
+          const invoice = legacyInvoice;
           if (invoice) {
             const nextInvoice: Invoice = {
               ...invoice,

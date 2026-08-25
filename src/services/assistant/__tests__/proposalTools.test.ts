@@ -1,6 +1,7 @@
 import { afterEach } from 'vitest';
 import { buildProposal, setUnconsumedAttachmentProbe } from '../proposalTools';
 import { rememberAppliedQuote } from '../quoteRefMap';
+import { setRenderableQuoteProbe } from '../showQuoteGate';
 import type { ImportSupplierListProposal } from '../../../types/assistant';
 import type {
   RepriceQuoteProposal,
@@ -238,5 +239,65 @@ describe('buildProposal propose_import_supplier_list', () => {
 
     const blank = buildProposal('propose_import_supplier_list', 'tool_i6', { supplierName: '   ' });
     expect((blank.proposal as ImportSupplierListProposal).supplierName).toBeUndefined();
+  });
+});
+
+describe('requireKnownQuote gate (birdhouse convo, 25 Aug 2026)', () => {
+  // The model invented "quote_pending_<ts>" for a draft nobody had applied,
+  // the card rendered, and Apply could only fail with "Quote not found" —
+  // followed by six turns of "open it manually". With the screen's quote
+  // lookup registered, the fabricated id must fail the tool call in-turn.
+  afterEach(() => setRenderableQuoteProbe(null));
+
+  it('rejects a fabricated quoteId in-turn when the probe is registered', () => {
+    setRenderableQuoteProbe((id) => (id === 'doc_real' ? 'doc_real' : null));
+    const { proposal, error } = buildProposal('propose_update_customer', 'tool_k1', {
+      quoteId: 'quote_pending_1787651870654',
+      customerDraft: { name: 'Karl Van Lishout' },
+      customerName: 'Karl Van Lishout',
+    });
+    expect(proposal).toBeUndefined();
+    expect(error).toContain('never invent a quoteId');
+    // The error must hand the model its recovery path, not a dead end.
+    expect(error).toContain('propose_draft_quote again');
+    expect(error).toContain('list_recent_quotes');
+  });
+
+  it('passes a known quote id through, resolved by the probe', () => {
+    setRenderableQuoteProbe((id) => (id === 'legacy_7' ? 'doc_7' : null));
+    const { proposal, error } = buildProposal('propose_update_customer', 'tool_k2', {
+      quoteId: 'legacy_7',
+      customerId: 'c1',
+      customerName: 'Karl',
+    });
+    expect(error).toBeUndefined();
+    expect((proposal as UpdateCustomerProposal).quoteId).toBe('doc_7');
+  });
+
+  it('gates every quote-targeting proposal tool, not just update_customer', () => {
+    setRenderableQuoteProbe(() => null);
+    const attempts: Array<[string, Record<string, unknown>]> = [
+      ['propose_update_quote_rates', { quoteId: 'fake', markup: 30 }],
+      ['propose_add_line_item', { quoteId: 'fake', searchTerm: 'pine', qty: 1, unit: 'each' }],
+      ['propose_delete_quote', { quoteId: 'fake' }],
+      ['propose_delete_line_item', { quoteId: 'fake', materialId: 'm1' }],
+      ['propose_send_quote', { quoteId: 'fake' }],
+      ['propose_convert_to_invoice', { quoteId: 'fake' }],
+      ['propose_reprice', { quoteId: 'fake' }],
+      ['propose_mark_paid', { quoteId: 'fake' }],
+    ];
+    for (const [tool, input] of attempts) {
+      const { proposal, error } = buildProposal(tool, 'tool_k3', input);
+      expect(proposal, tool).toBeUndefined();
+      expect(error, tool).toContain('never invent a quoteId');
+    }
+  });
+
+  it('keeps the old pass-through when no probe is registered', () => {
+    const { proposal, error } = buildProposal('propose_reprice', 'tool_k4', {
+      quoteId: 'anything_goes',
+    });
+    expect(error).toBeUndefined();
+    expect((proposal as RepriceQuoteProposal).quoteId).toBe('anything_goes');
   });
 });

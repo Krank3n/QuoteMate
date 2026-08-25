@@ -114,6 +114,7 @@ import {
 import { buildSupplierGapNote } from '../services/assistant/supplierGapNote';
 import { setUnconsumedAttachmentProbe } from '../services/assistant/proposalTools';
 import { setRenderableQuoteProbe } from '../services/assistant/showQuoteGate';
+import { findSupersededProposals } from './assistant/proposalSupersede';
 import { ensureLocalUri } from '../services/assistant/attachmentBytes';
 import { useSupplierListImport, type ExtractResult } from '../hooks/useSupplierListImport';
 import type { SaveSummary } from '../hooks/useSupplierListImport';
@@ -1804,6 +1805,15 @@ export function AssistantScreen() {
           // would sit there breathing forever.
           thinking: undefined,
         });
+        // A re-proposed decision dismisses the stale pending card of the same
+        // kind, so only the newest version of it can still be applied.
+        if (response.proposals.length > 0) {
+          const msgs =
+            useStore.getState().conversations.find((c) => c.id === convoId)?.messages || [];
+          for (const ref of findSupersededProposals(msgs, response.proposals, streamingId)) {
+            updateProposalStatus(convoId, ref.messageId, ref.proposalId, 'dismissed');
+          }
+        }
         // Render any quotes the model asked to show. Each lands as its own
         // inline card below the reply; an unresolved id gets a short nudge
         // instead of a silently missing card.
@@ -1851,7 +1861,7 @@ export function AssistantScreen() {
         setSending(false);
       }
     },
-    [appendMessage, updateMessage, showQuoteInChat],
+    [appendMessage, updateMessage, showQuoteInChat, updateProposalStatus],
   );
 
   // "Send again" on a failed turn: clear the error off the bubble and drive
@@ -2263,6 +2273,13 @@ export function AssistantScreen() {
               turnProposals.map((p) => [p.id, 'pending' as ProposalStatus]),
             ),
           });
+          // A re-proposed decision dismisses the stale pending card of the
+          // same kind, so only the newest version of it can still be applied.
+          const priorMsgs =
+            useStore.getState().conversations.find((c) => c.id === convoId)?.messages || [];
+          for (const ref of findSupersededProposals(priorMsgs, turnProposals, bubbleId)) {
+            updateProposalStatus(convoId!, ref.messageId, ref.proposalId, 'dismissed');
+          }
         },
         onControlAction: (decision, proposalId) => {
           // Resolve which card the tradie just confirmed/cancelled. Newest
@@ -2516,7 +2533,7 @@ export function AssistantScreen() {
       appendErrorMessage(convoId!, withTypeInsteadHint(message));
       await stopVoiceSession();
     }
-  }, [stopVoiceSession, appendMessage, appendErrorMessage, updateMessage, startConversation, micLevel, handleApply, handleDismiss, showQuoteInChat]);
+  }, [stopVoiceSession, appendMessage, appendErrorMessage, updateMessage, startConversation, micLevel, handleApply, handleDismiss, showQuoteInChat, updateProposalStatus]);
 
   // Keep the latest openVoiceMode / stopVoiceSession in refs so the
   // auto-start focus effect below can call them without taking them as
