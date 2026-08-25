@@ -1,22 +1,21 @@
 /**
- * Record Payment Screen
- * Modal screen for recording payments on invoices
+ * Record Payment — bottom-sheet screen for logging money already received
+ * (bank transfer / cash / cheque) against an invoice, and for editing or
+ * removing a ledger entry.
+ *
+ * Registered as a `transparentModal` route rendering the shared BottomSheet,
+ * so every navigate('RecordPayment') call site keeps working while the
+ * surface matches TakePaymentSheet / PaymentSheet instead of pushing a
+ * full headered screen. The screen's own card is invisible — BottomSheet
+ * portals above the navigator and owns all motion.
  */
 
-import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, ScrollView, Alert, Platform, TouchableOpacity } from 'react-native';
-import {
-  Text,
-  Button,
-  Surface,
-  TextInput,
-  RadioButton,
-  Title,
-  Menu,
-} from 'react-native-paper';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { View, Pressable } from 'react-native';
+import { Text, Button, TextInput } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { format, subDays, isToday, isYesterday } from 'date-fns';
+import { format, subDays, isToday, isYesterday, isSameDay } from 'date-fns';
 
 import { useStore, PAYMENT_METHOD_TO_LEDGER } from '../store/useStore';
 import { maxAmountForEdit } from '../utils/editablePayment';
@@ -24,11 +23,13 @@ import { PaymentMethod } from '../types';
 import { makeStyles, useThemeColors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
 import { getAmountDue } from '../utils/invoiceCalculator';
-import { GridBackground } from '../components/GridBackground';
-import { WebContainer } from '../components/WebContainer';
+import { BottomSheet } from '../components/BottomSheet';
+import { CurrencyInput } from '../components/CurrencyInput';
+import { useAlertModal } from '../hooks/useAlertModal';
+import { paymentCopy } from '../constants/paymentCopy';
 
 /**
- * Ledger method → the radio option that represents it. Lossy on purpose:
+ * Ledger method → the form option that represents it. Lossy on purpose:
  * card / cheque / other all store as 'other', so an edited card payment
  * prefills as "Other". The amount, date and notes are what people come back
  * to fix; losing the card/cheque distinction is the cheaper trade than
@@ -42,7 +43,7 @@ const LEDGER_METHOD_TO_FORM: Record<string, PaymentMethod> = {
 };
 
 const PAYMENT_METHODS: { value: PaymentMethod; label: string }[] = [
-  { value: 'bank_transfer', label: 'Bank Transfer' },
+  { value: 'bank_transfer', label: 'Bank transfer' },
   { value: 'card', label: 'Card' },
   { value: 'cash', label: 'Cash' },
   { value: 'cheque', label: 'Cheque' },
@@ -68,6 +69,22 @@ export function RecordPaymentScreen() {
   const pushPaymentToXero = useStore((s) => s.pushPaymentToXero);
   const updateDocumentPayment = useStore((s) => s.updateDocumentPayment);
   const deleteDocumentPayment = useStore((s) => s.deleteDocumentPayment);
+
+  const { showAlert, dismissAlert, alertNode } = useAlertModal();
+
+  // Sheet lifecycle on a navigation screen: mounted visible, dismissal plays
+  // the close animation, and goBack() only fires from onClosed — popping any
+  // earlier would snap the sheet away mid-slide.
+  const [visible, setVisible] = useState(true);
+  const closingRef = useRef(false);
+  const dismiss = useCallback(() => setVisible(false), []);
+  const handleClosed = useCallback(() => {
+    if (closingRef.current) return;
+    closingRef.current = true;
+    // A hardware back that already popped this (transparent) screen leaves
+    // us unfocused — a second goBack here would pop the screen underneath.
+    if (navigation.isFocused()) navigation.goBack();
+  }, [navigation]);
 
   // Callers navigate here with a *Document* id (ViewJobScreen passes
   // actionableDoc.id). The legacy `invoices` array is never loaded at
@@ -96,7 +113,7 @@ export function RecordPaymentScreen() {
         } as any
       : null);
   // The legacy row wins the lookup above, and its projection can reach us
-  // without a customerName — which printed a blank "Customer" line on a
+  // without a customerName — which printed a blank customer line on a
   // screen whose whole job is confirming who paid you. Take the name from
   // whichever source actually has one.
   const customerName =
@@ -116,8 +133,8 @@ export function RecordPaymentScreen() {
     ? maxAmountForEdit(document, editingPayment)
     : amountDue;
 
-  const [amount, setAmount] = useState(
-    editingPayment ? (Number(editingPayment.amount) || 0).toFixed(2) : amountDue.toFixed(2),
+  const [amount, setAmount] = useState<number>(
+    editingPayment ? Number(editingPayment.amount) || 0 : amountDue,
   );
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(
     LEDGER_METHOD_TO_FORM[editingPayment?.method ?? ''] ?? 'bank_transfer',
@@ -126,63 +143,75 @@ export function RecordPaymentScreen() {
   const [paymentDate, setPaymentDate] = useState(
     editingPayment?.paidAt ? new Date(editingPayment.paidAt) : new Date(),
   );
-  const [dateMenuVisible, setDateMenuVisible] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Keyed on the resolved id + figure, NOT the `invoice` object — that
+  // projection is rebuilt every render, and an identity dep made this effect
+  // fire after every keystroke, stomping a hand-entered amount (and the 50%
+  // quick-pick) back to the full balance.
+  const invoiceKey = invoice ? invoice.id : null;
   useEffect(() => {
     // Don't stomp the value being edited when the doc reloads.
-    if (invoice && !editingPayment) {
-      setAmount(amountDue.toFixed(2));
+    if (invoiceKey && !editingPayment) {
+      setAmount(amountDue);
     }
-  }, [invoice, amountDue, editingPayment]);
+  }, [invoiceKey, amountDue, editingPayment]);
 
   const handleRecordPayment = async () => {
     if (!invoice) return;
 
-    const paymentAmount = parseFloat(amount);
-    if (isNaN(paymentAmount) || paymentAmount <= 0) {
-      Alert.alert('Invalid Amount', 'Please enter a valid payment amount.');
+    if (!Number.isFinite(amount) || amount <= 0) {
+      showAlert({
+        type: 'warning',
+        title: 'Enter an amount',
+        message: 'Enter the payment amount before saving.',
+      });
       return;
     }
 
     // Hard-reject overpayment. Allow a 1c tolerance for rounding (e.g., when
     // a Square webhook records $50.001 and the tradie tries to close the
     // remaining cent via cash).
-    if (paymentAmount > ceiling + 0.01) {
-      Alert.alert(
-        'Amount exceeds balance',
-        `Enter up to ${formatCurrency(ceiling)}. This invoice doesn't owe more than that.`,
-      );
+    if (amount > ceiling + 0.01) {
+      showAlert({
+        type: 'warning',
+        title: 'Amount exceeds balance',
+        message: `Enter up to ${formatCurrency(ceiling)}. This invoice doesn't owe more than that.`,
+      });
       return;
     }
 
-    await submitPayment(paymentAmount);
+    await submitPayment(amount);
   };
 
   const handleDelete = () => {
     if (!editingPaymentId || !document) return;
-    Alert.alert(
-      'Remove this payment?',
-      'The invoice balance goes back up by this amount.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Remove',
-          style: 'destructive',
-          onPress: async () => {
-            setIsSubmitting(true);
-            try {
-              await deleteDocumentPayment(document.id, editingPaymentId);
-              navigation.goBack();
-            } catch (err: any) {
-              Alert.alert('Couldn’t remove it', err?.message || 'Please try again.');
-            } finally {
-              setIsSubmitting(false);
-            }
-          },
-        },
-      ],
-    );
+    showAlert({
+      type: 'warning',
+      title: 'Remove this payment?',
+      message: 'The invoice balance goes back up by this amount.',
+      primaryButtonText: 'Remove',
+      secondaryButtonText: paymentCopy.cancel,
+      // Keeps-open so a failure can swap in the error dialog without the
+      // auto-dismiss wiping it.
+      primaryKeepsOpen: true,
+      primaryButtonAction: async () => {
+        setIsSubmitting(true);
+        try {
+          await deleteDocumentPayment(document.id, editingPaymentId);
+          dismissAlert();
+          dismiss();
+        } catch (err: any) {
+          showAlert({
+            type: 'error',
+            title: 'Couldn’t remove it',
+            message: err?.message || 'Please try again.',
+          });
+        } finally {
+          setIsSubmitting(false);
+        }
+      },
+    });
   };
 
   const submitPayment = async (paymentAmount: number) => {
@@ -197,9 +226,13 @@ export function RecordPaymentScreen() {
           method: PAYMENT_METHOD_TO_LEDGER[paymentMethod] ?? 'other',
           notes: notes || undefined,
         });
-        Alert.alert('Saved', 'Payment updated.', [
-          { text: 'OK', onPress: () => navigation.goBack() },
-        ]);
+        showAlert({
+          type: 'success',
+          title: paymentCopy.paymentUpdatedTitle,
+          message: `This payment is now ${formatCurrency(paymentAmount)}.`,
+          primaryButtonText: 'Done',
+          primaryButtonAction: dismiss,
+        });
         return;
       }
       if (document) {
@@ -218,11 +251,19 @@ export function RecordPaymentScreen() {
         }
       }
 
-      Alert.alert('Success', 'Payment recorded successfully!', [
-        { text: 'OK', onPress: () => navigation.goBack() },
-      ]);
+      showAlert({
+        type: 'success',
+        title: paymentCopy.paymentRecordedTitle,
+        message: `${formatCurrency(paymentAmount)} recorded against this invoice.`,
+        primaryButtonText: 'Done',
+        primaryButtonAction: dismiss,
+      });
     } catch (error) {
-      Alert.alert('Error', 'Failed to record payment. Please try again.');
+      showAlert({
+        type: 'error',
+        title: paymentCopy.paymentErrorTitle,
+        message: 'Failed to record payment. Please try again.',
+      });
     } finally {
       setIsSubmitting(false);
     }
@@ -230,212 +271,158 @@ export function RecordPaymentScreen() {
 
   if (!invoice) {
     return (
-      <View style={styles.container}>
-      <GridBackground />
-        <Text>Invoice not found</Text>
-      </View>
+      <BottomSheet
+        visible={visible}
+        onDismiss={dismiss}
+        onClosed={handleClosed}
+        title={paymentCopy.recordPayment}
+      >
+        <View style={styles.notFound}>
+          <MaterialCommunityIcons
+            name="file-question-outline"
+            size={32}
+            color={themeColors.textMuted}
+          />
+          <Text style={styles.notFoundText}>
+            We couldn't find this invoice on this device.
+          </Text>
+        </View>
+        <Button mode="text" onPress={dismiss}>
+          {paymentCopy.close}
+        </Button>
+      </BottomSheet>
     );
   }
 
+  const dateOptions = [
+    { label: 'Today', date: new Date() },
+    { label: 'Yesterday', date: subDays(new Date(), 1) },
+    { label: '2 days ago', date: subDays(new Date(), 2) },
+    { label: '1 week ago', date: subDays(new Date(), 7) },
+  ];
+
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
-      {/* This is a `presentation: 'modal'` screen, and on web that modal is
-          as wide as the browser — a payment form with a $ field and four
-          radios stretched across a 27" display. 600 matches the other
-          payment surfaces (TakePaymentSheet, StripeCheckoutModal). No-op on
-          native. */}
-      <WebContainer maxWidth={600}>
-      {/* Invoice Summary */}
-      <Surface style={styles.summaryCard}>
-        <View style={styles.sectionHeader}>
-          <View style={[styles.sectionIconCircle, { backgroundColor: themeColors.accentSubtle }]}>
-            <MaterialCommunityIcons name="file-document-outline" size={18} color={themeColors.accentText} />
-          </View>
-          <Title style={styles.sectionTitle}>Invoice Summary</Title>
-        </View>
-        <View style={styles.summaryRow}>
-          <Text style={styles.summaryLabel}>Invoice</Text>
-          <Text style={styles.summaryValue}>{invoice.invoiceNumber || 'Draft'}</Text>
-        </View>
-        <View style={styles.summaryRow}>
-          <Text style={styles.summaryLabel}>Customer</Text>
-          <Text style={styles.summaryValue}>{customerName}</Text>
-        </View>
-        <View style={styles.summaryRow}>
+    <BottomSheet
+      visible={visible}
+      onDismiss={dismiss}
+      onClosed={handleClosed}
+      title={editingPaymentId ? 'Edit Payment' : paymentCopy.recordPayment}
+      subtitle={`Invoice ${invoice.invoiceNumber || 'Draft'}${customerName ? ` · ${customerName}` : ''}`}
+      scrollable
+      maxHeightRatio={0.9}
+    >
+      {/* Total / paid / balance at a glance — same grammar as PaymentSheet,
+          so the sheet answers "how much is left?" before asking anything. */}
+      <View style={styles.summaryRow}>
+        <View style={styles.summaryCell}>
           <Text style={styles.summaryLabel}>Total</Text>
           <Text style={styles.summaryValue}>{formatCurrency(invoice.total)}</Text>
         </View>
-        {(invoice.paidAmount || 0) > 0 && (
-          <>
-            <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>Already Paid</Text>
-              <Text style={[styles.summaryValue, { color: themeColors.money }]}>
-                {formatCurrency(invoice.paidAmount || 0)}
-              </Text>
-            </View>
-            {invoice.squarePaymentId && (
-              <View style={styles.squareNoteRow}>
-                <MaterialCommunityIcons
-                  name="credit-card-check-outline"
-                  size={14}
-                  color={themeColors.textMuted}
-                />
-                <Text style={styles.squareNoteText}>
-                  Paid via Square
-                  {invoice.squarePaidAt
-                    ? ` on ${format(new Date(invoice.squarePaidAt as any), 'd MMM yyyy')}`
-                    : ''}
-                </Text>
-              </View>
-            )}
-          </>
-        )}
-        <View style={[styles.summaryRow, styles.balanceRow]}>
-          <Text style={styles.balanceLabel}>Balance Due</Text>
-          <Text style={styles.balanceValue}>{formatCurrency(amountDue)}</Text>
-        </View>
-      </Surface>
-
-      {/* Payment Amount */}
-      <Surface style={styles.section}>
-        <View style={styles.sectionHeader}>
-          <View style={[styles.sectionIconCircle, { backgroundColor: themeColors.accentSubtle }]}>
-            <MaterialCommunityIcons name="cash" size={18} color={themeColors.accentText} />
-          </View>
-          <Title style={styles.sectionTitle}>Payment Amount</Title>
-        </View>
-        <TextInput
-          label="Amount"
-          value={amount}
-          onChangeText={setAmount}
-          keyboardType="decimal-pad"
-          mode="outlined"
-          style={styles.input}
-          left={<TextInput.Affix text="$" />}
-        />
-        <View style={styles.quickAmounts}>
-          <Button
-            mode="outlined"
-            onPress={() => setAmount(amountDue.toFixed(2))}
-            style={styles.quickButton}
-            compact
+        <View style={styles.summaryDivider} />
+        <View style={styles.summaryCell}>
+          <Text style={styles.summaryLabel}>Paid</Text>
+          <Text
+            style={[
+              styles.summaryValue,
+              (invoice.paidAmount || 0) > 0 && { color: themeColors.money },
+            ]}
           >
-            Full Balance
-          </Button>
-          {amountDue >= 100 && (
-            <Button
-              mode="outlined"
-              onPress={() => setAmount((amountDue / 2).toFixed(2))}
-              style={styles.quickButton}
-              compact
-            >
-              50%
-            </Button>
-          )}
+            {formatCurrency(invoice.paidAmount || 0)}
+          </Text>
         </View>
-      </Surface>
+        <View style={styles.summaryDivider} />
+        <View style={styles.summaryCell}>
+          <Text style={styles.summaryLabel}>Balance due</Text>
+          <Text style={[styles.summaryValue, styles.summaryValueDue]}>
+            {formatCurrency(amountDue)}
+          </Text>
+        </View>
+      </View>
+      {invoice.squarePaymentId ? (
+        <View style={styles.squareNoteRow}>
+          <MaterialCommunityIcons
+            name="credit-card-check-outline"
+            size={14}
+            color={themeColors.textMuted}
+          />
+          <Text style={styles.squareNoteText}>
+            Paid via Square
+            {invoice.squarePaidAt
+              ? ` on ${format(new Date(invoice.squarePaidAt as any), 'd MMM yyyy')}`
+              : ''}
+          </Text>
+        </View>
+      ) : null}
 
-      {/* Payment Method */}
-      <Surface style={styles.section}>
-        <View style={styles.sectionHeader}>
-          <View style={[styles.sectionIconCircle, { backgroundColor: themeColors.infoSubtle }]}>
-            <MaterialCommunityIcons name="credit-card-outline" size={18} color={themeColors.info} />
-          </View>
-          <Title style={styles.sectionTitle}>Payment Method</Title>
-        </View>
-        <RadioButton.Group
-          onValueChange={(value) => setPaymentMethod(value as PaymentMethod)}
-          value={paymentMethod}
-        >
-          {PAYMENT_METHODS.map((method) => (
-            <RadioButton.Item
-              key={method.value}
-              label={method.label}
-              value={method.value}
-              style={styles.radioItem}
-              labelStyle={styles.radioLabel}
-            />
-          ))}
-        </RadioButton.Group>
-      </Surface>
+      {/* Amount */}
+      <Text style={styles.fieldLabel}>Amount</Text>
+      <CurrencyInput
+        variant="field"
+        value={amount}
+        onCommit={setAmount}
+        accessibilityLabel="Payment amount"
+      />
+      <View style={styles.chipRow}>
+        <Chip
+          label="Full balance"
+          onPress={() => setAmount(Math.round(amountDue * 100) / 100)}
+        />
+        {amountDue >= 100 && (
+          <Chip
+            label="50%"
+            onPress={() => setAmount(Math.round((amountDue / 2) * 100) / 100)}
+          />
+        )}
+      </View>
 
-      {/* Payment Date */}
-      <Surface style={styles.section}>
-        <View style={styles.sectionHeader}>
-          <View style={[styles.sectionIconCircle, { backgroundColor: themeColors.moneySubtle }]}>
-            <MaterialCommunityIcons name="calendar-check" size={18} color={themeColors.money} />
-          </View>
-          <Title style={styles.sectionTitle}>Payment Date</Title>
-        </View>
-        <Menu
-          visible={dateMenuVisible}
-          onDismiss={() => setDateMenuVisible(false)}
-          anchor={
-            <TouchableOpacity
-              style={styles.dateSelector}
-              onPress={() => setDateMenuVisible(true)}
-            >
-              <Text style={styles.dateText}>
-                {format(paymentDate, 'dd MMM yyyy')}
-              </Text>
-              <Text style={styles.dateLabelText}>
-                {isToday(paymentDate) ? '(Today)' : isYesterday(paymentDate) ? '(Yesterday)' : ''}
-              </Text>
-            </TouchableOpacity>
-          }
-        >
-          <Menu.Item
-            onPress={() => {
-              setPaymentDate(new Date());
-              setDateMenuVisible(false);
-            }}
-            title="Today"
+      {/* Method */}
+      <Text style={styles.fieldLabel}>How was it paid?</Text>
+      <View style={styles.chipRow}>
+        {PAYMENT_METHODS.map((method) => (
+          <Chip
+            key={method.value}
+            label={method.label}
+            active={paymentMethod === method.value}
+            onPress={() => setPaymentMethod(method.value)}
           />
-          <Menu.Item
-            onPress={() => {
-              setPaymentDate(subDays(new Date(), 1));
-              setDateMenuVisible(false);
-            }}
-            title="Yesterday"
+        ))}
+      </View>
+
+      {/* Date */}
+      <Text style={styles.fieldLabel}>When?</Text>
+      <Text style={styles.dateText}>
+        {format(paymentDate, 'EEE d MMM yyyy')}
+        {isToday(paymentDate)
+          ? ' (Today)'
+          : isYesterday(paymentDate)
+            ? ' (Yesterday)'
+            : ''}
+      </Text>
+      <View style={styles.chipRow}>
+        {dateOptions.map((option) => (
+          <Chip
+            key={option.label}
+            label={option.label}
+            active={isSameDay(paymentDate, option.date)}
+            onPress={() => setPaymentDate(option.date)}
           />
-          <Menu.Item
-            onPress={() => {
-              setPaymentDate(subDays(new Date(), 2));
-              setDateMenuVisible(false);
-            }}
-            title="2 days ago"
-          />
-          <Menu.Item
-            onPress={() => {
-              setPaymentDate(subDays(new Date(), 7));
-              setDateMenuVisible(false);
-            }}
-            title="1 week ago"
-          />
-        </Menu>
-      </Surface>
+        ))}
+      </View>
 
       {/* Notes */}
-      <Surface style={styles.section}>
-        <View style={styles.sectionHeader}>
-          <View style={[styles.sectionIconCircle, { backgroundColor: themeColors.infoSubtle }]}>
-            <MaterialCommunityIcons name="note-text-outline" size={18} color={themeColors.info} />
-          </View>
-          <Title style={styles.sectionTitle}>Notes (Optional)</Title>
-        </View>
-        <TextInput
-          label="Payment notes"
-          value={notes}
-          onChangeText={setNotes}
-          mode="outlined"
-          style={styles.input}
-          multiline
-          numberOfLines={3}
-          placeholder="e.g., Transaction ID, reference number..."
-        />
-      </Surface>
+      <Text style={styles.fieldLabel}>Notes (optional)</Text>
+      <TextInput
+        value={notes}
+        onChangeText={setNotes}
+        mode="outlined"
+        dense
+        style={styles.notesInput}
+        multiline
+        numberOfLines={2}
+        placeholder="e.g., Transaction ID, reference number..."
+        accessibilityLabel="Payment notes"
+      />
 
-      {/* Submit Button */}
       <Button
         mode="contained" buttonColor={themeColors.accent} textColor={themeColors.onAccent}
         onPress={handleRecordPayment}
@@ -444,7 +431,7 @@ export function RecordPaymentScreen() {
         disabled={isSubmitting}
         icon="check"
       >
-        {editingPaymentId ? 'Save Changes' : 'Record Payment'}
+        {editingPaymentId ? 'Save Changes' : paymentCopy.recordPayment}
       </Button>
 
       {editingPaymentId ? (
@@ -459,46 +446,83 @@ export function RecordPaymentScreen() {
           Remove this payment
         </Button>
       ) : null}
-      </WebContainer>
-    </ScrollView>
+
+      {/* Portal-hosted, so position in the tree only sets mount order —
+          after the sheet, which puts the dialog on top (ScheduleJobSheet's
+          in-sheet prompt is the precedent). */}
+      {alertNode}
+    </BottomSheet>
+  );
+}
+
+function Chip({
+  label,
+  active,
+  onPress,
+}: {
+  label: string;
+  active?: boolean;
+  onPress: () => void;
+}) {
+  const styles = useStyles();
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityState={{ selected: !!active }}
+      // react-native-web drops accessibilityState.selected on buttons;
+      // the explicit alias reaches the DOM (and assistive tech) on web.
+      aria-selected={!!active}
+      style={({ pressed }) => [
+        styles.chip,
+        active && styles.chipActive,
+        pressed && !active && { opacity: 0.85 },
+      ]}
+    >
+      <Text style={[styles.chipLabel, active && styles.chipLabelActive]}>
+        {label}
+      </Text>
+    </Pressable>
   );
 }
 
 const useStyles = makeStyles((t) => ({
-  container: {
-    flex: 1,
-    backgroundColor: t.colors.bg,
-  },
-  scrollContent: {
-    padding: 16,
-    paddingBottom: 32,
-  },
-  summaryCard: {
-    padding: 16,
-    borderRadius: 14,
-    marginBottom: 12,
-    backgroundColor: t.colors.surfaceRaised,
-    elevation: 2,
-  },
   summaryRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 8,
+    alignItems: 'center',
+    backgroundColor: t.colors.surfaceOverlay,
+    borderRadius: 12,
+    padding: 16,
+    ...t.elevation[1],
+  },
+  summaryCell: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  summaryDivider: {
+    width: 1,
+    height: 32,
+    backgroundColor: t.colors.border,
   },
   summaryLabel: {
-    fontSize: 14,
+    fontSize: 12,
     color: t.colors.textSecondary,
+    marginBottom: 4,
   },
   summaryValue: {
-    fontSize: 14,
-    fontWeight: '500',
+    fontSize: 16,
+    fontWeight: '700',
+    color: t.colors.text,
+  },
+  summaryValueDue: {
+    color: t.colors.money,
+    fontSize: 18,
   },
   squareNoteRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    marginTop: -4,
-    marginBottom: 8,
+    marginTop: 8,
     marginLeft: 2,
   },
   squareNoteText: {
@@ -506,90 +530,61 @@ const useStyles = makeStyles((t) => ({
     color: t.colors.textMuted,
     fontStyle: 'italic',
   },
-  balanceRow: {
-    marginTop: 8,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: t.colors.border,
+  fieldLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: t.colors.textSecondary,
+    marginTop: 18,
+    marginBottom: 8,
   },
-  balanceLabel: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: t.colors.text,
-  },
-  balanceValue: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: t.colors.money,
-  },
-  section: {
-    padding: 16,
-    borderRadius: 14,
-    marginBottom: 12,
-    backgroundColor: t.colors.surfaceRaised,
-    elevation: 2,
-  },
-  sectionHeader: {
+  chipRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    marginBottom: 12,
-  },
-  sectionIconCircle: {
-    width: 34,
-    height: 34,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  sectionTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    marginBottom: 0,
-    lineHeight: 20,
-  },
-  input: {
-    backgroundColor: t.colors.surfaceRaised,
-  },
-  quickAmounts: {
-    flexDirection: 'row',
-    marginTop: 12,
+    flexWrap: 'wrap',
     gap: 8,
+    marginTop: 10,
   },
-  quickButton: {
-    borderColor: t.colors.accent,
-  },
-  radioItem: {
-    paddingVertical: 4,
-  },
-  radioLabel: {
-    fontSize: 14,
-  },
-  dateSelector: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
+  chip: {
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 999,
     borderWidth: 1,
     borderColor: t.colors.border,
-    borderRadius: 10,
-    backgroundColor: t.colors.surfaceRaised,
+    backgroundColor: t.colors.surfaceOverlay,
+  },
+  chipActive: {
+    backgroundColor: t.colors.accent,
+    borderColor: t.colors.accent,
+  },
+  chipLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: t.colors.text,
+  },
+  chipLabelActive: {
+    color: t.colors.onAccent,
   },
   dateText: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '500',
     color: t.colors.text,
   },
-  dateLabelText: {
-    fontSize: 14,
-    color: t.colors.textMuted,
-    marginLeft: 8,
+  notesInput: {
+    backgroundColor: t.colors.surfaceRaised,
   },
   submitButton: {
-    marginTop: 8,
-    paddingVertical: 8,
+    marginTop: 20,
   },
   deleteButton: {
     marginTop: 4,
+  },
+  notFound: {
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 24,
+  },
+  notFoundText: {
+    fontSize: 14,
+    color: t.colors.textSecondary,
+    textAlign: 'center',
   },
 }));
