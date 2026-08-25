@@ -19,7 +19,7 @@ import React from 'react';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, fireEvent, waitFor, act } from '@testing-library/react';
 import { Alert } from 'react-native';
-import { isYesterday } from 'date-fns';
+import { isYesterday, isSameDay } from 'date-fns';
 
 vi.mock('@expo/vector-icons/MaterialCommunityIcons', () => ({ default: () => null }));
 
@@ -38,6 +38,16 @@ vi.mock('../components/BottomSheet', () => ({
           props.children,
         )
       : null;
+  },
+}));
+
+// The calendar is DueDateSheet's problem (it has its own tests); capture its
+// props so tests can drive a day pick directly.
+const dateSheet = vi.hoisted(() => ({ props: null as any }));
+vi.mock('../components/DueDateSheet', () => ({
+  DueDateSheet: (props: any) => {
+    dateSheet.props = props;
+    return null;
   },
 }));
 
@@ -252,6 +262,44 @@ describe('RecordPaymentScreen sheet-screen', () => {
     fireEvent.click(getByRole('button', { name: /^Cancel$/ }));
 
     expect(sheet.props.visible).toBe(false);
+  });
+
+  it('opens the shared calendar from the Pick a date chip and applies the picked day', async () => {
+    const { getByText, getByRole } = render(<RecordPaymentScreen />);
+
+    expect(dateSheet.props.visible).toBe(false);
+    fireEvent.click(getByText('Pick a date'));
+    expect(dateSheet.props.visible).toBe(true);
+
+    // Pick the 10th of last month via the captured onChange.
+    const picked = new Date();
+    picked.setMonth(picked.getMonth() - 1, 10);
+    picked.setHours(0, 0, 0, 0);
+    await act(async () => dateSheet.props.onChange(picked.getTime()));
+
+    expect(getByText(new RegExp(`10 [A-Z][a-z]{2} ${picked.getFullYear()}`))).toBeTruthy();
+    // Off-list date → the Pick a date chip is the selected one (the method
+    // chip row keeps its own aria-selected entry, so collect them all).
+    const selectedChips = Array.from(
+      document.querySelectorAll('[aria-selected="true"]'),
+    ).map((el) => el.textContent);
+    expect(selectedChips).toContain('Pick a date');
+
+    fireEvent.click(getByRole('button', { name: /Record Payment/ }));
+    await waitFor(() => expect(state.recordDocumentPayment).toHaveBeenCalled());
+    const recordedDate = state.recordDocumentPayment.mock.calls[0][4] as Date;
+    expect(isSameDay(recordedDate, picked)).toBe(true);
+  });
+
+  it('clamps a future calendar pick to today', async () => {
+    const { getByText } = render(<RecordPaymentScreen />);
+
+    fireEvent.click(getByText('Pick a date'));
+    await act(async () =>
+      dateSheet.props.onChange(Date.now() + 5 * 24 * 60 * 60 * 1000),
+    );
+
+    expect(getByText(/\(Today\)/)).toBeTruthy();
   });
 
   it('renders the not-found fallback inside the sheet when no invoice resolves', () => {

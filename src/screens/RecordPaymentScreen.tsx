@@ -25,6 +25,7 @@ import { formatCurrency } from '../utils/quoteCalculator';
 import { getAmountDue } from '../utils/invoiceCalculator';
 import { BottomSheet } from '../components/BottomSheet';
 import { CurrencyInput } from '../components/CurrencyInput';
+import { DueDateSheet } from '../components/DueDateSheet';
 import { useAlertModal } from '../hooks/useAlertModal';
 import { paymentCopy } from '../constants/paymentCopy';
 
@@ -147,6 +148,9 @@ export function RecordPaymentScreen() {
     editingPayment?.paidAt ? new Date(editingPayment.paidAt) : new Date(),
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // The shared month calendar (same one due dates and document backdating
+  // use), for payments older than the quick chips reach.
+  const [dateSheetVisible, setDateSheetVisible] = useState(false);
 
   // Keyed on the resolved id + figure, NOT the `invoice` object — that
   // projection is rebuilt every render, and an identity dep made this effect
@@ -415,6 +419,11 @@ export function RecordPaymentScreen() {
             onPress={() => setPaymentDate(option.date)}
           />
         ))}
+        <Chip
+          label="Pick a date"
+          active={!dateOptions.some((o) => isSameDay(paymentDate, o.date))}
+          onPress={() => setDateSheetVisible(true)}
+        />
       </View>
 
       {/* Notes */}
@@ -462,8 +471,21 @@ export function RecordPaymentScreen() {
       </Button>
 
       {/* Portal-hosted, so position in the tree only sets mount order —
-          after the sheet, which puts the dialog on top (ScheduleJobSheet's
+          after the sheet, which puts these on top (ScheduleJobSheet's
           in-sheet prompt is the precedent). */}
+      <DueDateSheet
+        visible={dateSheetVisible}
+        onDismiss={() => setDateSheetVisible(false)}
+        value={paymentDate.getTime()}
+        onChange={(next) => {
+          // Clear = back to today. A future-dated payment reads as corrupt
+          // data in reports, so clamp forward picks to today too.
+          const picked = next ? new Date(next) : new Date();
+          setPaymentDate(picked.getTime() > Date.now() ? new Date() : picked);
+        }}
+        title="Payment date"
+        clearLabel="Reset to today"
+      />
       {alertNode}
     </BottomSheet>
   );
