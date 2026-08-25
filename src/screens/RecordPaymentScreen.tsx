@@ -544,7 +544,9 @@ const useStyles = makeStyles((t) => ({
     marginTop: 10,
   },
   chip: {
-    paddingVertical: 8,
+    // 10 matches PillToggle and keeps the tap target near the 44pt guideline
+    // for gloved on-site thumbs.
+    paddingVertical: 10,
     paddingHorizontal: 14,
     borderRadius: 999,
     borderWidth: 1,
