@@ -15,6 +15,10 @@ vi.mock('./PaymentChip', () => ({ PaymentChip: () => null, derivePaymentState: (
 vi.mock('../store/useStore', () => ({ useStore: () => null }));
 vi.mock('../hooks/useAlertModal', () => ({ useAlertModal: () => ({ showAlert: vi.fn(), dismissAlert: vi.fn(), alertNode: null }) }));
 vi.mock('./InvoiceDisplaySettings', () => ({ InvoiceDisplaySettings: () => null, DepositSettings: () => null, DisplayToggles: () => null }));
+// DueDateSheet pulls in react-native-calendars, which ships untranspiled JSX
+// vitest can't parse — and nothing here renders the sheet anyway.
+vi.mock('./DueDateSheet', () => ({ DueDateSheet: () => null }));
+vi.mock('../services/documentService', () => ({ documentService: { clearDocumentFields: vi.fn() } }));
 vi.mock('./document', () => ({}));
 vi.mock('./StageSheet', () => ({
   STAGE_META: new Proxy({}, { get: () => ({ chipLabel: 'x', actionLabel: 'x', icon: 'x', color: '#000', bgColor: '#fff' }) }),

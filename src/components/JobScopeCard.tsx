@@ -24,7 +24,7 @@ import {
   Platform,
   UIManager,
 } from 'react-native';
-import { Text, ActivityIndicator, Menu } from 'react-native-paper';
+import { Text, ActivityIndicator, Menu, TextInput } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { formatDistanceToNowStrict } from 'date-fns';
 
@@ -184,6 +184,11 @@ export function JobScopeCard({
   const [displayExpanded, setDisplayExpanded] = useState(false);
   const [previewing, setPreviewing] = useState(false);
   const [dateSheetVisible, setDateSheetVisible] = useState(false);
+  // Inline doc-number editing (expanded view only) — same tap-the-badge
+  // affordance JobPreview's header has. Draft is seeded on edit start so
+  // an external number change while idle never needs a sync effect.
+  const [editingNumber, setEditingNumber] = useState(false);
+  const [numberDraft, setNumberDraft] = useState('');
   const { showAlert, alertNode } = useAlertModal();
   const saveDocument = useStore((s) => s.saveDocument);
 
@@ -230,8 +235,27 @@ export function JobScopeCard({
     [persistedRecord, isInvoice, saveInvoice, saveQuote],
   );
 
+  const startNumberEdit = () => {
+    selectionTap();
+    setNumberDraft(doc.number || '');
+    setEditingNumber(true);
+  };
+
+  // Persists through saveDocument for the same reason the date change does:
+  // quote→invoice converts leave no same-id legacy record, and the mirror
+  // maps number → quoteNumber/invoiceNumber either way.
+  const commitNumberEdit = () => {
+    setEditingNumber(false);
+    const trimmed = numberDraft.trim();
+    if (!trimmed || trimmed === (doc.number || '')) return;
+    saveDocument({ ...doc, number: trimmed }).catch(() => {});
+  };
+
   const handleToggle = () => {
     selectionTap();
+    // Collapsing mid-edit unmounts the input before its blur can land —
+    // commit the draft here so the edit isn't silently dropped.
+    if (editingNumber) commitNumberEdit();
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     const next = !expanded;
     setExpanded(next);
@@ -279,9 +303,40 @@ export function JobScopeCard({
             {/* numberOfLines so a squeeze truncates rather than stacking
                 "INVOICE" one letter per line. */}
             <Text style={styles.typeLabel} numberOfLines={1}>{typeLabel}</Text>
-            <Text style={styles.docNumber} numberOfLines={1}>
-              {doc.number || 'Unnumbered'}
-            </Text>
+            {editingNumber ? (
+              <TextInput
+                value={numberDraft}
+                onChangeText={setNumberDraft}
+                onBlur={commitNumberEdit}
+                onSubmitEditing={commitNumberEdit}
+                placeholder={isInvoice ? 'e.g. INV-001' : 'e.g. Q-001'}
+                autoFocus
+                style={styles.numberInput}
+                mode="flat"
+                dense
+              />
+            ) : expanded ? (
+              <TouchableOpacity
+                onPress={startNumberEdit}
+                activeOpacity={0.7}
+                style={styles.numberEditTouchable}
+                accessibilityRole="button"
+                accessibilityLabel={`Edit ${typeLabel.toLowerCase()} number`}
+              >
+                <Text style={styles.docNumber} numberOfLines={1}>
+                  {doc.number || 'Unnumbered'}
+                </Text>
+                <MaterialCommunityIcons
+                  name={'pencil-outline' as any}
+                  size={12}
+                  color={themeColors.textMuted}
+                />
+              </TouchableOpacity>
+            ) : (
+              <Text style={styles.docNumber} numberOfLines={1}>
+                {doc.number || 'Unnumbered'}
+              </Text>
+            )}
           </View>
         </View>
         <View style={styles.headerRight}>
@@ -339,36 +394,10 @@ export function JobScopeCard({
         </Pressable>
       </View>
 
-      {expanded ? (
-        <ExpandedSections doc={doc} onEdit={onEdit} />
-      ) : (
-        <>
-          <ScopeRow
-            icon="package-variant"
-            label="Materials"
-            body={
-              lineCount > 0
-                ? `${lineCount} ${lineCount === 1 ? 'item' : 'items'} · ${formatCurrency(materialsTotal)}`
-                : 'Tap to add materials'
-            }
-            muted={lineCount === 0}
-            onPress={() => onEdit(doc, 'materials')}
-          />
-
-          <ScopeRow
-            icon="hammer-wrench"
-            label="Labour & markup"
-            body={laborSummary(doc)}
-            muted={(doc.laborHours ?? 0) === 0}
-            rightLabel={laborTotal > 0 ? formatCurrency(laborTotal) : undefined}
-            onPress={() => onEdit(doc, 'labor')}
-          />
-        </>
-      )}
-
-      {/* Document date (backdating) — tucked inside the expanded view,
-          same row chrome as PaymentTermsRow below. Lets a tradie shift a
-          doc into the prior financial year without opening the preview. */}
+      {/* Document date (backdating) — first row of the expanded view, right
+          under the header + chips so it reads as part of the doc's identity
+          (mirrors JobPreview's header date badge). Lets a tradie shift a doc
+          into the prior financial year without opening the preview. */}
       {expanded ? (
         <>
           <TouchableOpacity
@@ -417,6 +446,33 @@ export function JobScopeCard({
           />
         </>
       ) : null}
+
+      {expanded ? (
+        <ExpandedSections doc={doc} onEdit={onEdit} />
+      ) : (
+        <>
+          <ScopeRow
+            icon="package-variant"
+            label="Materials"
+            body={
+              lineCount > 0
+                ? `${lineCount} ${lineCount === 1 ? 'item' : 'items'} · ${formatCurrency(materialsTotal)}`
+                : 'Tap to add materials'
+            }
+            muted={lineCount === 0}
+            onPress={() => onEdit(doc, 'materials')}
+          />
+
+          <ScopeRow
+            icon="hammer-wrench"
+            label="Labour & markup"
+            body={laborSummary(doc)}
+            muted={(doc.laborHours ?? 0) === 0}
+            rightLabel={laborTotal > 0 ? formatCurrency(laborTotal) : undefined}
+            onPress={() => onEdit(doc, 'labor')}
+          />
+        </>
+      )}
 
       {isInvoice && persistedRecord ? (
         <PaymentTermsRow
@@ -776,6 +832,18 @@ const useStyles = makeStyles((t) => ({
     fontSize: 14,
     fontWeight: '700',
     color: t.colors.text,
+  },
+  numberEditTouchable: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    alignSelf: 'flex-start',
+  },
+  numberInput: {
+    backgroundColor: 'transparent',
+    fontSize: 14,
+    paddingHorizontal: 0,
+    height: 32,
   },
   expandButton: {
     width: 36,
