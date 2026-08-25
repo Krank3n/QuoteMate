@@ -32,6 +32,7 @@ import { ContactActionsBar } from '../components/document/ContactActionsBar';
 import { ContactEditModal, type ContactFormValues } from '../components/ContactEditModal';
 import { AlertModal, AlertType } from '../components/AlertModal';
 import { GridBackground } from '../components/GridBackground';
+import { WebContainer } from '../components/WebContainer';
 
 type AlertConfig = {
   type: AlertType;
@@ -313,6 +314,7 @@ export function ContactsScreen() {
   return (
     <View style={styles.container}>
       <GridBackground />
+      <WebContainer style={styles.flex}>
       <View style={styles.searchSection}>
         <Searchbar
           placeholder="Search contacts..."
@@ -409,6 +411,7 @@ export function ContactsScreen() {
         onPress={openAddModal}
         color={themeColors.onAccent}
       />
+      </WebContainer>
 
       {/* One shared form for customer details — the Customer screen renders the
           same component, so the two can't drift apart. */}
@@ -449,6 +452,7 @@ const useStyles = makeStyles((t) => ({
     flex: 1,
     backgroundColor: t.colors.bg,
   },
+  flex: { flex: 1 },
   searchSection: {
     paddingHorizontal: 16,
     paddingTop: 12,

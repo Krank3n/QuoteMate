@@ -16,6 +16,7 @@ import { format, formatDistanceToNow } from 'date-fns';
 import { makeStyles, useThemeColors } from '../../theme';
 import { useGoogleCalendarAuth } from '../../services/googleCalendarAuth';
 import { GridBackground } from '../../components/GridBackground';
+import { WebContainer } from '../../components/WebContainer';
 
 export function GoogleCalendarIntegrationScreen() {
   const styles = useStyles();
@@ -39,6 +40,7 @@ export function GoogleCalendarIntegrationScreen() {
     <View style={styles.gridHost}>
     <GridBackground />
     <ScrollView style={styles.scroller} contentContainerStyle={styles.content}>
+      <WebContainer style={styles.contentInner}>
       <Surface style={styles.heroCard}>
         <View
           style={[
@@ -153,6 +155,7 @@ export function GoogleCalendarIntegrationScreen() {
         We only ask for permission to manage events on your calendar
         (calendar.events). We can’t read events you didn’t create with us.
       </Text>
+      </WebContainer>
     </ScrollView>
     </View>
   );
@@ -192,6 +195,10 @@ const useStyles = makeStyles((t) => ({
   content: {
     padding: 16,
     paddingBottom: 48,
+  },
+  // Card spacing lives on the WebContainer (the cards' direct parent) so the
+  // web max-width wrapper doesn't swallow the gap.
+  contentInner: {
     gap: 14,
   },
   heroCard: {

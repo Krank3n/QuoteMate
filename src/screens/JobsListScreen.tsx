@@ -600,15 +600,17 @@ export function JobsListScreen() {
             }
           />
         </SkeletonCrossfade>
-      </WebContainer>
 
-      <FAB
-        icon="plus"
-        style={styles.fab}
-        onPress={handleNew}
-        color={themeColors.onAccent}
-        accessibilityLabel="Create new job"
-      />
+        {/* Inside the WebContainer so it hugs the content column on wide
+            screens instead of drifting to the viewport corner. */}
+        <FAB
+          icon="plus"
+          style={styles.fab}
+          onPress={handleNew}
+          color={themeColors.onAccent}
+          accessibilityLabel="Create new job"
+        />
+      </WebContainer>
 
       {stageSheetJob && (
         <JobStageSheet

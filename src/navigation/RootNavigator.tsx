@@ -335,6 +335,9 @@ function LiquidTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
         style={[StyleSheet.absoluteFill, { borderTopWidth: 1, borderTopColor: themeColors.border }]}
       />
 
+      {/* Pill + buttons share this wrapper so the pill's measured X offsets
+          stay valid when the row is centred on wide web viewports. */}
+      <View style={styles.tabBarInner}>
       {/* Liquid pill indicator */}
       {tabCenters.length > 0 && (
         <Animated.View
@@ -406,6 +409,7 @@ function LiquidTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
             </TouchableOpacity>
           );
         })}
+      </View>
       </View>
     </View>
   );
@@ -957,6 +961,16 @@ const useStyles = makeStyles((t) => ({
     right: 0,
     paddingTop: 8,
     overflow: 'hidden',
+  },
+  // Web only: cap the buttons (and the pill that tracks them) to the same
+  // 800px column every screen uses, so tabs don't spread to the viewport
+  // edges on desktop. Native keeps the full-width row.
+  tabBarInner: {
+    width: '100%',
+    ...(Platform.OS === 'web' && {
+      maxWidth: 800,
+      alignSelf: 'center' as const,
+    }),
   },
   tabRow: {
     flexDirection: 'row',

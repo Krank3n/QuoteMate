@@ -9,7 +9,6 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Platform,
 } from 'react-native';
 import {
   Text,
@@ -315,11 +314,6 @@ const useStyles = makeStyles((t) => ({
   scrollContent: {
     padding: 16,
     paddingBottom: 100,
-    ...(Platform.OS === 'web' && {
-      maxWidth: 600,
-      margin: 'auto' as any,
-      width: '100%',
-    }),
   },
   sectionContainer: {
     marginBottom: 24,
