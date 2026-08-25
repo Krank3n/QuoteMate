@@ -41,6 +41,7 @@ import type { Tokens } from '../theme';
 import { makeStyles, useThemeColors } from '../theme';
 import { selectionTap, lightTap } from '../utils/haptics';
 import { isStillBooked } from '../utils/jobBuckets';
+import { paymentCopy } from '../constants/paymentCopy';
 
 export type JobActionId =
   | 'createQuote'
@@ -255,7 +256,7 @@ export function resolveJobActions(
     // the state with no button for it. Resend still lives in the kebab.
     return [
       primary,
-      { id: 'recordPayment', label: 'Log Payment', icon: 'cash-multiple', tone: 'ghost' },
+      { id: 'recordPayment', label: paymentCopy.recordPayment, icon: 'cash-multiple', tone: 'ghost' },
     ];
   }
   if (isInvoice && isDraft) {

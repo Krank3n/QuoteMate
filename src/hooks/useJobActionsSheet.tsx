@@ -266,7 +266,7 @@ export function useJobActionsSheet(
       case 'takePayment': {
         const doc = primaryDocForJob(job);
         if (!doc) return;
-        // No Square gate here — the sheet's manual "Record a payment" row
+        // No Square gate here — the sheet's manual "Record Payment" row
         // must work with zero Square setup; the Square rows gate themselves.
         if (doc.type === 'invoice') {
           setTakePaymentTarget({

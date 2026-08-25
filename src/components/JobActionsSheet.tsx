@@ -30,6 +30,7 @@ import { canConvertDocument } from '../../shared/document/convertGuard';
 import { isLiveInvoice, jobStatusLabel } from '../utils/jobTimeline';
 import { jobStageMetaFor } from './JobStageSheet';
 import { StageOptionRow } from './StageOptionRow';
+import { paymentCopy } from '../constants/paymentCopy';
 
 export type JobAction =
   | 'recordPayment'
@@ -148,8 +149,8 @@ export const ROWS: RowDef[] = [
     // labelled for something else to find it. Unlike Take Payment it needs no
     // Square setup and no card reader, so it shows on iOS too.
     id: 'recordPayment',
-    label: 'Record a payment',
-    sub: "Bank transfer, cash or cheque you've already been paid",
+    label: paymentCopy.recordPayment,
+    sub: paymentCopy.recordPaymentSubtitle,
     icon: 'cash-multiple',
     when: ({ primaryDoc }) => invoiceOwes(primaryDoc),
   },
@@ -165,7 +166,7 @@ export const ROWS: RowDef[] = [
         ? 'Share the Square pay link'
         : 'Tap to pay or share the Square link',
     icon: 'credit-card-outline',
-    // Same money gate as Record a payment, widened to quotes: hidden once
+    // Same money gate as Record Payment, widened to quotes: hidden once
     // there is nothing left to collect. It used to be `any doc, Android
     // only` — so a settled invoice still offered Take Payment while Record
     // had already gone, and iPhones got neither.
