@@ -349,3 +349,45 @@ describe('typed confirmations (25 Aug 2026)', () => {
     expect(confirmIdx).toBeLessThan(voiceIdx);
   });
 });
+
+describe('mid-pipeline claims (real-device report, 26 Aug 2026)', () => {
+  const section = () => promptSection('Pricing narration (after the tradie taps Apply)');
+
+  it('binds the rule to the whole pipeline window, not just the [narrate] turn', () => {
+    // The bug: every rule here was scoped to a prompt tag ("On [narrate]:",
+    // "On [pipeline-done]:"), so the turns in BETWEEN were unconstrained — and
+    // those are exactly the turns the tradie triggers by talking during the
+    // 15-40 second run. Mate kept telling them the quote was ready to view.
+    expect(section()).toMatch(/every single thing you say in that window/i);
+  });
+
+  it('anticipates the tradie talking mid-run rather than treating it as an edge case', () => {
+    expect(section()).toMatch(/can talk to you the entire time/i);
+  });
+
+  it('gives Mate the answer to give while it waits', () => {
+    expect(section()).toMatch(/it's still pricing/i);
+  });
+
+  it('names the specific words that were being used wrongly', () => {
+    const s = section();
+    for (const word of ['ready', 'done', 'finished', 'drafted', 'sorted', 'priced']) {
+      expect(s.toLowerCase()).toContain(word);
+    }
+    expect(s).toMatch(/view it, open it, check it/i);
+  });
+
+  it('bans show_quote on a quote that is still pricing', () => {
+    expect(section()).toMatch(/don't call show_quote on it/i);
+  });
+
+  it('says the [pipeline-done] line is the ONLY signal that it finished', () => {
+    // Mate had been inferring completion from elapsed time / conversational feel.
+    expect(section()).toMatch(/from nothing else/i);
+    expect(section()).toMatch(/cannot tell by how long/i);
+  });
+
+  it('states the consequence, so the rule has a reason attached', () => {
+    expect(section()).toMatch(/in front of the customer/i);
+  });
+});
