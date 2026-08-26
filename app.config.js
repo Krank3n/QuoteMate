@@ -55,6 +55,20 @@ export default {
           }
         }
       ],
+      [
+        // LiveKit WebRTC, the transport under @elevenlabs/react-native. ios/ and
+        // android/ are gitignored, so this plugin is the ONLY way the native
+        // config survives a prebuild. audioType "communication" is the manifest
+        // analogue of the old mic.ts audioSource: 7 (VOICE_COMMUNICATION) — it's
+        // what engages platform AEC, which is what lets the half-duplex mic gate
+        // in AssistantScreen go away. We never screen-share or use the camera
+        // through LiveKit, so both extras stay off.
+        "@livekit/react-native-expo-plugin",
+        {
+          android: { audioType: "communication", enableScreenShareService: false },
+          ios: { enableMultitaskingCameraAccess: false }
+        }
+      ],
       "expo-apple-authentication",
       [
         // Native Google Sign-In (Play Services / iOS account picker). Replaces
@@ -70,7 +84,7 @@ export default {
       [
         "expo-speech-recognition",
         {
-          microphonePermission: "Allow QuoteMate to use your microphone for voice-to-text job descriptions.",
+          microphonePermission: "QuoteMate uses your microphone for voice-to-text job descriptions and to talk to Mate, your in-app offsider.",
           speechRecognitionPermission: "Allow QuoteMate to use speech recognition for voice-to-text job descriptions.",
           android: {
             requireOnDeviceRecognition: false
@@ -102,6 +116,14 @@ export default {
         }
       ],
       "expo-iap",
+      // Gradle heap. LiveKit's WebRTC pushes :app:mergeExtDexDebug past Expo's
+      // default -Xmx2048m and D8 dies with an OutOfMemoryError that presents as
+      // a DexArchiveMergerException. android/ is gitignored, so this can only
+      // live in a plugin.
+      "./plugins/withGradleJvmArgs",
+      // LiveKit's webrtc manifest merges in an Android screen-capture service we
+      // never start. enableScreenShareService:false does NOT remove it.
+      "./plugins/withLiveKitManifestTrim",
       ["./plugins/withKotlinVersion", "2.2.0"],
       // GoogleSignIn iOS SDK (native Google sign-in) pulls Swift pod
       // AppCheckCore whose ObjC deps need module maps — see the plugin.

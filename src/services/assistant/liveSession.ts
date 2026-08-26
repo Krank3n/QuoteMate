@@ -58,11 +58,46 @@ export class LiveRateLimitError extends LiveOfflineError {
   }
 }
 
-export interface MintedToken {
+/**
+ * What the mint returns depends on which voice provider the SERVER picked for
+ * this user — the client does not choose. That indirection is the rollback
+ * mechanism: moving everyone back to Gemini Live is a Firestore edit plus a
+ * functions deploy, with no app-store release in the loop.
+ */
+export interface GeminiMintedToken {
+  provider?: 'gemini';
   token: string;
   model: string;
   expiresAt?: string;
 }
+
+export interface ElevenLabsMintedToken {
+  provider: 'elevenlabs';
+  /** LiveKit conversation token — WebRTC only; the RN SDK rejects signed URLs. */
+  token: string;
+  model: string;
+  agentId: string;
+  /** Ties the session to the server's voiceSessions row for cost reconciliation. */
+  conversationId: string;
+  /** Client-side backstop for the agent's own duration ceiling. */
+  maxDurationSeconds: number;
+  heldSeconds: number;
+  remainingVoiceSeconds: number;
+}
+
+export type MintedToken = GeminiMintedToken | ElevenLabsMintedToken;
+
+export function isElevenLabsMint(m: MintedToken): m is ElevenLabsMintedToken {
+  return m.provider === 'elevenlabs';
+}
+
+/**
+ * Transports this build can actually open. Sent on every voice mint so the
+ * server can never hand this client a token it wouldn't know what to do with —
+ * a capability handshake rather than version parsing. Builds before 1.56 send
+ * nothing and are therefore always served Gemini.
+ */
+export const VOICE_CLIENT_CAPABILITIES = ['elevenlabs'] as const;
 
 // Per-request ceilings. Without these a half-open connection (walking out of
 // coverage mid-request) stalls the whole turn forever — fetch never rejects
@@ -144,7 +179,11 @@ export async function mintLiveToken(mode?: 'voice'): Promise<MintedToken> {
     response = await fetchWithTimeout(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
-      body: JSON.stringify({ platform: Platform.OS, mode }),
+      body: JSON.stringify({
+        platform: Platform.OS,
+        mode,
+        ...(mode === 'voice' ? { supports: VOICE_CLIENT_CAPABILITIES } : {}),
+      }),
     }, MINT_TIMEOUT_MS);
   } catch (err: any) {
     if (err instanceof LiveOfflineError) throw err;
@@ -165,6 +204,11 @@ export async function mintLiveToken(mode?: 'voice'): Promise<MintedToken> {
 
   const data = (await response.json()) as MintedToken;
   if (!data?.token || !data?.model) {
+    throw new LiveOfflineError('Mate is offline (bad token response).');
+  }
+  // An ElevenLabs mint without an agent id is unopenable — better to say Mate
+  // is offline than to fail deep inside the SDK with a shapeless error.
+  if (isElevenLabsMint(data) && !data.agentId) {
     throw new LiveOfflineError('Mate is offline (bad token response).');
   }
   return data;

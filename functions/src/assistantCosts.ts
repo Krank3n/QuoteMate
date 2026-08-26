@@ -40,6 +40,17 @@ export interface ModelPricing {
   inputAudioPerM?: number;
   /** USD per 1M output audio tokens. Only set for Live audio models. */
   outputAudioPerM?: number;
+  /**
+   * USD per MINUTE of connected conversation. Set only for per-minute platforms
+   * (ElevenLabs Agents), where audio is not billed per token at all.
+   *
+   * NOTE the unit change. Every other field here exploits the fact that
+   * tokens * pricePerM already equals micros; a per-minute rate is plain USD
+   * and has to be multiplied by 1e6 explicitly. See platformCostMicros.
+   */
+  perMinuteUsd?: number;
+  /** USD per minute when over the concurrency limit (burst rate). */
+  burstPerMinuteUsd?: number;
 }
 
 export const PRICING: Record<string, ModelPricing> = {
@@ -57,6 +68,25 @@ export const PRICING: Record<string, ModelPricing> = {
     outputPerM: 15.00,
     cachedInputPerM: 0.30,
     cacheWritePerM: 3.75,
+  },
+  // Voice via an ElevenLabs Agent running Claude Sonnet 5.
+  //
+  // The key is compound on purpose. The text path already writes
+  // models.claude-sonnet-5.* on the same daily doc; sharing the key would fuse
+  // typing spend and talking spend so /admin/ai-costs couldn't tell you which
+  // one is costing money. sanitiseKey turns the slash into an underscore for
+  // the Firestore field path, while pricingFor looks up the raw key.
+  //
+  // LLM tokens are billed by ElevenLabs and deducted from their credits, so the
+  // token rates below are for reconciliation against their charging breakdown,
+  // not for a bill we pay Anthropic directly.
+  'elevenlabs/claude-sonnet-5': {
+    inputPerM: 3.00,
+    outputPerM: 15.00,
+    cachedInputPerM: 0.30,
+    cacheWritePerM: 3.75,
+    perMinuteUsd: 0.08,
+    burstPerMinuteUsd: 0.16,
   },
   // Voice Live model used by assistantToken → client WS.
   'gemini-3.1-flash-live-preview': {
@@ -177,7 +207,7 @@ interface LiveUsagePayload {
   sessionEnded?: boolean;
 }
 
-function costMicrosForLive(model: string, u: LiveUsagePayload): number {
+export function costMicrosForLive(model: string, u: LiveUsagePayload): number {
   const p = pricingFor(model);
   const billedInputText = Math.max(0, (u.inputTextTokens || 0) - (u.cachedTokens || 0));
   const usd =
@@ -188,6 +218,31 @@ function costMicrosForLive(model: string, u: LiveUsagePayload): number {
     ((u.inputAudioTokens || 0) * (p.inputAudioPerM ?? p.inputPerM)) +
     ((u.outputAudioTokens || 0) * (p.outputAudioPerM ?? p.outputPerM));
   return Math.round(usd);
+}
+
+/**
+ * Platform (connection-time) cost of a voice session, in micros.
+ *
+ * THE UNIT TRAP: every other cost term in this file relies on
+ * `tokens * pricePerM === micros`, because pricePerM is USD per 1,000,000
+ * tokens. A per-minute rate is plain USD per minute and needs an explicit
+ * * 1e6. Getting this wrong is a factor-of-a-million error that looks
+ * completely plausible on a dashboard. Pinned by test: 6 minutes at $0.08/min
+ * is exactly 480_000 micros.
+ *
+ * Returns 0 for models with no per-minute rate, so the Gemini rows keep costing
+ * exactly what they always did.
+ */
+export function platformCostMicros(
+  model: string,
+  durationSeconds: number,
+  opts: { burst?: boolean } = {},
+): number {
+  const p = pricingFor(model);
+  const rate = opts.burst ? (p.burstPerMinuteUsd ?? p.perMinuteUsd) : p.perMinuteUsd;
+  if (!rate) return 0;
+  const seconds = Math.max(0, durationSeconds || 0);
+  return Math.round((seconds / 60) * rate * 1_000_000);
 }
 
 export const reportAssistantLiveUsage = functions.https.onCall(async (data, context) => {

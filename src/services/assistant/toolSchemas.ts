@@ -477,3 +477,54 @@ export const CONTROL_TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
     },
   },
 ];
+
+// ---------------------------------------------------------------------------
+// Per-tool runtime settings for the ElevenLabs agent.
+//
+// These are agent-side config (pushed by scripts/syncMateAgent.ts), but the
+// values live here so the repo stays the source of truth and a new tool can't
+// be added without deciding its budget.
+//
+// `expects_response` is deliberately absent: it is true for EVERY tool and the
+// converter hard-codes it. The ElevenLabs API defaults it to FALSE, which means
+// the agent fires the call and carries on without waiting — for find_customer
+// or get_quote that is Mate confidently inventing a customer. There is no tool
+// here whose answer Mate doesn't need.
+//
+// Timeouts are a ceiling, not a delay, so they err generous. Anything reading
+// Firestore over patchy site coverage gets the long budget — find_customer
+// pulls up to 500 contact docs, so it belongs in that group despite feeling
+// instant on a desk connection.
+export const TOOL_RUNTIME: Record<string, { timeoutSecs: number }> = {
+  // Firestore reads.
+  find_customer: { timeoutSecs: 20 },
+  list_recent_quotes: { timeoutSecs: 20 },
+  get_quote: { timeoutSecs: 20 },
+  get_business_defaults: { timeoutSecs: 20 },
+  review_quote: { timeoutSecs: 20 },
+  list_service_reports: { timeoutSecs: 20 },
+  // Niche inference + supplier-book checks — the slowest read by some way.
+  get_job_requirements: { timeoutSecs: 30 },
+  // Pure validation + a screen-registered probe. No network.
+  show_quote: { timeoutSecs: 10 },
+  propose_draft_quote: { timeoutSecs: 10 },
+  propose_add_line_item: { timeoutSecs: 10 },
+  propose_delete_line_item: { timeoutSecs: 10 },
+  propose_delete_quote: { timeoutSecs: 10 },
+  propose_create_contact: { timeoutSecs: 10 },
+  propose_update_customer: { timeoutSecs: 10 },
+  propose_send_quote: { timeoutSecs: 10 },
+  propose_convert_to_invoice: { timeoutSecs: 10 },
+  propose_reprice: { timeoutSecs: 10 },
+  propose_update_quote_rates: { timeoutSecs: 10 },
+  propose_mark_paid: { timeoutSecs: 10 },
+  propose_import_supplier_list: { timeoutSecs: 10 },
+  apply_pending_proposal: { timeoutSecs: 10 },
+  cancel_pending_proposal: { timeoutSecs: 10 },
+};
+
+/** Every declaration the agent is told about — read, view, proposal and control. */
+export const ALL_TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
+  ...TOOL_DECLARATIONS,
+  ...CONTROL_TOOL_DECLARATIONS,
+];
