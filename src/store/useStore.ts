@@ -49,6 +49,7 @@ import { trackEvent } from '../services/analyticsService';
 import { maybeRequestReview } from '../services/storeReviewService';
 import { ensureJobForDocument, ensureJobForQuote, useJobStore } from './useJobStore';
 import { canAnalysePhotos, canRunMatePipeline } from './planGates';
+import { markPricingStarted, markPricingFinished } from '../services/assistant/pricingInFlight';
 import type { CustomerEditPlan } from '../utils/customerEdit';
 import { auth } from '../config/firebase';
 import { searchLocalSources } from '../services/localMaterialSearch';
@@ -332,6 +333,18 @@ export type ApplyProposalResult =
       ok: true;
       navigate?: NavigateHint;
       note?: string;
+      /**
+       * The apply succeeded but the materials + pricing pipeline did NOT
+       * finish — the draft exists and opens, yet its prices don't.
+       *
+       * This is `ok: true` on purpose: the tradie gets their draft rather than
+       * an error, and the working card already tells them pricing fell over.
+       * But anything that ANNOUNCES the outcome has to be able to tell the two
+       * apart. Voice narration branched on `ok` alone and cheerfully said
+       * "sweet, came together fine" over a quote with no prices on it, while
+       * the card underneath read "Couldn't finish pricing that one."
+       */
+      pipelineDegraded?: true;
       review?: QuoteReview;
       /** How much of this quote the tradie's own supplier rates could price. */
       supplierGap?: SupplierGapSummary;
@@ -3358,6 +3371,10 @@ export const useStore = create<AppState>((set, get) => ({
           // is one-shot info, not a progress frame, and the caller needs the
           // terms after the run finishes.
           const missedSupplierTerms: string[] = [];
+          // Mate keeps talking to the tradie while this runs. Flag the quote as
+          // mid-pricing so show_quote refuses to put an unpriced draft on screen
+          // and call it ready — see pricingInFlight.
+          markPricingStarted(quoteId);
           try {
             // Track the current working status so partial updates (e.g. an
             // item-priced event that only changes the detail line) don't blow
@@ -3473,8 +3490,13 @@ export const useStore = create<AppState>((set, get) => ({
             return {
               ok: true,
               navigate: { kind: 'job_preview', quoteId },
+              pipelineDegraded: true,
               note: `Pipeline snag — opened the draft, tap Fetch Prices in the wizard. (${err?.message || 'unknown'})`,
             };
+          } finally {
+            // Clear on every exit — success, snag, or cancellation. A quote left
+            // flagged would have show_quote refusing it forever.
+            markPricingFinished(quoteId);
           }
 
           // If the tradie asked for an invoice up front, auto-convert at the
