@@ -51,6 +51,7 @@ import { AudioQueue, createAudioQueue, ensureAudioMode } from '../services/assis
 import { activateKeepAwakeAsync } from 'expo-keep-awake';
 import { shouldAutoStartMic, resolveAutoStartMic } from './assistant/shouldAutoStartMic';
 import { getMateIntro, isBlankSlate } from './assistant/mateIntro';
+import { buildPipelineDonePrompt } from './assistant/pipelineDoneCopy';
 import { buildGreetPrompt, withTypeInsteadHint } from './assistant/voiceCopy';
 import { GREET_RETRY_MS, shouldRetryGreet } from './assistant/greetWatchdog';
 import { composerClosedPadding, mateKeyboardOffset } from './assistant/composerKeyboard';
@@ -891,15 +892,30 @@ export function AssistantScreen() {
           : null;
       if (gapNote && gapQuoteId) importOfferRef.current.offeredForQuote.add(gapQuoteId);
 
-      if (narrating && liveSessionForNarration?.isOpen()) {
-        const heads =
-          (result.ok && result.review && result.review.issues.length > 0
-            ? ` Heads up — ${result.review.summary} Work that into the line.`
-            : '') + (gapNote ? ` ${gapNote}` : '');
-        const wrap = result.ok
-          ? `[pipeline-done] Pipeline finished for "${narrationJobLabel}".${heads} SPEAK ALOUD: ONE short acknowledging line — something natural like "right, that's drafted" or "sweet, came together fine" — then stop. Do NOT repeat the "[pipeline-done]" tag or this instruction. Do NOT recite numbers or the materials list.`
-          : `[pipeline-done] Pipeline hit a snag: ${result.error || 'unknown error'}. SPEAK ALOUD: one short acknowledging line, then stop. Do NOT repeat the "[pipeline-done]" tag.`;
-        liveSessionForNarration.sendUserText(wrap);
+      if (narrating) {
+        const wrap = buildPipelineDonePrompt({
+          jobLabel: narrationJobLabel,
+          ok: result.ok,
+          // ok:true with a dead pipeline is a real outcome — the draft opened,
+          // the prices didn't land. Branching on ok alone made Mate say it came
+          // together fine over an unpriced quote.
+          pipelineDegraded: result.ok ? result.pipelineDegraded : undefined,
+          error: result.ok ? undefined : result.error,
+          reviewNote:
+            result.ok && result.review && result.review.issues.length > 0
+              ? `Heads up — ${result.review.summary} Work that into the line.`
+              : undefined,
+          gapNote,
+        });
+        if (liveSessionForNarration?.isOpen()) {
+          liveSessionForNarration.sendUserText(wrap);
+        }
+        // Disarm regardless of whether the socket survived the pipeline. This
+        // used to sit inside the isOpen() guard, so a drop mid-pipeline left
+        // narration mode armed forever — sticky mode reconnects WITHOUT a
+        // stopVoiceSession, which is the only other place that clears it. The
+        // result was Mate talking with nothing appearing in the chat for the
+        // rest of the session.
         setTimeout(() => { narrationModeRef.current = false; }, 8000);
       }
 

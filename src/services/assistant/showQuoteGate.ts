@@ -14,6 +14,8 @@
 // registered (screen unmounted, tests) → optimistic pass-through, matching
 // the old behaviour; the screen-side nudge stays as the backstop.
 
+import { isPricingInFlight } from './pricingInFlight';
+
 let probe: ((quoteId: string) => string | null) | null = null;
 
 export function setRenderableQuoteProbe(
@@ -36,6 +38,17 @@ export function resolveKnownQuoteId(quoteId: string): string | null {
 }
 
 export function gateShowQuote(quoteId: string): ShowQuoteGateResult {
+  // Still pricing. Putting it on screen now shows a draft with no prices, and
+  // whatever Mate says alongside it ("here you go", "ready to view") is wrong.
+  // Refuse inside the turn so the model corrects itself rather than the tradie
+  // discovering it on the Job Preview screen.
+  if (isPricingInFlight(quoteId)) {
+    return {
+      ok: false,
+      error:
+        "That quote is still going through pricing — it has no prices on it yet, so don't put it on screen and don't tell the tradie it's ready. Wait for the pipeline to finish, then show it.",
+    };
+  }
   if (!probe) return { ok: true, quoteId };
   const renderable = probe(quoteId);
   if (renderable) return { ok: true, quoteId: renderable };
