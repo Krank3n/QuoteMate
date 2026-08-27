@@ -16,6 +16,7 @@ import {
   MAX_ASR_KEYWORDS,
   buildAgentPatch,
   buildAgentToolConfigs,
+  buildSessionAsrKeywords,
   humanisePropertyName,
   toElevenLabsTool,
   toolFingerprint,
@@ -333,5 +334,66 @@ describe('array item schemas (live-API preflight, 27 Aug 2026)', () => {
     };
     for (const tool of buildAgentToolConfigs()) walk(tool.parameters, tool.name);
     expect(missing).toEqual([]);
+  });
+});
+
+describe('buildSessionAsrKeywords (real transcript, 28 Aug 2026)', () => {
+  it('boosts the tradie\'s own customer names', () => {
+    // "Geraldine Luffaga" came back as "Jared Dane" twice in one conversation.
+    // A general speech model has never heard of Luffaga; the tradie's contact
+    // book is the only place that name exists.
+    const kw = buildSessionAsrKeywords(['Geraldine Luffaga', 'Carl Van Lyschaert']);
+    expect(kw).toContain('Luffaga');
+    expect(kw).toContain('Geraldine');
+    expect(kw).toContain('Lyschaert');
+  });
+
+  it('keeps the trade vocabulary a speech model would not know', () => {
+    const kw = buildSessionAsrKeywords([]);
+    expect(kw).toContain('Colorbond');
+    expect(kw).toContain('weed mat');
+  });
+
+  it('spends no slots on words a speech model already knows', () => {
+    // Every slot given to "quote" or "GST" is a customer whose name gets
+    // mangled. The cap is 50 for the whole list.
+    const kw = buildSessionAsrKeywords([]).map((k) => k.toLowerCase());
+    expect(kw).not.toContain('quote');
+    expect(kw).not.toContain('invoice');
+    expect(kw).not.toContain('gst');
+  });
+
+  it('never exceeds the API cap however many contacts there are', () => {
+    const many = Array.from({ length: 400 }, (_, i) => `Firstname${i} Surname${i}`);
+    expect(buildSessionAsrKeywords(many).length).toBeLessThanOrEqual(MAX_ASR_KEYWORDS);
+  });
+
+  it('prefers the most recent contacts when the budget runs out', () => {
+    // Caller passes newest-first; today's customer is far likelier to be
+    // someone recently dealt with than one of hundreds of historical rows.
+    // Distinct alphabetic surnames, because the sanitiser strips digits —
+    // real names don't have them.
+    const alphabet = 'abcdefghijklmnopqrstuvwxyz'.split('');
+    const many = alphabet.flatMap((a) => alphabet.map((b) => `Sur${a}${b}`));
+    const kw = buildSessionAsrKeywords(many);
+    expect(kw).toContain(many[0]);
+    expect(kw).not.toContain(many[many.length - 1]);
+  });
+
+  it('skips initials and filler that boost nothing', () => {
+    const kw = buildSessionAsrKeywords(['J R Hartley', 'Acme Pty Ltd']);
+    expect(kw).toContain('Hartley');
+    expect(kw).not.toContain('J');
+    expect(kw.map((k) => k.toLowerCase())).not.toContain('pty');
+    expect(kw.map((k) => k.toLowerCase())).not.toContain('ltd');
+  });
+
+  it('does not add the same surname twice for a family', () => {
+    const kw = buildSessionAsrKeywords(['Bob Nguyen', 'Katie Nguyen', 'Sam Nguyen']);
+    expect(kw.filter((k) => k === 'Nguyen')).toHaveLength(1);
+  });
+
+  it('copes with empty and malformed contact names', () => {
+    expect(() => buildSessionAsrKeywords(['', '   ', null as any, '!!!'])).not.toThrow();
   });
 });

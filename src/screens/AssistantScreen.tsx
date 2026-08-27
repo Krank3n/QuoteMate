@@ -2456,6 +2456,14 @@ export function AssistantScreen() {
         // original open survive the reconnect.
         getSeedHistory: () =>
           useStore.getState().conversations.find((c) => c.id === convoId)?.messages || [],
+        // Customer names for ASR boosting, newest first. Supplied from here
+        // because the screen already holds the store; the session module stays
+        // free of native dependencies so it remains unit-testable.
+        asrKeywordNames: (useStore.getState().contacts || [])
+          .slice(-120)
+          .reverse()
+          .map((c) => c.businessName || c.name || '')
+          .filter(Boolean),
       });
 
       // A stop landed while the mint/handshake was in flight — this open is

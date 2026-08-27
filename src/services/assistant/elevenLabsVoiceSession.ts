@@ -32,6 +32,7 @@ import { elapsedVoiceSeconds } from './voiceMinutes';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '../../config/firebase';
 import { mateGreetingWord } from '../../screens/assistant/voiceCopy';
+import { buildSessionAsrKeywords } from './elevenLabsAgentConfig';
 import { ElevenLabsMintedToken, LiveOfflineError } from './liveSession';
 import type { VoiceSession, VoiceSessionCallbacks, VoiceSessionOptions } from './voiceSession';
 
@@ -136,13 +137,9 @@ export async function openElevenLabsVoiceSession(
     cb.onClose?.(undefined);
   };
 
-  // Computed before connecting: whether there is prior conversation decides
-  // whether Mate should greet at all.
-
-
-  // Computed before connecting: whether there is prior conversation decides
-  // both whether to seed context AND whether Mate should greet at all.
+  // Prior turns, seeded after connect so Mate knows where the chat was up to.
   const seed = buildSeedContext(history);
+
 
   let conv: Conv;
   try {
@@ -162,6 +159,11 @@ export async function openElevenLabsVoiceSession(
         // supplied on EVERY session — a missing one errors the turn, which
         // here would mean dead air instead of a greeting.
         dynamicVariables: { greeting: mateGreetingWord(new Date().getHours()) },
+        // Boost this tradie's customer names for the session. A general speech
+        // model has never heard of Luffaga: one real conversation rendered
+        // "Geraldine Luffaga" as "Jared Dane" twice, and it took five turns
+        // and the tradie spelling it out to recover.
+        overrides: { asr: { keywords: buildSessionAsrKeywords(_opts.asrKeywordNames || []) } },
         // NOTE: do NOT suppress first_message on a chat with history.
         //
         // Tried it, to stop a second greeting when voice is reopened

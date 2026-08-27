@@ -98,18 +98,66 @@ export const AGENT_TTS_SIMILARITY_BOOST = 0.8;
  * the remainder on the tradie's own customer surnames.
  */
 export const MATE_ASR_KEYWORDS: string[] = [
-  // Suppliers and app vocabulary
-  'Bunnings', 'Reece', 'QuoteMate', 'Colorbond', 'Gyprock', 'Villaboard',
-  // Materials and structure
-  'weed mat', 'brickwork', 'cornice', 'architrave', 'skirting', 'batten',
-  'purlin', 'noggin', 'fascia', 'soffit', 'weatherboard', 'render', 'screed',
-  'LVL', 'MDF', 'CFC sheet', 'sarking', 'flashing', 'reo', 'lintel',
-  // Trade measure and money
-  'lineal metre', 'square metre', 'ex GST', 'inc GST', 'GST',
-  'PC sum', 'prime cost', 'provisional sum', 'variation', 'callout', 'takeoff',
-  // Document vocabulary the tools key off
-  'quote', 'invoice', 'service report', 'deposit', 'markup', 'labour rate',
+  // Deliberately SHORT. The cap is 50 for the whole list, and a real
+  // transcript showed where the budget is better spent: "Geraldine Luffaga"
+  // came back as "Jared Dane" twice and the tradie ended up spelling it out,
+  // furious. Names are what ASR actually loses, so most of the budget goes to
+  // the tradie's own contacts at session start — see buildSessionAsrKeywords.
+  //
+  // What survives here is only vocabulary a general model would not have:
+  // words that are odd, trade-specific, or Australian. "quote", "invoice" and
+  // "GST" were dropped — a speech model has no trouble with those, and every
+  // slot they occupied is a customer whose name gets mangled.
+  'Bunnings', 'Reece', 'Colorbond', 'Gyprock', 'Villaboard',
+  'weed mat', 'brickwork', 'cornice', 'architrave', 'noggin',
+  'purlin', 'sarking', 'reo mesh', 'lintel', 'screed',
+  'LVL', 'CFC sheet', 'lineal metre', 'PC sum', 'provisional sum',
 ];
+
+/** Slots reserved for the tradie's own contacts. See buildSessionAsrKeywords. */
+export const ASR_NAME_BUDGET = 30;
+
+/**
+ * Words too common to be worth a keyword slot, and too common to be a useful
+ * boost even when they ARE part of a name.
+ */
+const COMMON_NAME_TOKENS = new Set([
+  'the', 'and', 'pty', 'ltd', 'inc', 'group', 'services', 'and sons',
+  'mr', 'mrs', 'ms', 'dr', 'building', 'constructions', 'homes',
+]);
+
+/**
+ * The keyword list for one session: trade vocabulary plus this tradie's own
+ * customer names, capped at what the API accepts.
+ *
+ * The names are the point. A generic speech model has never heard of Luffaga,
+ * and getting a customer's name wrong on a quote is both the most likely
+ * failure and the most annoying one — it happened twice in a single 313-second
+ * conversation and cost five turns and a spelling-out to recover.
+ *
+ * Most recent contacts first, since the person being quoted today is far more
+ * likely to be someone recently dealt with than one of 500 historical rows.
+ */
+export function buildSessionAsrKeywords(contactNames: string[]): string[] {
+  const out: string[] = [...MATE_ASR_KEYWORDS];
+  const seen = new Set(out.map((k) => k.toLowerCase()));
+  let added = 0;
+
+  for (const full of contactNames) {
+    if (added >= ASR_NAME_BUDGET || out.length >= MAX_ASR_KEYWORDS) break;
+    for (const token of String(full || '').split(/[\s,]+/)) {
+      const word = token.replace(/[^\p{L}'-]/gu, '').trim();
+      if (word.length < 3) continue;                       // initials boost nothing
+      const key = word.toLowerCase();
+      if (COMMON_NAME_TOKENS.has(key) || seen.has(key)) continue;
+      seen.add(key);
+      out.push(word);
+      added++;
+      if (added >= ASR_NAME_BUDGET || out.length >= MAX_ASR_KEYWORDS) break;
+    }
+  }
+  return out.slice(0, MAX_ASR_KEYWORDS);
+}
 
 /** Max ASR keywords the API accepts per agent / per conversation. */
 export const MAX_ASR_KEYWORDS = 50;

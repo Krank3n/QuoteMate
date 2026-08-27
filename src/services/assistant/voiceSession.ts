@@ -207,6 +207,15 @@ export interface VoiceSessionOptions {
    * openVoiceSession.
    */
   getSeedHistory?: () => ChatMessage[];
+  /**
+   * The tradie's own customer names, newest first, for ASR keyword boosting.
+   *
+   * Passed in rather than read from the store, so the session module stays
+   * free of native dependencies and testable. A general speech model has never
+   * heard of Luffaga: one real conversation rendered "Geraldine Luffaga" as
+   * "Jared Dane" twice and took five turns and a spelling-out to recover.
+   */
+  asrKeywordNames?: string[];
 }
 
 export interface VoiceSession {
