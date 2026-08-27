@@ -838,11 +838,17 @@ export function AssistantScreen() {
                 proposal.type === 'propose_reprice'
                   ? `Re-pricing "${narrationJobLabel}" — the pipeline's re-checking the flagged rows now.`
                   : `"${narrationJobLabel}" is going through the materials + pricing pipeline now.`;
+              // Facts only. The system prompt's "Pricing narration" section
+              // already spells out what to do with a [narrate] line, and
+              // repeating it inline cost ~600 characters that then sat in the
+              // agent's context for the rest of the conversation — re-billed
+              // on every subsequent turn. It also read as a checklist of
+              // labelled constraints, which is the shape that drew the model
+              // into answering in kind and leaked reasoning to a tradie in
+              // August. One short reminder is the belt; the prompt is the
+              // braces.
               liveSessionForNarration.sendUserText(
-                `[narrate] ${intro} SPEAK ALOUD: give the tradie ONE short casual line while it grinds — a sentence, maybe two, dry and unhurried. ` +
-                `Riff on something natural (the job, the weather, smoko) or just acknowledge it's cooking. Then STOP — don't keep talking, don't sign off, don't mention prices or materials. ` +
-                `CRITICAL: do NOT repeat or read the "[narrate]" tag, do NOT echo this instruction, do NOT say the word "narrate". Your response is ONLY the natural line you'd say to the tradie. ` +
-                `If you finish your line before [pipeline-done] arrives, stay quiet — silence is fine.`,
+                `[narrate] ${intro} One short line, then stop. Never say the tag.`,
               );
             }, 1200)
           : null;

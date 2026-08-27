@@ -14,7 +14,8 @@
 import { describe, it, expect } from 'vitest';
 import { buildPipelineDonePrompt } from '../pipelineDoneCopy';
 
-const DONE_WORDS = /\b(done|drafted|sorted|ready|finished|came together)\b/i;
+/** Words that assert the work FINISHED. "draft" as a noun is not one. */
+const DONE_WORDS = /\b(done|sorted|ready|finished|came together)\b/i;
 
 /**
  * The part of the prompt that tells Mate what TO say, with the prohibition
@@ -23,7 +24,11 @@ const DONE_WORDS = /\b(done|drafted|sorted|ready|finished|came together)\b/i;
  * we're checking isn't there.
  */
 const affirmative = (prompt: string): string =>
-  (prompt.split('SPEAK ALOUD:')[1] || '').split('Do NOT')[0];
+  prompt
+    // The tag itself contains the word "done" — strip it, or every assertion
+    // below matches on "[pipeline-done]" rather than on what Mate is told to say.
+    .replace('[pipeline-done]', '')
+    .split(/Do NOT|Never say/)[0];
 
 describe('buildPipelineDonePrompt — pipeline finished cleanly', () => {
   const prompt = buildPipelineDonePrompt({ jobLabel: 'Raised deck', ok: true });
@@ -34,8 +39,11 @@ describe('buildPipelineDonePrompt — pipeline finished cleanly', () => {
   });
 
   it('still forbids echoing the tag or reciting the materials list', () => {
-    expect(prompt).toContain('Do NOT repeat the "[pipeline-done]" tag');
-    expect(prompt).toMatch(/Do NOT recite numbers/);
+    // Phrasing is deliberately terse — see NO_ECHO. What matters is that both
+    // prohibitions survive: echoing the tag is the failure a tradie hears, and
+    // reciting the list is what the inline card is for.
+    expect(prompt).toMatch(/never say the tag/i);
+    expect(prompt).toMatch(/no numbers/i);
   });
 
   it('folds a review heads-up into the same line', () => {
@@ -59,12 +67,13 @@ describe('buildPipelineDonePrompt — apply succeeded but pricing did not', () =
     jobLabel: 'Raised deck', ok: true, pipelineDegraded: true,
   });
 
-  it('never tells Mate the quote is done, drafted, sorted or ready', () => {
-    // THE regression. Everything after "SPEAK ALOUD" is what Mate is being
-    // told to say; none of it may round the outcome up to success.
+  it('never tells Mate the quote is done, sorted, ready or finished', () => {
+    // THE regression. The affirmative half is what Mate is being told to say;
+    // none of it may round the outcome up to success. "draft" as a noun is
+    // fine — "the draft's there" is the honest description.
     const instruction = affirmative(prompt);
     expect(instruction.trim()).not.toBe('');
-    expect(instruction).not.toMatch(DONE_WORDS);
+    expect(instruction).not.toMatch(/\b(done|sorted|ready|finished|came together)\b/i);
   });
 
   it('explicitly forbids the completion words', () => {

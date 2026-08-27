@@ -520,6 +520,19 @@ export interface JobRequirementsInput {
   categoryId?: string;
   nicheId?: string;
   freeText?: string;
+  /**
+   * True when categoryId/nicheId came from the tradie's business settings
+   * rather than from the caller — i.e. they are a default, not a statement
+   * about THIS job.
+   *
+   * Without this, a defaulted category silently wins over a freeText that
+   * describes the actual work. A cabinet maker asking for a concrete slab was
+   * handed Kitchen Cabinetry's must-ask list — linear metres of cabinets,
+   * door finish, benchtop material — for a 1x2m pour (voice transcript,
+   * 27 Aug 2026). Mate passed freeText: "concrete slab on ground" precisely
+   * to say what the job was, and the tool ignored it.
+   */
+  categoryFromSettings?: boolean;
   /** Injected so resolveJobRequirements stays pure and synchronous. */
   supplierBook?: SupplierBookSnapshot;
 }
@@ -547,13 +560,21 @@ export function resolveJobRequirements(input: JobRequirementsInput): JobRequirem
     (t) => t.categoryId === resolvedCategoryId && t.nicheId === resolvedNicheId,
   );
 
+  // A category that came from the tradie's settings is a default, not a claim
+  // about this job. When freeText describes the work, let it compete — and
+  // search ALL templates, not just the defaulted category's, since the whole
+  // point is that this job may sit outside their usual trade.
+  const defaultedOnly = input.categoryFromSettings && !!input.freeText;
+  if (defaultedOnly) template = undefined;
+
   // No niche pinned but we have a blurb — fuzzy-match it to the best template.
   if (!template && input.freeText) {
     const ft = input.freeText.toLowerCase().trim();
     let best: { t: (typeof NICHE_TEMPLATES)[number]; score: number } | undefined;
     for (const t of NICHE_TEMPLATES) {
-      // Prefer templates from the given category when one was supplied.
-      if (resolvedCategoryId && t.categoryId !== resolvedCategoryId) continue;
+      // Respect a category the CALLER pinned; ignore one that was merely
+      // defaulted from settings.
+      if (resolvedCategoryId && !defaultedOnly && t.categoryId !== resolvedCategoryId) continue;
       const nameLower = t.name.toLowerCase();
       const exactSubstring = ft.includes(nameLower) || nameLower.includes(ft);
       const score = exactSubstring ? 1 : similarity(ft, nameLower);
@@ -563,6 +584,12 @@ export function resolveJobRequirements(input: JobRequirementsInput): JobRequirem
       template = best.t;
       resolvedCategoryId = best.t.categoryId;
       resolvedNicheId = best.t.nicheId;
+    } else if (defaultedOnly) {
+      // freeText matched nothing better than the tradie's own trade. Fall back
+      // to it rather than answering with nothing.
+      template = NICHE_TEMPLATES.find(
+        (t) => t.categoryId === resolvedCategoryId && t.nicheId === resolvedNicheId,
+      );
     }
   }
 
@@ -636,6 +663,9 @@ export async function getJobRequirements(input: { category?: string; niche?: str
     categoryId: category,
     nicheId: niche,
     freeText: input.freeText,
+    // Flag defaults so a freeText describing THIS job can outvote the tradie's
+    // usual trade — see JobRequirementsInput.categoryFromSettings.
+    categoryFromSettings: !input.category && !input.niche,
     supplierBook,
   });
 }
