@@ -95,6 +95,7 @@ export {
   reportAssistantLiveUsage,
   reportAssistantVoiceUsage,
 } from './assistantCosts';
+export { elevenLabsPostCallWebhook } from './elevenLabsWebhook';
 export { reportPriceFetchUsage } from './featureUsage';
 import { recordMaterialsRecommend } from './featureUsage';
 import {
