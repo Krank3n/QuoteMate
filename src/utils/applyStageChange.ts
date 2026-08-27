@@ -98,7 +98,16 @@ export async function applyStageChange(
   const firstSend = target === 'quote_sent' && !doc.sentAt
     ? { sentAt: Date.now(), sendMethod }
     : {};
-  await helpers.saveQuote({ ...quote, status, updatedAt: new Date(), ...firstSend });
+  // Re-pitch (quote_rejected → quote_sent): drop the old answer. respondedAt
+  // is what locks an acceptance token, so a quote that carries one out of a
+  // rejection hands the customer a link reading "already responded to". The
+  // server clears it when it mints the new link — but this save lands after
+  // that on the SMS/share path, and would put the stale value straight back.
+  // clientNotes stays: it's the tradie's record of why they said no.
+  const repitchReset = target === 'quote_sent' && doc.stage === 'quote_rejected'
+    ? { respondedAt: undefined, respondedBy: undefined }
+    : {};
+  await helpers.saveQuote({ ...quote, status, updatedAt: new Date(), ...firstSend, ...repitchReset });
 }
 
 /**

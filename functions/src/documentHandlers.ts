@@ -274,6 +274,40 @@ function recordStageViolation(
   });
 }
 
+/**
+ * Is this send a re-pitch — a quote the customer has already knocked back?
+ *
+ * Takes either representation because the two send paths hold different ones:
+ * the email path has the unified document (stage), the SMS/share link path
+ * has the legacy quote record (status).
+ */
+export function isRepitchSend(current: { stage?: unknown; status?: unknown }): boolean {
+  return current.stage === 'quote_rejected' || current.status === 'rejected';
+}
+
+/**
+ * The patch that clears the customer's previous answer when a rejected quote
+ * goes out again.
+ *
+ * respondedAt is what locks an acceptance token — both /respondToQuote and
+ * the review page's own loader bail the moment it's set — so a fresh token
+ * minted over an old rejection produced a link that opened on "this quote has
+ * already been responded to". The re-send looked like it worked and the
+ * customer could never answer it.
+ *
+ * null rather than FieldValue.delete(): this patch also rides through
+ * setDocumentStage's stripUndefined, which walks into objects and would shred
+ * a delete sentinel into a plain `{}`. Every reader of respondedAt tests
+ * truthiness, so null retires it just as well.
+ *
+ * clientNotes is deliberately left alone — it's the tradie's record of why
+ * they said no, not part of the question being re-asked.
+ */
+export const REPITCH_RESPONSE_RESET: Readonly<{ respondedAt: null; respondedBy: null }> = {
+  respondedAt: null,
+  respondedBy: null,
+};
+
 export async function setDocumentStage(
   input: SetDocumentStageInput,
 ): Promise<SetDocumentStageResult> {
@@ -714,6 +748,14 @@ async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailRes
   }
   quoteUpdate.acceptanceTokenHash = hashedToken;
   quoteUpdate.acceptanceTokenCreatedAt = admin.firestore.FieldValue.serverTimestamp();
+  // Re-pitching a quote the customer knocked back — see
+  // REPITCH_RESPONSE_RESET for what respondedAt does to a fresh link. Only a
+  // rejection resets: a re-sent accepted quote (a PDF the customer misplaced,
+  // say) must not become declinable again. A test send changes nothing.
+  const isRepitch = !isTestSend && isRepitchSend(doc);
+  if (isRepitch) {
+    Object.assign(quoteUpdate, REPITCH_RESPONSE_RESET);
+  }
   if (!isTestSend) {
     quoteUpdate.status = 'sent';
     quoteUpdate.sentAt = admin.firestore.FieldValue.serverTimestamp();
@@ -737,6 +779,10 @@ async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailRes
       extraUpdates: {
         aiEmailBody: emailBody,
         acceptanceTokenCreatedAt: Date.now(),
+        // The unified doc needs the same reset: a stale respondedAt here lets
+        // computeStageStampsFromDocs date the Job as "accepted" on the day the
+        // customer actually said no.
+        ...(isRepitch ? REPITCH_RESPONSE_RESET : {}),
       },
     });
   }

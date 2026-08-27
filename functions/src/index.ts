@@ -174,6 +174,8 @@ import {
   logShimInvocation,
   resolveTradieReplyEmail,
   buildQuotePdfHtmlForQuote,
+  isRepitchSend,
+  REPITCH_RESPONSE_RESET,
   type SquareLinkMinter,
 } from './documentHandlers';
 export { getStageViolationCounts, convertDocumentToInvoice } from './documentHandlers';
@@ -6123,17 +6125,25 @@ export const generateQuoteAcceptanceLink = functions.https.onRequest((req, res) 
         ? (quoteData.termsVersionHash || hashTerms(termsSnapshot))
         : undefined;
 
+      // Re-pitching a quote the customer knocked back — the SMS / share-link
+      // half of the same reset sendDocumentEmail does. Without it the fresh
+      // link opens on "this quote has already been responded to", so the
+      // re-send looks like it worked and the customer can never answer.
+      const repitchReset = isRepitchSend(quoteData) ? REPITCH_RESPONSE_RESET : {};
+
       const tokenCreatedAt = admin.firestore.FieldValue.serverTimestamp();
       const batch = db.batch();
       batch.set(quoteRef, {
         acceptanceTokenHash: tokenHash,
         acceptanceTokenCreatedAt: tokenCreatedAt,
+        ...repitchReset,
         ...(termsSnapshot ? { termsSnapshot, termsVersionHash } : {}),
       }, { merge: true });
       // Do not create a sparse unified document for legacy-only quotes.
       if (documentDoc.exists) {
         batch.set(documentRef, {
           acceptanceTokenCreatedAt: Date.now(),
+          ...repitchReset,
           ...(termsSnapshot ? { termsSnapshot, termsVersionHash } : {}),
           updatedAt: Date.now(),
         }, { merge: true });
