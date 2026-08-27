@@ -42,6 +42,7 @@ let fetched: string[] = [];
 async function renderAcceptance(
   quote: Record<string, unknown>,
   intent?: 'accept' | 'decline',
+  biz: Record<string, unknown> = business,
 ): Promise<Document> {
   fetched = [];
   const html = generateAcceptancePage('a'.repeat(64), intent);
@@ -51,7 +52,7 @@ async function renderAcceptance(
     beforeParse(window) {
       (window as any).fetch = async (url: string) => {
         fetched.push(String(url));
-        return { json: async () => ({ success: true, quote, business }) };
+        return { json: async () => ({ success: true, quote, business: biz }) };
       };
     },
   });
@@ -145,5 +146,20 @@ describe('acceptance page — the intent from the email link', () => {
     expect(doc.querySelector('.confirm-step')).toBeNull();
     expect(doc.getElementById('acceptBtn')?.className).not.toContain('btn-primed');
     expect(doc.getElementById('declineBtn')?.className).not.toContain('btn-primed');
+  });
+
+  it('a quote value carrying a double quote cannot break out of an attribute', async () => {
+    // The page's escapeHtml() escapes through textContent, which leaves `"`
+    // alone — safe in a text node, an attribute break-out anywhere near an
+    // href/src. escapeAttr closes it. business.website is the one of these a
+    // person actually types.
+    const doc = await renderAcceptance(baseQuote(), undefined, {
+      ...business,
+      website: 'https://x.test" onmouseover="alert(1)',
+    });
+    const link = doc.querySelector('.contact-box a') as HTMLAnchorElement | null;
+    expect(link).not.toBeNull();
+    expect(link!.getAttribute('onmouseover')).toBeNull();
+    expect(link!.getAttribute('href')).toBe('https://x.test" onmouseover="alert(1)');
   });
 });

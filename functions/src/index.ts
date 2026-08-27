@@ -7306,6 +7306,18 @@ export function generateAcceptancePage(
       return escapeHtml(text).replace(/\\n/g, '<br/>');
     }
 
+    /**
+     * escapeHtml() escapes through textContent, which leaves double quotes
+     * alone — correct for a text node, not for a value being pasted into an
+     * attribute, where one quote ends the attribute and the rest of the
+     * string becomes markup. Anything landing inside href="" or src="" gets
+     * this instead. The server-side escapeHtml already covers quotes; this is
+     * the browser twin catching up.
+     */
+    function escapeAttr(value) {
+      return escapeHtml(value).replace(/"/g, '&quot;');
+    }
+
     async function loadQuote() {
       try {
         var response = await fetch(API_BASE + '/getQuoteForAcceptance', {
@@ -7343,7 +7355,7 @@ export function generateAcceptancePage(
       document.title = 'Quote from ' + (business.name || 'your tradie');
 
       var logoHtml = business.logoUrl
-        ? '<img class="biz-logo" src="' + escapeHtml(business.logoUrl) + '" alt="" />'
+        ? '<img class="biz-logo" src="' + escapeAttr(business.logoUrl) + '" alt="" />'
         : '<div class="biz-initial">' + escapeHtml((business.name || 'Q').trim().charAt(0).toUpperCase()) + '</div>';
 
       var dateLine = formatDate(quote.createdAt);
@@ -7369,7 +7381,7 @@ export function generateAcceptancePage(
       });
       if (remotePhotoUrls.length > 0) {
         var imgs = remotePhotoUrls.map(function(url) {
-          return '<img src="' + escapeHtml(url) + '" alt="Job photo" loading="lazy" />';
+          return '<img src="' + escapeAttr(url) + '" alt="Job photo" loading="lazy" />';
         }).join('');
         photosHtml =
           '<div class="section">' +
@@ -7475,7 +7487,7 @@ export function generateAcceptancePage(
       var contactBits = [];
       if (business.phone) contactBits.push('Phone: <a href="tel:' + escapeHtml(business.phone) + '">' + escapeHtml(business.phone) + '</a>');
       if (business.email) contactBits.push('Email: <a href="mailto:' + escapeHtml(business.email) + '">' + escapeHtml(business.email) + '</a>');
-      if (business.website) contactBits.push('Web: <a href="' + escapeHtml(business.website) + '" target="_blank" rel="noopener">' + escapeHtml(business.website.replace(/^https?:\\/\\//, '')) + '</a>');
+      if (business.website) contactBits.push('Web: <a href="' + escapeAttr(business.website) + '" target="_blank" rel="noopener">' + escapeHtml(business.website.replace(/^https?:\\/\\//, '')) + '</a>');
       var contactHtml = (contactBits.length || business.abn)
         ? '<div class="section">' +
             '<div class="section-title">Questions?</div>' +
@@ -7609,7 +7621,7 @@ export function generateAcceptancePage(
         ? '<div class="deposit">' +
             '<div class="deposit-label">Deposit to get started</div>' +
             '<div class="deposit-amount">' + formatCurrency(depositPayment.amount) + '</div>' +
-            '<a class="btn btn-accept" href="' + escapeHtml(depositPayment.url) + '">Pay deposit securely</a>' +
+            '<a class="btn btn-accept" href="' + escapeAttr(depositPayment.url) + '">Pay deposit securely</a>' +
             '<div class="deposit-note">Secure card payment through Square. ' +
               escapeHtml(BUSINESS_NAME || 'The business') + ' is notified the moment it clears.</div>' +
           '</div>'
