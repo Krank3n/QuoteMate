@@ -238,10 +238,24 @@ describe('buildAgentPatch', () => {
     expect(patch.conversation_config.turn.turn_timeout).toBeLessThanOrEqual(30);
   });
 
-  it('gives the tradie room to finish a thought before answering', () => {
-    // Worksite speech has long pauses in it. Cutting in mid-measurement is
-    // worse than a beat of silence.
-    expect(patch.conversation_config.turn.turn_eagerness).toBe('patient');
+  it('answers promptly once the tradie has finished', () => {
+    // 'patient' measured 2-5s from end-of-speech to reply on a real device and
+    // read as sluggish. Most of that gap is end-of-speech detection, which is
+    // what this governs — turn_timeout only ever fires on total silence.
+    expect(patch.conversation_config.turn.turn_eagerness).toBe('normal');
+  });
+
+  it('uses the expressive TTS model, not the latency-first one', () => {
+    // eleven_flash_v2 (the default) came across as flat — "a little unhappy".
+    expect(patch.conversation_config.tts.model_id).toBe('eleven_v3_conversational');
+    expect(patch.conversation_config.tts.model_id).not.toMatch(/flash/);
+  });
+
+  it('leaves delivery room to vary rather than flattening it', () => {
+    // Lower stability = more variation. Not so low that a noisy worksite gets
+    // an unreliable read of the numbers.
+    expect(patch.conversation_config.tts.stability).toBeLessThan(0.5);
+    expect(patch.conversation_config.tts.stability).toBeGreaterThanOrEqual(0.3);
   });
 
   it('still hangs up before an abandoned session bills all day', () => {

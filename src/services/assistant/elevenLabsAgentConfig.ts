@@ -52,12 +52,40 @@ export const AGENT_SILENCE_END_CALL_SECONDS = 60;
 export const AGENT_TURN_TIMEOUT_SECONDS = 20;
 
 /**
- * How readily Mate takes a turn once the tradie is talking. 'patient' gives
- * them room to finish a thought — worksite speech has long pauses in it
- * ("the run's… hang on… twenty-two metres"), and cutting in mid-measurement
- * is worse than a beat of silence.
+ * How readily Mate takes a turn once the tradie is talking.
+ *
+ * 'patient' was the instinct — worksite speech has long pauses in it — but a
+ * real conversation measured 2-5 seconds from the tradie finishing to Mate
+ * answering, and it read as sluggish. Most of that is end-of-speech detection,
+ * which is exactly what this knob governs.
+ *
+ * 'normal' buys the latency back. The risk it reintroduces is cutting in on a
+ * mid-measurement pause; if that shows up, the fix is here rather than
+ * turn_timeout, which only ever fires on total silence.
  */
-export const AGENT_TURN_EAGERNESS = 'patient';
+export const AGENT_TURN_EAGERNESS = 'normal';
+
+/**
+ * TTS model.
+ *
+ * The default was eleven_flash_v2 — the fastest and flattest of them, tuned
+ * for latency over delivery. It came across as, in the tradie's words, "a
+ * little unhappy". v3 Conversational is the expressive one.
+ *
+ * This costs some latency, which is why turn_eagerness moved back to 'normal'
+ * in the same change: paying for warmth out of the turn-detection budget
+ * rather than adding it on top.
+ */
+export const AGENT_TTS_MODEL = 'eleven_v3_conversational';
+
+/**
+ * Lower stability means more variation in delivery; higher flattens it toward
+ * monotone. 0.5 with a latency-first model is what "unhappy" sounded like.
+ * Nudged down for warmth, not so far that a noisy worksite gets an unreliable
+ * read of the numbers.
+ */
+export const AGENT_TTS_STABILITY = 0.4;
+export const AGENT_TTS_SIMILARITY_BOOST = 0.8;
 
 /**
  * ASR keyword boosting — the highest-leverage setting in the migration, and one
@@ -278,7 +306,10 @@ export function buildAgentPatch(opts: AgentPatchOptions) {
       },
       tts: {
         voice_id: opts.voiceId,
-        ...(opts.ttsModelId ? { model_id: opts.ttsModelId } : {}),
+        model_id: opts.ttsModelId ?? AGENT_TTS_MODEL,
+        stability: AGENT_TTS_STABILITY,
+        similarity_boost: AGENT_TTS_SIMILARITY_BOOST,
+        speed: 1.0,
       },
     },
     platform_settings: {
