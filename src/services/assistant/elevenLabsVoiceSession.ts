@@ -25,6 +25,7 @@ import { ensureElevenLabsRuntime } from './elevenLabsRuntime';
 import { ensureMicPermission } from './micPermission';
 import { buildClientTools } from './clientTools';
 import { buildSeedContext } from './seedContext';
+import { mateGreetingWord } from '../../screens/assistant/voiceCopy';
 import { ElevenLabsMintedToken, LiveOfflineError } from './liveSession';
 import type { VoiceSession, VoiceSessionCallbacks, VoiceSessionOptions } from './voiceSession';
 
@@ -77,6 +78,10 @@ export async function openElevenLabsVoiceSession(
         connectionType: 'webrtc',
         userId: minted.conversationId || undefined,
         clientTools: buildClientTools(cb),
+        // Every {{placeholder}} in the agent's prompt or first_message must be
+        // supplied on EVERY session — a missing one errors the turn, which
+        // here would mean dead air instead of a greeting.
+        dynamicVariables: { greeting: mateGreetingWord(new Date().getHours()) },
 
         onConnect: () => {
           clearTimeout(timer);
