@@ -162,13 +162,18 @@ export async function openElevenLabsVoiceSession(
         // supplied on EVERY session — a missing one errors the turn, which
         // here would mean dead air instead of a greeting.
         dynamicVariables: { greeting: mateGreetingWord(new Date().getHours()) },
-        // The agent speaks its first_message on EVERY connect. Reopening voice
-        // mid-conversation therefore greeted the tradie again, so a chat they
-        // had been talking in for two minutes gained a second identical
-        // "Evening — I can draft you a quote or an invoice". An empty override
-        // means wait silently instead, which is the right behaviour when we
-        // are resuming rather than starting.
-        ...(seed ? { overrides: { agent: { firstMessage: '' } } } : {}),
+        // NOTE: do NOT suppress first_message on a chat with history.
+        //
+        // Tried it, to stop a second greeting when voice is reopened
+        // mid-conversation. It fires on ANY chat with prior turns, which is
+        // most of them — the tradie taps the mic and Mate says nothing at all,
+        // with no signal it is even listening. Two sessions logged
+        // `agent "null"` and then died to "Ending conversation after 60
+        // seconds of silence".
+        //
+        // The duplicate greeting was only ever a symptom of the DOMException
+        // bug opening two sessions back to back. That is fixed. Silence is a
+        // far worse failure than a repeated hello.
 
         onConnect: () => {
           clearTimeout(timer);
