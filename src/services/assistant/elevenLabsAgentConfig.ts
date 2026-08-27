@@ -149,7 +149,19 @@ export function toElevenLabsSchema(
   }
 
   if (out.type === 'array' && node?.items) {
-    out.items = toElevenLabsSchema(node.items);
+    const items = toElevenLabsSchema(node.items);
+    // Array item schemas have no property name to humanise, and the API
+    // rejects a node with no description outright:
+    //   "Must set one of: description, dynamic_variable, is_system_provided,
+    //    constant_value, or is_omitted"
+    // — a 422 on tool creation, so the whole agent fails to provision rather
+    // than degrading quietly. Verified against the live API.
+    if (!items.description) {
+      items.description = propertyName
+        ? `One entry in ${humanisePropertyName(propertyName).replace(/\.$/, '').toLowerCase()}.`
+        : 'One entry in the list.';
+    }
+    out.items = items;
   }
 
   return out;

@@ -255,3 +255,51 @@ describe('humanisePropertyName', () => {
     expect(humanisePropertyName('name')).toBe('Name.');
   });
 });
+
+describe('array item schemas (live-API preflight, 27 Aug 2026)', () => {
+  it('gives array items a description — the API 422s without one', () => {
+    // Verified against the live API: creating a tool whose array items carry
+    // no description fails with "Must set one of: description,
+    // dynamic_variable, is_system_provided, constant_value, or is_omitted".
+    // That's a 422 on provisioning, so the whole agent fails to come up.
+    const missed = byName('propose_import_supplier_list').parameters.properties?.missedItems;
+    expect(missed?.type).toBe('array');
+    expect(missed?.items?.description).toBeTruthy();
+  });
+
+  it('names the parent list in the synthesised item description', () => {
+    const missed = byName('propose_import_supplier_list').parameters.properties?.missedItems;
+    expect(missed?.items?.description).toMatch(/missed items/i);
+  });
+
+  it('leaves an item description that was already declared alone', () => {
+    const tool = toElevenLabsTool({
+      name: 'find_customer',
+      description: 'x',
+      parameters: {
+        type: 'object',
+        properties: {
+          tags: { type: 'array', items: { type: 'string', description: 'A tag.' } },
+        },
+      },
+    } as any);
+    expect(tool.parameters.properties?.tags?.items?.description).toBe('A tag.');
+  });
+
+  it('leaves no schema node anywhere without a description', () => {
+    // The API's rule applies at every depth, not just to top-level properties.
+    const missing: string[] = [];
+    const walk = (schema: any, path: string) => {
+      for (const [key, child] of Object.entries<any>(schema.properties || {})) {
+        if (!child.description) missing.push(`${path}.${key}`);
+        walk(child, `${path}.${key}`);
+      }
+      if (schema.items) {
+        if (!schema.items.description) missing.push(`${path}[]`);
+        walk(schema.items, `${path}[]`);
+      }
+    };
+    for (const tool of buildAgentToolConfigs()) walk(tool.parameters, tool.name);
+    expect(missing).toEqual([]);
+  });
+});
