@@ -244,3 +244,36 @@ describe('voice budget shape', () => {
     expect(QUOTA.pro.turns).toBe(200);
   });
 });
+
+describe('settlement composes with the mint hold end-to-end', () => {
+  it('a 20-second call costs 20 seconds, not the 120 that were held', () => {
+    // The whole point of hold-and-settle. Reserve-the-ceiling would have
+    // charged this call 8 minutes of a free tier's 5-minute day.
+    const afterReserve = reserveVoiceSecondsUpdate(undefined, 'free');
+    expect(afterReserve.ok).toBe(true);
+    if (!afterReserve.ok) return;
+    const day = { voiceSeconds: afterReserve.update.voiceSeconds };
+    const settled = settleVoiceSecondsUpdate(day, {
+      plan: 'free', holdSeconds: afterReserve.heldSeconds, actualSeconds: 20,
+    });
+    expect(settled).toEqual({ voiceSeconds: 20 });
+  });
+
+  it('two short calls in a row leave most of a free day intact', () => {
+    // Before settlement existed, two calls parked 240 of 300 seconds and the
+    // tradie was locked out until midnight UTC however briefly they spoke.
+    let day: { voiceSeconds: number } = { voiceSeconds: 0 };
+    for (let i = 0; i < 2; i++) {
+      const r = reserveVoiceSecondsUpdate(day, 'free');
+      expect(r.ok).toBe(true);
+      if (!r.ok) return;
+      day = { voiceSeconds: r.update.voiceSeconds };
+      const s = settleVoiceSecondsUpdate(day, {
+        plan: 'free', holdSeconds: r.heldSeconds, actualSeconds: 15,
+      });
+      if (s) day = s;
+    }
+    expect(day.voiceSeconds).toBe(30);
+    expect(remainingVoiceSeconds(day, 'free')).toBe(QUOTA.free.voiceSeconds - 30);
+  });
+});

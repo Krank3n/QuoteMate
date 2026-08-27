@@ -25,6 +25,9 @@ import { ensureElevenLabsRuntime } from './elevenLabsRuntime';
 import { ensureMicPermission } from './micPermission';
 import { buildClientTools } from './clientTools';
 import { buildSeedContext } from './seedContext';
+import { elapsedVoiceSeconds } from './voiceMinutes';
+import { httpsCallable } from 'firebase/functions';
+import { functions } from '../../config/firebase';
 import { mateGreetingWord } from '../../screens/assistant/voiceCopy';
 import { ElevenLabsMintedToken, LiveOfflineError } from './liveSession';
 import type { VoiceSession, VoiceSessionCallbacks, VoiceSessionOptions } from './voiceSession';
@@ -52,6 +55,32 @@ export async function openElevenLabsVoiceSession(
   let closedOnce = false;
   let speaking = false;
   let sawConnected = false;
+  let connectedAtMs: number | null = null;
+  let usageReported = false;
+
+  /**
+   * Settle the budget hold parked at mint. Exactly once, on every terminal
+   * path — a session that never reports leaves its 120s held until midnight
+   * UTC, and on the free tier that is a third of the day's talk time gone for
+   * a call that may have lasted ten seconds.
+   *
+   * Best-effort: a failed report must never surface to the tradie. The
+   * post-call webhook is the authoritative backstop.
+   */
+  const flushUsage = (endReason: string) => {
+    if (usageReported) return;
+    usageReported = true;
+    const durationSeconds = elapsedVoiceSeconds(connectedAtMs, Date.now());
+    try {
+      void httpsCallable(functions, 'reportAssistantVoiceUsage')({
+        model: minted.model,
+        conversationId: minted.conversationId,
+        durationSeconds,
+        holdSeconds: minted.heldSeconds,
+        endReason,
+      }).catch(() => { /* best-effort */ });
+    } catch { /* best-effort */ }
+  };
 
   // Fires onClose exactly once, with onError riding along only on a real
   // failure — same contract the Gemini path guarantees.
@@ -60,6 +89,7 @@ export async function openElevenLabsVoiceSession(
     closedOnce = true;
     alive = false;
     connected = false;
+    flushUsage(err ? 'error' : 'ended');
     if (err) cb.onError?.(err);
     cb.onClose?.(undefined);
   };
@@ -87,6 +117,9 @@ export async function openElevenLabsVoiceSession(
           clearTimeout(timer);
           connected = true;
           sawConnected = true;
+          // Billing starts here, not at open — the mint, the handshake and the
+          // permission prompt are not conversation.
+          if (connectedAtMs === null) connectedAtMs = Date.now();
         },
 
         onDisconnect: () => {
@@ -203,7 +236,7 @@ export async function openElevenLabsVoiceSession(
       alive = false;
       connected = false;
       try { void (conv as any).endSession(); } catch { /* noop */ }
-      finish();
+      finish();  // reports usage exactly once
     },
 
     isOpen: () => alive && connected,

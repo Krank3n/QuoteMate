@@ -17,6 +17,11 @@
 
 import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
+import {
+  settleVoiceSecondsUpdate,
+  MAX_SESSION_SECONDS,
+  Plan,
+} from './assistantQuota.helpers';
 
 const db = () => admin.firestore();
 
@@ -466,3 +471,114 @@ export const adminAssistantCosts = functions
       pricing: PRICING,
     };
   });
+
+// ---------------------------------------------------------------------------
+// Voice (ElevenLabs Agents) — settle the budget hold and record the spend.
+//
+// A sibling of reportAssistantLiveUsage, not an overload of it. That one is
+// called by every shipped build and its payload contract has to survive the
+// whole rollback window; burying a budget settlement — which is
+// correctness-critical, not just a dashboard number — behind a discriminator
+// inside it is how billing quietly breaks.
+//
+// Without this, assistantToken's 120s hold is parked at mint and never given
+// back. On the free tier that is 300s a day: two sessions and the tradie is
+// locked out until midnight UTC regardless of how briefly they actually spoke.
+// ---------------------------------------------------------------------------
+
+interface VoiceUsagePayload {
+  model?: string;
+  conversationId?: string;
+  durationSeconds?: number;
+  holdSeconds?: number;
+  endReason?: string;
+}
+
+export const reportAssistantVoiceUsage = functions.https.onCall(async (data, context) => {
+  const uid = context.auth?.uid;
+  if (!uid) throw new functions.https.HttpsError('unauthenticated', 'Sign in required.');
+
+  const payload: VoiceUsagePayload = data || {};
+  const conversationId = String(payload.conversationId || '').trim();
+  const model = String(payload.model || 'elevenlabs/claude-sonnet-5');
+  const date = todayKey();
+  const usageRef = db().doc(`users/${uid}/assistantUsage/${date}`);
+
+  // The session doc, written at mint, carries the plan and the hold that was
+  // actually parked — the client is not trusted for either. It also makes this
+  // idempotent: the client report and the post-call webhook both land here.
+  const sessionRef = conversationId ? db().doc(`voiceSessions/${conversationId}`) : null;
+
+  const settled = await db().runTransaction(async (tx) => {
+    const [sessionSnap, usageSnap] = await Promise.all([
+      sessionRef ? tx.get(sessionRef) : Promise.resolve(null),
+      tx.get(usageRef),
+    ]);
+    const session = sessionSnap?.data();
+
+    // Someone already settled this conversation. Applying a second time would
+    // double-charge both the budget and the dashboard.
+    if (session?.settledAt) {
+      return { alreadySettled: true, seconds: session.settledSeconds || 0, costMicros: 0 };
+    }
+    // A session doc that isn't this user's is not this user's to settle.
+    if (session && session.uid !== uid) {
+      return { alreadySettled: true, seconds: 0, costMicros: 0 };
+    }
+
+    const plan: Plan = (session?.plan as Plan) || 'free';
+    const ceiling = MAX_SESSION_SECONDS[plan];
+    // Clamp before anything lands. This single line is what stops a
+    // misbehaving client inflating the day's usage past what the agent's own
+    // max_duration_seconds would ever have permitted.
+    const actualSeconds = Math.min(
+      Math.max(0, Math.round(Number(payload.durationSeconds) || 0)),
+      ceiling,
+    );
+    const holdSeconds = Number(session?.heldSeconds ?? payload.holdSeconds ?? 0);
+
+    const update = settleVoiceSecondsUpdate(usageSnap.data(), { plan, holdSeconds, actualSeconds });
+    const costMicros = platformCostMicros(model, actualSeconds);
+    const inc = admin.firestore.FieldValue.increment;
+
+    const patch: Record<string, unknown> = {
+      voiceSessions: inc(1),
+      voiceDurationSeconds: inc(actualSeconds),
+      costMicros: inc(costMicros),
+      [`models.${sanitiseKey(model)}.voiceCostMicros`]: inc(costMicros),
+      [`models.${sanitiseKey(model)}.voiceSessions`]: inc(1),
+      [`models.${sanitiseKey(model)}.voiceDurationSeconds`]: inc(actualSeconds),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
+    // voiceSeconds is a settled value, not an increment — it has to ride the
+    // same transaction as the read it was computed from.
+    if (update) patch.voiceSeconds = update.voiceSeconds;
+
+    tx.set(usageRef, patch, { merge: true });
+    tx.set(
+      db().doc(`assistantCostsDaily/${date}`),
+      {
+        voiceSessions: inc(1),
+        voiceDurationSeconds: inc(actualSeconds),
+        costMicros: inc(costMicros),
+        [`models.${sanitiseKey(model)}.voiceCostMicros`]: inc(costMicros),
+        [`activeUsers.${uid}`]: true,
+        date,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
+    if (sessionRef) {
+      tx.set(sessionRef, {
+        settledAt: admin.firestore.FieldValue.serverTimestamp(),
+        settledBy: 'client',
+        settledSeconds: actualSeconds,
+        endReason: String(payload.endReason || 'unknown'),
+        costMicros,
+      }, { merge: true });
+    }
+    return { alreadySettled: false, seconds: actualSeconds, costMicros };
+  });
+
+  return { ok: true, ...settled };
+});

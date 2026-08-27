@@ -90,7 +90,11 @@ export { assistantChat } from './assistantChat';
 export { composeServiceReport } from './composeServiceReport';
 export { sendServiceReport } from './serviceReportEmail';
 export { generatePresenterClip } from './generatePresenterClip';
-export { adminAssistantCosts, reportAssistantLiveUsage } from './assistantCosts';
+export {
+  adminAssistantCosts,
+  reportAssistantLiveUsage,
+  reportAssistantVoiceUsage,
+} from './assistantCosts';
 export { reportPriceFetchUsage } from './featureUsage';
 import { recordMaterialsRecommend } from './featureUsage';
 import {

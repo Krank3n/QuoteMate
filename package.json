@@ -18,7 +18,8 @@
     "test:rules": "export PATH=\"/opt/homebrew/opt/openjdk/bin:$PATH\" && firebase emulators:exec --only firestore --project demo-quotemate-rules \"vitest run --config vitest.rules.config.ts\"",
     "test:watch": "vitest",
     "postinstall": "patch-package",
-    "mate:agent": "tsx scripts/syncMateAgent.ts"
+    "mate:agent": "tsx scripts/syncMateAgent.ts",
+    "mate:simulate": "tsx scripts/simulateMate.ts"
   },
   "dependencies": {
     "@elevenlabs/client": "1.22.0",
