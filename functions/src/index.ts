@@ -1988,9 +1988,8 @@ async function callClaudeForMaterials(
       'anthropic-version': '2023-06-01',
     },
     body: JSON.stringify({
-      model: 'claude-opus-4-6',
+      model: 'claude-opus-4-7',
       max_tokens: 32000,
-      temperature: 0.2,
       messages: [{ role: 'user', content: messageContent }],
     }),
   });
@@ -2526,10 +2525,16 @@ Return ONLY valid JSON, no other text.`;
  *     wrong SKU entirely; needs to be rejected.
  *   - "10L Dulux Wash & Wear" for a paint-area requirement — needs to know
  *     coverage per litre (typical: ~12 m²/L).
- * A small Gemini Flash Lite call given the requirement + product can use
- * general knowledge to handle all of these uniformly across trades.
+ * This pass is also the last line of defence on quote correctness: it is what
+ * catches a round-1 blowout before it reaches a customer. It ran on
+ * gemini-3.1-flash-lite until Aug 2026, which is where the "3000 L / $90k"
+ * line item got through — flash-lite is the cheapest model Google sells and
+ * it was doing the arithmetic and unit reasoning that decides a quote total.
+ * Now on 3.7 Flash (GA, ~3x the token cost, still a fraction of Pro, and it
+ * outscores gemini-3.1-pro-preview on the Aug 2026 text arena). The cost
+ * delta is a rounding error against one blown quote.
  */
-const GEMINI_RECONCILE_MODEL = 'gemini-3.1-flash-lite';
+const GEMINI_RECONCILE_MODEL = 'gemini-3.7-flash';
 
 /**
  * Quantity sanity-check pass — review the materials list emitted by the
@@ -2675,12 +2680,15 @@ async function callClaudeLiteJson(apiKey: string, prompt: string): Promise<any> 
       'anthropic-version': '2023-06-01',
     },
     body: JSON.stringify({
-      // Haiku tier — reconcile work is structured reasoning over a small
-      // JSON payload, doesn't need Opus/Sonnet capability and Haiku is
-      // ~10× cheaper + ~3× faster, matching Gemini Flash Lite's profile.
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 8000,
-      temperature: 0.1,
+      // Sonnet 5, not Haiku. This is the fallback for the pass that decides
+      // quote totals, and a fallback weaker than the primary means a Gemini
+      // outage silently degrades quote accuracy instead of failing loudly.
+      // Omitting `thinking` runs adaptive thinking on Sonnet 5 — the
+      // arithmetic and unit reasoning here is precisely what it's for.
+      // max_tokens raised to 16000: thinking tokens draw down the same budget
+      // and the JSON payload can already run to ~8000 on a 50-item batch.
+      model: 'claude-sonnet-5',
+      max_tokens: 16000,
       messages: [{ role: 'user', content: prompt }],
     }),
   });
@@ -2905,9 +2913,8 @@ async function callClaudeForExtraction(
       'anthropic-version': '2023-06-01',
     },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-6',
+      model: 'claude-sonnet-5',
       max_tokens: 16000,
-      temperature: 0.1,
       messages: [{ role: 'user', content: messageContent }],
     }),
   });
@@ -3236,8 +3243,8 @@ Example:
           'anthropic-version': '2023-06-01',
         },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-5-20250929',
-          max_tokens: 500,
+          model: 'claude-sonnet-5',
+          max_tokens: 2000,
           messages: [
             {
               role: 'user',
@@ -5687,8 +5694,8 @@ Return ONLY valid JSON, no other text.`;
           'anthropic-version': '2023-06-01',
         },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-5-20250929',
-          max_tokens: 1000,
+          model: 'claude-sonnet-5',
+          max_tokens: 2000,
           messages: [
             {
               role: 'user',
@@ -5835,9 +5842,8 @@ If no products found, return: {"matches": [], "quantityAdjustment": null}`;
           'anthropic-version': '2023-06-01',
         },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-5-20250929',
-          max_tokens: 4096,
-          temperature: 0.2,
+          model: 'claude-sonnet-5',
+          max_tokens: 8192,
           messages: [
             {
               role: 'user',
@@ -5915,9 +5921,8 @@ export const selectBestProduct = functions.https.onRequest((req, res) => {
           'anthropic-version': '2023-06-01',
         },
         body: JSON.stringify({
-          model: 'claude-3-5-sonnet-20241022',
-          max_tokens: 1024,
-          temperature: 0,
+          model: 'claude-sonnet-5',
+          max_tokens: 2048,
           messages: [
             {
               role: 'user',
@@ -6411,8 +6416,8 @@ export const generateQuoteEmail = functions.https.onRequest((req, res) => {
           'anthropic-version': '2023-06-01',
         },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-5-20250929',
-          max_tokens: 1000,
+          model: 'claude-sonnet-5',
+          max_tokens: 2000,
           messages: [{ role: 'user', content: prompt }],
         }),
       });
@@ -12819,8 +12824,8 @@ Rules:
             'anthropic-version': '2023-06-01',
           },
           body: JSON.stringify({
-            model: 'claude-sonnet-4-6',
-            max_tokens: 1024,
+            model: 'claude-sonnet-5',
+            max_tokens: 2048,
             // NO tools — pure text completion. Previous web_search tool caused
             // runaway cost ($5-10/call in worst case).
             messages: [{ role: 'user', content: prompt }],
@@ -12950,8 +12955,8 @@ Rules:
             'anthropic-version': '2023-06-01',
           },
           body: JSON.stringify({
-            model: 'claude-sonnet-4-6',
-            max_tokens: 2048,
+            model: 'claude-sonnet-5',
+            max_tokens: 4096,
             messages: [{ role: 'user', content: prompt }],
           }),
         });

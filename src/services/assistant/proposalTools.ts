@@ -8,6 +8,7 @@ import {
   ConvertToInvoiceProposal,
   CreateContactProposal,
   DeleteLineItemProposal,
+  UpdateLineItemProposal,
   DeleteQuoteProposal,
   DraftQuoteProposal,
   ImportSupplierListProposal,
@@ -166,6 +167,44 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
         displayCustomerName: input.displayCustomerName ? String(input.displayCustomerName) : undefined,
         displayTotal: Number.isFinite(Number(input.displayTotal)) ? Number(input.displayTotal) : undefined,
         displayDocType: docType,
+      };
+      return { proposal };
+    }
+
+    case 'propose_update_line_item': {
+      const known = requireKnownQuote('propose_update_line_item', input);
+      if (known.error) return { error: known.error };
+      if (!input?.materialId) {
+        return { error: 'propose_update_line_item requires materialId — call get_quote first to get it.' };
+      }
+      const price = Number(input.price);
+      const quantity = Number(input.quantity);
+      const hasPrice = input.price !== undefined && Number.isFinite(price);
+      const hasQty = input.quantity !== undefined && Number.isFinite(quantity);
+      const hasName = typeof input.name === 'string' && input.name.trim().length > 0;
+      if (!hasPrice && !hasQty && !hasName) {
+        return { error: 'propose_update_line_item needs at least one of price, quantity or name to change.' };
+      }
+      // A negative price or quantity is never what the tradie meant, and both
+      // flow straight into the customer-facing total.
+      if (hasPrice && price < 0) return { error: 'Price cannot be negative.' };
+      if (hasQty && quantity <= 0) {
+        return { error: 'Quantity must be above zero — to take the line off, use propose_delete_line_item.' };
+      }
+      const proposal: UpdateLineItemProposal = {
+        id,
+        toolUseId,
+        createdAt: now,
+        type: 'propose_update_line_item',
+        quoteId: known.quoteId!,
+        materialId: String(input.materialId),
+        ...(hasPrice ? { price } : {}),
+        ...(hasQty ? { quantity } : {}),
+        ...(hasName ? { name: String(input.name).trim() } : {}),
+        displayName: input.displayName ? String(input.displayName) : undefined,
+        displayCurrentPrice: Number.isFinite(Number(input.displayCurrentPrice)) ? Number(input.displayCurrentPrice) : undefined,
+        displayCurrentQty: Number.isFinite(Number(input.displayCurrentQty)) ? Number(input.displayCurrentQty) : undefined,
+        displayUnit: input.displayUnit ? String(input.displayUnit) : undefined,
       };
       return { proposal };
     }

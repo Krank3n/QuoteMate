@@ -53,7 +53,7 @@ const CHAT_PROVIDER: 'claude' | 'gemini' = 'claude';
 const CLAUDE_CHAT_MODEL = 'claude-sonnet-5';
 const CLAUDE_MAX_TOKENS = 8192;
 // Legacy Gemini text model, kept as the revert path.
-const CHAT_MODEL = 'gemini-3-flash-preview';
+const CHAT_MODEL = 'gemini-3.7-flash';
 
 // A text turn fans out into up to 8 tool round-trips (the client's
 // MAX_TOOL_HOPS), so 30/min capped real usage at ~4 turns/min. 60 clears

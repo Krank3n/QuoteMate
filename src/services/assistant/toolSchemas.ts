@@ -25,6 +25,7 @@ export const PROPOSAL_TOOL_NAMES = [
   'propose_draft_quote',
   'propose_add_line_item',
   'propose_delete_line_item',
+  'propose_update_line_item',
   'propose_delete_quote',
   'propose_create_contact',
   'propose_update_customer',
@@ -239,6 +240,26 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
         section: { type: 'string', description: 'Optional section to add the row under.' },
       },
       required: ['quoteId', 'searchTerm', 'qty', 'unit'],
+    },
+  },
+  {
+    name: 'propose_update_line_item',
+    description:
+      "Change a line that's ALREADY on a quote or invoice — its price, its quantity, or its name. Use this whenever the tradie wants a row corrected: \"make the plywood a hundred bucks\", \"that should be 12 not 6\", \"the decking's $8.50 a metre\". NEVER tell them to go and type a price in themselves — that was the old answer and it's wrong, you can do it from here. Always call get_quote first so you have the real material id and can show what's changing (pass displayName, displayCurrentPrice, displayCurrentQty, displayUnit). Setting a price marks the row as manually priced, which also clears any 'estimated' flag review_quote raised against it. Pass only the fields that change. For a row that isn't on the quote at all, use propose_add_line_item; to take one off, propose_delete_line_item.",
+    parameters: {
+      type: 'object',
+      properties: {
+        quoteId: { type: 'string', description: 'Document id of the quote or invoice.' },
+        materialId: { type: 'string', description: 'Material id from get_quote — not the name.' },
+        price: { type: 'number', description: 'New PER-UNIT price in dollars. The line total is recalculated from price x quantity.' },
+        quantity: { type: 'number', description: 'New quantity.' },
+        name: { type: 'string', description: 'Corrected line name, when the tradie is renaming rather than repricing.' },
+        displayName: { type: 'string', description: "The row's current name, for the card." },
+        displayCurrentPrice: { type: 'number', description: 'Current per-unit price, so the card can show the change.' },
+        displayCurrentQty: { type: 'number', description: 'Current quantity, so the card can show the change.' },
+        displayUnit: { type: 'string', description: "The row's unit (each, m, m2...)." },
+      },
+      required: ['quoteId', 'materialId'],
     },
   },
   {
@@ -510,6 +531,7 @@ export const TOOL_RUNTIME: Record<string, { timeoutSecs: number }> = {
   propose_draft_quote: { timeoutSecs: 10 },
   propose_add_line_item: { timeoutSecs: 10 },
   propose_delete_line_item: { timeoutSecs: 10 },
+  propose_update_line_item: { timeoutSecs: 10 },
   propose_delete_quote: { timeoutSecs: 10 },
   propose_create_contact: { timeoutSecs: 10 },
   propose_update_customer: { timeoutSecs: 10 },

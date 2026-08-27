@@ -73,11 +73,24 @@ export interface ModelPricing {
 }
 
 export const PRICING: Record<string, ModelPricing> = {
-  // Text chat model used by assistantChat.
+  // Superseded by gemini-3.7-flash below. Kept because historical daily docs
+  // still carry models.gemini-3-flash-preview.* and pricingFor() falls back
+  // to this key for any model we haven't priced.
   'gemini-3-flash-preview': {
     inputPerM: 0.30,
     outputPerM: 2.50,
     cachedInputPerM: 0.075,
+  },
+  // Gemini revert path for assistantChat (see CHAT_PROVIDER) since Aug 2026.
+  // Priced at the POST-intro rate for the same reason as Sonnet 5 below: the
+  // $0.75/$3.75 introductory window runs to 2026-12-31, and recording the
+  // intro price would under-count every turn from January.
+  // cachedInputPerM is derived at the same 0.25x of input the other Gemini
+  // rows use, not separately quoted — correct it if you check the rate card.
+  'gemini-3.7-flash': {
+    inputPerM: 1.50,
+    outputPerM: 7.50,
+    cachedInputPerM: 0.375,
   },
   // Text chat brain since Aug 2026 (see assistantChat CHAT_PROVIDER).
   // Standard Sonnet 5 rates — the $2/$10 intro window ends 2026-08-31, so

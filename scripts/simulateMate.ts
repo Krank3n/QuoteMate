@@ -44,8 +44,15 @@ const TOOL_MOCKS = {
   get_job_requirements: mock({ mustAsk: ['fence height', 'number of gates'], specialistSupply: false, supplierBookPopulated: false }),
   propose_draft_quote: mock({ ok: true, proposalId: 'p_1', note: 'Card shown — nothing is saved until the tradie taps Apply. proposalId is not a quote id.' }),
   list_recent_quotes: mock({ quotes: [{ id: 'q_88', customerName: 'Katie Nguyen', jobName: 'Raised deck', total: 1183.4, status: 'draft', type: 'quote' }] }),
-  get_quote: mock({ id: 'q_88', customerName: 'Katie Nguyen', jobName: 'Raised deck', total: 1183.4, status: 'draft', materials: [{ id: 'm1', name: 'Weed mat 1m x 20m', total: 179.88 }] }),
+  get_quote: mock({
+    id: 'q_88', customerName: 'Katie Nguyen', jobName: 'Raised deck', total: 1183.4, status: 'draft',
+    materials: [
+      { id: 'm1', name: 'Weed mat 1m x 20m', quantity: 1, unit: 'each', price: 179.88, total: 179.88 },
+      { id: 'm2', name: 'Plywood panel 2400x1200', quantity: 2, unit: 'each', price: 0, total: 0, pricingSource: 'ai', estimated: true },
+    ],
+  }),
   show_quote: mock({ ok: true }),
+  propose_update_line_item: mock({ ok: true, proposalId: 'p_2', note: 'Card shown — nothing is saved until the tradie taps Update it.' }),
   apply_pending_proposal: mock({ ok: false, error: 'No card is waiting.' }),
 };
 
@@ -60,6 +67,13 @@ const SCENARIOS: Record<string, { first: string; persona: string }> = {
   'wrong-contact': {
     first: "quote for Marcus, the fencing job",
     persona: 'You are an Australian tradie. The assistant will suggest a contact that is NOT who you meant — correct it. Keep replies short. After about 4 exchanges, say thanks and stop.',
+  },
+  // The row has no price. Mate used to tell the tradie to go and type it in
+  // themselves — twice, in the conversation that prompted propose_update_line_item.
+  'set-a-price': {
+    first: "on Katie Nguyen's raised deck quote, the plywood panel has no price on it",
+    persona:
+      'You are an Australian tradie with ONE specific request: the plywood panel line on Katie Nguyen\'s "Raised deck" quote has no price, and you want it set to one hundred dollars each. Say so plainly and stay on that single line item — do not ask about the whole job or any other quote. If the assistant suggests you set the price yourself, push back once and tell it to do it. Keep replies short. Stop once it has offered to make the change.',
   },
   // Mate has no tool for this. It must say so in the first reply rather than
   // sending the tradie hunting for a control that was never there.
