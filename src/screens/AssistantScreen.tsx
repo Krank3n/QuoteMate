@@ -1281,6 +1281,12 @@ export function AssistantScreen() {
       audioQueueRef.current = queue;
     }
     lastVoiceActivityRef.current = Date.now();
+    // Transports that own the mic (ElevenLabs over WebRTC) just unmute — the
+    // screen must never open a second capture alongside them.
+    if (voiceSessionRef.current?.ownsMicrophone) {
+      voiceSessionRef.current.setMicMuted?.(false);
+      return;
+    }
     if (micRef.current) return;
     void startMicCapture((chunk) => {
       if (!matePlayingRef.current) voiceSessionRef.current?.sendMicChunk(chunk);
@@ -2353,6 +2359,28 @@ export function AssistantScreen() {
             ? { ok: true }
             : { ok: false, error: "Couldn't find that quote to put on screen." };
         },
+        // ElevenLabs reports speaking/listening directly. On the Gemini path
+        // matePlayingRef came from the audio queue draining; here there is no
+        // queue, because the SDK plays on the WebRTC track.
+        onModeChange: (mode) => {
+          matePlayingRef.current = mode === 'speaking';
+          if (mode === 'speaking') touchVoiceActivity();
+        },
+        // Waveform input where no raw PCM reaches JS. Deliberately does NOT
+        // touch the idle clock: vad fires continuously, silence included, so
+        // treating it as activity would mean the 90s watchdog never fires and
+        // a forgotten session bills until the daily budget stops it. Speech is
+        // registered via onModeChange and the transcript callbacks instead.
+        onVadScore: (score) => {
+          if (!voiceSessionRef.current?.ownsMicrophone) return;
+          const level = Math.max(WAVE_LEVEL_FLOOR, Math.min(1, score));
+          Animated.timing(micLevel, {
+            toValue: level,
+            duration: 130,
+            easing: Easing.out(Easing.quad),
+            useNativeDriver: false,
+          }).start();
+        },
         onTurnComplete: () => {
           // Mate just finished replying. Reset the idle clock so the
           // tradie gets a full timeout window to respond before we
@@ -2505,6 +2533,15 @@ export function AssistantScreen() {
       // but starting the mic now keeps the buffer small. On web the
       // first call also triggers the browser permission prompt, so this
       // is awaited.
+      // A transport that captures and plays audio itself needs no mic here.
+      // Starting one anyway puts two owners on the iOS audio session, which
+      // intermittently yields a dead mic or earpiece-only output.
+      if (session.ownsMicrophone) {
+        setVoiceState('listening');
+        gate.end(openToken);
+        return;
+      }
+
       try {
         const mic = await startMicCapture((chunk) => {
           // Half-duplex: while Mate's audio reply is playing, drop mic

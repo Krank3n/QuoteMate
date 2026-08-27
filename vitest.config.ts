@@ -45,12 +45,6 @@ export default defineConfig({
         find: /^(.*\/)?services\/nativeGoogleSignIn$/,
         replacement: resolve(__dirname, 'src/services/nativeGoogleSignIn.web.ts'),
       },
-      // Same story for the ElevenLabs runtime shim: the .native variant pulls
-      // in @livekit/react-native, which has no browser build at all.
-      {
-        find: /^(.*\/)?assistant\/elevenLabsRuntime$/,
-        replacement: resolve(__dirname, 'src/services/assistant/elevenLabsRuntime.web.ts'),
-      },
     ],
   },
 });

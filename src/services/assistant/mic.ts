@@ -18,6 +18,16 @@
 import { Platform } from 'react-native';
 import { Audio } from 'expo-av';
 import { bytesToBase64 } from './audioCodec';
+import {
+  MicUnavailableError,
+  ensureMicPermission,
+  micPermissionGranted,
+} from './micPermission';
+
+// Re-exported so existing importers (AssistantScreen) keep working unchanged
+// while the Gemini transport is still around. Both live in micPermission now:
+// the ElevenLabs path needs them too, and mic.ts retires with Gemini.
+export { MicUnavailableError, micPermissionGranted };
 
 interface AudioRecordOptions {
   sampleRate: number;
@@ -64,13 +74,6 @@ const RECORD_OPTS: AudioRecordOptions = {
 export interface MicCaptureHandle {
   stop: () => Promise<void>;
   isStreaming: () => boolean;
-}
-
-export class MicUnavailableError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'MicUnavailableError';
-  }
 }
 
 // --- Web path ---------------------------------------------------------
@@ -253,16 +256,7 @@ async function stopWebCapture(state: WebCaptureState): Promise<void> {
 // `startRecording() called on an uninitialized AudioRecord` on the native
 // modules thread, where a JS try/catch can't catch it — the app crashes
 // outright. Requesting here turns a denial into a friendly caught error.
-async function ensureMicPermission(): Promise<void> {
-  const { granted, canAskAgain } = await Audio.requestPermissionsAsync();
-  if (!granted) {
-    throw new MicUnavailableError(
-      canAskAgain
-        ? 'Mic access is needed for voice — tap the mic again and allow it.'
-        : 'Mic access is off. Switch it on for QuoteMate in your phone settings to talk to Mate.',
-    );
-  }
-}
+
 
 async function startNativeCapture(
   onChunk: (b64: string) => void,
@@ -298,22 +292,6 @@ async function startNativeCapture(
  * `onChunk` fires repeatedly with base64-encoded 16-bit LE PCM at 16 kHz.
  * Call `handle.stop()` to end the capture.
  */
-/**
- * Whether mic permission is already granted, WITHOUT prompting. Used to
- * decide if Mate can silently auto-start the mic on tab focus — we only
- * do so when the tradie has previously granted access, never to trigger a
- * fresh permission prompt. Web always returns false (the getUserMedia
- * prompt is part of capture itself).
- */
-export async function micPermissionGranted(): Promise<boolean> {
-  if (Platform.OS === 'web') return false;
-  try {
-    return (await Audio.getPermissionsAsync()).granted;
-  } catch {
-    return false;
-  }
-}
-
 export async function startMicCapture(onChunk: (base64Pcm: string) => void): Promise<MicCaptureHandle> {
   let stopped = false;
 

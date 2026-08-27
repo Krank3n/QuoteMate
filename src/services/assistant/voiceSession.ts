@@ -39,6 +39,8 @@ import {
   LiveQuotaError,
   LiveRateLimitError,
   mintLiveToken,
+  isElevenLabsMint,
+  MintedToken,
 } from './liveSession';
 
 // If the socket opens but the server never acks the setup frame (silently
@@ -168,6 +170,24 @@ export interface VoiceSessionCallbacks {
   onReconnecting?: (attempt: number) => void;
   /** Reconnect succeeded — session is live again with the transcript reseeded. */
   onReconnected?: () => void;
+  /**
+   * ElevenLabs only. Whether Mate is currently speaking or listening, straight
+   * from the transport. Replaces the Gemini path's trick of inferring it from
+   * whether the audio queue had anything playing — which was also what the
+   * half-duplex mic gate keyed off, and WebRTC's echo cancellation makes that
+   * gate unnecessary.
+   */
+  onModeChange?: (mode: 'speaking' | 'listening') => void;
+  /**
+   * ElevenLabs only. Voice-activity score, 0..1. Drives the waveform on BOTH
+   * platforms — the Gemini path could only do this on web, where it had the raw
+   * PCM to measure; on native the line just breathed on a timer.
+   *
+   * Fires continuously, including through silence. Anything treating it as
+   * "the tradie is talking" has to threshold it, or the idle watchdog never
+   * fires and a forgotten session bills until the daily budget stops it.
+   */
+  onVadScore?: (score: number) => void;
   /** Fatal error; the session is closed. Never fires for a drop that reconnects. */
   onError?: (err: Error) => void;
   /** The session is over — user close, server close (PTT), or reconnect exhausted. */
@@ -207,6 +227,19 @@ export interface VoiceSession {
   close: () => void;
   /** True until close() runs, the server closes (PTT), or reconnects exhaust. */
   isOpen: () => boolean;
+  /**
+   * The transport captures and plays audio itself, so the screen must NOT
+   * start its own mic capture. Two owners on the iOS audio session gives a
+   * dead mic or earpiece-instead-of-speaker output, intermittently.
+   * Absent/false on the Gemini path, which expects the screen to feed it.
+   */
+  ownsMicrophone?: boolean;
+  /** Mute without tearing the session down — used when a modal takes over. */
+  setMicMuted?: (muted: boolean) => void;
+  /** Input level 0..1, for the waveform when no raw PCM reaches JS. */
+  getInputVolume?: () => number;
+  /** Provider-side conversation id, for cost reconciliation and breadcrumbs. */
+  getConversationId?: () => string;
 }
 
 function buildSeedTurns(history: ChatMessage[]) {
@@ -230,11 +263,38 @@ interface Connection {
   isUsable: () => boolean;
 }
 
+/**
+ * Open a voice session with whichever provider the SERVER nominates.
+ *
+ * The mint answers "which transport", not the client — that indirection is
+ * what makes rolling back to Gemini Live a Firestore edit plus a functions
+ * deploy, with no app-store release in the loop. The token is minted once
+ * here and handed to whichever implementation wins, so a fork never costs
+ * two mints (and two quota turns).
+ */
 export async function openVoiceSession(
   history: ChatMessage[],
   cb: VoiceSessionCallbacks,
   opts: VoiceSessionOptions = {},
 ): Promise<VoiceSession> {
+  const minted = await mintLiveToken('voice');
+  if (isElevenLabsMint(minted)) {
+    const { openElevenLabsVoiceSession } = await import('./elevenLabsVoiceSession');
+    return openElevenLabsVoiceSession(minted, history, cb, opts);
+  }
+  return openGeminiVoiceSession(minted, history, cb, opts);
+}
+
+async function openGeminiVoiceSession(
+  firstMint: MintedToken,
+  history: ChatMessage[],
+  cb: VoiceSessionCallbacks,
+  opts: VoiceSessionOptions = {},
+): Promise<VoiceSession> {
+  // The mint that chose this provider is single-use and still unspent — hand
+  // it to the first socket rather than burning a second one (and a second
+  // quota turn) to open the very session it was minted for.
+  let pendingMint: MintedToken | null = firstMint;
   // ---- session-level state, shared across physical connections ----
   let alive = true; // false once the user closed or recovery gave up
   let reconnecting = false;
@@ -320,7 +380,10 @@ export async function openVoiceSession(
   // Mint a token, open a socket, resolve once the server acks the setup
   // frame. Rejects on error/close/timeout before that ack.
   async function connectOnce(seedHistory: ChatMessage[]): Promise<Connection> {
-    const { token, model } = await mintLiveToken('voice');
+    // Reconnects mint fresh — Gemini's ephemeral tokens are single-use.
+    const consumed = pendingMint;
+    pendingMint = null;
+    const { token, model } = consumed ?? (await mintLiveToken('voice'));
 
     return new Promise<Connection>((resolve, reject) => {
       const url = `${LIVE_WS_BASE}?access_token=${encodeURIComponent(token)}`;
