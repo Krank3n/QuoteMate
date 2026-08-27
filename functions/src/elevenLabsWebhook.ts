@@ -17,6 +17,10 @@ import { verifyElevenLabsWebhookSignature } from './elevenLabsWebhookSignature';
 import { settleVoiceSecondsUpdate, MAX_SESSION_SECONDS, Plan } from './assistantQuota.helpers';
 import { todayKey } from './assistantCosts';
 import { EL_VOICE_MODEL_LABEL } from './assistantVoiceToken';
+import { PRICING } from './assistantCosts';
+
+/** Standard (non-burst) connection rate, from the pricing table. */
+const EL_PLATFORM_USD_PER_MINUTE = PRICING[EL_VOICE_MODEL_LABEL]?.perMinuteUsd ?? 0.08;
 
 const db = () => admin.firestore();
 
@@ -54,8 +58,20 @@ export const elevenLabsPostCallWebhook = functions
     const data = event.data || {};
     const conversationId = String(data.conversation_id || '');
     const durationSeconds = Math.max(0, Math.round(Number(data.metadata?.call_duration_secs) || 0));
-    // Their number, in dollars, including the LLM — this is the invoice.
-    const reportedCostUsd = Number(data.metadata?.cost ?? data.metadata?.charging?.llm_price ?? 0);
+
+    // COST UNITS. metadata.cost is in ElevenLabs CREDITS, not dollars — it is
+    // simply charging.call_charge + charging.llm_charge. Reading it as dollars
+    // recorded $83 for a 47-second call that actually cost $0.068, a ~1200x
+    // over-report that looked entirely plausible in a database.
+    //
+    // charging.llm_price IS in dollars, and the platform side we can compute
+    // exactly from duration because we know the per-minute rate. So: their
+    // authoritative LLM figure, plus our own arithmetic for the connection
+    // time. No credit-to-dollar conversion anywhere, because that rate is
+    // undocumented and would drift silently.
+    const llmUsd = Number(data.metadata?.charging?.llm_price ?? 0);
+    const platformUsd = (durationSeconds / 60) * EL_PLATFORM_USD_PER_MINUTE;
+    const reportedCostUsd = platformUsd + llmUsd;
 
     if (!conversationId) { res.status(200).send('no conversation id'); return; }
 

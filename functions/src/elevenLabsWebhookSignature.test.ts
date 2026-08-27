@@ -97,3 +97,25 @@ describe('verifyElevenLabsWebhookSignature', () => {
     expect(verify({ header: sign(TS, BODY).replace(',', ', ') }).ok).toBe(true);
   });
 });
+
+describe('cost units (webhook payload)', () => {
+  it('metadata.cost is CREDITS — never treat it as dollars', () => {
+    // From a real delivery: a 47-second call reported cost=83, which is
+    // call_charge 69 + llm_charge 14. Read as dollars that became an $83
+    // charge for a call that actually cost $0.068 — and looked entirely
+    // plausible sitting in a database.
+    const metadata = {
+      call_duration_secs: 47,
+      cost: 83,
+      charging: { call_charge: 69, llm_charge: 14, llm_price: 0.0050149 },
+    };
+    expect(metadata.cost).toBe(metadata.charging.call_charge + metadata.charging.llm_charge);
+
+    // The correct figure: their dollar LLM price plus our own platform maths.
+    const platform = (metadata.call_duration_secs / 60) * 0.08;
+    const total = platform + metadata.charging.llm_price;
+    expect(total).toBeCloseTo(0.0677, 3);
+    expect(total).toBeLessThan(1);            // sanity: a 47s call is cents
+    expect(metadata.cost).toBeGreaterThan(total * 1000);  // the trap, quantified
+  });
+});
