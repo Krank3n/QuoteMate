@@ -48,27 +48,51 @@ describe('costMicrosForChat', () => {
 // ---------------------------------------------------------------------------
 
 describe('platformCostMicros', () => {
-  it('costs 6 minutes at $0.08/min as exactly 480,000 micros', () => {
+  it('charges the per-session prompt-cache write once, not per minute', () => {
+    // Measured on a real 64s call: $0.056 of a $0.062 LLM bill was a single
+    // Anthropic cache write re-paying the 20.5k-token prompt. It does not
+    // scale with duration, so a 30s call and a 10min call pay it identically.
+    const short = platformCostMicros('elevenlabs/claude-sonnet-5', 30);
+    const long = platformCostMicros('elevenlabs/claude-sonnet-5', 600);
+    expect(short - 40_000).toBe(62_000);          // 30s of platform + the fixed cost
+    expect(long - 800_000).toBe(62_000);          // 10min of platform + the SAME fixed cost
+  });
+
+  it('makes short sessions dearer per minute, which is the real shape', () => {
+    const perMin = (secs: number) =>
+      platformCostMicros('elevenlabs/claude-sonnet-5', secs) / (secs / 60);
+    expect(perMin(30)).toBeGreaterThan(perMin(600));
+  });
+
+  it('charges nothing at all for a session that never happened', () => {
+    // A mint that failed before connect must not be billed a cache write for
+    // a prompt that was never sent.
+    expect(platformCostMicros('elevenlabs/claude-sonnet-5', 0)).toBe(0);
+  });
+
+  it('costs 6 minutes of platform time at $0.08/min as 480,000 micros', () => {
     // THE unit guard. Every other term in assistantCosts relies on
     // tokens * pricePerM === micros; a per-minute rate is plain USD and needs
     // an explicit * 1e6. A factor-of-a-million slip here looks entirely
     // plausible on the dashboard, which is why it is pinned to a literal.
-    expect(platformCostMicros('elevenlabs/claude-sonnet-5', 360)).toBe(480_000);
+    expect(platformCostMicros('elevenlabs/claude-sonnet-5', 360) - 62_000).toBe(480_000);
   });
 
   it('scales linearly with duration', () => {
-    const one = platformCostMicros('elevenlabs/claude-sonnet-5', 60);
+    const FIXED = 62_000;
+    const one = platformCostMicros('elevenlabs/claude-sonnet-5', 60) - FIXED;
     expect(one).toBe(80_000);
-    expect(platformCostMicros('elevenlabs/claude-sonnet-5', 120)).toBe(one * 2);
+    expect(platformCostMicros('elevenlabs/claude-sonnet-5', 120) - FIXED).toBe(one * 2);
   });
 
   it('charges part-minutes proportionally rather than rounding up', () => {
-    expect(platformCostMicros('elevenlabs/claude-sonnet-5', 30)).toBe(40_000);
+    expect(platformCostMicros('elevenlabs/claude-sonnet-5', 30) - 62_000).toBe(40_000);
   });
 
   it('doubles at the burst rate when over the concurrency limit', () => {
-    const standard = platformCostMicros('elevenlabs/claude-sonnet-5', 360);
-    const burst = platformCostMicros('elevenlabs/claude-sonnet-5', 360, { burst: true });
+    const FIXED = 62_000;
+    const standard = platformCostMicros('elevenlabs/claude-sonnet-5', 360) - FIXED;
+    const burst = platformCostMicros('elevenlabs/claude-sonnet-5', 360, { burst: true }) - FIXED;
     expect(burst).toBe(standard * 2);
   });
 

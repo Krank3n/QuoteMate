@@ -38,13 +38,26 @@ export const AGENT_MAX_DURATION_SECONDS = 900;
 export const AGENT_SILENCE_END_CALL_SECONDS = 60;
 
 /**
- * How long the agent waits after the tradie stops talking before replying.
- * The Gemini Live path used silenceDurationMs: 1200 + prefixPaddingMs: 300;
- * ElevenLabs' default of 7s would feel broken by comparison, and it is also
- * what push-to-talk's release→reply latency is made of. Re-measure on a real
- * device before trusting this number.
+ * How long the agent sits through SILENCE before taking a turn of its own.
+ *
+ * Not the end-of-utterance threshold — that was my misreading, and a device
+ * test caught it. At 2s Mate filled every gap: five unprompted turns in the
+ * first 32 seconds of a session where nobody said anything ("Still there?",
+ * "Just checking in", "I'll be here when you're ready"). A tradie holding a
+ * tape measure would be interrupted before they got the reading out.
+ *
+ * How fast Mate answers once the tradie HAS spoken is turn_eagerness, below.
+ * These are two different knobs and only one of them is about latency.
  */
-export const AGENT_TURN_TIMEOUT_SECONDS = 2;
+export const AGENT_TURN_TIMEOUT_SECONDS = 20;
+
+/**
+ * How readily Mate takes a turn once the tradie is talking. 'patient' gives
+ * them room to finish a thought — worksite speech has long pauses in it
+ * ("the run's… hang on… twenty-two metres"), and cutting in mid-measurement
+ * is worse than a beat of silence.
+ */
+export const AGENT_TURN_EAGERNESS = 'patient';
 
 /**
  * ASR keyword boosting — the highest-leverage setting in the migration, and one
@@ -257,6 +270,7 @@ export function buildAgentPatch(opts: AgentPatchOptions) {
       },
       turn: {
         turn_timeout: AGENT_TURN_TIMEOUT_SECONDS,
+        turn_eagerness: AGENT_TURN_EAGERNESS,
         silence_end_call_timeout: AGENT_SILENCE_END_CALL_SECONDS,
       },
       asr: {

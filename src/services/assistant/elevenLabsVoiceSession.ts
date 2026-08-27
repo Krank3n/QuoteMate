@@ -19,7 +19,10 @@
 // or a signedUrl, because the WebSocket transport needs AudioContext and
 // AudioWorkletNode, which RN doesn't have.
 
-import { Conversation } from '@elevenlabs/client';
+// TYPE-ONLY on purpose — see the dynamic import in openElevenLabsVoiceSession.
+// `import type` is erased at compile time, so it cannot pull the module in
+// early. Do NOT "tidy" this into a value import.
+import type { Conversation as ConversationClass } from '@elevenlabs/client';
 import { ChatMessage } from '../../types/assistant';
 import { ensureElevenLabsRuntime } from './elevenLabsRuntime';
 import { ensureMicPermission } from './micPermission';
@@ -35,7 +38,7 @@ import type { VoiceSession, VoiceSessionCallbacks, VoiceSessionOptions } from '.
 /** How long to wait for onConnect before calling the open a failure. */
 export const EL_CONNECT_TIMEOUT_MS = 20_000;
 
-type Conv = Awaited<ReturnType<typeof Conversation.startSession>>;
+type Conv = Awaited<ReturnType<typeof ConversationClass.startSession>>;
 
 export async function openElevenLabsVoiceSession(
   minted: ElevenLabsMintedToken,
@@ -46,6 +49,19 @@ export async function openElevenLabsVoiceSession(
   // Registers LiveKit's WebRTC globals and the RN setup strategy. Dynamic, so
   // a tradie who never opens voice never pays for it.
   await ensureElevenLabsRuntime();
+
+  // @elevenlabs/client is loaded HERE, after the shim, and never as a static
+  // import at the top of this file. It is a browser library: it constructs
+  // DOMException, which Hermes has no global for. @livekit/react-native ships
+  // the polyfill (its index.js line 1 is `import './polyfills/DOMException'`)
+  // and ensureElevenLabsRuntime is what pulls that in.
+  //
+  // A static import would defeat that entirely — ES modules evaluate every
+  // static import before any of the importing module's own code runs, so the
+  // client would initialise before the polyfill existed. It fails at import
+  // time with "Property 'DOMException' doesn't exist", on device only, and
+  // neither the unit tests nor a server-side simulation can see it.
+  const { Conversation } = await import('@elevenlabs/client');
   // LiveKit does NOT request runtime permissions of its own. Without this,
   // Android fails with something that looks nothing like "no mic permission".
   await ensureMicPermission();
@@ -192,6 +208,7 @@ export async function openElevenLabsVoiceSession(
 
   const session: VoiceSession = {
     ownsMicrophone: true,
+    ownsGreeting: true,
 
     // The SDK captures and plays audio on the WebRTC track. Kept so the
     // facade matches the Gemini path; calling it does nothing.

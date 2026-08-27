@@ -2504,7 +2504,9 @@ export function AssistantScreen() {
       // resumed conversations — but an error-only history still greets
       // (isBlankSlate), or a retry after a failed open would connect to
       // dead air.
-      if (mode === 'sticky' && isBlankSlate(seedHistory)) {
+      // Transports with their own first_message greet on connect. Sending
+      // [greet] as well produces two greetings back to back.
+      if (mode === 'sticky' && isBlankSlate(seedHistory) && !session.ownsGreeting) {
         greetHeardRef.current = false;
         session.sendUserText(buildGreetPrompt({ hour: new Date().getHours() }));
         // The session right after a mic-permission grant has twice connected

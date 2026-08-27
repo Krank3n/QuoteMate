@@ -228,6 +228,19 @@ export interface VoiceSession {
   /** True until close() runs, the server closes (PTT), or reconnects exhaust. */
   isOpen: () => boolean;
   /**
+   * The transport speaks its own opening line (ElevenLabs first_message), so
+   * the screen must NOT also send the [greet] prompt. Sending both greets the
+   * tradie twice — verified on device: "Morning — I can draft you a quote or
+   * an invoice" immediately followed by "G'day, I'm Mate. Need a quote or
+   * invoice drafted?".
+   *
+   * This is also the prompt-leak fix actually landing. A configured
+   * first_message is spoken verbatim with no model turn behind it, so the
+   * chain-of-thought that twice reached a tradie has nowhere to come from —
+   * but only if the LLM-driven greeting is genuinely gone.
+   */
+  ownsGreeting?: boolean;
+  /**
    * The transport captures and plays audio itself, so the screen must NOT
    * start its own mic capture. Two owners on the iOS audio session gives a
    * dead mic or earpiece-instead-of-speaker output, intermittently.

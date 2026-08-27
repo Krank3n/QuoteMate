@@ -56,6 +56,20 @@ export interface ModelPricing {
   perMinuteUsd?: number;
   /** USD per minute when over the concurrency limit (burst rate). */
   burstPerMinuteUsd?: number;
+  /**
+   * USD charged once per SESSION regardless of length.
+   *
+   * Measured, not estimated: a 64-second call cost $0.147, and $0.056 of that
+   * was a single Anthropic cache WRITE — 91% of the LLM charge — re-paying the
+   * 20.5k-token system prompt and tool schemas because the cache had expired
+   * since the last call. It does not scale with duration, so short sessions
+   * are the expensive ones: ~$0.20/min effective at 30 seconds against
+   * ~$0.09/min at ten minutes.
+   *
+   * Modelling it as per-minute, which is what the first cut did, under-reports
+   * every short session on /admin/ai-costs.
+   */
+  perSessionUsd?: number;
 }
 
 export const PRICING: Record<string, ModelPricing> = {
@@ -92,6 +106,10 @@ export const PRICING: Record<string, ModelPricing> = {
     cacheWritePerM: 3.75,
     perMinuteUsd: 0.08,
     burstPerMinuteUsd: 0.16,
+    // Measured on a real 64s session (conv_1901m10c…): the per-session cache
+    // write dominates the LLM bill. Trimming the prompt or the tool schemas
+    // would cut this directly — it is 20.5k tokens of fixed overhead per call.
+    perSessionUsd: 0.062,
   },
   // Voice Live model used by assistantToken → client WS.
   'gemini-3.1-flash-live-preview': {
@@ -247,7 +265,11 @@ export function platformCostMicros(
   const rate = opts.burst ? (p.burstPerMinuteUsd ?? p.perMinuteUsd) : p.perMinuteUsd;
   if (!rate) return 0;
   const seconds = Math.max(0, durationSeconds || 0);
-  return Math.round((seconds / 60) * rate * 1_000_000);
+  const perMinute = (seconds / 60) * rate;
+  // The fixed per-session component (the prompt cache write) is charged once,
+  // and only for a session that actually happened.
+  const perSession = seconds > 0 ? (p.perSessionUsd ?? 0) : 0;
+  return Math.round((perMinute + perSession) * 1_000_000);
 }
 
 export const reportAssistantLiveUsage = functions.https.onCall(async (data, context) => {

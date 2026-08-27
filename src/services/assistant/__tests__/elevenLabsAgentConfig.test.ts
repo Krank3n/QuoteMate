@@ -227,8 +227,26 @@ describe('buildAgentPatch', () => {
     expect(patch.conversation_config.turn.silence_end_call_timeout).toBeGreaterThan(0);
   });
 
-  it('replies faster than the ElevenLabs 7s default, near the old Gemini 1.2s', () => {
-    expect(patch.conversation_config.turn.turn_timeout).toBeLessThan(7);
+  it('does not fill every gap in the conversation', () => {
+    // Device-tested regression. turn_timeout is how long Mate sits through
+    // SILENCE before speaking unprompted — not the end-of-utterance threshold,
+    // which is what I first took it for. At 2s Mate produced five unprompted
+    // turns in 32 seconds of a session where nobody spoke at all. A tradie
+    // reading a tape measure needs longer than a couple of seconds.
+    expect(patch.conversation_config.turn.turn_timeout).toBeGreaterThanOrEqual(15);
+    // Still inside the API's 1..30 range.
+    expect(patch.conversation_config.turn.turn_timeout).toBeLessThanOrEqual(30);
+  });
+
+  it('gives the tradie room to finish a thought before answering', () => {
+    // Worksite speech has long pauses in it. Cutting in mid-measurement is
+    // worse than a beat of silence.
+    expect(patch.conversation_config.turn.turn_eagerness).toBe('patient');
+  });
+
+  it('still hangs up before an abandoned session bills all day', () => {
+    const t = patch.conversation_config.turn;
+    expect(t.silence_end_call_timeout).toBeGreaterThan(t.turn_timeout);
   });
 
   it('stays inside the ASR keyword cap with headroom for per-session surnames', () => {
