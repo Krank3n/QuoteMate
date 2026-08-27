@@ -369,3 +369,34 @@ describe('reopening (the "works the second time" bug)', () => {
     await expect(open()).resolves.toBeDefined();
   });
 });
+
+describe('greeting on a resumed conversation', () => {
+  it('greets on a blank slate', async () => {
+    const f = fakeConversation();
+    await open();
+    // No override — the agent's configured first_message plays.
+    expect(f.options().overrides?.agent?.firstMessage).toBeUndefined();
+  });
+
+  it('stays quiet when reopening a chat that has history', async () => {
+    // The agent speaks first_message on EVERY connect. Without this, closing
+    // and reopening voice mid-conversation greeted the tradie a second time,
+    // so a chat they'd been talking in for two minutes gained another
+    // identical "Evening — I can draft you a quote or an invoice".
+    const f = fakeConversation();
+    await openElevenLabsVoiceSession(MINT, [
+      { id: '1', role: 'user', text: 'quote a fence for Bob', createdAt: 'x' },
+      { id: '2', role: 'assistant', text: 'righto', createdAt: 'x' },
+    ], {});
+    expect(f.options().overrides?.agent?.firstMessage).toBe('');
+  });
+
+  it('still seeds the prior turns when it suppresses the greeting', async () => {
+    // Suppressing the greeting must not also lose the context.
+    const f = fakeConversation();
+    await openElevenLabsVoiceSession(MINT, [
+      { id: '1', role: 'user', text: 'quote a fence for Bob', createdAt: 'x' },
+    ], {});
+    expect(f.conv.sendContextualUpdate).toHaveBeenCalledWith(expect.stringContaining('fence'));
+  });
+});

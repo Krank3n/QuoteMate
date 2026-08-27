@@ -136,6 +136,14 @@ export async function openElevenLabsVoiceSession(
     cb.onClose?.(undefined);
   };
 
+  // Computed before connecting: whether there is prior conversation decides
+  // whether Mate should greet at all.
+
+
+  // Computed before connecting: whether there is prior conversation decides
+  // both whether to seed context AND whether Mate should greet at all.
+  const seed = buildSeedContext(history);
+
   let conv: Conv;
   try {
     conv = await new Promise<Conv>((resolve, reject) => {
@@ -154,6 +162,13 @@ export async function openElevenLabsVoiceSession(
         // supplied on EVERY session — a missing one errors the turn, which
         // here would mean dead air instead of a greeting.
         dynamicVariables: { greeting: mateGreetingWord(new Date().getHours()) },
+        // The agent speaks its first_message on EVERY connect. Reopening voice
+        // mid-conversation therefore greeted the tradie again, so a chat they
+        // had been talking in for two minutes gained a second identical
+        // "Evening — I can draft you a quote or an invoice". An empty override
+        // means wait silently instead, which is the right behaviour when we
+        // are resuming rather than starting.
+        ...(seed ? { overrides: { agent: { firstMessage: '' } } } : {}),
 
         onConnect: () => {
           clearTimeout(timer);
@@ -227,7 +242,6 @@ export async function openElevenLabsVoiceSession(
 
   // Prior turns, as a contextual update so it doesn't trigger a reply. Sent
   // after connect — before it, there is nothing to send it down.
-  const seed = buildSeedContext(history);
   if (seed) {
     try { (conv as any).sendContextualUpdate(seed); } catch { /* best-effort */ }
   }
