@@ -40,12 +40,41 @@ export const EL_CONNECT_TIMEOUT_MS = 20_000;
 
 type Conv = Awaited<ReturnType<typeof ConversationClass.startSession>>;
 
+/**
+ * The previous session's teardown, if one is still unwinding.
+ *
+ * LiveKit releases the native audio session inside its detach, and endSession
+ * is async. Closing and immediately reopening therefore raced: the new
+ * session called startAudioSession() while the old one's stopAudioSession()
+ * was still in flight, and the winner was whichever finished last. That is
+ * one of the ways voice comes up silent and works on the second go.
+ */
+let pendingTeardown: Promise<void> | null = null;
+
 export async function openElevenLabsVoiceSession(
   minted: ElevenLabsMintedToken,
   history: ChatMessage[],
   cb: VoiceSessionCallbacks,
   _opts: VoiceSessionOptions = {},
 ): Promise<VoiceSession> {
+  // Let the previous session finish releasing the native audio session before
+  // this one claims it. See pendingTeardown.
+  if (pendingTeardown) {
+    try { await pendingTeardown; } catch { /* the old session's problem */ }
+    pendingTeardown = null;
+  }
+
+  // Permission FIRST, before any audio or WebRTC initialisation.
+  //
+  // This used to sit after the runtime shim and the client import, which put
+  // the iOS permission dialog in the middle of audio-session setup — the
+  // system prompt appears, LiveKit configures and starts its session behind
+  // it, and the mic track is created against a session the user has not
+  // answered for yet. It comes up silent, and the next attempt works because
+  // permission is already settled. Asking first removes the dialog from the
+  // sequence entirely.
+  await ensureMicPermission();
+
   // Registers LiveKit's WebRTC globals and the RN setup strategy. Dynamic, so
   // a tradie who never opens voice never pays for it.
   await ensureElevenLabsRuntime();
@@ -62,9 +91,6 @@ export async function openElevenLabsVoiceSession(
   // time with "Property 'DOMException' doesn't exist", on device only, and
   // neither the unit tests nor a server-side simulation can see it.
   const { Conversation } = await import('@elevenlabs/client');
-  // LiveKit does NOT request runtime permissions of its own. Without this,
-  // Android fails with something that looks nothing like "no mic permission".
-  await ensureMicPermission();
 
   let alive = true;
   let connected = false;
@@ -252,7 +278,11 @@ export async function openElevenLabsVoiceSession(
       if (!alive) return;
       alive = false;
       connected = false;
-      try { void (conv as any).endSession(); } catch { /* noop */ }
+      // Keep the teardown so the NEXT open can wait for the native audio
+      // session to be released before claiming it.
+      pendingTeardown = (async () => {
+        try { await (conv as any).endSession(); } catch { /* already gone */ }
+      })();
       finish();  // reports usage exactly once
     },
 

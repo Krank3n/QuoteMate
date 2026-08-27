@@ -301,3 +301,71 @@ describe('session identity', () => {
     expect((await open()).getInputVolume?.()).toBe(0.42);
   });
 });
+
+describe('reopening (the "works the second time" bug)', () => {
+  it('asks for mic permission BEFORE touching the WebRTC runtime', async () => {
+    // The dialog used to appear in the middle of audio-session setup: LiveKit
+    // configured and started its session behind the system prompt, and the
+    // mic track was created against a session the tradie had not answered
+    // for. Silent on the first go, fine on the second.
+    const order: string[] = [];
+    ensureMicPermission.mockImplementation(() => { order.push('permission'); return Promise.resolve(); });
+    startSession.mockImplementation((o: any) => {
+      order.push('startSession');
+      o.onConnect?.({ conversationId: 'conv_1' });
+      return Promise.resolve({
+        sendUserMessage: vi.fn(), sendContextualUpdate: vi.fn(), setMicMuted: vi.fn(),
+        getInputVolume: vi.fn(), getId: vi.fn(), endSession: vi.fn(async () => {}),
+      });
+    });
+    await open();
+    expect(order).toEqual(['permission', 'startSession']);
+  });
+
+  it('waits for the previous session to release the audio session', async () => {
+    // endSession is async and LiveKit frees the native audio session inside
+    // its detach. Close-then-immediately-reopen raced startAudioSession()
+    // against the old stopAudioSession().
+    let released = false;
+    let releaseIt: () => void = () => {};
+    const slowEnd = vi.fn(() => new Promise<void>((r) => {
+      releaseIt = () => { released = true; r(); };
+    }));
+    startSession.mockImplementation((o: any) => {
+      o.onConnect?.({ conversationId: 'conv_1' });
+      return Promise.resolve({
+        sendUserMessage: vi.fn(), sendContextualUpdate: vi.fn(), setMicMuted: vi.fn(),
+        getInputVolume: vi.fn(), getId: vi.fn(), endSession: slowEnd,
+      });
+    });
+
+    const first = await open();
+    first.close();
+    expect(released).toBe(false);
+
+    let secondOpened = false;
+    const second = open().then((s) => { secondOpened = true; return s; });
+    await Promise.resolve();
+    // The second open must not have completed while the first is unwinding.
+    expect(secondOpened).toBe(false);
+
+    releaseIt();
+    await second;
+    expect(released).toBe(true);
+    expect(secondOpened).toBe(true);
+  });
+
+  it('opens anyway if the previous teardown fails', async () => {
+    // A wedged old session must not lock the tradie out of voice entirely.
+    startSession.mockImplementation((o: any) => {
+      o.onConnect?.({ conversationId: 'conv_1' });
+      return Promise.resolve({
+        sendUserMessage: vi.fn(), sendContextualUpdate: vi.fn(), setMicMuted: vi.fn(),
+        getInputVolume: vi.fn(), getId: vi.fn(),
+        endSession: vi.fn(async () => { throw new Error('detach blew up'); }),
+      });
+    });
+    (await open()).close();
+    await expect(open()).resolves.toBeDefined();
+  });
+});

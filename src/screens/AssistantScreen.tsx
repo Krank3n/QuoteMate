@@ -2127,9 +2127,12 @@ export function AssistantScreen() {
     // so even a slow Live token mint can't sneak the screen off; released in
     // stopVoiceSession when the session is fully torn down.
     try { await activateKeepAwakeAsync(VOICE_KEEP_AWAKE_TAG); } catch { /* non-fatal */ }
-    try {
-      await ensureAudioMode();
-    } catch { /* non-fatal */ }
+    // NOTE: ensureAudioMode() deliberately does NOT run here any more. It is
+    // expo-av setting the iOS AVAudioSession category, and LiveKit sets the
+    // same category itself when it starts its own audio session. Two owners
+    // racing produced a session that opened silent roughly every other try —
+    // "reopen it twice and the sound works". It now runs only on the Gemini
+    // path, which genuinely needs it, immediately before mic capture starts.
 
     let session: VoiceSession | null = null;
     try {
@@ -2549,6 +2552,11 @@ export function AssistantScreen() {
         gate.end(openToken);
         return;
       }
+
+      // Gemini path only — see the note where this used to live. Safe here
+      // because playback is downstream of the first audio chunk, which is
+      // later than this.
+      try { await ensureAudioMode(); } catch { /* non-fatal */ }
 
       try {
         const mic = await startMicCapture((chunk) => {
