@@ -61,6 +61,7 @@ import { ensureSquareConnectedForPayment } from '../utils/quoteDeliveryGuard';
 import { applyJobStageChange } from '../utils/applyJobStageChange';
 import { cascadeDeleteJob, pickPaidDocs } from '../utils/deleteJobWithDocs';
 import { formatScheduledDateLong } from '../utils/formatSchedule';
+import { customerResponseNote } from '../utils/customerNote';
 import { selectionTap, lightTap } from '../utils/haptics';
 import { useAlertModal } from '../hooks/useAlertModal';
 import { paymentCopy } from '../constants/paymentCopy';
@@ -257,6 +258,27 @@ export function ViewJobScreen() {
           }
         />
       ))}
+    </View>
+  ) : null;
+
+  // What the customer typed on the acceptance page when they answered.
+  // The server has always stored it and the notification email has always
+  // printed it, but this screen never showed it — so a declined job landed
+  // in the app with no reason attached and nothing to act on. Slots into the
+  // ScopeBlock right under the quote card, beside the Revise & Re-send the
+  // sticky bar offers on a rejected quote.
+  const customerNote = customerResponseNote(primaryDoc);
+  const customerNoteBlock = customerNote ? (
+    <View style={styles.customerNoteCard}>
+      <View style={styles.customerNoteHeader}>
+        <MaterialCommunityIcons
+          name="comment-quote-outline"
+          size={15}
+          color={themeColors.textMuted}
+        />
+        <Text style={styles.customerNoteLabel}>{customerNote.label}</Text>
+      </View>
+      <Text style={styles.customerNoteText}>{customerNote.text}</Text>
     </View>
   ) : null;
 
@@ -934,7 +956,7 @@ export function ViewJobScreen() {
             onPaymentPress={handlePaymentChipPress}
             onConvertToInvoice={handleConvertToInvoice}
             jobIsPaid={job.stage === 'paid'}
-            extra={<>{serviceReportRows}{reeceOrderEntry}</>}
+            extra={<>{customerNoteBlock}{serviceReportRows}{reeceOrderEntry}</>}
           />
         ) : null}
 
@@ -956,7 +978,7 @@ export function ViewJobScreen() {
             onPaymentPress={handlePaymentChipPress}
             onConvertToInvoice={handleConvertToInvoice}
             jobIsPaid={job.stage === 'paid'}
-            extra={<>{serviceReportRows}{reeceOrderEntry}</>}
+            extra={<>{customerNoteBlock}{serviceReportRows}{reeceOrderEntry}</>}
           />
         ) : null}
 
@@ -1282,6 +1304,33 @@ const useStyles = makeStyles((t) => ({
     color: t.colors.textMuted,
     marginTop: 2,
     lineHeight: 16,
+  },
+  customerNoteCard: {
+    marginHorizontal: 16,
+    marginTop: 8,
+    padding: 14,
+    backgroundColor: t.colors.surfaceRaised,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: t.colors.border,
+  },
+  customerNoteHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 6,
+  },
+  customerNoteLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: t.colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  customerNoteText: {
+    fontSize: 14,
+    color: t.colors.text,
+    lineHeight: 20,
   },
   secondaryDocsLabel: {
     fontSize: 11,

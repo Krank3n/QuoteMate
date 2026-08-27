@@ -15,6 +15,7 @@
 import type { Job, JobStage } from '../../shared/job/types';
 import type { Document } from '../types/document';
 import { formatScheduledDate, formatScheduledTime } from './formatSchedule';
+import { clientNoteDetail } from './customerNote';
 
 export type TimelineEventKind =
   | 'job_created'
@@ -118,11 +119,16 @@ export function deriveTimelineEvents(
     }
 
     if (doc.stage === 'quote_rejected' && doc.respondedAt) {
+      // Why they said no. The acceptance page asks for it and the server
+      // stores it, but until now the only place it was ever shown was the
+      // notification email — so the tradie who read it on their phone at
+      // 7pm had no way back to it.
       push(events, {
         id: `${doc.id}:rejected`,
         kind: 'quote_rejected',
         at: doc.respondedAt,
         title: 'Quote rejected',
+        detail: clientNoteDetail(doc.clientNotes),
       });
     }
 
