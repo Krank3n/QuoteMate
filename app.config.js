@@ -12,7 +12,17 @@ export default {
     // 1.46: adds the @sentry/react-native NATIVE module. Do not publish JS
     // built from this tree as an OTA for 1.45 — the appVersion runtime
     // policy below is what stops that from happening automatically.
-    version: "1.55",
+    //
+    // 1.56: adds LiveKit WebRTC (@elevenlabs/react-native). The same rule, and
+    // this time it is load-bearing in a specific way: liveSession declares
+    // VOICE_CLIENT_CAPABILITIES = ['elevenlabs'] on every voice mint, and that
+    // claim is made by JS, not verified against the native binary. OTA this
+    // bundle onto a 1.55 build and the client would promise a transport it
+    // does not have — the server would hand it an ElevenLabs token, the
+    // LiveKit import would fail, and the tradie would lose the session having
+    // already spent a quota turn. runtimeVersion: appVersion is what makes
+    // that impossible, but only while this number is ahead of 1.55.
+    version: "1.56",
     orientation: "portrait",
     icon: "./assets/icon.png",
     userInterfaceStyle: "automatic",
@@ -154,7 +164,7 @@ export default {
       supportsTablet: true,
       bundleIdentifier: "com.hansendev.quotemate",
       usesAppleSignIn: true,
-      buildNumber: "93",
+      buildNumber: "94",
       // Universal Links. The path allow-list lives in
       // public/.well-known/apple-app-site-association (/join* and /ref/*).
       associatedDomains: ["applinks:quotemateapp.au"],
@@ -169,7 +179,7 @@ export default {
         backgroundColor: "#0A0E16"  // Dark blue-gray to match app theme
       },
       package: "com.quotemate.app",
-      versionCode: 169,
+      versionCode: 170,
       permissions: ["android.permission.RECORD_AUDIO", "android.permission.CAMERA", "android.permission.READ_CONTACTS"],
       intentFilters: [
         {

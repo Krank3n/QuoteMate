@@ -6,7 +6,7 @@
 // the endpoint constants, and the error trio those paths surface all live here
 // so the two transports can't drift on auth, quota, or offline handling.
 
-import { Platform } from 'react-native';
+import { NativeModules, Platform } from 'react-native';
 import { auth } from '../../config/firebase';
 
 const USE_EMULATOR = process.env.USE_FIREBASE_EMULATOR === 'true';
@@ -95,9 +95,21 @@ export function isElevenLabsMint(m: MintedToken): m is ElevenLabsMintedToken {
  * Transports this build can actually open. Sent on every voice mint so the
  * server can never hand this client a token it wouldn't know what to do with —
  * a capability handshake rather than version parsing. Builds before 1.56 send
- * nothing and are therefore always served Gemini.
+ * nothing at all and are therefore always served Gemini.
+ *
+ * Checked against the BINARY, not the bundle. runtimeVersion: appVersion is
+ * supposed to stop this JS reaching a build without LiveKit, but that's a
+ * version-discipline promise and this is a one-line verification. Claiming a
+ * transport the binary can't open costs the tradie their session and a quota
+ * turn before anyone finds out, so it's worth not relying on the promise.
+ *
+ * WebRTCModule is what both @livekit/react-native-webrtc platforms register.
  */
-export const VOICE_CLIENT_CAPABILITIES = ['elevenlabs'] as const;
+export function voiceClientCapabilities(): string[] {
+  // Browsers ship WebRTC; @elevenlabs/client uses it directly, no native module.
+  if (Platform.OS === 'web') return ['elevenlabs'];
+  return NativeModules?.WebRTCModule ? ['elevenlabs'] : [];
+}
 
 // Per-request ceilings. Without these a half-open connection (walking out of
 // coverage mid-request) stalls the whole turn forever — fetch never rejects
@@ -182,7 +194,7 @@ export async function mintLiveToken(mode?: 'voice'): Promise<MintedToken> {
       body: JSON.stringify({
         platform: Platform.OS,
         mode,
-        ...(mode === 'voice' ? { supports: VOICE_CLIENT_CAPABILITIES } : {}),
+        ...(mode === 'voice' ? { supports: voiceClientCapabilities() } : {}),
       }),
     }, MINT_TIMEOUT_MS);
   } catch (err: any) {
