@@ -10,6 +10,7 @@
  *   draft (mid-wizard) → Continue Quote (resumes at the step they left)
  *   draft (ready)      → Send Quote
  *   quote sent         → Take Deposit (primary) + Mark Approved (secondary)
+ *   quote rejected     → Revise & Re-send + Send Again (the re-pitch path)
  *   accepted (deposit  → Take Deposit + Schedule
  *     still owed)
  *   accepted (deposit  → Schedule
@@ -205,6 +206,7 @@ export function resolveJobActions(
   const isDraft = primaryDoc.stage === 'draft';
   const isQuoteSent = primaryDoc.stage === 'quote_sent';
   const isQuoteAccepted = primaryDoc.stage === 'quote_accepted';
+  const isQuoteRejected = primaryDoc.stage === 'quote_rejected';
   const isInvoiceUnpaid =
     isInvoice &&
     (primaryDoc.stage === 'invoice_sent' || primaryDoc.stage === 'partially_paid');
@@ -344,6 +346,22 @@ export function resolveJobActions(
       actions.push({ id: 'generateInvoice', label: 'Generate Invoice', icon: 'receipt', tone: 'ghost' });
     }
     return actions;
+  }
+  // A knocked-back quote used to fall through every branch to `return []`,
+  // so the bar vanished and the job offered the tradie nothing at all — on
+  // the one screen where they most need a next move. The state machine has
+  // always allowed quote_rejected → quote_sent (shared/document/stage.ts
+  // calls it the re-pitch path); this is the button that drives it.
+  //
+  // Revise leads: the usual answer to "no" is a different number, and
+  // editQuote lands in the materials editor where that number lives. Send
+  // Again sits behind it for the quote the customer knocked back for a
+  // reason that wasn't the price.
+  if (isQuoteRejected) {
+    return [
+      { id: 'editQuote', label: 'Revise & Re-send', icon: 'pencil-outline', tone: 'primary' },
+      { id: 'resendQuote', label: 'Send Again', icon: 'email-send-outline', tone: 'ghost' },
+    ];
   }
 
   return [];

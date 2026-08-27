@@ -225,3 +225,39 @@ describe('sticky bar — iOS shares the invoice money path', () => {
     expect(actions.map((a: any) => a.id)).toContain('recordPayment');
   });
 });
+
+/**
+ * A rejected quote fell through every branch of resolveJobActions to
+ * `return []`, so the sticky bar disappeared entirely and the job offered the
+ * tradie nothing at all — no revise, no re-send, no way forward — on the one
+ * screen where the next move matters most. The state machine has allowed
+ * quote_rejected → quote_sent since Phase 11 (shared/document/stage.ts calls
+ * it the re-pitch path); only the buttons were missing.
+ */
+describe('resolveJobActions — the rejected quote', () => {
+  it('REGRESSION: shows a bar instead of vanishing', () => {
+    const actions = resolveJobActions('quoted', quoteDoc({ stage: 'quote_rejected' }));
+    expect(actions.length).toBeGreaterThan(0);
+  });
+
+  it('leads with the revise path and keeps a plain re-send behind it', () => {
+    const actions = resolveJobActions('quoted', quoteDoc({ stage: 'quote_rejected' }));
+    expect(actions.map((a) => a.id)).toEqual(['editQuote', 'resendQuote']);
+    expect(actions[0]).toMatchObject({ label: 'Revise & Re-send', tone: 'primary' });
+    expect(actions[1]).toMatchObject({ label: 'Send Again', tone: 'ghost' });
+  });
+
+  it('offers the same way out whatever stage the Job itself is parked on', () => {
+    // The rejection lives on the document; the Job may still read inquiry or
+    // quoted depending on how it got there. Neither should hide the bar.
+    for (const stage of ['inquiry', 'quoted', 'accepted'] as const) {
+      const actions = resolveJobActions(stage, quoteDoc({ stage: 'quote_rejected' }));
+      expect(actions[0].id).toBe('editQuote');
+    }
+  });
+
+  it('still hides the bar on a job that is cancelled or closed', () => {
+    expect(resolveJobActions('cancelled', quoteDoc({ stage: 'quote_rejected' }))).toEqual([]);
+    expect(resolveJobActions('closed', quoteDoc({ stage: 'quote_rejected' }))).toEqual([]);
+  });
+});
