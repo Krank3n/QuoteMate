@@ -35,16 +35,24 @@ function baseQuote(over: Record<string, unknown> = {}) {
   };
 }
 
+/** Every URL the page asked for, so a test can assert what it did NOT ask for. */
+let fetched: string[] = [];
+
 /** Serve the page, stub the network, let the inline script render, return the DOM. */
-async function renderAcceptance(quote: Record<string, unknown>): Promise<Document> {
-  const html = generateAcceptancePage('a'.repeat(64));
+async function renderAcceptance(
+  quote: Record<string, unknown>,
+  intent?: 'accept' | 'decline',
+): Promise<Document> {
+  fetched = [];
+  const html = generateAcceptancePage('a'.repeat(64), intent);
   const dom = new JSDOM(html, {
     runScripts: 'dangerously',
     url: 'https://example.com/',
     beforeParse(window) {
-      (window as any).fetch = async () => ({
-        json: async () => ({ success: true, quote, business }),
-      });
+      (window as any).fetch = async (url: string) => {
+        fetched.push(String(url));
+        return { json: async () => ({ success: true, quote, business }) };
+      };
     },
   });
   // loadQuote() fires at parse time and renders asynchronously — poll for it.
@@ -99,5 +107,43 @@ describe('acceptance page — rendered DOM', () => {
     );
     expect(rowLabels(doc)).not.toContain('GST (10%)');
     expect(doc.querySelector('.gst-note')?.textContent).toContain('No GST has been charged');
+  });
+});
+
+/**
+ * The email's Decline / Accept buttons arrive as ?action=…, and the server
+ * answers with this page instead of recording anything — a link scanner must
+ * not be able to answer for the customer. What the page does with that intent
+ * is the other half of the fix, and it has to stop short of submitting.
+ */
+describe('acceptance page — the intent from the email link', () => {
+  it('decline: prompts and rings Decline without sending a response', async () => {
+    const doc = await renderAcceptance(baseQuote(), 'decline');
+
+    const prompt = doc.querySelector('#respondStep .confirm-step');
+    expect(prompt?.textContent).toContain('Decline quote');
+    expect(prompt?.textContent).toContain('Harbour City Plumbing');
+    expect(doc.getElementById('declineBtn')?.className).toContain('btn-primed');
+    expect(doc.getElementById('acceptBtn')?.className).not.toContain('btn-primed');
+    // Loading the quote is the only call it may make. respondToQuote is the
+    // customer's tap, never the page's own doing.
+    expect(fetched.some((u) => u.includes('respondToQuote'))).toBe(false);
+  });
+
+  it('accept: rings Accept without sending a response', async () => {
+    const doc = await renderAcceptance(baseQuote(), 'accept');
+
+    expect(doc.querySelector('#respondStep .confirm-step')?.textContent).toContain('Accept quote');
+    expect(doc.getElementById('acceptBtn')?.className).toContain('btn-primed');
+    expect(doc.getElementById('declineBtn')?.className).not.toContain('btn-primed');
+    expect(fetched.some((u) => u.includes('respondToQuote'))).toBe(false);
+  });
+
+  it('no intent: no prompt, no ringed button', async () => {
+    const doc = await renderAcceptance(baseQuote());
+
+    expect(doc.querySelector('.confirm-step')).toBeNull();
+    expect(doc.getElementById('acceptBtn')?.className).not.toContain('btn-primed');
+    expect(doc.getElementById('declineBtn')?.className).not.toContain('btn-primed');
   });
 });

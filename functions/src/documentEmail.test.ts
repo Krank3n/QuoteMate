@@ -12,7 +12,6 @@ import {
   safeBrandColor,
   remoteLogoUrl,
 } from './email';
-import { generateConfirmationPage } from './index';
 
 const business = {
   name: 'Hansen Fencing',
@@ -103,11 +102,9 @@ describe('safeBrandColor', () => {
     expect(safeBrandColor(null)).toBe('#059669');
   });
 
-  it('keeps a hostile brand colour out of the rendered email and page', () => {
+  it('keeps a hostile brand colour out of the rendered email', () => {
     const hostile = '#fff"onmouseover="alert(1)';
     expect(quote({ business: { ...business, brandColor: hostile } })).not.toContain('onmouseover');
-    expect(generateConfirmationPage('accepted', 'Thanks!', 'Hansen Fencing', hostile))
-      .not.toContain('onmouseover');
   });
 });
 
@@ -343,63 +340,5 @@ describe('quote reminder email', () => {
       business,
     });
     expect(html).not.toContain('<script>alert(1)</script>');
-  });
-});
-
-describe('generateConfirmationPage', () => {
-  it('escapes a business name coming out of Firestore', () => {
-    const html = generateConfirmationPage(
-      'accepted',
-      'Thank you!',
-      '<script>alert(1)</script>',
-      null,
-      'https://x.test/logo.png"onerror="alert(1)',
-    );
-    expect(html).not.toContain('<script>alert(1)</script>');
-    expect(html).not.toContain('"onerror="alert(1)');
-  });
-
-  it('drops an unfetchable logo instead of printing a broken image', () => {
-    const html = generateConfirmationPage(
-      'accepted', 'Thanks!', 'Hansen Fencing', null, 'file:///var/mobile/logo.png',
-    );
-    expect(html).not.toContain('file:///var/mobile/logo.png');
-    expect(html).not.toContain('<img');
-  });
-
-  it('escapes the message body', () => {
-    const html = generateConfirmationPage('already', 'This quote has already been <b>accepted</b>.');
-    expect(html).not.toContain('<b>accepted</b>');
-  });
-
-  it('falls back to the same brand colour as the email', () => {
-    expect(generateConfirmationPage('accepted', 'Thanks!')).toContain('#059669');
-  });
-
-  it('honours the business brand colour when set', () => {
-    expect(generateConfirmationPage('accepted', 'Thanks!', 'Hansen Fencing', '#1d4ed8'))
-      .toContain('#1d4ed8');
-  });
-
-  it('shows the deposit CTA with formatted money on acceptance', () => {
-    const html = generateConfirmationPage(
-      'accepted', 'Thanks!', 'Hansen Fencing', null, null,
-      { url: 'https://square.link/u/demo', amount: 2029.64 },
-    );
-    expect(html).toContain('$2,029.64');
-    expect(html).toContain('https://square.link/u/demo');
-  });
-
-  it('never shows a deposit CTA on a decline', () => {
-    const html = generateConfirmationPage(
-      'declined', 'Recorded.', 'Hansen Fencing', null, null,
-      { url: 'https://square.link/u/demo', amount: 2029.64 },
-    );
-    expect(html).not.toContain('https://square.link/u/demo');
-  });
-
-  it('tells the customer what happens next', () => {
-    expect(generateConfirmationPage('accepted', 'Thanks!', 'Hansen Fencing'))
-      .toContain('Hansen Fencing will be in touch');
   });
 });

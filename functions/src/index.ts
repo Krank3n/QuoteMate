@@ -30,8 +30,6 @@ import {
   sendPaymentReceiptEmail,
   classifyUnsendable,
   canSendEmail,
-  formatMoney,
-  safeBrandColor,
   remoteLogoUrl,
 } from './email';
 import { listAllAuthUsers } from './authUsers.helpers';
@@ -6726,9 +6724,73 @@ export const respondToQuote = functions.https.onRequest((req, res) => {
         return;
       }
 
+      // Phase-8: make sure the quote has a Job before flipping status. The
+      // wizard's saveDraft normally creates one via ensureJobForQuote, but
+      // any code path that wrote the quote without that step (legacy flows,
+      // imports) leaves the quote orphaned — onDocumentWriteSyncJob then
+      // bails because the Job doesn't exist, and the Jobs tab never sees
+      // the customer-accepted quote. Materialise here as a backstop.
+      //
+      // This backstop (and the deposit link below) used to live only on the
+      // GET path. That path no longer writes, so both moved here — otherwise
+      // making the GET safe would have quietly taken them away from every
+      // acceptance that came in through the email button.
+      let resolvedJobId: string | undefined =
+        typeof foundQuote.jobId === 'string' && foundQuote.jobId
+          ? foundQuote.jobId
+          : undefined;
+      if (!resolvedJobId && response === 'accepted') {
+        const customerName = (foundQuote.customerName || '').trim();
+        const customerEmail = (foundQuote.customerEmail || '').trim();
+        const customerPhone = (foundQuote.customerPhone || '').trim();
+        const jobAddress = (foundQuote.jobAddress || '').trim();
+        const jobName = (foundQuote.job?.name || '').trim();
+        if (customerName || customerEmail || customerPhone || jobAddress || jobName) {
+          const newJobRef = db.collection('users').doc(foundUserId)
+            .collection('jobs').doc();
+          const now = Date.now();
+          // Carry the quote's creation time across so the Job's age reflects
+          // when work was actually scoped, not when the customer happened to
+          // click accept. quotedAt comes from sentAt for the same reason.
+          const toMs = (v: unknown): number => {
+            if (!v) return 0;
+            const maybeTs = v as { toMillis?: () => number };
+            if (typeof maybeTs.toMillis === 'function') return maybeTs.toMillis();
+            if (v instanceof Date) return v.getTime();
+            if (typeof v === 'number') return v;
+            const parsed = Date.parse(String(v));
+            return Number.isFinite(parsed) ? parsed : 0;
+          };
+          const quoteCreatedAt = toMs(foundQuote.createdAt) || now;
+          const quoteSentAt = toMs(foundQuote.sentAt);
+          await newJobRef.set({
+            id: newJobRef.id,
+            userId: foundUserId,
+            customerName,
+            customerEmail,
+            customerPhone,
+            jobAddress,
+            name: jobName || 'Job',
+            description: foundQuote.job?.description || '',
+            stage: 'accepted',
+            acceptedAt: now,
+            ...(quoteSentAt > 0 ? { quotedAt: quoteSentAt } : {}),
+            documentIds: [],
+            totalQuoted: Number(foundQuote.total) || 0,
+            totalInvoiced: 0,
+            totalPaid: 0,
+            balanceDue: 0,
+            createdAt: quoteCreatedAt,
+            updatedAt: now,
+          });
+          resolvedJobId = newJobRef.id;
+        }
+      }
+
       // Update the quote
       await foundQuoteRef.update({
         status: response,
+        ...(resolvedJobId && !foundQuote.jobId ? { jobId: resolvedJobId } : {}),
         respondedAt: admin.firestore.FieldValue.serverTimestamp(),
         respondedBy: safeClientName || foundQuote.customerName || 'Client',
         clientNotes: safeClientNotes || null,
@@ -6783,207 +6845,13 @@ export const respondToQuote = functions.https.onRequest((req, res) => {
         // Push is best-effort; sendExpoPushToUser logs gateway failures.
       }
 
-      res.status(200).json({
-        success: true,
-        message: response === 'accepted'
-          ? 'Thank you! The quote has been accepted. The business will be in touch soon.'
-          : 'The quote has been declined. The business has been notified.',
-      });
-    } catch (error: any) {
-      res.status(500).json({ success: false, error: error.message });
-    }
-  });
-});
-
-/**
- * Serve the quote acceptance/response page
- * When action=accept or action=decline is provided, processes the response server-side
- * and shows a simple confirmation page. Otherwise shows the full review page.
- */
-export const quoteAcceptancePage = functions.https.onRequest(async (req, res) => {
-  if (!(await checkRateLimit(`ip:${getClientIp(req)}`, RATE_LIMITS.public, res))) return;
-
-  const token = req.query.token as string;
-  const action = req.query.action as string;
-
-  if (!token || typeof token !== 'string' || token.length > 200) {
-    res.status(400).send(generateErrorPage('Invalid Token', 'The quote token provided is missing or invalid.'));
-    return;
-  }
-
-  // If no action specified, show the full review page (fallback)
-  if (!action || (action !== 'accept' && action !== 'decline')) {
-    res.status(200).send(generateAcceptancePage(token));
-    return;
-  }
-
-  // Process the response server-side and show confirmation
-  try {
-    const db = admin.firestore();
-    const responseType = action === 'accept' ? 'accepted' : 'rejected';
-    const tokenHash = hashToken(token);
-
-    // Look up the token
-    let tokenDoc = await db.collection('quoteAcceptanceTokens').doc(tokenHash).get();
-    if (!tokenDoc.exists) {
-      tokenDoc = await db.collection('quoteAcceptanceTokens').doc(token).get();
-    }
-
-    if (!tokenDoc.exists) {
-      res.status(200).send(generateConfirmationPage('error', 'Quote not found. The link may have expired.'));
-      return;
-    }
-
-    const tokenData = tokenDoc.data()!;
-    const quoteDoc = await db.collection('users').doc(tokenData.userId)
-      .collection('quotes').doc(tokenData.quoteId).get();
-
-    if (!quoteDoc.exists) {
-      res.status(200).send(generateConfirmationPage('error', 'Quote not found.'));
-      return;
-    }
-
-    const foundQuote = quoteDoc.data()!;
-    const foundUserId = tokenData.userId;
-
-    // Get business settings for branding
-    const settingsDoc = await db.collection('users').doc(foundUserId)
-      .collection('settings').doc('business').get();
-    const businessSettings = settingsDoc.exists ? settingsDoc.data() : null;
-    const businessName = businessSettings?.businessName || 'Your Trade Business';
-    const brandColor = businessSettings?.brandColor || null;
-    const logoUrl = remoteLogoUrl(businessSettings?.logoStorageUrl || businessSettings?.logoUri) || null;
-
-    // Check if already responded
-    if (foundQuote.respondedAt) {
-      res.status(200).send(generateConfirmationPage(
-        'already',
-        `This quote has already been ${foundQuote.status}.`,
-        businessName, brandColor, logoUrl
-      ));
-      return;
-    }
-
-    // Check token expiration. Prefer the token doc's createdAt (always
-    // server-stamped at mint time) over the quote's acceptanceTokenCreatedAt
-    // field — the latter can get clobbered by a stale client ISO string and
-    // reduce to `new Date(null)` = 1970, which would make every link look
-    // expired. Skip the check if nothing resolves rather than false-expiring.
-    const tokenCreatedAt = resolveTokenCreatedAt(foundQuote, tokenData);
-    if (tokenCreatedAt && Date.now() - tokenCreatedAt.getTime() > TOKEN_EXPIRATION_MS) {
-      res.status(200).send(generateConfirmationPage(
-        'error',
-        'This link has expired. Please contact the business directly.',
-        businessName, brandColor, logoUrl
-      ));
-      return;
-    }
-
-    // Phase-8: make sure the quote has a Job before flipping status. The
-    // wizard's saveDraft normally creates one via ensureJobForQuote, but
-    // any code path that wrote the quote without that step (legacy flows,
-    // imports) leaves the quote orphaned — onDocumentWriteSyncJob then
-    // bails because the Job doesn't exist, and the Jobs tab never sees
-    // the customer-accepted quote. Materialise here as a backstop.
-    let resolvedJobId: string | undefined =
-      typeof foundQuote.jobId === 'string' && foundQuote.jobId
-        ? foundQuote.jobId
-        : undefined;
-    if (!resolvedJobId && responseType === 'accepted') {
-      const customerName = (foundQuote.customerName || '').trim();
-      const customerEmail = (foundQuote.customerEmail || '').trim();
-      const customerPhone = (foundQuote.customerPhone || '').trim();
-      const jobAddress = (foundQuote.jobAddress || '').trim();
-      const jobName = (foundQuote.job?.name || '').trim();
-      if (customerName || customerEmail || customerPhone || jobAddress || jobName) {
-        const newJobRef = db.collection('users').doc(foundUserId)
-          .collection('jobs').doc();
-        const now = Date.now();
-        // Carry the quote's creation time across so the Job's age reflects
-        // when work was actually scoped, not when the customer happened to
-        // click accept. quotedAt comes from sentAt for the same reason.
-        const toMs = (v: unknown): number => {
-          if (!v) return 0;
-          const maybeTs = v as { toMillis?: () => number };
-          if (typeof maybeTs.toMillis === 'function') return maybeTs.toMillis();
-          if (v instanceof Date) return v.getTime();
-          if (typeof v === 'number') return v;
-          const parsed = Date.parse(String(v));
-          return Number.isFinite(parsed) ? parsed : 0;
-        };
-        const quoteCreatedAt = toMs(foundQuote.createdAt) || now;
-        const quoteSentAt = toMs(foundQuote.sentAt);
-        await newJobRef.set({
-          id: newJobRef.id,
-          userId: foundUserId,
-          customerName,
-          customerEmail,
-          customerPhone,
-          jobAddress,
-          name: jobName || 'Job',
-          description: foundQuote.job?.description || '',
-          stage: 'accepted',
-          acceptedAt: now,
-          ...(quoteSentAt > 0 ? { quotedAt: quoteSentAt } : {}),
-          documentIds: [],
-          totalQuoted: Number(foundQuote.total) || 0,
-          totalInvoiced: 0,
-          totalPaid: 0,
-          balanceDue: 0,
-          createdAt: quoteCreatedAt,
-          updatedAt: now,
-        });
-        resolvedJobId = newJobRef.id;
-      }
-    }
-
-    // Process the response
-    await quoteDoc.ref.update({
-      status: responseType,
-      ...(resolvedJobId && !foundQuote.jobId ? { jobId: resolvedJobId } : {}),
-      respondedAt: admin.firestore.FieldValue.serverTimestamp(),
-      respondedBy: foundQuote.customerName || 'Client',
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
-
-    // Send email notification to business owner
-    if (businessSettings?.email) {
-      try {
-        const quoteNumber = foundQuote.quoteNumber || foundQuote.id;
-        const total = foundQuote.total || 0;
-        if (responseType === 'accepted') {
-          await sendQuoteAcceptedEmail(businessSettings.email, foundQuote.customerName, quoteNumber, total, null, foundUserId);
-        } else {
-          await sendQuoteDeclinedEmail(businessSettings.email, foundQuote.customerName, quoteNumber, total, null, foundUserId);
-        }
-      } catch (emailError) {
-      }
-    }
-
-    // Routed through sendAussiePush so notification preferences are honoured.
-    try {
-      const aussieEvent: AussieEvent = responseType === 'accepted' ? 'quote_accepted' : 'quote_rejected';
-      await sendAussiePush(foundUserId, aussieEvent, {
-        customer: foundQuote.customerName,
-        job: foundQuote.job?.name || 'the job',
-        amount: formatPushAmount(foundQuote.total),
-      }, {
-        quoteId: foundQuote.id,
-        response: responseType,
-        ...jobLink(foundQuote),
-      });
-    } catch {
-      // Push is best-effort; sendExpoPushToUser logs gateway failures.
-    }
-
-    // Show confirmation page
-    if (responseType === 'accepted') {
       // If the quote has a deposit configured and the tradie has Square
-      // connected, mint a hosted payment link and show a Pay Deposit button on
-      // the confirmation page. Best-effort: if anything fails we still show the
-      // standard "thank you" so the customer isn't blocked.
+      // connected, mint a hosted payment link and hand it back so the page
+      // can offer Pay Deposit on its thank-you state. Best-effort: if
+      // anything fails the customer still gets the standard thank-you rather
+      // than an error on an acceptance that has already been recorded.
       let depositPayment: { url: string; amount: number } | null = null;
-      const depositRequired = foundQuote.requireDeposit === true;
+      const depositRequired = response === 'accepted' && foundQuote.requireDeposit === true;
       const depositPct = depositRequired ? (Number(foundQuote.depositPercentage) || 0) : 0;
       if (depositRequired && depositPct > 0) {
         try {
@@ -7010,30 +6878,60 @@ export const quoteAcceptancePage = functions.https.onRequest(async (req, res) =>
           console.error('[square] deposit link mint threw on acceptance', {
             userId: foundUserId, quoteId: foundQuote.id, message: err?.message,
           });
-          // Show standard thank-you instead.
+          // Fall through to the standard thank-you.
         }
       }
 
-      const acceptedMessage = depositPayment
-        ? `Thank you! To lock in your spot, please pay your deposit below. ${businessName} will start work once it clears.`
-        : `Thank you! ${businessName} has been notified and will be in touch soon.`;
-
-      res.status(200).send(generateConfirmationPage(
-        'accepted',
-        acceptedMessage,
-        businessName, brandColor, logoUrl,
+      res.status(200).json({
+        success: true,
+        message: response === 'accepted'
+          ? 'Thank you! The quote has been accepted. The business will be in touch soon.'
+          : 'The quote has been declined. The business has been notified.',
         depositPayment,
-      ));
-    } else {
-      res.status(200).send(generateConfirmationPage(
-        'declined',
-        `Your response has been recorded. ${businessName} has been notified.`,
-        businessName, brandColor, logoUrl
-      ));
+      });
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: error.message });
     }
-  } catch (error: any) {
-    res.status(200).send(generateConfirmationPage('error', 'Something went wrong. Please try again later.'));
+  });
+});
+
+/**
+ * Serve the quote acceptance/response page.
+ *
+ * This handler renders. It does not record anything, ever.
+ *
+ * It used to: `?action=accept` / `?action=decline` were PROCESSED here, on
+ * the GET — status flipped, respondedAt stamped, the tradie emailed and
+ * pushed. That made the customer's answer a side-effect of merely fetching a
+ * URL, and plenty of things fetch URLs without a human: Outlook Safe Links,
+ * corporate mail-security scanners, link previewers, browser prefetchers.
+ * Any one of them following the buttons in a delivered quote email silently
+ * declined a live job — or accepted it, which also mints a Job document and
+ * a Square deposit link. respondedAt then locked the token forever, so the
+ * customer's real click landed on "already responded to" and the tradie's
+ * only record said the customer had answered. They never had.
+ *
+ * The action survives as an *intent* passed to the page: the review page
+ * opens scrolled to the confirmation step with that button ringed, and the
+ * answer is recorded by the deliberate tap that POSTs to /respondToQuote.
+ * That path also captures the customer's note, which this one hardcoded to
+ * null — so the tradie now hears why, not just that.
+ */
+export const quoteAcceptancePage = functions.https.onRequest(async (req, res) => {
+  if (!(await checkRateLimit(`ip:${getClientIp(req)}`, RATE_LIMITS.public, res))) return;
+
+  const token = req.query.token as string;
+  const action = req.query.action as string;
+
+  if (!token || typeof token !== 'string' || token.length > 200) {
+    res.status(400).send(generateErrorPage('Invalid Token', 'The quote token provided is missing or invalid.'));
+    return;
   }
+
+  // Anything other than the two known actions is simply no intent — a bare
+  // link wants the review page too.
+  const intent = action === 'accept' || action === 'decline' ? action : undefined;
+  res.status(200).send(generateAcceptancePage(token, intent));
 });
 
 /**
@@ -7104,149 +7002,20 @@ export const downloadQuotePdf = functions.runWith({ timeoutSeconds: 120, memory:
 });
 
 /**
- * Confirmation page shown after the customer clicks Accept or Decline in the
- * quote email. Deliberately mirrors the email's design language — same light
- * surface, same business lockup, same button shape — so the click doesn't dump
- * the customer onto a page that looks like it belongs to someone else.
- *
- * Exported for confirmationPage.test.ts.
- */
-export function generateConfirmationPage(
-  type: 'accepted' | 'declined' | 'already' | 'error',
-  message: string,
-  businessName?: string,
-  brandColor?: string | null,
-  logoUrl?: string | null,
-  depositPayment?: { url: string; amount: number } | null
-): string {
-  const esc = escapeHtml;
-  // Match the email's default brand colour so an unbranded business doesn't
-  // get a green email followed by an orange confirmation page.
-  const accent = safeBrandColor(brandColor);
-  const icon = type === 'accepted' ? '&#10003;' : type === 'declined' ? '&#10005;' : type === 'already' ? '&#8505;' : '&#9888;';
-  const iconBg = type === 'accepted' ? '#059669' : type === 'declined' ? '#6b7280' : type === 'error' ? '#dc2626' : '#d97706';
-  const heading = type === 'accepted' ? 'Quote accepted'
-    : type === 'declined' ? 'Quote declined'
-    : type === 'already' ? 'Already responded'
-    : 'Something went wrong';
-
-  // What happens next — the old page ended on a full stop and left the
-  // customer wondering whether anything had actually happened.
-  const who = businessName ? esc(businessName) : 'The business';
-  const nextStep = type === 'accepted' && !depositPayment
-    ? `${who} will be in touch to lock in a date. Keep the quote PDF from the email for your records.`
-    : type === 'declined'
-      ? `No hard feelings — if something changes, just reply to the original email.`
-      : '';
-
-  // Guarded here as well as at the caller: a device-local file:// logo would
-  // print a broken-image box above the confirmation, and this function is
-  // exported and called from several paths.
-  const fetchableLogo = remoteLogoUrl(logoUrl);
-  const logoHtml = fetchableLogo
-    ? `<img src="${esc(fetchableLogo)}" alt="${esc(businessName || '')}" class="logo" />`
-    : '';
-
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <meta name="color-scheme" content="light">
-  <title>${heading}</title>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-      background: #f7f7f7;
-      color: #111827;
-      min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 32px 16px calc(32px + env(safe-area-inset-bottom));
-    }
-    .wrap { width: 100%; max-width: 460px; text-align: center; }
-    .logo {
-      width: 88px; height: 88px; object-fit: contain; background: #fff;
-      border-radius: 12px; margin: 0 auto 14px; display: block;
-    }
-    .business { font-size: 19px; font-weight: 700; letter-spacing: -0.2px; margin-bottom: 20px; }
-    .card {
-      background: #ffffff;
-      border: 1px solid #e5e7eb;
-      border-top: 4px solid ${accent};
-      border-radius: 14px;
-      padding: 40px 28px;
-    }
-    .icon {
-      width: 68px; height: 68px; border-radius: 50%;
-      background: ${iconBg};
-      display: flex; align-items: center; justify-content: center;
-      margin: 0 auto 22px; font-size: 30px; color: #fff;
-    }
-    h1 { font-size: 23px; font-weight: 800; letter-spacing: -0.3px; margin-bottom: 10px; }
-    .message { color: #4b5563; font-size: 16px; line-height: 1.65; }
-    .next { color: #6b7280; font-size: 14px; line-height: 1.65; margin-top: 14px; }
-    .deposit {
-      margin-top: 26px; padding: 22px 20px;
-      background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 12px;
-    }
-    .deposit-label {
-      color: #6b7280; font-size: 11px; font-weight: 700;
-      text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 6px;
-    }
-    .deposit-amount {
-      font-size: 32px; font-weight: 800; letter-spacing: -0.5px; margin-bottom: 18px;
-      font-variant-numeric: tabular-nums;
-    }
-    .btn {
-      display: block; background: ${accent}; color: #fff;
-      padding: 15px 24px; border-radius: 10px; font-weight: 700;
-      text-decoration: none; font-size: 16px; line-height: 1.2;
-    }
-    .deposit-note { color: #6b7280; font-size: 12px; line-height: 1.6; margin-top: 14px; }
-    .powered { color: #9ca3af; font-size: 12px; margin-top: 20px; }
-    @media (max-width: 420px) {
-      .card { padding: 32px 20px; }
-    }
-  </style>
-</head>
-<body>
-  <div class="wrap">
-    ${logoHtml}
-    ${businessName ? `<div class="business">${esc(businessName)}</div>` : ''}
-    <div class="card">
-      <div class="icon">${icon}</div>
-      <h1>${heading}</h1>
-      <p class="message">${esc(message)}</p>
-      ${nextStep ? `<p class="next">${nextStep}</p>` : ''}
-      ${
-        depositPayment && type === 'accepted'
-          ? `
-      <div class="deposit">
-        <div class="deposit-label">Deposit to get started</div>
-        <div class="deposit-amount">${formatMoney(depositPayment.amount)}</div>
-        <a href="${esc(depositPayment.url)}" class="btn">Pay deposit securely</a>
-        <div class="deposit-note">Secure card payment through Square. ${who} is notified the moment it clears.</div>
-      </div>`
-          : ''
-      }
-    </div>
-    <div class="powered">Sent with QuoteMate</div>
-  </div>
-</body>
-</html>`;
-}
-
-/**
  * Generate the quote acceptance HTML page (fallback review page).
  * Exported for acceptancePage.test.ts, which parses the inline script.
  */
-export function generateAcceptancePage(token: string): string {
+export function generateAcceptancePage(
+  token: string,
+  intent?: 'accept' | 'decline',
+): string {
   // This value is embedded in a <script>, so quote it as JSON and neutralise
   // `<` to prevent a crafted query token from terminating the script tag.
   const tokenLiteral = JSON.stringify(token).replace(/</g, '\\u003c');
+  // The intent only ever steers the page — see quoteAcceptancePage for why a
+  // GET must not carry the answer itself. Narrowed to the two literals above,
+  // so nothing from the query string reaches the script unchecked.
+  const intentLiteral = JSON.stringify(intent === 'accept' || intent === 'decline' ? intent : null);
   return `
 <!DOCTYPE html>
 <html lang="en">
@@ -7416,6 +7185,33 @@ export function generateAcceptancePage(token: string): string {
     }
     .btn-decline { color: #475569; }
     .btn-pdf { color: var(--ink); }
+    /* Ring on the button the customer came here to press. The email link
+       carries an intent, never an answer, so the tap still has to happen. */
+    .btn-primed { box-shadow: 0 0 0 3px rgba(2, 6, 23, 0.12); }
+
+    /* ---- Confirmation step ---- */
+    .confirm-step {
+      background: #f8fafc; border: 1px solid var(--line);
+      border-left: 4px solid var(--accent); border-radius: 10px;
+      padding: 14px 16px; margin-bottom: 16px;
+      color: #475569; font-size: 14px; line-height: 1.6;
+    }
+    .confirm-step strong { display: block; color: var(--ink); margin-bottom: 2px; }
+
+    /* ---- Deposit, on the thank-you state ---- */
+    .deposit {
+      max-width: 320px; margin: 26px auto 0; padding: 20px 18px; text-align: center;
+      background: #f8fafc; border: 1px solid var(--line); border-radius: 12px;
+    }
+    .deposit-label {
+      color: var(--muted); font-size: 11px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 6px;
+    }
+    .deposit-amount {
+      font-size: 30px; font-weight: 800; letter-spacing: -0.5px;
+      margin-bottom: 16px; font-variant-numeric: tabular-nums;
+    }
+    .deposit-note { color: var(--muted); font-size: 12px; line-height: 1.6; margin-top: 12px; }
 
     /* ---- States ---- */
     .state { text-align: center; padding: 72px 24px; }
@@ -7471,6 +7267,9 @@ export function generateAcceptancePage(token: string): string {
 
   <script>
     var TOKEN = ${tokenLiteral};
+    // 'accept' | 'decline' | null — which button in the email brought them
+    // here. Steers the page only; the answer is the tap, not the visit.
+    var INTENT = ${intentLiteral};
     var API_BASE = 'https://us-central1-hansendev.cloudfunctions.net';
     // Filled in by renderQuote so the confirmation states can name the
     // business instead of saying "the business" at the customer.
@@ -7715,7 +7514,7 @@ export function generateAcceptancePage(token: string): string {
           '</div>' +
           notesHtml +
           termsHtml +
-          '<div class="section">' +
+          '<div class="section" id="respondStep">' +
             '<div class="section-title">Anything we should know? (optional)</div>' +
             '<textarea id="clientNotes" class="client-notes" placeholder="Add any comments or questions for ' + escapeHtml(business.name) + '..."></textarea>' +
           '</div>' +
@@ -7726,6 +7525,37 @@ export function generateAcceptancePage(token: string): string {
       var pdfBtn = document.getElementById('pdfBtn');
       pdfBtn.href = API_BASE + '/downloadQuotePdf?token=' + encodeURIComponent(TOKEN);
       document.getElementById('actionBar').style.display = 'block';
+      applyIntent();
+    }
+
+    /**
+     * The email's buttons land here as ?action=accept|decline and the server
+     * deliberately records nothing on the way in — a mail scanner following
+     * the link must not be able to answer on the customer's behalf. So the
+     * intent finishes the job here instead: scroll to the last step, say what
+     * the remaining tap does, and ring the button that does it.
+     */
+    function applyIntent() {
+      if (INTENT !== 'accept' && INTENT !== 'decline') return;
+      var step = document.getElementById('respondStep');
+      var btn = document.getElementById(INTENT === 'accept' ? 'acceptBtn' : 'declineBtn');
+      if (!step || !btn) return;
+
+      var who = escapeHtml(BUSINESS_NAME || 'the business');
+      var note = document.createElement('div');
+      note.className = 'confirm-step';
+      note.innerHTML = INTENT === 'accept'
+        ? '<strong>One tap to go.</strong> Hit <b>Accept quote</b> below and ' + who +
+          ' is notified straight away. Add a note first if you need to.'
+        : '<strong>One tap to go.</strong> Hit <b>Decline quote</b> below to let ' + who +
+          ' know. A quick line on why helps — it goes straight to them.';
+      step.insertBefore(note, step.firstChild);
+      btn.classList.add('btn-primed');
+      // Guarded: older browsers (and the jsdom test harness) have no
+      // scrollIntoView, and a missing scroll must not cost them the prompt.
+      if (typeof step.scrollIntoView === 'function') {
+        step.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
     }
 
     async function respondToQuote(response) {
@@ -7742,7 +7572,7 @@ export function generateAcceptancePage(token: string): string {
         });
         var data = await resp.json();
         if (data.success) {
-          showSuccess(response);
+          showSuccess(response, data.depositPayment);
         } else {
           showError(data.error || 'Failed to submit your response');
           buttons.forEach(function(btn) { btn.disabled = false; });
@@ -7758,9 +7588,22 @@ export function generateAcceptancePage(token: string): string {
       if (bar) bar.style.display = 'none';
     }
 
-    function showSuccess(response) {
+    function showSuccess(response, depositPayment) {
       hideActionBar();
       var isAccepted = response === 'accepted';
+      // A deposit link only ever comes back on an acceptance, and only when
+      // the quote asks for a deposit and the business has Square connected.
+      // /respondToQuote mints it; this page just offers it. Deliberately not
+      // an auto-redirect — they tapped Accept, not Pay.
+      var depositHtml = (isAccepted && depositPayment && depositPayment.url)
+        ? '<div class="deposit">' +
+            '<div class="deposit-label">Deposit to get started</div>' +
+            '<div class="deposit-amount">' + formatCurrency(depositPayment.amount) + '</div>' +
+            '<a class="btn btn-accept" href="' + escapeHtml(depositPayment.url) + '">Pay deposit securely</a>' +
+            '<div class="deposit-note">Secure card payment through Square. ' +
+              escapeHtml(BUSINESS_NAME || 'The business') + ' is notified the moment it clears.</div>' +
+          '</div>'
+        : '';
       document.getElementById('content').innerHTML =
         '<div class="state success">' +
           '<div class="state-icon-ring">' + (isAccepted ? '&#10003;' : '&#9998;') + '</div>' +
@@ -7768,6 +7611,7 @@ export function generateAcceptancePage(token: string): string {
           '<p>' + (isAccepted
             ? 'Thanks for accepting. ' + escapeHtml(BUSINESS_NAME || 'The business') + ' has been notified and will be in touch to lock in a date.'
             : 'Your response has been recorded and ' + escapeHtml(BUSINESS_NAME || 'the business') + ' has been notified.') + '</p>' +
+          depositHtml +
         '</div>';
       window.scrollTo(0, 0);
     }
