@@ -200,6 +200,7 @@ import {
 import { sendExpoPushNotifications } from './expoPush';
 import { hashTerms } from './shared/pdf/terms/defaultAuTradie';
 import { generateQuotePdfBuffer } from './pdfGenerator';
+import { normaliseTimestamp } from './timestamps.helpers';
 import { processAndStoreLogo } from './logoProcessing';
 import { dollarsToCents, centsToDollars } from './shared/pdf/money';
 import { validateAndRepairAiOutput, clampMaterialQuantity, detectLaunderedSections } from './shared/ai/validateAiOutput';
@@ -6009,39 +6010,6 @@ const TOKEN_EXPIRATION_MS = 30 * 24 * 60 * 60 * 1000;
 
 function hashToken(token: string): string {
   return crypto.createHash('sha256').update(token).digest('hex');
-}
-
-/**
- * Normalise any Firestore-shaped timestamp value into a JS Date.
- * Handles: Firestore Timestamp, {_seconds, _nanoseconds}, {seconds, nanoseconds},
- * ISO string, number, Date, null/undefined. Returns null for missing/invalid
- * input — callers MUST treat that as "no expiry anchor available" and handle
- * accordingly rather than falling into `new Date(null)` (which is 1970 and
- * would make every link appear expired).
- */
-function normaliseTimestamp(value: any): Date | null {
-  if (value === null || value === undefined) return null;
-  if (value instanceof Date) return isNaN(value.getTime()) ? null : value;
-  if (typeof value === 'object' && typeof value.toDate === 'function') {
-    try {
-      const d = value.toDate();
-      return d instanceof Date && !isNaN(d.getTime()) ? d : null;
-    } catch { /* fall through */ }
-  }
-  if (typeof value === 'object') {
-    const seconds = typeof value.seconds === 'number' ? value.seconds
-                  : typeof value._seconds === 'number' ? value._seconds
-                  : null;
-    const nanos = typeof value.nanoseconds === 'number' ? value.nanoseconds
-                : typeof value._nanoseconds === 'number' ? value._nanoseconds
-                : 0;
-    if (seconds !== null) return new Date(seconds * 1000 + nanos / 1e6);
-  }
-  if (typeof value === 'string' || typeof value === 'number') {
-    const d = new Date(value);
-    return isNaN(d.getTime()) ? null : d;
-  }
-  return null;
 }
 
 /**

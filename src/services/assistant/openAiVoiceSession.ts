@@ -24,6 +24,7 @@ import { buildSeedContext } from './seedContext';
 import { ALL_TOOL_DECLARATIONS } from './toolSchemas';
 import { MATE_SYSTEM_PROMPT } from './systemPrompt';
 import { OpenAiMintedToken, LiveOfflineError } from './liveSession';
+import { base64ToBytes, bytesToBase64 } from './audioCodec';
 import type { VoiceSession, VoiceSessionCallbacks, VoiceSessionOptions } from './voiceSession';
 
 export const OA_REALTIME_URL = 'wss://api.openai.com/v1/realtime';
@@ -37,6 +38,36 @@ export function toOpenAiTools() {
     description: d.description,
     parameters: d.parameters,
   }));
+}
+
+/**
+ * Upsample 16 kHz PCM16 to 24 kHz.
+ *
+ * react-native-audio-record is initialised at 16 kHz on both platforms and
+ * that path is proven — asking it for 24 kHz produced empty buffers on device
+ * and OpenAI rejected every frame ("Expected base64-encoded audio bytes (mono
+ * PCM16 at 24kHz) but got empty bytes"). Rather than fight the recorder, we
+ * capture at the rate it actually delivers and convert here.
+ *
+ * The ratio is exactly 3:2, so each pair of input samples becomes three
+ * output samples with one linear interpolation between them. Cheap enough to
+ * run on every 100 ms frame, and the artefacts are far below what a worksite
+ * microphone contributes anyway.
+ */
+export function upsample16kTo24k(base64Pcm16: string): string {
+  const bytes = base64ToBytes(base64Pcm16);
+  const inSamples = new Int16Array(bytes.buffer, bytes.byteOffset, Math.floor(bytes.byteLength / 2));
+  if (inSamples.length < 2) return '';
+  const outCount = Math.floor((inSamples.length * 3) / 2);
+  const out = new Int16Array(outCount);
+  for (let i = 0; i < outCount; i++) {
+    const src = (i * 2) / 3;
+    const lo = Math.floor(src);
+    const hi = Math.min(lo + 1, inSamples.length - 1);
+    const frac = src - lo;
+    out[i] = (inSamples[lo] + (inSamples[hi] - inSamples[lo]) * frac) | 0;
+  }
+  return bytesToBase64(new Uint8Array(out.buffer, out.byteOffset, out.byteLength));
 }
 
 export async function openOpenAiVoiceSession(
@@ -135,11 +166,17 @@ export async function openOpenAiVoiceSession(
         break;
 
       // What Mate said, as it is spoken.
+      //
+      // Deltas ONLY. The screen ACCUMULATES what it is handed
+      // (assistantBubbleTextRef.current + text), so also forwarding the
+      // .done event's full transcript printed the whole greeting twice inside
+      // one bubble. The .done event still matters as an end-of-turn marker,
+      // but its text is a repeat of what has already been shown.
       case 'response.output_audio_transcript.delta':
         if (msg.delta) cb.onOutputTranscription?.(msg.delta, false);
         break;
       case 'response.output_audio_transcript.done':
-        if (msg.transcript) cb.onOutputTranscription?.(msg.transcript, true);
+        cb.onOutputTranscription?.('', true);
         break;
 
       case 'response.output_audio.delta':
@@ -192,11 +229,16 @@ export async function openOpenAiVoiceSession(
   return {
     // The screen feeds the mic and owns playback, exactly as on the Gemini
     // path — so ownsMicrophone and ownsGreeting stay unset.
-    // OpenAI Realtime refuses input below 24 kHz; Gemini wants 16. The screen
-    // reads this rather than hard-coding either.
-    micSampleRate: 24000,
-
-    sendMicChunk: (base64Pcm: string) => send({ type: 'input_audio_buffer.append', audio: base64Pcm }),
+    // Capture stays at the recorder's proven 16 kHz and is converted here —
+    // see upsample16kTo24k for why asking the recorder for 24 kHz doesn't work.
+    sendMicChunk: (base64Pcm: string) => {
+      if (!base64Pcm) return;
+      const converted = upsample16kTo24k(base64Pcm);
+      // An empty frame is rejected outright by the API and tears the session
+      // down, so drop it here rather than sending it.
+      if (!converted) return;
+      send({ type: 'input_audio_buffer.append', audio: converted });
+    },
 
     sendUserText: (text: string) => {
       send({

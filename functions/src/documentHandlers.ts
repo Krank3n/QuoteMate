@@ -32,6 +32,7 @@ import {
   buildInvoicePdfHtml,
   generateQuotePdfBuffer,
 } from './pdfGenerator';
+import { formatAuDate } from './timestamps.helpers';
 import { hashTerms } from './shared/pdf/terms/defaultAuTradie';
 import { toPdfMaterials, toPdfSections } from './shared/pdf/mapMaterial';
 import {
@@ -531,10 +532,11 @@ export function buildQuotePdfHtmlForQuote(
   );
 }
 
+// Delegates to the shared normaliser. Was `new Date(value || Date.now())`,
+// which returns Invalid Date for a Firestore Timestamp — that shipped
+// "Invalid Date" onto the date line of real quote and invoice PDFs.
 function fmtAuDate(value: any): string {
-  return new Date(value || Date.now()).toLocaleDateString('en-AU', {
-    day: '2-digit', month: 'long', year: 'numeric',
-  });
+  return formatAuDate(value);
 }
 
 // ---------------------------------------------------------------------------

@@ -2,6 +2,7 @@ import * as admin from 'firebase-admin';
 import fetch from 'node-fetch';
 import { PASSTHROUGH_SURCHARGE_PCT } from './shared/pdf';
 import { isPdfUrl } from './shared/media/pdfUrl';
+import { normaliseTimestamp } from './timestamps.helpers';
 import { NEXT_PRICE_AUD } from './foundingOffer';
 import { NO_GST_NOTE, resolveGstMode } from './shared/document/gstMode';
 import {
@@ -2003,7 +2004,13 @@ export interface PricingRowsInput {
   // Invoice-only. Rendered as a single meta line under the total so the due
   // date and payment reference live next to the amount they belong to,
   // instead of in a second card that repeats the same number.
-  dueDate?: string; // ISO date string
+  /**
+   * An ISO date string in principle — but it is populated straight off a
+   * Firestore doc (see the isInvoice branch that feeds this), so at runtime it
+   * can also arrive as a Timestamp. Parsed with normaliseTimestamp for that
+   * reason; the declared `string` was what hid the bug.
+   */
+  dueDate?: unknown;
   invoiceNumber?: string;
   // Travel surcharge. `travelAdjustment` is the PERCENTAGE the tradie set
   // (7 = +7%), used for the label only.
@@ -2051,8 +2058,11 @@ export function renderPricingRows(input: PricingRowsInput): string {
   // Due date / reference meta line (invoices only).
   const metaBits: string[] = [];
   if (input.dueDate) {
-    const due = new Date(input.dueDate);
-    if (!isNaN(due.getTime())) {
+    // normaliseTimestamp, not `new Date(...)`: a Firestore Timestamp parses to
+    // Invalid Date, and the guard below then dropped the whole "Due …" line —
+    // so an invoice email silently went out with no due date on it at all.
+    const due = normaliseTimestamp(input.dueDate);
+    if (due) {
       metaBits.push(`Due ${due.toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' })}`);
     }
   }
