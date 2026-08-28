@@ -222,6 +222,10 @@ const ChatRowMemo = React.memo(function ChatRow({
 // to read as continuous, slow enough not to thrash the message store.
 const PACER_TICK_MS = 60;
 
+// How long past the end of an utterance's audio to keep pacing before giving
+// up and showing the rest. Only reached if playback stalled or under-ran.
+const PACER_OVERRUN_GRACE_MS = 1_500;
+
 const WAVE_LEVEL_FLOOR = 0.12;
 // SVG viewBox the wave is drawn in (stretched to the row via
 // preserveAspectRatio="none"). Units are arbitrary — the path math works in
@@ -578,6 +582,10 @@ export function AssistantScreen() {
   // Only transports whose audio WE play can be paced. Default off, so a
   // transport that hands us no PCM renders immediately as it always did.
   const pacingEnabledRef = useRef(false);
+  // A turn whose text has all arrived but whose voice is still speaking. The
+  // bubble must stay open until the reveal catches up, or it freezes
+  // part-written — generation ends seconds before the audio does.
+  const pendingBubbleCloseRef = useRef(false);
   const pacedRenderRef = useRef('');
   const pacerTickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // Set when the tradie accepted/cancelled a card by voice this turn (Mate
@@ -2046,6 +2054,7 @@ export function AssistantScreen() {
     matePlayingRef.current = false;
     if (pacerTickRef.current) { clearInterval(pacerTickRef.current); pacerTickRef.current = null; }
     pacingEnabledRef.current = false;
+    pendingBubbleCloseRef.current = false;
     pacerRef.current = createPacerState();
     audioTimelineEndRef.current = 0;
     pacedRenderRef.current = '';
@@ -2181,6 +2190,38 @@ export function AssistantScreen() {
         userBubbleTextRef.current = '';
       };
 
+      // End of Mate's turn. Every signal for that — the transcript's own
+      // finished flag, and onTurnComplete — arrives when GENERATION stops,
+      // which is seconds before the voice stops. Closing the bubble there
+      // stopped the paced reveal dead, leaving "Good afternoon. I" on screen
+      // for the rest of the reply. So when pacing, hand the close to the
+      // ticker and let it fire once the words have caught up with the audio.
+      const finishAssistantBubble = () => {
+        if (!assistantBubbleIdRef.current) {
+          pendingBubbleCloseRef.current = false;
+          return;
+        }
+        if (pacingEnabledRef.current && !pacerIsSettled(pacerRef.current)) {
+          // With audio to wait for, let the ticker finish the reveal.
+          if (pacerRef.current.totalAudioMs > 0) {
+            pendingBubbleCloseRef.current = true;
+            return;
+          }
+          // No audio ever arrived for this turn, so there is no clock and
+          // nothing will ever advance the reveal. Show the words rather than
+          // leaving an empty bubble open forever.
+          const full = pacerFlush(pacerRef.current);
+          if (full !== pacedRenderRef.current) {
+            updateMessage(convoId!, assistantBubbleIdRef.current, { text: full });
+          }
+        }
+        pendingBubbleCloseRef.current = false;
+        pacerRef.current = createPacerState();
+        pacedRenderRef.current = '';
+        assistantBubbleIdRef.current = null;
+        assistantBubbleTextRef.current = '';
+      };
+
       // The audio queue is single-use — stop() is terminal (no restart), so a
       // reconnect swaps in a fresh queue rather than reusing the drained one.
       const makeQueue = () => {
@@ -2250,9 +2291,8 @@ export function AssistantScreen() {
           // what this job needs first.I need a few details to price it".
           if (!text) {
             if (finished) {
-              assistantBubbleIdRef.current = null;
-              assistantBubbleTextRef.current = '';
               suppressLeakedTurnRef.current = false;
+              finishAssistantBubble();
             }
             return;
           }
@@ -2319,19 +2359,7 @@ export function AssistantScreen() {
               updateMessage(convoId!, assistantBubbleIdRef.current, { text: next });
             }
           }
-          if (finished) {
-            // End of turn: nothing may be left stranded behind the clock.
-            if (pacing && assistantBubbleIdRef.current) {
-              const full = pacerFlush(pacerRef.current);
-              if (full !== pacedRenderRef.current) {
-                updateMessage(convoId!, assistantBubbleIdRef.current, { text: full });
-              }
-            }
-            pacerRef.current = createPacerState();
-            pacedRenderRef.current = '';
-            assistantBubbleIdRef.current = null;
-            assistantBubbleTextRef.current = '';
-          }
+          if (finished) finishAssistantBubble();
         },
         onTextDelta: (delta) => {
           // Audio-modality sessions usually omit TEXT parts, but some
@@ -2487,8 +2515,7 @@ export function AssistantScreen() {
           // tradie gets a full timeout window to respond before we
           // auto-close.
           touchVoiceActivity();
-          assistantBubbleIdRef.current = null;
-          assistantBubbleTextRef.current = '';
+          finishAssistantBubble();
           turnProposals = [];
 
           // The tradie confirmed/cancelled a card by voice this turn — run the
@@ -2588,6 +2615,29 @@ export function AssistantScreen() {
         if (next !== pacedRenderRef.current) {
           pacedRenderRef.current = next;
           updateMessage(convoId!, bubbleId, { text: next });
+        }
+        // Backstop: if playback under-ran or stalled, don't strand the rest
+        // of the words behind a clock that has stopped advancing.
+        const p = pacerRef.current;
+        if (
+          pendingBubbleCloseRef.current
+          && !pacerIsSettled(p)
+          && p.startedAtMs !== null
+          && Date.now() > p.startedAtMs + p.totalAudioMs + PACER_OVERRUN_GRACE_MS
+        ) {
+          const full = pacerFlush(p);
+          if (full !== pacedRenderRef.current) {
+            pacedRenderRef.current = full;
+            updateMessage(convoId!, bubbleId, { text: full });
+          }
+        }
+        // The words have caught up with the voice — now the turn can close.
+        if (pendingBubbleCloseRef.current && pacerIsSettled(pacerRef.current)) {
+          pendingBubbleCloseRef.current = false;
+          pacerRef.current = createPacerState();
+          pacedRenderRef.current = '';
+          assistantBubbleIdRef.current = null;
+          assistantBubbleTextRef.current = '';
         }
       }, PACER_TICK_MS);
 

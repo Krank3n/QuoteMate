@@ -128,3 +128,47 @@ describe('transcript pacer', () => {
     expect(revealedLength(s, 500)).toBe(0);
   });
 });
+
+describe('when a turn can be considered finished', () => {
+  it('is NOT settled while words are still hidden behind the clock', () => {
+    // The stall bug: end-of-turn arrives when GENERATION stops, seconds before
+    // the voice does. Closing the bubble on that signal froze the greeting at
+    // "Good afternoon. I" for the rest of the reply. Callers must defer the
+    // close until this reports settled.
+    const s = createPacerState();
+    pushText(s, 'Good afternoon. I can draft a quote or an invoice for you.');
+    noteAudio(s, 6000, 0);
+    visibleText(s, 500);
+    expect(isSettled(s)).toBe(false);
+  });
+
+  it('settles on its own once the audio has played out', () => {
+    const s = createPacerState();
+    pushText(s, 'Good afternoon. I can draft a quote.');
+    noteAudio(s, 6000, 0);
+    visibleText(s, 6000);
+    expect(isSettled(s)).toBe(true);
+  });
+
+  it('never settles when no audio ever arrived, so callers must flush', () => {
+    // A turn with text but no PCM has no clock. Waiting for it to settle would
+    // leave an empty bubble open forever.
+    const s = createPacerState();
+    pushText(s, 'text with no audio');
+    expect(s.totalAudioMs).toBe(0);
+    visibleText(s, 10_000);
+    expect(isSettled(s)).toBe(false);
+    expect(flush(s)).toBe('text with no audio');
+    expect(isSettled(s)).toBe(true);
+  });
+
+  it('exposes the clock a caller needs for an overrun backstop', () => {
+    // If playback stalls the fraction stops advancing, so the caller checks
+    // startedAtMs + totalAudioMs to decide it has waited long enough.
+    const s = createPacerState();
+    pushText(s, 'one two three four five');
+    noteAudio(s, 1000, 5_000);
+    expect(s.startedAtMs).toBe(5_000);
+    expect(s.totalAudioMs).toBe(1000);
+  });
+});
