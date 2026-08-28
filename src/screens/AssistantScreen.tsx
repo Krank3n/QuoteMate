@@ -2302,6 +2302,21 @@ export function AssistantScreen() {
           // entirely for the speakers. Don't pollute the chat with
           // banter — audio chunks still play normally via the queue.
           if (narrationModeRef.current) return;
+          // A close was deferred so the words could catch up with the voice —
+          // and now the NEXT turn is already talking. Finish the old bubble
+          // here or the two run together in one, which is how "Sound
+          // right?Drafted Karl Van Lishout's colorbond fence repair" happened.
+          if (pendingBubbleCloseRef.current && assistantBubbleIdRef.current) {
+            const full = pacerFlush(pacerRef.current);
+            if (full && full !== pacedRenderRef.current) {
+              updateMessage(convoId!, assistantBubbleIdRef.current, { text: full });
+            }
+            pendingBubbleCloseRef.current = false;
+            pacerRef.current = createPacerState();
+            pacedRenderRef.current = '';
+            assistantBubbleIdRef.current = null;
+            assistantBubbleTextRef.current = '';
+          }
           // Hard guard: any transcript that leaks one of our bracketed
           // prompt tags is a prompt-format echo from the model, never
           // user-facing. Drop the chunk silently rather than risking it

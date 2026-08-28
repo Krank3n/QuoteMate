@@ -280,6 +280,13 @@ const BYTES_PER_MS = (SAMPLE_RATE * (BITS_PER_SAMPLE / 8) * CHANNELS) / 1000;
 // latency, so cutting it a hair early lands the next batch's first sample
 // right where the previous one ends instead of after a gap.
 const TRANSITION_LEAD_MS = 20;
+// ...which means the outgoing batch still has that long of real audio left to
+// play when we hand over. Unloading it right then chops the tail off
+// mid-sample — an audible click at every seam, and with 750 ms batches that is
+// about one a second the whole time Mate is talking. Let the tail finish
+// first. The margin is over the lead, not instead of it, so a late timer or a
+// slow mixer still can't truncate anything.
+const UNLOAD_GRACE_MS = TRANSITION_LEAD_MS + 60;
 
 class NativeAudioQueue implements AudioQueue {
   // Raw PCM chunks waiting to be merged into a WAV. We hold them as a list +
@@ -291,6 +298,8 @@ class NativeAudioQueue implements AudioQueue {
   // Built WAV batches awaiting playback. We track the exact audio duration
   // alongside the data URI so the transition timer can pre-empt didJustFinish.
   private queue: Array<{ uri: string; durationMs: number }> = [];
+  // Sounds whose audio is still draining and which will be unloaded shortly.
+  private pendingUnloads = new Set<ReturnType<typeof setTimeout>>();
   // Duration of the currently-playing batch — needed when scheduling the
   // transition timer after playAsync resolves.
   private currentDurationMs = 0;
@@ -408,8 +417,14 @@ class NativeAudioQueue implements AudioQueue {
     this.currentDurationMs = 0;
     if (this.transitionTimer) { clearTimeout(this.transitionTimer); this.transitionTimer = null; }
     // Unload off the critical path so the next batch's playAsync isn't
-    // blocked on the previous batch's MediaPlayer teardown.
-    void (async () => { try { await sound.unloadAsync(); } catch { /* noop */ } })();
+    // blocked on the previous batch's MediaPlayer teardown — and not until
+    // this batch's remaining audio has actually played out (see
+    // UNLOAD_GRACE_MS). Tracked so stop() can tear them down at once.
+    const unloadAt = setTimeout(() => {
+      this.pendingUnloads.delete(unloadAt);
+      void (async () => { try { await sound.unloadAsync(); } catch { /* noop */ } })();
+    }, UNLOAD_GRACE_MS);
+    this.pendingUnloads.add(unloadAt);
     void this.pump();
   }
 
@@ -483,6 +498,10 @@ class NativeAudioQueue implements AudioQueue {
 
   async stop(): Promise<void> {
     this.stopped = true;
+    // Nothing is draining any more — drop the grace timers so a stopped queue
+    // can't unload into a session that has already moved on.
+    for (const t of this.pendingUnloads) clearTimeout(t);
+    this.pendingUnloads.clear();
     this.pending = [];
     this.pendingBytes = 0;
     if (this.flushTimer) { clearTimeout(this.flushTimer); this.flushTimer = null; }

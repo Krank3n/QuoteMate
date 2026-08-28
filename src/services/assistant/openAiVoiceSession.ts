@@ -174,6 +174,13 @@ export async function openOpenAiVoiceSession(
   // and whether this turn has already been answered.
   let heardSoFar = '';
   let answeredTurn = false;
+  // Only ONE response may be generating at a time. A second turn can commit
+  // while the first reply is still being produced — the tradie talks again, or
+  // a tool result lands mid-reply — and asking for another response then is
+  // rejected outright: "Conversation already has an active response in
+  // progress". That surfaced to the tradie as a dead end mid-quote.
+  let responseInFlight = false;
+  let queuedResponse = false;
   let transcriptTimer: ReturnType<typeof setTimeout> | null = null;
   const clearTranscriptFallback = () => {
     if (transcriptTimer) { clearTimeout(transcriptTimer); transcriptTimer = null; }
@@ -184,13 +191,20 @@ export async function openOpenAiVoiceSession(
     try { ws.send(JSON.stringify(frame)); } catch { /* socket died */ }
   };
 
+  /** Ask for a reply, waiting our turn if one is already being generated. */
+  const requestResponse = () => {
+    if (responseInFlight) { queuedResponse = true; return; }
+    responseInFlight = true;
+    send({ type: 'response.create' });
+  };
+
   const armTranscriptFallback = () => {
     clearTranscriptFallback();
     transcriptTimer = setTimeout(() => {
       transcriptTimer = null;
       if (!alive || answeredTurn) return;
       answeredTurn = true;
-      send({ type: 'response.create' });
+      requestResponse();
     }, OA_TRANSCRIPT_WAIT_MS);
   };
 
@@ -278,7 +292,7 @@ export async function openOpenAiVoiceSession(
         if (!shouldAnswerYet(heardSoFar)) break;
         answeredTurn = true;
         clearTranscriptFallback();
-        send({ type: 'response.create' });
+        requestResponse();
         break;
 
       // The finished transcript is what the tradie sees they said. It also
@@ -290,7 +304,7 @@ export async function openOpenAiVoiceSession(
         if (!answeredTurn) {
           answeredTurn = true;
           clearTranscriptFallback();
-          send({ type: 'response.create' });
+          requestResponse();
         }
         break;
       }
@@ -322,8 +336,13 @@ export async function openOpenAiVoiceSession(
         if (speaking) { speaking = false; cb.onModeChange?.('listening'); }
         break;
 
+      case 'response.created':
+        responseInFlight = true;
+        break;
+
       case 'response.done': {
         if (speaking) { speaking = false; cb.onModeChange?.('listening'); }
+        responseInFlight = false;
         // Tool calls arrive as output items rather than a dedicated event.
         const calls = (msg.response?.output || []).filter((o: any) => o.type === 'function_call');
         for (const call of calls) {
@@ -343,14 +362,26 @@ export async function openOpenAiVoiceSession(
         }
         // Only ask for another turn when a tool actually ran; otherwise this
         // loops the model against itself forever.
-        if (calls.length) send({ type: 'response.create' });
+        if (calls.length) requestResponse();
         else cb.onTurnComplete?.();
+        // A turn that arrived while this one was generating has been waiting.
+        if (queuedResponse) { queuedResponse = false; requestResponse(); }
         break;
       }
 
-      case 'error':
-        cb.onError?.(new LiveOfflineError(String(msg.error?.message || 'Realtime error.')));
+      case 'error': {
+        const text = String(msg.error?.message || 'Realtime error.');
+        // Our create was refused because one was already running: retry when
+        // it finishes rather than showing the tradie a dead end.
+        if (/active response/i.test(text)) {
+          responseInFlight = true;
+          queuedResponse = true;
+          break;
+        }
+        responseInFlight = false;
+        cb.onError?.(new LiveOfflineError(text));
         break;
+      }
       default:
         break;
     }
@@ -375,7 +406,7 @@ export async function openOpenAiVoiceSession(
         type: 'conversation.item.create',
         item: { type: 'message', role: 'user', content: [{ type: 'input_text', text }] },
       });
-      send({ type: 'response.create' });
+      requestResponse();
     },
 
     // No reply wanted — created without a following response.create, which is

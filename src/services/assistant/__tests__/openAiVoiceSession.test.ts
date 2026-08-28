@@ -269,8 +269,58 @@ describe('replying only to actual speech', () => {
     for (const word of ['Quote', 'Invoice']) {
       deliver(socket, { type: 'input_audio_buffer.committed' });
       deliver(socket, { type: 'conversation.item.input_audio_transcription.delta', delta: word });
+      deliver(socket, { type: 'response.created' });
+      deliver(socket, { type: 'response.done', response: { output: [] } });
     }
     expect(socket.frames('response.create').length).toBe(before + 2);
+  });
+
+  it('never asks for a reply while one is already generating', async () => {
+    // "Conversation already has an active response in progress" was shown to a
+    // tradie mid-quote: they spoke again before the previous reply finished.
+    const { socket } = await open();
+    const before = socket.frames('response.create').length;
+    deliver(socket, { type: 'input_audio_buffer.committed' });
+    deliver(socket, { type: 'conversation.item.input_audio_transcription.delta', delta: 'Quote' });
+    deliver(socket, { type: 'response.created' });
+    // Tradie talks over the top of the reply being generated.
+    deliver(socket, { type: 'input_audio_buffer.committed' });
+    deliver(socket, { type: 'conversation.item.input_audio_transcription.delta', delta: 'Actually' });
+    expect(socket.frames('response.create').length).toBe(before + 1);
+  });
+
+  it('asks for the waiting reply as soon as the current one finishes', async () => {
+    const { socket } = await open();
+    const before = socket.frames('response.create').length;
+    deliver(socket, { type: 'input_audio_buffer.committed' });
+    deliver(socket, { type: 'conversation.item.input_audio_transcription.delta', delta: 'Quote' });
+    deliver(socket, { type: 'response.created' });
+    deliver(socket, { type: 'input_audio_buffer.committed' });
+    deliver(socket, { type: 'conversation.item.input_audio_transcription.delta', delta: 'Actually' });
+    deliver(socket, { type: 'response.done', response: { output: [] } });
+    expect(socket.frames('response.create').length).toBe(before + 2);
+  });
+
+  it('retries rather than surfacing an active-response rejection', async () => {
+    // The server refusing our create is recoverable — it must not reach the
+    // tradie as an error bubble.
+    const errors: string[] = [];
+    const { socket } = await open({ onError: (e: Error) => errors.push(e.message) });
+    deliver(socket, {
+      type: 'error',
+      error: { message: 'Conversation already has an active response in progress: resp_X.' },
+    });
+    expect(errors).toEqual([]);
+    const before = socket.frames('response.create').length;
+    deliver(socket, { type: 'response.done', response: { output: [] } });
+    expect(socket.frames('response.create').length).toBe(before + 1);
+  });
+
+  it('still surfaces errors that are not about an active response', async () => {
+    const errors: string[] = [];
+    const { socket } = await open({ onError: (e: Error) => errors.push(e.message) });
+    deliver(socket, { type: 'error', error: { message: 'Invalid audio format.' } });
+    expect(errors).toEqual(['Invalid audio format.']);
   });
 
   it('uses a transcriber that actually accepts a vocabulary prompt', async () => {
