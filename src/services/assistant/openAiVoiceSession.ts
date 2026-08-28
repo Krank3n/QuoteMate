@@ -26,6 +26,10 @@ import { MATE_SYSTEM_PROMPT } from './systemPrompt';
 import { OpenAiMintedToken, LiveOfflineError } from './liveSession';
 import { base64ToBytes, bytesToBase64 } from './audioCodec';
 import type { VoiceSession, VoiceSessionCallbacks, VoiceSessionOptions } from './voiceSession';
+import { isMeaningfulTranscript } from './heardSomething';
+// The trade vocabulary is shared with the ElevenLabs agent so the two can't
+// drift. How it is APPLIED differs — see buildTranscriptionPrompt.
+import { MATE_ASR_KEYWORDS, ASR_NAME_BUDGET } from './elevenLabsAgentConfig';
 
 export const OA_REALTIME_URL = 'wss://api.openai.com/v1/realtime';
 export const OA_CONNECT_TIMEOUT_MS = 20_000;
@@ -70,6 +74,45 @@ export function upsample16kTo24k(base64Pcm16: string): string {
   return bytesToBase64(new Uint8Array(out.buffer, out.byteOffset, out.byteLength));
 }
 
+/**
+ * Vocabulary hint for the transcriber.
+ *
+ * OpenAI's Realtime transcription takes a free-text `prompt` that biases
+ * decoding — the same job ElevenLabs does with ASR keywords. It matters: one
+ * real session turned "Karl van Leishout" into "Calvin Lyshut", then "Karl Ben
+ * Lyshut", and Mate created a fresh contact for each spelling.
+ *
+ * Names go in WHOLE, which is where this parts company with the ElevenLabs
+ * path. That one splits "Karl van Leishout" into three boostable keywords
+ * because its ASR matches word by word; a transcription prompt instead biases
+ * what text is likely to follow, so the intact name is the useful signal and
+ * the loose tokens ("van") are noise that could corrupt other words.
+ */
+export function buildTranscriptionPrompt(contactNames: string[]): string {
+  const seen = new Set(MATE_ASR_KEYWORDS.map((k) => k.toLowerCase()));
+  const names: string[] = [];
+  for (const raw of contactNames) {
+    if (names.length >= ASR_NAME_BUDGET) break;
+    const name = String(raw || '').replace(/\s+/g, ' ').trim();
+    if (name.length < 3) continue;
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    names.push(name);
+  }
+  const vocab = [...MATE_ASR_KEYWORDS, ...names];
+  return `Australian tradie talking about a job. Likely words: ${vocab.join(', ')}.`;
+}
+
+/**
+ * How long to wait for a transcript before replying anyway.
+ *
+ * Replies are gated on the transcript so Mate never answers room noise, which
+ * means a transcription that never lands would leave Mate mute. This is the
+ * backstop: speak rather than stall.
+ */
+export const OA_TRANSCRIPT_WAIT_MS = 2_000;
+
 export async function openOpenAiVoiceSession(
   minted: OpenAiMintedToken,
   history: ChatMessage[],
@@ -77,6 +120,7 @@ export async function openOpenAiVoiceSession(
   _opts: VoiceSessionOptions = {},
 ): Promise<VoiceSession> {
   const tools = buildClientTools(cb);
+  const transcriptionPrompt = buildTranscriptionPrompt(_opts.asrKeywordNames || []);
 
   let alive = true;
   let connected = false;
@@ -88,6 +132,7 @@ export async function openOpenAiVoiceSession(
     closedOnce = true;
     alive = false;
     connected = false;
+    clearTranscriptFallback();
     if (err) cb.onError?.(err);
     cb.onClose?.(undefined);
   };
@@ -113,9 +158,22 @@ export async function openOpenAiVoiceSession(
     socket.onerror = () => { clearTimeout(timer); reject(new LiveOfflineError('Voice connection failed.')); };
   });
 
+  let transcriptTimer: ReturnType<typeof setTimeout> | null = null;
+  const clearTranscriptFallback = () => {
+    if (transcriptTimer) { clearTimeout(transcriptTimer); transcriptTimer = null; }
+  };
+
   const send = (frame: unknown) => {
     if (!alive) return;
     try { ws.send(JSON.stringify(frame)); } catch { /* socket died */ }
+  };
+
+  const armTranscriptFallback = () => {
+    clearTranscriptFallback();
+    transcriptTimer = setTimeout(() => {
+      transcriptTimer = null;
+      if (alive) send({ type: 'response.create' });
+    }, OA_TRANSCRIPT_WAIT_MS);
   };
 
   // One session.update carries the prompt, the tools and the audio contract.
@@ -132,16 +190,27 @@ export async function openOpenAiVoiceSession(
       audio: {
         input: {
           format: { type: 'audio/pcm', rate: 24000 },
-          transcription: { model: 'gpt-realtime-whisper' },
+          transcription: {
+            model: 'gpt-realtime-whisper',
+            language: 'en',
+            ...(transcriptionPrompt ? { prompt: transcriptionPrompt } : {}),
+          },
           // 700ms cut tradies off mid-thought — one utterance came back as
           // three turns ("I didn't give you a job." / "Well, I'm just like
           // quoting a job for um" / "I'm wondering how Van Lish"), and the
           // model answered each fragment. 1200ms is what the Gemini path used
           // in production, where people pause to think on a worksite.
+          //
+          // create_response is OFF: the VAD commits a turn for any sound it
+          // takes for speech, and Mate then answered nothing at all — one
+          // session ended with four unprompted wrap-ups in a row, each phantom
+          // turn making it restate what it was still waiting on. We create the
+          // response ourselves once the transcript proves someone spoke.
           turn_detection: {
             type: 'server_vad',
             silence_duration_ms: 1200,
             prefix_padding_ms: 300,
+            create_response: false,
           },
         },
         // 24 kHz out is exactly what audioPlayer already expects from the
@@ -169,10 +238,22 @@ export async function openOpenAiVoiceSession(
     try { msg = JSON.parse(String(event.data)); } catch { return; }
 
     switch (msg.type) {
-      // What the tradie said.
-      case 'conversation.item.input_audio_transcription.completed':
-        if (msg.transcript) cb.onInputTranscription?.(msg.transcript, true);
+      // The VAD decided a turn ended. Nothing is said back until the
+      // transcript shows someone actually spoke — but arm a backstop so a
+      // transcription that never lands can't leave Mate mute.
+      case 'input_audio_buffer.committed':
+        armTranscriptFallback();
         break;
+
+      // What the tradie said — and the gate on whether Mate answers at all.
+      case 'conversation.item.input_audio_transcription.completed': {
+        clearTranscriptFallback();
+        const heard = String(msg.transcript || '');
+        if (!isMeaningfulTranscript(heard)) break;   // room noise; stay quiet
+        cb.onInputTranscription?.(heard, true);
+        send({ type: 'response.create' });
+        break;
+      }
 
       // What Mate said, as it is spoken.
       //

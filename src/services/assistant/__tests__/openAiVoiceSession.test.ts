@@ -8,7 +8,9 @@
  * recorder actually delivers and the conversion happens here.
  */
 import { describe, it, expect } from 'vitest';
-import { upsample16kTo24k, toOpenAiTools, openOpenAiVoiceSession } from '../openAiVoiceSession';
+import {
+  upsample16kTo24k, toOpenAiTools, openOpenAiVoiceSession, buildTranscriptionPrompt,
+} from '../openAiVoiceSession';
 import { bytesToBase64, base64ToBytes } from '../audioCodec';
 import { ALL_TOOL_DECLARATIONS } from '../toolSchemas';
 
@@ -162,5 +164,105 @@ describe('openOpenAiVoiceSession', () => {
     deliver(socket, { type: 'response.output_audio.delta', delta: 'AAAA' });
     deliver(socket, { type: 'response.done', response: { output: [] } });
     expect(modes).toEqual(['speaking', 'listening']);
+  });
+});
+
+describe('replying only to actual speech', () => {
+  const MINTED2 = { provider: 'openai', token: 't', model: 'gpt-realtime-2', voice: 'cedar' } as any;
+
+  class Sock {
+    static last: Sock;
+    sent: any[] = [];
+    onopen?: () => void;
+    onmessage?: (e: { data: string }) => void;
+    onclose?: () => void;
+    onerror?: () => void;
+    constructor() { Sock.last = this; setTimeout(() => this.onopen?.(), 0); }
+    send(raw: string) { this.sent.push(JSON.parse(raw)); }
+    close() { /* noop */ }
+    frames(t: string) { return this.sent.filter((f) => f.type === t); }
+  }
+
+  const open = async (cb: any = {}, opts: any = {}) => {
+    const prev = (globalThis as any).WebSocket;
+    (globalThis as any).WebSocket = Sock as any;
+    try {
+      const session = await openOpenAiVoiceSession(MINTED2, [], cb, opts);
+      return { session, socket: Sock.last };
+    } finally { (globalThis as any).WebSocket = prev; }
+  };
+  const deliver = (s: any, m: any) => s.onmessage?.({ data: JSON.stringify(m) });
+
+  it('does not auto-reply on turn end — the transcript decides', async () => {
+    const { socket } = await open();
+    expect(socket.frames('session.update')[0].session.audio.input.turn_detection.create_response)
+      .toBe(false);
+  });
+
+  it('stays silent when a committed turn transcribes to noise', async () => {
+    // The exact failure: four unprompted wrap-ups with no tradie turn between.
+    const heard: string[] = [];
+    const { socket } = await open({ onInputTranscription: (t: string) => heard.push(t) });
+    const before = socket.frames('response.create').length;
+    deliver(socket, { type: 'input_audio_buffer.committed' });
+    deliver(socket, {
+      type: 'conversation.item.input_audio_transcription.completed',
+      transcript: 'Thank you.',
+    });
+    expect(socket.frames('response.create').length).toBe(before);
+    expect(heard).toEqual([]);
+  });
+
+  it('replies when the tradie really said something', async () => {
+    const heard: string[] = [];
+    const { socket } = await open({ onInputTranscription: (t: string) => heard.push(t) });
+    const before = socket.frames('response.create').length;
+    deliver(socket, { type: 'input_audio_buffer.committed' });
+    deliver(socket, {
+      type: 'conversation.item.input_audio_transcription.completed',
+      transcript: 'quote for Karl, deck replacement',
+    });
+    expect(socket.frames('response.create').length).toBe(before + 1);
+    expect(heard).toEqual(['quote for Karl, deck replacement']);
+  });
+
+  it('feeds the tradie’s own customer names to the transcriber', async () => {
+    // "Karl van Leishout" came back as "Calvin Lyshut" then "Karl Ben Lyshut",
+    // and Mate made a new contact for each spelling.
+    const { socket } = await open({}, { asrKeywordNames: ['Karl van Leishout'] });
+    const prompt = socket.frames('session.update')[0].session.audio.input.transcription.prompt;
+    expect(prompt).toContain('Karl van Leishout');
+  });
+
+  it('still sends trade vocabulary when the tradie has no contacts yet', async () => {
+    // Trade words help a general speech model even with an empty contact list.
+    const { socket } = await open({}, {});
+    const t = socket.frames('session.update')[0].session.audio.input.transcription;
+    expect(t.language).toBe('en');
+    expect(t.prompt).toContain('Colorbond');
+  });
+});
+
+describe('buildTranscriptionPrompt', () => {
+  it('keeps a full name intact rather than splitting it into tokens', () => {
+    // The ElevenLabs path splits names into keywords; a transcription prompt
+    // needs the whole name, or "van" leaks in as a word on its own.
+    const p = buildTranscriptionPrompt(['Geraldine Luffaga']);
+    expect(p).toContain('Geraldine Luffaga');
+  });
+
+  it('includes trade vocabulary alongside the names', () => {
+    expect(buildTranscriptionPrompt(['Karl van Leishout'])).toContain('Villaboard');
+  });
+
+  it('caps how many names it will list', () => {
+    const many = Array.from({ length: 200 }, (_, i) => `Customer Number${i}`);
+    const p = buildTranscriptionPrompt(many);
+    expect(p.split(', ').length).toBeLessThan(200);
+  });
+
+  it('skips blank and too-short entries', () => {
+    const p = buildTranscriptionPrompt(['', '  ', 'Jo']);
+    expect(p).not.toContain('Jo,');
   });
 });
