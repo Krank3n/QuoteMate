@@ -49,6 +49,7 @@ import { rememberAppliedQuote } from '../services/assistant/quoteRefMap';
 import { startMicCapture, MicCaptureHandle, MicUnavailableError, micPermissionGranted } from '../services/assistant/mic';
 import { AudioQueue, createAudioQueue, ensureAudioMode } from '../services/assistant/audioPlayer';
 import { nextMatePlaying } from '../services/assistant/micGate';
+import { describeThrown } from '../services/assistant/describeThrown';
 import { activateKeepAwakeAsync } from 'expo-keep-awake';
 import { shouldAutoStartMic, resolveAutoStartMic } from './assistant/shouldAutoStartMic';
 import { getMateIntro, isBlankSlate } from './assistant/mateIntro';
@@ -2649,13 +2650,13 @@ export function AssistantScreen() {
       gate.end(openToken);
     } catch (err: any) {
       // eslint-disable-next-line no-console
-      console.warn('[Mate voice] open failed', err?.name, err?.message);
+      console.warn('[Mate voice] open failed', err?.name, err?.message, err);
       const message =
         err instanceof LiveQuotaError ||
         err instanceof LiveOfflineError ||
         err instanceof LiveAuthError
           ? err.message
-          : `Voice mode is offline: ${err?.message || 'unknown error'}`;
+          : `Voice mode is offline: ${describeThrown(err)}`;
       appendErrorMessage(convoId!, withTypeInsteadHint(message));
       await stopVoiceSession();
     }
