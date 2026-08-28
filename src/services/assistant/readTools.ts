@@ -29,6 +29,7 @@ import { isProposalId, resolveQuoteId } from './quoteRefMap';
 import { fuzzyScoreQuote } from './quoteFuzzy';
 import { getPillsForNiche } from '../../data/nichePills';
 import { NICHE_TEMPLATES } from '../../data/nicheTemplates';
+import { buildWordWeights, scoreName, NICHE_MATCH_FLOOR } from './nicheMatch';
 import { isSpecialistSupplyNiche } from '../../data/specialistSupplyNiches';
 import { coversProbes, type SupplierBookSnapshot } from '../supplierBookCoverage';
 // Folding rules are shared with the jobs-list search — see src/utils/textMatch.
@@ -553,6 +554,9 @@ export interface JobRequirementsResult {
 
 const MEASUREMENT_DRIVEN_METHODS = new Set(['per_sqm', 'per_linear_m', 'per_cubic_m']);
 
+// How much each word narrows the field, derived once from the template names.
+const NICHE_NAME_WEIGHTS = buildWordWeights(NICHE_TEMPLATES.map((t) => t.name));
+
 export function resolveJobRequirements(input: JobRequirementsInput): JobRequirementsResult {
   let resolvedCategoryId = input.categoryId;
   let resolvedNicheId = input.nicheId;
@@ -575,12 +579,14 @@ export function resolveJobRequirements(input: JobRequirementsInput): JobRequirem
       // Respect a category the CALLER pinned; ignore one that was merely
       // defaulted from settings.
       if (resolvedCategoryId && !defaultedOnly && t.categoryId !== resolvedCategoryId) continue;
-      const nameLower = t.name.toLowerCase();
-      const exactSubstring = ft.includes(nameLower) || nameLower.includes(ft);
-      const score = exactSubstring ? 1 : similarity(ft, nameLower);
+      // Score by WORDS, weighted by how rare each is across the template
+      // names — see nicheMatch, which also handles the tradie naming the
+      // niche outright. Whole-string edit distance used to live here and
+      // matched "2 meter by 5 meter deck" to Split System Service.
+      const score = scoreName(ft, t.name.toLowerCase(), NICHE_NAME_WEIGHTS);
       if (!best || score > best.score) best = { t, score };
     }
-    if (best && best.score > 0.3) {
+    if (best && best.score >= NICHE_MATCH_FLOOR) {
       template = best.t;
       resolvedCategoryId = best.t.categoryId;
       resolvedNicheId = best.t.nicheId;
