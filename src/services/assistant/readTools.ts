@@ -37,7 +37,6 @@ import { coversProbes, type SupplierBookSnapshot } from '../supplierBookCoverage
 import {
   normalizePhoneTail as normalizePhone,
   scoreToken,
-  similarity,
   soundex,
   stripDiacritics,
   tokenize,
