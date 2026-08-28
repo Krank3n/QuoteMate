@@ -41,3 +41,25 @@ export function isMeaningfulTranscript(raw: string | null | undefined): boolean 
   if (!/[a-z0-9]/i.test(trimmed)) return false;
   return !SILENCE_ARTEFACTS.has(trimmed.toLowerCase());
 }
+
+/**
+ * Could this partial transcript still turn into one of the stock phrases?
+ *
+ * The reply gate fires on the first delta that proves speech, which means
+ * judging text that is still arriving. "Thank" reads as real speech; "Thank
+ * you." is silence. Anything that is still a prefix of an artefact has to wait
+ * for the next delta before it can be trusted either way.
+ */
+export function couldStillBecomeArtefact(raw: string | null | undefined): boolean {
+  const t = String(raw || '').trim().toLowerCase();
+  if (!t) return true;
+  for (const artefact of SILENCE_ARTEFACTS) {
+    if (artefact !== t && artefact.startsWith(t)) return true;
+  }
+  return false;
+}
+
+/** Is this partial transcript enough to wake the model? */
+export function shouldAnswerYet(partial: string | null | undefined): boolean {
+  return isMeaningfulTranscript(partial) && !couldStillBecomeArtefact(partial);
+}

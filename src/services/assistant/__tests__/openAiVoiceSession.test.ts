@@ -205,6 +205,8 @@ describe('replying only to actual speech', () => {
     const { socket } = await open({ onInputTranscription: (t: string) => heard.push(t) });
     const before = socket.frames('response.create').length;
     deliver(socket, { type: 'input_audio_buffer.committed' });
+    deliver(socket, { type: 'conversation.item.input_audio_transcription.delta', delta: 'Thank' });
+    deliver(socket, { type: 'conversation.item.input_audio_transcription.delta', delta: ' you.' });
     deliver(socket, {
       type: 'conversation.item.input_audio_transcription.completed',
       transcript: 'Thank you.',
@@ -213,9 +215,45 @@ describe('replying only to actual speech', () => {
     expect(heard).toEqual([]);
   });
 
-  it('replies when the tradie really said something', async () => {
+  it('answers on the first delta that proves speech, not on the full transcript', async () => {
+    // Measured: first delta lands ~180ms after turn end, the finished
+    // transcript ~780ms. The model reasons from the audio, so waiting for the
+    // text would cost half a second a turn for nothing.
+    const { socket } = await open();
+    const before = socket.frames('response.create').length;
+    deliver(socket, { type: 'input_audio_buffer.committed' });
+    deliver(socket, { type: 'conversation.item.input_audio_transcription.delta', delta: 'Quote' });
+    expect(socket.frames('response.create').length).toBe(before + 1);
+  });
+
+  it('answers a turn exactly once, however many deltas arrive', async () => {
+    const { socket } = await open();
+    const before = socket.frames('response.create').length;
+    deliver(socket, { type: 'input_audio_buffer.committed' });
+    for (const d of ['Quote', ' for', ' Karl', ' please']) {
+      deliver(socket, { type: 'conversation.item.input_audio_transcription.delta', delta: d });
+    }
+    deliver(socket, {
+      type: 'conversation.item.input_audio_transcription.completed',
+      transcript: 'Quote for Karl please',
+    });
+    expect(socket.frames('response.create').length).toBe(before + 1);
+  });
+
+  it('shows the tradie the finished transcript, not the partial one', async () => {
     const heard: string[] = [];
     const { socket } = await open({ onInputTranscription: (t: string) => heard.push(t) });
+    deliver(socket, { type: 'input_audio_buffer.committed' });
+    deliver(socket, { type: 'conversation.item.input_audio_transcription.delta', delta: 'Quote' });
+    deliver(socket, {
+      type: 'conversation.item.input_audio_transcription.completed',
+      transcript: 'Quote for Karl van Leishout',
+    });
+    expect(heard).toEqual(['Quote for Karl van Leishout']);
+  });
+
+  it('still answers a turn that produced no deltas at all', async () => {
+    const { socket } = await open();
     const before = socket.frames('response.create').length;
     deliver(socket, { type: 'input_audio_buffer.committed' });
     deliver(socket, {
@@ -223,7 +261,25 @@ describe('replying only to actual speech', () => {
       transcript: 'quote for Karl, deck replacement',
     });
     expect(socket.frames('response.create').length).toBe(before + 1);
-    expect(heard).toEqual(['quote for Karl, deck replacement']);
+  });
+
+  it('resets the gate between turns', async () => {
+    const { socket } = await open();
+    const before = socket.frames('response.create').length;
+    for (const word of ['Quote', 'Invoice']) {
+      deliver(socket, { type: 'input_audio_buffer.committed' });
+      deliver(socket, { type: 'conversation.item.input_audio_transcription.delta', delta: word });
+    }
+    expect(socket.frames('response.create').length).toBe(before + 2);
+  });
+
+  it('uses a transcriber that actually accepts a vocabulary prompt', async () => {
+    // gpt-realtime-whisper rejects `prompt` outright, which is how this
+    // shipped broken: "The 'prompt' parameter is not supported for this model".
+    const { socket } = await open({}, { asrKeywordNames: ['Karl van Leishout'] });
+    const t = socket.frames('session.update')[0].session.audio.input.transcription;
+    expect(t.model).toBe('gpt-4o-transcribe');
+    expect(t.prompt).toContain('Karl van Leishout');
   });
 
   it('feeds the tradie’s own customer names to the transcriber', async () => {

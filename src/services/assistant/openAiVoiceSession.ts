@@ -26,7 +26,7 @@ import { MATE_SYSTEM_PROMPT } from './systemPrompt';
 import { OpenAiMintedToken, LiveOfflineError } from './liveSession';
 import { base64ToBytes, bytesToBase64 } from './audioCodec';
 import type { VoiceSession, VoiceSessionCallbacks, VoiceSessionOptions } from './voiceSession';
-import { isMeaningfulTranscript } from './heardSomething';
+import { isMeaningfulTranscript, shouldAnswerYet } from './heardSomething';
 // The trade vocabulary is shared with the ElevenLabs agent so the two can't
 // drift. How it is APPLIED differs — see buildTranscriptionPrompt.
 import { MATE_ASR_KEYWORDS, ASR_NAME_BUDGET } from './elevenLabsAgentConfig';
@@ -113,6 +113,18 @@ export function buildTranscriptionPrompt(contactNames: string[]): string {
  */
 export const OA_TRANSCRIPT_WAIT_MS = 2_000;
 
+/**
+ * Transcriber for the reply gate — and for what the tradie sees they said.
+ *
+ * NOT gpt-realtime-whisper, which rejects a vocabulary `prompt` outright
+ * ("The 'prompt' parameter is not supported for this model") and without one
+ * heard "Quote for Karl van Leishout" as "Vote for Kyle Van Leeuwen". Measured
+ * against the same synthesised Australian speech, gpt-4o-transcribe with the
+ * prompt returned the name, "Colorbond", "Villaboard" and "square metres"
+ * exactly right.
+ */
+export const OA_TRANSCRIBE_MODEL = 'gpt-4o-transcribe';
+
 export async function openOpenAiVoiceSession(
   minted: OpenAiMintedToken,
   history: ChatMessage[],
@@ -158,6 +170,10 @@ export async function openOpenAiVoiceSession(
     socket.onerror = () => { clearTimeout(timer); reject(new LiveOfflineError('Voice connection failed.')); };
   });
 
+  // Per-turn state for the reply gate: what the transcriber has heard so far,
+  // and whether this turn has already been answered.
+  let heardSoFar = '';
+  let answeredTurn = false;
   let transcriptTimer: ReturnType<typeof setTimeout> | null = null;
   const clearTranscriptFallback = () => {
     if (transcriptTimer) { clearTimeout(transcriptTimer); transcriptTimer = null; }
@@ -172,7 +188,9 @@ export async function openOpenAiVoiceSession(
     clearTranscriptFallback();
     transcriptTimer = setTimeout(() => {
       transcriptTimer = null;
-      if (alive) send({ type: 'response.create' });
+      if (!alive || answeredTurn) return;
+      answeredTurn = true;
+      send({ type: 'response.create' });
     }, OA_TRANSCRIPT_WAIT_MS);
   };
 
@@ -191,7 +209,7 @@ export async function openOpenAiVoiceSession(
         input: {
           format: { type: 'audio/pcm', rate: 24000 },
           transcription: {
-            model: 'gpt-realtime-whisper',
+            model: OA_TRANSCRIBE_MODEL,
             language: 'en',
             ...(transcriptionPrompt ? { prompt: transcriptionPrompt } : {}),
           },
@@ -242,16 +260,38 @@ export async function openOpenAiVoiceSession(
       // transcript shows someone actually spoke — but arm a backstop so a
       // transcription that never lands can't leave Mate mute.
       case 'input_audio_buffer.committed':
+        heardSoFar = '';
+        answeredTurn = false;
         armTranscriptFallback();
         break;
 
-      // What the tradie said — and the gate on whether Mate answers at all.
-      case 'conversation.item.input_audio_transcription.completed': {
+      // The gate. Fire on the FIRST delta that proves speech rather than
+      // waiting for the finished transcript: measured, that is ~180ms after
+      // the turn ends instead of ~780ms, and the model is reasoning from the
+      // AUDIO anyway — the transcript is our noise filter and the tradie's
+      // read-back, never the model's input. Waiting for it would cost half a
+      // second on every single turn for nothing.
+      case 'conversation.item.input_audio_transcription.delta':
+        if (answeredTurn) break;
+        heardSoFar += String(msg.delta || '');
+        // Partial text: "Thank" reads as speech until " you." arrives.
+        if (!shouldAnswerYet(heardSoFar)) break;
+        answeredTurn = true;
         clearTranscriptFallback();
+        send({ type: 'response.create' });
+        break;
+
+      // The finished transcript is what the tradie sees they said. It also
+      // catches a turn that produced no deltas at all.
+      case 'conversation.item.input_audio_transcription.completed': {
         const heard = String(msg.transcript || '');
         if (!isMeaningfulTranscript(heard)) break;   // room noise; stay quiet
         cb.onInputTranscription?.(heard, true);
-        send({ type: 'response.create' });
+        if (!answeredTurn) {
+          answeredTurn = true;
+          clearTranscriptFallback();
+          send({ type: 'response.create' });
+        }
         break;
       }
 

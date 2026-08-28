@@ -6,7 +6,7 @@
  * question, which reads as looping.
  */
 import { describe, it, expect } from 'vitest';
-import { isMeaningfulTranscript } from '../heardSomething';
+import { isMeaningfulTranscript, couldStillBecomeArtefact, shouldAnswerYet } from '../heardSomething';
 
 describe('isMeaningfulTranscript', () => {
   it('accepts a normal utterance', () => {
@@ -46,5 +46,35 @@ describe('isMeaningfulTranscript', () => {
 
   it('keeps a real sentence that merely contains an artefact word', () => {
     expect(isMeaningfulTranscript('thank you, now price it up')).toBe(true);
+  });
+});
+
+describe('shouldAnswerYet (partial transcripts)', () => {
+  it('waits on a prefix that could still become silence', () => {
+    // "Thank" alone reads as real speech; "Thank you." is what silence sounds
+    // like. Firing on the prefix is how Mate answered nothing.
+    expect(couldStillBecomeArtefact('Thank')).toBe(true);
+    expect(shouldAnswerYet('Thank')).toBe(false);
+    expect(shouldAnswerYet('Thank you.')).toBe(false);
+  });
+
+  it('answers immediately on a word that cannot become silence', () => {
+    // The latency win: no waiting for the finished transcript.
+    expect(shouldAnswerYet('Quote')).toBe(true);
+    expect(shouldAnswerYet('Invoice')).toBe(true);
+  });
+
+  it('answers once a prefix grows into something real', () => {
+    expect(shouldAnswerYet('Thanks')).toBe(false);
+    expect(shouldAnswerYet('Thanks mate, price it up')).toBe(true);
+  });
+
+  it('waits on nothing at all', () => {
+    expect(shouldAnswerYet('')).toBe(false);
+    expect(couldStillBecomeArtefact('')).toBe(true);
+  });
+
+  it('does not treat a complete non-artefact as a prefix', () => {
+    expect(couldStillBecomeArtefact('deck')).toBe(false);
   });
 });
