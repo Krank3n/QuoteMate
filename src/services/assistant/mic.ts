@@ -275,8 +275,9 @@ async function startNativeCapture(
   // stop(), so reusing it on the next session would call startRecording()
   // on a released recorder — the same uninitialised crash. A fresh init()
   // each time keeps the recorder valid.
-  // Rate follows the transport: Gemini takes 16 kHz, OpenAI Realtime refuses
-  // anything under 24 kHz.
+  // Always the recorder's proven 16 kHz. OpenAI Realtime wants 24 kHz, but
+  // asking react-native-audio-record for it produced empty buffers on device —
+  // so that conversion happens in openAiVoiceSession, not here.
   mod.init({ ...RECORD_OPTS, sampleRate });
   // react-native-audio-record's listener is global; re-bind on every
   // capture so the previous closure is replaced rather than queued.
@@ -299,14 +300,13 @@ async function startNativeCapture(
  * Call `handle.stop()` to end the capture.
  */
 /**
- * Capture sample rates, per transport.
+ * The one rate the recorder reliably delivers on both platforms.
  *
- * Gemini Live takes 16 kHz. OpenAI Realtime rejects anything below 24 kHz
- * outright ("integer below minimum value. Expected a value >= 24000"), so the
- * rate has to follow the provider rather than being a constant.
+ * Transports that want something else convert on their own side — OpenAI
+ * Realtime needs 24 kHz and upsamples in openAiVoiceSession, because asking
+ * the recorder for 24 kHz yielded empty buffers and killed the session.
  */
 export const MIC_RATE_GEMINI = 16000;
-export const MIC_RATE_OPENAI = 24000;
 
 export async function startMicCapture(
   onChunk: (base64Pcm: string) => void,
