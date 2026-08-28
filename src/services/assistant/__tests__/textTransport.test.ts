@@ -197,12 +197,16 @@ describe('mintLiveToken', () => {
   // The server, not the client, decides which voice transport opens. That is
   // what makes a rollback a Firestore edit instead of an app-store release.
 
-  it('only claims elevenlabs when the binary can actually open it', () => {
+  it('only claims a transport the binary can actually open', () => {
     // Vitest runs under react-native-web, where browser WebRTC is always
     // available — so this asserts the web branch. The native branch checks
     // NativeModules.WebRTCModule, because runtimeVersion discipline alone is
     // a promise and this is a verification.
-    expect(voiceClientCapabilities()).toEqual(['elevenlabs']);
+    //
+    // OpenAI Realtime rides the same PCM WebSocket the Gemini transport uses,
+    // so it needs no native module; ElevenLabs needs LiveKit's WebRTC linked
+    // in. That asymmetry is the whole point of sending capabilities at all.
+    expect(voiceClientCapabilities()).toEqual(['elevenlabs', 'openai']);
   });
 
   it('declares its supported transports on a voice mint', () => {

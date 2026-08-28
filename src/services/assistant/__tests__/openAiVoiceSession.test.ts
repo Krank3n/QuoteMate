@@ -8,7 +8,7 @@
  * recorder actually delivers and the conversion happens here.
  */
 import { describe, it, expect } from 'vitest';
-import { upsample16kTo24k, toOpenAiTools } from '../openAiVoiceSession';
+import { upsample16kTo24k, toOpenAiTools, openOpenAiVoiceSession } from '../openAiVoiceSession';
 import { bytesToBase64, base64ToBytes } from '../audioCodec';
 import { ALL_TOOL_DECLARATIONS } from '../toolSchemas';
 
@@ -79,5 +79,88 @@ describe('toOpenAiTools', () => {
       expect(t.parameters.type).toBe('object');
       expect((t as any).function).toBeUndefined();
     }
+  });
+});
+
+/**
+ * Session behaviour, driven through a fake socket.
+ *
+ * All three cases here are regressions from one messy device conversation:
+ * the greeting printed twice, the pre-tool preamble glued onto the answer that
+ * followed it ("...what this job needs first.I need a few details"), and one
+ * spoken sentence arriving as three separate turns the model answered one by
+ * one.
+ */
+describe('openOpenAiVoiceSession', () => {
+  const MINTED = { provider: 'openai', token: 't', model: 'gpt-realtime-2', voice: 'cedar' } as any;
+
+  class FakeSocket {
+    static last: FakeSocket;
+    sent: any[] = [];
+    onopen?: () => void;
+    onmessage?: (e: { data: string }) => void;
+    onclose?: () => void;
+    onerror?: () => void;
+    constructor() {
+      FakeSocket.last = this;
+      setTimeout(() => this.onopen?.(), 0);
+    }
+    send(raw: string) { this.sent.push(JSON.parse(raw)); }
+    close() { /* noop */ }
+    frames(type: string) { return this.sent.filter((f) => f.type === type); }
+  }
+
+  const open = async (cb: any = {}) => {
+    const prev = (globalThis as any).WebSocket;
+    (globalThis as any).WebSocket = FakeSocket as any;
+    try {
+      const session = await openOpenAiVoiceSession(MINTED, [], cb);
+      return { session, socket: FakeSocket.last };
+    } finally {
+      (globalThis as any).WebSocket = prev;
+    }
+  };
+
+  const deliver = (socket: any, msg: any) => socket.onmessage?.({ data: JSON.stringify(msg) });
+
+  it('gives the tradie 1200ms of silence before taking the turn', async () => {
+    // 700ms chopped one utterance into three, and Mate answered each fragment.
+    // 1200ms is the value the Gemini path ran in production.
+    const { socket } = await open();
+    const [update] = socket.frames('session.update');
+    expect(update.session.audio.input.turn_detection).toMatchObject({
+      type: 'server_vad',
+      silence_duration_ms: 1200,
+    });
+  });
+
+  it('emits spoken text once, from the deltas only', async () => {
+    // The screen ACCUMULATES what it is handed, so forwarding the .done
+    // event's full transcript as well printed the whole greeting twice inside
+    // a single bubble.
+    const chunks: string[] = [];
+    const { socket } = await open({ onOutputTranscription: (t: string) => { if (t) chunks.push(t); } });
+    deliver(socket, { type: 'response.output_audio_transcript.delta', delta: 'Morning. ' });
+    deliver(socket, { type: 'response.output_audio_transcript.delta', delta: 'What do you need?' });
+    deliver(socket, { type: 'response.output_audio_transcript.done', transcript: 'Morning. What do you need?' });
+    expect(chunks.join('')).toBe('Morning. What do you need?');
+  });
+
+  it('marks end of turn so the next response starts its own bubble', async () => {
+    // OpenAI ends a response at every tool call, so the preamble and the
+    // answer after it are two turns. Without this marker they glue together.
+    const calls: Array<[string, boolean | undefined]> = [];
+    const { socket } = await open({ onOutputTranscription: (t: string, f?: boolean) => calls.push([t, f]) });
+    deliver(socket, { type: 'response.output_audio_transcript.delta', delta: 'Got it.' });
+    deliver(socket, { type: 'response.output_audio_transcript.done', transcript: 'Got it.' });
+    expect(calls).toEqual([['Got it.', false], ['', true]]);
+  });
+
+  it('closes the mic gate on the first audio, and reports listening at generation end', async () => {
+    const modes: string[] = [];
+    const { socket } = await open({ onModeChange: (m: string) => modes.push(m) });
+    deliver(socket, { type: 'response.output_audio.delta', delta: 'AAAA' });
+    deliver(socket, { type: 'response.done', response: { output: [] } });
+    expect(modes).toEqual(['speaking', 'listening']);
   });
 });

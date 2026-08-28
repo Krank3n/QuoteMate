@@ -133,7 +133,16 @@ export async function openOpenAiVoiceSession(
         input: {
           format: { type: 'audio/pcm', rate: 24000 },
           transcription: { model: 'gpt-realtime-whisper' },
-          turn_detection: { type: 'server_vad', silence_duration_ms: 700 },
+          // 700ms cut tradies off mid-thought — one utterance came back as
+          // three turns ("I didn't give you a job." / "Well, I'm just like
+          // quoting a job for um" / "I'm wondering how Van Lish"), and the
+          // model answered each fragment. 1200ms is what the Gemini path used
+          // in production, where people pause to think on a worksite.
+          turn_detection: {
+            type: 'server_vad',
+            silence_duration_ms: 1200,
+            prefix_padding_ms: 300,
+          },
         },
         // 24 kHz out is exactly what audioPlayer already expects from the
         // Gemini path, so playback needs no change at all.

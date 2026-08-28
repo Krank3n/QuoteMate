@@ -48,6 +48,7 @@ import { LiveAuthError, LiveOfflineError, LiveQuotaError } from '../services/ass
 import { rememberAppliedQuote } from '../services/assistant/quoteRefMap';
 import { startMicCapture, MicCaptureHandle, MicUnavailableError, micPermissionGranted } from '../services/assistant/mic';
 import { AudioQueue, createAudioQueue, ensureAudioMode } from '../services/assistant/audioPlayer';
+import { nextMatePlaying } from '../services/assistant/micGate';
 import { activateKeepAwakeAsync } from 'expo-keep-awake';
 import { shouldAutoStartMic, resolveAutoStartMic } from './assistant/shouldAutoStartMic';
 import { getMateIntro, isBlankSlate } from './assistant/mateIntro';
@@ -2213,7 +2214,20 @@ export function AssistantScreen() {
           }
         },
         onOutputTranscription: (text, finished) => {
-          if (!text) return;
+          // An empty chunk carrying finished=true is a pure end-of-turn
+          // marker, and it has to close the bubble before the early return —
+          // OpenAI Realtime ends a response at every tool call, so the next
+          // response is genuinely a new turn. Swallowing the marker glued the
+          // pre-tool preamble onto the answer inside one bubble: "...check
+          // what this job needs first.I need a few details to price it".
+          if (!text) {
+            if (finished) {
+              assistantBubbleIdRef.current = null;
+              assistantBubbleTextRef.current = '';
+              suppressLeakedTurnRef.current = false;
+            }
+            return;
+          }
           touchVoiceActivity();
           flushUserBubbleIfOpen();
           // During the post-Apply narration window, Mate is yarning
@@ -2368,12 +2382,30 @@ export function AssistantScreen() {
             ? { ok: true }
             : { ok: false, error: "Couldn't find that quote to put on screen." };
         },
-        // ElevenLabs reports speaking/listening directly. On the Gemini path
-        // matePlayingRef came from the audio queue draining; here there is no
-        // queue, because the SDK plays on the WebRTC track.
+        // Who owns the half-duplex gate depends on who PLAYS the audio.
+        //
+        // Closing it early is always safe, so 'speaking' always closes it.
+        // Opening it is the dangerous half. Where the SCREEN plays (Gemini,
+        // OpenAI) the audio queue's drain callback is the only correct owner:
+        // this callback's 'listening' arrives when the model finishes
+        // GENERATING, which is seconds before the queued audio has finished
+        // PLAYING. Clearing the gate then reopens the mic into Mate's own
+        // voice, and with no echo cancellation on the raw-PCM path the server
+        // VAD hears that as a fresh user turn and answers itself. That is the
+        // Android infinite-loop bug the gate was built for, and it is exactly
+        // what the first OpenAI device test produced: three assistant turns
+        // off a single "Hello", including a fence job nobody asked for.
+        //
+        // Where the SDK plays (ElevenLabs over WebRTC) there is no queued
+        // audio, hardware AEC handles the echo, and this is the only signal
+        // there is — so it stays in charge.
         onModeChange: (mode) => {
-          matePlayingRef.current = mode === 'speaking';
           if (mode === 'speaking') touchVoiceActivity();
+          matePlayingRef.current = nextMatePlaying(
+            matePlayingRef.current,
+            mode,
+            !!voiceSessionRef.current?.ownsMicrophone,
+          );
         },
         // Waveform input where no raw PCM reaches JS. Deliberately does NOT
         // touch the idle clock: vad fires continuously, silence included, so
