@@ -39,11 +39,36 @@ describe('SENTRY_IGNORE_ERRORS', () => {
     ).toBe(true);
   });
 
+  it('filters chrome.storage extension-injection noise (#127)', () => {
+    expect(
+      matchesIgnoreList(
+        "undefined is not an object (evaluating 'chrome.storage[n].get')",
+      ),
+    ).toBe(true);
+    expect(
+      matchesIgnoreList(
+        "undefined is not an object (evaluating 'chrome.storage.local.get')",
+      ),
+    ).toBe(true);
+    expect(
+      matchesIgnoreList(
+        "undefined is not an object (evaluating 'chrome.storage.sync.set')",
+      ),
+    ).toBe(true);
+  });
+
   it('does not swallow other NotFoundErrors or unrelated crashes', () => {
     expect(matchesIgnoreList('NotFoundError: The object can not be found here.')).toBe(false);
     expect(
       matchesIgnoreList("TypeError: Cannot read properties of undefined (reading 'routes')"),
     ).toBe(false);
+    // A real first-party error that merely mentions storage must still report.
+    expect(
+      matchesIgnoreList(
+        "TypeError: undefined is not an object (evaluating 'this.storage.get')",
+      ),
+    ).toBe(false);
+    expect(matchesIgnoreList('Error: chrome storage quota exceeded')).toBe(false);
   });
 
   it('is passed to Sentry.init in enabled builds', () => {
