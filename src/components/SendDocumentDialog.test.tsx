@@ -134,6 +134,7 @@ vi.mock('../store/useStore', () => {
 import { SendDocumentDialog } from './SendDocumentDialog';
 import { resetWarmedEmailDrafts, warmEmailDraft } from '../utils/emailDraft';
 import { trackEvent } from '../services/analyticsService';
+import { markDocumentSent } from '../utils/applyStageChange';
 import type { Document } from '../types/document';
 
 const tracked = vi.mocked(trackEvent);
@@ -526,6 +527,27 @@ describe('non-email channels', () => {
     await waitFor(() => expect(sms.openSmsComposer).toHaveBeenCalled());
     expect(eventProps('quote_send_succeeded')).toBeUndefined();
     expect(screen.getByTestId('sheet')).toBeTruthy();
+  });
+
+  it('REGRESSION: an abandoned SMS records no send, so a re-pitch resets nothing', async () => {
+    // The acceptance link is minted BEFORE the composer opens, so anything
+    // hung off minting happens whether or not a message is ever sent. The
+    // re-pitch reset briefly lived there, which meant cancelling this
+    // composer wiped respondedAt off a quote that was never re-sent — and
+    // with it the rejection row and the decline note, from a job the tradie
+    // had only looked at. The reset now rides with markDocumentSent, so this
+    // pins the thing that makes that safe: the abandon path records nothing.
+    sms.openSmsComposer.mockResolvedValueOnce('cancelled' as any);
+    renderDialog({ doc: doc({ customerEmail: undefined, customerPhone: '0412345678' }) });
+    await waitFor(() => expect(screen.getByTestId('sheet')).toBeTruthy());
+
+    fireEvent.click(screen.getByText('SMS'));
+
+    await waitFor(() => expect(sms.openSmsComposer).toHaveBeenCalled());
+    // The link WAS minted — that's the part that runs early and is fine.
+    expect(acceptance.generateAcceptanceLink).toHaveBeenCalled();
+    // Nothing was recorded as sent, so nothing reset the customer's answer.
+    expect(vi.mocked(markDocumentSent)).not.toHaveBeenCalled();
   });
 
   it('asks Android users to confirm an unknown send result before marking sent', async () => {

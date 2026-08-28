@@ -33,6 +33,7 @@ function rejectedQuote(over: Partial<Document> = {}): Document {
     clientNotes: 'Too dear, going with the other mob.',
     materials: [],
     payments: [],
+    ...over,
   } as unknown as Document;
 }
 
@@ -42,6 +43,7 @@ function helpers() {
     saveQuote,
     saveInvoice: vi.fn(async () => {}),
     createInvoiceFromQuote: vi.fn(async () => ({} as any)),
+    clearQuoteFields: vi.fn(async () => {}),
   };
 }
 
@@ -68,6 +70,34 @@ describe('applyStageChange — re-sending a rejected quote', () => {
     const saved: any = h.saveQuote.mock.calls[0][0];
     expect(saved.respondedAt).toBeUndefined();
     expect(saved.respondedBy).toBeUndefined();
+  });
+
+  it('REGRESSION: deletes the stored fields, because a merge save cannot', async () => {
+    // The assertion above only sees the object handed to saveQuote — and
+    // saveQuote strips undefined and writes with merge:true, so an omitted
+    // key leaves the STORED respondedAt exactly where it was. Passing that
+    // test while the field survives in Firestore is precisely the shape of
+    // this bug, so pin the explicit delete too.
+    const h = helpers();
+    await applyStageChange(rejectedQuote(), 'quote_sent', h);
+    expect(h.clearQuoteFields).toHaveBeenCalledWith('doc1', ['respondedAt', 'respondedBy']);
+  });
+
+  it('does not delete anything on a send that is not a re-pitch', async () => {
+    const h = helpers();
+    await applyStageChange(
+      rejectedQuote({ stage: 'draft', respondedAt: undefined, respondedBy: undefined }),
+      'quote_sent',
+      h,
+    );
+    expect(h.clearQuoteFields).not.toHaveBeenCalled();
+  });
+
+  it('still moves the stage when no clearQuoteFields helper is supplied', async () => {
+    // The helper is optional — callers that never re-pitch don't pass it.
+    const { clearQuoteFields, ...withoutClear } = helpers();
+    await applyStageChange(rejectedQuote(), 'quote_sent', withoutClear);
+    expect(withoutClear.saveQuote.mock.calls[0][0]).toMatchObject({ status: 'sent' });
   });
 
   it('keeps the note — it is the tradie record of why they said no', async () => {
@@ -101,6 +131,7 @@ describe('applyStageChange — re-sending a rejected quote', () => {
     const h = helpers();
     await applyStageChange(rejectedQuote(), 'quote_accepted', h);
     expect((h.saveQuote.mock.calls[0][0] as any).respondedAt).toEqual(new Date(9_000));
+    expect(h.clearQuoteFields).not.toHaveBeenCalled();
   });
 });
 
@@ -112,5 +143,6 @@ describe('markDocumentSent — the SMS and share channels', () => {
     const saved: any = h.saveQuote.mock.calls[0][0];
     expect(saved.status).toBe('sent');
     expect(saved.respondedAt).toBeUndefined();
+    expect(h.clearQuoteFields).toHaveBeenCalledWith('doc1', ['respondedAt', 'respondedBy']);
   });
 });

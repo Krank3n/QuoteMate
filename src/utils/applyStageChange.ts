@@ -17,6 +17,14 @@ export interface ApplyStageChangeHelpers {
   saveInvoice: (i: Invoice) => Promise<void>;
   createInvoiceFromQuote: (q: Quote) => Promise<Invoice>;
   navigation?: { navigate: (route: string, params?: any) => void };
+  /**
+   * Really remove fields from the stored quote + document
+   * (documentService.clearDocumentFields). saveQuote merges and omits
+   * undefined, so a field can only be retired by an explicit delete — see
+   * the re-pitch reset below. Optional: only the send paths supply it, and
+   * only a re-pitch ever needs it.
+   */
+  clearQuoteFields?: (documentId: string, fields: string[]) => Promise<void>;
 }
 
 /** Map a DocumentStage to the legacy Quote['status'], if one applies. */
@@ -98,16 +106,28 @@ export async function applyStageChange(
   const firstSend = target === 'quote_sent' && !doc.sentAt
     ? { sentAt: Date.now(), sendMethod }
     : {};
-  // Re-pitch (quote_rejected → quote_sent): drop the old answer. respondedAt
-  // is what locks an acceptance token, so a quote that carries one out of a
-  // rejection hands the customer a link reading "already responded to". The
-  // server clears it when it mints the new link — but this save lands after
-  // that on the SMS/share path, and would put the stale value straight back.
+  // Re-pitch (quote_rejected → quote_sent): retire the old answer, because
+  // respondedAt is what locks an acceptance token — carry one out of a
+  // rejection and the customer's new link opens on "already responded to".
+  //
+  // This is the moment to do it. It's the same write that flips the stage, so
+  // the reset can't happen for a send that was abandoned half way. The email
+  // path does the equivalent server-side inside sendDocumentEmail; every
+  // client-side channel (SMS, Share, Export, "Mark as sent") arrives here via
+  // markDocumentSent.
+  //
   // clientNotes stays: it's the tradie's record of why they said no.
-  const repitchReset = target === 'quote_sent' && doc.stage === 'quote_rejected'
-    ? { respondedAt: undefined, respondedBy: undefined }
-    : {};
+  const isRepitch = target === 'quote_sent' && doc.stage === 'quote_rejected';
+  const repitchReset = isRepitch ? { respondedAt: undefined, respondedBy: undefined } : {};
   await helpers.saveQuote({ ...quote, status, updatedAt: new Date(), ...firstSend, ...repitchReset });
+  // ...and undefined is not enough on its own. saveQuote strips undefined and
+  // writes with merge:true, so an omitted key leaves the STORED value exactly
+  // where it was — the field has to be deleted explicitly or the customer's
+  // fresh link is still locked. Same trap documentService.clearDocumentFields
+  // was written for. Best-effort: the stage move is the important half.
+  if (isRepitch && helpers.clearQuoteFields) {
+    await helpers.clearQuoteFields(doc.id, ['respondedAt', 'respondedBy']).catch(() => {});
+  }
 }
 
 /**

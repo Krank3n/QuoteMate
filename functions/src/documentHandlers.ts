@@ -277,12 +277,20 @@ function recordStageViolation(
 /**
  * Is this send a re-pitch — a quote the customer has already knocked back?
  *
- * Takes either representation because the two send paths hold different ones:
- * the email path has the unified document (stage), the SMS/share link path
- * has the legacy quote record (status).
+ * Takes either representation because callers hold different ones: the
+ * unified document carries `stage`, a legacy quote record carries `status`.
+ *
+ * `stage` wins outright when present rather than the two being OR'd. A
+ * document read raw from Firestore can still carry a `status` left behind by
+ * a legacy import (normaliseDocument spreads the raw row, and saveDocument
+ * writes it back), and an OR would let a stale `status: 'rejected'` re-open
+ * an accepted quote for declining — the exact case this must never allow.
  */
 export function isRepitchSend(current: { stage?: unknown; status?: unknown }): boolean {
-  return current.stage === 'quote_rejected' || current.status === 'rejected';
+  if (typeof current.stage === 'string' && current.stage) {
+    return current.stage === 'quote_rejected';
+  }
+  return current.status === 'rejected';
 }
 
 /**

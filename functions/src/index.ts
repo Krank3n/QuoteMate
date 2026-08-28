@@ -174,8 +174,6 @@ import {
   logShimInvocation,
   resolveTradieReplyEmail,
   buildQuotePdfHtmlForQuote,
-  isRepitchSend,
-  REPITCH_RESPONSE_RESET,
   type SquareLinkMinter,
 } from './documentHandlers';
 export { getStageViolationCounts, convertDocumentToInvoice } from './documentHandlers';
@@ -6125,25 +6123,31 @@ export const generateQuoteAcceptanceLink = functions.https.onRequest((req, res) 
         ? (quoteData.termsVersionHash || hashTerms(termsSnapshot))
         : undefined;
 
-      // Re-pitching a quote the customer knocked back — the SMS / share-link
-      // half of the same reset sendDocumentEmail does. Without it the fresh
-      // link opens on "this quote has already been responded to", so the
-      // re-send looks like it worked and the customer can never answer.
-      const repitchReset = isRepitchSend(quoteData) ? REPITCH_RESPONSE_RESET : {};
-
+      // Deliberately does NOT clear a previous rejection, even though a
+      // re-pitch needs that cleared to be answerable.
+      //
+      // Minting a link is not sending one. The SMS path calls this BEFORE it
+      // opens the composer, and every abandon route out of that composer
+      // (cancel, "Keep as draft", "Not yet") returns without recording a
+      // send. Resetting here retired the customer's answer for a message that
+      // was never sent: the doc still read quote_rejected but respondedAt was
+      // gone, so the timeline row — and the decline note hanging off it —
+      // silently disappeared from a job nobody had touched.
+      //
+      // The reset belongs with the thing that flips the stage, so it happens
+      // once, when a send actually happened: sendDocumentEmail on the email
+      // path, markDocumentSent/applyStageChange on every client-side channel.
       const tokenCreatedAt = admin.firestore.FieldValue.serverTimestamp();
       const batch = db.batch();
       batch.set(quoteRef, {
         acceptanceTokenHash: tokenHash,
         acceptanceTokenCreatedAt: tokenCreatedAt,
-        ...repitchReset,
         ...(termsSnapshot ? { termsSnapshot, termsVersionHash } : {}),
       }, { merge: true });
       // Do not create a sparse unified document for legacy-only quotes.
       if (documentDoc.exists) {
         batch.set(documentRef, {
           acceptanceTokenCreatedAt: Date.now(),
-          ...repitchReset,
           ...(termsSnapshot ? { termsSnapshot, termsVersionHash } : {}),
           updatedAt: Date.now(),
         }, { merge: true });
@@ -6849,7 +6853,11 @@ export const respondToQuote = functions.https.onRequest((req, res) => {
         }, {
           quoteId: foundQuote.id,
           response,
-          ...jobLink(foundQuote),
+          // resolvedJobId, not foundQuote.jobId: foundQuote is the pre-update
+          // snapshot, so on the one path that most needs a deep link — the
+          // backstop above having just materialised the Job — its jobId is
+          // still undefined and the push would land with nowhere to tap.
+          ...jobLink({ jobId: resolvedJobId ?? foundQuote.jobId }),
         });
       } catch {
         // Push is best-effort; sendExpoPushToUser logs gateway failures.

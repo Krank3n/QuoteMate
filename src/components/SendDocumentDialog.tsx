@@ -49,6 +49,7 @@ import {
 import { hasCustomerEmail, orderSendOptions, type SendChannel } from '../utils/sendFlow';
 import { cleanSmsRecipient, openSmsComposer } from '../utils/smsComposer';
 import { generateAcceptanceLink } from '../services/quoteAcceptanceService';
+import { documentService } from '../services/documentService';
 import { hashTerms } from '../../shared/pdf/terms/defaultAuTradie';
 import { isRecoveredDocId } from '../../shared/document/recovered';
 
@@ -484,7 +485,17 @@ export function SendDocumentDialog({
       const deliveredDoc = currentTerms && !sendDoc.termsSnapshot
         ? { ...sendDoc, termsSnapshot: currentTerms, termsVersionHash: hashTerms(currentTerms) }
         : sendDoc;
-      await markDocumentSent(deliveredDoc, method, { saveQuote, saveInvoice, createInvoiceFromQuote });
+      await markDocumentSent(deliveredDoc, method, {
+        saveQuote,
+        saveInvoice,
+        createInvoiceFromQuote,
+        // Lets a re-pitch actually retire the previous rejection. saveQuote
+        // merges and omits undefined, so respondedAt can only go by an
+        // explicit delete — without this the customer's new link still opens
+        // on "already responded to".
+        clearQuoteFields: (documentId, fields) =>
+          documentService.clearDocumentFields(documentId, fields),
+      });
     } catch {
       // Best-effort audit; ignore.
       return;
