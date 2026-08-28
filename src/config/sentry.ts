@@ -30,9 +30,17 @@ export function shouldEnableSentry(dsn: string, isDev: boolean): boolean {
  * calls set/releasePointerCapture (fast flick, touch cancel, unmount
  * mid-gesture). No first-party frame, the browser auto-releases capture,
  * and the drag/slider interaction still completes — pure noise.
+ *
+ * chrome.storage (#127): TypeError "undefined is not an object (evaluating
+ * 'chrome.storage[n].get')". chrome.storage is a Chrome-extension-only API —
+ * ordinary page/app JS (our react-native-web bundle in a browser) cannot reach
+ * it. So this can only be a user's browser extension injecting a content script
+ * that Sentry's global handler misattributes to our page — never a first-party
+ * bug. Stack is fully minified with no first-party frame, confirming it.
  */
 export const SENTRY_IGNORE_ERRORS: (string | RegExp)[] = [
   /Failed to execute '(set|release)PointerCapture' on 'Element'/,
+  /undefined is not an object \(evaluating 'chrome\.storage[^']*\.(get|set|remove)'\)/,
 ];
 
 export function initSentry(): void {
