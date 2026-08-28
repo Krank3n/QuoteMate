@@ -29,8 +29,11 @@ import { userRateLimitKey } from './rateLimitKey';
 import { decideVoiceProvider, VoiceConfigDoc } from './assistantVoiceProvider';
 import {
   mintElevenLabsConversationToken,
+  mintOpenAiRealtimeToken,
   participantNameForUid,
   EL_VOICE_MODEL_LABEL,
+  OA_VOICE_MODEL_LABEL,
+  OA_REALTIME_MODEL,
 } from './assistantVoiceToken';
 
 const corsHandler = cors({ origin: true });
@@ -322,8 +325,11 @@ export const assistantToken = functions
       // Only voice opens can land here; text keeps the Gemini path untouched.
       const elKey = process.env.ELEVENLABS_API_KEY;
       const elAgentId = process.env.ELEVENLABS_AGENT_ID;
+      const oaKey = process.env.OPENAI_API_KEY;
       const envEnabled = process.env.ELEVENLABS_VOICE_ENABLED === 'true';
-      const credentialsPresent = Boolean(elKey && elAgentId);
+      // Either provider having credentials is enough to consider a non-Gemini
+      // route; which one is then decided by the config doc.
+      const credentialsPresent = Boolean((elKey && elAgentId) || oaKey);
       // Only pay the config read when the answer could actually be ElevenLabs.
       // With the flag off — which is every request until the rollout starts —
       // this is a Firestore round-trip per voice open for a decision already
@@ -336,6 +342,45 @@ export const assistantToken = functions
         credentialsPresent,
         clientSupports: Array.isArray(req.body?.supports) ? req.body.supports : undefined,
       });
+
+      // ---- OpenAI Realtime branch (evaluation) -------------------------
+      // Rides the same budget and quota path as ElevenLabs; only the mint
+      // differs. Kept separate rather than generalised because the two are
+      // being compared, and a shared abstraction would hide the differences
+      // that comparison is about.
+      if (req.body?.mode === 'voice' && decision.provider === 'openai' && oaKey) {
+        const held = await checkAndReserveVoiceSeconds(uid, plan);
+        if (!held.ok) {
+          res.status(402).json({ error: held.reason, code: 'VOICE_BUDGET_EXCEEDED', remainingVoiceSeconds: 0 });
+          return;
+        }
+        const oaQuota = await checkAndReserveQuota(uid, plan);
+        if (!oaQuota.ok) {
+          await refundVoiceSeconds(uid, held.heldSeconds);
+          res.status(402).json({ error: oaQuota.reason, code: 'QUOTA_EXCEEDED' });
+          return;
+        }
+        try {
+          const minted = await mintOpenAiRealtimeToken({ apiKey: oaKey });
+          const usage = await db().doc(`users/${uid}/assistantUsage/${todayKey()}`).get();
+          res.status(200).json({
+            provider: 'openai',
+            token: minted.token,
+            model: OA_REALTIME_MODEL,
+            voice: process.env.OPENAI_REALTIME_VOICE || 'cedar',
+            modelLabel: OA_VOICE_MODEL_LABEL,
+            maxDurationSeconds: MAX_SESSION_SECONDS[plan],
+            heldSeconds: held.heldSeconds,
+            remainingVoiceSeconds: remainingVoiceSeconds(usage.data(), plan),
+          });
+          return;
+        } catch (err: any) {
+          // eslint-disable-next-line no-console
+          console.warn('[assistantVoice] OpenAI mint failed, falling back to Gemini', err?.message);
+          await refundVoiceSeconds(uid, held.heldSeconds);
+          await refundQuotaTurn(uid);
+        }
+      }
 
       if (req.body?.mode === 'voice' && decision.provider === 'elevenlabs') {
         // Seconds first: a user out of talk time shouldn't also lose a turn.

@@ -85,10 +85,26 @@ export interface ElevenLabsMintedToken {
   remainingVoiceSeconds: number;
 }
 
-export type MintedToken = GeminiMintedToken | ElevenLabsMintedToken;
+export interface OpenAiMintedToken {
+  provider: 'openai';
+  /** Ephemeral client secret — the API key never reaches the device. */
+  token: string;
+  model: string;
+  /** OpenAI's own TTS voice name for the session. */
+  voice?: string;
+  maxDurationSeconds: number;
+  heldSeconds: number;
+  remainingVoiceSeconds: number;
+}
+
+export type MintedToken = GeminiMintedToken | ElevenLabsMintedToken | OpenAiMintedToken;
 
 export function isElevenLabsMint(m: MintedToken): m is ElevenLabsMintedToken {
   return m.provider === 'elevenlabs';
+}
+
+export function isOpenAiMint(m: MintedToken): m is OpenAiMintedToken {
+  return m.provider === 'openai';
 }
 
 /**
@@ -107,8 +123,11 @@ export function isElevenLabsMint(m: MintedToken): m is ElevenLabsMintedToken {
  */
 export function voiceClientCapabilities(): string[] {
   // Browsers ship WebRTC; @elevenlabs/client uses it directly, no native module.
-  if (Platform.OS === 'web') return ['elevenlabs'];
-  return NativeModules?.WebRTCModule ? ['elevenlabs'] : [];
+  // OpenAI Realtime rides the same PCM WebSocket path the Gemini transport
+  // uses, so it needs no native module beyond the mic — unlike ElevenLabs,
+  // which needs LiveKit's WebRTC linked into this binary.
+  if (Platform.OS === 'web') return ['elevenlabs', 'openai'];
+  return NativeModules?.WebRTCModule ? ['elevenlabs', 'openai'] : ['openai'];
 }
 
 // Per-request ceilings. Without these a half-open connection (walking out of

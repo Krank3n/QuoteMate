@@ -1296,7 +1296,7 @@ export function AssistantScreen() {
     if (micRef.current) return;
     void startMicCapture((chunk) => {
       if (!matePlayingRef.current) voiceSessionRef.current?.sendMicChunk(chunk);
-    })
+    }, voiceSessionRef.current?.micSampleRate)
       .then((mic) => {
         // The session may have closed while the mic was spinning up.
         if (!voiceSessionRef.current) { void mic.stop(); return; }
@@ -2592,7 +2592,7 @@ export function AssistantScreen() {
               }).start();
             }
           }
-        });
+        }, session.micSampleRate);
         // A stop landed while the mic was spinning up — release it instead
         // of assigning it into a ref the teardown already nulled.
         if (!gate.isCurrent(openToken)) {

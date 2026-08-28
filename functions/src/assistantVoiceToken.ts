@@ -119,3 +119,58 @@ export async function mintElevenLabsConversationToken(args: {
     conversationId: parsed.conversation_id || '',
   };
 }
+
+
+// ---------------------------------------------------------------------------
+// OpenAI Realtime — ephemeral client secret
+//
+// Same shape of problem as the ElevenLabs mint: the device needs to open a
+// realtime socket, and the API key must never leave the server. OpenAI issues
+// a short-lived client secret for exactly this.
+// ---------------------------------------------------------------------------
+
+/** Model label for cost records and the UI. Compound, like the ElevenLabs one. */
+export const OA_VOICE_MODEL_LABEL = 'openai/gpt-realtime-2';
+export const OA_REALTIME_MODEL = 'gpt-realtime-2';
+
+export interface MintedOpenAiToken {
+  token: string;
+  expiresAt: number;
+}
+
+export async function mintOpenAiRealtimeToken(args: {
+  apiKey: string;
+  model?: string;
+  fetchImpl?: typeof fetch;
+  timeoutMs?: number;
+}): Promise<MintedOpenAiToken> {
+  const doFetch = args.fetchImpl || fetch;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), args.timeoutMs ?? EL_MINT_TIMEOUT_MS);
+
+  let res: any;
+  try {
+    res = await doFetch('https://api.openai.com/v1/realtime/client_secrets', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${args.apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session: { type: 'realtime', model: args.model || OA_REALTIME_MODEL } }),
+      signal: controller.signal as any,
+    } as any);
+  } catch (err: any) {
+    if (controller.signal.aborted) throw new ElevenLabsMintError('realtime client_secret request timed out');
+    throw new ElevenLabsMintError(err?.message || 'realtime client_secret request failed');
+  } finally {
+    clearTimeout(timer);
+  }
+
+  const text = await res.text();
+  if (!res.ok) throw new ElevenLabsMintError(`realtime/client_secrets ${res.status}: ${text}`, res.status);
+  let parsed: any;
+  try { parsed = JSON.parse(text); } catch {
+    throw new ElevenLabsMintError(`realtime/client_secrets returned non-JSON: ${text.slice(0, 200)}`);
+  }
+  if (!parsed?.value) {
+    throw new ElevenLabsMintError(`realtime/client_secrets returned no value: ${text.slice(0, 200)}`);
+  }
+  return { token: parsed.value, expiresAt: Number(parsed.expires_at) || 0 };
+}

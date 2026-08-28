@@ -163,7 +163,10 @@ async function ensureWorkletLoaded(ctx: AudioContext): Promise<void> {
   workletModuleReady = true;
 }
 
-async function startWebCapture(onChunk: (b64: string) => void): Promise<WebCaptureState> {
+async function startWebCapture(
+  onChunk: (b64: string) => void,
+  sampleRate: number,
+): Promise<WebCaptureState> {
   const g: any = globalThis as any;
   if (!g.navigator?.mediaDevices?.getUserMedia) {
     throw new MicUnavailableError(
@@ -181,7 +184,7 @@ async function startWebCapture(onChunk: (b64: string) => void): Promise<WebCaptu
         channelCount: 1,
         // Browsers usually ignore sampleRate; the worklet downsamples
         // from whatever the AudioContext gives us.
-        sampleRate: 16000,
+        sampleRate,
         echoCancellation: true,
         noiseSuppression: true,
         autoGainControl: true,
@@ -201,7 +204,7 @@ async function startWebCapture(onChunk: (b64: string) => void): Promise<WebCaptu
 
   const source = audioCtx.createMediaStreamSource(stream);
   const worklet = new AudioWorkletNode(audioCtx, 'pcm-downsampler', {
-    processorOptions: { targetRate: 16000, frameSize: 2048 },
+    processorOptions: { targetRate: sampleRate, frameSize: 2048 },
   });
   let chunkCount = 0;
   worklet.port.onmessage = (e: MessageEvent) => {
@@ -260,6 +263,7 @@ async function stopWebCapture(state: WebCaptureState): Promise<void> {
 
 async function startNativeCapture(
   onChunk: (b64: string) => void,
+  sampleRate: number,
 ): Promise<{ stop: () => Promise<void> }> {
   const mod = loadNativeModule();
   if (!mod) {
@@ -271,7 +275,9 @@ async function startNativeCapture(
   // stop(), so reusing it on the next session would call startRecording()
   // on a released recorder — the same uninitialised crash. A fresh init()
   // each time keeps the recorder valid.
-  mod.init(RECORD_OPTS);
+  // Rate follows the transport: Gemini takes 16 kHz, OpenAI Realtime refuses
+  // anything under 24 kHz.
+  mod.init({ ...RECORD_OPTS, sampleRate });
   // react-native-audio-record's listener is global; re-bind on every
   // capture so the previous closure is replaced rather than queued.
   mod.on('data', onChunk);
@@ -292,11 +298,24 @@ async function startNativeCapture(
  * `onChunk` fires repeatedly with base64-encoded 16-bit LE PCM at 16 kHz.
  * Call `handle.stop()` to end the capture.
  */
-export async function startMicCapture(onChunk: (base64Pcm: string) => void): Promise<MicCaptureHandle> {
+/**
+ * Capture sample rates, per transport.
+ *
+ * Gemini Live takes 16 kHz. OpenAI Realtime rejects anything below 24 kHz
+ * outright ("integer below minimum value. Expected a value >= 24000"), so the
+ * rate has to follow the provider rather than being a constant.
+ */
+export const MIC_RATE_GEMINI = 16000;
+export const MIC_RATE_OPENAI = 24000;
+
+export async function startMicCapture(
+  onChunk: (base64Pcm: string) => void,
+  sampleRate: number = MIC_RATE_GEMINI,
+): Promise<MicCaptureHandle> {
   let stopped = false;
 
   if (Platform.OS === 'web') {
-    const state = await startWebCapture(onChunk);
+    const state = await startWebCapture(onChunk, sampleRate);
     return {
       stop: async () => {
         if (stopped) return;
@@ -307,7 +326,7 @@ export async function startMicCapture(onChunk: (base64Pcm: string) => void): Pro
     };
   }
 
-  const handle = await startNativeCapture(onChunk);
+  const handle = await startNativeCapture(onChunk, sampleRate);
   return {
     stop: async () => {
       if (stopped) return;

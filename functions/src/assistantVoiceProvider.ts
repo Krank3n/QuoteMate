@@ -12,7 +12,7 @@
 
 import * as crypto from 'crypto';
 
-export type VoiceProvider = 'gemini' | 'elevenlabs';
+export type VoiceProvider = 'gemini' | 'elevenlabs' | 'openai';
 
 export interface VoiceConfigDoc {
   provider?: string;
@@ -70,20 +70,28 @@ export function decideVoiceProvider(input: VoiceProviderInput): VoiceProviderDec
   }
   // A client that never declared support would push an ElevenLabs conversation
   // token into the Gemini WS URL and fail in a way nobody could read.
-  if (!Array.isArray(input.clientSupports) || !input.clientSupports.includes('elevenlabs')) {
+  if (!Array.isArray(input.clientSupports) || input.clientSupports.length === 0) {
     return { provider: 'gemini', reason: 'client-unsupported' };
   }
   const config = input.config;
-  if (!config || config.provider !== 'elevenlabs') {
+  const wanted = config?.provider;
+  if (wanted !== 'elevenlabs' && wanted !== 'openai') {
     return { provider: 'gemini', reason: 'config-gemini' };
   }
-  if (config.forceUids?.includes(input.uid)) {
-    return { provider: 'elevenlabs', reason: 'force-listed' };
+  // A client that cannot open THIS transport gets Gemini, even if the config
+  // names it — capability is per-transport, not a single flag. ElevenLabs
+  // needs LiveKit linked; OpenAI Realtime rides the same PCM socket Gemini
+  // uses and needs nothing extra.
+  if (!input.clientSupports.includes(wanted)) {
+    return { provider: 'gemini', reason: `client-cannot-${wanted}` };
   }
-  const percent = Math.max(0, Math.min(100, Math.round(config.rolloutPercent ?? 0)));
+  if (config!.forceUids?.includes(input.uid)) {
+    return { provider: wanted, reason: 'force-listed' };
+  }
+  const percent = Math.max(0, Math.min(100, Math.round(config!.rolloutPercent ?? 0)));
   if (percent <= 0) return { provider: 'gemini', reason: 'rollout-0' };
-  if (percent >= 100) return { provider: 'elevenlabs', reason: 'rollout-100' };
+  if (percent >= 100) return { provider: wanted, reason: 'rollout-100' };
   return hashUidToPercent(input.uid) < percent
-    ? { provider: 'elevenlabs', reason: `rollout-${percent}` }
+    ? { provider: wanted, reason: `rollout-${percent}` }
     : { provider: 'gemini', reason: `rollout-${percent}-excluded` };
 }

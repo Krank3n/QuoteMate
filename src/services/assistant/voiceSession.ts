@@ -40,6 +40,7 @@ import {
   LiveRateLimitError,
   mintLiveToken,
   isElevenLabsMint,
+  isOpenAiMint,
   MintedToken,
 } from './liveSession';
 
@@ -256,6 +257,11 @@ export interface VoiceSession {
    * Absent/false on the Gemini path, which expects the screen to feed it.
    */
   ownsMicrophone?: boolean;
+  /**
+   * Sample rate this transport expects for mic chunks. Gemini takes 16 kHz;
+   * OpenAI Realtime rejects anything below 24 kHz. Absent means 16 kHz.
+   */
+  micSampleRate?: number;
   /** Mute without tearing the session down — used when a modal takes over. */
   setMicMuted?: (muted: boolean) => void;
   /** Input level 0..1, for the waveform when no raw PCM reaches JS. */
@@ -303,6 +309,10 @@ export async function openVoiceSession(
   if (isElevenLabsMint(minted)) {
     const { openElevenLabsVoiceSession } = await import('./elevenLabsVoiceSession');
     return openElevenLabsVoiceSession(minted, history, cb, opts);
+  }
+  if (isOpenAiMint(minted)) {
+    const { openOpenAiVoiceSession } = await import('./openAiVoiceSession');
+    return openOpenAiVoiceSession(minted, history, cb, opts);
   }
   return openGeminiVoiceSession(minted, history, cb, opts);
 }
