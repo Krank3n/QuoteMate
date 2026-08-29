@@ -11,6 +11,13 @@
 // proposalTools.ts (validator). Adding a name here without wiring it on
 // either side leaves Mate emitting tool calls the dispatcher can't service.
 
+import { NICHE_TEMPLATES } from '../../data/nicheTemplates';
+
+// Every job type Mate knows, listed for the model so it can pick one by name
+// instead of leaving a keyword matcher to guess. Built from the templates so
+// a niche added tomorrow is offered without anyone remembering to list it.
+const KNOWN_JOB_TYPE_LIST = NICHE_TEMPLATES.map((t) => t.name).join(', ');
+
 export const READ_TOOL_NAMES = [
   'find_customer',
   'list_recent_quotes',
@@ -156,13 +163,18 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
   {
     name: 'get_job_requirements',
     description:
-      "Call this first when a job type is mentioned. Returns the must-ask questions for this niche, pricing method, and flags for measurement-driven and specialist-supply jobs. Use the returned mustAskQuestions — do not invent questions. mustAskQuestions is NEVER empty: when no niche matches, it returns general scope questions and genericScope is true, so there is never a case where you should draft without asking anything. Also returns supplierBookPopulated (true when this phone can see the tradie's own imported/saved supplier rates), supplierBookSuppliers (up to 3 of those supplier names) and supplierBookCoversTrade (true when those rates would actually price this niche's core gear). specialistSupply true + supplierBookPopulated false is the one combination worth mentioning — the core materials for this job don't come off a Bunnings or Reece shelf and there's no price list on the phone to fall back on.",
+      "Call this first when a job type is mentioned. Returns the must-ask questions for this niche, pricing method, and flags for measurement-driven and specialist-supply jobs. Use the returned mustAskQuestions — do not invent questions. mustAskQuestions is NEVER empty: when no niche matches, it returns general scope questions and genericScope is true, so there is never a case where you should draft without asking anything. Also returns supplierBookPopulated (true when this phone can see the tradie's own imported/saved supplier rates), supplierBookSuppliers (up to 3 of those supplier names) and supplierBookCoversTrade (true when those rates would actually price this niche's core gear). specialistSupply true + supplierBookPopulated false is the one combination worth mentioning — the core materials for this job don't come off a Bunnings or Reece shelf and there's no price list on the phone to fall back on. KNOWN JOB TYPES (pass one of these verbatim as jobType, or \"none\"): " + KNOWN_JOB_TYPE_LIST + ".",
     parameters: {
       type: 'object',
       properties: {
+        jobType: {
+          type: 'string',
+          description:
+            'PREFERRED. The exact job-type name from the list in this tool\'s description when one genuinely fits, or "none" when you have read the list and none does. You can judge this far better than the keyword matcher behind freeText — "hang a hammock" is not Door Hanging, however many words they share. Never force a near-miss; "none" still returns general scope questions to ask.',
+        },
         category: { type: 'string', description: 'Trade category ID (optional; loaded from business settings if omitted)' },
-        niche: { type: 'string', description: 'Niche ID (optional; inferred from freeText if omitted)' },
-        freeText: { type: 'string', description: 'The job description or blurb to match a niche from (e.g. "colorbond fence", "lawn mow and edge")' },
+        niche: { type: 'string', description: 'Niche ID (optional; inferred from freeText if omitted). NOT unique — several job types share one category/niche pair, so prefer jobType.' },
+        freeText: { type: 'string', description: 'The job description or blurb, always worth passing. Used to match a job type when jobType is omitted, and to pick between job types that share a niche.' },
       },
       required: [],
     },

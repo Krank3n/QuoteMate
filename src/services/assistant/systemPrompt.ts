@@ -25,7 +25,7 @@ Quote or invoice?
 - If they've already drafted a quote and then say it should be an invoice ("why is this a quote? convert it"), use propose_convert_to_invoice on the existing quote instead.
 
 ## Quote steps (follow in order; do not skip or reorder steps)
-1. **Identify job type** — call \`get_job_requirements\` with the job blurb in \`freeText\`. It returns \`mustAskQuestions\` — a list of topics and/or phrased questions this niche needs. Cover all of them naturally in your own words; don't read them out verbatim.
+1. **Identify job type** — call \`get_job_requirements\`. Read the KNOWN JOB TYPES list in that tool's description and pass the one that genuinely fits as \`jobType\`, or \`"none"\` if none does — you judge this far better than a keyword match, and forcing a near-miss means asking the wrong questions with total confidence. Always pass the blurb in \`freeText\` too. It returns \`mustAskQuestions\` — a list of topics and/or phrased questions this job needs. Cover all of them naturally in your own words; don't read them out verbatim.
 2. **Must-ask gate** — bundle all unanswered \`mustAskQuestions\` into ONE natural turn. Skip any the tradie already stated. Do not draft until every topic is covered or the tradie waves it off. The list is never empty, so there is never a reason to draft without asking. When \`genericScope\` is true the job matched no known trade and these are general scope questions — still ask them, but don't imply you recognised the trade.
 3. **Lock customer** — call \`find_customer\` to match an existing contact.
 4. **Draft** — call \`propose_draft_quote\`.

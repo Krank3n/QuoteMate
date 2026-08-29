@@ -12,7 +12,7 @@ import { NICHE_TEMPLATES } from '../../../data/nicheTemplates';
 import {
   buildWordWeights, scoreName, tokenise, stem, subjectWord, NICHE_MATCH_FLOOR,
 } from '../nicheMatch';
-import { resolveJobRequirements, GENERIC_SCOPE_QUESTIONS } from '../readTools';
+import { resolveJobRequirements, GENERIC_SCOPE_QUESTIONS, KNOWN_JOB_TYPES } from '../readTools';
 
 const NAMES: string[] = NICHE_TEMPLATES.map((t: { name: string }) => t.name);
 const WEIGHTS = buildWordWeights(NAMES);
@@ -159,5 +159,63 @@ describe('a job no template covers still gets asked about', () => {
     expect(r.genericScope).toBe(false);
     expect(r.matched.templateName).toBe('Deck Build');
     expect(r.mustAskQuestions).not.toEqual(GENERIC_SCOPE_QUESTIONS);
+  });
+})
+
+describe('the model names the job type', () => {
+  // Word matching can only compare a blurb to 57 short names, so a job whose
+  // one recognisable word belongs to another trade lands there: "hang a
+  // hammock" shares "hang" with Door Hanging and nothing else. The model can
+  // see that; the matcher can't. So it picks, by name.
+  const req = (input: any) => resolveJobRequirements(input);
+
+  it('uses the named job type over anything the blurb would have matched', () => {
+    const r = req({ jobType: 'Pool Fence (Glass)', freeText: 'colorbond fence repair' });
+    expect(r.matched.templateName).toBe('Pool Fence (Glass)');
+  });
+
+  it('lets the model say none of them fit', () => {
+    const r = req({ jobType: 'none', freeText: 'hang a hammock' });
+    expect(r.genericScope).toBe(true);
+    expect(r.matched.templateName).toBeUndefined();
+    expect(r.mustAskQuestions).toEqual(GENERIC_SCOPE_QUESTIONS);
+  });
+
+  it('would otherwise have forced that blurb onto an unrelated trade', () => {
+    // Documents exactly why the "none" answer has to exist.
+    const r = req({ freeText: 'hang a hammock' });
+    expect(r.matched.templateName).toBe('Door Hanging');
+  });
+
+  it('ignores a job type that is not a real one and falls back to the blurb', () => {
+    const r = req({ jobType: 'Underwater Basket Weaving', freeText: '2 meter by 5 meter deck' });
+    expect(r.matched.templateName).toBe('Deck Build');
+  });
+
+  it('matches the name whatever the casing', () => {
+    expect(req({ jobType: 'deck build' }).matched.templateName).toBe('Deck Build');
+  });
+
+  it('offers every template as a choosable name', () => {
+    expect(KNOWN_JOB_TYPES).toHaveLength(NICHE_TEMPLATES.length);
+    expect(KNOWN_JOB_TYPES).toContain('Pool Fence (Glass)');
+  });
+});
+
+describe('job types that share a category and niche', () => {
+  // 55 templates, 40 distinct category/niche pairs. `other/fencing` alone
+  // covers five, and taking the first asked a glass pool fence job about
+  // Colorbond.
+  it('uses the blurb to pick within the group', () => {
+    const r = resolveJobRequirements({
+      categoryId: 'other', nicheId: 'fencing', freeText: 'glass pool fence',
+    } as any);
+    expect(r.matched.templateName).toBe('Pool Fence (Glass)');
+  });
+
+  it('still resolves when the blurb says nothing useful', () => {
+    const r = resolveJobRequirements({ categoryId: 'other', nicheId: 'fencing' } as any);
+    expect(r.matched.templateName).toBeTruthy();
+    expect(r.mustAskQuestions.length).toBeGreaterThan(0);
   });
 })
