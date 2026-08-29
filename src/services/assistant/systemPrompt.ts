@@ -26,7 +26,7 @@ Quote or invoice?
 
 ## Quote steps (follow in order; do not skip or reorder steps)
 1. **Identify job type** — call \`get_job_requirements\` with the job blurb in \`freeText\`. It returns \`mustAskQuestions\` — a list of topics and/or phrased questions this niche needs. Cover all of them naturally in your own words; don't read them out verbatim.
-2. **Must-ask gate** — bundle all unanswered \`mustAskQuestions\` into ONE natural turn. Skip any the tradie already stated. Do not draft until every topic is covered or the tradie waves it off. If \`mustAskQuestions\` comes back empty (custom or unknown job), ask for space/measurements/work/finishes then draft.
+2. **Must-ask gate** — bundle all unanswered \`mustAskQuestions\` into ONE natural turn. Skip any the tradie already stated. Do not draft until every topic is covered or the tradie waves it off. The list is never empty, so there is never a reason to draft without asking. When \`genericScope\` is true the job matched no known trade and these are general scope questions — still ask them, but don't imply you recognised the trade.
 3. **Lock customer** — call \`find_customer\` to match an existing contact.
 4. **Draft** — call \`propose_draft_quote\`.
 

@@ -540,6 +540,12 @@ export interface JobRequirementsInput {
 export interface JobRequirementsResult {
   matched: { categoryId?: string; nicheId?: string; templateName?: string };
   mustAskQuestions: string[];
+  /**
+   * True when mustAskQuestions are the generic fallback rather than a niche's
+   * own. Mate should still ask them, but shouldn't imply this trade was
+   * recognised — and shouldn't promise niche-specific pricing off them.
+   */
+  genericScope: boolean;
   pricingMethod?: string;
   measurementDriven: boolean;
   planHelps: boolean;
@@ -550,6 +556,27 @@ export interface JobRequirementsResult {
   /** True when the book could actually price this niche's core gear. */
   supplierBookCoversTrade: boolean;
 }
+
+/**
+ * Scope questions for a job no template covers.
+ *
+ * The rule Mate is given is "ask what this tool returns, don't invent
+ * questions". An unmatched job used to return an empty list, leaving that rule
+ * saying "ask nothing" — and the prompt's soft exception ("if empty, ask about
+ * space and measurements") is exactly the kind of caveat a model drops under
+ * pressure. It did: a tradie asked for a deck quote, got no questions at all,
+ * and was told "there weren't any required deck questions for this job type".
+ *
+ * So the fallback is structural instead. These are deliberately about what the
+ * pricing engine needs from ANY job — how big, what work, what materials, what
+ * access — rather than anything trade-specific we'd be guessing at.
+ */
+export const GENERIC_SCOPE_QUESTIONS: string[] = [
+  'The size or measurements of the area involved',
+  'What work is actually being done to it',
+  'Any materials, brands or finishes they want used',
+  'Anything that makes the job harder — access, height, removing what is there now',
+];
 
 const MEASUREMENT_DRIVEN_METHODS = new Set(['per_sqm', 'per_linear_m', 'per_cubic_m']);
 
@@ -603,6 +630,7 @@ export function resolveJobRequirements(input: JobRequirementsInput): JobRequirem
   // Prefer questionsLine as the single bundled entry when it exists (better
   // phrasing); fall back to individual pill labels when there is no questionsLine.
   const mustAskQuestions: string[] = [];
+  let genericScope = false;
   if (resolvedCategoryId && resolvedNicheId) {
     if (template?.questionsLine) {
       mustAskQuestions.push(template.questionsLine.trim());
@@ -617,6 +645,14 @@ export function resolveJobRequirements(input: JobRequirementsInput): JobRequirem
         }
       }
     }
+  }
+
+  // Nothing matched, or the matched niche carries no questions of its own.
+  // Never hand back an empty list: that turns "ask what this returns" into
+  // "ask nothing", and Mate drafts a quote it has asked nothing about.
+  if (mustAskQuestions.length === 0) {
+    mustAskQuestions.push(...GENERIC_SCOPE_QUESTIONS);
+    genericScope = true;
   }
 
   const pricingMethod = template?.pricingMethod || undefined;
@@ -638,6 +674,7 @@ export function resolveJobRequirements(input: JobRequirementsInput): JobRequirem
       templateName: template?.name,
     },
     mustAskQuestions,
+    genericScope,
     pricingMethod,
     measurementDriven,
     planHelps: measurementDriven,

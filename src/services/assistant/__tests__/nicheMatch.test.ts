@@ -12,6 +12,7 @@ import { NICHE_TEMPLATES } from '../../../data/nicheTemplates';
 import {
   buildWordWeights, scoreName, tokenise, stem, subjectWord, NICHE_MATCH_FLOOR,
 } from '../nicheMatch';
+import { resolveJobRequirements, GENERIC_SCOPE_QUESTIONS } from '../readTools';
 
 const NAMES: string[] = NICHE_TEMPLATES.map((t: { name: string }) => t.name);
 const WEIGHTS = buildWordWeights(NAMES);
@@ -124,3 +125,39 @@ describe('stem', () => {
     expect(stem('gas')).toBe('gas');
   });
 });
+
+describe('a job no template covers still gets asked about', () => {
+  // The rule Mate follows is "ask what the tool returns, don't invent
+  // questions". An empty list turned that into "ask nothing", and the prompt's
+  // soft exception did not save it: a tradie asked for a deck quote, got no
+  // questions, and was told "there weren't any required deck questions for
+  // this job type". The fallback is structural now, not a caveat.
+  it('never hands back an empty question list', () => {
+    for (const blurb of ['replace laundry taps', 'zzz qqq', '']) {
+      const r = resolveJobRequirements({ freeText: blurb } as any);
+      expect(r.mustAskQuestions.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('marks those questions as generic so Mate does not claim it knew the trade', () => {
+    // There is no tap niche, so this is the honest no-match case.
+    const r = resolveJobRequirements({ freeText: 'replace laundry taps' } as any);
+    expect(r.genericScope).toBe(true);
+    expect(r.mustAskQuestions).toEqual(GENERIC_SCOPE_QUESTIONS);
+  });
+
+  it('asks about what the pricing engine needs from any job', () => {
+    const joined = GENERIC_SCOPE_QUESTIONS.join(' ').toLowerCase();
+    expect(joined).toContain('size');
+    expect(joined).toContain('work');
+    expect(joined).toContain('material');
+    expect(joined).toContain('access');
+  });
+
+  it('leaves a recognised niche using its OWN questions', () => {
+    const r = resolveJobRequirements({ freeText: '2 meter by 5 meter deck' } as any);
+    expect(r.genericScope).toBe(false);
+    expect(r.matched.templateName).toBe('Deck Build');
+    expect(r.mustAskQuestions).not.toEqual(GENERIC_SCOPE_QUESTIONS);
+  });
+})
