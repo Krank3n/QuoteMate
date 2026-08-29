@@ -30,6 +30,7 @@
  */
 
 import type { Material } from '../types';
+import { tradeFallbackUnitPriceWithUnit } from './tradeFallback';
 
 export type MatchEvidence = 'strong' | 'weak' | 'none';
 
@@ -209,7 +210,9 @@ export const WEAK_MATCH_NOTE =
  * better), but it is never presented as a confident supplier price.
  */
 export function stampMatchConfidence(m: Material, productName?: string): void {
-  if (matchEvidence(m.searchTerm || m.name, productName || '') !== 'weak') {
+  const lexicallyWeak = matchEvidence(m.searchTerm || m.name, productName || '') === 'weak';
+  const priceImplausible = !lexicallyWeak && pricedFarAboveTrade(m);
+  if (!lexicallyWeak && !priceImplausible) {
     // Explicitly cleared, not just skipped: a re-price that finally lands a
     // proper product must drop the old warning, or the row stays flagged for
     // the life of the quote.
@@ -218,8 +221,40 @@ export function stampMatchConfidence(m: Material, productName?: string): void {
   }
   m.weakProductMatch = true;
   m.priceConfidence = 'low';
-  const note = typeof m.description === 'string' && m.description && m.description !== WEAK_MATCH_NOTE
-    ? `${WEAK_MATCH_NOTE}. ${m.description}`
-    : WEAK_MATCH_NOTE;
+  const reason = priceImplausible ? IMPLAUSIBLE_PRICE_NOTE : WEAK_MATCH_NOTE;
+  const note = typeof m.description === 'string' && m.description && m.description !== reason
+    ? `${reason}. ${m.description}`
+    : reason;
   m.description = note;
+}
+
+/** Row note for a match whose money gives it away, whatever the names share. */
+export const IMPLAUSIBLE_PRICE_NOTE =
+  "That unit price is far above what this normally costs — check it's the right product";
+
+/**
+ * How many times the trade estimate a real price may reach before the product
+ * itself is in doubt. Deliberately generous: brand, grade and bulk packs all
+ * move a real price around, and this only flags — it never repairs.
+ */
+const IMPLAUSIBLE_PRICE_MULTIPLE = 8;
+
+/**
+ * Word overlap alone can't tell a product from its accessories: "Ekodeck
+ * decking screws" shares 2 of its 3 words with an Ekodeck composite decking
+ * BOARD, scores 0.67 against a 0.33 bar, and graded 'strong'. Fifty of them at
+ * $98.23 put $4,911 of screws on a $13k deck.
+ *
+ * The money says what the names can't. tradeFallbackUnitPrice is already a
+ * curated view of what things cost per unit, so where it has an opinion in the
+ * row's own unit, a price many times over it means we priced something else.
+ * Screws at $98.23 each sit 1,228x above the table's $0.08.
+ */
+function pricedFarAboveTrade(m: Material): boolean {
+  if (!(m.price > 0) || m.manualPriceOverride) return false;
+  const hit = tradeFallbackUnitPriceWithUnit(`${m.searchTerm || ''} ${m.name || ''}`, m.unit);
+  // Only compare like with like — a per-each opinion says nothing about the
+  // price of a pack.
+  if (!hit || hit.per !== m.unit || !(hit.price > 0)) return false;
+  return m.price / hit.price >= IMPLAUSIBLE_PRICE_MULTIPLE;
 }

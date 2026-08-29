@@ -57,6 +57,38 @@ export function isNonRetailTradeRow(nameText: string, unit?: string, qty?: numbe
   return false;
 }
 
+export interface TradeFallbackPrice {
+  price: number;
+  /** The unit `price` is quoted in. */
+  per: string;
+}
+
+/**
+ * Same table, but it also says what the price is PER — which the caller needs
+ * before it multiplies.
+ *
+ * Every entry has the shape `unit === <measurement> ? <per-measurement price>
+ * : <per-item price>`, so the table only answers in the row's own unit when its
+ * ternary explicitly tested that unit. Probing with no unit at all reveals
+ * which happened: a different answer means the row's unit was tested and the
+ * price is per that unit; the same answer means we got the per-item branch.
+ *
+ * Deriving it this way rather than restating a unit on each of the ~60 returns
+ * means the two can never drift apart.
+ *
+ * This matters because the per-item branch used to be multiplied by whatever
+ * the row was counting. "plasterboard paper joint tape" matches the
+ * plasterboard rule, takes the $35 SHEET price, and 75 lineal metres of tape
+ * billed at $2,386.50.
+ */
+export function tradeFallbackUnitPriceWithUnit(nameText: string, unit?: string): TradeFallbackPrice | null {
+  const price = tradeFallbackUnitPrice(nameText, unit);
+  if (price === null) return null;
+  const unitless = tradeFallbackUnitPrice(nameText, undefined);
+  const answeredInRowUnit = !!unit && price !== unitless;
+  return { price, per: answeredInRowUnit ? unit : 'each' };
+}
+
 export function tradeFallbackUnitPrice(nameText: string, unit?: string): number | null {
   const name = nameText.toLowerCase();
   if (/screws?|nails?|brads?|staples?/.test(name)) return unit === 'each' ? 0.08 : 18;
@@ -83,7 +115,11 @@ export function tradeFallbackUnitPrice(nameText: string, unit?: string): number 
   if (/\b(?:rhs|shs)\b|rectangular\s+hollow|square\s+hollow/.test(name)) return unit === 'm' ? 45 : 180;
   if (/steel\s+base\s+plate|base\s+plate/.test(name)) return 28;
   if (/steel\s+post|galvanised\s+post|galvanized\s+post/.test(name)) return unit === 'm' ? 38 : 90;
-  if (/plasterboard|villaboard|fibre\s+cement\s+sheet|fiber\s+cement\s+sheet|cement\s+sheet|cladding\s+sheets?|external\s+cladding/.test(name)) return unit === 'm²' ? 12 : 35;
+  // Sheet price. The negative lookahead keeps the consumables that hang off a
+  // plasterboard job off the sheet rate — "plasterboard jointing compound" and
+  // "plasterboard paper joint tape" both matched here and were billed $35 per
+  // kilo and per metre respectively.
+  if (/(?:plasterboard|villaboard|fibre\s+cement\s+sheet|fiber\s+cement\s+sheet|cement\s+sheet|cladding\s+sheets?|external\s+cladding)\b(?![\s\S]*\b(?:compound|tape|screws?|stopping|cornice|adhesive|cement\s+mix|sealant|primer)\b)/.test(name)) return unit === 'm²' ? 12 : 35;
   if (/floor\s+tiles?|wall\s+tiles?|ceramic\s+tiles?|porcelain\s+tiles?/.test(name) && !/roof/.test(name)) return unit === 'm²' ? 45 : 30;
   if (/\bgrout\b/.test(name)) return unit === 'kg' ? 4 : 55;
   if (/\b(?:pvc|pex)\b.*\bpipe\b|\bpipe\b.*\b(?:pvc|pex)\b|waste\s+pipe|dwv\s+pipe/.test(name)) return unit === 'm' ? 8 : 24;

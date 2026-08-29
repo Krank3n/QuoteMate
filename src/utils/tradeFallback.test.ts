@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isNonRetailTradeRow, tradeFallbackUnitPrice } from './tradeFallback';
+import { isNonRetailTradeRow, tradeFallbackUnitPrice, tradeFallbackUnitPriceWithUnit } from './tradeFallback';
 
 describe('isNonRetailTradeRow — the audit failures it exists to fix', () => {
   it('routes MPa-rated ready-mix concrete away from retail (the umbrella-base bug)', () => {
@@ -130,5 +130,33 @@ describe('reinforcing steel is a steel-merchant line, not a hardware shelf (QU-1
 
   it('never returns the towel-bar money for a starter bar', () => {
     expect(tradeFallbackUnitPrice('N12 starter bar 600mm dowel', 'each')).toBeLessThan(20);
+  });
+});
+
+describe('tradeFallbackUnitPriceWithUnit — a price must say what it is per', () => {
+  it('reports a per-m2 price as per m2 and a per-sheet price as per each', () => {
+    expect(tradeFallbackUnitPriceWithUnit('plasterboard 10mm sheet', 'm²')).toEqual({ price: 12, per: 'm²' });
+    expect(tradeFallbackUnitPriceWithUnit('plasterboard 10mm sheet', 'each')).toEqual({ price: 35, per: 'each' });
+  });
+
+  it('reports the per-item branch as per each even when the row counts metres', () => {
+    // The row asks in metres; the table only knows a per-pack price. Saying so
+    // is what stops the caller multiplying it by 75.
+    const hit = tradeFallbackUnitPriceWithUnit('galvanised decking screws', 'm');
+    expect(hit).toEqual({ price: 18, per: 'each' });
+  });
+
+  it('does not give plasterboard consumables the sheet price', () => {
+    // "plasterboard paper joint tape" billed 75 m at $35/m = $2,386.50.
+    expect(tradeFallbackUnitPrice('plasterboard paper joint tape', 'm')).toBeNull();
+    expect(tradeFallbackUnitPrice('plasterboard jointing compound base top coat', 'kg')).toBeNull();
+    // The sheet itself still prices.
+    expect(tradeFallbackUnitPrice('plasterboard recessed edge 10mm 2400x1200', 'each')).toBe(35);
+  });
+
+  it('keeps answering in the row unit where the table branches on it', () => {
+    expect(tradeFallbackUnitPriceWithUnit('ready mix concrete 25mpa', 'm³')).toEqual({ price: 300, per: 'm³' });
+    expect(tradeFallbackUnitPriceWithUnit('road base crusher dust bulk', 'kg')).toEqual({ price: 0.08, per: 'kg' });
+    expect(tradeFallbackUnitPriceWithUnit('wall grout', 'kg')).toEqual({ price: 4, per: 'kg' });
   });
 });

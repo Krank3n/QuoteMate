@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { reviewQuoteMaterials, isFlaggedRow, buildPresendWarning, detectAnchorLaunderedIssues, detectImplausibleCostIssues, topLinesSummary, priceResettableIds, wipeStillImplausibleRows } from './quoteReview';
+import { reviewQuoteMaterials, isFlaggedRow, buildPresendWarning, detectAnchorLaunderedIssues, detectImplausibleCostIssues, topLinesSummary, priceResettableIds, wipeStillImplausibleRows, withIntegrityIssues } from './quoteReview';
 import type { Material, QuoteSection } from '../types';
 
 // Minimal Material factory — only the fields the classifier reads matter; the
@@ -555,5 +555,61 @@ describe('wipeStillImplausibleRows — bars the product from winning again', () 
     );
     const { materials: next } = wipeStillImplausibleRows(new Set(['adhesive']), second, sections);
     expect(next.find((m) => m.id === 'adhesive')!.excludedProducts).toEqual(['0087125', '0099999']);
+  });
+});
+
+describe('reviewQuoteMaterials — the summary points at the money', () => {
+  // The carport quote's real shape: the cheap flags came first in the array.
+  const carportRows = [
+    mat({ id: 'skip1', name: 'Skip Bin Hire - Heavy/Concrete', quantity: 1, price: 1090.91, totalPrice: 1090.91, pricingSource: 'ai', priceConfidence: 'low' }),
+    mat({ id: 'skip2', name: 'Skip Bin Hire - General Waste', quantity: 1, price: 590.91, totalPrice: 590.91, pricingSource: 'ai', priceConfidence: 'low' }),
+    mat({ id: 'base', name: 'Road Base / Crusher Dust', quantity: 5280, unit: 'kg', price: 0.07, totalPrice: 369.6, pricingSource: 'ai', priceConfidence: 'low' }),
+    mat({ id: 'batts', name: 'Wall & Ceiling Insulation Batts R2.0', quantity: 21, unit: 'm²', price: 97.87, totalPrice: 2055.27, pricingSource: 'ai', priceConfidence: 'low' }),
+    mat({ id: 'tape', name: 'Paper Joint Tape', quantity: 75, unit: 'm', price: 31.82, totalPrice: 2386.5, pricingSource: 'ai', priceConfidence: 'low' }),
+  ];
+
+  it('names the most expensive flagged row first, not the first in array order', () => {
+    const review = reviewQuoteMaterials(carportRows);
+    expect(review.issues[0].name).toBe('Paper Joint Tape');
+    expect(review.issues[1].name).toBe('Wall & Ceiling Insulation Batts R2.0');
+    expect(review.summary).toContain('Paper Joint Tape');
+    expect(review.summary).not.toContain('Road Base');
+  });
+
+  it('includes the dollar figure of each named row', () => {
+    expect(reviewQuoteMaterials(carportRows).summary).toContain('$2,386.50 of Paper Joint Tape');
+  });
+
+  it('says "1 row needs a look" for a single issue', () => {
+    const review = reviewQuoteMaterials([
+      mat({ id: 'tape', name: 'Electrical Insulation Tape', priceConfidence: 'low' }),
+    ]);
+    expect(review.summary).toContain('1 row needs a look');
+    expect(review.summary).not.toContain('1 row need a look');
+  });
+
+  it('still says "rows need" for more than one', () => {
+    const review = reviewQuoteMaterials([
+      mat({ id: 'a', priceConfidence: 'low' }),
+      mat({ id: 'b', priceConfidence: 'low' }),
+    ]);
+    expect(review.summary).toContain('2 rows need a look');
+  });
+});
+
+describe('withIntegrityIssues', () => {
+  const clean = reviewQuoteMaterials([mat({ priceConfidence: 'high' })]);
+
+  it('reports a labour total that disagrees with hours x rate', () => {
+    // The Overton switchboard: laborHours 5, laborRate 85, laborTotal 170.
+    const folded = withIntegrityIssues(clean, ['stored laborTotal=170, recomputed=425']);
+    expect(folded.integrity).toEqual(['stored laborTotal=170, recomputed=425']);
+    expect(folded.summary).toContain("1 figure on this quote don't add up");
+    expect(folded.summary).toContain('recomputed=425');
+  });
+
+  it('leaves a clean review untouched', () => {
+    expect(withIntegrityIssues(clean, [])).toBe(clean);
+    expect(withIntegrityIssues(clean, []).integrity).toBeUndefined();
   });
 });

@@ -23,7 +23,8 @@ import {
 } from '../services/materialsPipeline';
 import { pricingEventToProgress } from './pricingProgress';
 import type { SupplierGapSummary } from '../services/assistant/supplierGapNote';
-import { reviewQuoteMaterials, isFlaggedRow, priceResettableIds, topLinesSummary, wipeStillImplausibleRows, QuoteReview } from '../utils/quoteReview';
+import { reviewQuoteMaterials, isFlaggedRow, priceResettableIds, topLinesSummary, wipeStillImplausibleRows, withIntegrityIssues, QuoteReview } from '../utils/quoteReview';
+import { checkDocumentIntegrity } from '../../shared/document/integrityCheck';
 import { loadTemplates } from '../services/sectionTemplateService';
 import { updateQuoteCalculations, healBrokenLabourSections } from '../utils/quoteCalculator';
 import { normaliseLabourToHours } from '../../shared/document/labourUnits';
@@ -3454,6 +3455,16 @@ export const useStore = create<AppState>((set, get) => ({
             get().updateQuote(pricedResult.updatedQuote);
             await get().saveDraft(get().currentQuote!);
             review = reviewQuoteMaterials(pricedResult.updatedQuote.materials, pricedResult.updatedQuote.sections);
+            // The document's own arithmetic, checked on the live path rather
+            // than only in the offline audit scripts. A switchboard quote
+            // shipped storing 5 hours at $85 while charging $170. Reported,
+            // never blocking — a false positive must not strand a quote.
+            const integrity = checkDocumentIntegrity(pricedResult.updatedQuote as any);
+            if (integrity.length) {
+              // eslint-disable-next-line no-console
+              console.warn('[Mate] integrity', quoteId, integrity.map((i) => i.code).join(','));
+              review = withIntegrityIssues(review, integrity.map((i) => i.detail));
+            }
             supplierGap = await summariseSupplierGap(
               missedSupplierTerms,
               review.counts.estimated,

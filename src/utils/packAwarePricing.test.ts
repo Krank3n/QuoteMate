@@ -122,3 +122,115 @@ describe('applyPackAwarePricing is idempotent', () => {
     expect(m.quantity).toBe(afterFirst);
   });
 });
+
+// Regressions from the 28-29 Aug Mate audit. Each case is a real row off a real
+// quote, named by what it did to the tradie's total.
+describe('applyPackAwarePricing — purchase-unit invariant', () => {
+  it('prices a 16m2 32-pack batt against a 21m2 requirement as 2 packs, not 21', () => {
+    // QIp452Jh carport quote: 21 x $97.87 = $2,055.27 of insulation.
+    const m = mat(21, 'm²', 97.87);
+    m.name = 'Wall & Ceiling Insulation Batts R2.0';
+    applyPackAwarePricing(m, {
+      productName: 'Earthwool R2.0 Wall Batt 90mm x 430mm x 1160mm 16.0m² 32 Pack',
+    });
+    expect(m.quantity).toBe(2);
+    expect(m.packSize).toBe(16);
+    expect(m.packUnit).toBe('m²');
+    expect(m.totalPrice).toBe(195.74);
+  });
+
+  it('prices an 11m underlay roll against an 8m2 requirement as one purchase, flagged', () => {
+    // euBZ9wiS / QIp452Jh: 8 x $47.71 = $381.68. One roll is the honest answer.
+    const m = mat(8, 'm²', 47.71);
+    m.name = 'Flooring Underlay';
+    applyPackAwarePricing(m, {
+      productName: 'QEP 2mm 11m Silver Laminate Floating Floor Underlay',
+    });
+    expect(m.quantity).toBe(1);
+    expect(m.unit).toBe('pack');
+    expect(m.totalPrice).toBe(47.71);
+    expect(m.priceConfidence).toBe('low');
+    expect(m.description).toContain('check it covers 8 m²');
+  });
+
+  it('treats a 1L tin as a pack rather than a per-litre price', () => {
+    // ptQG8JbX: 10 x $53.95 = $539.50 charged as though $53.95 bought a litre.
+    const m = mat(10, 'L', 53.95);
+    m.name = 'Interior Low Sheen Paint';
+    applyPackAwarePricing(m, {
+      productName: 'Taubmans 1L White Low Sheen Endure Interior Walls Paint',
+    });
+    expect(m.quantity).toBe(10);
+    expect(m.unit).toBe('pack');
+    expect(m.packSize).toBe(1);
+    expect(m.packUnit).toBe('L');
+  });
+
+  it('reads a 2400x1200 plywood sheet as 2.88m2 and buys one', () => {
+    const m = mat(0.74, 'm²', 46);
+    m.name = '12mm CD Structural Plywood';
+    applyPackAwarePricing(m, {
+      productName: 'Customply 2400 x 1200 x 12mm Non Structural Plywood',
+    });
+    expect(m.quantity).toBe(1);
+    expect(m.totalPrice).toBe(46);
+  });
+
+  it('flags a measurement requirement it cannot reconcile, even when it cannot repair it', () => {
+    // "Gyprock Paper Joint Tape" states no roll length, so we can't know how
+    // many rolls 75 m needs — but we can refuse to present it as confident.
+    // (The real $2,386.50 tape row was an estimate, killed by the unit-aware
+    // trade fallback rather than here.)
+    const m = mat(75, 'm', 31.82);
+    m.name = 'Paper Joint Tape';
+    applyPackAwarePricing(m, { productName: 'Gyprock Paper Joint Tape' });
+    expect(m.priceConfidence).toBe('low');
+    expect(m.description).toContain('check it covers 75 m');
+  });
+
+  it('leaves a genuine per-each row untouched', () => {
+    const m = mat(1, 'each', 24.98);
+    m.name = 'Passage Lever Door Handle';
+    applyPackAwarePricing(m, { productName: 'Gainsborough Passage Lever Door Handle Set' });
+    expect(m.quantity).toBe(1);
+    expect(m.unit).toBe('each');
+    expect(m.totalPrice).toBe(24.98);
+    expect(m.priceConfidence).toBeUndefined();
+  });
+
+  it('still multiplies a counted requirement with no pack info', () => {
+    const m = mat(34, 'each', 4.9);
+    m.name = 'Hardwood Formwork Pegs 300mm';
+    applyPackAwarePricing(m, { productName: 'Hardwood Formwork Peg' });
+    expect(m.quantity).toBe(34);
+    expect(m.totalPrice).toBe(166.6);
+  });
+});
+
+describe('applyPackAwarePricing — an unknown product is not assumed to be one purchase', () => {
+  it('keeps a lineal-metre requirement when the title states no pack at all', () => {
+    // "Treated Pine Framing H3 90x45mm" carries no length. Collapsing 231 m to
+    // one length would quote $23 for $1,781 of timber.
+    const m = mat(231, 'm', 23.13);
+    m.name = 'Treated pine joists 90x45mm H3';
+    applyPackAwarePricing(m, { productName: 'Treated Pine Framing H3 90x45mm' });
+    expect(m.quantity).toBe(231);
+    expect(m.totalPrice).toBe(5343.03);
+    expect(m.priceConfidence).toBe('low');
+  });
+
+  it('still buys one when the title proves it is a pack we could not map', () => {
+    const m = mat(8, 'm²', 47.71);
+    applyPackAwarePricing(m, { productName: 'QEP 2mm 11m Silver Laminate Floating Floor Underlay' });
+    expect(m.quantity).toBe(1);
+    expect(m.totalPrice).toBe(47.71);
+  });
+
+  it('converts a stated stock length rather than flagging it', () => {
+    const m = mat(231, 'm', 23.13);
+    applyPackAwarePricing(m, { productName: '90 x 45mm Outdoor Framing H3 Treated Pine 3.0m' });
+    expect(m.quantity).toBe(77);
+    expect(m.packSize).toBe(3);
+    expect(m.priceConfidence).toBeUndefined();
+  });
+});

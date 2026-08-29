@@ -39,7 +39,7 @@ import {
 import { simplifySearchTerm } from '../utils/simplifySearchTerm';
 import { withPreservedCorrections } from './floorplanTakeoff';
 import { stampAsPriced } from '../utils/asPriced';
-import { isNonRetailTradeRow, tradeFallbackUnitPrice } from '../utils/tradeFallback';
+import { isNonRetailTradeRow, tradeFallbackUnitPriceWithUnit } from '../utils/tradeFallback';
 import { loadAllFavoritesForLLM, loadFavoritesFromLocal } from './materialFavorites';
 import { searchLocalSources } from './localMaterialSearch';
 import { loadGroups as loadSupplierGroups } from './supplierGroupService';
@@ -440,8 +440,24 @@ class FetchCancelled extends Error {
   }
 }
 
-function deterministicFallbackUnitPrice(material: Material): number | null {
-  return tradeFallbackUnitPrice(`${material.searchTerm || ''} ${material.name || ''}`, material.unit);
+/** Units that count purchasable items, where a per-item price multiplies out. */
+const PURCHASE_UNITS: ReadonlySet<Material['unit']> = new Set(['each', 'pack', 'box']);
+
+/**
+ * The trade table's estimate for a row, but only when the price is quoted in
+ * the unit the row is counting. A price per sheet is not a price per metre, and
+ * multiplying one by the other is how 75 m of paper joint tape reached $2,386.
+ * Returning null here leaves the row unpriced with the existing "add your own
+ * price" note, which is the honest state: we don't know what it costs.
+ */
+function unitSafeFallbackUnitPrice(material: Material): number | null {
+  const hit = tradeFallbackUnitPriceWithUnit(
+    `${material.searchTerm || ''} ${material.name || ''}`,
+    material.unit,
+  );
+  if (!hit) return null;
+  if (hit.per !== material.unit && !PURCHASE_UNITS.has(material.unit)) return null;
+  return hit.price;
 }
 
 function shouldUseTradeFallbackInsteadOfRetail(material: Material): boolean {
@@ -657,7 +673,7 @@ export function applyReconcileResult(
 }
 
 function applyVisibleFallbackEstimate(material: Material, gstInclusive: boolean): boolean {
-  const fallback = deterministicFallbackUnitPrice(material);
+  const fallback = unitSafeFallbackUnitPrice(material);
   if (!(fallback && fallback > 0)) return false;
   const unitPrice = roundToTwoDecimals(supplierPriceForGstMode(fallback, gstInclusive));
   material.price = unitPrice;
@@ -1238,7 +1254,7 @@ async function fetchPricesForQuoteInner(
         } catch {
           // fall through to failed
         }
-        const fallback = deterministicFallbackUnitPrice(material);
+        const fallback = unitSafeFallbackUnitPrice(material);
         if (fallback && fallback > 0) {
           const unitPrice = roundToTwoDecimals(supplierPriceForGstMode(fallback, gstInclusive));
           material.price = unitPrice;

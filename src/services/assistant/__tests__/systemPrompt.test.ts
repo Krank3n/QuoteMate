@@ -391,3 +391,22 @@ describe('mid-pipeline claims (real-device report, 26 Aug 2026)', () => {
     expect(section()).toMatch(/in front of the customer/i);
   });
 });
+
+// The smoke-alarm conversation: the tradie asked for a ballpark, was told
+// "I still need a customer to attach it to, even for a rough one", gave a name
+// under protest, was then asked for a phone number, and left. That account
+// still has zero quotes. A reworded prompt that reinstates the gate fails here.
+describe('a rough price does not require a customer', () => {
+  it('instructs drafting with a placeholder when the tradie asks for a rough price', () => {
+    expect(MATE_SYSTEM_PROMPT).toContain('rough price');
+    expect(MATE_SYSTEM_PROMPT).toContain('Unnamed job');
+    expect(MATE_SYSTEM_PROMPT).toMatch(/never make a price conditional on a customer/i);
+  });
+
+  it('keeps the placeholder in step with the pre-send gate', async () => {
+    const { isPlaceholderCustomer } = await import('../../../utils/quoteReview');
+    const placeholder = MATE_SYSTEM_PROMPT.match(/customerDraft: \{ name: "([^"]+)" \}/)?.[1];
+    expect(placeholder).toBeTruthy();
+    expect(isPlaceholderCustomer(placeholder)).toBe(true);
+  });
+});

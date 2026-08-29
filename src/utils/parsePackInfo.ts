@@ -16,6 +16,19 @@ export interface PackInfo {
   packUnit: 'each' | 'm' | 'm²' | 'm³' | 'L' | 'kg' | 'box' | 'pack';
 }
 
+export interface ParsePackOptions {
+  /**
+   * The unit the CALLER needs the answer in. A title routinely states its pack
+   * more than one way — "Earthwool R2.0 Wall Batt … 16.0m² 32 Pack" is both a
+   * 32-piece pack and 16 m² of coverage — and declaration order alone picked
+   * the count, which is useless to an m² requirement. The caller then found the
+   * units incompatible and fell through to charging the pack price per m².
+   *
+   * Set this to the requirement's unit and a reading in that unit wins.
+   */
+  preferUnit?: PackInfo['packUnit'];
+}
+
 const NUM = String.raw`(\d+(?:\.\d+)?)`;
 
 // Order matters — more specific patterns first. m²/m³ MUST come before m so
@@ -28,9 +41,14 @@ const PATTERNS: Array<{ re: RegExp; unit: PackInfo['packUnit'] }> = [
   // "500 pieces", "500pc", "500 pcs"
   { re: new RegExp(String.raw`\b${NUM}\s*(?:pieces|piece|pcs|pc)\b`, 'i'), unit: 'each' },
   // Area: "30m²", "30 sqm", "30 sq m", "30m2 roll". Must precede the linear-m pattern.
-  { re: new RegExp(String.raw`${NUM}\s*(?:m²|m2|sqm|sq\s*m|square\s+(?:metres?|meters?))\b`, 'i'), unit: 'm²' },
+  // The tail is a negative lookahead, NOT \b: `²` and `³` are non-word
+  // characters, so a trailing \b after them can only match before another word
+  // character — i.e. never in a real title. That silently made the "16.0m²"
+  // spelling unparseable, which is how an Earthwool batt pack stating its own
+  // coverage still got charged per square metre.
+  { re: new RegExp(String.raw`${NUM}\s*(?:m²|m2|sqm|sq\s*m|square\s+(?:metres?|meters?))(?!\w)`, 'i'), unit: 'm²' },
   // Volume: "0.054m³", "0.5m3 bag", "1 cubic metre". Must precede the linear-m pattern.
-  { re: new RegExp(String.raw`${NUM}\s*(?:m³|m3|cubic\s+(?:metres?|meters?))\b`, 'i'), unit: 'm³' },
+  { re: new RegExp(String.raw`${NUM}\s*(?:m³|m3|cubic\s+(?:metres?|meters?))(?!\w)`, 'i'), unit: 'm³' },
   // Length: "5.4m length", "5.4m long", or just trailing "5.4m" / "2400mm" at end
   { re: new RegExp(String.raw`(?<![\d.])${NUM}\s*m(?![lm²2a-z])(?:\s+(?:length|long|roll))?`, 'i'), unit: 'm' },
   { re: new RegExp(String.raw`\b${NUM}\s*mm\s+(?:length|long)\b`, 'i'), unit: 'm' }, // mm length → convert below
@@ -46,32 +64,70 @@ const PATTERNS: Array<{ re: RegExp; unit: PackInfo['packUnit'] }> = [
 
 const MM_LENGTH_RE = new RegExp(String.raw`\b${NUM}\s*mm\s+(?:length|long)\b`, 'i');
 
+/** Goods whose two stated dimensions describe the whole purchasable piece. */
+const AREA_NOUN_RE = /\b(?:roll|fabric|mat|geotextile|membrane|sheet|sheeting|film|wrap|sarking|barrier|insulation|plywood|ply|plastic|polyethylene|poly)\b/i;
+
 /**
  * Extract pack size/unit from a product title. Returns null when nothing
  * obvious matches — caller should leave the material's qty alone.
  */
-export function parsePackInfo(productName: string | undefined | null): PackInfo | null {
+export function parsePackInfo(
+  productName: string | undefined | null,
+  opts: ParsePackOptions = {},
+): PackInfo | null {
   if (!productName) return null;
   const title = productName.trim();
   if (!title) return null;
 
+  // A stated figure in the unit we need beats anything inferred. "Earthwool
+  // R2.0 Wall Batt 90mm x 430mm x 1160mm 16.0m² 32 Pack" says 16 m² outright;
+  // reading its 90 x 430 face dimensions as the pack area instead gives
+  // 0.04 m², and taking the "32 Pack" gives a piece count an m² requirement
+  // can't use. Only runs when the caller stated a unit, so the long-standing
+  // no-preference ordering below is untouched.
+  if (opts.preferUnit) {
+    const stated = readPack(title, PATTERNS.filter((p) => p.unit === opts.preferUnit));
+    if (stated) return stated;
+  }
+
   // Roll/sheet area from dimensions, e.g. "2m x 20m roll" = 40m². Must run
   // before plain length parsing so m² requirements don't buy one roll per m.
-  const areaDims = title.match(/\b(\d+(?:\.\d+)?)\s*(mm|m)\s*[x×]\s*(\d+(?:\.\d+)?)\s*(mm|m)\b/i);
-  if (areaDims && /\b(?:roll|fabric|mat|geotextile|membrane|sheet|sheeting|film|wrap|sarking|barrier|insulation|plastic|polyethylene|poly)\b/i.test(title)) {
-    const a = parseFloat(areaDims[1]) / (areaDims[2].toLowerCase() === 'mm' ? 1000 : 1);
-    const b = parseFloat(areaDims[3]) / (areaDims[4].toLowerCase() === 'mm' ? 1000 : 1);
-    if (a > 0 && b > 0) return { packSize: Math.round(a * b * 100) / 100, packUnit: 'm²' };
+  // The noun list covers goods whose two stated dimensions ARE the whole piece.
+  // `plywood`/`ply` earn their place — "2400 x 1200 x 12mm Plywood" is 2.88 m²,
+  // and without it a 0.74 m² requirement priced the sheet 0.74 times. Nouns
+  // whose face dimensions describe ONE unit of a multi-unit pack (batts, boards,
+  // panels) are deliberately absent: they yield the size of a piece, not a pack.
+  if (AREA_NOUN_RE.test(title) && (!opts.preferUnit || opts.preferUnit === 'm²')) {
+    const areaDims = title.match(/\b(\d+(?:\.\d+)?)\s*(mm|m)\s*[x×]\s*(\d+(?:\.\d+)?)\s*(mm|m)\b/i);
+    if (areaDims) {
+      const a = parseFloat(areaDims[1]) / (areaDims[2].toLowerCase() === 'mm' ? 1000 : 1);
+      const b = parseFloat(areaDims[3]) / (areaDims[4].toLowerCase() === 'mm' ? 1000 : 1);
+      if (a > 0 && b > 0) return { packSize: Math.round(a * b * 100) / 100, packUnit: 'm²' };
+    }
+    // Sheet goods usually carry the unit once, at the end: "2400 x 1200 x 12mm
+    // Plywood". Both leading figures are millimetres, so the sheet is 2.88 m².
+    const bareDims = title.match(/\b(\d{3,4})\s*[x×]\s*(\d{3,4})\s*[x×]\s*\d+(?:\.\d+)?\s*mm\b/i);
+    if (bareDims) {
+      const a = parseInt(bareDims[1], 10);
+      const b = parseInt(bareDims[2], 10);
+      if (a >= 100 && a <= 5000 && b >= 100 && b <= 5000) {
+        return { packSize: Math.round((a / 1000) * (b / 1000) * 100) / 100, packUnit: 'm²' };
+      }
+    }
   }
 
   // Special-case mm lengths — convert to metres so packUnit stays in 'm'.
   const mmMatch = title.match(MM_LENGTH_RE);
   if (mmMatch) {
     const mm = parseFloat(mmMatch[1]);
-    if (mm > 0) return { packSize: mm / 1000, packUnit: 'm' };
+    if (mm > 0 && (!opts.preferUnit || opts.preferUnit === 'm')) return { packSize: mm / 1000, packUnit: 'm' };
   }
 
-  for (const { re, unit } of PATTERNS) {
+  return readPack(title, PATTERNS);
+}
+
+function readPack(title: string, patterns: typeof PATTERNS): PackInfo | null {
+  for (const { re, unit } of patterns) {
     const match = title.match(re);
     if (!match) continue;
     let size = parseFloat(match[1]);
@@ -86,7 +142,6 @@ export function parsePackInfo(productName: string | undefined | null): PackInfo 
     if (unit === 'each' && size < 2) continue;
     return { packSize: size, packUnit: unit };
   }
-
   return null;
 }
 
