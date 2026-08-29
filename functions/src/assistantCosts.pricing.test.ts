@@ -3,7 +3,12 @@
 // READS at the discounted one, instead of everything flattening to inputPerM.
 
 import { describe, it, expect } from 'vitest';
-import { costMicrosForChat, PRICING } from './assistantCosts';
+import {
+  costMicrosForChat,
+  costMicrosForLive,
+  platformCostMicros,
+  PRICING,
+} from './assistantCosts';
 
 describe('costMicrosForChat', () => {
   it('bills a claude-sonnet-5 turn with cache reads and writes at their own rates', () => {
@@ -35,5 +40,97 @@ describe('costMicrosForChat', () => {
 
   it('has a pricing row for the live chat model', () => {
     expect(PRICING['claude-sonnet-5']).toBeTruthy();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Per-minute voice pricing (ElevenLabs Agents)
+// ---------------------------------------------------------------------------
+
+describe('platformCostMicros', () => {
+  it('charges the per-session prompt-cache write once, not per minute', () => {
+    // Measured on a real 64s call: $0.056 of a $0.062 LLM bill was a single
+    // Anthropic cache write re-paying the 20.5k-token prompt. It does not
+    // scale with duration, so a 30s call and a 10min call pay it identically.
+    const short = platformCostMicros('elevenlabs/claude-sonnet-5', 30);
+    const long = platformCostMicros('elevenlabs/claude-sonnet-5', 600);
+    expect(short - 40_000).toBe(62_000);          // 30s of platform + the fixed cost
+    expect(long - 800_000).toBe(62_000);          // 10min of platform + the SAME fixed cost
+  });
+
+  it('makes short sessions dearer per minute, which is the real shape', () => {
+    const perMin = (secs: number) =>
+      platformCostMicros('elevenlabs/claude-sonnet-5', secs) / (secs / 60);
+    expect(perMin(30)).toBeGreaterThan(perMin(600));
+  });
+
+  it('charges nothing at all for a session that never happened', () => {
+    // A mint that failed before connect must not be billed a cache write for
+    // a prompt that was never sent.
+    expect(platformCostMicros('elevenlabs/claude-sonnet-5', 0)).toBe(0);
+  });
+
+  it('costs 6 minutes of platform time at $0.08/min as 480,000 micros', () => {
+    // THE unit guard. Every other term in assistantCosts relies on
+    // tokens * pricePerM === micros; a per-minute rate is plain USD and needs
+    // an explicit * 1e6. A factor-of-a-million slip here looks entirely
+    // plausible on the dashboard, which is why it is pinned to a literal.
+    expect(platformCostMicros('elevenlabs/claude-sonnet-5', 360) - 62_000).toBe(480_000);
+  });
+
+  it('scales linearly with duration', () => {
+    const FIXED = 62_000;
+    const one = platformCostMicros('elevenlabs/claude-sonnet-5', 60) - FIXED;
+    expect(one).toBe(80_000);
+    expect(platformCostMicros('elevenlabs/claude-sonnet-5', 120) - FIXED).toBe(one * 2);
+  });
+
+  it('charges part-minutes proportionally rather than rounding up', () => {
+    expect(platformCostMicros('elevenlabs/claude-sonnet-5', 30) - 62_000).toBe(40_000);
+  });
+
+  it('doubles at the burst rate when over the concurrency limit', () => {
+    const FIXED = 62_000;
+    const standard = platformCostMicros('elevenlabs/claude-sonnet-5', 360) - FIXED;
+    const burst = platformCostMicros('elevenlabs/claude-sonnet-5', 360, { burst: true }) - FIXED;
+    expect(burst).toBe(standard * 2);
+  });
+
+  it('costs nothing for a zero-length or negative duration', () => {
+    expect(platformCostMicros('elevenlabs/claude-sonnet-5', 0)).toBe(0);
+    expect(platformCostMicros('elevenlabs/claude-sonnet-5', -100)).toBe(0);
+  });
+
+  it('costs nothing for a token-billed model, so the Gemini rows are untouched', () => {
+    expect(platformCostMicros('gemini-3.1-flash-live-preview', 600)).toBe(0);
+    expect(platformCostMicros('claude-sonnet-5', 600)).toBe(0);
+  });
+});
+
+describe('ElevenLabs pricing row', () => {
+  it('exists and carries a per-minute rate', () => {
+    expect(PRICING['elevenlabs/claude-sonnet-5'].perMinuteUsd).toBe(0.08);
+  });
+
+  it('uses a compound key so voice spend stays separable from text spend', () => {
+    // Both run claude-sonnet-5; fusing the keys would make /admin/ai-costs
+    // unable to say whether Mate's cost comes from typing or talking.
+    expect(PRICING['elevenlabs/claude-sonnet-5']).not.toBe(PRICING['claude-sonnet-5']);
+  });
+
+  it('survives sanitiseKey as a legal Firestore field path segment', () => {
+    const key = 'elevenlabs/claude-sonnet-5'.replace(/[.#$/[\]]/g, '_');
+    expect(key).toBe('elevenlabs_claude-sonnet-5');
+    expect(key).not.toMatch(/[.#$/[\]]/);
+  });
+});
+
+describe('token-cost regression for the pre-existing rows', () => {
+  it('costs a Gemini Live session exactly as it did before the voice swap', () => {
+    // Guards the additive change: adding perMinuteUsd must not perturb any
+    // existing arithmetic. 1M input audio tokens at $0.50/M = $0.50 = 500k micros.
+    expect(costMicrosForLive('gemini-3.1-flash-live-preview', {
+      inputAudioTokens: 1_000_000,
+    })).toBe(500_000);
   });
 });

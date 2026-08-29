@@ -3733,6 +3733,68 @@ export const useStore = create<AppState>((set, get) => ({
           return { ok: false, error: 'Quote not found — it may have already been deleted.' };
         }
 
+        case 'propose_update_line_item': {
+          // Change a row that's already on the doc. Mate could add lines and
+          // delete lines but not correct one, so an unpriced row meant telling
+          // the tradie to go and type it in — twice, in the conversation that
+          // prompted this.
+          const applyEdit = (materials: Material[]): { next: Material[]; found: boolean } => {
+            let found = false;
+            const next = materials.map((m) => {
+              if (m.id !== proposal.materialId) return m;
+              found = true;
+              const price = proposal.price ?? m.price;
+              const quantity = proposal.quantity ?? m.quantity;
+              return {
+                ...m,
+                name: proposal.name ?? m.name,
+                price,
+                quantity,
+                // Stored, not derived — recompute or the customer sees the old
+                // line total against the new unit price.
+                totalPrice: Number((price * quantity).toFixed(2)),
+                // A price the tradie set is a fact, not an estimate. Marking it
+                // manual is also what clears the 'estimated' flag review_quote
+                // raises, so a row they've just priced stops being reported as
+                // needing a look.
+                ...(proposal.price !== undefined
+                  ? { pricingSource: 'manual' as const, priceConfidence: 'high' as const }
+                  : {}),
+              };
+            });
+            return { next, found };
+          };
+
+          const target = await resolveDocument(proposal.quoteId);
+          if (target) {
+            const { next, found } = applyEdit(target.materials ?? []);
+            if (!found) {
+              return { ok: false, error: 'That line is not on the quote any more — call get_quote and try again.' };
+            }
+            await get().saveDocument({ ...target, materials: next });
+            return { ok: true };
+          }
+          const quote = get().quotes.find((q) => q.id === proposal.quoteId);
+          if (quote) {
+            const { next, found } = applyEdit(quote.materials);
+            if (!found) {
+              return { ok: false, error: 'That line is not on the quote any more — call get_quote and try again.' };
+            }
+            await get().saveQuote(updateQuoteCalculations({ ...quote, materials: next, updatedAt: new Date() }));
+            return { ok: true, navigate: { kind: 'job_preview', quoteId: quote.id } };
+          }
+          const invoice = get().invoices.find((i) => i.id === proposal.quoteId);
+          if (invoice) {
+            const { next, found } = applyEdit(invoice.materials);
+            if (!found) {
+              return { ok: false, error: 'That line is not on the invoice any more — call get_quote and try again.' };
+            }
+            await get().saveInvoice(updateQuoteCalculations({ ...invoice, materials: next, updatedAt: new Date() } as any) as any);
+            return { ok: true, navigate: { kind: 'job_preview', quoteId: invoice.id } };
+          }
+          return { ok: false, error: 'Quote not found.' };
+        }
+
         case 'propose_delete_line_item': {
           // Prefer the unified Document path so the legacy mirror tracks the
           // change; fall back to legacy quote/invoice arrays.

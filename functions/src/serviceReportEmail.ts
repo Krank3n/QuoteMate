@@ -18,6 +18,7 @@ import cors from 'cors';
 import { verifyAuth } from './assistantToken';
 import { sendEmail, getUserEmail } from './email';
 import { generateQuotePdfBuffer } from './pdfGenerator';
+import { formatAuDate } from './timestamps.helpers';
 import { buildReportPdfHtml } from './shared/pdf';
 import type { ReportPdfData, BusinessPdfData } from './shared/pdf';
 import type { ServiceReport } from './shared/report/types';
@@ -78,11 +79,14 @@ export function reportAttachmentFilename(reportNumber: string, customerName: str
   return `Service_Report_${num}_${who}.pdf`;
 }
 
-/** Australian long-date, e.g. "22 July 2026". Pure — deterministic for a given ms. */
-export function fmtAuDate(value: number | undefined): string {
-  return new Date(value || Date.now()).toLocaleDateString('en-AU', {
-    day: '2-digit', month: 'long', year: 'numeric',
-  });
+/**
+ * Australian long-date, e.g. "22 July 2026". Pure — deterministic for a given
+ * input. Takes `any`, not `number`: report.visitDate is read straight off a
+ * Firestore doc, so it can arrive as a Timestamp regardless of the declared
+ * type, and `new Date(Timestamp)` is Invalid Date.
+ */
+export function fmtAuDate(value: any): string {
+  return formatAuDate(value);
 }
 
 function esc(s: string): string {

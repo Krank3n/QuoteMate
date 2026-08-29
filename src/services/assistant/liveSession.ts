@@ -6,7 +6,7 @@
 // the endpoint constants, and the error trio those paths surface all live here
 // so the two transports can't drift on auth, quota, or offline handling.
 
-import { Platform } from 'react-native';
+import { NativeModules, Platform } from 'react-native';
 import { auth } from '../../config/firebase';
 
 const USE_EMULATOR = process.env.USE_FIREBASE_EMULATOR === 'true';
@@ -58,10 +58,76 @@ export class LiveRateLimitError extends LiveOfflineError {
   }
 }
 
-export interface MintedToken {
+/**
+ * What the mint returns depends on which voice provider the SERVER picked for
+ * this user — the client does not choose. That indirection is the rollback
+ * mechanism: moving everyone back to Gemini Live is a Firestore edit plus a
+ * functions deploy, with no app-store release in the loop.
+ */
+export interface GeminiMintedToken {
+  provider?: 'gemini';
   token: string;
   model: string;
   expiresAt?: string;
+}
+
+export interface ElevenLabsMintedToken {
+  provider: 'elevenlabs';
+  /** LiveKit conversation token — WebRTC only; the RN SDK rejects signed URLs. */
+  token: string;
+  model: string;
+  agentId: string;
+  /** Ties the session to the server's voiceSessions row for cost reconciliation. */
+  conversationId: string;
+  /** Client-side backstop for the agent's own duration ceiling. */
+  maxDurationSeconds: number;
+  heldSeconds: number;
+  remainingVoiceSeconds: number;
+}
+
+export interface OpenAiMintedToken {
+  provider: 'openai';
+  /** Ephemeral client secret — the API key never reaches the device. */
+  token: string;
+  model: string;
+  /** OpenAI's own TTS voice name for the session. */
+  voice?: string;
+  maxDurationSeconds: number;
+  heldSeconds: number;
+  remainingVoiceSeconds: number;
+}
+
+export type MintedToken = GeminiMintedToken | ElevenLabsMintedToken | OpenAiMintedToken;
+
+export function isElevenLabsMint(m: MintedToken): m is ElevenLabsMintedToken {
+  return m.provider === 'elevenlabs';
+}
+
+export function isOpenAiMint(m: MintedToken): m is OpenAiMintedToken {
+  return m.provider === 'openai';
+}
+
+/**
+ * Transports this build can actually open. Sent on every voice mint so the
+ * server can never hand this client a token it wouldn't know what to do with —
+ * a capability handshake rather than version parsing. Builds before 1.56 send
+ * nothing at all and are therefore always served Gemini.
+ *
+ * Checked against the BINARY, not the bundle. runtimeVersion: appVersion is
+ * supposed to stop this JS reaching a build without LiveKit, but that's a
+ * version-discipline promise and this is a one-line verification. Claiming a
+ * transport the binary can't open costs the tradie their session and a quota
+ * turn before anyone finds out, so it's worth not relying on the promise.
+ *
+ * WebRTCModule is what both @livekit/react-native-webrtc platforms register.
+ */
+export function voiceClientCapabilities(): string[] {
+  // Browsers ship WebRTC; @elevenlabs/client uses it directly, no native module.
+  // OpenAI Realtime rides the same PCM WebSocket path the Gemini transport
+  // uses, so it needs no native module beyond the mic — unlike ElevenLabs,
+  // which needs LiveKit's WebRTC linked into this binary.
+  if (Platform.OS === 'web') return ['elevenlabs', 'openai'];
+  return NativeModules?.WebRTCModule ? ['elevenlabs', 'openai'] : ['openai'];
 }
 
 // Per-request ceilings. Without these a half-open connection (walking out of
@@ -144,7 +210,11 @@ export async function mintLiveToken(mode?: 'voice'): Promise<MintedToken> {
     response = await fetchWithTimeout(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
-      body: JSON.stringify({ platform: Platform.OS, mode }),
+      body: JSON.stringify({
+        platform: Platform.OS,
+        mode,
+        ...(mode === 'voice' ? { supports: voiceClientCapabilities() } : {}),
+      }),
     }, MINT_TIMEOUT_MS);
   } catch (err: any) {
     if (err instanceof LiveOfflineError) throw err;
@@ -165,6 +235,11 @@ export async function mintLiveToken(mode?: 'voice'): Promise<MintedToken> {
 
   const data = (await response.json()) as MintedToken;
   if (!data?.token || !data?.model) {
+    throw new LiveOfflineError('Mate is offline (bad token response).');
+  }
+  // An ElevenLabs mint without an agent id is unopenable — better to say Mate
+  // is offline than to fail deep inside the SDK with a shapeless error.
+  if (isElevenLabsMint(data) && !data.agentId) {
     throw new LiveOfflineError('Mate is offline (bad token response).');
   }
   return data;

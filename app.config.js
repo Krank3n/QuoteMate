@@ -12,7 +12,17 @@ export default {
     // 1.46: adds the @sentry/react-native NATIVE module. Do not publish JS
     // built from this tree as an OTA for 1.45 — the appVersion runtime
     // policy below is what stops that from happening automatically.
-    version: "1.55",
+    //
+    // 1.56: adds LiveKit WebRTC (@elevenlabs/react-native). The same rule, and
+    // this time it is load-bearing in a specific way: liveSession declares
+    // VOICE_CLIENT_CAPABILITIES = ['elevenlabs'] on every voice mint, and that
+    // claim is made by JS, not verified against the native binary. OTA this
+    // bundle onto a 1.55 build and the client would promise a transport it
+    // does not have — the server would hand it an ElevenLabs token, the
+    // LiveKit import would fail, and the tradie would lose the session having
+    // already spent a quota turn. runtimeVersion: appVersion is what makes
+    // that impossible, but only while this number is ahead of 1.55.
+    version: "1.56",
     orientation: "portrait",
     icon: "./assets/icon.png",
     userInterfaceStyle: "automatic",
@@ -55,6 +65,20 @@ export default {
           }
         }
       ],
+      [
+        // LiveKit WebRTC, the transport under @elevenlabs/react-native. ios/ and
+        // android/ are gitignored, so this plugin is the ONLY way the native
+        // config survives a prebuild. audioType "communication" is the manifest
+        // analogue of the old mic.ts audioSource: 7 (VOICE_COMMUNICATION) — it's
+        // what engages platform AEC, which is what lets the half-duplex mic gate
+        // in AssistantScreen go away. We never screen-share or use the camera
+        // through LiveKit, so both extras stay off.
+        "@livekit/react-native-expo-plugin",
+        {
+          android: { audioType: "communication", enableScreenShareService: false },
+          ios: { enableMultitaskingCameraAccess: false }
+        }
+      ],
       "expo-apple-authentication",
       [
         // Native Google Sign-In (Play Services / iOS account picker). Replaces
@@ -70,7 +94,7 @@ export default {
       [
         "expo-speech-recognition",
         {
-          microphonePermission: "Allow QuoteMate to use your microphone for voice-to-text job descriptions.",
+          microphonePermission: "QuoteMate uses your microphone for voice-to-text job descriptions and to talk to Mate, your in-app offsider.",
           speechRecognitionPermission: "Allow QuoteMate to use speech recognition for voice-to-text job descriptions.",
           android: {
             requireOnDeviceRecognition: false
@@ -102,6 +126,14 @@ export default {
         }
       ],
       "expo-iap",
+      // Gradle heap. LiveKit's WebRTC pushes :app:mergeExtDexDebug past Expo's
+      // default -Xmx2048m and D8 dies with an OutOfMemoryError that presents as
+      // a DexArchiveMergerException. android/ is gitignored, so this can only
+      // live in a plugin.
+      "./plugins/withGradleJvmArgs",
+      // LiveKit's webrtc manifest merges in an Android screen-capture service we
+      // never start. enableScreenShareService:false does NOT remove it.
+      "./plugins/withLiveKitManifestTrim",
       ["./plugins/withKotlinVersion", "2.2.0"],
       // GoogleSignIn iOS SDK (native Google sign-in) pulls Swift pod
       // AppCheckCore whose ObjC deps need module maps — see the plugin.
@@ -132,7 +164,7 @@ export default {
       supportsTablet: true,
       bundleIdentifier: "com.hansendev.quotemate",
       usesAppleSignIn: true,
-      buildNumber: "93",
+      buildNumber: "94",
       // Universal Links. The path allow-list lives in
       // public/.well-known/apple-app-site-association (/join* and /ref/*).
       associatedDomains: ["applinks:quotemateapp.au"],
@@ -147,7 +179,7 @@ export default {
         backgroundColor: "#0A0E16"  // Dark blue-gray to match app theme
       },
       package: "com.quotemate.app",
-      versionCode: 169,
+      versionCode: 170,
       permissions: ["android.permission.RECORD_AUDIO", "android.permission.CAMERA", "android.permission.READ_CONTACTS"],
       intentFilters: [
         {

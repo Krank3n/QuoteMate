@@ -301,3 +301,63 @@ describe('requireKnownQuote gate (birdhouse convo, 25 Aug 2026)', () => {
     expect((proposal as RepriceQuoteProposal).quoteId).toBe('anything_goes');
   });
 });
+
+describe('propose_update_line_item (real conversation, 28 Aug 2026)', () => {
+  /**
+   * Mate could add a line and delete a line but not correct one. Asked to put
+   * $100 on an unpriced row, it told the tradie twice to go and type it in
+   * himself — the second time after he said "no, you do it".
+   */
+  const base = { quoteId: 'q1', materialId: 'm1' };
+
+  it('accepts a price on its own', () => {
+    const { proposal, error } = buildProposal('propose_update_line_item', 't1', { ...base, price: 100 });
+    expect(error).toBeUndefined();
+    expect(proposal).toMatchObject({ type: 'propose_update_line_item', materialId: 'm1', price: 100 });
+  });
+
+  it('accepts a quantity on its own', () => {
+    const { proposal } = buildProposal('propose_update_line_item', 't1', { ...base, quantity: 12 });
+    expect(proposal).toMatchObject({ quantity: 12 });
+    expect((proposal as any)?.price).toBeUndefined();
+  });
+
+  it('accepts a rename on its own', () => {
+    const { proposal } = buildProposal('propose_update_line_item', 't1', { ...base, name: '  Merbau decking  ' });
+    expect(proposal).toMatchObject({ name: 'Merbau decking' });
+  });
+
+  it('refuses a change that changes nothing', () => {
+    const { error } = buildProposal('propose_update_line_item', 't1', base);
+    expect(error).toMatch(/at least one of price, quantity or name/);
+  });
+
+  it('requires the material id, since names arrive mangled by voice', () => {
+    const { error } = buildProposal('propose_update_line_item', 't1', { quoteId: 'q1', price: 100 });
+    expect(error).toMatch(/materialId/);
+  });
+
+  it('refuses a negative price — it flows straight to the customer total', () => {
+    const { error } = buildProposal('propose_update_line_item', 't1', { ...base, price: -50 });
+    expect(error).toMatch(/negative/i);
+  });
+
+  it('accepts a zero price, which is a legitimate freebie', () => {
+    const { error } = buildProposal('propose_update_line_item', 't1', { ...base, price: 0 });
+    expect(error).toBeUndefined();
+  });
+
+  it('sends a zero quantity to delete instead of silently emptying the row', () => {
+    const { error } = buildProposal('propose_update_line_item', 't1', { ...base, quantity: 0 });
+    expect(error).toMatch(/propose_delete_line_item/);
+  });
+
+  it('carries the before-values so the card can show the change', () => {
+    const { proposal } = buildProposal('propose_update_line_item', 't1', {
+      ...base, price: 100, displayName: 'Plywood panel', displayCurrentPrice: 0, displayUnit: 'each',
+    });
+    expect(proposal).toMatchObject({
+      displayName: 'Plywood panel', displayCurrentPrice: 0, displayUnit: 'each',
+    });
+  });
+});

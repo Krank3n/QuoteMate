@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { buildSelfCopyBcc, sendMethodPatch, stageTransitionTimestamps } from './documentHandlers';
+import {
+  buildSelfCopyBcc,
+  buildQuotePdfHtmlForQuote,
+  sendMethodPatch,
+  stageTransitionTimestamps,
+} from './documentHandlers';
 
 describe('sendMethodPatch', () => {
   it('returns {sendMethod} only on a sent transition', () => {
@@ -55,5 +60,56 @@ describe('buildSelfCopyBcc', () => {
   it('skips the BCC when the tradie is already the recipient (case/whitespace-insensitive)', () => {
     expect(buildSelfCopyBcc({ ...base, recipientEmail: 'tradie@example.au' })).toBeUndefined();
     expect(buildSelfCopyBcc({ ...base, recipientEmail: '  Tradie@Example.AU ' })).toBeUndefined();
+  });
+});
+
+/**
+ * Regression: "Invalid Date" on the customer-facing quote PDF.
+ *
+ * `quoteDate` is built from `quote.documentDate || quote.updatedAt`, read
+ * straight off Firestore. When that field is a Timestamp (32 of 400 sampled
+ * prod quotes), the old `new Date(value)` produced Invalid Date and the
+ * customer's PDF showed the literal text "Invalid Date" under the quote
+ * number. Assert on the rendered HTML, not just the formatter, so the whole
+ * path is covered.
+ */
+describe('buildQuotePdfHtmlForQuote — quote date', () => {
+  const AT_NOON_UTC = Date.UTC(2026, 7, 9, 12, 0, 0); // 9 Aug 2026
+  const business = { businessName: 'Riverbend Carpentry' } as any;
+  const baseQuote = {
+    customerName: 'Test Client',
+    quoteNumber: 'QU-1189',
+    job: { name: 'Sleeper retaining wall', description: 'Test' },
+    materials: [], subtotal: 0, total: 0,
+  };
+
+  it('renders a real date when updatedAt is a Firestore Timestamp — THE BUG', () => {
+    const html = buildQuotePdfHtmlForQuote(
+      { ...baseQuote, updatedAt: { toDate: () => new Date(AT_NOON_UTC) } },
+      business,
+    );
+    expect(html).not.toContain('Invalid Date');
+    expect(html).toContain('09 August 2026');
+  });
+
+  it('renders a real date for {_seconds} and epoch-millis shapes too', () => {
+    for (const updatedAt of [{ _seconds: AT_NOON_UTC / 1000, _nanoseconds: 0 }, AT_NOON_UTC]) {
+      const html = buildQuotePdfHtmlForQuote({ ...baseQuote, updatedAt }, business);
+      expect(html).not.toContain('Invalid Date');
+      expect(html).toContain('09 August 2026');
+    }
+  });
+
+  it('lets a backdated documentDate win over updatedAt', () => {
+    const html = buildQuotePdfHtmlForQuote(
+      {
+        ...baseQuote,
+        documentDate: Date.UTC(2026, 0, 15, 12, 0, 0),
+        updatedAt: { toDate: () => new Date(AT_NOON_UTC) },
+      },
+      business,
+    );
+    expect(html).toContain('15 January 2026');
+    expect(html).not.toContain('09 August 2026');
   });
 });

@@ -12,6 +12,8 @@ import {
   LiveOfflineError,
   LiveQuotaError,
   LiveRateLimitError,
+  isElevenLabsMint,
+  voiceClientCapabilities,
   __resetMintThrottle,
 } from '../liveSession';
 import type { ChatAttachment, ChatMessage } from '../../../types/assistant';
@@ -189,6 +191,83 @@ describe('mintLiveToken', () => {
     vi.setSystemTime(61_000);
     await expect(mintLiveToken('voice')).resolves.toEqual({ token: 'tok', model: 'm' });
     expect(fetchMock).toHaveBeenCalledTimes(9);
+  });
+
+  // --- provider handshake ------------------------------------------------
+  // The server, not the client, decides which voice transport opens. That is
+  // what makes a rollback a Firestore edit instead of an app-store release.
+
+  it('only claims a transport the binary can actually open', () => {
+    // Vitest runs under react-native-web, where browser WebRTC is always
+    // available — so this asserts the web branch. The native branch checks
+    // NativeModules.WebRTCModule, because runtimeVersion discipline alone is
+    // a promise and this is a verification.
+    //
+    // OpenAI Realtime rides the same PCM WebSocket the Gemini transport uses,
+    // so it needs no native module; ElevenLabs needs LiveKit's WebRTC linked
+    // in. That asymmetry is the whole point of sending capabilities at all.
+    expect(voiceClientCapabilities()).toEqual(['elevenlabs', 'openai']);
+  });
+
+  it('declares its supported transports on a voice mint', () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true, status: 200, json: async () => ({ token: 'tok', model: 'm' }),
+    } as unknown as Response);
+    return mintLiveToken('voice').then(() => {
+      const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+      expect(body.mode).toBe('voice');
+      expect(body.supports).toEqual(voiceClientCapabilities());
+    });
+  });
+
+  it('does not declare voice transports on a text mint', async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true, status: 200, json: async () => ({ token: 'tok', model: 'm' }),
+    } as unknown as Response);
+    await mintLiveToken();
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.supports).toBeUndefined();
+  });
+
+  it('passes an ElevenLabs mint through with its agent and session fields', async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true, status: 200, json: async () => ({
+        provider: 'elevenlabs', token: 'lk-tok', model: 'elevenlabs/claude-sonnet-5',
+        agentId: 'agent_1', conversationId: 'conv_1',
+        maxDurationSeconds: 600, heldSeconds: 120, remainingVoiceSeconds: 1680,
+      }),
+    } as unknown as Response);
+    const minted = await mintLiveToken('voice');
+    expect(isElevenLabsMint(minted)).toBe(true);
+    if (isElevenLabsMint(minted)) {
+      expect(minted.agentId).toBe('agent_1');
+      expect(minted.maxDurationSeconds).toBe(600);
+    }
+  });
+
+  it('treats a mint with no provider as Gemini, so old server builds still work', async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true, status: 200, json: async () => ({ token: 'tok', model: 'live-model' }),
+    } as unknown as Response);
+    expect(isElevenLabsMint(await mintLiveToken('voice'))).toBe(false);
+  });
+
+  it('rejects an ElevenLabs mint that arrived without an agent id', async () => {
+    // Unopenable. Better to say Mate is offline than to fail deep in the SDK.
+    fetchMock.mockResolvedValueOnce({
+      ok: true, status: 200, json: async () => ({
+        provider: 'elevenlabs', token: 'lk-tok', model: 'elevenlabs/claude-sonnet-5',
+      }),
+    } as unknown as Response);
+    await expect(mintLiveToken('voice')).rejects.toBeInstanceOf(LiveOfflineError);
+  });
+
+  it('surfaces an exhausted voice budget as a quota error, which stops the reconnect loop', async () => {
+    fetchMock.mockResolvedValueOnce(errorResponse(402, {
+      error: "You've used up today's talk time with Mate (5 minutes).",
+      code: 'VOICE_BUDGET_EXCEEDED',
+    }));
+    await expect(mintLiveToken('voice')).rejects.toBeInstanceOf(LiveQuotaError);
   });
 });
 

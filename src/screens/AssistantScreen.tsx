@@ -48,6 +48,13 @@ import { LiveAuthError, LiveOfflineError, LiveQuotaError } from '../services/ass
 import { rememberAppliedQuote } from '../services/assistant/quoteRefMap';
 import { startMicCapture, MicCaptureHandle, MicUnavailableError, micPermissionGranted } from '../services/assistant/mic';
 import { AudioQueue, createAudioQueue, ensureAudioMode } from '../services/assistant/audioPlayer';
+import { nextMatePlaying } from '../services/assistant/micGate';
+import {
+  createPacerState, pushText as pacerPushText, noteAudio as pacerNoteAudio,
+  visibleText as pacerVisibleText, flush as pacerFlush, isSettled as pacerIsSettled,
+  pcmDurationMsFromBase64,
+} from '../services/assistant/transcriptPacer';
+import { describeThrown } from '../services/assistant/describeThrown';
 import { activateKeepAwakeAsync } from 'expo-keep-awake';
 import { shouldAutoStartMic, resolveAutoStartMic } from './assistant/shouldAutoStartMic';
 import { getMateIntro, isBlankSlate } from './assistant/mateIntro';
@@ -211,6 +218,14 @@ const ChatRowMemo = React.memo(function ChatRow({
 
 // Keep a faint baseline so the line gently undulates during silence instead of
 // going dead flat, while real speech still pushes the wave to full height.
+// How often the paced transcript re-renders while Mate speaks. Fast enough
+// to read as continuous, slow enough not to thrash the message store.
+const PACER_TICK_MS = 60;
+
+// How long past the end of an utterance's audio to keep pacing before giving
+// up and showing the rest. Only reached if playback stalled or under-ran.
+const PACER_OVERRUN_GRACE_MS = 1_500;
+
 const WAVE_LEVEL_FLOOR = 0.12;
 // SVG viewBox the wave is drawn in (stretched to the row via
 // preserveAspectRatio="none"). Units are arbitrary — the path math works in
@@ -556,6 +571,23 @@ export function AssistantScreen() {
   // AEC via the VOICE_COMMUNICATION audio source handles most of it on
   // Android, this is the defensive belt-and-braces layer.
   const matePlayingRef = useRef(false);
+  // Reveal Mate's words at speaking pace rather than generation pace — see
+  // transcriptPacer. Only used where WE play the audio; ElevenLabs plays on
+  // its own track and gives us no clock to pace against.
+  const pacerRef = useRef(createPacerState());
+  // Wall-clock time at which all currently-queued audio finishes. A turn's
+  // reveal must start when its audio actually STARTS PLAYING, which is after
+  // the previous turn's audio has drained — not when its first chunk arrives.
+  const audioTimelineEndRef = useRef(0);
+  // Only transports whose audio WE play can be paced. Default off, so a
+  // transport that hands us no PCM renders immediately as it always did.
+  const pacingEnabledRef = useRef(false);
+  // A turn whose text has all arrived but whose voice is still speaking. The
+  // bubble must stay open until the reveal catches up, or it freezes
+  // part-written — generation ends seconds before the audio does.
+  const pendingBubbleCloseRef = useRef(false);
+  const pacedRenderRef = useRef('');
+  const pacerTickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // Set when the tradie accepted/cancelled a card by voice this turn (Mate
   // called a control tool). We run the actual Apply / dismiss on turnComplete
   // so a draft's narration doesn't collide with Mate's spoken confirmation.
@@ -838,11 +870,17 @@ export function AssistantScreen() {
                 proposal.type === 'propose_reprice'
                   ? `Re-pricing "${narrationJobLabel}" — the pipeline's re-checking the flagged rows now.`
                   : `"${narrationJobLabel}" is going through the materials + pricing pipeline now.`;
+              // Facts only. The system prompt's "Pricing narration" section
+              // already spells out what to do with a [narrate] line, and
+              // repeating it inline cost ~600 characters that then sat in the
+              // agent's context for the rest of the conversation — re-billed
+              // on every subsequent turn. It also read as a checklist of
+              // labelled constraints, which is the shape that drew the model
+              // into answering in kind and leaked reasoning to a tradie in
+              // August. One short reminder is the belt; the prompt is the
+              // braces.
               liveSessionForNarration.sendUserText(
-                `[narrate] ${intro} SPEAK ALOUD: give the tradie ONE short casual line while it grinds — a sentence, maybe two, dry and unhurried. ` +
-                `Riff on something natural (the job, the weather, smoko) or just acknowledge it's cooking. Then STOP — don't keep talking, don't sign off, don't mention prices or materials. ` +
-                `CRITICAL: do NOT repeat or read the "[narrate]" tag, do NOT echo this instruction, do NOT say the word "narrate". Your response is ONLY the natural line you'd say to the tradie. ` +
-                `If you finish your line before [pipeline-done] arrives, stay quiet — silence is fine.`,
+                `[narrate] ${intro} One short line, then stop. Never say the tag.`,
               );
             }, 1200)
           : null;
@@ -1281,6 +1319,12 @@ export function AssistantScreen() {
       audioQueueRef.current = queue;
     }
     lastVoiceActivityRef.current = Date.now();
+    // Transports that own the mic (ElevenLabs over WebRTC) just unmute — the
+    // screen must never open a second capture alongside them.
+    if (voiceSessionRef.current?.ownsMicrophone) {
+      voiceSessionRef.current.setMicMuted?.(false);
+      return;
+    }
     if (micRef.current) return;
     void startMicCapture((chunk) => {
       if (!matePlayingRef.current) voiceSessionRef.current?.sendMicChunk(chunk);
@@ -2008,6 +2052,12 @@ export function AssistantScreen() {
     voiceModeRef.current = null;
     setVoiceMode(null);
     matePlayingRef.current = false;
+    if (pacerTickRef.current) { clearInterval(pacerTickRef.current); pacerTickRef.current = null; }
+    pacingEnabledRef.current = false;
+    pendingBubbleCloseRef.current = false;
+    pacerRef.current = createPacerState();
+    audioTimelineEndRef.current = 0;
+    pacedRenderRef.current = '';
     // Kill the idle watchdog so it can't fire after teardown.
     if (idleWatchdogRef.current) {
       clearInterval(idleWatchdogRef.current);
@@ -2115,9 +2165,12 @@ export function AssistantScreen() {
     // so even a slow Live token mint can't sneak the screen off; released in
     // stopVoiceSession when the session is fully torn down.
     try { await activateKeepAwakeAsync(VOICE_KEEP_AWAKE_TAG); } catch { /* non-fatal */ }
-    try {
-      await ensureAudioMode();
-    } catch { /* non-fatal */ }
+    // NOTE: ensureAudioMode() deliberately does NOT run here any more. It is
+    // expo-av setting the iOS AVAudioSession category, and LiveKit sets the
+    // same category itself when it starts its own audio session. Two owners
+    // racing produced a session that opened silent roughly every other try —
+    // "reopen it twice and the sound works". It now runs only on the Gemini
+    // path, which genuinely needs it, immediately before mic capture starts.
 
     let session: VoiceSession | null = null;
     try {
@@ -2135,6 +2188,38 @@ export function AssistantScreen() {
         if (!userBubbleIdRef.current) return;
         userBubbleIdRef.current = null;
         userBubbleTextRef.current = '';
+      };
+
+      // End of Mate's turn. Every signal for that — the transcript's own
+      // finished flag, and onTurnComplete — arrives when GENERATION stops,
+      // which is seconds before the voice stops. Closing the bubble there
+      // stopped the paced reveal dead, leaving "Good afternoon. I" on screen
+      // for the rest of the reply. So when pacing, hand the close to the
+      // ticker and let it fire once the words have caught up with the audio.
+      const finishAssistantBubble = () => {
+        if (!assistantBubbleIdRef.current) {
+          pendingBubbleCloseRef.current = false;
+          return;
+        }
+        if (pacingEnabledRef.current && !pacerIsSettled(pacerRef.current)) {
+          // With audio to wait for, let the ticker finish the reveal.
+          if (pacerRef.current.totalAudioMs > 0) {
+            pendingBubbleCloseRef.current = true;
+            return;
+          }
+          // No audio ever arrived for this turn, so there is no clock and
+          // nothing will ever advance the reveal. Show the words rather than
+          // leaving an empty bubble open forever.
+          const full = pacerFlush(pacerRef.current);
+          if (full !== pacedRenderRef.current) {
+            updateMessage(convoId!, assistantBubbleIdRef.current, { text: full });
+          }
+        }
+        pendingBubbleCloseRef.current = false;
+        pacerRef.current = createPacerState();
+        pacedRenderRef.current = '';
+        assistantBubbleIdRef.current = null;
+        assistantBubbleTextRef.current = '';
       };
 
       // The audio queue is single-use — stop() is terminal (no restart), so a
@@ -2198,13 +2283,40 @@ export function AssistantScreen() {
           }
         },
         onOutputTranscription: (text, finished) => {
-          if (!text) return;
+          // An empty chunk carrying finished=true is a pure end-of-turn
+          // marker, and it has to close the bubble before the early return —
+          // OpenAI Realtime ends a response at every tool call, so the next
+          // response is genuinely a new turn. Swallowing the marker glued the
+          // pre-tool preamble onto the answer inside one bubble: "...check
+          // what this job needs first.I need a few details to price it".
+          if (!text) {
+            if (finished) {
+              suppressLeakedTurnRef.current = false;
+              finishAssistantBubble();
+            }
+            return;
+          }
           touchVoiceActivity();
           flushUserBubbleIfOpen();
           // During the post-Apply narration window, Mate is yarning
           // entirely for the speakers. Don't pollute the chat with
           // banter — audio chunks still play normally via the queue.
           if (narrationModeRef.current) return;
+          // A close was deferred so the words could catch up with the voice —
+          // and now the NEXT turn is already talking. Finish the old bubble
+          // here or the two run together in one, which is how "Sound
+          // right?Drafted Karl Van Lishout's colorbond fence repair" happened.
+          if (pendingBubbleCloseRef.current && assistantBubbleIdRef.current) {
+            const full = pacerFlush(pacerRef.current);
+            if (full && full !== pacedRenderRef.current) {
+              updateMessage(convoId!, assistantBubbleIdRef.current, { text: full });
+            }
+            pendingBubbleCloseRef.current = false;
+            pacerRef.current = createPacerState();
+            pacedRenderRef.current = '';
+            assistantBubbleIdRef.current = null;
+            assistantBubbleTextRef.current = '';
+          }
           // Hard guard: any transcript that leaks one of our bracketed
           // prompt tags is a prompt-format echo from the model, never
           // user-facing. Drop the chunk silently rather than risking it
@@ -2234,27 +2346,35 @@ export function AssistantScreen() {
           // never sets this: the watchdog's re-send is what turns a filtered
           // chain-of-thought reply into a spoken greeting instead of silence.)
           greetHeardRef.current = true;
+          // assistantBubbleTextRef always holds the FULL text: the leak filter
+          // above tests it, and a reconnect seeds history from it. Only what
+          // is RENDERED is paced.
+          const pacing = pacingEnabledRef.current;
+          if (pacing) pacerPushText(pacerRef.current, text);
+          const rendered = pacing
+            ? pacerVisibleText(pacerRef.current, Date.now())
+            : null;
           if (!assistantBubbleIdRef.current) {
             const id = generateId();
             assistantBubbleIdRef.current = id;
             assistantBubbleTextRef.current = text;
             turnProposals = [];
+            pacedRenderRef.current = rendered ?? text;
             appendMessage(convoId!, {
               id,
               role: 'assistant',
-              text,
+              text: rendered ?? text,
               createdAt: new Date().toISOString(),
             });
           } else {
             assistantBubbleTextRef.current += text;
-            updateMessage(convoId!, assistantBubbleIdRef.current, {
-              text: assistantBubbleTextRef.current,
-            });
+            const next = rendered ?? assistantBubbleTextRef.current;
+            if (next !== pacedRenderRef.current) {
+              pacedRenderRef.current = next;
+              updateMessage(convoId!, assistantBubbleIdRef.current, { text: next });
+            }
           }
-          if (finished) {
-            assistantBubbleIdRef.current = null;
-            assistantBubbleTextRef.current = '';
-          }
+          if (finished) finishAssistantBubble();
         },
         onTextDelta: (delta) => {
           // Audio-modality sessions usually omit TEXT parts, but some
@@ -2295,6 +2415,18 @@ export function AssistantScreen() {
         onAudioChunk: (b64) => {
           touchVoiceActivity();
           flushUserBubbleIfOpen();
+          // Feed the transcript pacer before queuing, so the reveal clock is
+          // driven by real audio durations. The start time is when this chunk
+          // will actually be HEARD — after whatever is already queued — not
+          // when it arrived, or a turn following a long reply would have its
+          // text revealed while the previous reply was still being spoken.
+          const durationMs = pcmDurationMsFromBase64(b64);
+          if (durationMs > 0) {
+            const now = Date.now();
+            const startsAt = Math.max(now, audioTimelineEndRef.current);
+            audioTimelineEndRef.current = startsAt + durationMs;
+            pacerNoteAudio(pacerRef.current, durationMs, startsAt);
+          }
           audioQueueRef.current?.enqueuePcmChunk(b64);
         },
         onProposal: (proposal) => {
@@ -2353,13 +2485,52 @@ export function AssistantScreen() {
             ? { ok: true }
             : { ok: false, error: "Couldn't find that quote to put on screen." };
         },
+        // Who owns the half-duplex gate depends on who PLAYS the audio.
+        //
+        // Closing it early is always safe, so 'speaking' always closes it.
+        // Opening it is the dangerous half. Where the SCREEN plays (Gemini,
+        // OpenAI) the audio queue's drain callback is the only correct owner:
+        // this callback's 'listening' arrives when the model finishes
+        // GENERATING, which is seconds before the queued audio has finished
+        // PLAYING. Clearing the gate then reopens the mic into Mate's own
+        // voice, and with no echo cancellation on the raw-PCM path the server
+        // VAD hears that as a fresh user turn and answers itself. That is the
+        // Android infinite-loop bug the gate was built for, and it is exactly
+        // what the first OpenAI device test produced: three assistant turns
+        // off a single "Hello", including a fence job nobody asked for.
+        //
+        // Where the SDK plays (ElevenLabs over WebRTC) there is no queued
+        // audio, hardware AEC handles the echo, and this is the only signal
+        // there is — so it stays in charge.
+        onModeChange: (mode) => {
+          if (mode === 'speaking') touchVoiceActivity();
+          matePlayingRef.current = nextMatePlaying(
+            matePlayingRef.current,
+            mode,
+            !!voiceSessionRef.current?.ownsMicrophone,
+          );
+        },
+        // Waveform input where no raw PCM reaches JS. Deliberately does NOT
+        // touch the idle clock: vad fires continuously, silence included, so
+        // treating it as activity would mean the 90s watchdog never fires and
+        // a forgotten session bills until the daily budget stops it. Speech is
+        // registered via onModeChange and the transcript callbacks instead.
+        onVadScore: (score) => {
+          if (!voiceSessionRef.current?.ownsMicrophone) return;
+          const level = Math.max(WAVE_LEVEL_FLOOR, Math.min(1, score));
+          Animated.timing(micLevel, {
+            toValue: level,
+            duration: 130,
+            easing: Easing.out(Easing.quad),
+            useNativeDriver: false,
+          }).start();
+        },
         onTurnComplete: () => {
           // Mate just finished replying. Reset the idle clock so the
           // tradie gets a full timeout window to respond before we
           // auto-close.
           touchVoiceActivity();
-          assistantBubbleIdRef.current = null;
-          assistantBubbleTextRef.current = '';
+          finishAssistantBubble();
           turnProposals = [];
 
           // The tradie confirmed/cancelled a card by voice this turn — run the
@@ -2419,6 +2590,14 @@ export function AssistantScreen() {
         // original open survive the reconnect.
         getSeedHistory: () =>
           useStore.getState().conversations.find((c) => c.id === convoId)?.messages || [],
+        // Customer names for ASR boosting, newest first. Supplied from here
+        // because the screen already holds the store; the session module stays
+        // free of native dependencies so it remains unit-testable.
+        asrKeywordNames: (useStore.getState().contacts || [])
+          .slice(-120)
+          .reverse()
+          .map((c) => c.businessName || c.name || '')
+          .filter(Boolean),
       });
 
       // A stop landed while the mint/handshake was in flight — this open is
@@ -2431,6 +2610,51 @@ export function AssistantScreen() {
 
       voiceSessionRef.current = session;
       audioQueueRef.current = makeQueue();
+      // ElevenLabs plays on its own WebRTC track and sends us no PCM, so there
+      // is no audio clock to pace against — its transcripts pass straight
+      // through, exactly as before.
+      pacingEnabledRef.current = !session.ownsMicrophone;
+      pacerRef.current = createPacerState();
+      audioTimelineEndRef.current = 0;
+      pacedRenderRef.current = '';
+      // Deltas stop arriving as soon as the model finishes generating, but the
+      // voice keeps talking for seconds afterwards. Without a ticker the
+      // reveal would freeze wherever the last delta left it.
+      if (pacerTickRef.current) clearInterval(pacerTickRef.current);
+      pacerTickRef.current = setInterval(() => {
+        if (!pacingEnabledRef.current) return;
+        const bubbleId = assistantBubbleIdRef.current;
+        if (!bubbleId || narrationModeRef.current) return;
+        if (pacerIsSettled(pacerRef.current)) return;
+        const next = pacerVisibleText(pacerRef.current, Date.now());
+        if (next !== pacedRenderRef.current) {
+          pacedRenderRef.current = next;
+          updateMessage(convoId!, bubbleId, { text: next });
+        }
+        // Backstop: if playback under-ran or stalled, don't strand the rest
+        // of the words behind a clock that has stopped advancing.
+        const p = pacerRef.current;
+        if (
+          pendingBubbleCloseRef.current
+          && !pacerIsSettled(p)
+          && p.startedAtMs !== null
+          && Date.now() > p.startedAtMs + p.totalAudioMs + PACER_OVERRUN_GRACE_MS
+        ) {
+          const full = pacerFlush(p);
+          if (full !== pacedRenderRef.current) {
+            pacedRenderRef.current = full;
+            updateMessage(convoId!, bubbleId, { text: full });
+          }
+        }
+        // The words have caught up with the voice — now the turn can close.
+        if (pendingBubbleCloseRef.current && pacerIsSettled(pacerRef.current)) {
+          pendingBubbleCloseRef.current = false;
+          pacerRef.current = createPacerState();
+          pacedRenderRef.current = '';
+          assistantBubbleIdRef.current = null;
+          assistantBubbleTextRef.current = '';
+        }
+      }, PACER_TICK_MS);
 
       // Sticky-only idle watchdog. PTT auto-closes on turnComplete already,
       // so it doesn't need this. We only ever fire the auto-close when the
@@ -2476,7 +2700,9 @@ export function AssistantScreen() {
       // resumed conversations — but an error-only history still greets
       // (isBlankSlate), or a retry after a failed open would connect to
       // dead air.
-      if (mode === 'sticky' && isBlankSlate(seedHistory)) {
+      // Transports with their own first_message greet on connect. Sending
+      // [greet] as well produces two greetings back to back.
+      if (mode === 'sticky' && isBlankSlate(seedHistory) && !session.ownsGreeting) {
         greetHeardRef.current = false;
         session.sendUserText(buildGreetPrompt({ hour: new Date().getHours() }));
         // The session right after a mic-permission grant has twice connected
@@ -2505,6 +2731,20 @@ export function AssistantScreen() {
       // but starting the mic now keeps the buffer small. On web the
       // first call also triggers the browser permission prompt, so this
       // is awaited.
+      // A transport that captures and plays audio itself needs no mic here.
+      // Starting one anyway puts two owners on the iOS audio session, which
+      // intermittently yields a dead mic or earpiece-only output.
+      if (session.ownsMicrophone) {
+        setVoiceState('listening');
+        gate.end(openToken);
+        return;
+      }
+
+      // Gemini path only — see the note where this used to live. Safe here
+      // because playback is downstream of the first audio chunk, which is
+      // later than this.
+      try { await ensureAudioMode(); } catch { /* non-fatal */ }
+
       try {
         const mic = await startMicCapture((chunk) => {
           // Half-duplex: while Mate's audio reply is playing, drop mic
@@ -2556,13 +2796,13 @@ export function AssistantScreen() {
       gate.end(openToken);
     } catch (err: any) {
       // eslint-disable-next-line no-console
-      console.warn('[Mate voice] open failed', err?.name, err?.message);
+      console.warn('[Mate voice] open failed', err?.name, err?.message, err);
       const message =
         err instanceof LiveQuotaError ||
         err instanceof LiveOfflineError ||
         err instanceof LiveAuthError
           ? err.message
-          : `Voice mode is offline: ${err?.message || 'unknown error'}`;
+          : `Voice mode is offline: ${describeThrown(err)}`;
       appendErrorMessage(convoId!, withTypeInsteadHint(message));
       await stopVoiceSession();
     }

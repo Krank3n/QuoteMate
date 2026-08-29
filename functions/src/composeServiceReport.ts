@@ -27,7 +27,7 @@ import {
 const corsHandler = cors({ origin: true });
 
 // Same text-capable flash model the Mate text chat uses.
-const CHAT_MODEL = 'gemini-3-flash-preview';
+const CHAT_MODEL = 'gemini-3.7-flash';
 
 // One-shot rewrite — a modest ceiling is plenty and bounds abuse.
 const COMPOSE_RATE: RateLimitConfig = { maxRequests: 20, windowMs: 60_000 };

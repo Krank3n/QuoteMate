@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildGreetPrompt, withTypeInsteadHint, TYPE_INSTEAD_HINT } from '../voiceCopy';
+import { buildGreetPrompt, withTypeInsteadHint, TYPE_INSTEAD_HINT, mateGreetingWord } from '../voiceCopy';
 
 describe('buildGreetPrompt', () => {
   it('buildGreetPrompt starts with the [greet] tag', () => {
@@ -75,5 +75,32 @@ describe('withTypeInsteadHint', () => {
     // equality — a hint that stacked on re-wrap would defeat that.
     const once = withTypeInsteadHint('Voice mode is offline.');
     expect(withTypeInsteadHint(once)).toBe(once);
+  });
+});
+
+describe('mateGreetingWord', () => {
+  it('says something a person would actually say, at every hour', () => {
+    // buildGreetPrompt has a "middle of the day" bucket, which is a
+    // description rather than a greeting — nobody opens with it out loud.
+    for (let h = 0; h < 24; h++) {
+      expect(['Morning', 'Afternoon', 'Evening']).toContain(mateGreetingWord(h));
+    }
+  });
+
+  it('covers the day in the order a day happens', () => {
+    expect(mateGreetingWord(6)).toBe('Morning');
+    expect(mateGreetingWord(11)).toBe('Morning');
+    expect(mateGreetingWord(12)).toBe('Afternoon');
+    expect(mateGreetingWord(17)).toBe('Afternoon');
+    expect(mateGreetingWord(18)).toBe('Evening');
+    expect(mateGreetingWord(23)).toBe('Evening');
+  });
+
+  it('greets a 5am start and a midnight quote as morning', () => {
+    // Tradies do start before dawn. Midnight lands in the morning bucket by
+    // the standard <12 split — technically right, and the alternative
+    // (special-casing the small hours) buys nothing anyone would notice.
+    expect(mateGreetingWord(5)).toBe('Morning');
+    expect(mateGreetingWord(0)).toBe('Morning');
   });
 });

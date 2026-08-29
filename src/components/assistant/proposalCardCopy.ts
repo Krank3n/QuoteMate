@@ -9,6 +9,11 @@ export function titleFor(p: Proposal): string {
     case 'propose_draft_quote':
       return p.documentType === 'invoice' ? 'Draft invoice' : 'Draft quote';
     case 'propose_add_line_item': return 'Add line item';
+    case 'propose_update_line_item':
+      if (p.price !== undefined && p.quantity === undefined && p.name === undefined) return 'Set price';
+      if (p.quantity !== undefined && p.price === undefined && p.name === undefined) return 'Change quantity';
+      if (p.name !== undefined && p.price === undefined && p.quantity === undefined) return 'Rename line';
+      return 'Update line item';
     case 'propose_delete_line_item': return 'Delete line item';
     case 'propose_delete_quote':
       return p.displayDocType === 'invoice' ? 'Delete invoice' : 'Delete quote';
@@ -27,6 +32,7 @@ export function iconFor(p: Proposal): string {
   switch (p.type) {
     case 'propose_draft_quote': return 'file-document-edit-outline';
     case 'propose_add_line_item': return 'plus-circle-outline';
+    case 'propose_update_line_item': return 'pencil-outline';
     case 'propose_delete_line_item': return 'trash-can-outline';
     case 'propose_delete_quote': return 'file-remove-outline';
     case 'propose_create_contact': return 'account-plus-outline';
@@ -53,6 +59,7 @@ export function applyLabelFor(p: Proposal): string {
     case 'propose_create_contact': return 'Save contact';
     case 'propose_update_customer': return 'Change it';
     case 'propose_send_quote': return 'Send';
+    case 'propose_update_line_item': return 'Update it';
     case 'propose_delete_line_item': return 'Delete';
     case 'propose_delete_quote': return 'Delete';
     case 'propose_convert_to_invoice': return 'Convert';

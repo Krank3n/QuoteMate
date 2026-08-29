@@ -85,7 +85,7 @@ export async function dispatchToolCall(call: ToolCallInput): Promise<ToolCallOut
           result = await reviewQuote(input);
           break;
         case 'get_job_requirements':
-          result = await getJobRequirements(input as { category?: string; niche?: string; freeText?: string });
+          result = await getJobRequirements(input as { category?: string; niche?: string; freeText?: string; jobType?: string });
           break;
         case 'list_service_reports':
           result = await listServiceReports(input as { query?: string; limit?: number });

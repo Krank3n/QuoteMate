@@ -126,3 +126,74 @@ describe('resolveJobRequirements', () => {
     expect(Array.isArray(result.mustAskQuestions)).toBe(true);
   });
 });
+
+describe('a defaulted trade must not outvote the job in front of you', () => {
+  /**
+   * From a real voice transcript, 27 Aug 2026. A cabinet maker asked Mate to
+   * quote a 1m x 2m concrete slab. get_job_requirements fills category/niche
+   * from the tradie's business settings when the caller passes none, so the
+   * call became {cabinet_making, kitchens, freeText: "concrete slab on
+   * ground"} — and resolveJobRequirements only consulted freeText when no
+   * template had been found. One had, from the defaults.
+   *
+   * Mate was handed Kitchen Cabinetry's must-ask list — linear metres of
+   * cabinets, door finish, benchtop material — for a concrete pour. It
+   * recovered by calling again with an explicit category, but nothing
+   * guaranteed that, and a tradie asked about their slab's benchtop finish
+   * would rightly conclude the thing is broken.
+   */
+  it('does not return kitchen questions for a concrete slab', () => {
+    const r = resolveJobRequirements({
+      categoryId: 'cabinet_making',
+      nicheId: 'kitchens',
+      freeText: 'concrete slab on ground',
+      categoryFromSettings: true,
+    });
+    expect(r.matched.categoryId).not.toBe('cabinet_making');
+    const asked = r.mustAskQuestions.join(' ').toLowerCase();
+    expect(asked).not.toMatch(/benchtop|cabinet|door finish/);
+  });
+
+  it('lets freeText pick a trade outside the tradie\'s usual one', () => {
+    const r = resolveJobRequirements({
+      categoryId: 'cabinet_making',
+      nicheId: 'kitchens',
+      freeText: 'colorbond fence',
+      categoryFromSettings: true,
+    });
+    expect(r.matched.categoryId).not.toBe('cabinet_making');
+  });
+
+  it('still respects a category the CALLER pinned explicitly', () => {
+    // An explicit category is a statement, not a default — freeText must not
+    // override it, or Mate loses the ability to say "no, this IS a kitchen".
+    const r = resolveJobRequirements({
+      categoryId: 'cabinet_making',
+      nicheId: 'kitchens',
+      freeText: 'concrete slab on ground',
+      categoryFromSettings: false,
+    });
+    expect(r.matched.categoryId).toBe('cabinet_making');
+  });
+
+  it('falls back to the tradie\'s trade when freeText matches nothing', () => {
+    // Better their usual questions than none at all.
+    const r = resolveJobRequirements({
+      categoryId: 'cabinet_making',
+      nicheId: 'kitchens',
+      freeText: 'zzzzz qqqqq',
+      categoryFromSettings: true,
+    });
+    expect(r.matched.categoryId).toBe('cabinet_making');
+    expect(r.mustAskQuestions.length).toBeGreaterThan(0);
+  });
+
+  it('is unchanged when there is no freeText to go on', () => {
+    const r = resolveJobRequirements({
+      categoryId: 'cabinet_making',
+      nicheId: 'kitchens',
+      categoryFromSettings: true,
+    });
+    expect(r.matched.categoryId).toBe('cabinet_making');
+  });
+});

@@ -17,6 +17,11 @@
 
 import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
+import {
+  settleVoiceSecondsUpdate,
+  MAX_SESSION_SECONDS,
+  Plan,
+} from './assistantQuota.helpers';
 
 const db = () => admin.firestore();
 
@@ -40,14 +45,52 @@ export interface ModelPricing {
   inputAudioPerM?: number;
   /** USD per 1M output audio tokens. Only set for Live audio models. */
   outputAudioPerM?: number;
+  /**
+   * USD per MINUTE of connected conversation. Set only for per-minute platforms
+   * (ElevenLabs Agents), where audio is not billed per token at all.
+   *
+   * NOTE the unit change. Every other field here exploits the fact that
+   * tokens * pricePerM already equals micros; a per-minute rate is plain USD
+   * and has to be multiplied by 1e6 explicitly. See platformCostMicros.
+   */
+  perMinuteUsd?: number;
+  /** USD per minute when over the concurrency limit (burst rate). */
+  burstPerMinuteUsd?: number;
+  /**
+   * USD charged once per SESSION regardless of length.
+   *
+   * Measured, not estimated: a 64-second call cost $0.147, and $0.056 of that
+   * was a single Anthropic cache WRITE — 91% of the LLM charge — re-paying the
+   * 20.5k-token system prompt and tool schemas because the cache had expired
+   * since the last call. It does not scale with duration, so short sessions
+   * are the expensive ones: ~$0.20/min effective at 30 seconds against
+   * ~$0.09/min at ten minutes.
+   *
+   * Modelling it as per-minute, which is what the first cut did, under-reports
+   * every short session on /admin/ai-costs.
+   */
+  perSessionUsd?: number;
 }
 
 export const PRICING: Record<string, ModelPricing> = {
-  // Text chat model used by assistantChat.
+  // Superseded by gemini-3.7-flash below. Kept because historical daily docs
+  // still carry models.gemini-3-flash-preview.* and pricingFor() falls back
+  // to this key for any model we haven't priced.
   'gemini-3-flash-preview': {
     inputPerM: 0.30,
     outputPerM: 2.50,
     cachedInputPerM: 0.075,
+  },
+  // Gemini revert path for assistantChat (see CHAT_PROVIDER) since Aug 2026.
+  // Priced at the POST-intro rate for the same reason as Sonnet 5 below: the
+  // $0.75/$3.75 introductory window runs to 2026-12-31, and recording the
+  // intro price would under-count every turn from January.
+  // cachedInputPerM is derived at the same 0.25x of input the other Gemini
+  // rows use, not separately quoted — correct it if you check the rate card.
+  'gemini-3.7-flash': {
+    inputPerM: 1.50,
+    outputPerM: 7.50,
+    cachedInputPerM: 0.375,
   },
   // Text chat brain since Aug 2026 (see assistantChat CHAT_PROVIDER).
   // Standard Sonnet 5 rates — the $2/$10 intro window ends 2026-08-31, so
@@ -57,6 +100,29 @@ export const PRICING: Record<string, ModelPricing> = {
     outputPerM: 15.00,
     cachedInputPerM: 0.30,
     cacheWritePerM: 3.75,
+  },
+  // Voice via an ElevenLabs Agent running Claude Sonnet 5.
+  //
+  // The key is compound on purpose. The text path already writes
+  // models.claude-sonnet-5.* on the same daily doc; sharing the key would fuse
+  // typing spend and talking spend so /admin/ai-costs couldn't tell you which
+  // one is costing money. sanitiseKey turns the slash into an underscore for
+  // the Firestore field path, while pricingFor looks up the raw key.
+  //
+  // LLM tokens are billed by ElevenLabs and deducted from their credits, so the
+  // token rates below are for reconciliation against their charging breakdown,
+  // not for a bill we pay Anthropic directly.
+  'elevenlabs/claude-sonnet-5': {
+    inputPerM: 3.00,
+    outputPerM: 15.00,
+    cachedInputPerM: 0.30,
+    cacheWritePerM: 3.75,
+    perMinuteUsd: 0.08,
+    burstPerMinuteUsd: 0.16,
+    // Measured on a real 64s session (conv_1901m10c…): the per-session cache
+    // write dominates the LLM bill. Trimming the prompt or the tool schemas
+    // would cut this directly — it is 20.5k tokens of fixed overhead per call.
+    perSessionUsd: 0.062,
   },
   // Voice Live model used by assistantToken → client WS.
   'gemini-3.1-flash-live-preview': {
@@ -177,7 +243,7 @@ interface LiveUsagePayload {
   sessionEnded?: boolean;
 }
 
-function costMicrosForLive(model: string, u: LiveUsagePayload): number {
+export function costMicrosForLive(model: string, u: LiveUsagePayload): number {
   const p = pricingFor(model);
   const billedInputText = Math.max(0, (u.inputTextTokens || 0) - (u.cachedTokens || 0));
   const usd =
@@ -188,6 +254,35 @@ function costMicrosForLive(model: string, u: LiveUsagePayload): number {
     ((u.inputAudioTokens || 0) * (p.inputAudioPerM ?? p.inputPerM)) +
     ((u.outputAudioTokens || 0) * (p.outputAudioPerM ?? p.outputPerM));
   return Math.round(usd);
+}
+
+/**
+ * Platform (connection-time) cost of a voice session, in micros.
+ *
+ * THE UNIT TRAP: every other cost term in this file relies on
+ * `tokens * pricePerM === micros`, because pricePerM is USD per 1,000,000
+ * tokens. A per-minute rate is plain USD per minute and needs an explicit
+ * * 1e6. Getting this wrong is a factor-of-a-million error that looks
+ * completely plausible on a dashboard. Pinned by test: 6 minutes at $0.08/min
+ * is exactly 480_000 micros.
+ *
+ * Returns 0 for models with no per-minute rate, so the Gemini rows keep costing
+ * exactly what they always did.
+ */
+export function platformCostMicros(
+  model: string,
+  durationSeconds: number,
+  opts: { burst?: boolean } = {},
+): number {
+  const p = pricingFor(model);
+  const rate = opts.burst ? (p.burstPerMinuteUsd ?? p.perMinuteUsd) : p.perMinuteUsd;
+  if (!rate) return 0;
+  const seconds = Math.max(0, durationSeconds || 0);
+  const perMinute = (seconds / 60) * rate;
+  // The fixed per-session component (the prompt cache write) is charged once,
+  // and only for a session that actually happened.
+  const perSession = seconds > 0 ? (p.perSessionUsd ?? 0) : 0;
+  return Math.round((perMinute + perSession) * 1_000_000);
 }
 
 export const reportAssistantLiveUsage = functions.https.onCall(async (data, context) => {
@@ -411,3 +506,114 @@ export const adminAssistantCosts = functions
       pricing: PRICING,
     };
   });
+
+// ---------------------------------------------------------------------------
+// Voice (ElevenLabs Agents) — settle the budget hold and record the spend.
+//
+// A sibling of reportAssistantLiveUsage, not an overload of it. That one is
+// called by every shipped build and its payload contract has to survive the
+// whole rollback window; burying a budget settlement — which is
+// correctness-critical, not just a dashboard number — behind a discriminator
+// inside it is how billing quietly breaks.
+//
+// Without this, assistantToken's 120s hold is parked at mint and never given
+// back. On the free tier that is 300s a day: two sessions and the tradie is
+// locked out until midnight UTC regardless of how briefly they actually spoke.
+// ---------------------------------------------------------------------------
+
+interface VoiceUsagePayload {
+  model?: string;
+  conversationId?: string;
+  durationSeconds?: number;
+  holdSeconds?: number;
+  endReason?: string;
+}
+
+export const reportAssistantVoiceUsage = functions.https.onCall(async (data, context) => {
+  const uid = context.auth?.uid;
+  if (!uid) throw new functions.https.HttpsError('unauthenticated', 'Sign in required.');
+
+  const payload: VoiceUsagePayload = data || {};
+  const conversationId = String(payload.conversationId || '').trim();
+  const model = String(payload.model || 'elevenlabs/claude-sonnet-5');
+  const date = todayKey();
+  const usageRef = db().doc(`users/${uid}/assistantUsage/${date}`);
+
+  // The session doc, written at mint, carries the plan and the hold that was
+  // actually parked — the client is not trusted for either. It also makes this
+  // idempotent: the client report and the post-call webhook both land here.
+  const sessionRef = conversationId ? db().doc(`voiceSessions/${conversationId}`) : null;
+
+  const settled = await db().runTransaction(async (tx) => {
+    const [sessionSnap, usageSnap] = await Promise.all([
+      sessionRef ? tx.get(sessionRef) : Promise.resolve(null),
+      tx.get(usageRef),
+    ]);
+    const session = sessionSnap?.data();
+
+    // Someone already settled this conversation. Applying a second time would
+    // double-charge both the budget and the dashboard.
+    if (session?.settledAt) {
+      return { alreadySettled: true, seconds: session.settledSeconds || 0, costMicros: 0 };
+    }
+    // A session doc that isn't this user's is not this user's to settle.
+    if (session && session.uid !== uid) {
+      return { alreadySettled: true, seconds: 0, costMicros: 0 };
+    }
+
+    const plan: Plan = (session?.plan as Plan) || 'free';
+    const ceiling = MAX_SESSION_SECONDS[plan];
+    // Clamp before anything lands. This single line is what stops a
+    // misbehaving client inflating the day's usage past what the agent's own
+    // max_duration_seconds would ever have permitted.
+    const actualSeconds = Math.min(
+      Math.max(0, Math.round(Number(payload.durationSeconds) || 0)),
+      ceiling,
+    );
+    const holdSeconds = Number(session?.heldSeconds ?? payload.holdSeconds ?? 0);
+
+    const update = settleVoiceSecondsUpdate(usageSnap.data(), { plan, holdSeconds, actualSeconds });
+    const costMicros = platformCostMicros(model, actualSeconds);
+    const inc = admin.firestore.FieldValue.increment;
+
+    const patch: Record<string, unknown> = {
+      voiceSessions: inc(1),
+      voiceDurationSeconds: inc(actualSeconds),
+      costMicros: inc(costMicros),
+      [`models.${sanitiseKey(model)}.voiceCostMicros`]: inc(costMicros),
+      [`models.${sanitiseKey(model)}.voiceSessions`]: inc(1),
+      [`models.${sanitiseKey(model)}.voiceDurationSeconds`]: inc(actualSeconds),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
+    // voiceSeconds is a settled value, not an increment — it has to ride the
+    // same transaction as the read it was computed from.
+    if (update) patch.voiceSeconds = update.voiceSeconds;
+
+    tx.set(usageRef, patch, { merge: true });
+    tx.set(
+      db().doc(`assistantCostsDaily/${date}`),
+      {
+        voiceSessions: inc(1),
+        voiceDurationSeconds: inc(actualSeconds),
+        costMicros: inc(costMicros),
+        [`models.${sanitiseKey(model)}.voiceCostMicros`]: inc(costMicros),
+        [`activeUsers.${uid}`]: true,
+        date,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
+    if (sessionRef) {
+      tx.set(sessionRef, {
+        settledAt: admin.firestore.FieldValue.serverTimestamp(),
+        settledBy: 'client',
+        settledSeconds: actualSeconds,
+        endReason: String(payload.endReason || 'unknown'),
+        costMicros,
+      }, { merge: true });
+    }
+    return { alreadySettled: false, seconds: actualSeconds, costMicros };
+  });
+
+  return { ok: true, ...settled };
+});

@@ -90,7 +90,12 @@ export { assistantChat } from './assistantChat';
 export { composeServiceReport } from './composeServiceReport';
 export { sendServiceReport } from './serviceReportEmail';
 export { generatePresenterClip } from './generatePresenterClip';
-export { adminAssistantCosts, reportAssistantLiveUsage } from './assistantCosts';
+export {
+  adminAssistantCosts,
+  reportAssistantLiveUsage,
+  reportAssistantVoiceUsage,
+} from './assistantCosts';
+export { elevenLabsPostCallWebhook } from './elevenLabsWebhook';
 export { reportPriceFetchUsage } from './featureUsage';
 import { recordMaterialsRecommend } from './featureUsage';
 import {
@@ -195,6 +200,7 @@ import {
 import { sendExpoPushNotifications } from './expoPush';
 import { hashTerms } from './shared/pdf/terms/defaultAuTradie';
 import { generateQuotePdfBuffer } from './pdfGenerator';
+import { normaliseTimestamp } from './timestamps.helpers';
 import { processAndStoreLogo } from './logoProcessing';
 import { dollarsToCents, centsToDollars } from './shared/pdf/money';
 import { validateAndRepairAiOutput, clampMaterialQuantity, detectLaunderedSections } from './shared/ai/validateAiOutput';
@@ -1983,9 +1989,8 @@ async function callClaudeForMaterials(
       'anthropic-version': '2023-06-01',
     },
     body: JSON.stringify({
-      model: 'claude-opus-4-6',
+      model: 'claude-opus-4-7',
       max_tokens: 32000,
-      temperature: 0.2,
       messages: [{ role: 'user', content: messageContent }],
     }),
   });
@@ -2521,10 +2526,16 @@ Return ONLY valid JSON, no other text.`;
  *     wrong SKU entirely; needs to be rejected.
  *   - "10L Dulux Wash & Wear" for a paint-area requirement — needs to know
  *     coverage per litre (typical: ~12 m²/L).
- * A small Gemini Flash Lite call given the requirement + product can use
- * general knowledge to handle all of these uniformly across trades.
+ * This pass is also the last line of defence on quote correctness: it is what
+ * catches a round-1 blowout before it reaches a customer. It ran on
+ * gemini-3.1-flash-lite until Aug 2026, which is where the "3000 L / $90k"
+ * line item got through — flash-lite is the cheapest model Google sells and
+ * it was doing the arithmetic and unit reasoning that decides a quote total.
+ * Now on 3.7 Flash (GA, ~3x the token cost, still a fraction of Pro, and it
+ * outscores gemini-3.1-pro-preview on the Aug 2026 text arena). The cost
+ * delta is a rounding error against one blown quote.
  */
-const GEMINI_RECONCILE_MODEL = 'gemini-3.1-flash-lite';
+const GEMINI_RECONCILE_MODEL = 'gemini-3.7-flash';
 
 /**
  * Quantity sanity-check pass — review the materials list emitted by the
@@ -2670,12 +2681,15 @@ async function callClaudeLiteJson(apiKey: string, prompt: string): Promise<any> 
       'anthropic-version': '2023-06-01',
     },
     body: JSON.stringify({
-      // Haiku tier — reconcile work is structured reasoning over a small
-      // JSON payload, doesn't need Opus/Sonnet capability and Haiku is
-      // ~10× cheaper + ~3× faster, matching Gemini Flash Lite's profile.
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 8000,
-      temperature: 0.1,
+      // Sonnet 5, not Haiku. This is the fallback for the pass that decides
+      // quote totals, and a fallback weaker than the primary means a Gemini
+      // outage silently degrades quote accuracy instead of failing loudly.
+      // Omitting `thinking` runs adaptive thinking on Sonnet 5 — the
+      // arithmetic and unit reasoning here is precisely what it's for.
+      // max_tokens raised to 16000: thinking tokens draw down the same budget
+      // and the JSON payload can already run to ~8000 on a 50-item batch.
+      model: 'claude-sonnet-5',
+      max_tokens: 16000,
       messages: [{ role: 'user', content: prompt }],
     }),
   });
@@ -2900,9 +2914,8 @@ async function callClaudeForExtraction(
       'anthropic-version': '2023-06-01',
     },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-6',
+      model: 'claude-sonnet-5',
       max_tokens: 16000,
-      temperature: 0.1,
       messages: [{ role: 'user', content: messageContent }],
     }),
   });
@@ -3231,8 +3244,8 @@ Example:
           'anthropic-version': '2023-06-01',
         },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-5-20250929',
-          max_tokens: 500,
+          model: 'claude-sonnet-5',
+          max_tokens: 2000,
           messages: [
             {
               role: 'user',
@@ -5682,8 +5695,8 @@ Return ONLY valid JSON, no other text.`;
           'anthropic-version': '2023-06-01',
         },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-5-20250929',
-          max_tokens: 1000,
+          model: 'claude-sonnet-5',
+          max_tokens: 2000,
           messages: [
             {
               role: 'user',
@@ -5830,9 +5843,8 @@ If no products found, return: {"matches": [], "quantityAdjustment": null}`;
           'anthropic-version': '2023-06-01',
         },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-5-20250929',
-          max_tokens: 4096,
-          temperature: 0.2,
+          model: 'claude-sonnet-5',
+          max_tokens: 8192,
           messages: [
             {
               role: 'user',
@@ -5910,9 +5922,8 @@ export const selectBestProduct = functions.https.onRequest((req, res) => {
           'anthropic-version': '2023-06-01',
         },
         body: JSON.stringify({
-          model: 'claude-3-5-sonnet-20241022',
-          max_tokens: 1024,
-          temperature: 0,
+          model: 'claude-sonnet-5',
+          max_tokens: 2048,
           messages: [
             {
               role: 'user',
@@ -5999,39 +6010,6 @@ const TOKEN_EXPIRATION_MS = 30 * 24 * 60 * 60 * 1000;
 
 function hashToken(token: string): string {
   return crypto.createHash('sha256').update(token).digest('hex');
-}
-
-/**
- * Normalise any Firestore-shaped timestamp value into a JS Date.
- * Handles: Firestore Timestamp, {_seconds, _nanoseconds}, {seconds, nanoseconds},
- * ISO string, number, Date, null/undefined. Returns null for missing/invalid
- * input — callers MUST treat that as "no expiry anchor available" and handle
- * accordingly rather than falling into `new Date(null)` (which is 1970 and
- * would make every link appear expired).
- */
-function normaliseTimestamp(value: any): Date | null {
-  if (value === null || value === undefined) return null;
-  if (value instanceof Date) return isNaN(value.getTime()) ? null : value;
-  if (typeof value === 'object' && typeof value.toDate === 'function') {
-    try {
-      const d = value.toDate();
-      return d instanceof Date && !isNaN(d.getTime()) ? d : null;
-    } catch { /* fall through */ }
-  }
-  if (typeof value === 'object') {
-    const seconds = typeof value.seconds === 'number' ? value.seconds
-                  : typeof value._seconds === 'number' ? value._seconds
-                  : null;
-    const nanos = typeof value.nanoseconds === 'number' ? value.nanoseconds
-                : typeof value._nanoseconds === 'number' ? value._nanoseconds
-                : 0;
-    if (seconds !== null) return new Date(seconds * 1000 + nanos / 1e6);
-  }
-  if (typeof value === 'string' || typeof value === 'number') {
-    const d = new Date(value);
-    return isNaN(d.getTime()) ? null : d;
-  }
-  return null;
 }
 
 /**
@@ -6406,8 +6384,8 @@ export const generateQuoteEmail = functions.https.onRequest((req, res) => {
           'anthropic-version': '2023-06-01',
         },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-5-20250929',
-          max_tokens: 1000,
+          model: 'claude-sonnet-5',
+          max_tokens: 2000,
           messages: [{ role: 'user', content: prompt }],
         }),
       });
@@ -12814,8 +12792,8 @@ Rules:
             'anthropic-version': '2023-06-01',
           },
           body: JSON.stringify({
-            model: 'claude-sonnet-4-6',
-            max_tokens: 1024,
+            model: 'claude-sonnet-5',
+            max_tokens: 2048,
             // NO tools — pure text completion. Previous web_search tool caused
             // runaway cost ($5-10/call in worst case).
             messages: [{ role: 'user', content: prompt }],
@@ -12945,8 +12923,8 @@ Rules:
             'anthropic-version': '2023-06-01',
           },
           body: JSON.stringify({
-            model: 'claude-sonnet-4-6',
-            max_tokens: 2048,
+            model: 'claude-sonnet-5',
+            max_tokens: 4096,
             messages: [{ role: 'user', content: prompt }],
           }),
         });

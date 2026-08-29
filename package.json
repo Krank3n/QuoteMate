@@ -17,11 +17,18 @@
     "test": "vitest run",
     "test:rules": "export PATH=\"/opt/homebrew/opt/openjdk/bin:$PATH\" && firebase emulators:exec --only firestore --project demo-quotemate-rules \"vitest run --config vitest.rules.config.ts\"",
     "test:watch": "vitest",
-    "postinstall": "patch-package"
+    "postinstall": "patch-package",
+    "mate:agent": "tsx scripts/syncMateAgent.ts",
+    "mate:simulate": "tsx scripts/simulateMate.ts"
   },
   "dependencies": {
+    "@elevenlabs/client": "1.22.0",
+    "@elevenlabs/react-native": "1.2.24",
     "@expo/metro-runtime": "~5.0.5",
     "@expo/vector-icons": "^14.1.0",
+    "@livekit/react-native": "^2.12.0",
+    "@livekit/react-native-expo-plugin": "^1.0.2",
+    "@livekit/react-native-webrtc": "^144.1.2",
     "@lottiefiles/dotlottie-react": "^0.18.1",
     "@react-native-async-storage/async-storage": "^2.1.2",
     "@react-native-google-signin/google-signin": "^16.1.2",
@@ -71,6 +78,7 @@
     "expo-web-browser": "~14.2.0",
     "firebase": "^12.4.0",
     "jpeg-js": "^0.4.4",
+    "livekit-client": "^2.22.0",
     "lottie-react-native": "^7.2.2",
     "mobile-payments-sdk-react-native": "^2026.3.4",
     "papaparse": "^5.5.3",
@@ -109,7 +117,11 @@
     "baseline-browser-mapping": "^2.9.18",
     "jsdom": "^29.1.1",
     "patch-package": "^8.0.1",
+    "tsx": "^4.23.12",
     "typescript": "^5.3.3",
     "vitest": "^4.1.7"
+  },
+  "overrides": {
+    "@elevenlabs/client": "1.22.0"
   }
 }

@@ -29,6 +29,7 @@ import { isProposalId, resolveQuoteId } from './quoteRefMap';
 import { fuzzyScoreQuote } from './quoteFuzzy';
 import { getPillsForNiche } from '../../data/nichePills';
 import { NICHE_TEMPLATES } from '../../data/nicheTemplates';
+import { buildWordWeights, scoreName, NICHE_MATCH_FLOOR } from './nicheMatch';
 import { isSpecialistSupplyNiche } from '../../data/specialistSupplyNiches';
 import { coversProbes, type SupplierBookSnapshot } from '../supplierBookCoverage';
 // Folding rules are shared with the jobs-list search — see src/utils/textMatch.
@@ -36,7 +37,6 @@ import { coversProbes, type SupplierBookSnapshot } from '../supplierBookCoverage
 import {
   normalizePhoneTail as normalizePhone,
   scoreToken,
-  similarity,
   soundex,
   stripDiacritics,
   tokenize,
@@ -520,6 +520,25 @@ export interface JobRequirementsInput {
   categoryId?: string;
   nicheId?: string;
   freeText?: string;
+  /**
+   * True when categoryId/nicheId came from the tradie's business settings
+   * rather than from the caller — i.e. they are a default, not a statement
+   * about THIS job.
+   *
+   * Without this, a defaulted category silently wins over a freeText that
+   * describes the actual work. A cabinet maker asking for a concrete slab was
+   * handed Kitchen Cabinetry's must-ask list — linear metres of cabinets,
+   * door finish, benchtop material — for a 1x2m pour (voice transcript,
+   * 27 Aug 2026). Mate passed freeText: "concrete slab on ground" precisely
+   * to say what the job was, and the tool ignored it.
+   */
+  categoryFromSettings?: boolean;
+  /**
+   * Exact name from KNOWN_JOB_TYPES, or JOB_TYPE_NONE when the model has
+   * looked at the list and nothing fits. Absent means it didn't say, and the
+   * blurb gets matched on words instead.
+   */
+  jobType?: string;
   /** Injected so resolveJobRequirements stays pure and synchronous. */
   supplierBook?: SupplierBookSnapshot;
 }
@@ -527,6 +546,12 @@ export interface JobRequirementsInput {
 export interface JobRequirementsResult {
   matched: { categoryId?: string; nicheId?: string; templateName?: string };
   mustAskQuestions: string[];
+  /**
+   * True when mustAskQuestions are the generic fallback rather than a niche's
+   * own. Mate should still ask them, but shouldn't imply this trade was
+   * recognised — and shouldn't promise niche-specific pricing off them.
+   */
+  genericScope: boolean;
   pricingMethod?: string;
   measurementDriven: boolean;
   planHelps: boolean;
@@ -538,39 +563,156 @@ export interface JobRequirementsResult {
   supplierBookCoversTrade: boolean;
 }
 
+/**
+ * Scope questions for a job no template covers.
+ *
+ * The rule Mate is given is "ask what this tool returns, don't invent
+ * questions". An unmatched job used to return an empty list, leaving that rule
+ * saying "ask nothing" — and the prompt's soft exception ("if empty, ask about
+ * space and measurements") is exactly the kind of caveat a model drops under
+ * pressure. It did: a tradie asked for a deck quote, got no questions at all,
+ * and was told "there weren't any required deck questions for this job type".
+ *
+ * So the fallback is structural instead. These are deliberately about what the
+ * pricing engine needs from ANY job — how big, what work, what materials, what
+ * access — rather than anything trade-specific we'd be guessing at.
+ */
+export const GENERIC_SCOPE_QUESTIONS: string[] = [
+  'The size or measurements of the area involved',
+  'What work is actually being done to it',
+  'Any materials, brands or finishes they want used',
+  'Anything that makes the job harder — access, height, removing what is there now',
+];
+
 const MEASUREMENT_DRIVEN_METHODS = new Set(['per_sqm', 'per_linear_m', 'per_cubic_m']);
+
+/**
+ * Every job type Mate knows, by name.
+ *
+ * Names are how the model addresses a template, because category/niche IDs
+ * can't: 55 templates share only 40 category/niche pairs, so `other/fencing`
+ * alone matches Colorbond Fence, Timber Paling Fence, Fence Repair, Gate
+ * Install and Pool Fence (Glass) — and the lookup took whichever came first.
+ * A tradie quoting a glass pool fence got asked about Colorbond.
+ */
+export const KNOWN_JOB_TYPES: string[] = NICHE_TEMPLATES.map((t) => t.name);
+
+/** The model's answer when none of the known job types fit. */
+export const JOB_TYPE_NONE = 'none';
+
+/**
+ * Pick one template from a category/niche group.
+ *
+ * The pair isn't unique — `other/fencing` covers Colorbond Fence, Timber
+ * Paling Fence, Fence Repair, Gate Install and Pool Fence (Glass) — so taking
+ * the first match asked a glass-pool-fence job about Colorbond. Let the blurb
+ * choose among them when there is one.
+ */
+function pickInGroup(
+  categoryId: string | undefined,
+  nicheId: string | undefined,
+  freeText: string | undefined,
+) {
+  if (!categoryId || !nicheId) return undefined;
+  const group = NICHE_TEMPLATES.filter(
+    (t) => t.categoryId === categoryId && t.nicheId === nicheId,
+  );
+  if (group.length <= 1) return group[0];
+  if (!freeText) return group[0];
+  let best: { t: (typeof NICHE_TEMPLATES)[number]; score: number } | undefined;
+  for (const t of group) {
+    const score = scoreName(freeText.toLowerCase(), t.name.toLowerCase(), NICHE_NAME_WEIGHTS);
+    if (!best || score > best.score) best = { t, score };
+  }
+  return best && best.score > 0 ? best.t : group[0];
+}
+
+function templateByName(name: string) {
+  const wanted = String(name || '').trim().toLowerCase();
+  if (!wanted) return undefined;
+  return NICHE_TEMPLATES.find((t) => t.name.toLowerCase() === wanted);
+}
+
+// How much each word narrows the field, derived once from the template names.
+const NICHE_NAME_WEIGHTS = buildWordWeights(NICHE_TEMPLATES.map((t) => t.name));
 
 export function resolveJobRequirements(input: JobRequirementsInput): JobRequirementsResult {
   let resolvedCategoryId = input.categoryId;
   let resolvedNicheId = input.nicheId;
-  let template = NICHE_TEMPLATES.find(
-    (t) => t.categoryId === resolvedCategoryId && t.nicheId === resolvedNicheId,
-  );
+
+  // The model has the list of job types and picks by name. That is a genuine
+  // semantic judgement — the thing word-matching can't do — and it is the only
+  // way to address one template rather than a whole category/niche group.
+  const named = input.jobType ? templateByName(input.jobType) : undefined;
+  const saidNone =
+    !!input.jobType && input.jobType.trim().toLowerCase() === JOB_TYPE_NONE;
+  if (named) {
+    return buildRequirements(named, named.categoryId, named.nicheId, input);
+  }
+  // "None of these fit" is an answer, and a better one than forcing a match.
+  // Word-matching a blurb whose subject no template covers is how "hang a
+  // hammock" landed on Door Hanging — it shares the word "hang" and nothing
+  // else, and the model can see that where the matcher can't.
+  if (saidNone) {
+    return buildRequirements(undefined, undefined, undefined, input);
+  }
+
+  let template = pickInGroup(resolvedCategoryId, resolvedNicheId, input.freeText);
+
+  // A category that came from the tradie's settings is a default, not a claim
+  // about this job. When freeText describes the work, let it compete — and
+  // search ALL templates, not just the defaulted category's, since the whole
+  // point is that this job may sit outside their usual trade.
+  const defaultedOnly = input.categoryFromSettings && !!input.freeText;
+  if (defaultedOnly) template = undefined;
 
   // No niche pinned but we have a blurb — fuzzy-match it to the best template.
   if (!template && input.freeText) {
     const ft = input.freeText.toLowerCase().trim();
     let best: { t: (typeof NICHE_TEMPLATES)[number]; score: number } | undefined;
     for (const t of NICHE_TEMPLATES) {
-      // Prefer templates from the given category when one was supplied.
-      if (resolvedCategoryId && t.categoryId !== resolvedCategoryId) continue;
-      const nameLower = t.name.toLowerCase();
-      const exactSubstring = ft.includes(nameLower) || nameLower.includes(ft);
-      const score = exactSubstring ? 1 : similarity(ft, nameLower);
+      // Respect a category the CALLER pinned; ignore one that was merely
+      // defaulted from settings.
+      if (resolvedCategoryId && !defaultedOnly && t.categoryId !== resolvedCategoryId) continue;
+      // Score by WORDS, weighted by how rare each is across the template
+      // names — see nicheMatch, which also handles the tradie naming the
+      // niche outright. Whole-string edit distance used to live here and
+      // matched "2 meter by 5 meter deck" to Split System Service.
+      const score = scoreName(ft, t.name.toLowerCase(), NICHE_NAME_WEIGHTS);
       if (!best || score > best.score) best = { t, score };
     }
-    if (best && best.score > 0.3) {
+    if (best && best.score >= NICHE_MATCH_FLOOR) {
       template = best.t;
       resolvedCategoryId = best.t.categoryId;
       resolvedNicheId = best.t.nicheId;
+    } else if (defaultedOnly) {
+      // freeText matched nothing better than the tradie's own trade. Fall back
+      // to it rather than answering with nothing.
+      template = pickInGroup(resolvedCategoryId, resolvedNicheId, input.freeText);
     }
   }
 
+  return buildRequirements(template, resolvedCategoryId, resolvedNicheId, input);
+}
+
+/**
+ * Assemble the answer once a template (or none) has been settled on.
+ *
+ * Shared by every route in — the model naming a job type, the model saying
+ * none fits, and word-matching a blurb — so they can't drift apart.
+ */
+function buildRequirements(
+  template: (typeof NICHE_TEMPLATES)[number] | undefined,
+  resolvedCategoryId: string | undefined,
+  resolvedNicheId: string | undefined,
+  input: JobRequirementsInput,
+): JobRequirementsResult {
   // Build the must-ask list. Pill labels are the individual topics to cover;
   // questionsLine is the same content phrased as sentences, so we only use one.
   // Prefer questionsLine as the single bundled entry when it exists (better
   // phrasing); fall back to individual pill labels when there is no questionsLine.
   const mustAskQuestions: string[] = [];
+  let genericScope = false;
   if (resolvedCategoryId && resolvedNicheId) {
     if (template?.questionsLine) {
       mustAskQuestions.push(template.questionsLine.trim());
@@ -585,6 +727,14 @@ export function resolveJobRequirements(input: JobRequirementsInput): JobRequirem
         }
       }
     }
+  }
+
+  // Nothing matched, or the matched niche carries no questions of its own.
+  // Never hand back an empty list: that turns "ask what this returns" into
+  // "ask nothing", and Mate drafts a quote it has asked nothing about.
+  if (mustAskQuestions.length === 0) {
+    mustAskQuestions.push(...GENERIC_SCOPE_QUESTIONS);
+    genericScope = true;
   }
 
   const pricingMethod = template?.pricingMethod || undefined;
@@ -606,6 +756,7 @@ export function resolveJobRequirements(input: JobRequirementsInput): JobRequirem
       templateName: template?.name,
     },
     mustAskQuestions,
+    genericScope,
     pricingMethod,
     measurementDriven,
     planHelps: measurementDriven,
@@ -616,7 +767,7 @@ export function resolveJobRequirements(input: JobRequirementsInput): JobRequirem
   };
 }
 
-export async function getJobRequirements(input: { category?: string; niche?: string; freeText?: string }): Promise<unknown> {
+export async function getJobRequirements(input: { category?: string; niche?: string; freeText?: string; jobType?: string }): Promise<unknown> {
   const uid = requireUid();
   let { category, niche } = input;
   if (!category && !niche) {
@@ -636,6 +787,10 @@ export async function getJobRequirements(input: { category?: string; niche?: str
     categoryId: category,
     nicheId: niche,
     freeText: input.freeText,
+    jobType: input.jobType,
+    // Flag defaults so a freeText describing THIS job can outvote the tradie's
+    // usual trade — see JobRequirementsInput.categoryFromSettings.
+    categoryFromSettings: !input.category && !input.niche,
     supplierBook,
   });
 }
