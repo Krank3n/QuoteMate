@@ -36,6 +36,16 @@ export interface AppleJwsVerification {
   environment: string | null;
   productId: string | null;
   transactionId: string | null;
+  /**
+   * The price Apple actually charged, in MILLIUNITS of `currency` (329000 =
+   * A$329.00), straight from the signed transaction. This is what a
+   * grandfathered or promo-priced subscriber really pays, so revenue maths
+   * never has to fall back to today's list price.
+   */
+  price: number | null;
+  currency: string | null;
+  /** The subscription's first transaction — stable across every renewal. */
+  originalTransactionId: string | null;
   /** Short machine-readable note for logs; never surfaced to the buyer. */
   detail: string;
 }
@@ -101,6 +111,9 @@ export async function verifyAppleJws(jws: unknown): Promise<AppleJwsVerification
     environment: null,
     productId: null,
     transactionId: null,
+    price: null,
+    currency: null,
+    originalTransactionId: null,
     detail: '',
   };
 
@@ -135,6 +148,9 @@ export async function verifyAppleJws(jws: unknown): Promise<AppleJwsVerification
       environment: payload.environment ?? declared,
       productId: payload.productId ?? null,
       transactionId: payload.transactionId ?? null,
+      price: typeof payload.price === 'number' ? payload.price : null,
+      currency: payload.currency ?? null,
+      originalTransactionId: payload.originalTransactionId ?? null,
       detail: 'verified',
     };
   } catch (err: any) {

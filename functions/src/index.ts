@@ -130,7 +130,7 @@ import {
 import { receiptVerdict, isFirstGrantOfTransaction } from './receiptValidation.helpers';
 import { verifyAppleJws } from './appleJws.helpers';
 import { verifySquareWebhookSignature } from './squareWebhookSignature';
-import { resolveServerPlan } from './subscription.helpers';
+import { resolveServerPlan, storePricePatch, subInterval } from './subscription.helpers';
 import {
   SQUARE_OAUTH_STATES_COLLECTION,
   SQUARE_OAUTH_STATE_TTL_MS,
@@ -1067,12 +1067,21 @@ async function handleSubscriptionUpdate(subscription: Stripe.Subscription) {
     const subscriptionRef = firestore.doc(`users/${userId}/profile/subscription`);
     const isActive = subscription.status === 'active' || subscription.status === 'trialing';
 
+    const stripePrice = subscription.items.data[0]?.price;
     await subscriptionRef.set({
       isPro: isActive,
       platform: 'web',
-      productId: subscription.items.data[0]?.price?.id || null,
+      productId: stripePrice?.id || null,
       subscriptionId: subscription.id,
       customerId,
+      // Bill-accurate MRR: the amount on the price the customer is actually on,
+      // not whatever the current list price happens to be.
+      ...storePricePatch({
+        micros: stripePrice?.unit_amount == null ? null : stripePrice.unit_amount * 10000,
+        currency: stripePrice?.currency || null,
+        interval: stripePrice?.recurring?.interval === 'year' ? 'yearly' : 'monthly',
+        source: 'stripe',
+      }),
       validatedAt: admin.firestore.FieldValue.serverTimestamp(),
       currentPeriodStart: new Date(subscription.current_period_start * 1000),
       currentPeriodEnd: new Date(subscription.current_period_end * 1000),
@@ -1520,6 +1529,15 @@ export const validateAppleReceipt = functions.https.onRequest((req, res) => {
       const firestore = admin.firestore();
       const subscriptionRef = firestore.doc(`users/${userId}/profile/subscription`);
       const resolvedTransactionId = jwsResult.transactionId || transactionId;
+      // The signed transaction carries the price actually charged. Storing it
+      // keeps a grandfathered or promo-priced subscriber out of the admin's
+      // list-price guesswork (subscription.helpers subPriceInfo).
+      const applePricePatch = storePricePatch({
+        micros: Number(jwsResult.price) * 1000,
+        currency: jwsResult.currency,
+        interval: subInterval({ productId: signedProductId }),
+        source: 'apple',
+      });
 
       // Decide "is this a new sale?" and write the entitlement ATOMICALLY. The
       // launch sweep re-posts every live receipt StoreKit hands back, so this
@@ -1539,6 +1557,11 @@ export const validateAppleReceipt = functions.https.onRequest((req, res) => {
           // Persist the signed environment so isBilledSub() can exclude sandbox
           // purchases from revenue without re-decoding the token every read.
           environment: jwsResult.environment,
+          // …and the signed price, so MRR is what this subscriber actually pays
+          // rather than today's list price (Apple quotes milliunits).
+          ...applePricePatch,
+          // Stable across every renewal — the key revenue maths dedupes on.
+          originalTransactionId: jwsResult.originalTransactionId || resolvedTransactionId,
           appleValidated,
           validatedAt: admin.firestore.FieldValue.serverTimestamp(),
           currentPeriodStart: now,
@@ -1619,6 +1642,8 @@ export const validateGoogleReceipt = functions.https.onRequest((req, res) => {
       // bad/expired → terminal.
       let googleOutcome: 'valid' | 'invalid' | 'unavailable' = 'unavailable';
       let googleExpiryDate: Date | null = null;
+      let googlePriceMicros: number | null = null;
+      let googlePriceCurrency: string | null = null;
 
       // Validate with Google Play Developer API if service account is configured
       const googleServiceAccount = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
@@ -1649,6 +1674,10 @@ export const validateGoogleReceipt = functions.https.onRequest((req, res) => {
 
           if (googleRes.ok) {
             const data = await googleRes.json() as any;
+            // Play reports what THIS subscriber is billed — which is not the
+            // current SKU price for anyone grandfathered on an older one.
+            googlePriceMicros = Number(data?.priceAmountMicros);
+            googlePriceCurrency = data?.priceCurrencyCode || null;
             const expiryTimeMs = parseInt(data?.expiryTimeMillis || '0', 10);
             if (expiryTimeMs > Date.now()) {
               googleOutcome = 'valid';
@@ -1715,6 +1744,12 @@ export const validateGoogleReceipt = functions.https.onRequest((req, res) => {
           productId,
           transactionId,
           purchaseToken: purchaseToken || null,
+          ...storePricePatch({
+            micros: googlePriceMicros,
+            currency: googlePriceCurrency,
+            interval: subInterval({ productId }),
+            source: 'google',
+          }),
           googleValidated,
           validatedAt: admin.firestore.FieldValue.serverTimestamp(),
           currentPeriodStart: now,
