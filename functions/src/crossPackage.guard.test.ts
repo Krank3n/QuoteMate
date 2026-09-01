@@ -50,7 +50,10 @@ describe('reconcile batch-size mirror (src/services/llmService.ts RECONCILE_MAX_
 });
 
 describe('estimated-price pack info (src/services/webSearchPricing.ts)', () => {
-  const handler = fs.readFileSync(path.join(__dirname, 'index.ts'), 'utf8');
+  // Prompt text lives in estimatorPrompt.ts; plumbing in index.ts.
+  const handler =
+    fs.readFileSync(path.join(__dirname, 'estimatorPrompt.ts'), 'utf8') +
+    fs.readFileSync(path.join(__dirname, 'index.ts'), 'utf8');
   const client = fs.readFileSync(
     path.join(__dirname, '..', '..', 'src', 'services', 'webSearchPricing.ts'),
     'utf8',
@@ -82,7 +85,12 @@ describe('estimated-price pack info (src/services/webSearchPricing.ts)', () => {
 });
 
 describe('price estimator must not decline trade-supply goods', () => {
-  const handler = fs.readFileSync(path.join(__dirname, 'index.ts'), 'utf8');
+  // The server prompt lives in estimatorPrompt.ts (extracted so the offline
+  // paired eval exercises exactly what production sends); the handler's
+  // response plumbing stays in index.ts.
+  const handler =
+    fs.readFileSync(path.join(__dirname, 'estimatorPrompt.ts'), 'utf8') +
+    fs.readFileSync(path.join(__dirname, 'index.ts'), 'utf8');
   const client = fs.readFileSync(
     path.join(__dirname, '..', '..', 'src', 'services', 'webSearchPricing.ts'),
     'utf8',
