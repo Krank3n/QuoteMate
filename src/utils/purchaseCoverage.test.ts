@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { coverageSanePurchaseCount, coverageFloorPurchaseCount, recoverPackInfo } from './purchaseCoverage';
+import { isLumpSumRow, coverageSanePurchaseCount, coverageFloorPurchaseCount, recoverPackInfo } from './purchaseCoverage';
 import { parsePackInfo } from './parsePackInfo';
 
 describe('coverageSanePurchaseCount', () => {
@@ -652,5 +652,37 @@ describe('the clamp only lowers, so it must not act on guessed pack sizes', () =
         requirementUnit: 'each',
       }),
     ).toBeNull();
+  });
+});
+
+describe('isLumpSumRow (the QU-178514 $18,000 allowance)', () => {
+  // "Post hole digging - spoil removal allowance | 15 each @ $1,200 = $18,000"
+  // on a $15.6k fence. An allowance is one figure for the whole job; the
+  // pricing path multiplied it by the post count and tripled the quote.
+  it('recognises an allowance', () => {
+    expect(isLumpSumRow('Post hole digging - spoil removal allowance')).toBe(true);
+    expect(isLumpSumRow('Waste disposal allowance')).toBe(true);
+  });
+
+  it('recognises hire and provisional sums', () => {
+    expect(isLumpSumRow('Skip bin hire 6m³')).toBe(true);
+    expect(isLumpSumRow('Excavator hire')).toBe(true);
+    expect(isLumpSumRow('Provisional sum for tiling')).toBe(true);
+    expect(isLumpSumRow('PC sum - tapware')).toBe(true);
+  });
+
+  // Deliberately narrow. These read like services but are genuinely per-unit,
+  // and collapsing them to one would under-quote real work — the worse error.
+  it('does not treat per-unit work as a lump sum', () => {
+    expect(isLumpSumRow('Post hole digging')).toBe(false);
+    expect(isLumpSumRow('Core hole drilling')).toBe(false);
+    expect(isLumpSumRow('Spoil removal')).toBe(false);
+    expect(isLumpSumRow('Labour - install palings')).toBe(false);
+  });
+
+  it('does not fire on ordinary materials', () => {
+    expect(isLumpSumRow('Treated pine H4 post 90x90mm')).toBe(false);
+    expect(isLumpSumRow('Galvanised coil nails')).toBe(false);
+    expect(isLumpSumRow('')).toBe(false);
   });
 });

@@ -49,6 +49,27 @@ function normaliseUnit(u: string): string {
   return t;
 }
 
+/**
+ * Lines that are a LUMP SUM by trade convention, not a per-unit rate.
+ *
+ * An "allowance" or a "hire" is one figure covering the whole job — a tradie
+ * writing "spoil removal allowance" means one allowance, never one per post.
+ * The pricing path treats every row as a unit rate times a count, which turned
+ * "Post hole digging - spoil removal allowance, 15 each" into 15 x $1,200 =
+ * $18,000 on a $15.6k fence, tripling the materials total on its own.
+ *
+ * Deliberately narrow. Words like "removal", "digging" or "labour" are NOT
+ * here: those genuinely can be per-unit ("core hole drilling, 12 each"), and
+ * collapsing them would under-quote real work. Only terms that denote a single
+ * lump by convention qualify.
+ */
+const LUMP_SUM_RE = /\b(?:allowance|hire|provisional\s+sum|pc\s+sum)\b/i;
+
+/** True when the row is a lump sum that must never be multiplied by a count. */
+export function isLumpSumRow(name: string): boolean {
+  return LUMP_SUM_RE.test(name || '');
+}
+
 /** Purchase units that hold MORE THAN ONE piece, so one per piece is absurd. */
 const CONTAINER_UNITS = new Set(['pack', 'box']);
 

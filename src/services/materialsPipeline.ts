@@ -24,7 +24,7 @@ import { supplierPriceForGstMode, roundToTwoDecimals } from '../utils/quoteCalcu
 import { keepSupplierPriceInclusive } from '../../shared/document';
 import { applyPackAwarePricing } from '../utils/packAwarePricing';
 import { parsePackInfo } from '../utils/parsePackInfo';
-import { coverageSanePurchaseCount, coverageFloorPurchaseCount, recoverPackInfo } from '../utils/purchaseCoverage';
+import { coverageSanePurchaseCount, coverageFloorPurchaseCount, recoverPackInfo, isLumpSumRow } from '../utils/purchaseCoverage';
 import {
   parseJobAreaM2,
   geometricSanePieceCount,
@@ -1602,6 +1602,18 @@ async function fetchPricesForQuoteInner(
       // feeding it prose-derived sizes bought 4 formwork pegs against a
       // 20-peg requirement and 1 hinge against 2. Under-buying costs the
       // tradie money directly, so the asymmetry matters.
+      // A lump sum is one figure for the whole job, so it can never be
+      // multiplied by a piece count. "Post hole digging - spoil removal
+      // allowance, 15 each @ $1,200" billed $18,000 and tripled the materials
+      // total on a $15.6k fence, on its own.
+      if (isLumpSumRow(m.name) && m.quantity > 1) {
+        m.quantity = 1;
+        m.totalPrice = roundToTwoDecimals(m.price);
+        m.priceConfidence = 'low';
+        m.description = m.description
+          ? `Priced as a single allowance — check it covers the job. ${m.description}`
+          : 'Priced as a single allowance — check it covers the job.';
+      }
       const sane = coverageSanePurchaseCount({
         requirement: m.requiredQty,
         name: m.name,
