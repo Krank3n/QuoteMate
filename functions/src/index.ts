@@ -203,11 +203,12 @@ import { generateQuotePdfBuffer } from './pdfGenerator';
 import { normaliseTimestamp } from './timestamps.helpers';
 import { processAndStoreLogo } from './logoProcessing';
 import { dollarsToCents, centsToDollars } from './shared/pdf/money';
-import { validateAndRepairAiOutput, clampMaterialQuantity, detectLaunderedSections } from './shared/ai/validateAiOutput';
+import { validateAndRepairAiOutput } from './shared/ai/validateAiOutput';
 import { getFeedbackDocId, getCategoryLabel, isSideEffectFreeRequest, isRatingRecordRequest } from './quickFeedback.helpers';
 import { buildReconcilePrompt } from './reconcile.helpers';
 import { buildMaterialsPrompt } from './materialsPrompt';
 import { buildEstimatorPrompt } from './estimatorPrompt';
+import { buildQuantitySanityPrompt, applySanityDecisions, indexMaterialsForSanity } from './quantitySanity';
 import { claudeText } from './claudeText';
 import {
   applyAnchorScale,
@@ -2515,94 +2516,16 @@ async function sanityCheckQuantities(
   tradeContext: any,
   materials: any[],
 ): Promise<any[]> {
-  const tradeLine = tradeContext?.nicheName
-    ? `${tradeContext.categoryName || ''} / ${tradeContext.nicheName}`.trim()
-    : tradeContext?.categoryName || 'general trade';
-
-  // Tag each material with a stable index so the validator can refer back
-  // without us trusting it to repeat the full object.
-  const indexed = materials.map((m, i) => ({
-    index: i,
-    name: m.name,
-    quantity: m.quantity,
-    unit: m.unit,
-    section: m.section,
-    sectionMultiplier: m.sectionMultiplier,
-  }));
-
-  // Deterministic detection of sections whose quantities were never derived.
-  // The generation prompt's ANTI-LAUNDER RULE asks for this and gets ignored
-  // (QU-178425 shipped 165 tubes of sealant on a 165 m² roof), so when the
-  // detector fires we stop asking politely and name the section here.
-  const laundered = detectLaunderedSections(indexed);
-  const launderBlock = laundered.length
-    ? `
-
-OVERRIDE — THE FOLLOWING SECTIONS WERE NOT DERIVED AND MUST BE RECALCULATED: ${laundered.map((s) => `"${s}"`).join(', ')}
-Several materials in each carry the SAME round placeholder quantity against a large sectionMultiplier. That multiplier is the job's SIZE, so every one of those lines is about to be multiplied into it — a 165 m² roof emitted this way becomes 165 sheets, 165 batten screws AND 165 tubes of sealant.
-For EVERY material in those sections, return "adjust" with a newQuantity derived from real geometry. This overrides the "when in doubt, keep" rule above — in these sections, keeping is the wrong answer:
-- Sheet / roll goods: area ÷ the product's cover width or roll coverage.
-- Linear goods (ridge capping, edging, trim, battens, flashing): the EDGE or RIDGE length, never the area.
-- Consumables (sealant, adhesive, primer, oil): a per-job count or a coverage rate. A few tubes for a whole roof, not one per m².
-- Fasteners: a per-m² or per-intersection density × the area.
-Remember the quantity you return is PER UNIT of sectionMultiplier, so divide your whole-job figure by ${laundered.length === 1 ? 'that multiplier' : 'the section multiplier'}. Two materials of different physical kinds must NOT come out at the same number. A fractional newQuantity is valid and expected here.`
-    : '';
-
-  const prompt = `You are reviewing a materials list generated for an Australian tradie's job. The first-pass LLM sometimes over-spec's repeating elements by 3-10× (e.g. 60 deck joists when a 50m² deck only needs 12). Your job: review each material's quantity against the job scope and adjust any that are clearly excessive.
-
-Job description: "${jobDescription}"
-Trade: ${tradeLine}
-
-Materials list (with index):
-${JSON.stringify(indexed, null, 2)}
-
-For each material, decide:
-- "keep" — quantity is reasonable for the scope (within 30% over for waste is fine).
-- "adjust" — quantity is clearly excessive (roughly 2× or more over what the scope requires). Reduce to a sensible count.
-
-Use general structural-counting knowledge that applies across all trades:
-- Repeating linear elements (joists, studs, posts, rafters): count = ceil(span / centres) + 1.
-- Per-area elements (clips, tiles, sheets, downlights, GPOs): count = area × density.
-- Linear material from area (decking, weatherboard, cladding): linear metres = area / element_width.
-- One-per-unit items: count = N units × items_per_unit.
-- Volumetric (concrete bags, sand): bags = volume / yield.
-- If quantity has a sectionMultiplier (per-unit qty × multiplier), multiplier is the count of repeating WORK UNITS — sanity-check the multiplier itself against the scope.
-- Units "m", "m²", "m³", "kg" and "L" are continuous measures, so a FRACTIONAL newQuantity is valid and often correct — one deck footing is 0.054 m³ of concrete, not 1. Only "each", "pack" and "box" must be whole numbers. Never round a per-unit volume or mass up to 1 just to make it an integer; in a section with a large multiplier that multiplies straight into the quote.
-
-CRITICAL — be conservative. A 20-30% over-spec is normal for waste; do NOT adjust those. Only adjust when the count is clearly disproportionate. When in doubt, keep.${launderBlock}
-
-Respond with ONLY valid JSON in this exact shape:
-{
-  "results": [
-    { "index": <number>, "decision": "keep" | "adjust", "newQuantity": <number when adjust>, "reasoning": "<one short sentence>" }
-  ]
-}`;
-
+  // Prompt construction and decision application live in quantitySanity.ts so
+  // the paired eval (scripts/bakeoff/quantitySanityAB.ts) exercises exactly
+  // this code offline. Only the LLM call itself stays here.
+  const indexed = indexMaterialsForSanity(materials);
+  const prompt = buildQuantitySanityPrompt(jobDescription, tradeContext, indexed);
   const parsed = await callGeminiLiteJson(apiKey, prompt);
   const results = Array.isArray(parsed.results) ? parsed.results : [];
-  const adjustments = new Map<number, number>();
-  for (const r of results) {
-    if (
-      r &&
-      typeof r.index === 'number' &&
-      r.decision === 'adjust' &&
-      typeof r.newQuantity === 'number' &&
-      r.newQuantity > 0
-    ) {
-      // Unit-aware, same as the client. A corrective pass that rounds
-      // 0.054 m³ to 0 (or floors it to 1) would re-create the very bug it
-      // exists to catch — see clampMaterialQuantity.
-      const unit = typeof materials[r.index]?.unit === 'string' ? materials[r.index].unit : 'each';
-      const clamped = clampMaterialQuantity(r.newQuantity, unit);
-      if (clamped > 0) adjustments.set(r.index, clamped);
-    }
-  }
-  if (adjustments.size === 0) return materials;
-  return materials.map((m, i) => {
-    const adjusted = adjustments.get(i);
-    return adjusted !== undefined ? { ...m, quantity: adjusted } : m;
-  });
+  return applySanityDecisions(materials, results);
 }
+
 
 async function callGeminiLiteJson(apiKey: string, prompt: string): Promise<any> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_RECONCILE_MODEL}:generateContent?key=${apiKey}`;

@@ -42,6 +42,44 @@ import {
 
 const corsHandler = cors({ origin: true });
 
+/**
+ * Is this upstream failure the PROVIDER being dead, rather than our request
+ * being wrong? Only these classes may fall back to Gemini: a fallback on a
+ * generic 400 would mask real request bugs behind a silent quality downgrade —
+ * the exact failure mode the Opus-generation no-op taught us to fear.
+ *
+ * The billing case is the one that has actually happened, twice: an
+ * out-of-credit ANTHROPIC_API_KEY 502'd every Mate turn while the resolver,
+ * which checks key PRESENCE only, kept routing to Claude. Mate is the app's
+ * front door; it must degrade to Gemini, not die.
+ */
+export function isProviderDeadError(status: number, bodyText: string): boolean {
+  if (status === 401 || status === 403 || status === 429 || status === 529) return true;
+  if (status >= 500) return true;
+  if (status === 400 && /credit balance|billing|payment/i.test(bodyText)) return true;
+  return false;
+}
+
+/**
+ * Claude thinking rides the Gemini-shaped parts as thoughtSignature blobs.
+ * Gemini rejects signatures it did not mint, so a conversation replayed to the
+ * fallback must shed them — the thinking context is lost for that turn, which
+ * degrades, but the turn ANSWERS.
+ */
+export function stripThoughtSignatures(contents: unknown[]): unknown[] {
+  return (contents || []).map((c: any) => {
+    if (!c || !Array.isArray(c.parts)) return c;
+    return {
+      ...c,
+      parts: c.parts.map((p: any) => {
+        if (!p || p.thoughtSignature === undefined) return p;
+        const { thoughtSignature, ...rest } = p;
+        return rest;
+      }),
+    };
+  });
+}
+
 // The text brain. Claude Sonnet 5 replaced gemini-3-flash-preview after the
 // Aug 2026 audit: flash-tier instruction-following was producing empty
 // replies mid-tool-loop, chain-of-thought leaks, and name slop
@@ -135,23 +173,57 @@ export const assistantChat = functions
         if (tools) upstreamBody.tools = tools;
       }
 
-      let upstreamRes: Awaited<ReturnType<typeof fetch>>;
+      let activeProvider = provider;
+      let upstreamRes: Awaited<ReturnType<typeof fetch>> | null = null;
+      let text = '';
       try {
-        upstreamRes = await fetch(url, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify(upstreamBody),
-        });
+        upstreamRes = await fetch(url, { method: 'POST', headers, body: JSON.stringify(upstreamBody) });
+        text = await upstreamRes.text();
       } catch (err: any) {
-        if (reservedTurn) await refundQuotaTurn(decoded.uid);
-        res.status(502).json({ error: 'Mate is offline — try again in a moment.', detail: err?.message });
-        return;
+        // Network-level failure counts as provider-dead below.
+        text = String(err?.message || err);
       }
 
-      const text = await upstreamRes.text();
+      // Claude down (billing, auth, quota, outage, network)? Replay the turn
+      // on Gemini instead of 502ing — Mate is the front door and an unfunded
+      // key has taken it offline before. Never for request-shaped 400s.
+      if (
+        activeProvider === 'claude' &&
+        geminiKey &&
+        (!upstreamRes || (!upstreamRes.ok && isProviderDeadError(upstreamRes.status, text)))
+      ) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          '[assistantChat] Claude unavailable, falling back to Gemini:',
+          upstreamRes ? `${upstreamRes.status} ${text.slice(0, 200)}` : text.slice(0, 200),
+        );
+        activeProvider = 'gemini';
+        const gUrl = `https://generativelanguage.googleapis.com/v1beta/models/${CHAT_MODEL}:generateContent?key=${geminiKey}`;
+        const gBody: Record<string, unknown> = { contents: stripThoughtSignatures(contents) };
+        if (systemInstruction) gBody.systemInstruction = systemInstruction;
+        if (tools) gBody.tools = tools;
+        try {
+          upstreamRes = await fetch(gUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(gBody),
+          });
+          text = await upstreamRes.text();
+        } catch (err: any) {
+          if (reservedTurn) await refundQuotaTurn(decoded.uid);
+          res.status(502).json({ error: 'Mate is offline — try again in a moment.', detail: err?.message });
+          return;
+        }
+      }
+
+      if (!upstreamRes) {
+        if (reservedTurn) await refundQuotaTurn(decoded.uid);
+        res.status(502).json({ error: 'Mate is offline — try again in a moment.', detail: text.slice(0, 200) });
+        return;
+      }
       if (!upstreamRes.ok) {
         // eslint-disable-next-line no-console
-        console.warn('[assistantChat]', provider, 'error', upstreamRes.status, text.slice(0, 300));
+        console.warn('[assistantChat]', activeProvider, 'error', upstreamRes.status, text.slice(0, 300));
         if (reservedTurn) await refundQuotaTurn(decoded.uid);
         res.status(502).json({ error: 'Mate hit a snag — try again in a moment.' });
         return;
@@ -168,13 +240,13 @@ export const assistantChat = functions
       // echoes verbatim. For Claude, thinking blocks ride the parts'
       // thoughtSignature field so the next hop can restore them; for Gemini,
       // functionCall parts carry their native thoughtSignature untouched.
-      const model = provider === 'claude' ? CLAUDE_CHAT_MODEL : CHAT_MODEL;
+      const model = activeProvider === 'claude' ? CLAUDE_CHAT_MODEL : CHAT_MODEL;
       const parts =
-        provider === 'claude'
+        activeProvider === 'claude'
           ? claudeContentToGeminiParts(parsed?.content || [], parsed?.stop_reason)
           : parsed?.candidates?.[0]?.content?.parts || [];
       const usageMetadata =
-        provider === 'claude'
+        activeProvider === 'claude'
           ? claudeUsageToGeminiUsage(parsed?.usage)
           : parsed?.usageMetadata || {};
 
