@@ -107,3 +107,32 @@ describe('parsePackInfo — stock length stated in millimetres', () => {
       .not.toEqual({ packSize: 3.6, packUnit: 'm' });
   });
 });
+
+describe('the reconcile model\'s own phrasing (QU-178514 corrupted floor)', () => {
+  // The reconcile pass states its arithmetic as "N things per container" in
+  // its coverage notes, and nothing here could read it — so recoverPackInfo
+  // fell to worse sources and the floor divided a 147-paling requirement by a
+  // wrong size, RAISING the model's correct 3 bundles to 15 ($3,285 for ~750
+  // palings). The one source stating the true size was unreadable.
+  it('reads "50 palings per bundle"', () => {
+    expect(parsePackInfo('50 palings per bundle')).toEqual({ packSize: 50, packUnit: 'each' });
+  });
+
+  it('reads "300 coil nails per pack"', () => {
+    expect(parsePackInfo('300 coil nails per pack')).toEqual({ packSize: 300, packUnit: 'each' });
+  });
+
+  it('reads "1 paling per purchase" — one-per-purchase is a statement, not noise', () => {
+    expect(parsePackInfo('1 paling per purchase')).toEqual({ packSize: 1, packUnit: 'each' });
+  });
+
+  it('does not read a PRICE per container as a size', () => {
+    expect(parsePackInfo('$219 per bundle')).toBeNull();
+    expect(parsePackInfo('about $45.90 per pack at Bunnings')).toBeNull();
+    expect(parsePackInfo('45.90 per pack')).toBeNull();
+  });
+
+  it('still ignores bare "1 each" title noise', () => {
+    expect(parsePackInfo('Gate Hinge 1 each')).toBeNull();
+  });
+});

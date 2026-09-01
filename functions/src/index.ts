@@ -2652,6 +2652,7 @@ async function callClaudeLiteJson(apiKey: string, prompt: string): Promise<any> 
   return parseLLMJson(content);
 }
 
+
 export const reconcilePricedMaterials = functions.runWith({ timeoutSeconds: 120 }).https.onRequest((req, res) => {
   corsHandler(req, res, async () => {
     if (req.method !== 'POST') {
@@ -2706,6 +2707,14 @@ export const reconcilePricedMaterials = functions.runWith({ timeoutSeconds: 120 
       // the client fell back to leaving raw mass quantities in place,
       // producing the "400 packs of concrete" bug. Having a second provider
       // keeps the pricing pipeline working through single-vendor outages.
+      //
+      // An Opus-primary reconcile was BUILT and then not shipped (1 Sep 2026):
+      // three verification runs on the same five real quotes could not
+      // reproduce the harness result that motivated it — the claude-candidates
+      // arm itself swung 5/8 → 2/5 → 3/5 → 0/5 sendable across runs with
+      // unchanged code, so the apparent gain was judge/generation variance,
+      // not the model tier. Do not re-ship it without a paired measurement
+      // large enough to clear that noise floor (see scripts/bakeoff).
       let parsed: any | null = null;
       let primaryError: Error | null = null;
       if (geminiApiKey) {
@@ -3233,24 +3242,45 @@ Examples:
 {"price": 8.50, "productName": "Gyprock 90m Paper Joint Tape", "packSize": 90, "packUnit": "m", "store": "Hardware Store (AI estimate)", "confidence": "medium"}
 {"price": 45.90, "productName": "Davco 20kg Tile Adhesive", "packSize": 20, "packUnit": "kg", "store": "Hardware Store (AI estimate)", "confidence": "medium"}`;
 
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': anthropicApiKey,
-          'anthropic-version': '2023-06-01',
-        },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-5-20250929',
-          max_tokens: 500,
-          messages: [
-            {
-              role: 'user',
-              content: prompt,
-            },
-          ],
-        }),
-      });
+      // One retry on a transient failure. This estimator is the LAST real
+      // price source before the nominal placeholder, and it runs with no
+      // second provider — a single 429 or connection reset here is how a
+      // 14kW ducted system shipped at $25 in one run and $7,500 in the next.
+      let response: any;
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+    response = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': anthropicApiKey,
+            'anthropic-version': '2023-06-01',
+          },
+          body: JSON.stringify({
+            model: 'claude-sonnet-4-5-20250929',
+            max_tokens: 500,
+            messages: [
+              {
+                role: 'user',
+                content: prompt,
+              },
+            ],
+          }),
+        });
+          if (response.status === 429 || response.status >= 500) {
+            if (attempt === 2) break;
+            await new Promise((r) => setTimeout(r, 3000));
+            continue;
+          }
+          break;
+        } catch (err: any) {
+          const connectionLevel = /ECONNRESET|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|socket hang up|network|fetch failed/i.test(
+            String(err?.message || err),
+          );
+          if (!connectionLevel || attempt === 2) throw err;
+          await new Promise((r) => setTimeout(r, 3000));
+        }
+      }
 
       if (!response.ok) {
         const errorText = await response.text();

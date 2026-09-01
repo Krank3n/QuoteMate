@@ -33,7 +33,27 @@ const NUM = String.raw`(\d+(?:\.\d+)?)`;
 
 // Order matters — more specific patterns first. m²/m³ MUST come before m so
 // "30m²" doesn't match the plain "m" pattern first.
-const PATTERNS: Array<{ re: RegExp; unit: PackInfo['packUnit'] }> = [
+const PATTERNS: Array<{ re: RegExp; unit: PackInfo['packUnit']; allowOne?: boolean }> = [
+  // "50 palings per bundle", "300 coil nails per pack", "1 paling per purchase".
+  // This is the reconcile model's OWN phrasing — its coverageNote states the
+  // arithmetic behind its purchase count in exactly this shape, row after row.
+  // Nothing here could read it, so recoverPackInfo fell through to worse
+  // sources: on a real fencing quote the floor divided a 147-paling
+  // requirement by a wrong pack size and RAISED the model's correct 3 bundles
+  // to 15 ($3,285 for ~750 palings), while "1 paling per purchase" rows were
+  // left under-bought. The one source that stated the true size was the one
+  // the parser was illiterate in. Up to two words may sit between the number
+  // and "per" (the item's name); the container word is anchored.
+  // Guarded two ways: a $-prefixed or decimal number is a PRICE per container
+  // ("$219 per bundle"), not a size, so only bare integers match; and unlike
+  // every other 'each' pattern a size of ONE is meaningful here — "1 paling
+  // per purchase" is the model saying each purchase is a single piece, which
+  // is exactly what the coverage floor needs to raise an under-bought count.
+  {
+    re: new RegExp(String.raw`(?<![$.\d])(\d+)\s+(?:[a-z]+\s+){0,2}per\s+(?:pack|packet|box|bag|bundle|carton|case|tub|purchase|unit)\b`, 'i'),
+    unit: 'each',
+    allowOne: true,
+  },
   // "Box of 500", "Pack of 100", "Bag of 60", "Tub of 250"
   { re: new RegExp(String.raw`\b(?:box|pack|packet|bag|tub|carton|case)\s+of\s+${NUM}\b`, 'i'), unit: 'each' },
   // "500 pack", "100-pack", "100pk", "2400 Box"
@@ -159,11 +179,13 @@ export function parsePackInfo(
 }
 
 function readPack(title: string, patterns: typeof PATTERNS): PackInfo | null {
-  for (const { re, unit } of patterns) {
+  for (const { re, unit, allowOne } of patterns) {
     const match = title.match(re);
     if (!match) continue;
     let size = parseFloat(match[1]);
     if (!isFinite(size) || size <= 0) continue;
+    // An explicit per-container statement makes a size of one meaningful.
+    if (allowOne && unit === 'each' && size >= 1) return { packSize: size, packUnit: unit };
     if (unit === 'L' && /(?:ml|millilitres?|milliliters?)/i.test(match[0])) {
       size = size / 1000;
     }

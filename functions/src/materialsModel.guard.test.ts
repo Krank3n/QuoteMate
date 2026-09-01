@@ -109,3 +109,4 @@ describe('materials generator model', () => {
     expect(source).toContain('callGeminiForBlindTakeoff(geminiApiKey, attachments)');
   });
 });
+
