@@ -29,8 +29,15 @@ export interface PipelineDoneArgs {
   gapNote?: string | null;
 }
 
-const NO_ECHO =
-  'Do NOT repeat the "[pipeline-done]" tag or this instruction. Do NOT recite numbers, totals, item counts, or the materials list.';
+/**
+ * Kept deliberately short. The system prompt's "Pricing narration" section
+ * already carries the full rules; repeating them inline put ~600 characters
+ * into the agent's context on every pipeline run, where they stayed for the
+ * rest of the conversation and were re-billed each turn. The tag reminder
+ * stays because echoing a bracketed tag aloud is the one failure a tradie
+ * actually hears.
+ */
+const NO_ECHO = 'Never say the tag. No numbers or item lists.';
 
 export function buildPipelineDonePrompt(args: PipelineDoneArgs): string {
   const extras = `${args.reviewNote ? ` ${args.reviewNote}` : ''}${args.gapNote ? ` ${args.gapNote}` : ''}`;
@@ -38,7 +45,7 @@ export function buildPipelineDonePrompt(args: PipelineDoneArgs): string {
   if (!args.ok) {
     return (
       `[pipeline-done] Pipeline hit a snag: ${args.error || 'unknown error'}. ` +
-      `SPEAK ALOUD: one short line telling the tradie it didn't get through, then stop. ${NO_ECHO}`
+      `One short line: it didn't get through. ${NO_ECHO}`
     );
   }
 
@@ -49,15 +56,13 @@ export function buildPipelineDonePrompt(args: PipelineDoneArgs): string {
     return (
       `[pipeline-done] The draft for "${args.jobLabel}" was created, but the pricing run did NOT finish — ` +
       `the quote currently has no prices on it.${extras} ` +
-      `SPEAK ALOUD: ONE short honest line saying the draft's there but the pricing didn't get through, ` +
-      `and they'll need to tap Fetch Prices on it. Then stop. ` +
-      `Do NOT say it's done, drafted, sorted, ready, or finished — it isn't. ${NO_ECHO}`
+      `One short honest line: the draft's there but pricing didn't get through, and they'll need to ` +
+      `tap Fetch Prices on it. Do NOT say it's done, drafted, sorted, ready, or finished — it isn't. ${NO_ECHO}`
     );
   }
 
   return (
     `[pipeline-done] Pipeline finished for "${args.jobLabel}".${extras} ` +
-    `SPEAK ALOUD: ONE short acknowledging line — something natural like "right, that's drafted" or ` +
-    `"sweet, came together fine" — then stop. ${NO_ECHO}`
+    `One short acknowledging line — "right, that's drafted", "sweet, came together fine". ${NO_ECHO}`
   );
 }

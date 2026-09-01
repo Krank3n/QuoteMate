@@ -18,6 +18,16 @@
 import { Platform } from 'react-native';
 import { Audio } from 'expo-av';
 import { bytesToBase64 } from './audioCodec';
+import {
+  MicUnavailableError,
+  ensureMicPermission,
+  micPermissionGranted,
+} from './micPermission';
+
+// Re-exported so existing importers (AssistantScreen) keep working unchanged
+// while the Gemini transport is still around. Both live in micPermission now:
+// the ElevenLabs path needs them too, and mic.ts retires with Gemini.
+export { MicUnavailableError, micPermissionGranted };
 
 interface AudioRecordOptions {
   sampleRate: number;
@@ -64,13 +74,6 @@ const RECORD_OPTS: AudioRecordOptions = {
 export interface MicCaptureHandle {
   stop: () => Promise<void>;
   isStreaming: () => boolean;
-}
-
-export class MicUnavailableError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'MicUnavailableError';
-  }
 }
 
 // --- Web path ---------------------------------------------------------
@@ -160,7 +163,10 @@ async function ensureWorkletLoaded(ctx: AudioContext): Promise<void> {
   workletModuleReady = true;
 }
 
-async function startWebCapture(onChunk: (b64: string) => void): Promise<WebCaptureState> {
+async function startWebCapture(
+  onChunk: (b64: string) => void,
+  sampleRate: number,
+): Promise<WebCaptureState> {
   const g: any = globalThis as any;
   if (!g.navigator?.mediaDevices?.getUserMedia) {
     throw new MicUnavailableError(
@@ -178,7 +184,7 @@ async function startWebCapture(onChunk: (b64: string) => void): Promise<WebCaptu
         channelCount: 1,
         // Browsers usually ignore sampleRate; the worklet downsamples
         // from whatever the AudioContext gives us.
-        sampleRate: 16000,
+        sampleRate,
         echoCancellation: true,
         noiseSuppression: true,
         autoGainControl: true,
@@ -198,7 +204,7 @@ async function startWebCapture(onChunk: (b64: string) => void): Promise<WebCaptu
 
   const source = audioCtx.createMediaStreamSource(stream);
   const worklet = new AudioWorkletNode(audioCtx, 'pcm-downsampler', {
-    processorOptions: { targetRate: 16000, frameSize: 2048 },
+    processorOptions: { targetRate: sampleRate, frameSize: 2048 },
   });
   let chunkCount = 0;
   worklet.port.onmessage = (e: MessageEvent) => {
@@ -253,19 +259,11 @@ async function stopWebCapture(state: WebCaptureState): Promise<void> {
 // `startRecording() called on an uninitialized AudioRecord` on the native
 // modules thread, where a JS try/catch can't catch it — the app crashes
 // outright. Requesting here turns a denial into a friendly caught error.
-async function ensureMicPermission(): Promise<void> {
-  const { granted, canAskAgain } = await Audio.requestPermissionsAsync();
-  if (!granted) {
-    throw new MicUnavailableError(
-      canAskAgain
-        ? 'Mic access is needed for voice — tap the mic again and allow it.'
-        : 'Mic access is off. Switch it on for QuoteMate in your phone settings to talk to Mate.',
-    );
-  }
-}
+
 
 async function startNativeCapture(
   onChunk: (b64: string) => void,
+  sampleRate: number,
 ): Promise<{ stop: () => Promise<void> }> {
   const mod = loadNativeModule();
   if (!mod) {
@@ -277,7 +275,10 @@ async function startNativeCapture(
   // stop(), so reusing it on the next session would call startRecording()
   // on a released recorder — the same uninitialised crash. A fresh init()
   // each time keeps the recorder valid.
-  mod.init(RECORD_OPTS);
+  // Always the recorder's proven 16 kHz. OpenAI Realtime wants 24 kHz, but
+  // asking react-native-audio-record for it produced empty buffers on device —
+  // so that conversion happens in openAiVoiceSession, not here.
+  mod.init({ ...RECORD_OPTS, sampleRate });
   // react-native-audio-record's listener is global; re-bind on every
   // capture so the previous closure is replaced rather than queued.
   mod.on('data', onChunk);
@@ -299,26 +300,22 @@ async function startNativeCapture(
  * Call `handle.stop()` to end the capture.
  */
 /**
- * Whether mic permission is already granted, WITHOUT prompting. Used to
- * decide if Mate can silently auto-start the mic on tab focus — we only
- * do so when the tradie has previously granted access, never to trigger a
- * fresh permission prompt. Web always returns false (the getUserMedia
- * prompt is part of capture itself).
+ * The one rate the recorder reliably delivers on both platforms.
+ *
+ * Transports that want something else convert on their own side — OpenAI
+ * Realtime needs 24 kHz and upsamples in openAiVoiceSession, because asking
+ * the recorder for 24 kHz yielded empty buffers and killed the session.
  */
-export async function micPermissionGranted(): Promise<boolean> {
-  if (Platform.OS === 'web') return false;
-  try {
-    return (await Audio.getPermissionsAsync()).granted;
-  } catch {
-    return false;
-  }
-}
+export const MIC_RATE_GEMINI = 16000;
 
-export async function startMicCapture(onChunk: (base64Pcm: string) => void): Promise<MicCaptureHandle> {
+export async function startMicCapture(
+  onChunk: (base64Pcm: string) => void,
+  sampleRate: number = MIC_RATE_GEMINI,
+): Promise<MicCaptureHandle> {
   let stopped = false;
 
   if (Platform.OS === 'web') {
-    const state = await startWebCapture(onChunk);
+    const state = await startWebCapture(onChunk, sampleRate);
     return {
       stop: async () => {
         if (stopped) return;
@@ -329,7 +326,7 @@ export async function startMicCapture(onChunk: (base64Pcm: string) => void): Pro
     };
   }
 
-  const handle = await startNativeCapture(onChunk);
+  const handle = await startNativeCapture(onChunk, sampleRate);
   return {
     stop: async () => {
       if (stopped) return;

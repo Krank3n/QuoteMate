@@ -22,7 +22,7 @@ import { readStoreStats } from './storeFunnel';
 
 const GA_PROPERTY = `properties/${process.env.GA_PROPERTY_ID || '527922866'}`;
 const DIGEST_TO = process.env.DIGEST_TO || 'thomas.andrew.hansen@gmail.com';
-const DIGEST_MODEL = process.env.DIGEST_MODEL || 'claude-sonnet-4-6';
+const DIGEST_MODEL = process.env.DIGEST_MODEL || 'claude-sonnet-5';
 
 const CTA_EVENTS = [
   'web_app_click',
@@ -181,8 +181,7 @@ async function callClaude(system: string, user: string): Promise<ClaudeResult> {
       },
       body: JSON.stringify({
         model: DIGEST_MODEL,
-        max_tokens: 2048,
-        temperature: 0.3,
+        max_tokens: 4096,
         system,
         messages: [{ role: 'user', content: user }],
       }),

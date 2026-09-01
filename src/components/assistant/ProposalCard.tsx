@@ -100,6 +100,37 @@ function Body({ proposal }: { proposal: Proposal }) {
           <Text style={styles.dim}>I'll price this one up.</Text>
         </View>
       );
+    case 'propose_update_line_item': {
+      // Show the change, not just the new value — "$100" alone doesn't tell
+      // the tradie whether Mate heard them right.
+      const changes: string[] = [];
+      if (proposal.price !== undefined) {
+        changes.push(
+          proposal.displayCurrentPrice != null
+            ? `${formatCurrency(proposal.displayCurrentPrice)} → ${formatCurrency(proposal.price)}${proposal.displayUnit ? ` per ${proposal.displayUnit}` : ''}`
+            : `${formatCurrency(proposal.price)}${proposal.displayUnit ? ` per ${proposal.displayUnit}` : ''}`,
+        );
+      }
+      if (proposal.quantity !== undefined) {
+        changes.push(
+          proposal.displayCurrentQty != null
+            ? `${proposal.displayCurrentQty} → ${proposal.quantity}${proposal.displayUnit ? ` ${proposal.displayUnit}` : ''}`
+            : `${proposal.quantity}${proposal.displayUnit ? ` ${proposal.displayUnit}` : ''}`,
+        );
+      }
+      if (proposal.name !== undefined) changes.push(`renamed to “${proposal.name}”`);
+      return (
+        <View>
+          <Text style={styles.summary} numberOfLines={2}>
+            {proposal.displayName || `Line ${proposal.materialId.slice(0, 8)}…`}
+          </Text>
+          <Text style={styles.dim}>{changes.join(' · ')}</Text>
+          {proposal.price !== undefined && (
+            <Text style={styles.dim}>Priced by you, so it won't be flagged as an estimate.</Text>
+          )}
+        </View>
+      );
+    }
     case 'propose_delete_line_item':
       return (
         <View>

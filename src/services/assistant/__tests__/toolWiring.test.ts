@@ -24,6 +24,7 @@ const VALID_ARGS: Record<ProposalToolName, Record<string, unknown>> = {
   },
   propose_add_line_item: { quoteId: 'q1', searchTerm: '90x45 treated pine', qty: 4, unit: 'each' },
   propose_delete_line_item: { quoteId: 'q1', materialId: 'm1' },
+  propose_update_line_item: { quoteId: 'q1', materialId: 'm1', price: 100 },
   propose_delete_quote: { quoteId: 'q1' },
   propose_create_contact: { name: 'Gigar' },
   propose_update_customer: { quoteId: 'q1', customerId: 'c1' },

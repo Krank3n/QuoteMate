@@ -7,6 +7,7 @@ export type ProposalType =
   | 'propose_draft_quote'
   | 'propose_add_line_item'
   | 'propose_delete_line_item'
+  | 'propose_update_line_item'
   | 'propose_delete_quote'
   | 'propose_create_contact'
   | 'propose_update_customer'
@@ -43,6 +44,31 @@ export interface AddLineItemProposal extends BaseProposal {
   qty: number;
   unit: string;
   section?: string;
+}
+
+/**
+ * Change a line that is already on the quote — its price, its quantity, or
+ * its name.
+ *
+ * Added because Mate could add a line and delete a line but not correct one,
+ * and the gap surfaced badly in a real conversation: the tradie said "let's
+ * just add it for $100" about an unpriced row and was told twice to go and
+ * type it in himself. He asked again — "no, you do it" — and got refused
+ * again. Adding and deleting without editing is a strange place to stop.
+ */
+export interface UpdateLineItemProposal extends BaseProposal {
+  type: 'propose_update_line_item';
+  quoteId: string;
+  materialId: string;
+  /** New per-unit price. Setting this marks the row as manually priced. */
+  price?: number;
+  quantity?: number;
+  name?: string;
+  /** For the card, so the tradie sees what is changing and from what. */
+  displayName?: string;
+  displayCurrentPrice?: number;
+  displayCurrentQty?: number;
+  displayUnit?: string;
 }
 
 export interface DeleteLineItemProposal extends BaseProposal {
@@ -170,6 +196,7 @@ export type Proposal =
   | DraftQuoteProposal
   | AddLineItemProposal
   | DeleteLineItemProposal
+  | UpdateLineItemProposal
   | DeleteQuoteProposal
   | CreateContactProposal
   | UpdateCustomerProposal

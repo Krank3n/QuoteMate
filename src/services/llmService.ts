@@ -29,8 +29,8 @@ const FIREBASE_FUNCTIONS_URL = USE_EMULATOR
   ? 'http://127.0.0.1:5001/hansendev/us-central1'
   : 'https://us-central1-hansendev.cloudfunctions.net';
 const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
-const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent';
-const GEMINI_LITE_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent';
+const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent';
+const GEMINI_LITE_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent';
 
 
 interface LLMMaterial {

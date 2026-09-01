@@ -386,7 +386,6 @@ async function callClaudeJSON<T>(opts: {
   system: string;
   user: string;
   maxTokens?: number;
-  temperature?: number;
   model?: string;
 }): Promise<ClaudeJSONResult<T> | ClaudeJSONError> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -788,7 +787,7 @@ ${jsonLdText}
 === Website page text ===
 ${blocks || '(no scraped page content — site likely JS-rendered or blocked our crawl. Lean heavily on the Google reviews above.)'}`;
 
-  const r = await callClaudeJSON<ClaudeEnrichment>({ system, user, maxTokens: 1500, temperature: 0.3 });
+  const r = await callClaudeJSON<ClaudeEnrichment>({ system, user, maxTokens: 3000 });
   if (!r.ok) {
     console.warn('claudeEnrich failed:', r.error);
     return null;
@@ -857,7 +856,7 @@ ${TRADE_PITCH[input.trade]}
 
 Include the website link <a href="https://quotemateapp.au">quotemateapp.au</a> woven naturally into the body (one place only — see LINK RULE). Mention iOS + Android once if it fits without being clunky. Make it sound human and dashed off, not polished marketing copy.`;
 
-  const r = await callClaudeJSON<ClaudeMessage>({ system, user, maxTokens: 800, temperature: 0.6 });
+  const r = await callClaudeJSON<ClaudeMessage>({ system, user, maxTokens: 2000 });
   if (!r.ok) {
     console.warn('claudeGenerateMessage failed:', r.error);
     return null;

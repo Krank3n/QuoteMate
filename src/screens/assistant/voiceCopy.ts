@@ -47,3 +47,23 @@ export function buildGreetPrompt({ hour }: { hour: number }): string {
     `do not write drafts or alternatives, do not think out loud. The greeting is your entire reply.`
   );
 }
+
+/**
+ * The one word Mate opens with, as a dynamic variable for the agent's
+ * first_message.
+ *
+ * The greeting is no longer an LLM turn. buildGreetPrompt asked the model to
+ * compose a hello, and twice that produced chain-of-thought reaching a tradie
+ * ("Thought to self: … Greeting constraints: …", 23 Aug 2026). ElevenLabs
+ * speaks first_message verbatim, so there is no turn to leak — but the
+ * time-of-day warmth was worth keeping, and a dynamic variable is how it
+ * survives.
+ *
+ * Deliberately coarser than buildGreetPrompt's four buckets: "middle of the
+ * day" is a description, not something anyone says out loud.
+ */
+export function mateGreetingWord(hour: number): string {
+  if (hour < 12) return 'Morning';
+  if (hour < 18) return 'Afternoon';
+  return 'Evening';
+}

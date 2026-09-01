@@ -11,6 +11,13 @@
 // proposalTools.ts (validator). Adding a name here without wiring it on
 // either side leaves Mate emitting tool calls the dispatcher can't service.
 
+import { NICHE_TEMPLATES } from '../../data/nicheTemplates';
+
+// Every job type Mate knows, listed for the model so it can pick one by name
+// instead of leaving a keyword matcher to guess. Built from the templates so
+// a niche added tomorrow is offered without anyone remembering to list it.
+const KNOWN_JOB_TYPE_LIST = NICHE_TEMPLATES.map((t) => t.name).join(', ');
+
 export const READ_TOOL_NAMES = [
   'find_customer',
   'list_recent_quotes',
@@ -25,6 +32,7 @@ export const PROPOSAL_TOOL_NAMES = [
   'propose_draft_quote',
   'propose_add_line_item',
   'propose_delete_line_item',
+  'propose_update_line_item',
   'propose_delete_quote',
   'propose_create_contact',
   'propose_update_customer',
@@ -155,13 +163,18 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
   {
     name: 'get_job_requirements',
     description:
-      "Call this first when a job type is mentioned. Returns the must-ask questions for this niche, pricing method, and flags for measurement-driven and specialist-supply jobs. Use the returned mustAskQuestions — do not invent questions. Also returns supplierBookPopulated (true when this phone can see the tradie's own imported/saved supplier rates), supplierBookSuppliers (up to 3 of those supplier names) and supplierBookCoversTrade (true when those rates would actually price this niche's core gear). specialistSupply true + supplierBookPopulated false is the one combination worth mentioning — the core materials for this job don't come off a Bunnings or Reece shelf and there's no price list on the phone to fall back on.",
+      "Call this first when a job type is mentioned. Returns the must-ask questions for this niche, pricing method, and flags for measurement-driven and specialist-supply jobs. Use the returned mustAskQuestions — do not invent questions. mustAskQuestions is NEVER empty: when no niche matches, it returns general scope questions and genericScope is true, so there is never a case where you should draft without asking anything. Also returns supplierBookPopulated (true when this phone can see the tradie's own imported/saved supplier rates), supplierBookSuppliers (up to 3 of those supplier names) and supplierBookCoversTrade (true when those rates would actually price this niche's core gear). specialistSupply true + supplierBookPopulated false is the one combination worth mentioning — the core materials for this job don't come off a Bunnings or Reece shelf and there's no price list on the phone to fall back on. KNOWN JOB TYPES (pass one of these verbatim as jobType, or \"none\"): " + KNOWN_JOB_TYPE_LIST + ".",
     parameters: {
       type: 'object',
       properties: {
+        jobType: {
+          type: 'string',
+          description:
+            'PREFERRED. The exact job-type name from the list in this tool\'s description when one genuinely fits, or "none" when you have read the list and none does. You can judge this far better than the keyword matcher behind freeText — "hang a hammock" is not Door Hanging, however many words they share. Never force a near-miss; "none" still returns general scope questions to ask.',
+        },
         category: { type: 'string', description: 'Trade category ID (optional; loaded from business settings if omitted)' },
-        niche: { type: 'string', description: 'Niche ID (optional; inferred from freeText if omitted)' },
-        freeText: { type: 'string', description: 'The job description or blurb to match a niche from (e.g. "colorbond fence", "lawn mow and edge")' },
+        niche: { type: 'string', description: 'Niche ID (optional; inferred from freeText if omitted). NOT unique — several job types share one category/niche pair, so prefer jobType.' },
+        freeText: { type: 'string', description: 'The job description or blurb, always worth passing. Used to match a job type when jobType is omitted, and to pick between job types that share a niche.' },
       },
       required: [],
     },
@@ -239,6 +252,26 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
         section: { type: 'string', description: 'Optional section to add the row under.' },
       },
       required: ['quoteId', 'searchTerm', 'qty', 'unit'],
+    },
+  },
+  {
+    name: 'propose_update_line_item',
+    description:
+      "Change a line that's ALREADY on a quote or invoice — its price, its quantity, or its name. Use this whenever the tradie wants a row corrected: \"make the plywood a hundred bucks\", \"that should be 12 not 6\", \"the decking's $8.50 a metre\". NEVER tell them to go and type a price in themselves — that was the old answer and it's wrong, you can do it from here. Always call get_quote first so you have the real material id and can show what's changing (pass displayName, displayCurrentPrice, displayCurrentQty, displayUnit). Setting a price marks the row as manually priced, which also clears any 'estimated' flag review_quote raised against it. Pass only the fields that change. For a row that isn't on the quote at all, use propose_add_line_item; to take one off, propose_delete_line_item.",
+    parameters: {
+      type: 'object',
+      properties: {
+        quoteId: { type: 'string', description: 'Document id of the quote or invoice.' },
+        materialId: { type: 'string', description: 'Material id from get_quote — not the name.' },
+        price: { type: 'number', description: 'New PER-UNIT price in dollars. The line total is recalculated from price x quantity.' },
+        quantity: { type: 'number', description: 'New quantity.' },
+        name: { type: 'string', description: 'Corrected line name, when the tradie is renaming rather than repricing.' },
+        displayName: { type: 'string', description: "The row's current name, for the card." },
+        displayCurrentPrice: { type: 'number', description: 'Current per-unit price, so the card can show the change.' },
+        displayCurrentQty: { type: 'number', description: 'Current quantity, so the card can show the change.' },
+        displayUnit: { type: 'string', description: "The row's unit (each, m, m2...)." },
+      },
+      required: ['quoteId', 'materialId'],
     },
   },
   {
@@ -476,4 +509,56 @@ export const CONTROL_TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
       },
     },
   },
+];
+
+// ---------------------------------------------------------------------------
+// Per-tool runtime settings for the ElevenLabs agent.
+//
+// These are agent-side config (pushed by scripts/syncMateAgent.ts), but the
+// values live here so the repo stays the source of truth and a new tool can't
+// be added without deciding its budget.
+//
+// `expects_response` is deliberately absent: it is true for EVERY tool and the
+// converter hard-codes it. The ElevenLabs API defaults it to FALSE, which means
+// the agent fires the call and carries on without waiting — for find_customer
+// or get_quote that is Mate confidently inventing a customer. There is no tool
+// here whose answer Mate doesn't need.
+//
+// Timeouts are a ceiling, not a delay, so they err generous. Anything reading
+// Firestore over patchy site coverage gets the long budget — find_customer
+// pulls up to 500 contact docs, so it belongs in that group despite feeling
+// instant on a desk connection.
+export const TOOL_RUNTIME: Record<string, { timeoutSecs: number }> = {
+  // Firestore reads.
+  find_customer: { timeoutSecs: 20 },
+  list_recent_quotes: { timeoutSecs: 20 },
+  get_quote: { timeoutSecs: 20 },
+  get_business_defaults: { timeoutSecs: 20 },
+  review_quote: { timeoutSecs: 20 },
+  list_service_reports: { timeoutSecs: 20 },
+  // Niche inference + supplier-book checks — the slowest read by some way.
+  get_job_requirements: { timeoutSecs: 30 },
+  // Pure validation + a screen-registered probe. No network.
+  show_quote: { timeoutSecs: 10 },
+  propose_draft_quote: { timeoutSecs: 10 },
+  propose_add_line_item: { timeoutSecs: 10 },
+  propose_delete_line_item: { timeoutSecs: 10 },
+  propose_update_line_item: { timeoutSecs: 10 },
+  propose_delete_quote: { timeoutSecs: 10 },
+  propose_create_contact: { timeoutSecs: 10 },
+  propose_update_customer: { timeoutSecs: 10 },
+  propose_send_quote: { timeoutSecs: 10 },
+  propose_convert_to_invoice: { timeoutSecs: 10 },
+  propose_reprice: { timeoutSecs: 10 },
+  propose_update_quote_rates: { timeoutSecs: 10 },
+  propose_mark_paid: { timeoutSecs: 10 },
+  propose_import_supplier_list: { timeoutSecs: 10 },
+  apply_pending_proposal: { timeoutSecs: 10 },
+  cancel_pending_proposal: { timeoutSecs: 10 },
+};
+
+/** Every declaration the agent is told about — read, view, proposal and control. */
+export const ALL_TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
+  ...TOOL_DECLARATIONS,
+  ...CONTROL_TOOL_DECLARATIONS,
 ];
