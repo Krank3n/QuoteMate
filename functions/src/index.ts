@@ -5679,8 +5679,11 @@ Return ONLY valid JSON, no other text.`;
           'anthropic-version': '2023-06-01',
         },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-5-20250929',
-          max_tokens: 1000,
+          // Sonnet 5 thinks by default: 1000 tokens would truncate the answer
+          // after the thinking, and a content[0] read would see the thinking
+          // block, not the text.
+          model: 'claude-sonnet-5',
+          max_tokens: 4000,
           messages: [
             {
               role: 'user',
@@ -5696,7 +5699,8 @@ Return ONLY valid JSON, no other text.`;
       }
 
       const data = await response.json();
-      const content = data.content[0].text;
+      const content = claudeText(data);
+      if (!content) throw new Error(`Anthropic returned no text block (stop_reason: ${data.stop_reason || 'none'})`);
 
       // Parse the JSON response
       let jsonStr = content.trim();
@@ -5827,9 +5831,9 @@ If no products found, return: {"matches": [], "quantityAdjustment": null}`;
           'anthropic-version': '2023-06-01',
         },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-5-20250929',
-          max_tokens: 4096,
-          temperature: 0.2,
+          // temperature is rejected with a 400 on Sonnet 5.
+          model: 'claude-sonnet-5',
+          max_tokens: 8000,
           messages: [
             {
               role: 'user',
@@ -5845,13 +5849,11 @@ If no products found, return: {"matches": [], "quantityAdjustment": null}`;
       }
 
       const data = await response.json();
-      const content = data.content[0];
+      // The old block-type check is subsumed: claudeText selects text blocks.
+      const parsedText = claudeText(data);
+      if (!parsedText) throw new Error(`Anthropic returned no text block (stop_reason: ${data.stop_reason || 'none'})`);
 
-      if (content.type !== 'text') {
-        throw new Error('Unexpected response type from Claude');
-      }
-
-      res.status(200).json({ parsed: content.text });
+      res.status(200).json({ parsed: parsedText });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -5907,9 +5909,10 @@ export const selectBestProduct = functions.https.onRequest((req, res) => {
           'anthropic-version': '2023-06-01',
         },
         body: JSON.stringify({
-          model: 'claude-3-5-sonnet-20241022',
-          max_tokens: 1024,
-          temperature: 0,
+          // Was claude-3-5-sonnet-20241022 — a TWO-year-old pin — plus a
+          // temperature that Sonnet 5 rejects with a 400.
+          model: 'claude-sonnet-5',
+          max_tokens: 4000,
           messages: [
             {
               role: 'user',
@@ -5957,7 +5960,9 @@ The selectedIndex should be 1-based (first product is 1, second is 2, etc.).`,
       }
 
       const data: any = await response.json();
-      const content = data.content?.[0]?.text || '';
+      // `|| ''` made a thinking-first response read as an EMPTY answer — a
+      // silent failure. Select the text block instead.
+      const content = claudeText(data);
 
       // Parse JSON from response
       let jsonStr = content.trim();
@@ -6403,8 +6408,11 @@ export const generateQuoteEmail = functions.https.onRequest((req, res) => {
           'anthropic-version': '2023-06-01',
         },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-5-20250929',
-          max_tokens: 1000,
+          // Sonnet 5 thinks by default: 1000 tokens would truncate the answer
+          // after the thinking, and a content[0] read would see the thinking
+          // block, not the text.
+          model: 'claude-sonnet-5',
+          max_tokens: 4000,
           messages: [{ role: 'user', content: prompt }],
         }),
       });
@@ -6414,7 +6422,9 @@ export const generateQuoteEmail = functions.https.onRequest((req, res) => {
       }
 
       const data = await response.json() as any;
-      const rawBody = data.content?.[0]?.text || '';
+      // `|| ''` made a thinking-first response read as an EMPTY answer — a
+      // silent failure. Select the text block instead.
+      const rawBody = claudeText(data);
       // Strip a single leading greeting line — the customer email template
       // already renders "Hi {customerName}," above the body, and the model
       // occasionally emits one despite the prompt telling it not to. Leaving

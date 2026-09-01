@@ -1001,9 +1001,8 @@ export async function cleanupTranscriptionAndGenerateTitle(
           'anthropic-version': '2023-06-01',
         },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-5-20250929',
+          model: 'claude-sonnet-5',
           max_tokens: 4000,
-          temperature: 0.2,
           messages: [
             {
               role: 'user',
@@ -1019,7 +1018,10 @@ export async function cleanupTranscriptionAndGenerateTitle(
       }
 
       const data = await response.json();
-      const content = data.content[0].text;
+      const content = (data.content || [])
+        .filter((b: any) => b?.type === 'text' && typeof b.text === 'string')
+        .map((b: any) => b.text)
+        .join('');
       return parseCleanupResponse(content);
     } catch (claudeError) {
       // Claude fallback also failed
@@ -1272,9 +1274,8 @@ Return ONLY valid JSON, no explanation text:
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-5-20250929',
-        max_tokens: 500,
-        temperature: 0.2,
+        model: 'claude-sonnet-5',
+        max_tokens: 4000,
         messages: [{ role: 'user', content: prompt }],
       }),
     });

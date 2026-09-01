@@ -392,7 +392,7 @@ async function callClaudeJSON<T>(opts: {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return { ok: false, error: 'ANTHROPIC_API_KEY missing' };
 
-  const model = opts.model || 'claude-sonnet-4-5';
+  const model = opts.model || 'claude-sonnet-5';
   try {
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -403,8 +403,8 @@ async function callClaudeJSON<T>(opts: {
       },
       body: JSON.stringify({
         model,
-        max_tokens: opts.maxTokens || 1024,
-        temperature: opts.temperature ?? 0.3,
+        // No sampling params — Sonnet 5 rejects temperature with a 400.
+        max_tokens: opts.maxTokens || 4000,
         system: opts.system,
         messages: [{ role: 'user', content: opts.user }],
       }),
@@ -414,7 +414,10 @@ async function callClaudeJSON<T>(opts: {
       return { ok: false, error: `claude-${response.status}: ${txt.slice(0, 300)}` };
     }
     const body: any = await response.json();
-    const text = body?.content?.[0]?.text || '';
+    const text = (body?.content || [])
+      .filter((b: { type?: string; text?: string }) => b?.type === 'text' && typeof b.text === 'string')
+      .map((b: { text: string }) => b.text)
+      .join('');
     // Extract first JSON block (Claude sometimes wraps in fences)
     const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/) || [null, text];
     const raw = jsonMatch[1] || text;
