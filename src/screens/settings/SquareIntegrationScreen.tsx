@@ -32,6 +32,10 @@ import * as squareService from '../../services/squareService';
 import type { SquareConnectionStatus } from '../../services/squareService';
 import { trackEvent } from '../../services/analyticsService';
 import { primeTapToPayOnDevice } from '../../services/squarePayments';
+import {
+  isTapToPayEducationAvailable,
+  presentTapToPayEducation,
+} from '../../../modules/tap-to-pay-education';
 import { GridBackground } from '../../components/GridBackground';
 
 export function SquareIntegrationScreen() {
@@ -144,6 +148,26 @@ export function SquareIntegrationScreen() {
     } finally {
       setPrimingTapToPay(false);
     }
+  };
+
+  /**
+   * Apple req 4.3: merchant education has to stay reachable from Settings or
+   * Help, not only in the moment just after the T&Cs are accepted. Apple owns
+   * the content, so this is one call — and on a device that can't show it
+   * (iOS 17, Android) the row isn't rendered at all rather than failing on tap.
+   */
+  const handleShowTapToPayEducation = async () => {
+    const result = await presentTapToPayEducation();
+    if (result.shown) return;
+    showAlert(
+      'error',
+      'Could not open',
+      result.reason === 'offline'
+        ? 'Connect to the internet to see how Tap to Pay works.'
+        : result.reason === 'busy'
+          ? 'Your iPhone is busy. Try again in a moment.'
+          : 'Could not open Tap to Pay education. Try again.',
+    );
   };
 
   const handleDisconnect = () => setDisconnectModalVisible(true);
@@ -269,6 +293,20 @@ export function SquareIntegrationScreen() {
                 >
                   Set up Tap to Pay on this device
                 </Button>
+
+                {/* Apple req 4.3 — education stays reachable after setup.
+                    Rendered only where Apple can actually show it (iOS 18+),
+                    so there is no dead row on Android or older iPhones. */}
+                {isTapToPayEducationAvailable() && (
+                  <Button
+                    mode="text"
+                    onPress={handleShowTapToPayEducation}
+                    textColor={themeColors.accentText}
+                    style={styles.tapToPayButton}
+                  >
+                    How Tap to Pay works
+                  </Button>
+                )}
 
                 <Button
                   mode="outlined"

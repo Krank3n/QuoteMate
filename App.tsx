@@ -6,7 +6,7 @@
 import 'react-native-gesture-handler';
 import React, { useEffect, useRef, useState } from 'react';
 import { initSentry, wrapRootComponent, reportIssue } from './src/config/sentry';
-import { Platform, LogBox, InteractionManager } from 'react-native';
+import { Platform, LogBox, InteractionManager, AppState } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
@@ -40,6 +40,7 @@ import { seedAppearanceForExistingUser } from './src/services/appearance';
 import { RootNavigator } from './src/navigation/RootNavigator';
 import { isDemoCaptureActive } from './src/demo/demoPlayback';
 import { trackEvent } from './src/services/analyticsService';
+import { warmUpTapToPay } from './src/services/squarePayments';
 import { trackWebEvent } from './src/utils/webAnalytics';
 import {
   raceTimeout,
@@ -590,6 +591,22 @@ function App() {
   useEffect(() => {
     void seedAppearanceForExistingUser(!!user && isOnboarded);
   }, [user, isOnboarded]);
+
+  // Apple req 1.5: warm up Tap to Pay at launch and on every return to the
+  // foreground, so the reader is ready before a tradie is standing in front of
+  // a customer (and req 5.6's one-second open is achievable). Best-effort by
+  // contract — warmUpTapToPay never throws, and it deliberately skips a
+  // merchant who hasn't accepted Apple's T&Cs rather than ambushing them with
+  // the acceptance sheet at launch. Gated on being signed in, since it needs
+  // the tradie's Square connection to mint an auth code.
+  useEffect(() => {
+    if (!user) return;
+    void warmUpTapToPay();
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next === 'active') void warmUpTapToPay();
+    });
+    return () => sub.remove();
+  }, [user]);
 
   // Dead-man's switch on the splash overlay. Runs once from mount rather than
   // resetting per gate, so a chain of individually-short stalls still can't

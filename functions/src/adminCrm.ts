@@ -20,7 +20,14 @@ import type { DocumentStage, DocumentType } from './shared/document/types';
 // so the admin CRM callables and the funnel analytics helpers share one source
 // of truth (and the latter stays unit-testable without firebase). See
 // subscription.helpers.ts.
-import { ts, deriveSubFields, isBilledSub } from './subscription.helpers';
+import {
+  ts,
+  deriveSubFields,
+  isBilledSub,
+  isRestoredStorePro,
+  rollupRevenue,
+  RevenueEntry,
+} from './subscription.helpers';
 import { listAllAuthUsers as drainAuthUsers } from './authUsers.helpers';
 import {
   computeFunnelStats,
@@ -311,14 +318,32 @@ async function computeDashboardStats() {
   let canceledSubs = 0;
   let trialingSubs = 0;
   let trialExpiredSubs = 0;
-  for (const [, raw] of subscriptions) {
-    const f = deriveSubFields(raw);
+  // The dashboard already holds every subscription doc, so the revenue rollup
+  // is free here — no separate call needed to answer "are we making money?".
+  const revenueEntries: RevenueEntry[] = [];
+  for (const [uid, raw] of subscriptions) {
+    const f = deriveSubFields(raw, now);
     if (f.status === 'active') activeSubs++;
     else if (f.status === 'canceling') cancelingSubs++;
     else if (f.status === 'canceled') canceledSubs++;
     else if (f.status === 'trialing') trialingSubs++;
     else if (f.status === 'trial_expired') trialExpiredSubs++;
+    revenueEntries.push({
+      uid,
+      billed: f.billed,
+      platform: f.platform,
+      interval: f.interval,
+      monthlyAud: f.monthlyAud,
+      netMonthlyAud: f.netMonthlyAud,
+      priceAmount: f.priceAmount,
+      priceCurrency: f.priceCurrency,
+      priceSource: f.priceSource,
+      periodEnded: f.periodEnded,
+      purchaseKey: f.purchaseKey,
+      restored: isRestoredStorePro(raw, now),
+    });
   }
+  const revenue = rollupRevenue(revenueEntries);
 
   // Signups this week — fall back to Auth user metadata since users doc may not carry createdAt.
   // Signups this week — combine emailState.signupAt (canonical when present)
@@ -360,6 +385,7 @@ async function computeDashboardStats() {
       trialing: trialingSubs,
       trialExpired: trialExpiredSubs,
     },
+    revenue,
     suppliers: {
       total: suppliers.size,
       top: topSuppliers,
@@ -3147,6 +3173,9 @@ export const adminListSubscriptions = functions
     requireAdmin(context);
     const firestore = db();
     const subsMap = await fetchAllSubscriptions();
+    // One clock for the whole rollup — a row that lapses mid-loop would
+    // otherwise be counted by one derivation and dropped by the next.
+    const now = Date.now();
 
     const rows = await Promise.all(
       Array.from(subsMap.entries()).map(async ([uid, sub]) => {
@@ -3155,7 +3184,7 @@ export const adminListSubscriptions = functions
           admin.auth().getUser(uid).catch(() => null),
         ]);
         const business = businessSnap.data() || {};
-        const f = deriveSubFields(sub);
+        const f = deriveSubFields(sub, now);
         return {
           uid,
           email: authRec?.email || business.email || null,
@@ -3177,6 +3206,13 @@ export const adminListSubscriptions = functions
           billed: f.billed,
           interval: f.interval,
           monthlyAud: f.monthlyAud,
+          netMonthlyAud: f.netMonthlyAud,
+          priceAmount: f.priceAmount,
+          priceCurrency: f.priceCurrency,
+          priceSource: f.priceSource,
+          periodEnded: f.periodEnded,
+          purchaseKey: f.purchaseKey,
+          restored: isRestoredStorePro(sub, now),
         };
       })
     );
@@ -3188,15 +3224,34 @@ export const adminListSubscriptions = functions
     const trial_expired = rows.filter((r) => r.status === 'trial_expired').length;
     const free = rows.filter((r) => r.status === 'free').length;
 
-    // MRR = sum of monthly-equivalent revenue across billed subs (comps + bare
-    // isPro flags contribute $0). "paying" is the count of real revenue subs.
-    const mrr = Math.round(rows.reduce((a, r) => a + (r.monthlyAud || 0), 0));
-    const paying = rows.filter((r) => r.billed && (r.status === 'active' || r.status === 'canceling')).length;
-    const comped = rows.filter((r) => r.isPro && !r.billed).length;
+    // Revenue is rolled up per STORE PURCHASE, not per account: two accounts
+    // sharing one Play subscription are one payer, a lapsed period is not
+    // revenue, and every subscriber is priced at what the store says they
+    // actually pay (grandfathered SKUs included) rather than today's list
+    // price. rollupRevenue also reports how much of the total is estimated.
+    const revenue = rollupRevenue(rows as unknown as RevenueEntry[]);
+    const comped = rows.filter((r) => r.isPro && !r.billed && !r.restored).length;
 
     return {
       subscriptions: rows,
-      totals: { active, canceling, canceled, trialing, trial_expired, free, all: rows.length, mrr, paying, comped },
+      revenue,
+      totals: {
+        active,
+        canceling,
+        canceled,
+        trialing,
+        trial_expired,
+        free,
+        all: rows.length,
+        // Kept for older clients — the same number rollupRevenue reports.
+        mrr: Math.round(revenue.mrrGross),
+        mrrGross: revenue.mrrGross,
+        mrrNet: revenue.mrrNet,
+        arrGross: revenue.arrGross,
+        arrNet: revenue.arrNet,
+        paying: revenue.payers,
+        comped,
+      },
     };
   });
 

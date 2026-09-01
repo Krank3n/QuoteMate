@@ -187,6 +187,29 @@ export async function findCandidatesForMaterial(
  * tier ordering to the previous pickBestMatch — just doesn't throw the
  * runners-up away.
  */
+/**
+ * Coerce `description` to the string this module's type has always claimed.
+ *
+ * The scraper actually returns it as an ARRAY of bullet strings. Nothing
+ * normalised it, so the array reached `material.description`, and from there
+ * `applyReconcileResult` fed it to `parsePackInfo`, which calls `.trim()` on
+ * it and throws. Both reconcile call sites wrap the loop in a bare catch, so
+ * the whole safety pass — coverage floor, over-buy clamp, category gate —
+ * was abandoned from the first applied row onward with nothing logged.
+ *
+ * Measured over 24 real customer quotes: reconcile died on 23 of them and
+ * only 7% of rows were ever checked. Worst case was a bulk-bag price charged
+ * per kilogram — $162,785 for drainage gravel that costs $2,432.
+ *
+ * Normalising here covers both entry points, since batch and individual
+ * searches both funnel through rankCandidates.
+ */
+export function normaliseScraperProduct(p: ScraperProduct): ScraperProduct {
+  if (!Array.isArray((p as { description?: unknown }).description)) return p;
+  const bullets = (p as unknown as { description: unknown[] }).description;
+  return { ...p, description: bullets.filter((b) => typeof b === 'string').join('. ') };
+}
+
 function rankCandidates(results: ScraperProduct[]): ScraperProduct[] {
   if (!results || results.length === 0) return [];
   const tier = (p: ScraperProduct): number => {
@@ -196,7 +219,7 @@ function rankCandidates(results: ScraperProduct[]): ScraperProduct[] {
     if (hasPrice) return 2;
     return 3;
   };
-  return [...results].sort((a, b) => tier(a) - tier(b));
+  return [...results].map(normaliseScraperProduct).sort((a, b) => tier(a) - tier(b));
 }
 
 /**

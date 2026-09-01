@@ -77,3 +77,10 @@ dist-staging
 
 # Warragul ground-truth replay outputs (testWarragulPlan.ts)
 functions/warragul-replay-*.json
+
+# Bake-off harness caches and results (functions/scripts/bakeoff).
+# Scrape/product caches are prod-derived, and results files embed REAL customer
+# job scopes — this repo is public, so none of it may ever be committed.
+.bakeoff-*.json
+bakeoff-*.json
+customer-jobs-corpus*.json

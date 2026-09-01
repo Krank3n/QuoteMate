@@ -4,9 +4,20 @@
  * Gates the in-app card / Tap to Pay row in TakePaymentSheet behind two ANDed
  * conditions:
  *  1. A remote feature flag at Firestore `config/squareTapToPay`
- *     (`{ ios: boolean, android: boolean }`). Lets us flip iOS on the day
- *     Apple's Tap-to-Pay entitlement is approved without an app release.
+ *     (`{ ios: boolean, android: boolean }`) — or a local dev build, see below.
  *  2. The device itself supports Tap to Pay (Square SDK probe).
+ *
+ * On iOS the flag must stay OFF in production until Apple grants the
+ * *publishing* entitlement. Apple's Apr 2026 grant is development-only, so
+ * every shipped build carries no entitlement: flipping `ios: true` would light
+ * the row up for real tradies and then fail at `authorize()` in front of a
+ * paying customer. A local dev build IS signed with the development
+ * entitlement, so it bypasses the flag — that is the only way to exercise the
+ * flow before the publishing entitlement lands.
+ *
+ * NOTE: Apple requirement 5.3 says this button must never be greyed out, and
+ * 3.7 says pressing it should open T&C acceptance. Both conflict with the
+ * disabled row TakePaymentSheet renders today — see docs/SQUARE_TAP_TO_PAY.md.
  *
  * Public read on `/config/{docId}` is already allowed by firestore.rules.
  */
@@ -43,7 +54,7 @@ export function useTapToPayEnabled(): TapToPayState {
         const flag = (snap.exists() ? snap.data() : {}) as TapToPayFlag;
 
         const platformAllowed =
-          Platform.OS === 'ios' ? !!flag.ios : !!flag.android;
+          __DEV__ || (Platform.OS === 'ios' ? !!flag.ios : !!flag.android);
 
         if (!platformAllowed) {
           if (!cancelled) {

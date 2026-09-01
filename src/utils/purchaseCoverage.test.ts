@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { coverageSanePurchaseCount, coverageFloorPurchaseCount, recoverPackInfo } from './purchaseCoverage';
+import { isLumpSumRow, coverageSanePurchaseCount, coverageFloorPurchaseCount, recoverPackInfo } from './purchaseCoverage';
 import { parsePackInfo } from './parsePackInfo';
 
 describe('coverageSanePurchaseCount', () => {
@@ -41,6 +41,188 @@ describe('coverageSanePurchaseCount', () => {
       expect(
         coverageSanePurchaseCount({ requirement: 20, name: 'Decking Oil', perPurchasePrice: 150, packSize: 10 }),
       ).toBe(2);
+    });
+  });
+
+  describe('bulk-unit rows (the QU-178377 475-pack over-buy)', () => {
+    // A reconcile hallucination: 475 packs of R4.0 ceiling batts for a 38 m²
+    // ceiling, $42,702 on one line of a real customer quote. Nothing caught it
+    // — insulation is neither a fastener nor a liquid, and the exact-arithmetic
+    // branch was gated on BOTH units being countable, which m² is not.
+    it('collapses 475 packs of ceiling batts to the 8 that cover 38 m²', () => {
+      expect(
+        coverageSanePurchaseCount({
+          requirement: 38,
+          name: 'Ceiling insulation batts R4.0',
+          perPurchasePrice: 89.9,
+          packSize: 5,
+          packUnit: 'm²',
+          requirementUnit: 'm²',
+        }),
+      ).toBe(8);
+    });
+
+    it('treats m2 and m² as the same unit', () => {
+      expect(
+        coverageSanePurchaseCount({
+          requirement: 38,
+          name: 'Ceiling insulation batts R4.0',
+          perPurchasePrice: 89.9,
+          packSize: 5,
+          packUnit: 'm2',
+          requirementUnit: 'm²',
+        }),
+      ).toBe(8);
+    });
+
+    it('collapses a 20 kg adhesive bag row to 1 for a 5.7 kg requirement', () => {
+      expect(
+        coverageSanePurchaseCount({
+          requirement: 5.7,
+          name: 'Flexible cement-based tile adhesive',
+          perPurchasePrice: 32,
+          packSize: 20,
+          packUnit: 'kg',
+          requirementUnit: 'kg',
+        }),
+      ).toBe(1);
+    });
+
+    it('keeps a genuine multi-pack buy intact', () => {
+      // 48 m² of wall batts from 5 m² packs is really 10 packs — not 1.
+      expect(
+        coverageSanePurchaseCount({
+          requirement: 48,
+          name: 'Insulation batts R2.5',
+          perPurchasePrice: 94.45,
+          packSize: 5,
+          packUnit: 'm²',
+          requirementUnit: 'm²',
+        }),
+      ).toBe(10);
+    });
+  });
+
+  describe('one container per piece (the QU-178514 nails over-buy)', () => {
+    // Four identical coil-nail rows in one real fencing quote, same $42.90
+    // product. 400 and 172 pieces clamped correctly; 72 and 64 fell just under
+    // MIN_FASTENER_REQUIREMENT_FOR_TUB and bought one BOX per nail — $5,834 of
+    // nails on a $15.6k job. The siblings are the control: the pack assumption
+    // was already right, only the gate differed.
+    const nails = (requirement: number, proposedCount: number) =>
+      coverageSanePurchaseCount({
+        requirement,
+        name: 'Galvanised coil nails 50 x 2.5mm for palings',
+        perPurchasePrice: 42.9,
+        requirementUnit: 'each',
+        purchaseUnit: 'pack',
+        proposedCount,
+      });
+
+    it('collapses 72 packs for 72 nails to 1', () => {
+      expect(nails(72, 72)).toBe(1);
+    });
+
+    it('collapses 64 packs for 64 nails to 1', () => {
+      expect(nails(64, 64)).toBe(1);
+    });
+
+    it('still clamps the siblings that were already right', () => {
+      expect(nails(400, 4)).toBe(4);
+      expect(nails(172, 2)).toBe(2);
+    });
+
+    it('has no opinion when the purchase is already sane', () => {
+      // 2 packs for 72 nails is sensible and is NOT one-per-piece, so the rule
+      // does not engage and the caller keeps its own count. null is the guard
+      // declining to interfere, not a failure to catch something.
+      expect(nails(72, 2)).toBeNull();
+    });
+
+    // The gate exists to protect goods sold ONE AT A TIME whose name matches
+    // the fastener pattern. Those are counted in 'each', never in packs, so
+    // the new rule cannot reach them.
+    it('does not touch an individually-sold item counted in each', () => {
+      expect(
+        coverageSanePurchaseCount({
+          requirement: 6,
+          name: 'Screw pile 76mm galvanised',
+          perPurchasePrice: 300,
+          requirementUnit: 'each',
+          purchaseUnit: 'each',
+          proposedCount: 6,
+        }),
+      ).toBeNull();
+    });
+
+    it('does not touch a nail gun bought two at a time', () => {
+      expect(
+        coverageSanePurchaseCount({
+          requirement: 2,
+          name: 'Framing nail gun',
+          perPurchasePrice: 236,
+          requirementUnit: 'each',
+          purchaseUnit: 'each',
+          proposedCount: 2,
+        }),
+      ).toBeNull();
+    });
+
+    it('ignores the rule for a bulk requirement that is not a piece count', () => {
+      expect(
+        coverageSanePurchaseCount({
+          requirement: 40,
+          name: 'Concrete mix',
+          perPurchasePrice: 10,
+          requirementUnit: 'kg',
+          purchaseUnit: 'pack',
+          proposedCount: 40,
+        }),
+      ).toBeNull();
+    });
+  });
+
+  describe('mismatched units must never divide (the under-buy this guard protects)', () => {
+    it('does not read a "2.4m" pack against a 7-post each-requirement', () => {
+      // The failure that motivated the countable-units gate: dividing 7 posts
+      // by a 2.4 m length gives 3 posts — an under-buy, the worse error.
+      expect(
+        coverageSanePurchaseCount({
+          requirement: 7,
+          name: 'Treated Pine Post',
+          perPurchasePrice: 28,
+          packSize: 2.4,
+          packUnit: 'm',
+          requirementUnit: 'each',
+        }),
+      ).toBeNull();
+    });
+
+    it('does not divide a m³ concrete requirement by a kg bag', () => {
+      // 0.6 m³ from 20 kg bags is legitimately ~60 bags; dividing 0.6 by 20
+      // would clamp it to 1 and under-buy the pour by 59 bags.
+      expect(
+        coverageSanePurchaseCount({
+          requirement: 0.6,
+          name: 'Rapid set concrete mix',
+          perPurchasePrice: 10.5,
+          packSize: 20,
+          packUnit: 'kg',
+          requirementUnit: 'm³',
+        }),
+      ).toBeNull();
+    });
+
+    it('leaves a bulk-unit row alone when the pack unit is unknown', () => {
+      expect(
+        coverageSanePurchaseCount({
+          requirement: 38,
+          name: 'Ceiling insulation batts R4.0',
+          perPurchasePrice: 89.9,
+          packSize: 5,
+          requirementUnit: 'm²',
+        }),
+      ).toBeNull();
     });
   });
 
@@ -364,5 +546,143 @@ describe('recoverPackInfo — the QU-178692 under-buy', () => {
         }),
       ).toBeNull();
     });
+  });
+});
+
+describe('a known pack size clamps regardless of category', () => {
+  // Regression: the fastener/liquid gate ran BEFORE the known-pack-size branch,
+  // so every other consumable went unclamped. 100 sanding mesh sheets were
+  // billed at the price of a 10-pack, 100 times over — $10,500 against a real
+  // $130. A size we can actually read is arithmetic, not a heuristic; the gate
+  // only ever needed to guard the guessing branches below it.
+  it('divides a non-fastener consumable by its stated pack size', () => {
+    expect(
+      coverageSanePurchaseCount({
+        requirement: 100,
+        name: 'Sanding Mesh Sheets 225mm 150 Grit',
+        perPurchasePrice: 105,
+        packSize: 10,
+        packUnit: 'each',
+        requirementUnit: 'each',
+      }),
+    ).toBe(10);
+  });
+
+  it('still clamps fasteners with a known pack size', () => {
+    expect(
+      coverageSanePurchaseCount({
+        requirement: 4480,
+        name: 'Stainless Decking Screws',
+        perPurchasePrice: 29.68,
+        packSize: 100,
+        packUnit: 'each',
+        requirementUnit: 'each',
+      }),
+    ).toBe(45);
+  });
+
+  it('refuses to divide a piece count by a mass pack — the unit guard', () => {
+    // A "20kg" pack must never divide a 100-piece requirement.
+    expect(
+      coverageSanePurchaseCount({
+        requirement: 100,
+        name: 'Tile Adhesive',
+        perPurchasePrice: 40,
+        packSize: 20,
+        packUnit: 'kg',
+        requirementUnit: 'each',
+      }),
+    ).toBeNull();
+  });
+
+  it('leaves a genuine piece-good alone when no pack size is known', () => {
+    // 20 doors at $105 each is a real quote, not an over-buy. With no pack
+    // size and no fastener/liquid match, the clamp must stay out of the way.
+    expect(
+      coverageSanePurchaseCount({
+        requirement: 20,
+        name: 'Internal Pre-Hung Door 820mm',
+        perPurchasePrice: 105,
+        requirementUnit: 'each',
+      }),
+    ).toBeNull();
+  });
+});
+
+describe('the known-pack branch never fires on unstated units', () => {
+  it('refuses to divide when the pack unit is unknown', () => {
+    // Regression: "Treated Pine Post 2.4m" parses as packSize 2.4 with unit
+    // 'm'. A caller that omitted packUnit had that treated as a 2.4-pack and
+    // a 7-post requirement was divided down to 3 — an under-buy, which is the
+    // worse of the two failures.
+    expect(
+      coverageSanePurchaseCount({
+        requirement: 7,
+        name: '100x75mm H4 Treated Hardwood Post 2.4m',
+        perPurchasePrice: 32.9,
+        packSize: 2.4,
+      }),
+    ).toBeNull();
+  });
+
+  it('refuses when the requirement unit is unknown', () => {
+    expect(
+      coverageSanePurchaseCount({
+        requirement: 100,
+        name: 'Sanding Mesh Sheets',
+        perPurchasePrice: 105,
+        packSize: 10,
+        packUnit: 'each',
+      }),
+    ).toBeNull();
+  });
+});
+
+describe('the clamp only lowers, so it must not act on guessed pack sizes', () => {
+  // The floor raises and the clamp lowers, so they can afford different levels
+  // of evidence. A pack size recovered from a row's prose is fine for the
+  // floor; giving it to the clamp bought 4 formwork pegs against a 20-peg
+  // requirement. Callers must pass only a RESOLVED pack size.
+  it('is a no-op for a single-item product with no resolved pack', () => {
+    expect(
+      coverageSanePurchaseCount({
+        requirement: 20,
+        name: 'Hardwood Formwork Pegs',
+        perPurchasePrice: 5.2,
+        requirementUnit: 'each',
+      }),
+    ).toBeNull();
+  });
+});
+
+describe('isLumpSumRow (the QU-178514 $18,000 allowance)', () => {
+  // "Post hole digging - spoil removal allowance | 15 each @ $1,200 = $18,000"
+  // on a $15.6k fence. An allowance is one figure for the whole job; the
+  // pricing path multiplied it by the post count and tripled the quote.
+  it('recognises an allowance', () => {
+    expect(isLumpSumRow('Post hole digging - spoil removal allowance')).toBe(true);
+    expect(isLumpSumRow('Waste disposal allowance')).toBe(true);
+  });
+
+  it('recognises hire and provisional sums', () => {
+    expect(isLumpSumRow('Skip bin hire 6m³')).toBe(true);
+    expect(isLumpSumRow('Excavator hire')).toBe(true);
+    expect(isLumpSumRow('Provisional sum for tiling')).toBe(true);
+    expect(isLumpSumRow('PC sum - tapware')).toBe(true);
+  });
+
+  // Deliberately narrow. These read like services but are genuinely per-unit,
+  // and collapsing them to one would under-quote real work — the worse error.
+  it('does not treat per-unit work as a lump sum', () => {
+    expect(isLumpSumRow('Post hole digging')).toBe(false);
+    expect(isLumpSumRow('Core hole drilling')).toBe(false);
+    expect(isLumpSumRow('Spoil removal')).toBe(false);
+    expect(isLumpSumRow('Labour - install palings')).toBe(false);
+  });
+
+  it('does not fire on ordinary materials', () => {
+    expect(isLumpSumRow('Treated pine H4 post 90x90mm')).toBe(false);
+    expect(isLumpSumRow('Galvanised coil nails')).toBe(false);
+    expect(isLumpSumRow('')).toBe(false);
   });
 });

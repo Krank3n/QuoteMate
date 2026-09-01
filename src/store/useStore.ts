@@ -20,10 +20,12 @@ import {
   generateMaterialsForQuote,
   fetchPricesForQuote,
   PipelineCancelled,
+  LAST_RESORT_GUESS_PREFIX,
 } from '../services/materialsPipeline';
 import { pricingEventToProgress } from './pricingProgress';
 import type { SupplierGapSummary } from '../services/assistant/supplierGapNote';
-import { reviewQuoteMaterials, isFlaggedRow, priceResettableIds, topLinesSummary, wipeStillImplausibleRows, QuoteReview } from '../utils/quoteReview';
+import { reviewQuoteMaterials, isFlaggedRow, priceResettableIds, topLinesSummary, wipeStillImplausibleRows, withIntegrityIssues, QuoteReview } from '../utils/quoteReview';
+import { checkDocumentIntegrity } from '../../shared/document/integrityCheck';
 import { loadTemplates } from '../services/sectionTemplateService';
 import { updateQuoteCalculations, healBrokenLabourSections } from '../utils/quoteCalculator';
 import { normaliseLabourToHours } from '../../shared/document/labourUnits';
@@ -490,6 +492,22 @@ async function summariseSupplierGap(
     estimatedCount,
     pricedRowCount: materials.filter((m) => (m.price ?? 0) > 0).length,
     supplierBookPopulated,
+    // Read from the quote's own rows, not from one run's outcome: the audit of
+    // stored quotes found most $0 lines carry no pricingSource at all — they
+    // were added after a run, or a run never reached them. Mate should ask
+    // about whatever lacks a real price NOW: still-$0 rows, plus rows holding
+    // the pipeline's last-resort placeholder, which are the ones that most
+    // need a real number. Work items are lump-sum scope lines with no unit
+    // price by design and are never a gap.
+    needsPriceTerms: materials
+      .filter(
+        (m) =>
+          m.kind !== 'work' &&
+          (m.quantity ?? 0) > 0 &&
+          (!((m.price ?? 0) > 0) || (m.description ?? '').startsWith(LAST_RESORT_GUESS_PREFIX)),
+      )
+      .map((m) => m.name)
+      .filter((n): n is string => !!n),
   };
 }
 
@@ -3454,6 +3472,16 @@ export const useStore = create<AppState>((set, get) => ({
             get().updateQuote(pricedResult.updatedQuote);
             await get().saveDraft(get().currentQuote!);
             review = reviewQuoteMaterials(pricedResult.updatedQuote.materials, pricedResult.updatedQuote.sections);
+            // The document's own arithmetic, checked on the live path rather
+            // than only in the offline audit scripts. A switchboard quote
+            // shipped storing 5 hours at $85 while charging $170. Reported,
+            // never blocking — a false positive must not strand a quote.
+            const integrity = checkDocumentIntegrity(pricedResult.updatedQuote as any);
+            if (integrity.length) {
+              // eslint-disable-next-line no-console
+              console.warn('[Mate] integrity', quoteId, integrity.map((i) => i.code).join(','));
+              review = withIntegrityIssues(review, integrity.map((i) => i.detail));
+            }
             supplierGap = await summariseSupplierGap(
               missedSupplierTerms,
               review.counts.estimated,

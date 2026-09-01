@@ -215,3 +215,55 @@ describe('stampMatchConfidence', () => {
     expect(m.description).toBe(WEAK_MATCH_NOTE);
   });
 });
+
+describe('stampMatchConfidence — implausible money', () => {
+  function row(over: Partial<Material> = {}): Material {
+    return {
+      id: 'm1',
+      name: 'Ekodeck Colour Matched Decking Screws',
+      searchTerm: 'Ekodeck decking screws',
+      quantity: 50,
+      unit: 'each',
+      price: 98.23,
+      totalPrice: 4911.5,
+      manualPriceOverride: false,
+      ...over,
+    } as Material;
+  }
+
+  it('flags screws priced at a decking board, which word overlap graded strong', () => {
+    // The real row: 50 x $98.23 = $4,911.50, matched to an Ekodeck BOARD.
+    const product = 'Ekodeck 137 x 23mm 5.4m Riverbank Red Estate Brown Designer Series Composite Decking';
+    expect(matchEvidence('Ekodeck decking screws', product)).toBe('strong');
+    const m = row();
+    stampMatchConfidence(m, product);
+    expect(m.weakProductMatch).toBe(true);
+    expect(m.priceConfidence).toBe('low');
+    expect(m.description).toContain('far above what this normally costs');
+  });
+
+  it('leaves a sanely priced screw row alone', () => {
+    const m = row({ price: 0.14, totalPrice: 7 });
+    stampMatchConfidence(m, 'Buildex 10g x 50mm Stainless Decking Screws 50 Pack');
+    expect(m.weakProductMatch).toBeUndefined();
+  });
+
+  it('does not second-guess a price the tradie typed in', () => {
+    const m = row({ manualPriceOverride: true });
+    stampMatchConfidence(m, 'Ekodeck 137 x 23mm 5.4m Composite Decking');
+    expect(m.weakProductMatch).toBeUndefined();
+  });
+
+  it('only compares a price against an opinion in the same unit', () => {
+    // The table's screw opinion is per-each; it says nothing about a pack.
+    const m = row({ unit: 'pack', price: 98.23 });
+    stampMatchConfidence(m, 'Buildex Decking Screws 1000 Pack');
+    expect(m.weakProductMatch).toBeUndefined();
+  });
+
+  it('still clears a stale flag when the row re-prices cleanly', () => {
+    const m = row({ price: 0.14, weakProductMatch: true });
+    stampMatchConfidence(m, 'Buildex 10g x 50mm Stainless Decking Screws 50 Pack');
+    expect(m.weakProductMatch).toBeUndefined();
+  });
+});

@@ -58,6 +58,12 @@ export interface QuoteReview {
   };
   /** Plain-English line Mate can read verbatim, in chat or aloud. */
   summary: string;
+  /**
+   * Arithmetic the document contradicts — a labour total that doesn't match its
+   * own hours x rate, a subtotal that doesn't match its lines. Separate from
+   * `issues`, which are all per-material.
+   */
+  integrity?: string[];
 }
 
 const DEFAULT_DETAIL: Record<QuoteIssueKind, string> = {
@@ -111,10 +117,22 @@ function buildSummary(issues: QuoteIssue[], counts: QuoteReview['counts']): stri
   if (counts.estimated) parts.push(`${counts.estimated} estimated`);
   if (counts.lowConfidence) parts.push(`${counts.lowConfidence} low-confidence`);
 
-  const names = issues.slice(0, 3).map((i) => i.name);
+  // Name the money, not just the row. "Skip Bin Hire, Road Base" reads like
+  // small change; "$2,386.50 of Paper Joint Tape" is a tradie opening the quote.
+  // `issues` arrives sorted by line total, so these are the three worth the look.
+  const names = issues.slice(0, 3).map((i) => `${money(issueMoney(i))} of ${i.name}`);
   const more = issues.length > names.length ? `, +${issues.length - names.length} more` : '';
-  const noun = issues.length === 1 ? 'row' : 'rows';
-  return `${issues.length} ${noun} need a look — ${parts.join(', ')}. (${names.join(', ')}${more})`;
+  const noun = issues.length === 1 ? 'row needs' : 'rows need';
+  return `${issues.length} ${noun} a look — ${parts.join(', ')}. (${names.join(', ')}${more})`;
+}
+
+/** What a flagged row is carrying — the number that decides if it matters. */
+function issueMoney(i: QuoteIssue): number {
+  return (i.price || 0) * (i.quantity || 0);
+}
+
+function money(n: number): string {
+  return `$${n.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 // --- Anchor-launder detection (QU-178425) ---------------------------------
@@ -453,11 +471,15 @@ export function reviewQuoteMaterials(
     (i) => !implausibleIds.has(i.materialId),
   );
   const detectorIds = new Set([...implausibleIds, ...inflated.map((i) => i.materialId)]);
+  // Ordered by money at risk, because only the first three get named and the
+  // tradie acts on those. Array order used to decide it: the carport quote
+  // named two skip bins and road base (~$2,051 between them) and buried $2,386
+  // of joint tape and $2,055 of insulation inside "+5 more".
   const issues = [
     ...implausible,
     ...inflated,
     ...rowIssues.filter((i) => !detectorIds.has(i.materialId)),
-  ];
+  ].sort((a, b) => issueMoney(b) - issueMoney(a));
 
   const counts = {
     unpriced: issues.filter((i) => i.kind === 'unpriced').length,
@@ -498,17 +520,31 @@ export function buildPresendWarning(
      *  total is still missing their money, so the gate still fires with
      *  wording that matches the real consequence. */
     materialsShownToCustomer?: boolean;
+    /** The name on the document. A draft that skipped the customer to get a
+     *  price out fast still carries a stand-in, and that must not reach a
+     *  real customer's inbox. */
+    customerName?: string;
   } = {},
 ): PresendWarning | null {
   const unpriced = review.issues.filter((i) => i.kind === 'unpriced');
   const inflated = review.issues.filter((i) => i.kind === 'inflated_quantity');
   const weak = review.issues.filter((i) => i.kind === 'weak_match');
   const implausible = review.issues.filter((i) => i.kind === 'implausible_cost');
-  if (unpriced.length === 0 && inflated.length === 0 && weak.length === 0 && implausible.length === 0) {
+  const placeholderCustomer = isPlaceholderCustomer(options.customerName);
+  if (
+    unpriced.length === 0 && inflated.length === 0 && weak.length === 0 &&
+    implausible.length === 0 && !placeholderCustomer
+  ) {
     return null;
   }
 
   const lines: string[] = [];
+
+  if (placeholderCustomer) {
+    lines.push(
+      `This ${docLabel} is still made out to "${options.customerName}" — put the customer's real name on it before it goes out.`,
+    );
+  }
 
   // Money that can't be right leads — it's the fabricated-total family, the
   // one that costs a customer relationship if it goes out (QU-178763: $8,239
@@ -571,6 +607,10 @@ export function buildPresendWarning(
     }
   }
 
+  if (placeholderCustomer && unpriced.length === 0 && inflated.length === 0 && weak.length === 0 && implausible.length === 0) {
+    return { title: 'No customer name on this one', message: lines.join('\n') };
+  }
+
   const pricesNeedALook = unpriced.length > 0 || weak.length > 0 || implausible.length > 0;
   const title =
     pricesNeedALook && inflated.length > 0
@@ -580,4 +620,35 @@ export function buildPresendWarning(
         : 'Some prices need a look';
 
   return { title, message: lines.join('\n') };
+}
+
+/**
+ * Fold document-level arithmetic faults into a review so they reach the same
+ * places the row flags do.
+ *
+ * `checkDocumentIntegrity` has always been able to catch these — a switchboard
+ * quote stored 5 hours at $85 and charged $170, which is 2 hours — but it was
+ * only ever imported by offline scripts, so the contradiction shipped to the
+ * tradie. This is the seam that puts it on the live path.
+ */
+export function withIntegrityIssues(review: QuoteReview, details: string[]): QuoteReview {
+  if (!details.length) return review;
+  const noun = details.length === 1 ? 'figure' : 'figures';
+  return {
+    ...review,
+    integrity: details,
+    summary: `${review.summary} Also — ${details.length} ${noun} on this quote don't add up (${details[0]}).`,
+  };
+}
+
+/**
+ * Stand-in names a draft carries when the tradie wanted a price before they
+ * wanted paperwork. Mate is told to use "Unnamed job"; the rest are what it and
+ * tradies have actually reached for. Matched case-insensitively so a real
+ * customer called "Self Storage Co" is untouched.
+ */
+const PLACEHOLDER_CUSTOMER_NAMES = new Set(['unnamed job', 'unnamed', 'self', 'customer', 'tbc', 'tba', 'n/a']);
+
+export function isPlaceholderCustomer(name?: string): boolean {
+  return PLACEHOLDER_CUSTOMER_NAMES.has((name || '').trim().toLowerCase());
 }

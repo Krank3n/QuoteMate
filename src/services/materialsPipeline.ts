@@ -24,7 +24,7 @@ import { supplierPriceForGstMode, roundToTwoDecimals } from '../utils/quoteCalcu
 import { keepSupplierPriceInclusive } from '../../shared/document';
 import { applyPackAwarePricing } from '../utils/packAwarePricing';
 import { parsePackInfo } from '../utils/parsePackInfo';
-import { coverageSanePurchaseCount, coverageFloorPurchaseCount, recoverPackInfo } from '../utils/purchaseCoverage';
+import { coverageSanePurchaseCount, coverageFloorPurchaseCount, recoverPackInfo, isLumpSumRow } from '../utils/purchaseCoverage';
 import {
   parseJobAreaM2,
   geometricSanePieceCount,
@@ -39,7 +39,7 @@ import {
 import { simplifySearchTerm } from '../utils/simplifySearchTerm';
 import { withPreservedCorrections } from './floorplanTakeoff';
 import { stampAsPriced } from '../utils/asPriced';
-import { isNonRetailTradeRow, tradeFallbackUnitPrice } from '../utils/tradeFallback';
+import { isNonRetailTradeRow, tradeFallbackUnitPriceWithUnit } from '../utils/tradeFallback';
 import { loadAllFavoritesForLLM, loadFavoritesFromLocal } from './materialFavorites';
 import { searchLocalSources } from './localMaterialSearch';
 import { loadGroups as loadSupplierGroups } from './supplierGroupService';
@@ -440,8 +440,24 @@ class FetchCancelled extends Error {
   }
 }
 
-function deterministicFallbackUnitPrice(material: Material): number | null {
-  return tradeFallbackUnitPrice(`${material.searchTerm || ''} ${material.name || ''}`, material.unit);
+/** Units that count purchasable items, where a per-item price multiplies out. */
+const PURCHASE_UNITS: ReadonlySet<Material['unit']> = new Set(['each', 'pack', 'box']);
+
+/**
+ * The trade table's estimate for a row, but only when the price is quoted in
+ * the unit the row is counting. A price per sheet is not a price per metre, and
+ * multiplying one by the other is how 75 m of paper joint tape reached $2,386.
+ * Returning null here leaves the row unpriced with the existing "add your own
+ * price" note, which is the honest state: we don't know what it costs.
+ */
+function unitSafeFallbackUnitPrice(material: Material): number | null {
+  const hit = tradeFallbackUnitPriceWithUnit(
+    `${material.searchTerm || ''} ${material.name || ''}`,
+    material.unit,
+  );
+  if (!hit) return null;
+  if (hit.per !== material.unit && !PURCHASE_UNITS.has(material.unit)) return null;
+  return hit.price;
 }
 
 function shouldUseTradeFallbackInsteadOfRetail(material: Material): boolean {
@@ -523,6 +539,11 @@ export function applyReconcileResult(
       requirement: m.requiredQty,
       name: m.name,
       perPurchasePrice: r.estimatedUnitPrice,
+      // Lets the guard see "72 packs for 72 nails" — a contradiction it cannot
+      // infer from price, and the shape that put $5,834 of nails on one fence.
+      requirementUnit: (m.requiredUnit ?? m.packUnit ?? m.unit) as string,
+      purchaseUnit: r.purchaseUnit,
+      proposedCount: estPurchaseCount,
     });
     if (estSane !== null && estSane < estPurchaseCount) estPurchaseCount = estSane;
     m.quantity = estPurchaseCount;
@@ -596,6 +617,11 @@ export function applyReconcileResult(
         rowPackSize: m.packSize,
         rowPackUnit: m.packUnit,
         rowDescription: m.description,
+        // Reconcile states the coverage it assumed ("~5m² per pack") and this
+        // branch only stamps it onto m.description further down, AFTER both
+        // guards have run — so the one statement of pack size for an
+        // unidentified product was never available to them.
+        statedByModel: r.coverageNote || r.reasoning,
         rowName: m.name,
       },
       parsePackInfo,
@@ -618,6 +644,14 @@ export function applyReconcileResult(
       name: m.name,
       perPurchasePrice: impliedUnitInc,
       packSize: candidatePackSize ?? undefined,
+      // Without these the clamp cannot tell whether the pack measures the same
+      // thing as the requirement, so its exact-arithmetic branch never ran from
+      // here and any non-fastener, non-liquid row fell through unguarded. Same
+      // expression the floor uses, so both guards read one requirement unit.
+      packUnit: candidatePackUnit,
+      requirementUnit: (m.requiredUnit ?? m.packUnit ?? m.unit) as string,
+      purchaseUnit: r.purchaseUnit,
+      proposedCount: flooredCount,
     });
     const purchaseCount = sane !== null && sane < flooredCount ? sane : flooredCount;
     m.quantity = purchaseCount;
@@ -635,6 +669,19 @@ export function applyReconcileResult(
     ) {
       m.packSize = candidatePackSize;
       m.packUnit = candidatePackUnit as Material['unit'];
+      // The count is PACKS, so the row has to say packs. `r.purchaseUnit` is
+      // the model's word for it and it routinely says 'each', which prints as
+      // "needs 40 each | buy 4 each" — indistinguishable from a 10x shortfall.
+      // A blind estimator read exactly that as "systematic 10x under-buys on
+      // fixings" when the quantities were right. Same mapping the pack-aware
+      // path uses: a length or area pack is one piece ('each'), anything else
+      // is a 'pack'.
+      if (candidatePackSize > 1) {
+        m.unit =
+          candidatePackUnit === 'm' || candidatePackUnit === 'm²' || candidatePackUnit === 'm³'
+            ? 'each'
+            : 'pack';
+      }
     }
     // Establish a 2dp unit price and derive the line total from it so
     // quantity × price === totalPrice always holds — this also kills the
@@ -656,8 +703,67 @@ export function applyReconcileResult(
   return 'skipped';
 }
 
+/**
+ * A nominal one-purchase price for a row nothing else could price.
+ *
+ * Deliberately round and modest so it reads as a placeholder rather than a
+ * quote. It is never multiplied by the requirement — see applyLastResortGuess.
+ */
+export const LAST_RESORT_GUESS_PRICE = 25;
+
+/** Prefix that marks a line as a placeholder the tradie must replace. */
+export const LAST_RESORT_GUESS_PREFIX = 'Rough guess';
+
+/**
+ * Last stop for a row that survived every pricing path with no price.
+ *
+ * A $0 line is worse than a wrong one: the customer reads it as free work, it
+ * silently understates the total, and it is easy to miss on a long quote. An
+ * audit of stored quotes found $0 material rows on 36 of 173 quotes that had
+ * already gone out. So the row gets a number — but the SHAPE of the guess is
+ * what keeps it safe.
+ *
+ * It prices ONE purchase, never the requirement. Multiplying a guess by a
+ * requirement is how a placeholder becomes $49,000 of cup-head bolts or
+ * $6,000 of soil; capping at a single purchase bounds the damage to one modest
+ * line whatever the quantity. The requirement is named in the note instead, so
+ * the tradie can see exactly what the line has to cover before they replace it.
+ *
+ * priceConfidence 'low' raises the existing "Est." treatment on the material
+ * card, and Mate reads these rows off the quote to ask for a supplier list or
+ * the real number (see summariseSupplierGap).
+ */
+export function applyLastResortGuess(material: Material, gstInclusive: boolean): void {
+  const requirement = material.requiredQty ?? material.quantity;
+  const requirementUnit = material.requiredUnit ?? material.unit;
+  if (material.requiredQty === undefined) material.requiredQty = requirement;
+  if (material.requiredUnit === undefined) material.requiredUnit = requirementUnit;
+
+  const unitPrice = roundToTwoDecimals(supplierPriceForGstMode(LAST_RESORT_GUESS_PRICE, gstInclusive));
+  material.price = unitPrice;
+  material.quantity = 1;
+  material.unit = 'pack';
+  material.totalPrice = unitPrice;
+  material.packSize = undefined;
+  material.packUnit = undefined;
+  material.manualPriceOverride = false;
+  material.pricingSource = 'ai';
+  material.priceConfidence = 'low';
+  material.bunningsItemNumber = undefined;
+  material.productUrl = undefined;
+  material.imageUrl = undefined;
+
+  const need =
+    requirement > 0
+      ? ` This line needs to cover ${Number.isInteger(requirement) ? requirement : roundToTwoDecimals(requirement)} ${requirementUnit}.`
+      : '';
+  material.description =
+    `${LAST_RESORT_GUESS_PREFIX} — nothing could price this one, so it is a placeholder for one purchase.` +
+    `${need} Put your price in, or send a supplier list with this item.`;
+}
+
 function applyVisibleFallbackEstimate(material: Material, gstInclusive: boolean): boolean {
-  const fallback = deterministicFallbackUnitPrice(material);
+  const fallback = unitSafeFallbackUnitPrice(material);
   if (!(fallback && fallback > 0)) return false;
   const unitPrice = roundToTwoDecimals(supplierPriceForGstMode(fallback, gstInclusive));
   material.price = unitPrice;
@@ -1222,7 +1328,14 @@ async function fetchPricesForQuoteInner(
             material.priceConfidence = 'low';
             if (aiResult.productName) material.name = aiResult.productName;
             material.description = 'Estimated price — verify with supplier before sending';
-            applyPackAwarePricing(material, { productName: aiResult.productName });
+            // The estimate now states what ONE purchase contains, so this has
+            // real pack evidence instead of falling through to multiplying the
+            // purchase price by the requirement.
+            applyPackAwarePricing(material, {
+              productName: aiResult.productName,
+              packSize: aiResult.packSize,
+              packUnit: aiResult.packUnit,
+            });
             fetchedCount += 1;
             onEvent?.({
               kind: 'item-priced',
@@ -1238,7 +1351,7 @@ async function fetchPricesForQuoteInner(
         } catch {
           // fall through to failed
         }
-        const fallback = deterministicFallbackUnitPrice(material);
+        const fallback = unitSafeFallbackUnitPrice(material);
         if (fallback && fallback > 0) {
           const unitPrice = roundToTwoDecimals(supplierPriceForGstMode(fallback, gstInclusive));
           material.price = unitPrice;
@@ -1350,9 +1463,14 @@ async function fetchPricesForQuoteInner(
           const outcome = applyReconcileResult(m, r, gatedCandidatesByMaterialId.get(m.id) || [], gstInclusive);
           if (outcome === 'rejected') rejectedRows.push(m);
         }
-      } catch {
+      } catch (err) {
         // Reconciliation is best-effort — fall back to whatever the per-row
-        // pack-aware regex worked out.
+        // pack-aware regex worked out. But it must never fail SILENTLY: a
+        // bare catch here hid a TypeError that killed this pass on 23 of 24
+        // real quotes for twelve days, taking the coverage floor, the
+        // over-buy clamp and the category gate with it. Nothing reached
+        // Sentry because nothing was logged.
+        console.error('[pricing] reconcile pass aborted — rows keep their pre-reconcile prices', err);
       }
 
       // ── Rejected-row rescue ──
@@ -1424,8 +1542,10 @@ async function fetchPricesForQuoteInner(
               }
             }
           }
-        } catch {
-          // Rescue is best-effort; rows keep their reject state.
+        } catch (err) {
+          // Rescue is best-effort; rows keep their reject state — but log it,
+          // for the same reason as the reconcile pass above.
+          console.error('[pricing] rejected-row rescue aborted — rows stay rejected', err);
         }
 
         // Safety net for rows still unpriced after the rescue: a visible
@@ -1441,8 +1561,16 @@ async function fetchPricesForQuoteInner(
               m.manualPriceOverride = false;
               m.pricingSource = 'ai';
               m.priceConfidence = 'low';
-              m.totalPrice = roundToTwoDecimals(m.price * m.quantity);
               m.description = 'Estimated price — verify with supplier before sending';
+              // Was `m.price * m.quantity`, where quantity is the REQUIREMENT
+              // for a bulk row — so a $45.90 bag of adhesive was charged 150
+              // times over on a 150 kg job. Route it through the same
+              // pack-aware path as every other estimate.
+              applyPackAwarePricing(m, {
+                productName: aiResult.productName,
+                packSize: aiResult.packSize,
+                packUnit: aiResult.packUnit,
+              });
               continue;
             }
           } catch {
@@ -1467,12 +1595,33 @@ async function fetchPricesForQuoteInner(
     for (const m of updatedMaterials) {
       if (m.manualPriceOverride) continue;
       if (m.requiredQty === undefined || !(m.price > 0)) continue;
+      // Only the pack size a pricing pass actually RESOLVED is handed to this
+      // clamp — never one recovered from the row's prose. recoverPackInfo
+      // exists to feed the coverage FLOOR, which only ever raises a count, so
+      // a misparse there is harmless. This guard only ever lowers one, and
+      // feeding it prose-derived sizes bought 4 formwork pegs against a
+      // 20-peg requirement and 1 hinge against 2. Under-buying costs the
+      // tradie money directly, so the asymmetry matters.
+      // A lump sum is one figure for the whole job, so it can never be
+      // multiplied by a piece count. "Post hole digging - spoil removal
+      // allowance, 15 each @ $1,200" billed $18,000 and tripled the materials
+      // total on a $15.6k fence, on its own.
+      if (isLumpSumRow(m.name) && m.quantity > 1) {
+        m.quantity = 1;
+        m.totalPrice = roundToTwoDecimals(m.price);
+        m.priceConfidence = 'low';
+        m.description = m.description
+          ? `Priced as a single allowance — check it covers the job. ${m.description}`
+          : 'Priced as a single allowance — check it covers the job.';
+      }
       const sane = coverageSanePurchaseCount({
         requirement: m.requiredQty,
         name: m.name,
         // m.price is in the business's GST mode; compare against inc-GST retail.
         perPurchasePrice: gstInclusive ? m.price : roundToTwoDecimals(m.price * 1.1),
         packSize: m.packSize,
+        packUnit: m.packUnit,
+        requirementUnit: (m.requiredUnit ?? m.unit) as string,
       });
       if (sane !== null && sane < m.quantity) {
         m.quantity = sane;
@@ -1509,6 +1658,94 @@ async function fetchPricesForQuoteInner(
           }
         }
       }
+    }
+    // ── Last-resort estimate sweep ──
+    // A completed run must not leave a row at $0. A $0 line on a customer's
+    // quote is not a blank to fill in — it reads as free work, and it silently
+    // understates the total the tradie is agreeing to. An audit of stored
+    // quotes found $0 material rows on 36 of 173 quotes that had already gone
+    // out to a customer.
+    //
+    // The earlier safety net only covered rows the reconcile pass explicitly
+    // REJECTED. Rows that never drew a candidate, or whose estimate call
+    // failed, fell past it. This sweep is the invariant for every path.
+    //
+    // Order is most-to-least evidence: a simplified search term often prices
+    // what the over-specified original could not ("Base Coat Setting Compound
+    // 20kg Bag" -> "setting compound"), then the deterministic trade table.
+    // Anything still unpriced is named for the caller so Mate can ask the
+    // tradie for a price list or a hand-typed price — the row is flagged
+    // low-confidence either way, so the card shows "Est." rather than
+    // presenting a guess as a real supplier price.
+    for (const m of updatedMaterials) {
+      checkCancel();
+      if (!needsPriceFetch(m)) continue;
+      if (m.manualPriceOverride) continue;
+
+      const term = m.searchTerm || m.name;
+      const simplified = simplifySearchTerm(term);
+      if (simplified && simplified !== term) {
+        try {
+          const retry = await searchMaterialPrice(simplified, hardwareStores);
+          if (retry.price) {
+            m.price = supplierPriceForGstMode(retry.price, gstInclusive);
+            m.manualPriceOverride = false;
+            m.pricingSource = 'ai';
+            m.priceConfidence = 'low';
+            // The estimate is the price of ONE purchasable item, so it must go
+            // through pack-aware pricing exactly as the individual pass does.
+            // Multiplying it by the requirement is the bag-price-per-kilogram
+            // bug: a $25.50 20kg bag against a 20 kg requirement billed $510.
+            applyPackAwarePricing(m, {
+              productName: retry.productName,
+              packSize: retry.packSize,
+              packUnit: retry.packUnit,
+            });
+            if (!m.description || m.description.startsWith('No price')) {
+              m.description = 'Estimated price — verify with supplier before sending';
+            }
+            fetchedCount += 1;
+            continue;
+          }
+        } catch {
+          // fall through to the deterministic table
+        }
+      }
+
+      if (applyVisibleFallbackEstimate(m, gstInclusive)) {
+        fetchedCount += 1;
+        continue;
+      }
+
+      // Last chance at a REAL estimate before any placeholder. The retry above
+      // uses the simplified search term, which strips the detail a price
+      // depends on — "Ducted inverter air conditioner 14kW" becomes "air
+      // conditioner". The full name is a genuinely different question, and the
+      // estimator now prices trade-supply goods instead of declining them.
+      if (m.name && m.name !== simplified && m.name !== term) {
+        try {
+          const byName = await searchMaterialPrice(m.name, hardwareStores);
+          if (byName.price) {
+            m.price = supplierPriceForGstMode(byName.price, gstInclusive);
+            m.manualPriceOverride = false;
+            m.pricingSource = 'ai';
+            m.priceConfidence = 'low';
+            applyPackAwarePricing(m, {
+              productName: byName.productName,
+              packSize: byName.packSize,
+              packUnit: byName.packUnit,
+            });
+            m.description = 'Estimated price — verify with supplier before sending';
+            fetchedCount += 1;
+            continue;
+          }
+        } catch {
+          // fall through to the placeholder
+        }
+      }
+
+      applyLastResortGuess(m, gstInclusive);
+      fetchedCount += 1;
     }
   } catch (err: any) {
     if (err instanceof FetchCancelled) {

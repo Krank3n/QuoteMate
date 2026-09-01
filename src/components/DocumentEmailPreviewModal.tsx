@@ -394,7 +394,10 @@ export function DocumentEmailPreviewModal({
     const warning = buildPresendWarning(
       reviewQuoteMaterials(doc.materials, doc.sections),
       doc.type === 'invoice' ? 'invoice' : 'quote',
-      { materialsShownToCustomer: showsPerLineMoney(resolvePriceDetail(doc, businessSettings)) },
+      {
+        materialsShownToCustomer: showsPerLineMoney(resolvePriceDetail(doc, businessSettings)),
+        customerName: doc.customerName,
+      },
     );
     if (warning) {
       setPresendWarning(warning);

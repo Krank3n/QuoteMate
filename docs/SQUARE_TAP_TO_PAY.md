@@ -9,7 +9,9 @@ Phase 2 wires Square's Mobile Payments SDK into QuoteMate so tradies can take ca
 - ✅ JS service: `src/services/squarePayments.ts` (`takeInAppPayment`)
 - ✅ Feature-flag gate: `src/hooks/useTapToPayEnabled.ts` reads Firestore `config/squareTapToPay`
 - ✅ UI: `TakePaymentSheet` Tap-to-Pay row enabled when flag + device capability allow
-- ⏳ Apple Tap-to-Pay entitlement (manual; see below)
+- ✅ Apple Tap-to-Pay entitlement — **granted 16 Apr 2026, development distribution only** (Case-ID 19476927)
+- ⏳ Apple **publishing** entitlement — needs three flow videos + checklist (see below). This is the real gate.
+- ⏳ App requirements from Apple's review guide v1.6 — most now met; outstanding: **3.1–3.3** (awareness moment, blocked on Apple's Marketing Toolkit), **5.5** (SF Symbol icon), **1.4** (osVersionNotSupported), **5.10** (receipt on decline), and the **AU surcharging** conflict
 
 ## Run the prebuild
 
@@ -24,7 +26,8 @@ cd ios && pod install && cd ..
 
 After prebuild, sanity-check that:
 - `ios/QuoteMate/AppDelegate.swift` contains `MobilePaymentsSDK.initialize(...)`
-- `ios/QuoteMate/Info.plist` contains `NFCReaderUsageDescription`
+- `ios/QuoteMate/QuoteMate.entitlements` contains `com.apple.developer.proximity-reader.payment.acceptance`
+- `ios/QuoteMate/Info.plist` contains `NSLocationWhenInUseUsageDescription` and does **not** contain `NFCReaderUsageDescription`
 - `android/build.gradle` contains `squareSdkVersion` and the Square maven repo
 - `android/app/build.gradle` contains `com.squareup.sdk:mobile-payments-sdk`
 - `android/app/src/main/java/.../MainApplication.kt` contains `MobilePaymentsSdk.initialize(...)`
@@ -33,10 +36,11 @@ After prebuild, sanity-check that:
 
 ```bash
 eas build --profile development --platform android  # ships first
-eas build --profile development --platform ios      # waits on Apple entitlement for Tap to Pay
+eas build --profile development --platform ios      # or: npx expo run:ios --device <udid>
 ```
 
-Tap to Pay cannot be tested on the iOS Simulator or Android emulator — you need a real iPhone XS+ on iOS 16.4+ or an NFC-capable Android device.
+Tap to Pay cannot be tested on the iOS Simulator or Android emulator — you need a real iPhone XS+ on iOS 16.7+ or an NFC-capable Android device.
+The iPhone must be **registered as a test device** on the developer account: the development entitlement signs for registered devices only.
 
 ## Enable the feature flag
 
@@ -45,27 +49,98 @@ Tap to Pay is OFF by default. Flip it on by writing to Firestore:
 ```
 config/squareTapToPay
 {
-  "ios": false,        // flip to true once Apple approval lands and the build with the entitlement ships
+  "ios": false,        // flip only after the PUBLISHING entitlement lands and that build ships
   "android": true      // ship Android immediately
 }
 ```
 
 The hook re-reads this on every `TakePaymentSheet` mount so changes propagate without an app release.
 
-## Apple Tap-to-Pay entitlement (iOS only)
+## Apple entitlement: two stages, not one
 
-1. Sign in at https://developer.apple.com → Identifiers → `com.hansendev.quotemate` → enable **Tap to Pay on iPhone** capability. This requires requesting access from Apple via the linked form.
-2. Apple reviews (1–4 weeks). They contact you if they need more info about the use case.
-3. After approval:
-   - Open `ios/QuoteMate/QuoteMate.entitlements` and add:
-     ```xml
-     <key>com.apple.developer.proximity-reader.payment.acceptance</key>
-     <true/>
-     ```
-   - Or add a `withEntitlementsPlist` step inside `withSquareSDK.js` so prebuild applies it automatically.
-4. Bump the iOS build, ship via TestFlight, then flip `config/squareTapToPay.ios = true`.
+Apple grants Tap to Pay in two steps, and it is easy to think you're blocked when you're
+only half-blocked.
 
-Until step 3 lands, the iOS row in `TakePaymentSheet` says *"Coming soon on iPhone — pending Apple approval"*.
+**Stage 1 — development entitlement. DONE.** Granted 16 Apr 2026 by Wallet Entitlements
+(Case-ID 19476927) for team 5GHUTAV35B, PSP Square, Australia first. Distribution is
+limited to registered test devices. The App ID carries the managed capability, so
+`expo prebuild` + automatic signing produces a build that runs Tap to Pay on a registered
+iPhone today.
+
+**Stage 2 — publishing entitlement. OUTSTANDING.** Required for TestFlight and the App
+Store. To get it, build the app to meet Apple's requirements, then **reply to the original
+entitlement email** (`ttpoientitlements@apple.com`, quoting Case-ID 19476927) and upload to
+Apple's File Uploader:
+
+1. A video recording of the **Onboarding flow**
+2. A video recording of the **Enabling Tap to Pay and Educating Merchants flow**
+3. A video recording of the **Checkout flow**
+4. A completed **App Review Requirements Checklist**
+
+Both requirement documents live at <https://apple.box.com/v/ttpoirequirements> — currently
+v1.6, refreshed 26 Aug 2026. Pull the live copy; don't work from a download.
+
+> **The checkout video cannot be screen-recorded.** Apple: *"Use another device to record
+> the Checkout flow video as the Tap to Pay on iPhone UI screens won't work for screen
+> recordings."* The ProximityReader UI is excluded from screen capture and records as
+> black. Film the phone with a second camera. Videos 1 and 2 screen-record fine over USB.
+
+Only after the publishing entitlement lands do you submit to App Review — which is itself a
+special review for entitlement-bearing apps.
+
+### No Square reader needed
+
+An earlier note in this repo said the demo was blocked on "no Square reader on hand". That
+was a misread: with Tap to Pay the iPhone *is* the terminal. You need an eligible iPhone
+(XS or later, iOS 16.7+), a connected AU Square seller account, and a contactless card or a
+phone with Apple Pay.
+
+### `NFCReaderUsageDescription` stays out
+
+Square documents exactly three required privacy keys — Bluetooth, Location, Microphone.
+NFC is not one of them, because Tap to Pay runs on ProximityReader rather than CoreNFC.
+Setting the NFC key put us into the CoreNFC "needs a hardware demo video" review path
+(Guideline 2.1) in Apr 2026. See the comment in `plugins/withSquareSDK.js`.
+
+## What Apple still wants
+
+Requirement numbers below are from the App Review Requirements Checklist v1.6. These have
+to be true *before* the videos are shot, because the videos are the evidence.
+
+| Req | Apple requires | State |
+| --- | --- | --- |
+| 1.4 | Handle `osVersionNotSupported` below iOS 17.6 | missing |
+| 1.5 | Warm up the reader on launch and on foreground | ✅ `warmUpTapToPay()` on launch + AppState active (`App.tsx`) |
+| 1.6 | Read T&C acceptance from Apple, not a local variable | ✅ every path reads `isAppleAccountLinked()` live |
+| 3.1–3.3 | Awareness moment, splash modal, one push to all eligible users | **blocked** — must use Apple Marketing Toolkit assets/copy, which we don't have yet |
+| 3.4 | Show how to enable at the end of onboarding | ✅ on the Payments step once Square connects |
+| 3.5 | A clear action to accept the Tap to Pay T&Cs | ✅ `linkAppleAccountIfNeeded()` wired into all three paths |
+| 3.7 / 5.3 | Button never greyed out; pressing it opens T&C acceptance | ✅ terms gate moved to press; row never disabled |
+| 3.9.1 | Configuration progress indicator while the reader prepares | ✅ `observeTapToPayReadiness()` → `useTapToPayReadiness` |
+| 4.1 | `ProximityReaderDiscovery` for merchant education on iOS 18+ | ✅ `modules/tap-to-pay-education` (local Expo module). Clears 4.4/4.6/4.7/4.8 |
+| 4.2 / 4.3 | Education after T&Cs, findable again in Settings | ✅ on fresh acceptance; "How Tap to Pay works" row in Square settings |
+| 5.2 | Button reachable without scrolling, top of the list | ✅ already |
+| 5.4 / 5.5 | Approved copy; SF Symbol `wave.3.right.circle` | copy ✅ (`tapToPayRowTitle`); **icon still outstanding** — needs `expo-symbols` (native dep + rebuild) |
+| 5.10 | Digital receipt on approve *and* decline | partial — confirm the decline path |
+
+### Australia-specific
+
+- **PIN entry in education** applies everywhere except JP and TW, so it applies here.
+- **Surcharging** applies to AU and BR only, and it is a live conflict. Apple requires the
+  surcharge be shown on its own Tap to Pay screen via the surcharge API. QuoteMate instead
+  bakes `PASSTHROUGH_SURCHARGE_PCT` into `amountCents` and passes
+  `allowCardSurcharge: false`, so Apple's screen shows a grossed-up total with no surcharge
+  note. `mobile-payments-sdk-react-native` exposes no `surchargeAmount`. Resolve with Square
+  before building anything else — the answer changes either `shared/pdf/squareFees.ts` or
+  the in-person feature set.
+- **Fallback payment method** is CA/GL/IE/IM/JE/UK only — not required here.
+
+### Marketing is gated too
+
+Requirements 6.1–6.3 make a launch email, an in-app splash and a push notification
+mandatory at launch, all built from Apple's Marketing Toolkit templates — you may not write
+your own Tap to Pay copy or art. And none of it may go live until the app is in full general
+availability.
 
 ## OAuth scope migration
 

@@ -12,6 +12,9 @@ export default defineConfig({
       'shared/**/*.test.ts',
       'functions/scripts/**/*.test.ts',
       'plugins/**/*.test.ts',
+      // Local Expo native modules live outside src/ but their JS wrappers carry
+      // real branching (availability, error-code mapping) worth covering.
+      'modules/**/*.test.ts',
     ],
     exclude: ['node_modules', 'functions/node_modules', 'android', 'ios', 'dist', 'dist-web', 'build'],
   },

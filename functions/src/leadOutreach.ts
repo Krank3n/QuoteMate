@@ -402,7 +402,8 @@ async function callClaudeJSON<T>(opts: {
       },
       body: JSON.stringify({
         model,
-        max_tokens: opts.maxTokens || 2048,
+        // No sampling params — Sonnet 5 rejects temperature with a 400.
+        max_tokens: opts.maxTokens || 4000,
         system: opts.system,
         messages: [{ role: 'user', content: opts.user }],
       }),
@@ -412,7 +413,10 @@ async function callClaudeJSON<T>(opts: {
       return { ok: false, error: `claude-${response.status}: ${txt.slice(0, 300)}` };
     }
     const body: any = await response.json();
-    const text = body?.content?.[0]?.text || '';
+    const text = (body?.content || [])
+      .filter((b: { type?: string; text?: string }) => b?.type === 'text' && typeof b.text === 'string')
+      .map((b: { text: string }) => b.text)
+      .join('');
     // Extract first JSON block (Claude sometimes wraps in fences)
     const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/) || [null, text];
     const raw = jsonMatch[1] || text;
