@@ -29,7 +29,31 @@ export interface CoverageInput {
   perPurchasePrice: number;
   /** Real pack/volume size when known (e.g. 500 screws, 10 L). Authoritative. */
   packSize?: number;
+  /** Unit `packSize` counts. Required before a known pack size may be divided. */
+  packUnit?: string;
+  /** Unit `requirement` counts, so pack and requirement can be compared. */
+  requirementUnit?: string;
+  /** The unit the proposed purchase is counted in ('pack', 'box', 'each'). */
+  purchaseUnit?: string;
+  /** The purchase count under consideration, so the guard can recognise the
+   *  "one container per piece" pathology it cannot infer from price alone. */
+  proposedCount?: number;
 }
+
+/** Compare units by meaning, not spelling: 'm2' and 'm²' are the same unit. */
+function normaliseUnit(u: string): string {
+  const t = u.trim().toLowerCase();
+  if (t === 'm2' || t === 'sqm') return 'm²';
+  if (t === 'm3') return 'm³';
+  if (t === 'litre' || t === 'litres' || t === 'l') return 'l';
+  return t;
+}
+
+/** Purchase units that hold MORE THAN ONE piece, so one per piece is absurd. */
+const CONTAINER_UNITS = new Set(['pack', 'box']);
+
+/** Units that count discrete purchasable pieces. */
+const COUNT_UNITS = new Set(['each', 'pack', 'box']);
 
 // Bulk consumables that genuinely come in tubs/boxes/drums priced per bulk unit.
 // Deliberately excludes "bolt", "bracket", "anchor", "clip" — those are commonly
@@ -58,14 +82,44 @@ const MIN_FASTENER_REQUIREMENT_FOR_TUB = 100;
  * only ever clamp DOWN: `count = Math.min(count, sane)`.
  */
 export function coverageSanePurchaseCount(input: CoverageInput): number | null {
-  const { requirement, name, perPurchasePrice, packSize } = input;
+  const { requirement, name, perPurchasePrice, packSize, packUnit, requirementUnit, purchaseUnit, proposedCount } =
+    input;
   if (!(requirement > 0) || !(perPurchasePrice > 0)) return null;
+
+  // A KNOWN pack size is arithmetic, not a heuristic, so it runs BEFORE the
+  // fastener/liquid gate below. That gate exists to guard the *guessing*
+  // branches — assumed tub and drum sizes — and applying it to a size we can
+  // actually read left every non-fastener consumable unclamped: 100 sanding
+  // mesh sheets billed at the price of a 10-pack, 100 times over ($10,500
+  // against a real $130). Requires the pack to count the same kind of thing as
+  // the requirement, so a "20kg" pack never divides a piece count.
+  // BOTH units must be stated and countable. Treating an unknown unit as
+  // countable read "Treated Pine Post 2.4m" as a 2.4-pack and divided a 7-post
+  // requirement down to 3 — an under-buy, the worse failure. A caller that
+  // does not supply units gets the pre-existing behaviour below, unchanged.
+  const packIsCountable = !!packUnit && COUNT_UNITS.has(packUnit);
+  const requirementIsCountable = !!requirementUnit && COUNT_UNITS.has(requirementUnit);
+  // Same unit on both sides is exact arithmetic too, and it is the case the
+  // COUNT_UNITS pair was too narrow to reach: a pack covering 5 m² against a
+  // 38 m² ceiling is 8 packs, no heuristic involved. Restricting the division
+  // to countable units left every bulk-unit row (m², m, kg, L) with NO over-buy
+  // guard at all — that is how a reconcile hallucination of 475 packs of
+  // R4.0 ceiling batts for 38 m² survived every check and billed $42,702.
+  // Requiring the units to MATCH is what keeps the old failure out: a "2.4m"
+  // pack read against a 7-'each' post requirement has m ≠ each, so it is still
+  // refused rather than dividing 7 posts down to 3.
+  const sameUnit =
+    !!packUnit && !!requirementUnit && normaliseUnit(packUnit) === normaliseUnit(requirementUnit);
+  if (packSize && packSize > 1 && ((packIsCountable && requirementIsCountable) || sameUnit)) {
+    return Math.max(1, Math.ceil(requirement / packSize));
+  }
 
   const isFastener = BULK_FASTENER_RE.test(name);
   const isLiquid = LIQUID_RE.test(name);
   if (!isFastener && !isLiquid) return null;
 
-  // When the real pack/volume size is known it is authoritative — divide by it.
+  // Known size on a fastener/liquid row whose units did not line up above
+  // (e.g. a litre pack against a litre requirement) — still authoritative.
   if (packSize && packSize > 1) {
     return Math.max(1, Math.ceil(requirement / packSize));
   }
@@ -83,7 +137,28 @@ export function coverageSanePurchaseCount(input: CoverageInput): number | null {
   // one single nail/screw; it's a retail pack/tub. This catches rows like
   // "200 Pryda nails × $12.01" and "100 bugle screws × $17.02" while leaving
   // genuinely individual cheap fasteners alone.
-  if (requirement < MIN_FASTENER_REQUIREMENT_FOR_TUB) return null;
+  //
+  // One container per piece is wrong by definition, whatever the requirement.
+  // A row that proposes buying `pack`s or `box`es, one for each piece needed,
+  // contradicts itself: a pack holds more than one. That is not a guess from
+  // price, so it runs ahead of the requirement gate below — which exists to
+  // protect items sold individually whose NAME matches this pattern (a "screw
+  // pile", a "nail gun"), and those are counted in 'each', never in packs.
+  //
+  // Real case, QU-178514: four identical coil-nail rows, same $42.90 product.
+  // 400 and 172 pieces clamped correctly to 4 and 2 packs; 72 and 64 sat just
+  // under the gate and bought one box per nail — $5,834 of nails on a $15.6k
+  // fence. The siblings prove the pack assumption; only the gate differed.
+  const buysAContainerPerPiece =
+    !!purchaseUnit &&
+    CONTAINER_UNITS.has(purchaseUnit) &&
+    !!requirementUnit &&
+    requirementUnit === 'each' &&
+    typeof proposedCount === 'number' &&
+    requirement > 1 &&
+    proposedCount >= requirement;
+
+  if (requirement < MIN_FASTENER_REQUIREMENT_FOR_TUB && !buysAContainerPerPiece) return null;
   if (perPurchasePrice >= BULK_PRICE_FLOOR) {
     return Math.max(1, Math.ceil(requirement / ASSUMED_SCREWS_PER_TUB));
   }
@@ -105,6 +180,12 @@ export interface PackInfoSources {
   /** The reconcile model's own reasoning — it routinely states the pack size
    *  ("20kg per bag, 11 bags total 220kg") even when nothing structured did. */
   rowDescription?: string;
+  /** What the reconcile model said about the pack it chose (coverageNote /
+   *  reasoning). Ranks below the candidate's own description because it is
+   *  prose, but it is often the ONLY statement of coverage when the chosen
+   *  product could not be identified — the case that left the R4.0 batts row
+   *  with no pack size and therefore no guard. */
+  statedByModel?: string;
   /** The material name, which sometimes carries the size itself. */
   rowName?: string;
 }
@@ -124,7 +205,8 @@ export function recoverPackInfo(
   parsePack: (text?: string) => { packSize: number; packUnit: string } | null,
 ): { packSize?: number; packUnit?: string } {
   const fromCandidateName = parsePack(s.candidateProductName);
-  const fromStated = parsePack(s.rowDescription) ?? parsePack(s.rowName);
+  const fromStated =
+    parsePack(s.rowDescription) ?? parsePack(s.statedByModel) ?? parsePack(s.rowName);
   return {
     packSize:
       s.candidatePackSize ?? fromCandidateName?.packSize ?? s.rowPackSize ?? fromStated?.packSize,

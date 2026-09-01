@@ -21,6 +21,13 @@ export interface SupplierGapSummary {
   pricedRowCount: number;
   /** Whether this phone can see any of the tradie's own rates. */
   supplierBookPopulated: boolean;
+  /**
+   * Rows carrying no real price: either still at $0 (a run never reached them)
+   * or holding the last-resort placeholder. Distinct from an estimate — an
+   * estimate is a researched number worth checking, these are blanks. Always
+   * worth a word, however few there are.
+   */
+  needsPriceTerms?: string[];
 }
 
 /** Three estimated rows is a pattern, not a one-off. */
@@ -32,7 +39,26 @@ const MAX_NAMED = 2;
 
 export function buildSupplierGapNote(gap: SupplierGapSummary): string | null {
   const missed = gap.missedTerms.map((t) => t?.trim()).filter((t): t is string => !!t);
+  const needsPrice = (gap.needsPriceTerms ?? []).map((t) => t?.trim()).filter((t): t is string => !!t);
   const ratio = gap.pricedRowCount > 0 ? gap.estimatedCount / gap.pricedRowCount : 0;
+
+  // A row with no real price outranks every other gap and has no threshold:
+  // one placeholder is already a line that will go out wrong. Ask for the two
+  // things that actually fix it — the supplier's list, or the number.
+  if (needsPrice.length > 0) {
+    const named = needsPrice.slice(0, MAX_NAMED);
+    const rest = needsPrice.length - named.length;
+    const more = rest > 0 ? ` and ${rest} more` : '';
+    const count = needsPrice.length === 1 ? 'One row' : `${needsPrice.length} rows`;
+    const verb = needsPrice.length === 1 ? 'has' : 'have';
+    return (
+      `${count} on this quote ${verb} no real price — ${named.join(', ')}${more}. ` +
+      'Those are placeholders, not researched estimates, so the total is wrong until they are set. ' +
+      "Tell them plainly, then offer both ways out in ONE line: send through the supplier's " +
+      'price list for these items, or give you the price and you will put it in. Ask once, ' +
+      'and drop it if they knock it back.'
+    );
+  }
   const worthMentioning =
     missed.length > 0 || gap.estimatedCount >= MIN_ESTIMATED || ratio >= MIN_ESTIMATE_RATIO;
   if (!worthMentioning) return null;

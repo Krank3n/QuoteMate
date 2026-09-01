@@ -20,6 +20,7 @@ import {
   generateMaterialsForQuote,
   fetchPricesForQuote,
   PipelineCancelled,
+  LAST_RESORT_GUESS_PREFIX,
 } from '../services/materialsPipeline';
 import { pricingEventToProgress } from './pricingProgress';
 import type { SupplierGapSummary } from '../services/assistant/supplierGapNote';
@@ -491,6 +492,22 @@ async function summariseSupplierGap(
     estimatedCount,
     pricedRowCount: materials.filter((m) => (m.price ?? 0) > 0).length,
     supplierBookPopulated,
+    // Read from the quote's own rows, not from one run's outcome: the audit of
+    // stored quotes found most $0 lines carry no pricingSource at all — they
+    // were added after a run, or a run never reached them. Mate should ask
+    // about whatever lacks a real price NOW: still-$0 rows, plus rows holding
+    // the pipeline's last-resort placeholder, which are the ones that most
+    // need a real number. Work items are lump-sum scope lines with no unit
+    // price by design and are never a gap.
+    needsPriceTerms: materials
+      .filter(
+        (m) =>
+          m.kind !== 'work' &&
+          (m.quantity ?? 0) > 0 &&
+          (!((m.price ?? 0) > 0) || (m.description ?? '').startsWith(LAST_RESORT_GUESS_PREFIX)),
+      )
+      .map((m) => m.name)
+      .filter((n): n is string => !!n),
   };
 }
 

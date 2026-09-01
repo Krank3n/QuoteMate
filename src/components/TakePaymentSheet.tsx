@@ -31,6 +31,7 @@ import { formatCurrency } from '../utils/quoteCalculator';
 import * as squareService from '../services/squareService';
 import { takeInAppPayment } from '../services/squarePayments';
 import { useTapToPayEnabled } from '../hooks/useTapToPayEnabled';
+import { useTapToPayReadiness } from '../hooks/useTapToPayReadiness';
 import { dollarsToCents, centsToDollars } from '../../shared/pdf/money';
 import {
   QM_APP_FEE_PCT_IN_PERSON,
@@ -41,6 +42,23 @@ import { BottomSheet } from './BottomSheet';
 import { PillToggle } from './PillToggle';
 import { CurrencyInput } from './CurrencyInput';
 import { paymentCopy } from '../constants/paymentCopy';
+
+/**
+ * Apple req 5.4: the button that starts a Tap to Pay transaction must use the
+ * approved name for the region's language. Apple's English long form is
+ * exactly "Tap to Pay on iPhone" (short form "Tap to Pay"); adding our own
+ * words to it is what the requirement rules out.
+ *
+ * Android is Square's own contactless reader, not Tap to Pay on iPhone, so
+ * Apple's naming rule does not apply and the row keeps wording that describes
+ * what that platform can actually do.
+ *
+ * Pure and exported so the iOS string is covered by a test — under jsdom
+ * Platform.OS is 'web', so a test that renders the sheet can never assert it.
+ */
+export function tapToPayRowTitle(platformOS: string): string {
+  return platformOS === 'ios' ? 'Tap to Pay on iPhone' : 'Tap to Pay / Card Entry';
+}
 
 export type TakePaymentTarget =
   | {
@@ -152,6 +170,8 @@ export function TakePaymentSheet({
   const [termsAcknowledged, setTermsAcknowledged] = useState(false);
   const [termsModalVisible, setTermsModalVisible] = useState(false);
   const tapToPay = useTapToPayEnabled();
+  // Apple req 3.9.1 / 5.7 — only subscribed while the sheet is open.
+  const tapToPayReadiness = useTapToPayReadiness(visible && tapToPay.enabled);
   const { businessSettings, getDocumentById, saveDocument } = useStore();
   const surchargeOn = businessSettings?.surchargePaymentFees === true;
 
@@ -266,6 +286,13 @@ export function TakePaymentSheet({
 
   const handleTakeCardPayment = async () => {
     if (chargingCard || amounts.remaining <= 0) return;
+    // Apple req 5.3 forbids greying this button out, so the terms gate is
+    // enforced on press rather than by disabling the row. Same outcome for the
+    // tradie, but the control stays live the way Apple's review expects.
+    if (!termsGatePassed) {
+      onError('Confirm the customer has read the terms before charging.');
+      return;
+    }
     setChargingCard(true);
     try {
       // An in-flight deposit edit has to land first — otherwise we'd charge a
@@ -482,30 +509,35 @@ export function TakePaymentSheet({
           </View>
         )}
 
-        {/* Tap to Pay / Card Entry — gated on remote flag + device capability */}
+        {/* Tap to Pay — shown when the remote flag + device capability allow.
+            Once shown it is NEVER disabled: Apple req 5.3 says the control must
+            not be greyed out or obscured even before the merchant has accepted
+            Apple's T&Cs, because pressing it is what opens that acceptance
+            (req 3.7). The terms gate and the acceptance step both run inside
+            handleTakeCardPayment. Copy is Apple's approved English long form
+            (req 5.4) on iOS; Android is Square's contactless reader, not Tap to
+            Pay on iPhone, so it keeps its own wording.
+            TODO(req 5.5): the icon must be the SF Symbol wave.3.right.circle —
+            needs expo-symbols, which is a native dep + rebuild. */}
         <MethodRow
           icon="cellphone-nfc"
-          title="Tap to Pay / Card Entry"
+          title={tapToPayRowTitle(Platform.OS)}
           subtitle={
             tapToPay.enabled
-              ? termsGatePassed
-                ? 'Tap a card or phone, or key in details.'
-                : 'Confirm customer has read terms above.'
-              : tapToPay.reason === 'pending_apple'
-                ? 'Coming soon on iPhone — pending Apple approval.'
-                : tapToPay.reason === 'unsupported_device'
-                  ? 'This device does not support Tap to Pay.'
-                  : tapToPay.reason === 'loading'
-                    ? 'Checking device…'
-                    : 'Not enabled for your account yet.'
+              ? // Apple req 3.9.1: say plainly that it isn't ready yet while
+                // the reader configures, rather than implying a card can be
+                // taken right now. Req 5.7 wants the same state to read as
+                // "initializing" if the tradie presses during setup.
+                (tapToPayReadiness.label ?? 'Tap a card or phone, or key in details.')
+              : tapToPay.reason === 'unsupported_device'
+                ? 'This device does not support Tap to Pay.'
+                : tapToPay.reason === 'loading'
+                  ? 'Checking device…'
+                  : 'Not enabled for your account yet.'
           }
-          onPress={
-            tapToPay.enabled && termsGatePassed
-              ? handleTakeCardPayment
-              : undefined
-          }
-          disabled={!tapToPay.enabled || !termsGatePassed}
-          loading={chargingCard}
+          onPress={tapToPay.enabled ? handleTakeCardPayment : undefined}
+          disabled={!tapToPay.enabled}
+          loading={chargingCard || tapToPayReadiness.readiness === 'preparing'}
         />
 
         {/* Phase 1 — Share a Square pay link */}

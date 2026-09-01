@@ -40,6 +40,8 @@ import ColorPicker, { Panel1, HueSlider, type ColorFormatsObject } from 'reanima
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { useStore } from '../store/useStore';
+import { useTapToPayEnabled } from '../hooks/useTapToPayEnabled';
+import { acceptTapToPayTermsAndEducate } from '../services/squarePayments';
 import { BusinessSettings } from '../types';
 import { makeStyles, useThemeColors } from '../theme';
 import { OnboardingProgress, OnboardingStep } from '../components/OnboardingProgress';
@@ -129,6 +131,13 @@ export function NewOnboardingScreen() {
     const [squareConnecting, setSquareConnecting] = useState(false);
     const [squareConnected, setSquareConnected] = useState(false);
     const [squareError, setSquareError] = useState<string | null>(null);
+
+    // Apple req 3.4: the end of every new merchant onboarding must clearly
+    // show how to enable Tap to Pay. This rides on the existing Payments step
+    // rather than adding a ninth one — the tradie has just connected Square,
+    // which is the moment the option means anything.
+    const tapToPay = useTapToPayEnabled();
+    const [tapToPaySetup, setTapToPaySetup] = useState<'idle' | 'busy' | 'done'>('idle');
 
     // Optional Reece step — only included in the flow when the user picks
     // plumbing, since maX integration is plumber-specific.
@@ -612,6 +621,22 @@ export function NewOnboardingScreen() {
                 return renderStep6Payments();
             default:
                 return null;
+        }
+    };
+
+    /**
+     * Accepting Apple's Tap to Pay Terms and Conditions (req 3.5), followed by
+     * Apple's merchant education on a fresh acceptance (req 4.2). Backing out
+     * of Apple's sheet returns to 'idle' so the tradie can try again here or
+     * later from Settings — onboarding never blocks on it.
+     */
+    const handleEnableTapToPay = async () => {
+        setTapToPaySetup('busy');
+        try {
+            await acceptTapToPayTermsAndEducate();
+            setTapToPaySetup('done');
+        } catch {
+            setTapToPaySetup('idle');
         }
     };
 
@@ -1112,6 +1137,30 @@ export function NewOnboardingScreen() {
                         <Text style={styles.squareConnectedSubtitle}>
                             You're ready to accept card payments on your invoices. Tap Finish to complete setup.
                         </Text>
+
+                        {/* Apple req 3.4 — the enablement path is shown at the
+                            end of onboarding, on the device that will take the
+                            payment. Only where Tap to Pay can actually run, so
+                            no tradie is offered something their phone can't do. */}
+                        {tapToPay.enabled && (
+                            tapToPaySetup === 'done' ? (
+                                <Text style={styles.squareConnectedSubtitle}>
+                                    Tap to Pay is set up on this phone.
+                                </Text>
+                            ) : (
+                                <Button
+                                    mode="contained"
+                                    buttonColor={themeColors.accent}
+                                    textColor={themeColors.onAccent}
+                                    onPress={handleEnableTapToPay}
+                                    loading={tapToPaySetup === 'busy'}
+                                    disabled={tapToPaySetup === 'busy'}
+                                    style={styles.connectSquareButton}
+                                >
+                                    Set up Tap to Pay on this phone
+                                </Button>
+                            )
+                        )}
                     </View>
                 ) : (
                     <>

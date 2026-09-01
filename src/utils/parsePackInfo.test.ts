@@ -69,3 +69,41 @@ describe('parsePackInfo — unit preference and superscript units', () => {
     expect(parsePackInfo('Coolaroo 2m x 20m Weedmat Roll')).toEqual({ packSize: 40, packUnit: 'm²' });
   });
 });
+
+describe('parsePackInfo is total', () => {
+  // Callers sit inside best-effort regions guarded by bare catches, so a throw
+  // here does not read as a parse failure — it silently kills the surrounding
+  // pass. The scraper's bullet-array description did exactly that.
+  it('accepts the scraper bullet array and reads a pack size out of it', () => {
+    expect(parsePackInfo(['Premium mix', 'Supplied in a 20kg bag'])).toEqual({ packSize: 20, packUnit: 'kg' });
+  });
+
+  it('returns null rather than throwing on any non-string input', () => {
+    for (const bad of [42, {}, true, [], [1, 2], Symbol('x')] as unknown[]) {
+      expect(() => parsePackInfo(bad as never)).not.toThrow();
+      expect(parsePackInfo(bad as never)).toBeNull();
+    }
+  });
+});
+
+describe('parsePackInfo — stock length stated in millimetres', () => {
+  it('reads a cornice stick length, not its profile', () => {
+    expect(parsePackInfo('Gyprock CSR 90mm x 3600mm Cove Plaster Cornice', { preferUnit: 'm' }))
+      .toEqual({ packSize: 3.6, packUnit: 'm' });
+  });
+
+  it('reads a stopping angle length', () => {
+    // 640 lineal metres was billed as 640 x the price of one 3 m length.
+    expect(parsePackInfo('Siniat 10 x 3000mm Shadowline Stopping Angle Plaster Trim', { preferUnit: 'm' }))
+      .toEqual({ packSize: 3, packUnit: 'm' });
+  });
+
+  it('ignores mm figures outside a stock-length band', () => {
+    expect(parsePackInfo('Bremick Metal Hex Screw 10g x 16mm B8', { preferUnit: 'm' })?.packUnit).not.toBe('m');
+  });
+
+  it('does not change a row counted in pieces', () => {
+    expect(parsePackInfo('Gyprock CSR 90mm x 3600mm Cove Plaster Cornice', { preferUnit: 'each' }))
+      .not.toEqual({ packSize: 3.6, packUnit: 'm' });
+  });
+});

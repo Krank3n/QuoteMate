@@ -34,7 +34,18 @@ export function isNonRetailTradeRow(nameText: string, unit?: string, qty?: numbe
   // are just hardwood stakes) and routing them here priced a $2-3 timber peg
   // off the steel table.
   if (/\b(?:steel|metal|galvanised|galvanized)\b[^.]*\bformwork\s+(?:pegs?|pins?)|\bformwork\s+(?:pegs?|pins?)\b[^.]*\b(?:steel|metal|galvanised|galvanized)\b/.test(name)) return true;
-  if (/plasterboard|villaboard|fibre\s+cement\s+sheet|fiber\s+cement\s+sheet|cement\s+sheet|cladding\s+sheets?|external\s+cladding|floor\s+tiles?|wall\s+tiles?|\bgrout\b|basin\s+mixer|mixer\s+tap|plumber'?s?\s+putty|plumbing\s+putty|debris\s+netting|safety\s+debris/.test(name)) return true;
+  // Grout, floor/wall tiles and basin mixers were removed from this list on
+  // 31 Aug 2026. They are ordinary Bunnings stock, and routing them here meant
+  // they never reached a supplier search at all — they took a flat table price
+  // instead ($30 a tile, $55 for every hand tool, and every "grout float",
+  // "grout sponge" and "grout saw" swept along with the grout itself).
+  //
+  // The measurement behind it: a line priced from a real scraped product lands
+  // at a 0.93x median of true cost with 69% inside 1.5x, while an estimated
+  // line manages 26%. Sending a stocked item here trades the app's single
+  // biggest advantage for its weakest fallback. Plasterboard and cement sheet
+  // stay — the scraper genuinely misses those more often than it finds them.
+  if (/plasterboard|villaboard|fibre\s+cement\s+sheet|fiber\s+cement\s+sheet|cement\s+sheet|cladding\s+sheets?|external\s+cladding|plumber'?s?\s+putty|plumbing\s+putty|debris\s+netting|safety\s+debris/.test(name)) return true;
   if (/road\s+base|crusher\s+dust|aggregate\s+base/.test(name)) return true;
   if (/green\s+waste|tip\s*fee|tipping|dumping|disposal|hook\s*bin|soil\s+disposal|spoil\s+disposal|dirt\s+disposal|heavy\s+waste/.test(name)) return true;
   if (/vehicle\s+(?:running\s+)?(?:costs?|fuel)|travel\s+fuel/.test(name)) return true;

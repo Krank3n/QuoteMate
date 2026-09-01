@@ -1357,11 +1357,40 @@ export interface ReconcileResult {
   rejectReason?: string;
 }
 
+/**
+ * The server rejects more than 50 items in one request. Keep this in step with
+ * the cap in functions/src/index.ts (reconcilePricedMaterials).
+ */
+export const RECONCILE_MAX_ITEMS_PER_REQUEST = 50;
+
+/**
+ * Reconcile in server-sized batches.
+ *
+ * Sending the whole list used to 400 with "Too many items in single request"
+ * the moment a quote had more than 50 priceable rows. The caller treats
+ * reconcile as best-effort and catches, so the entire pass was skipped in
+ * silence — no pack-size correction, no over-buy clamp, no category gate — on
+ * exactly the big, high-value quotes where those matter most. One quote in the
+ * 338-quote corpus was already over the line, and it alone carried 3% of all
+ * materials value; a generator that returns more complete lists pushes more
+ * quotes across it.
+ *
+ * Batches run sequentially: these endpoints are rate-limited per user (10/60s)
+ * and firing five at once trades a 400 for a 429.
+ */
 export async function reconcilePricedMaterials(
   items: ReconcileItem[],
   jobContext?: { jobName?: string; jobDescription?: string },
 ): Promise<ReconcileResult[]> {
   if (!items || items.length === 0) return [];
+  if (items.length > RECONCILE_MAX_ITEMS_PER_REQUEST) {
+    const results: ReconcileResult[] = [];
+    for (let i = 0; i < items.length; i += RECONCILE_MAX_ITEMS_PER_REQUEST) {
+      const batch = items.slice(i, i + RECONCILE_MAX_ITEMS_PER_REQUEST);
+      results.push(...(await reconcilePricedMaterials(batch, jobContext)));
+    }
+    return results;
+  }
   const idToken = await auth.currentUser?.getIdToken();
   const response = await fetch(`${FIREBASE_FUNCTIONS_URL}/reconcilePricedMaterials`, {
     method: 'POST',

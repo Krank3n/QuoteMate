@@ -43,7 +43,15 @@ vi.mock('../services/storeReviewService', () => ({
 }));
 vi.mock('../services/squarePayments', () => ({
   takeInAppPayment: vi.fn(async () => {}),
+  // The row subscribes to reader readiness while the sheet is open (Apple req
+  // 3.9.1). Default to ready so existing cases exercise the charge path; the
+  // preparing state has its own cases below.
+  observeTapToPayReadiness: vi.fn((cb: (r: string) => void) => {
+    cb(readiness.state);
+    return () => {};
+  }),
 }));
+const readiness = vi.hoisted(() => ({ state: 'ready' as string }));
 vi.mock('../services/squareService', () => ({
   mintInvoicePaymentLink: vi.fn(async () => ({ paymentLinkUrl: 'https://sq.link/x' })),
   mintQuoteFullPaymentLink: vi.fn(async () => ({ paymentLinkUrl: 'https://sq.link/x' })),
@@ -69,7 +77,11 @@ vi.mock('../store/useStore', () => ({
   useStore: () => store,
 }));
 
-import { TakePaymentSheet, type TakePaymentTarget } from './TakePaymentSheet';
+import {
+  TakePaymentSheet,
+  tapToPayRowTitle,
+  type TakePaymentTarget,
+} from './TakePaymentSheet';
 import * as squareService from '../services/squareService';
 import * as squarePayments from '../services/squarePayments';
 
@@ -104,6 +116,7 @@ function renderSheet(overrides: Partial<React.ComponentProps<typeof TakePaymentS
 
 beforeEach(() => {
   vi.clearAllMocks();
+  readiness.state = 'ready';
   tapToPay.state = { enabled: false, reason: 'pending_apple' };
   store.getDocumentById.mockImplementation((id: string) => ({
     id,
@@ -403,5 +416,126 @@ describe('TakePaymentSheet success + dialog conventions', () => {
 
     await waitFor(() => expect(getByText('Customer agrees')).toBeTruthy());
     expect(queryByText('Close')).toBeNull();
+  });
+});
+
+
+/**
+ * Apple's Tap to Pay on iPhone review requirements (App Review Requirements
+ * Checklist v1.6) constrain this row directly:
+ *
+ *  - 5.3 the control must never be greyed out or obscured, even before the
+ *        merchant has accepted Apple's Terms and Conditions
+ *  - 3.7 pressing it is the in-checkout trigger that opens that acceptance
+ *  - 5.4 it must carry Apple's approved name on iOS
+ *
+ * Before Aug 2026 the row was `disabled` until the tradie ticked the terms
+ * acknowledgement, which is exactly the greyed-out control 5.3 rules out. The
+ * gate now runs on press instead, so the button stays live and the tradie
+ * still cannot charge without confirming the customer saw the terms.
+ */
+describe('TakePaymentSheet Tap to Pay row meets Apple review requirements', () => {
+  const termsTarget: TakePaymentTarget = {
+    ...invoiceTarget,
+    terms: 'Payment due in 7 days.',
+  };
+  const ACK = 'Customer has read and agrees to the terms.';
+
+  it('req 5.4: uses Apple\'s approved name on iOS', () => {
+    expect(tapToPayRowTitle('ios')).toBe('Tap to Pay on iPhone');
+  });
+
+  it('req 5.4: does not claim "on iPhone" on Android, which is a Square reader', () => {
+    expect(tapToPayRowTitle('android')).toBe('Tap to Pay / Card Entry');
+  });
+
+  it('req 5.3: stays pressable with terms unacknowledged instead of greying out', async () => {
+    tapToPay.state = { enabled: true };
+    const ensureSquareConnected = vi.fn(async () => true);
+    const { getByText, props } = renderSheet({
+      target: termsTarget,
+      ensureSquareConnected,
+    });
+
+    fireEvent.click(getByText('Tap to Pay / Card Entry'));
+
+    // The press registered — a disabled row would have done nothing at all.
+    await waitFor(() =>
+      expect(props.onError).toHaveBeenCalledWith(
+        'Confirm the customer has read the terms before charging.',
+      ),
+    );
+    // ...and it still refused to charge.
+    expect(squarePayments.takeInAppPayment).not.toHaveBeenCalled();
+  });
+
+  it('charges once the terms are acknowledged', async () => {
+    tapToPay.state = { enabled: true };
+    const ensureSquareConnected = vi.fn(async () => true);
+    const { getByText, props } = renderSheet({
+      target: termsTarget,
+      ensureSquareConnected,
+    });
+
+    fireEvent.click(getByText(ACK));
+    fireEvent.click(getByText('Tap to Pay / Card Entry'));
+
+    await waitFor(() => expect(squarePayments.takeInAppPayment).toHaveBeenCalled());
+    expect(props.onError).not.toHaveBeenCalled();
+  });
+
+  it('leaves a no-terms target chargeable in one press — nothing to confirm', async () => {
+    tapToPay.state = { enabled: true };
+    const ensureSquareConnected = vi.fn(async () => true);
+    const { getByText, props } = renderSheet({ ensureSquareConnected });
+
+    fireEvent.click(getByText('Tap to Pay / Card Entry'));
+
+    await waitFor(() => expect(squarePayments.takeInAppPayment).toHaveBeenCalled());
+    expect(props.onError).not.toHaveBeenCalled();
+  });
+});
+
+
+/**
+ * Apple req 3.9.1 wants a configuration progress indicator while Tap to Pay
+ * gets itself ready, and the row must say it is not usable yet — not imply a
+ * card can be tapped right now. Req 5.7 wants that same state to read as
+ * "initializing" rather than as a failure. Req 5.3 still applies throughout:
+ * preparing must not grey the control out.
+ */
+describe('TakePaymentSheet surfaces Tap to Pay configuration progress', () => {
+  it('req 3.9.1: says it is not ready to take a card while configuring', () => {
+    tapToPay.state = { enabled: true };
+    readiness.state = 'preparing';
+
+    const { getByText } = renderSheet({ ensureSquareConnected: vi.fn(async () => true) });
+
+    expect(
+      getByText('Getting Tap to Pay ready — not ready to take a card yet.'),
+    ).toBeTruthy();
+  });
+
+  it('drops the warning once the reader is ready', () => {
+    tapToPay.state = { enabled: true };
+    readiness.state = 'ready';
+
+    const { getByText, queryByText } = renderSheet({
+      ensureSquareConnected: vi.fn(async () => true),
+    });
+
+    expect(queryByText('Getting Tap to Pay ready — not ready to take a card yet.')).toBeNull();
+    expect(getByText('Tap a card or phone, or key in details.')).toBeTruthy();
+  });
+
+  it('req 5.3: preparing still does not grey the control out', async () => {
+    tapToPay.state = { enabled: true };
+    readiness.state = 'preparing';
+
+    const { getByText } = renderSheet({ ensureSquareConnected: vi.fn(async () => true) });
+    fireEvent.click(getByText('Tap to Pay / Card Entry'));
+
+    // Pressing mid-configuration is accepted, not swallowed by a disabled row.
+    await waitFor(() => expect(squarePayments.takeInAppPayment).toHaveBeenCalled());
   });
 });

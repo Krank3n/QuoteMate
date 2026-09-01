@@ -160,3 +160,40 @@ describe('tradeFallbackUnitPriceWithUnit — a price must say what it is per', (
     expect(tradeFallbackUnitPriceWithUnit('wall grout', 'kg')).toEqual({ price: 4, per: 'kg' });
   });
 });
+
+describe('ordinary Bunnings stock reaches supplier search', () => {
+  // A row routed here never gets a real price — it takes a flat table figure.
+  // Measured over 24 real quotes: scraped lines land at a 0.93x median of true
+  // cost (69% inside 1.5x) against 26% for estimated ones, so routing a
+  // stocked item away trades the best mechanism for the worst.
+  it.each([
+    ['flexible floor grout light grey', 'kg'],
+    ['rubber grout float', 'each'],
+    ['tiling grout sponge', 'each'],
+    ['floor tiles 600x600 matt', 'each'],
+    ['wall tiles 300x600 white gloss', 'each'],
+    ['basin mixer tap chrome', 'each'],
+  ])('searches for %s', (name, unit) => {
+    expect(isNonRetailTradeRow(name, unit as never, 10)).toBe(false);
+  });
+
+  it('still routes work with no shelf price away from search', () => {
+    for (const [name, unit] of [
+      ['concrete pump hire', 'each'],
+      ['skip bin 6m3', 'each'],
+      ['tip fees green waste disposal', 'each'],
+      ['ready mix concrete 25mpa delivered', 'm³'],
+      ['N16 starter bars', 'each'],
+      ['road base 20mm', 'kg'],
+      ['10mm plasterboard sheet', 'each'],
+    ] as const) {
+      expect(isNonRetailTradeRow(name, unit as never, 10)).toBe(true);
+    }
+  });
+
+  it('keeps a price in the table for grout — routing and pricing are separate', () => {
+    // Removing the routing rule must not remove the fallback value: a grout row
+    // whose search comes back empty still needs something to fall back to.
+    expect(tradeFallbackUnitPriceWithUnit('wall grout', 'kg')).toEqual({ price: 4, per: 'kg' });
+  });
+});

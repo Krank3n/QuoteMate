@@ -27,7 +27,11 @@
  *   • AndroidManifest.xml — NFC + location permissions
  *
  * iOS Tap to Pay entitlement (proximity-reader.payment.acceptance) is added
- * automatically — Apple approved the entitlement for this account.
+ * automatically. Apple granted it to team 5GHUTAV35B on 16 Apr 2026 (Case-ID
+ * 19476927) with the DEVELOPMENT distribution restriction: it signs for
+ * registered test devices only. TestFlight and App Store uploads need the
+ * publishing entitlement, which Apple grants after reviewing the three flow
+ * videos — see docs/SQUARE_TAP_TO_PAY.md.
  */
 
 const {
@@ -76,15 +80,24 @@ function withSquareIOSAppDelegate(config, applicationId) {
   });
 }
 
-// NFC / Bluetooth / Location strings are intentionally omitted while iOS
-// payments are gated off in-app. Apple flags NFCReaderUsageDescription as a
-// "needs hardware demo video" review issue (Guideline 2.1) — restore these
-// when Tap to Pay is approved AND we can demo a Square reader on iOS.
+// Square's Mobile Payments SDK documents exactly three required privacy keys:
+// NSBluetoothAlwaysUsageDescription (set in app.config.js), Location, and
+// Microphone. Location is a hard requirement — the SDK refuses to authorize
+// without it, because Square has to place the transaction in a supported
+// country.
+//
+// NFCReaderUsageDescription is deliberately NOT set. Tap to Pay on iPhone runs
+// on ProximityReader, not CoreNFC, so Square doesn't need the key — and it was
+// this key that put us into the CoreNFC "needs a hardware demo video" review
+// path (Guideline 2.1) in Apr 2026. Adding it back buys nothing and costs a
+// rejection.
 const IOS_USAGE_STRINGS = {
   NSCameraUsageDescription:
     'QuoteMate uses the camera for site photos and supplier price-list capture.',
   NSMicrophoneUsageDescription:
     'QuoteMate uses the microphone for voice-to-text job descriptions.',
+  NSLocationWhenInUseUsageDescription:
+    'Square requires your location to take in-person card payments and to confirm the payment is taken in a supported country.',
 };
 
 function withSquareIOSInfoPlist(config) {
@@ -343,9 +356,10 @@ function withSquareSDK(config, props = {}) {
   config = withSquareIOSAppDelegate(config, applicationId);
   config = withSquareIOSInfoPlist(config);
   config = withSquareIOSBuildPhase(config);
-  // Re-enable once Apple approves the Tap to Pay on iPhone entitlement
-  // request for team 5GHUTAV35B. Without approval, ASC rejects the upload.
-  // config = withSquareIOSTapToPayEntitlement(config);
+  // Granted 16 Apr 2026, development distribution only. The App ID must also
+  // carry the "Tap to Pay on iPhone" capability or signing fails with a
+  // profile/entitlement mismatch rather than anything that names Tap to Pay.
+  config = withSquareIOSTapToPayEntitlement(config);
 
   config = withSquareAndroidRootGradle(config);
   config = withSquareAndroidAppGradle(config);

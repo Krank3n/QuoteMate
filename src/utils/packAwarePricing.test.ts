@@ -234,3 +234,60 @@ describe('applyPackAwarePricing — an unknown product is not assumed to be one 
     expect(m.priceConfidence).toBeUndefined();
   });
 });
+
+describe('estimated prices state what one purchase buys (QU-178444 / QU-178571)', () => {
+  /**
+   * The AI price estimator returned only a price and a name. With no pack
+   * evidence this fell through to multiplying the PURCHASE price by the whole
+   * requirement, which is how five real quotes carried $25,051 of invented
+   * money on 16 lines — a $45.90 bag of tile adhesive billed 150 times over,
+   * a $189 box of Cat6 billed 35 times, a $8.50 roll of joint tape 250 times.
+   * The estimator is now asked what one purchase contains.
+   */
+  function estimated(name: string, required: number, unit: Material['unit'], price: number): Material {
+    const m = mat(required, unit, price);
+    m.name = name;
+    m.requiredQty = required;
+    m.requiredUnit = unit;
+    return m;
+  }
+
+  it('buys 2 bags of adhesive for 150 kg, not 150', () => {
+    const m = estimated('Flexible cement based wall tile adhesive', 150, 'kg', 45.9);
+    applyPackAwarePricing(m, { productName: 'Ardex 20kg Tile Adhesive', packSize: 20, packUnit: 'kg' });
+    expect(m.quantity).toBe(8);
+    expect(m.totalPrice).toBeCloseTo(45.9 * 8, 2);
+  });
+
+  it('buys 1 box of Cat6 for a 35 m run, not 35 boxes', () => {
+    const m = estimated('Cat6 UTP data cable', 35, 'm', 189);
+    applyPackAwarePricing(m, { productName: 'Cat6 UTP Cable 305m Box', packSize: 305, packUnit: 'm' });
+    expect(m.quantity).toBe(1);
+    expect(m.totalPrice).toBeCloseTo(189, 2);
+  });
+
+  it('buys 3 rolls of joint tape for 250 m, not 250', () => {
+    const m = estimated('Paper plasterboard joint tape 52mm', 250, 'm', 8.5);
+    applyPackAwarePricing(m, { productName: 'Gyprock 90m Paper Joint Tape', packSize: 90, packUnit: 'm' });
+    expect(m.quantity).toBe(3);
+    expect(m.totalPrice).toBeCloseTo(25.5, 2);
+  });
+
+  // The case the multiply branch exists to protect: goods a store really does
+  // price per metre. packSize 1 'm' means one purchase IS one metre, so the
+  // count must stay at the requirement rather than collapsing to a single buy.
+  it('still charges framing timber per lineal metre', () => {
+    const m = estimated('Treated pine H3 90x45', 231, 'm', 8.9);
+    applyPackAwarePricing(m, { productName: 'Treated Pine H3 90x45mm', packSize: 1, packUnit: 'm' });
+    expect(m.quantity).toBe(231);
+    expect(m.totalPrice).toBeCloseTo(231 * 8.9, 2);
+  });
+
+  it('leaves the old behaviour when the estimator states no pack size', () => {
+    // No evidence either way — unchanged, and still flagged for the tradie.
+    const m = estimated('Mystery bulk product', 40, 'm', 10);
+    applyPackAwarePricing(m, { productName: 'Mystery Bulk Product' });
+    expect(m.quantity).toBe(40);
+    expect(m.description).toContain('check it covers');
+  });
+});

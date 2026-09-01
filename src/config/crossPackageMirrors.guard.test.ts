@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { TRIAL_DAYS, TRIAL_MS } from '../utils/trialConfig';
 import { NBA_ENDING_THRESHOLD_DAYS } from '../utils/nextBestAction';
 import { ACTUAL_PRICE_AUD, REGULAR_PRICE_AUD } from './pricingConfig';
+import { RECONCILE_MAX_ITEMS_PER_REQUEST } from '../services/llmService';
 
 /**
  * Cross-package mirror guards. These constants are duplicated across the
@@ -32,5 +33,14 @@ describe('price mirror (functions SUB_PRICE_AUD + live store/Stripe products)', 
 
   it('display-only anchor prices are $99/mo, $658/yr AUD (never charged)', () => {
     expect(REGULAR_PRICE_AUD).toEqual({ monthly: 99, yearly: 658 });
+  });
+});
+
+describe('reconcile batch-size mirror (functions/src/index.ts reconcilePricedMaterials)', () => {
+  it('is 50, the server\'s hard per-request cap', () => {
+    // Raising the client side alone reintroduces the 400 that silently voided
+    // the whole reconcile pass on big quotes; lowering it alone just costs
+    // extra round trips. Move both, or neither.
+    expect(RECONCILE_MAX_ITEMS_PER_REQUEST).toBe(50);
   });
 });

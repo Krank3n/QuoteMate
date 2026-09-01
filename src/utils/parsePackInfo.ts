@@ -64,6 +64,13 @@ const PATTERNS: Array<{ re: RegExp; unit: PackInfo['packUnit'] }> = [
 
 const MM_LENGTH_RE = new RegExp(String.raw`\b${NUM}\s*mm\s+(?:length|long)\b`, 'i');
 
+/**
+ * Plausible band for a stock length quoted in millimetres. Below 900mm is a
+ * profile or a fixing, above 6500mm is not something sold as a stick.
+ */
+const STOCK_LENGTH_MIN_MM = 900;
+const STOCK_LENGTH_MAX_MM = 6500;
+
 /** Goods whose two stated dimensions describe the whole purchasable piece. */
 const AREA_NOUN_RE = /\b(?:roll|fabric|mat|geotextile|membrane|sheet|sheeting|film|wrap|sarking|barrier|insulation|plywood|ply|plastic|polyethylene|poly)\b/i;
 
@@ -72,11 +79,23 @@ const AREA_NOUN_RE = /\b(?:roll|fabric|mat|geotextile|membrane|sheet|sheeting|fi
  * obvious matches — caller should leave the material's qty alone.
  */
 export function parsePackInfo(
-  productName: string | undefined | null,
+  productName: string | string[] | undefined | null,
   opts: ParsePackOptions = {},
 ): PackInfo | null {
   if (!productName) return null;
-  const title = productName.trim();
+  // This is a total function on purpose. Its callers sit inside best-effort
+  // regions guarded by bare catches, so a throw here does not surface as a
+  // parse failure — it silently takes the whole surrounding pass with it.
+  // That is exactly what happened: the scraper returns product descriptions
+  // as a bullet ARRAY, `.trim()` threw on it, and the reconcile pass died on
+  // 23 of 24 real quotes for twelve days with nothing logged. Accept the
+  // array (joining keeps the pack size that may be stated in a bullet) and
+  // refuse anything else rather than throwing.
+  const text = Array.isArray(productName)
+    ? productName.filter((p) => typeof p === 'string').join('. ')
+    : productName;
+  if (typeof text !== 'string') return null;
+  const title = text.trim();
   if (!title) return null;
 
   // A stated figure in the unit we need beats anything inferred. "Earthwool
@@ -121,6 +140,19 @@ export function parsePackInfo(
   if (mmMatch) {
     const mm = parseFloat(mmMatch[1]);
     if (mm > 0 && (!opts.preferUnit || opts.preferUnit === 'm')) return { packSize: mm / 1000, packUnit: 'm' };
+  }
+
+  // Trim and moulding titles state the stock length in millimetres with no
+  // "length"/"long" to key on, and pair it with the profile: "Gyprock CSR 90mm
+  // x 3600mm Cove Plaster Cornice" is a 3.6 m stick, not 90 mm of anything. For
+  // a requirement counted in lineal metres the stock length is the LARGEST mm
+  // figure — the smaller ones are the profile. Without this, 640 m of stopping
+  // angle was billed as 640 × the price of one 3 m length.
+  if (opts.preferUnit === 'm') {
+    const mms = [...title.matchAll(/\b(\d{3,4})\s*mm\b/gi)]
+      .map((m) => parseInt(m[1], 10))
+      .filter((n) => n >= STOCK_LENGTH_MIN_MM && n <= STOCK_LENGTH_MAX_MM);
+    if (mms.length) return { packSize: Math.max(...mms) / 1000, packUnit: 'm' };
   }
 
   return readPack(title, PATTERNS);
