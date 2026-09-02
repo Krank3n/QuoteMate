@@ -74,7 +74,7 @@ import { firestoreService } from './src/services/firestoreService';
 import { documentService } from './src/services/documentService';
 import { notificationService } from './src/services/notificationService';
 import { routeForNotification } from './src/services/notificationRouting';
-import { checkForUpdate, AppUpdateInfo } from './src/services/appUpdateService';
+import { checkForUpdate, snoozeUpdate, AppUpdateInfo } from './src/services/appUpdateService';
 import { checkDeferredLink } from './src/services/supplierDiscoveryService';
 import { applyPendingReferral, storePendingReferral } from './src/services/pendingReferral';
 import { AppUpdateSheet } from './src/components/AppUpdateSheet';
@@ -776,7 +776,12 @@ function App() {
             {showUpdateSheet && updateInfo && (
               <AppUpdateSheet
                 visible={showUpdateSheet}
-                onDismiss={() => setShowUpdateSheet(false)}
+                onDismiss={() => {
+                  setShowUpdateSheet(false);
+                  // "Maybe later" — keep this version quiet for a few days
+                  // rather than re-asking on every cold start.
+                  snoozeUpdate(updateInfo.latestVersion);
+                }}
                 info={updateInfo}
               />
             )}

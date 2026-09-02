@@ -58,13 +58,13 @@ describe('version helpers', () => {
 });
 
 const base = {
-  appVersion: '1.55',
+  version: '1.55',
   currentConfig: { latestVersion: '1.54', minimumVersion: '1.0.0', whatsNew: 'old' },
   whatsNew: 'Push notifications now tell you when a customer opens your quote.',
 };
 
 describe('planAnnouncement', () => {
-  it('announces the shipping version', () => {
+  it('announces the store version', () => {
     const plan = planAnnouncement(base);
     expect(plan.ok).toBe(true);
     expect(plan.errors).toEqual([]);
@@ -72,11 +72,17 @@ describe('planAnnouncement', () => {
     expect(plan.next.minimumVersion).toBe('1.0.0');
   });
 
+  it('rejects a non-numeric --version', () => {
+    const plan = planAnnouncement({ ...base, version: 'v1.55' });
+    expect(plan.ok).toBe(false);
+    expect(plan.errors.join(' ')).toMatch(/--version "v1\.55"/);
+  });
+
   it('warns loudly when replacing a stale value the client could never reach', () => {
     // The real situation on 18 Aug 2026: latest "1.0.74", app shipping "1.54".
     const plan = planAnnouncement({
       ...base,
-      appVersion: '1.54',
+      version: '1.54',
       currentConfig: { latestVersion: '1.0.74', minimumVersion: '1.0.0' },
     });
     expect(plan.ok).toBe(true);
@@ -85,13 +91,13 @@ describe('planAnnouncement', () => {
   });
 
   it('refuses to move latestVersion backwards', () => {
-    const plan = planAnnouncement({ ...base, appVersion: '1.53' });
+    const plan = planAnnouncement({ ...base, version: '1.53' });
     expect(plan.ok).toBe(false);
     expect(plan.errors.join(' ')).toMatch(/backwards/);
   });
 
   it('allows an explicit rollback', () => {
-    const plan = planAnnouncement({ ...base, appVersion: '1.53', allowDowngrade: true });
+    const plan = planAnnouncement({ ...base, version: '1.53', allowDowngrade: true });
     expect(plan.ok).toBe(true);
   });
 
@@ -138,7 +144,7 @@ describe('planAnnouncement', () => {
     expect(plan.warnings.join(' ')).toMatch(/package\.json version "1\.0\.74"/);
   });
 
-  it('stays quiet when the two version sources agree', () => {
+  it('stays quiet when package.json agrees', () => {
     const plan = planAnnouncement({ ...base, packageVersion: '1.55' });
     expect(plan.warnings.join(' ')).not.toMatch(/package\.json/);
   });
@@ -148,5 +154,57 @@ describe('planAnnouncement', () => {
     expect(plan.ok).toBe(true);
     expect(plan.next.latestVersion).toBe('1.55');
     expect(plan.next.minimumVersion).toBe('0.0.0');
+  });
+});
+
+describe('planAnnouncement vs app.config.js', () => {
+  it('stays quiet when app.config.js matches the store', () => {
+    const plan = planAnnouncement({ ...base, appConfigVersion: '1.55' });
+    expect(plan.ok).toBe(true);
+    expect(plan.warnings.join(' ')).not.toMatch(/app\.config\.js/);
+  });
+
+  it('accepts the store version when app.config.js has already moved on', () => {
+    // 2 Sep 2026: app.config.js bumped to 1.56 as an OTA fence while 1.55 is
+    // what the stores serve. Announcing 1.56 would have sent everyone to a
+    // version they could not download.
+    const plan = planAnnouncement({ ...base, appConfigVersion: '1.56' });
+    expect(plan.ok).toBe(true);
+    expect(plan.next.latestVersion).toBe('1.55');
+    expect(plan.warnings.join(' ')).toMatch(/already at "1\.56", ahead of the "1\.55"/);
+  });
+
+  it('refuses a version the source has never been built at', () => {
+    const plan = planAnnouncement({ ...base, version: '1.57', appConfigVersion: '1.56' });
+    expect(plan.ok).toBe(false);
+    expect(plan.errors.join(' ')).toMatch(/No build of that version can exist/);
+  });
+
+  it('skips the check when app.config.js could not be read', () => {
+    const plan = planAnnouncement({ ...base, appConfigVersion: undefined });
+    expect(plan.ok).toBe(true);
+    expect(plan.warnings.join(' ')).not.toMatch(/app\.config\.js/);
+  });
+
+  it('plans the real 1.55 announcement with every warning it deserves', () => {
+    const plan = planAnnouncement({
+      version: '1.55',
+      appConfigVersion: '1.56',
+      packageVersion: '1.55',
+      currentConfig: { latestVersion: '1.0.74', minimumVersion: '1.0.0', whatsNew: '' },
+      whatsNew: 'Mate greets you first now.',
+    });
+    expect(plan.ok).toBe(true);
+    expect(plan.next).toEqual({
+      latestVersion: '1.55',
+      minimumVersion: '1.0.0',
+      whatsNew: 'Mate greets you first now.',
+    });
+    const text = plan.warnings.join(' ');
+    expect(text).toMatch(/could never have shown/);
+    expect(text).toMatch(/3-part/);
+    expect(text).toMatch(/ahead of the "1\.55"/);
+    expect(text).not.toMatch(/package\.json/);
+    expect(text).not.toMatch(/BLOCKED/);
   });
 });

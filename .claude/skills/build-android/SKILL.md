@@ -68,8 +68,8 @@ The release signing config in `android/app/build.gradle` reads from `keystore.pr
    has to be told about it:
 
    ```
-   npm run release:announce -- --whats-new "..."        # dry run
-   npm run release:announce -- --whats-new "..." --write
+   npm run release:announce -- --version <store version> --whats-new "..."        # dry run
+   npm run release:announce -- --version <store version> --whats-new "..." --write
    ```
 
    Skipping this is invisible: `config/appUpdate` went stale at `1.0.74` while

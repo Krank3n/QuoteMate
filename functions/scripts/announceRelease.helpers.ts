@@ -7,6 +7,12 @@
  * than "latest" and the sheet silently never rendered. Nobody noticed, because
  * a dead update prompt looks exactly like a released-and-up-to-date one.
  *
+ * The version announced is the one LIVE IN THE STORES, passed explicitly.
+ * Neither file in the repo is that number: app.config.js is bumped ahead of
+ * the store as soon as the next build needs a fresh OTA runtime (1.56 while
+ * 1.55 was still what people could download), and package.json is whatever
+ * last got synced. Reading either would announce a version nobody can get.
+ *
  * Everything here is pure so the guards that prevent a repeat are testable.
  */
 
@@ -17,8 +23,14 @@ export interface AppUpdateConfig {
 }
 
 export interface AnnounceInput {
-  /** Version from app.config.js — the value the client actually compares. */
-  appVersion: string;
+  /** The version live in the stores — the value latestVersion becomes. */
+  version: string;
+  /**
+   * Version from app.config.js, advisory. It is legitimately AHEAD of the
+   * store between a bump and the next store release; it can never be behind
+   * a version that shipped, so that direction is refused.
+   */
+  appConfigVersion?: string;
   /** Existing config/appUpdate, or null when the doc is missing. */
   currentConfig: AppUpdateConfig | null;
   whatsNew: string;
@@ -79,51 +91,77 @@ export function extractAppVersion(configSource: string): string | null {
 export function planAnnouncement(input: AnnounceInput): AnnouncePlan {
   const errors: string[] = [];
   const warnings: string[] = [];
-  const { appVersion, currentConfig, whatsNew, minimumVersion, packageVersion } = input;
+  const {
+    version,
+    appConfigVersion,
+    currentConfig,
+    whatsNew,
+    minimumVersion,
+    packageVersion,
+  } = input;
 
   const current = currentConfig || {};
-  const latest = appVersion;
+  const latest = version;
 
-  if (!isValidVersion(appVersion)) {
-    errors.push(`app.config.js version "${appVersion}" is not a numeric version string.`);
+  if (!isValidVersion(version)) {
+    errors.push(`--version "${version}" is not a numeric version string.`);
+  }
+
+  // The store can only ever hold a version the source has been built at.
+  // Announcing above app.config.js is a typo; announcing below it is the
+  // normal state between a bump and the next store release.
+  if (isValidVersion(appConfigVersion) && isValidVersion(version)) {
+    const cmp = compareVersions(version, appConfigVersion!);
+    if (cmp > 0) {
+      errors.push(
+        `--version "${version}" is newer than app.config.js "${appConfigVersion}". ` +
+        `No build of that version can exist, so nobody could update to it.`
+      );
+    } else if (cmp < 0) {
+      warnings.push(
+        `app.config.js is already at "${appConfigVersion}", ahead of the "${version}" ` +
+        `being announced. Fine between a bump and the next store release — ` +
+        `the store version is what clients are told about.`
+      );
+    }
   }
 
   // THE guard. If latestVersion sorts below the version clients are running,
   // every client compares as newer than "latest" and the sheet never shows —
   // precisely how this broke at 1.0.74 vs 1.54.
-  if (isValidVersion(current.latestVersion) && isValidVersion(appVersion)) {
-    if (compareVersions(appVersion, current.latestVersion!) > 0) {
+  if (isValidVersion(current.latestVersion) && isValidVersion(version)) {
+    if (compareVersions(version, current.latestVersion!) > 0) {
       warnings.push(
         `Replacing a stale latestVersion "${current.latestVersion}" that sorts BELOW the ` +
-        `shipping app version "${appVersion}" — the update sheet could never have shown.`
+        `shipping app version "${version}" — the update sheet could never have shown.`
       );
-    } else if (compareVersions(appVersion, current.latestVersion!) < 0 && !input.allowDowngrade) {
+    } else if (compareVersions(version, current.latestVersion!) < 0 && !input.allowDowngrade) {
       errors.push(
         `Refusing to move latestVersion backwards, from "${current.latestVersion}" to ` +
-        `"${appVersion}". Pass allowDowngrade only to roll back a bad announcement.`
+        `"${version}". Pass allowDowngrade only to roll back a bad announcement.`
       );
     }
   }
 
   // A version-scheme change is what made the old value unreachable. Flag any
   // shape change so it's a decision rather than an accident.
-  if (isValidVersion(current.latestVersion) && isValidVersion(appVersion)) {
+  if (isValidVersion(current.latestVersion) && isValidVersion(version)) {
     const wasParts = current.latestVersion!.split('.').length;
-    const nowParts = appVersion.split('.').length;
+    const nowParts = version.split('.').length;
     if (wasParts !== nowParts) {
       warnings.push(
         `Version scheme changed from ${wasParts}-part ("${current.latestVersion}") to ` +
-        `${nowParts}-part ("${appVersion}"). Positional comparison makes these two ` +
+        `${nowParts}-part ("${version}"). Positional comparison makes these two ` +
         `schemes non-comparable — keep every future release on the new shape.`
       );
     }
   }
 
   // The drift that seeded the bad value in the first place.
-  if (packageVersion && packageVersion !== appVersion) {
+  if (packageVersion && packageVersion !== version) {
     warnings.push(
-      `package.json version "${packageVersion}" does not match app.config.js "${appVersion}". ` +
-      `The client reads app.config.js, so that is the one being announced.`
+      `package.json version "${packageVersion}" does not match the "${version}" being ` +
+      `announced. The client compares against app.config.js, so package.json is advisory.`
     );
   }
 
@@ -139,9 +177,9 @@ export function planAnnouncement(input: AnnounceInput): AnnouncePlan {
   const nextMinimum = minimumVersion ?? current.minimumVersion ?? '0.0.0';
   if (!isValidVersion(nextMinimum)) {
     errors.push(`minimumVersion "${nextMinimum}" is not a numeric version string.`);
-  } else if (isValidVersion(appVersion) && compareVersions(nextMinimum, appVersion) > 0) {
+  } else if (isValidVersion(version) && compareVersions(nextMinimum, version) > 0) {
     errors.push(
-      `minimumVersion "${nextMinimum}" is above the released version "${appVersion}" — ` +
+      `minimumVersion "${nextMinimum}" is above the released version "${version}" — ` +
       `every user would be force-updated to a version that does not exist.`
     );
   }

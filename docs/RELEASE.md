@@ -34,15 +34,23 @@ Native build numbers are separate and per-platform: `android/app/build.gradle`
 4. **Announce it to the update sheet:**
 
    ```bash
-   npm run release:announce -- --whats-new "One or two plain sentences."
+   npm run release:announce -- --version 1.55 --whats-new "One or two plain sentences."
    # review the plan, then:
-   npm run release:announce -- --whats-new "One or two plain sentences." --write
+   npm run release:announce -- --version 1.55 --whats-new "One or two plain sentences." --write
    ```
 
    This writes `config/appUpdate`, which `src/services/appUpdateService.ts`
-   reads to decide whether to show `AppUpdateSheet`. `latestVersion` is taken
-   from `app.config.js` automatically — it is never typed by hand, which is the
-   whole point.
+   reads to decide whether to show `AppUpdateSheet`. `--version` is the version
+   **live in the stores** and is always explicit: nothing in the repo holds
+   that number. `app.config.js` is bumped ahead of the store as soon as the
+   next build needs its own OTA runtime (it read 1.56 while 1.55 was what
+   people could download), so reading it would announce a version nobody can
+   install. The script still reads `app.config.js` as a sanity check and
+   refuses a `--version` the source has never been built at.
+
+   Soft prompts snooze: "Maybe later" keeps that version quiet for three days,
+   a newer `latestVersion` resets the snooze, and a version below
+   `minimumVersion` is never snoozed.
 
    **Run this only after step 3.** Announcing a version that's still in review
    tells everyone to update to something they can't download.
