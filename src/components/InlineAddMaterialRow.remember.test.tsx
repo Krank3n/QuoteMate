@@ -6,13 +6,12 @@
  * the Supplier Book unless the tradie ticked "Save to book" — and even then
  * the entry went in without isPersonalRate, so the next quote ignored it.
  *
- * Pinned here:
- *   1. Editing the PRICE of a pipeline-priced row ticks the chip by itself;
- *      the tradie's own tap on the chip wins from then on.
- *   2. A quantity-only edit, a hand-typed row, or typing the pipeline's
- *      number back leaves the chip off — no retail price gets frozen in.
- *   3. What Save writes, in both modes, is a personal rate the pipeline will
- *      actually pick up.
+ * Pinned here (the pure rules live in priceMemory.test.ts):
+ *   1. The whole chain from keystroke to book write, in the document's GST
+ *      basis — an ex-GST $22 lands in the book as $24.20.
+ *   2. An edit that leaves the price alone writes nothing.
+ *   3. The tradie's own tap on the chip wins over the auto-tick.
+ *   4. The explicit chip in add mode now writes a rate the pipeline will use.
  *
  * Under jsdom, react-native is aliased to react-native-web (see
  * vitest.config.ts), so the real component renders to DOM nodes.
@@ -84,13 +83,14 @@ function pipelineRow(extra: Partial<Material> = {}): Material {
   } as Material;
 }
 
-function renderEdit(initialMaterial: Material, onUpdate = vi.fn()) {
+function renderEdit(initialMaterial: Material, pricesIncludeGst = false, onUpdate = vi.fn()) {
   render(
     <InlineAddMaterialRow
       sectionName=""
       onAdd={vi.fn()}
       supplierGroups={[]}
       reeceConnected={false}
+      pricesIncludeGst={pricesIncludeGst}
       mode="edit"
       initialMaterial={initialMaterial}
       onUpdate={onUpdate}
@@ -105,6 +105,8 @@ const chipChecked = () => chip().querySelector('[data-icon="bookmark-check"]') !
 const typePrice = (value: string) =>
   fireEvent.change(screen.getByPlaceholderText('0.00'), { target: { value } });
 const save = () => fireEvent.click(screen.getByText('Save'));
+const savedEntry = () =>
+  (book.bulkSaveFavorites.mock.calls[0] as unknown as [Array<Record<string, unknown>>])[0][0];
 
 beforeEach(() => {
   book.bulkSaveFavorites.mockClear();
@@ -112,7 +114,7 @@ beforeEach(() => {
 });
 
 describe('InlineAddMaterialRow — remembering a corrected price', () => {
-  it('ticks Save to book when a pipeline price is corrected, and writes a personal rate on Save', async () => {
+  it('ticks Save to book when a pipeline price is corrected, and writes a GST-inclusive personal rate on Save', async () => {
     const onUpdate = renderEdit(pipelineRow());
     expect(chipChecked()).toBe(false);
 
@@ -124,10 +126,11 @@ describe('InlineAddMaterialRow — remembering a corrected price', () => {
     expect(onUpdate.mock.calls[0][0].price).toBe(22);
 
     await vi.waitFor(() => expect(book.bulkSaveFavorites).toHaveBeenCalledTimes(1));
-    const [items] = book.bulkSaveFavorites.mock.calls[0] as unknown as [Array<Record<string, unknown>>];
-    expect(items[0]).toMatchObject({
+    // Ex-GST business (the default): the row's $22 is stored as $24.20 so the
+    // pipeline's ÷1.1 brings it back to $22 on the next quote.
+    expect(savedEntry()).toMatchObject({
       productName: 'Treated Pine Post 90x90 2.4m',
-      price: 22,
+      price: 24.2,
       unit: 'each',
       isPersonalRate: true,
       source: 'manual',
@@ -136,14 +139,12 @@ describe('InlineAddMaterialRow — remembering a corrected price', () => {
     expect(book.invalidateSupplierBookCache).toHaveBeenCalledTimes(1);
   });
 
-  it('un-ticks again when the pipeline number is typed back', () => {
-    renderEdit(pipelineRow());
+  it('stores the typed price as-is for an inclusive-GST document', async () => {
+    renderEdit(pipelineRow(), true);
     typePrice('22');
-    expect(chipChecked()).toBe(true);
-    typePrice('18.50');
-    expect(chipChecked()).toBe(false);
     save();
-    expect(book.bulkSaveFavorites).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(book.bulkSaveFavorites).toHaveBeenCalledTimes(1));
+    expect(savedEntry()).toMatchObject({ price: 22 });
   });
 
   it('writes nothing for an edit that leaves the price alone', () => {
@@ -167,16 +168,6 @@ describe('InlineAddMaterialRow — remembering a corrected price', () => {
     expect(book.bulkSaveFavorites).not.toHaveBeenCalled();
   });
 
-  it('never auto-ticks on a row the tradie priced themselves', () => {
-    renderEdit(
-      pipelineRow({ asPriced: undefined, origin: 'manual', pricingSource: 'manual', manualPriceOverride: true }),
-    );
-    typePrice('99');
-    expect(chipChecked()).toBe(false);
-    save();
-    expect(book.bulkSaveFavorites).not.toHaveBeenCalled();
-  });
-
   it('the explicit chip in add mode now writes a personal rate the pipeline will use', async () => {
     const onAdd = vi.fn();
     render(<InlineAddMaterialRow sectionName="" onAdd={onAdd} supplierGroups={[]} reeceConnected={false} />);
@@ -189,7 +180,6 @@ describe('InlineAddMaterialRow — remembering a corrected price', () => {
 
     expect(onAdd).toHaveBeenCalledTimes(1);
     await vi.waitFor(() => expect(book.bulkSaveFavorites).toHaveBeenCalledTimes(1));
-    const [items] = book.bulkSaveFavorites.mock.calls[0] as unknown as [Array<Record<string, unknown>>];
-    expect(items[0]).toMatchObject({ productName: 'Merbau decking 90x19', price: 8.5, isPersonalRate: true });
+    expect(savedEntry()).toMatchObject({ productName: 'Merbau decking 90x19', price: 9.35, isPersonalRate: true });
   });
 });

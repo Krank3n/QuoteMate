@@ -50,7 +50,6 @@ import {
   removeFavoriteProduct,
   getExistingPersonalRateSuppliers,
   deleteAllFavoritesByStore,
-  syncFavoritesFromCloud,
 } from '../../services/materialFavorites';
 import { AlertModal } from '../../components/AlertModal';
 import * as ImagePicker from 'expo-image-picker';
@@ -616,9 +615,6 @@ export function AddMaterialScreen() {
   const loadSavedItems = async () => {
     setIsLoadingSaved(true);
     try {
-      // The book screen reads the local cache; make sure a reinstall's cloud
-      // copy has been pulled into it first (once per session).
-      await syncFavoritesFromCloud();
       const favorites = await loadFavoritesFromLocal();
       const items = Object.entries(favorites).map(([key, fav]) => ({
         key,

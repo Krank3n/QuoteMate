@@ -464,28 +464,20 @@ function InlineAddMaterialForm({
       nameInputRef.current?.focus();
       return;
     }
+    // "Save to book" ticked — by the tradie, or by a price correction (see
+    // handlePriceChange) — also writes a personal rate the pricing engine will
+    // prefer next time. Fire-and-forget: the quote-side save is what matters.
+    if (saveToBook) {
+      void rememberMaterialPrice(material, selectedResultRef.current, { pricesIncludeGst });
+    }
     if (isEdit) {
       onUpdate?.(material);
       lightTap();
-      // Persist a personal rate if the chip is ticked — by the tradie, or by
-      // the price correction itself (see handlePriceChange). Fire-and-forget:
-      // the quote-side save has already succeeded.
-      if (saveToBook) {
-        void rememberMaterialPrice(material, selectedResultRef.current);
-      }
       onExitEdit?.();
       return;
     }
     onAdd(material);
     lightTap();
-
-    // When the user has ticked "Save to book", also persist a personal rate so
-    // this material is reachable from the Supplier Book — and preferred by the
-    // pricing engine — next time. Fire-and-forget: the quote-side save has
-    // already succeeded; a failed book write shouldn't block rapid entry.
-    if (saveToBook) {
-      void rememberMaterialPrice(material, selectedResultRef.current);
-    }
 
     // Rapid-entry mode: clear the form but keep unit + saveToBook sticky,
     // stay expanded and refocus the name input so the user can add another
@@ -498,7 +490,7 @@ function InlineAddMaterialForm({
     selectedResultRef.current = null;
     search.clearResults();
     setTimeout(() => nameInputRef.current?.focus(), 0);
-  }, [buildMaterial, isEdit, onAdd, onExitEdit, onUpdate, search, saveToBook]);
+  }, [buildMaterial, isEdit, onAdd, onExitEdit, onUpdate, search, saveToBook, pricesIncludeGst]);
 
   const incrementQty = useCallback(() => {
     const n = parseFloat(qty) || 0;

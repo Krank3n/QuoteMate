@@ -12,7 +12,11 @@ import { getAuth } from 'firebase/auth';
 import { FavoriteProductMapping } from '../types';
 import { logSyncError } from '../store/useStore';
 
+// Also listed by name in useStore.clearAllData (sign-out), which can't import
+// this module without a cycle. Keep the two in step.
 const FAVORITES_STORAGE_KEY = 'material_favorites';
+/** How long the pricing pipeline waits for a first cloud pull before pricing from what it has. */
+const SYNC_WAIT_MS = 2_500;
 
 /**
  * Generate a unique key for a material (used for storage)
@@ -175,8 +179,13 @@ export async function removeFavoriteProduct(
  */
 export async function loadAllFavoritesForLLM(): Promise<FavoriteProductMapping[]> {
   // The pipeline only ever reads local; on a fresh install that is empty
-  // until the cloud copy has been pulled once (cheap after the first call).
-  await syncFavoritesFromCloud();
+  // until the cloud copy lands. Wait briefly for it, never long enough to
+  // stall pricing with no signal (the SDK can sit ~10s before it gives up) —
+  // the pull carries on in the background and the next run gets it.
+  await Promise.race([
+    syncFavoritesFromCloud(),
+    new Promise<void>((resolve) => setTimeout(resolve, SYNC_WAIT_MS)),
+  ]);
   const local = await loadFavoritesFromLocal();
   return Object.values(local).filter((f) => f.isPersonalRate === true);
 }
@@ -204,6 +213,7 @@ export async function bulkSaveFavorites(
   let unchanged = 0;
 
   const localFavorites = await loadFavoritesFromLocal();
+  const toPush: Array<{ key: string; merged: FavoriteProductMapping }> = [];
 
   // Pre-resolve auth + db once
   const auth = getAuth();
@@ -222,8 +232,12 @@ export async function bulkSaveFavorites(
       // Refresh existing — preserve user-edited fields.
       const nextPrice = incoming.price ?? existing.price;
       const nextUnit = incoming.unit ?? existing.unit;
-      const nextCoveragePerUnit = incoming.coveragePerUnit ?? existing.coveragePerUnit;
-      const nextCoverageUnit = incoming.coverageUnit ?? existing.coverageUnit;
+      // Coverage is stated per purchase unit. When the unit itself changes
+      // ("per pack" → "per m²") the old coverage no longer describes the
+      // entry, and the estimator prompt would read it as fact.
+      const keepCoverage = nextUnit === existing.unit;
+      const nextCoveragePerUnit = incoming.coveragePerUnit ?? (keepCoverage ? existing.coveragePerUnit : undefined);
+      const nextCoverageUnit = incoming.coverageUnit ?? (keepCoverage ? existing.coverageUnit : undefined);
 
       const priceChanged = nextPrice !== existing.price;
       const unitChanged = nextUnit !== existing.unit;
@@ -284,29 +298,30 @@ export async function bulkSaveFavorites(
     if (status === 'created') created += 1;
     else if (status === 'updated') updated += 1;
     else unchanged += 1;
-
-    // Push to Firestore (best-effort, don't block the batch).
-    if (db && uid && status !== 'unchanged') {
-      try {
-        await setDoc(
-          doc(db, `users/${uid}/materialFavorites/${key}`),
-          stripUndefined({
-            ...merged,
-            savedAt: new Date().toISOString(),
-          }),
-          { merge: true }
-        );
-      } catch (error) {
-        // Local cache is source of truth for this session, but surface the
-        // failure so the user knows their bulk import didn't fully sync.
-        // logSyncError keeps only the most recent error, so a noisy import
-        // won't spam the banner — the user just sees that *something* failed.
-        logSyncError('favorite', key, error);
-      }
-    }
+    if (status !== 'unchanged') toPush.push({ key, merged });
   }
 
+  // Local FIRST. A Firestore write never acks while offline (and the SDK here
+  // is memory-only, so a killed process drops it), so anything awaited behind
+  // it is lost with it — an earlier version wrote local after the pushes and
+  // an offline correction vanished. Local is also what every reader uses.
   await saveFavoritesToLocal(localFavorites);
+
+  // Then the cloud, in the background: the caller has what it needs, and a
+  // push that fails surfaces through logSyncError (which keeps only the most
+  // recent error, so a noisy import can't spam the banner).
+  if (db && uid) {
+    for (const { key, merged } of toPush) {
+      setDoc(
+        doc(db, `users/${uid}/materialFavorites/${key}`),
+        stripUndefined({
+          ...merged,
+          savedAt: new Date().toISOString(),
+        }),
+        { merge: true }
+      ).catch((error) => logSyncError('favorite', key, error));
+    }
+  }
 
   return { created, updated, unchanged };
 }
@@ -450,20 +465,15 @@ export function mergeCloudFavorites(
   return { merged, added, updated };
 }
 
-// One collection read per signed-in uid per app session. Every writer in this
-// module keeps local current, so a second pull would return what we already
-// hold; a FAILED pull leaves the guard unset so the next caller retries.
+// One server-backed collection read per signed-in uid per app session. Every
+// writer in this module keeps local current, so a second pull would return
+// what we already hold. Concurrent first callers share the one read.
 let syncedForUid: string | null = null;
+let inFlight: Promise<void> | null = null;
 
 export function resetFavoritesSyncForTests(): void {
   syncedForUid = null;
-}
-
-export interface FavoritesSyncResult {
-  added: number;
-  updated: number;
-  /** True when no read happened: signed out, or already synced this session. */
-  skipped: boolean;
+  inFlight = null;
 }
 
 /**
@@ -472,18 +482,25 @@ export interface FavoritesSyncResult {
  * This was a no-op for a long time, so a reinstall (or a second phone) showed
  * an EMPTY book even though Firestore still held every import and saved rate
  * — and the pricing pipeline, which only reads local, quietly went back to
- * retail. Runs once per uid per session; pass { force: true } to re-pull.
+ * retail. Never rejects; a failed or offline pull is retried by the next call.
  */
-export async function syncFavoritesFromCloud(
-  options?: { force?: boolean },
-): Promise<FavoritesSyncResult> {
-  const none: FavoritesSyncResult = { added: 0, updated: 0, skipped: true };
+export function syncFavoritesFromCloud(): Promise<void> {
+  let uid: string | undefined;
   try {
-    const auth = getAuth();
-    const uid = auth.currentUser?.uid;
-    if (!uid) return none;
-    if (syncedForUid === uid && !options?.force) return none;
+    uid = getAuth().currentUser?.uid;
+  } catch {
+    return Promise.resolve();
+  }
+  if (!uid || syncedForUid === uid) return Promise.resolve();
+  if (inFlight) return inFlight;
+  inFlight = pullFavoritesFromCloud(uid).finally(() => {
+    inFlight = null;
+  });
+  return inFlight;
+}
 
+async function pullFavoritesFromCloud(uid: string): Promise<void> {
+  try {
     const db = getFirestore();
     const snapshot = await getDocs(collection(db, `users/${uid}/materialFavorites`));
     const cloud: Record<string, FavoriteProductMapping> = {};
@@ -501,11 +518,12 @@ export async function syncFavoritesFromCloud(
     if (added > 0 || updated > 0) {
       await saveFavoritesToLocal(merged);
     }
-    syncedForUid = uid;
-    return { added, updated, skipped: false };
+    // Offline, getDocs RESOLVES from the (memory-only, so empty) cache rather
+    // than rejecting. Latching on that would lock the session into an empty
+    // book — only a server-backed read counts as synced.
+    if (!snapshot.metadata?.fromCache) syncedForUid = uid;
   } catch (error) {
     // eslint-disable-next-line no-console
     console.warn('[favorites] cloud sync failed', error);
-    return none;
   }
 }

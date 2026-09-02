@@ -198,7 +198,7 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
   {
     name: 'search_supplier_book',
     description:
-      "Look up the tradie's OWN saved prices — their supplier book: rates imported off a supplier's price list, prices they typed in, and prices they corrected on earlier quotes. Pass `query` to find entries for a material (\"R2.5 batts\", \"90x45 treated pine\"); omit it for a summary (count, suppliers, most recent entries). Returns matches[] with name, price (per unit), unit, supplier, coverage and keywords, plus populated, total, suppliers[] and a note on how to read the result. Use it when the tradie asks what their price is for something, asks why a quote didn't use their supplier, or wants a line added at their own rate — then read the entry back rather than guessing, and pass its exact name as searchTerm to propose_add_line_item so the pricing engine hits it. populated:false means THIS PHONE can't see a book — never that they haven't got one.",
+      "Look up the tradie's OWN saved prices — their supplier book: rates imported off a supplier's price list, prices they typed in, and prices they corrected on earlier quotes. Pass `query` to find entries for a material; omit it for the book's most recent entries. Prices are GST-inclusive, as the supplier quotes them. populated:false means THIS PHONE can't see a book — never that they haven't got one.",
     parameters: {
       type: 'object',
       properties: {

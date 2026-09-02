@@ -30,6 +30,7 @@ import { loadTemplates } from '../services/sectionTemplateService';
 import { updateQuoteCalculations, healBrokenLabourSections } from '../utils/quoteCalculator';
 import { normaliseLabourToHours } from '../../shared/document/labourUnits';
 import { isAlreadyInvoiced } from '../../shared/document/convertGuard';
+import { keepSupplierPriceInclusive } from '../../shared/document/gstMode';
 import { calculateDueDate } from '../utils/invoiceCalculator';
 import { canRevertToQuote } from '../utils/revertToQuote';
 import { isEditablePayment, maxAmountForEdit } from '../utils/editablePayment';
@@ -3797,12 +3798,14 @@ export const useStore = create<AppState>((set, get) => ({
           };
           // A price the tradie gave Mate is remembered in the Supplier Book so
           // the next quote starts from THEIR number, not retail. Best-effort and
-          // after the save: a failed book write must never fail the edit.
-          const rememberPrice = () => {
+          // after the save: a failed book write must never fail the edit. The
+          // book holds GST-inclusive prices, so the document's mode rides along.
+          const rememberPrice = (source: { gstRegistered?: boolean; pricesIncludeGst?: boolean }) => {
             if (proposal.price === undefined || !updatedRow) return;
             const row = updatedRow;
+            const options = { pricesIncludeGst: keepSupplierPriceInclusive(source) };
             void import('../services/priceMemory')
-              .then(({ rememberMaterialPrice }) => rememberMaterialPrice(row))
+              .then(({ rememberMaterialPrice }) => rememberMaterialPrice(row, undefined, options))
               .catch(() => {});
           };
 
@@ -3813,7 +3816,7 @@ export const useStore = create<AppState>((set, get) => ({
               return { ok: false, error: 'That line is not on the quote any more — call get_quote and try again.' };
             }
             await get().saveDocument({ ...target, materials: next });
-            rememberPrice();
+            rememberPrice(target);
             return { ok: true };
           }
           const quote = get().quotes.find((q) => q.id === proposal.quoteId);
@@ -3823,7 +3826,7 @@ export const useStore = create<AppState>((set, get) => ({
               return { ok: false, error: 'That line is not on the quote any more — call get_quote and try again.' };
             }
             await get().saveQuote(updateQuoteCalculations({ ...quote, materials: next, updatedAt: new Date() }));
-            rememberPrice();
+            rememberPrice(quote);
             return { ok: true, navigate: { kind: 'job_preview', quoteId: quote.id } };
           }
           const invoice = get().invoices.find((i) => i.id === proposal.quoteId);
@@ -3833,7 +3836,7 @@ export const useStore = create<AppState>((set, get) => ({
               return { ok: false, error: 'That line is not on the invoice any more — call get_quote and try again.' };
             }
             await get().saveInvoice(updateQuoteCalculations({ ...invoice, materials: next, updatedAt: new Date() } as any) as any);
-            rememberPrice();
+            rememberPrice(invoice);
             return { ok: true, navigate: { kind: 'job_preview', quoteId: invoice.id } };
           }
           return { ok: false, error: 'Quote not found.' };
@@ -4115,6 +4118,11 @@ export const useStore = create<AppState>((set, get) => ({
         STORAGE_KEYS.CONTACTS,
         STORAGE_KEYS.CONTACTS_MIGRATED,
         STORAGE_KEYS.CONVERSATIONS,
+        // The Supplier Book cache (materialFavorites.ts, which can't be
+        // imported here without a cycle). It is user data: left behind, the
+        // next account on this phone would be priced off this one's rates,
+        // and the cloud pull only ever ADDS to what is already local.
+        'material_favorites',
         // NOT '@quotemate:job_list_prefs'. Which chip and sort the Jobs list
         // opens on is a per-device view preference, not user data — same
         // reasoning as appearance, which also survives sign-out. Don't "fix"

@@ -40,7 +40,7 @@ export const EMPTY_SUPPLIER_BOOK: SupplierBookSnapshot = {
  * product would read as "book populated" and Mate would stop offering the
  * import to someone who has never done one.
  */
-function isPersonalRate(fav: FavoriteProductMapping): boolean {
+export function isSupplierBookEntry(fav: FavoriteProductMapping): boolean {
   return fav.isPersonalRate === true || fav.source === 'imported' || fav.source === 'subscribed';
 }
 
@@ -62,7 +62,7 @@ export function buildSupplierBookSnapshot(
   };
 
   for (const fav of favorites) {
-    if (!isPersonalRate(fav)) continue;
+    if (!isSupplierBookEntry(fav)) continue;
     entries.push(
       [fav.productName, ...(fav.keywords ?? []), ...(fav.notes ? [fav.notes] : [])].filter(Boolean),
     );

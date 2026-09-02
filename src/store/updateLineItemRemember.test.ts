@@ -106,8 +106,29 @@ describe('propose_update_line_item remembers the price', () => {
     expect(saved.pricingSource).toBe('manual');
 
     await vi.waitFor(() => expect(remember.rememberMaterialPrice).toHaveBeenCalledTimes(1));
-    const remembered = remember.rememberMaterialPrice.mock.calls[0][0] as Material;
+    const [remembered, picked, options] = remember.rememberMaterialPrice.mock.calls[0] as unknown as [
+      Material,
+      unknown,
+      { pricesIncludeGst: boolean },
+    ];
     expect(remembered).toMatchObject({ id: 'm1', name: 'Merbau decking 90x19', price: 8.5, pricingSource: 'manual' });
+    expect(picked).toBeUndefined();
+    // A document with no GST snapshot resolves to exclusive mode, so the
+    // book write must gross the row price up.
+    expect(options).toEqual({ pricesIncludeGst: false });
+  });
+
+  it("passes the document's GST mode through so the book keeps its inclusive basis", async () => {
+    useStore.setState({ documents: [quoteDoc({ gstRegistered: true, pricesIncludeGst: true } as Partial<Document>)] } as any);
+    await useStore.getState().applyProposal({
+      ...base,
+      type: 'propose_update_line_item',
+      quoteId: DOC_ID,
+      materialId: 'm1',
+      price: 8.5,
+    });
+    await vi.waitFor(() => expect(remember.rememberMaterialPrice).toHaveBeenCalledTimes(1));
+    expect(remember.rememberMaterialPrice.mock.calls[0][2]).toEqual({ pricesIncludeGst: true });
   });
 
   it('remembers nothing for a quantity-only or rename-only edit', async () => {

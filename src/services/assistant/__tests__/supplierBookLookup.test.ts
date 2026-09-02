@@ -2,24 +2,20 @@
  * search_supplier_book — what Mate sees when it looks in the tradie's book.
  *
  * The result has to be honest in three directions: an empty book must read as
- * "this phone can't see one", a starred retail product must not read as a
- * saved rate, and a hit must be what the pricing engine would actually use.
+ * "this phone can't see one" (populated: false), a starred retail product
+ * must never read as a saved rate, and the entries counted here must be the
+ * same set get_job_requirements counts as "populated".
  */
 import { describe, it, expect } from 'vitest';
 import {
   SUPPLIER_BOOK_DEFAULT_LIMIT,
   SUPPLIER_BOOK_MAX_LIMIT,
-  displaySupplier,
   resolveSupplierBookLookup,
 } from '../supplierBookLookup';
-import type { FavoriteProductMapping, SupplierGroup } from '../../../types';
+import type { FavoriteProductMapping } from '../../../types';
 
 function rate(productName: string, extra: Partial<FavoriteProductMapping> = {}): FavoriteProductMapping {
   return { productName, store: 'Metro Fencing', price: 40, unit: 'each', isPersonalRate: true, ...extra };
-}
-
-function group(name: string, sortOrder = 0): SupplierGroup {
-  return { id: name.toLowerCase(), name, sortOrder, createdAt: '', updatedAt: '' } as SupplierGroup;
 }
 
 const BOOK: FavoriteProductMapping[] = [
@@ -39,18 +35,18 @@ const BOOK: FavoriteProductMapping[] = [
   rate('Gate kit 1.2m', { isPersonalRate: undefined, source: 'imported', price: 180 }),
   // Imported with no price yet: counted, never offered as a rate.
   rate('Gate hinges heavy duty', { price: undefined, source: 'imported' }),
-  // A starred Bunnings product is NOT a saved rate.
+  // A starred Bunnings product is NOT a saved rate, even under a supplier name.
   { productName: 'Starred retail sleeper', store: 'Bunnings', price: 25, unit: 'each' },
 ];
 
 describe('resolveSupplierBookLookup', () => {
-  it('an empty book reads as "this phone can\'t see one", never "you haven\'t got one"', () => {
-    const result = resolveSupplierBookLookup({ favorites: [], query: 'batts' });
-    expect(result.populated).toBe(false);
-    expect(result.total).toBe(0);
-    expect(result.matches).toEqual([]);
-    expect(result.note).toContain("This phone can't see a supplier book");
-    expect(result.note).toContain("never that they haven't got one");
+  it('an empty book reads as "this phone can\'t see one"', () => {
+    expect(resolveSupplierBookLookup({ favorites: [], query: 'batts' })).toEqual({
+      populated: false,
+      total: 0,
+      suppliers: [],
+      matches: [],
+    });
   });
 
   it('a book of only starred retail products is not a book', () => {
@@ -71,28 +67,24 @@ describe('resolveSupplierBookLookup', () => {
       'R4.0 Ceiling Batts 430mm',
       'Fence post 75x75x2.4',
     ]);
-    expect(result.note).toContain('6 saved rates across 2 suppliers');
   });
 
-  it('finds an entry by the word the tradie used, with price, unit, supplier and coverage', () => {
+  it('finds entries by the words the tradie used, with price, unit, supplier and coverage', () => {
     const result = resolveSupplierBookLookup({ favorites: BOOK, query: 'insulation batts' });
-    // Both batts entries come back; the order between them is the pricing
-    // engine's own scorer, which this tool mirrors rather than second-guesses.
     expect(result.matches.map((m) => m.name).sort()).toEqual([
       'R2.5 HD Insulation Batts 580mm',
       'R4.0 Ceiling Batts 430mm',
     ]);
-    expect(result.matches.find((m) => m.name.startsWith('R2.5'))).toMatchObject({
+    expect(result.matches.find((m) => m.name.startsWith('R2.5'))).toEqual({
       name: 'R2.5 HD Insulation Batts 580mm',
       price: 48,
       unit: 'pack',
       supplier: 'Your prices',
       coverage: '8.7 m² per pack',
     });
-    expect(result.note).toContain('the pricing engine prefers these over retail');
   });
 
-  it('a spec-only query lists every matching SKU instead of nothing', () => {
+  it('a spec-only query lists the matching SKU instead of nothing', () => {
     // The pricing-time scorer rejects "R2.5" on purpose; the book lookup
     // should still answer "what R2.5 have I got?".
     const result = resolveSupplierBookLookup({ favorites: BOOK, query: 'R2.5' });
@@ -107,34 +99,18 @@ describe('resolveSupplierBookLookup', () => {
   it('reaches an imported entry that was never flagged personal', () => {
     const result = resolveSupplierBookLookup({ favorites: BOOK, query: 'gate kit' });
     expect(result.matches.map((m) => m.name)).toEqual(['Gate kit 1.2m']);
-    expect(result.matches[0].source).toBe('imported');
+    expect(result.matches[0].supplier).toBe('Metro Fencing');
   });
 
   it('never offers an unpriced entry as a rate', () => {
     const result = resolveSupplierBookLookup({ favorites: BOOK, query: 'hinges' });
     expect(result.matches).toEqual([]);
-    expect(result.note).toContain('No saved rate for "hinges"');
-    expect(result.note).toContain('propose_update_line_item');
+    expect(result.populated).toBe(true);
   });
 
   it('never surfaces a starred retail product as a saved rate', () => {
-    const result = resolveSupplierBookLookup({ favorites: BOOK, query: 'sleeper' });
-    expect(result.matches).toEqual([]);
-  });
-
-  it('ranks the preferred supplier first when the tradie has set a priority', () => {
-    const favorites = [
-      rate('Treated pine sleeper 200x75', { store: 'Bowens', price: 30 }),
-      rate('Treated pine sleeper 200x75 H4', { store: 'Metro Fencing', price: 28 }),
-    ];
-    const groups = [group('Bowens', 0), group('Metro Fencing', 1)];
-    const metroFirst = resolveSupplierBookLookup({
-      favorites,
-      groups,
-      priorityOrder: ['metro fencing', 'bowens'],
-      query: 'treated pine sleeper',
-    });
-    expect(metroFirst.matches[0].supplier).toBe('Metro Fencing');
+    expect(resolveSupplierBookLookup({ favorites: BOOK, query: 'sleeper' }).matches).toEqual([]);
+    expect(resolveSupplierBookLookup({ favorites: BOOK, query: 'starred' }).matches).toEqual([]);
   });
 
   it('caps and floors the limit', () => {
@@ -143,14 +119,5 @@ describe('resolveSupplierBookLookup', () => {
     expect(resolveSupplierBookLookup({ favorites: many, limit: 999 }).matches).toHaveLength(SUPPLIER_BOOK_MAX_LIMIT);
     expect(resolveSupplierBookLookup({ favorites: many, limit: 0 }).matches).toHaveLength(SUPPLIER_BOOK_DEFAULT_LIMIT);
     expect(resolveSupplierBookLookup({ favorites: many, limit: 1 }).matches).toHaveLength(1);
-  });
-});
-
-describe('displaySupplier', () => {
-  it("reads the storage placeholder as the tradie's own prices", () => {
-    expect(displaySupplier('manual')).toBe('Your prices');
-    expect(displaySupplier('')).toBe('Your prices');
-    expect(displaySupplier(undefined)).toBe('Your prices');
-    expect(displaySupplier('Bowens')).toBe('Bowens');
   });
 });

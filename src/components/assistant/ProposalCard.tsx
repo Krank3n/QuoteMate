@@ -126,7 +126,10 @@ function Body({ proposal }: { proposal: Proposal }) {
           </Text>
           <Text style={styles.dim}>{changes.join(' · ')}</Text>
           {proposal.price !== undefined && (
-            <Text style={styles.dim}>Priced by you, so it won't be flagged as an estimate. Saved to your supplier book for next time.</Text>
+            <Text style={styles.dim}>
+              Priced by you, so it won't be flagged as an estimate.
+              {proposal.price > 0 ? ' Saved to your supplier book for next time.' : ''}
+            </Text>
           )}
         </View>
       );
