@@ -30,7 +30,7 @@ import { loadTemplates } from '../services/sectionTemplateService';
 import { updateQuoteCalculations, healBrokenLabourSections } from '../utils/quoteCalculator';
 import { normaliseLabourToHours } from '../../shared/document/labourUnits';
 import { isAlreadyInvoiced } from '../../shared/document/convertGuard';
-import { keepSupplierPriceInclusive } from '../../shared/document/gstMode';
+import { keepSupplierPriceInclusive, resolveGstMode } from '../../shared/document/gstMode';
 import {
   addPreference,
   buildRateWorkItem,
@@ -3363,13 +3363,15 @@ export const useStore = create<AppState>((set, get) => ({
 
           // Rate-card lines, when Mate charged the job off the tradie's own
           // rates: lump-sum work items at rate × quantity, in the document's
-          // GST basis. Labour is then on those lines, so the analysis pass's
+          // GST basis (the tradie's stated basis vs the document's — NOT the
+          // supplier-catalogue rule, which reads "not registered" as
+          // inclusive). Labour is then on those lines, so the analysis pass's
           // hours must not land on top — and when every line includes
           // materials, the lines ARE the price: nothing to generate or price.
           const businessInclusive = get().businessSettings?.pricesIncludeGst === true;
-          const docInclusive = keepSupplierPriceInclusive(fresh);
+          const docMode = resolveGstMode(fresh);
           const rateLines = proposal.rateLines ?? [];
-          const rateItems = rateLines.map((line) => buildRateWorkItem(line, docInclusive, businessInclusive));
+          const rateItems = rateLines.map((line) => buildRateWorkItem(line, docMode, businessInclusive));
           const ratesCoverMaterials = rateLinesCoverMaterials(rateLines);
           const labourOnly = proposal.materialsMode === 'labour_only';
 
@@ -3830,8 +3832,13 @@ export const useStore = create<AppState>((set, get) => ({
               label: proposal.label,
               unit: proposal.unit,
               rate: proposal.rate,
-              // The tradie's own basis when they said it; their usual one otherwise.
-              pricesIncludeGst: proposal.pricesIncludeGst ?? settings.pricesIncludeGst === true,
+              // The tradie's own basis when they said it; their usual one
+              // otherwise. A business not registered for GST has no basis —
+              // the card and the prompt then say nothing about GST.
+              pricesIncludeGst:
+                settings.gstRegistered === false
+                  ? undefined
+                  : (proposal.pricesIncludeGst ?? settings.pricesIncludeGst === true),
               includesMaterials: proposal.includesMaterials,
               notes: proposal.notes,
             }),

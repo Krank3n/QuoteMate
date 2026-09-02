@@ -4,7 +4,9 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { makeStyles, useThemeColors } from '../../theme';
 import { Proposal, ProposalStatus } from '../../types/assistant';
 import { applyLabelFor, iconFor, titleFor } from './proposalCardCopy';
-import { rateLinesCoverMaterials, rateSummary, rateUnitLabel } from '../../services/quotingProfile';
+import { rateLineUnitPrice, rateLinesCoverMaterials, rateSummary, rateUnitLabel } from '../../services/quotingProfile';
+import { registeredBusinessSettings } from '../../services/assistant/quotingProfileContext';
+import { resolveGstMode } from '../../../shared/document/gstMode';
 
 interface Props {
   proposal: Proposal;
@@ -76,6 +78,11 @@ function ProposalCardImpl({ proposal, status, onApply, onDismiss }: Props) {
 function Body({ proposal }: { proposal: Proposal }) {
   const styles = useStyles();
   const themeColors = useThemeColors();
+  // A Mate draft is minted from business settings, so the document's GST
+  // mode is the business's — read once, here, for the draft card's rate lines.
+  const settings = registeredBusinessSettings();
+  const docMode = resolveGstMode(settings ?? {});
+  const businessInclusive = settings?.pricesIncludeGst === true;
   switch (proposal.type) {
     case 'propose_draft_quote':
       return (
@@ -85,13 +92,18 @@ function Body({ proposal }: { proposal: Proposal }) {
             <Text style={styles.dim}>New contact: {proposal.customerDraft.name}</Text>
           )}
           <Text style={styles.scope} numberOfLines={6}>{proposal.jobDescription}</Text>
-          {(proposal.rateLines ?? []).map((line, i) => (
-            <Text key={`${line.label}-${i}`} style={styles.dim}>
-              {line.label}: {line.quantity} {line.unit === 'each' ? '×' : `${line.unit} ×`} {formatCurrency(line.unitPrice)}
-              {line.unit === 'each' ? '' : ` ${rateUnitLabel(line.unit)}`} = {formatCurrency(line.quantity * line.unitPrice)}
-              {line.pricesIncludeGst === true ? ' inc GST' : line.pricesIncludeGst === false ? ' ex GST' : ''}
-            </Text>
-          ))}
+          {(proposal.rateLines ?? []).map((line, i) => {
+            // The same conversion the apply path runs, so the card shows the
+            // money that will land on the quote — not the number as said.
+            const unitPrice = rateLineUnitPrice(line, docMode, businessInclusive);
+            return (
+              <Text key={`${line.label}-${i}`} style={styles.dim}>
+                {line.label}: {line.quantity} {line.unit === 'each' ? '×' : `${line.unit} ×`} {formatCurrency(unitPrice)}
+                {line.unit === 'each' ? '' : ` ${rateUnitLabel(line.unit)}`} = {formatCurrency(Math.round(unitPrice * line.quantity * 100) / 100)}
+                {docMode === 'inclusive' ? ' inc GST' : docMode === 'exclusive' ? ' ex GST' : ''}
+              </Text>
+            );
+          })}
           <Text style={styles.dim}>
             {rateLinesCoverMaterials(proposal.rateLines)
               ? 'Priced off your rate card — no materials list, no extra labour.'

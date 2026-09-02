@@ -17,6 +17,7 @@
  * number — this is where it goes.
  */
 import type { BusinessSettings, Material, Quote, RateCardEntry, RateCardUnit, RateLine } from '../types';
+import type { GstMode } from '../../shared/document/gstMode';
 import { generateId } from '../utils/generateId';
 import { formatCurrency, roundToTwoDecimals } from '../utils/quoteCalculator';
 import { withOrigin } from '../utils/materialOrigin';
@@ -25,6 +26,8 @@ export const MAX_PREFERENCES = 20;
 // Re-capped at the server boundary too (functions/src/materialsPrompt.ts).
 const MAX_PREFERENCE_CHARS = 160;
 export const MAX_RATES = 30;
+/** Rate labels and notes land in the system prompt on every turn — keep them short. */
+export const MAX_LABEL_CHARS = 120;
 
 export const RATE_CARD_UNITS: readonly RateCardUnit[] = [
   'm²', 'm', 'm³', 'hour', 'day', 'each', 'room', 'point', 'job',
@@ -85,10 +88,10 @@ export function upsertRate(list: RateCardEntry[] | undefined, draft: RateCardDra
   const existing = findRate(list, draft.label);
   const entry: RateCardEntry = {
     id: existing?.id ?? generateId(),
-    label: draft.label.replace(/\s+/g, ' ').trim(),
+    label: draft.label.replace(/\s+/g, ' ').trim().slice(0, MAX_LABEL_CHARS),
     unit: draft.unit,
     rate: roundToTwoDecimals(draft.rate),
-    pricesIncludeGst: draft.pricesIncludeGst,
+    ...(draft.pricesIncludeGst === undefined ? {} : { pricesIncludeGst: draft.pricesIncludeGst }),
     includesMaterials: draft.includesMaterials,
     ...(draft.notes?.trim() ? { notes: draft.notes.trim() } : {}),
     updatedAt: new Date().toISOString(),
@@ -153,9 +156,19 @@ export function buildQuotingProfileBlock(
 
 // ─── Rate lines on a draft ──────────────────────────────────────────────────
 
-/** The line's unit price converted into the document's display basis. */
-export function rateLineUnitPrice(line: RateLine, docInclusive: boolean, fallbackInclusive: boolean): number {
-  const lineInclusive = line.pricesIncludeGst ?? fallbackInclusive;
+/**
+ * The line's unit price in the document's display basis.
+ *
+ * A rate is a price the TRADIE stated, so the conversion is between the basis
+ * they said it in and the document's — never the supplier-catalogue rule
+ * (keepSupplierPriceInclusive), which treats a non-registered business as
+ * "inclusive" and would have inflated every one of their rates by 10%. With
+ * no GST in play there is nothing to convert between.
+ */
+export function rateLineUnitPrice(line: RateLine, docMode: GstMode, businessInclusive: boolean): number {
+  if (docMode === 'none') return roundToTwoDecimals(line.unitPrice);
+  const docInclusive = docMode === 'inclusive';
+  const lineInclusive = line.pricesIncludeGst ?? businessInclusive;
   if (lineInclusive === docInclusive) return roundToTwoDecimals(line.unitPrice);
   return roundToTwoDecimals(lineInclusive ? line.unitPrice / 1.1 : line.unitPrice * 1.1);
 }
@@ -165,8 +178,8 @@ export function rateLineUnitPrice(line: RateLine, docInclusive: boolean, fallbac
  * so every calculator, adapter and PDF path handles it unchanged. Markup never
  * applies to a work item — the tradie set this price.
  */
-export function buildRateWorkItem(line: RateLine, docInclusive: boolean, fallbackInclusive: boolean): Material {
-  const unitPrice = rateLineUnitPrice(line, docInclusive, fallbackInclusive);
+export function buildRateWorkItem(line: RateLine, docMode: GstMode, businessInclusive: boolean): Material {
+  const unitPrice = rateLineUnitPrice(line, docMode, businessInclusive);
   const total = roundToTwoDecimals(unitPrice * line.quantity);
   const qty = Number.isInteger(line.quantity) ? String(line.quantity) : line.quantity.toFixed(2);
   const basis = line.unit === 'job' && line.quantity === 1 ? `${formatCurrency(unitPrice)} fixed price` : `${qty} ${line.unit === 'each' ? 'items' : line.unit} @ ${formatCurrency(unitPrice)} ${rateUnitLabel(line.unit)}`;
@@ -194,12 +207,20 @@ export function rateLinesCoverMaterials(lines: RateLine[] | undefined): boolean 
 
 /**
  * Zero the labour on a quote whose labour is charged through rate lines,
- * otherwise the analysis pass's hours × rate lands on top of the rate.
+ * otherwise the analysis pass's hours × rate lands on top of the rate. The
+ * sections become lump sums: an hourly section with no hours is exactly the
+ * shape the integrity check flags as broken.
  */
 export function stripLabourFromQuote<T extends Pick<Quote, 'laborHours' | 'sections'>>(quote: T): T {
   return {
     ...quote,
     laborHours: 0,
-    sections: (quote.sections ?? []).map((s) => ({ ...s, laborHours: 0, laborHoursTotal: 0, laborTotal: 0 })),
+    sections: (quote.sections ?? []).map((s) => ({
+      ...s,
+      pricing: 'lumpSum' as const,
+      laborHours: 0,
+      laborHoursTotal: 0,
+      laborTotal: 0,
+    })),
   };
 }

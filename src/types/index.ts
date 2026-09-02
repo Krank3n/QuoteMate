@@ -163,7 +163,8 @@ export interface RateCardEntry {
   label: string;                // "Patio roof supply and fit"
   unit: RateCardUnit;
   rate: number;                 // per unit, in the basis below
-  pricesIncludeGst: boolean;    // the basis the tradie stated it in
+  /** The basis the tradie stated it in. Undefined for a business not registered for GST — there is no basis. */
+  pricesIncludeGst?: boolean;
   includesMaterials: boolean;   // true = the rate is the whole price; false = labour only
   notes?: string;
   updatedAt: string;            // ISO

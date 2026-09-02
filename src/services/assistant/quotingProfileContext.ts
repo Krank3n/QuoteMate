@@ -15,13 +15,25 @@ import type { BusinessSettings } from '../../types';
 import { MATE_SYSTEM_PROMPT } from './systemPrompt';
 import { buildQuotingProfileBlock } from '../quotingProfile';
 
-type ProfileSettings = Pick<BusinessSettings, 'quotingPreferences' | 'rateCard'>;
-type ProfileSource = () => ProfileSettings | null | undefined;
+type ProfileSource = () => BusinessSettings | null | undefined;
 
 let source: ProfileSource = () => null;
 
 export function registerQuotingProfileSource(fn: ProfileSource): void {
   source = fn;
+}
+
+/**
+ * The registered business settings, for the one place outside the store that
+ * must show the same money the apply path will write: the draft card's rate
+ * lines. Null when nothing is registered or the source throws.
+ */
+export function registeredBusinessSettings(): BusinessSettings | null {
+  try {
+    return source() ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /** The block, or null when the tradie has saved nothing. Never throws. */

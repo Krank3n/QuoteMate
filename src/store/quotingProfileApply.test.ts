@@ -188,6 +188,26 @@ describe('propose_draft_quote with rate lines', () => {
     expect(useStore.getState().currentQuote!.materials[0].price).toBe(9680);
   });
 
+  it('charges a business not registered for GST exactly the rate it stated', async () => {
+    // Business defaults write gstRegistered:false + pricesIncludeGst:false for
+    // "not registered". The supplier-price rule reads that as inclusive and
+    // would have put $242/m² ($9,680) on a quote whose card said $8,800 —
+    // with no GST row to explain the extra $880.
+    useStore.setState({
+      businessSettings: settings({ pricesIncludeGst: false, gstRegistered: false }),
+      createNewQuote: () => useStore.setState({ currentQuote: baseQuote({ pricesIncludeGst: false, gstRegistered: false }) } as any),
+    } as any);
+    await useStore.getState().applyProposal(draft({ rateLines: [{ ...patioLine, pricesIncludeGst: undefined }] }));
+    expect(useStore.getState().currentQuote!.materials[0].price).toBe(8800);
+  });
+
+  it('saves a rate for a non-registered business without a GST basis', async () => {
+    useStore.setState({ businessSettings: settings({ pricesIncludeGst: false, gstRegistered: false }) } as any);
+    await useStore.getState().applyProposal({ ...base, type: 'propose_save_rate', label: 'Gutter clean', unit: 'job', rate: 180, includesMaterials: true });
+    const entry = useStore.getState().businessSettings!.rateCard![0];
+    expect('pricesIncludeGst' in entry).toBe(false);
+  });
+
   it('a labour-only rate still gets materials worked out and priced, with the analysis labour stripped', async () => {
     await useStore.getState().applyProposal(draft({ rateLines: [{ ...patioLine, includesMaterials: false, unitPrice: 45 }] }));
 
@@ -198,7 +218,9 @@ describe('propose_draft_quote with rate lines', () => {
     expect(quote.materials.map((m) => m.name)).toEqual(['Patio roof supply and fit', 'Roof screws']);
     expect(quote.materials[0].price).toBe(1800);
     expect(quote.laborHours).toBe(0);
-    expect(quote.sections?.[0]).toMatchObject({ laborHours: 0, laborHoursTotal: 0, laborTotal: 0, laborRate: 85 });
+    // Lump-sum, not an hourly section with no hours — that shape trips the
+    // integrity check and puts a false "figures don't add up" in the chat.
+    expect(quote.sections?.[0]).toMatchObject({ pricing: 'lumpSum', laborHours: 0, laborHoursTotal: 0, laborTotal: 0, laborRate: 85 });
   });
 
   it('labour-only mode keeps hours and sections, drops the gear list and skips pricing', async () => {

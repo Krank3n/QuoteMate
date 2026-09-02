@@ -25,7 +25,11 @@ import type { RateLine } from '../../types';
 import { resolveQuoteId } from './quoteRefMap';
 import { resolveKnownQuoteId } from './showQuoteGate';
 import { sanitizeJobDescription } from '../../utils/sanitizeJobDescription';
-import { RATE_CARD_UNITS, normalisePreference, normaliseRateUnit } from '../quotingProfile';
+import { MAX_LABEL_CHARS, RATE_CARD_UNITS, normalisePreference, normaliseRateUnit } from '../quotingProfile';
+
+/** Whitespace-folded, trimmed, capped — for text that lands in the prompt on every turn. */
+const shortText = (v: unknown): string =>
+  typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, MAX_LABEL_CHARS) : '';
 
 /** Most rate lines a draft can carry — a job with more than this is not one rate card job. */
 const MAX_RATE_LINES = 10;
@@ -41,7 +45,7 @@ function parseRateLines(raw: unknown): { lines?: RateLine[]; error?: string } {
   if (raw.length > MAX_RATE_LINES) return { error: `rateLines: at most ${MAX_RATE_LINES} lines.` };
   const lines: RateLine[] = [];
   for (const [i, item] of (raw as Array<Record<string, unknown>>).entries()) {
-    const label = typeof item?.label === 'string' ? item.label.replace(/\s+/g, ' ').trim() : '';
+    const label = shortText(item?.label);
     if (!label) return { error: `rateLines[${i}] needs a label — what the rate is for.` };
     const quantity = Number(item.quantity);
     if (!Number.isFinite(quantity) || quantity <= 0) {
@@ -62,6 +66,16 @@ function parseRateLines(raw: unknown): { lines?: RateLine[]; error?: string } {
       includesMaterials: item.includesMaterials,
       ...(typeof item.pricesIncludeGst === 'boolean' ? { pricesIncludeGst: item.pricesIncludeGst } : {}),
     });
+  }
+  // All-in and labour-only rates cannot share a draft: the labour-only line
+  // would send the pipeline off generating the very materials the all-in
+  // line already covers, and the customer would pay for them twice.
+  const inclusive = lines.filter((l) => l.includesMaterials).length;
+  if (inclusive > 0 && inclusive < lines.length) {
+    return {
+      error:
+        'rateLines must all include materials or all be labour only — a supply-and-fit rate and a labour rate on one draft would price the materials twice. Split the job or pick one.',
+    };
   }
   return { lines };
 }
@@ -160,7 +174,7 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
     }
 
     case 'propose_save_rate': {
-      const label = typeof input?.label === 'string' ? input.label.replace(/\s+/g, ' ').trim() : '';
+      const label = shortText(input?.label);
       if (!label) return { error: 'propose_save_rate needs a label — what the rate is for.' };
       const unit = normaliseRateUnit(input?.unit);
       if (!unit) return { error: `propose_save_rate needs unit as one of ${RATE_CARD_UNITS.join(', ')}.` };
@@ -179,7 +193,7 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
         rate: Math.round(rate * 100) / 100,
         includesMaterials: input.includesMaterials,
         ...(typeof input.pricesIncludeGst === 'boolean' ? { pricesIncludeGst: input.pricesIncludeGst } : {}),
-        ...(typeof input.notes === 'string' && input.notes.trim() ? { notes: input.notes.trim().slice(0, 120) } : {}),
+        ...(shortText(input.notes) ? { notes: shortText(input.notes) } : {}),
       };
       return { proposal };
     }

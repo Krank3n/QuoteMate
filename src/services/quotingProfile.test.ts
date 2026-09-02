@@ -151,23 +151,32 @@ describe('rate lines on a document', () => {
   const line = { label: 'Patio roof supply and fit', quantity: 40, unit: 'm²' as const, unitPrice: 220, pricesIncludeGst: false, includesMaterials: true };
 
   it('keeps the unit price when the line and the document share a basis', () => {
-    expect(rateLineUnitPrice(line, false, false)).toBe(220);
-    expect(rateLineUnitPrice({ ...line, pricesIncludeGst: true }, true, false)).toBe(220);
+    expect(rateLineUnitPrice(line, 'exclusive', false)).toBe(220);
+    expect(rateLineUnitPrice({ ...line, pricesIncludeGst: true }, 'inclusive', false)).toBe(220);
   });
 
   it('converts between bases: ex-GST rate onto an inclusive document, and back', () => {
-    expect(rateLineUnitPrice(line, true, false)).toBe(242);
-    expect(rateLineUnitPrice({ ...line, pricesIncludeGst: true, unitPrice: 242 }, false, false)).toBe(220);
+    expect(rateLineUnitPrice(line, 'inclusive', false)).toBe(242);
+    expect(rateLineUnitPrice({ ...line, pricesIncludeGst: true, unitPrice: 242 }, 'exclusive', false)).toBe(220);
   });
 
   it('falls back to the business default basis when the tradie did not say', () => {
     const unsaid = { ...line, pricesIncludeGst: undefined };
-    expect(rateLineUnitPrice(unsaid, false, false)).toBe(220);
-    expect(rateLineUnitPrice(unsaid, false, true)).toBe(200);
+    expect(rateLineUnitPrice(unsaid, 'exclusive', false)).toBe(220);
+    expect(rateLineUnitPrice(unsaid, 'exclusive', true)).toBe(200);
+  });
+
+  it('never converts for a business not registered for GST — there is no basis to move between', () => {
+    // The supplier-catalogue rule reads "not registered" as inclusive; applied
+    // to a tradie-stated rate it inflated every line by 10%.
+    expect(rateLineUnitPrice(line, 'none', false)).toBe(220);
+    expect(rateLineUnitPrice({ ...line, pricesIncludeGst: true }, 'none', false)).toBe(220);
+    expect(rateLineUnitPrice({ ...line, pricesIncludeGst: undefined }, 'none', true)).toBe(220);
+    expect(buildRateWorkItem(line, 'none', false).price).toBe(8800);
   });
 
   it('mints a lump-sum work item the calculators already understand, totalled to cents', () => {
-    const item = buildRateWorkItem(line, false, false);
+    const item = buildRateWorkItem(line, 'exclusive', false);
     expect(item).toMatchObject({
       name: 'Patio roof supply and fit',
       kind: 'work',
@@ -181,18 +190,18 @@ describe('rate lines on a document', () => {
     });
     expect(item.scope).toBe('40 m² @ $220.00 per m² — materials included');
     expect(item.id).toBeTruthy();
-    expect(buildRateWorkItem({ ...line, quantity: 30.86, unitPrice: 55 }, false, false).price).toBe(1697.3);
+    expect(buildRateWorkItem({ ...line, quantity: 30.86, unitPrice: 55 }, 'exclusive', false).price).toBe(1697.3);
   });
 
   it('describes a labour-only rate and a fixed price honestly', () => {
-    expect(buildRateWorkItem({ ...line, includesMaterials: false }, false, false).scope).toBe(
+    expect(buildRateWorkItem({ ...line, includesMaterials: false }, 'exclusive', false).scope).toBe(
       '40 m² @ $220.00 per m² — labour only, materials listed separately',
     );
     expect(
-      buildRateWorkItem({ label: 'Gutter clean', quantity: 1, unit: 'job', unitPrice: 180, includesMaterials: true }, false, false).scope,
+      buildRateWorkItem({ label: 'Gutter clean', quantity: 1, unit: 'job', unitPrice: 180, includesMaterials: true }, 'exclusive', false).scope,
     ).toBe('$180.00 fixed price — materials included');
     expect(
-      buildRateWorkItem({ label: 'Points', quantity: 6, unit: 'each', unitPrice: 95, includesMaterials: true }, false, false).scope,
+      buildRateWorkItem({ label: 'Points', quantity: 6, unit: 'each', unitPrice: 95, includesMaterials: true }, 'exclusive', false).scope,
     ).toBe('6 items @ $95.00 each — materials included');
   });
 
@@ -203,12 +212,21 @@ describe('rate lines on a document', () => {
     expect(rateLinesCoverMaterials([line, { ...line, includesMaterials: false }])).toBe(false);
   });
 
-  it('zeroes labour on the quote and every section', () => {
+  it('zeroes labour on the quote and every section, and makes the sections lump sums', () => {
+    // An hourly section with no hours is exactly what the integrity check
+    // flags as broken; a lump-sum section with none is fine.
     const stripped = stripLabourFromQuote({
       laborHours: 6,
       sections: [{ id: 's', name: 'Roof', multiplier: 1, laborHours: 3, laborHoursTotal: 3, laborRate: 85, laborTotal: 255, sortOrder: 0 } as any],
     });
     expect(stripped.laborHours).toBe(0);
-    expect(stripped.sections[0]).toMatchObject({ laborHours: 0, laborHoursTotal: 0, laborTotal: 0, laborRate: 85 });
+    expect(stripped.sections[0]).toMatchObject({ pricing: 'lumpSum', laborHours: 0, laborHoursTotal: 0, laborTotal: 0, laborRate: 85 });
+  });
+
+  it('saves a rate without a GST basis when there is none, and caps a long label', () => {
+    const list = upsertRate([], { label: 'x'.repeat(200), unit: 'job', rate: 180, includesMaterials: true });
+    expect(list[0].label).toHaveLength(120);
+    expect('pricesIncludeGst' in list[0]).toBe(false);
+    expect(rateSummary(list[0])).toBe('$180.00 per job · materials included');
   });
 });
