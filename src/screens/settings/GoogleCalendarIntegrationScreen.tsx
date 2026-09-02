@@ -8,7 +8,7 @@
  */
 
 import React from 'react';
-import { View, StyleSheet, ScrollView, Alert } from 'react-native';
+import { View, StyleSheet, ScrollView } from 'react-native';
 import { Text, Button, Surface, ActivityIndicator } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { format, formatDistanceToNow } from 'date-fns';
@@ -17,6 +17,7 @@ import { makeStyles, useThemeColors } from '../../theme';
 import { useGoogleCalendarAuth } from '../../services/googleCalendarAuth';
 import { GridBackground } from '../../components/GridBackground';
 import { WebContainer } from '../../components/WebContainer';
+import { useAlertModal } from '../../hooks/useAlertModal';
 
 export function GoogleCalendarIntegrationScreen() {
   const styles = useStyles();
@@ -24,16 +25,20 @@ export function GoogleCalendarIntegrationScreen() {
   const { ready, pending, lastError, connection, connect, disconnect } =
     useGoogleCalendarAuth();
   const isConnected = !!connection;
+  // Themed confirm. The native Alert.alert this replaced is a no-op in
+  // react-native-web, so on the web build Disconnect silently did nothing.
+  const { showAlert, alertNode } = useAlertModal();
 
   const handleDisconnect = () => {
-    Alert.alert(
-      'Disconnect Google Calendar?',
-      'Future Job changes won’t push to your calendar. Existing events stay where they are — you can clean them up in Google Calendar if you want.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Disconnect', style: 'destructive', onPress: () => disconnect() },
-      ],
-    );
+    showAlert({
+      type: 'warning',
+      title: 'Disconnect Google Calendar?',
+      message:
+        'Future Job changes won’t push to your calendar. Existing events stay where they are — you can clean them up in Google Calendar if you want.',
+      primaryButtonText: 'Disconnect',
+      primaryButtonAction: () => disconnect(),
+      secondaryButtonText: 'Cancel',
+    });
   };
 
   return (
@@ -157,6 +162,7 @@ export function GoogleCalendarIntegrationScreen() {
       </Text>
       </WebContainer>
     </ScrollView>
+    {alertNode}
     </View>
   );
 }
