@@ -52,9 +52,12 @@ export default {
         {
           android: {
             minSdkVersion: 28,
-            compileSdkVersion: 35,
-            targetSdkVersion: 35,
-            buildToolsVersion: "35.0.0",
+            // Android 16. Play has required targetSdk 36 for updates since
+            // 31 Aug 2026 — an API 35 artifact is rejected at upload with
+            // "Target SDK of artifact is too low".
+            compileSdkVersion: 36,
+            targetSdkVersion: 36,
+            buildToolsVersion: "36.0.0",
             ndkVersion: "28.0.12433566",
             useLegacyPackaging: false,
             enablePageAlignedLibraries: true,
@@ -180,6 +183,10 @@ export default {
       },
       package: "com.quotemate.app",
       versionCode: 170,
+      // Android 16 (targetSdk 36) enforces edge-to-edge and ignores the
+      // opt-out flag. Declaring it here makes Expo theme for it deliberately
+      // rather than emitting an opt-out Android no longer honours.
+      edgeToEdgeEnabled: true,
       permissions: ["android.permission.RECORD_AUDIO", "android.permission.CAMERA", "android.permission.READ_CONTACTS"],
       intentFilters: [
         {
