@@ -137,6 +137,10 @@ export default {
       // LiveKit's webrtc manifest merges in an Android screen-capture service we
       // never start. enableScreenShareService:false does NOT remove it.
       "./plugins/withLiveKitManifestTrim",
+      // targetSdk 36 turns Android 16 predictive back on by default, which stops
+      // onBackPressed — and so React Native's BackHandler — ever firing: back
+      // exits the app from any screen. See the plugin.
+      "./plugins/withPredictiveBackOptOut",
       ["./plugins/withKotlinVersion", "2.2.0"],
       // GoogleSignIn iOS SDK (native Google sign-in) pulls Swift pod
       // AppCheckCore whose ObjC deps need module maps — see the plugin.

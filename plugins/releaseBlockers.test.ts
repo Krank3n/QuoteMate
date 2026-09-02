@@ -42,6 +42,14 @@ describe('Android target SDK (Play upload requirement)', () => {
     // app draws under the system bars with no theme behind them.
     expect(source).toMatch(/edgeToEdgeEnabled:\s*true/);
   });
+
+  it('registers the predictive-back opt-out plugin, or back exits the app on Android 16', () => {
+    // targetSdk 36 defaults android:enableOnBackInvokedCallback to true, and
+    // React Native 0.79 has no OnBackInvokedCallback — onBackPressed is never
+    // called, so BackHandler never fires and every back press finishes the
+    // activity. The plugin writes the documented opt-out into the manifest.
+    expect(source).toMatch(/\.\/plugins\/withPredictiveBackOptOut/);
+  });
 });
 
 describe('iOS Tap to Pay entitlement (App Store export blocker)', () => {

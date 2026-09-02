@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { getPathFromState, getStateFromPath } from '@react-navigation/core';
-import { LINKING_SCREENS } from './linkingConfig';
+import { LINKING_CONFIG, LINKING_SCREENS } from './linkingConfig';
 
 const config = { screens: { ...LINKING_SCREENS } };
 const repoRoot = resolve(__dirname, '../..');
@@ -63,5 +63,25 @@ describe('native path allow-lists cover every linked route', () => {
     const source = readFileSync(resolve(repoRoot, 'app.config.js'), 'utf8');
     expect(source).toContain('pathPrefix: "/ref"');
     expect(source).toContain('pathPrefix: "/join"');
+  });
+});
+
+describe('cold open on a deep link keeps the home screen beneath it', () => {
+  // Without initialRouteName the state is just [Referral]; on Android the
+  // first back press then has nothing to pop to and exits the app.
+  const names = (path: string) =>
+    getStateFromPath(path, LINKING_CONFIG as never)?.routes.map((r) => r.name);
+
+  it('seeds Main under a referral link so back goes to the Dashboard', () => {
+    expect(names('ref/QM-AB2CD3')).toEqual(['Main', 'Referral']);
+  });
+
+  it('seeds Main under the supplier /join link', () => {
+    expect(names('join?supplier=abc')).toEqual(['Main', 'DiscoverSuppliers']);
+  });
+
+  it('still carries the referral code on the linked screen', () => {
+    const state = getStateFromPath('ref/QM-AB2CD3', LINKING_CONFIG as never);
+    expect(state?.routes[1]).toMatchObject({ name: 'Referral', params: { code: 'QM-AB2CD3' } });
   });
 });
