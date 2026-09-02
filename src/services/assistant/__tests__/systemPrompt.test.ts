@@ -210,22 +210,17 @@ describe('how they quote', () => {
     expect(section).toContain('never recite them back');
   });
 
-  it('saves standing rules and rates through the two cards, once each', () => {
-    expect(section).toContain('call propose_remember_preference');
-    expect(section).toContain('Standing rules only');
-    expect(section).toContain('call propose_save_rate');
-    expect(section).toContain('One card per rate');
-    expect(section).toContain('save it again under the same label');
+  it('offers the two cards once, in their words, and never invents', () => {
+    expect(section).toContain('offer propose_remember_preference');
+    expect(section).toContain('offer propose_save_rate');
+    expect(section).toContain('in their words, once');
+    expect(section).toContain('Never invent a rate or a rule');
   });
 
   it('drafts off a rate with rateLines and never guesses a quantity', () => {
-    expect(section).toContain('pass rateLines on propose_draft_quote');
+    expect(section).toContain('rateLines on propose_draft_quote');
+    expect(section).toContain("materialsMode 'labour_only'");
     expect(section).toContain('Never guess a quantity');
-    expect(section).toContain("pass materialsMode 'labour_only'");
-  });
-
-  it('never invents a rate or a rule', () => {
-    expect(section).toContain('Never invent a rate or a rule');
   });
 
   it('keeps the house tone', () => {

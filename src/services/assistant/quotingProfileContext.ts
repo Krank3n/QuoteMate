@@ -25,7 +25,7 @@ export function registerQuotingProfileSource(fn: ProfileSource): void {
 }
 
 /** The block, or null when the tradie has saved nothing. Never throws. */
-export function quotingProfileBlock(): string | null {
+function quotingProfileBlock(): string | null {
   try {
     return buildQuotingProfileBlock(source());
   } catch {

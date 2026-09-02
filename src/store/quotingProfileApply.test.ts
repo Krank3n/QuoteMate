@@ -176,7 +176,6 @@ describe('propose_draft_quote with rate lines', () => {
     const quote = useStore.getState().currentQuote!;
     expect(quote.materials).toHaveLength(1);
     expect(quote.materials[0]).toMatchObject({ kind: 'work', name: 'Patio roof supply and fit', price: 8800, totalPrice: 8800, quantity: 1 });
-    expect(quote.materials[0].scope).toBe('40 m² @ $220.00 per m² — materials included');
     expect(quote.laborHours).toBe(0);
   });
 

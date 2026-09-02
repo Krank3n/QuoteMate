@@ -61,7 +61,6 @@ function parseRateLines(raw: unknown): { lines?: RateLine[]; error?: string } {
       unitPrice,
       includesMaterials: item.includesMaterials,
       ...(typeof item.pricesIncludeGst === 'boolean' ? { pricesIncludeGst: item.pricesIncludeGst } : {}),
-      ...(typeof item.rateId === 'string' && item.rateId ? { rateId: item.rateId } : {}),
     });
   }
   return { lines };

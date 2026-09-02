@@ -58,7 +58,7 @@ describe('propose_draft_quote rate lines and materials mode', () => {
   it('passes clean rate lines through with the unit normalised', () => {
     const { proposal, error } = buildProposal('propose_draft_quote', 't', {
       ...DRAFT,
-      rateLines: [{ label: 'Patio roof supply and fit', quantity: 40, unit: 'square metres', unitPrice: 220, includesMaterials: true }],
+      rateLines: [{ label: 'Patio roof supply and fit', quantity: 40, unit: 'sqm', unitPrice: 220, includesMaterials: true }],
     });
     expect(error).toBeUndefined();
     expect((proposal as DraftQuoteProposal).rateLines).toEqual([

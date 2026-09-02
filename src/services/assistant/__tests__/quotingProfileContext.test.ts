@@ -7,7 +7,6 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { MATE_SYSTEM_PROMPT } from '../systemPrompt';
 import {
-  quotingProfileBlock,
   quotingProfileContextNote,
   registerQuotingProfileSource,
   systemPromptWithProfile,
@@ -18,7 +17,6 @@ afterEach(() => registerQuotingProfileSource(() => null));
 describe('systemPromptWithProfile', () => {
   it('is the static prompt when nothing is saved', () => {
     expect(systemPromptWithProfile()).toBe(MATE_SYSTEM_PROMPT);
-    expect(quotingProfileBlock()).toBeNull();
     expect(quotingProfileContextNote()).toBeNull();
   });
 
@@ -32,7 +30,7 @@ describe('systemPromptWithProfile', () => {
     const prompt = systemPromptWithProfile();
     expect(prompt.startsWith(MATE_SYSTEM_PROMPT)).toBe(true);
     expect(prompt).toContain('- labour separate from materials');
-    expect(prompt).toContain('- Patio roof — $220.00 per m² ex GST, materials included');
+    expect(prompt).toContain('- Patio roof — $220.00 per m² ex GST · materials included');
     expect(quotingProfileContextNote()!.startsWith('[context] How this business quotes')).toBe(true);
   });
 

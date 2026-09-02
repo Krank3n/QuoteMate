@@ -41,8 +41,7 @@ import { loadGroups } from '../../services/supplierGroupService';
 import { composeSupplierList, type SupplierEntry } from '../../services/supplierPriority';
 import type { SupplierGroup } from '../../types';
 import { GridBackground } from '../../components/GridBackground';
-import { formatCurrency } from '../../utils/quoteCalculator';
-import { rateUnitLabel, removePreference, removeRate } from '../../services/quotingProfile';
+import { rateSummary, removePreference, removeRate } from '../../services/quotingProfile';
 
 export function TradePricingScreen() {
   const styles = useStyles();
@@ -428,12 +427,7 @@ export function TradePricingScreen() {
                 <View key={rate.id} style={styles.profileRow}>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.supplierName}>{rate.label}</Text>
-                    <Text style={styles.supplierSubtitle}>
-                      {formatCurrency(rate.rate)} {rateUnitLabel(rate.unit)} {rate.pricesIncludeGst ? 'inc GST' : 'ex GST'}
-                      {' · '}
-                      {rate.includesMaterials ? 'materials included' : 'labour only'}
-                      {rate.notes ? ` · ${rate.notes}` : ''}
-                    </Text>
+                    <Text style={styles.supplierSubtitle}>{rateSummary(rate)}</Text>
                   </View>
                   <TouchableOpacity
                     style={styles.profileRemove}

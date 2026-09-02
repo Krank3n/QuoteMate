@@ -4,7 +4,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { makeStyles, useThemeColors } from '../../theme';
 import { Proposal, ProposalStatus } from '../../types/assistant';
 import { applyLabelFor, iconFor, titleFor } from './proposalCardCopy';
-import { rateLinesCoverMaterials, rateUnitLabel } from '../../services/quotingProfile';
+import { rateLinesCoverMaterials, rateSummary, rateUnitLabel } from '../../services/quotingProfile';
 
 interface Props {
   proposal: Proposal;
@@ -118,13 +118,7 @@ function Body({ proposal }: { proposal: Proposal }) {
       return (
         <View>
           <Text style={styles.summary}>{proposal.label}</Text>
-          <Text style={styles.dim}>
-            {formatCurrency(proposal.rate)} {rateUnitLabel(proposal.unit)}
-            {proposal.pricesIncludeGst === true ? ' inc GST' : proposal.pricesIncludeGst === false ? ' ex GST' : ''}
-            {' · '}
-            {proposal.includesMaterials ? 'materials included' : 'labour only, materials on top'}
-            {proposal.notes ? ` · ${proposal.notes}` : ''}
-          </Text>
+          <Text style={styles.dim}>{rateSummary(proposal)}</Text>
           <Text style={styles.dim}>Goes on your rate card — I'll use it whenever it fits a job.</Text>
         </View>
       );

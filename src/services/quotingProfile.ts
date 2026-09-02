@@ -22,7 +22,8 @@ import { formatCurrency, roundToTwoDecimals } from '../utils/quoteCalculator';
 import { withOrigin } from '../utils/materialOrigin';
 
 export const MAX_PREFERENCES = 20;
-export const MAX_PREFERENCE_CHARS = 160;
+// Re-capped at the server boundary too (functions/src/materialsPrompt.ts).
+const MAX_PREFERENCE_CHARS = 160;
 export const MAX_RATES = 30;
 
 export const RATE_CARD_UNITS: readonly RateCardUnit[] = [
@@ -54,22 +55,17 @@ export function removePreference(list: string[] | undefined, text: string): stri
 
 // ─── Rate card ──────────────────────────────────────────────────────────────
 
+// The tool schemas enumerate the canonical units, so the model sends those.
+// These are the few spellings a person would plausibly type if a rate input
+// ever appears, plus the plurals a model slips into.
 const UNIT_ALIASES: Record<string, RateCardUnit> = {
-  'm²': 'm²', m2: 'm²', sqm: 'm²', 'sq m': 'm²', 'square metre': 'm²', 'square metres': 'm²', 'square meter': 'm²', 'square meters': 'm²', square: 'm²',
-  m: 'm', lm: 'm', 'lineal metre': 'm', 'lineal metres': 'm', 'linear metre': 'm', 'linear metres': 'm', metre: 'm', metres: 'm', meter: 'm', meters: 'm',
-  'm³': 'm³', m3: 'm³', 'cubic metre': 'm³', 'cubic metres': 'm³', cubic: 'm³',
-  hour: 'hour', hours: 'hour', hr: 'hour', hrs: 'hour', hourly: 'hour',
-  day: 'day', days: 'day', daily: 'day',
-  each: 'each', ea: 'each', unit: 'each', item: 'each', items: 'each',
-  room: 'room', rooms: 'room', bedroom: 'room', bedrooms: 'room',
-  point: 'point', points: 'point',
-  job: 'job', fixed: 'job', 'lump sum': 'job', flat: 'job', 'flat rate': 'job',
+  m2: 'm²', sqm: 'm²', lm: 'm', m3: 'm³', hr: 'hour', hrs: 'hour', hours: 'hour', days: 'day', rooms: 'room', points: 'point',
 };
 
-/** Accepts the way tradies say a unit ("sqm", "lm", "an hour") and returns the canonical one. */
 export function normaliseRateUnit(unit: unknown): RateCardUnit | null {
   if (typeof unit !== 'string') return null;
-  const key = unit.toLowerCase().replace(/^per\s+/, '').replace(/\s+/g, ' ').trim();
+  const key = unit.toLowerCase().replace(/^per\s+/, '').trim();
+  if ((RATE_CARD_UNITS as readonly string[]).includes(key)) return key as RateCardUnit;
   return UNIT_ALIASES[key] ?? null;
 }
 
@@ -77,28 +73,18 @@ export function rateUnitLabel(unit: RateCardUnit): string {
   return unit === 'each' ? 'each' : `per ${unit}`;
 }
 
-export interface RateCardDraft {
-  id?: string;
-  label: string;
-  unit: RateCardUnit;
-  rate: number;
-  pricesIncludeGst: boolean;
-  includesMaterials: boolean;
-  notes?: string;
-}
+export type RateCardDraft = Omit<RateCardEntry, 'id' | 'updatedAt'>;
 
 const labelKey = (label: string) => label.replace(/\s+/g, ' ').trim().toLowerCase();
 
-export function findRate(list: RateCardEntry[] | undefined, label: string): RateCardEntry | undefined {
-  const key = labelKey(label);
-  return (list ?? []).find((r) => labelKey(r.label) === key);
-}
+const findRate = (list: RateCardEntry[] | undefined, label: string): RateCardEntry | undefined =>
+  (list ?? []).find((r) => labelKey(r.label) === labelKey(label));
 
 /** Insert or replace by label (case-insensitive); a replaced entry keeps its id; oldest drops past the cap. */
 export function upsertRate(list: RateCardEntry[] | undefined, draft: RateCardDraft): RateCardEntry[] {
   const existing = findRate(list, draft.label);
   const entry: RateCardEntry = {
-    id: existing?.id ?? draft.id ?? generateId(),
+    id: existing?.id ?? generateId(),
     label: draft.label.replace(/\s+/g, ' ').trim(),
     unit: draft.unit,
     rate: roundToTwoDecimals(draft.rate),
@@ -115,10 +101,26 @@ export function removeRate(list: RateCardEntry[] | undefined, id: string): RateC
   return (list ?? []).filter((r) => r.id !== id);
 }
 
-export function formatRate(e: RateCardEntry): string {
-  return `${e.label} — ${formatCurrency(e.rate)} ${rateUnitLabel(e.unit)} ${e.pricesIncludeGst ? 'inc GST' : 'ex GST'}, ${
-    e.includesMaterials ? 'materials included' : 'labour only'
+/**
+ * "$220.00 per m² ex GST · materials included" — the one arrangement of a
+ * rate's facts, shared by the prompt block, the confirm card and the settings
+ * row so they can never disagree. GST basis is left out when unstated.
+ */
+export function rateSummary(e: {
+  rate: number;
+  unit: RateCardUnit;
+  pricesIncludeGst?: boolean;
+  includesMaterials: boolean;
+  notes?: string;
+}): string {
+  const gst = e.pricesIncludeGst === true ? ' inc GST' : e.pricesIncludeGst === false ? ' ex GST' : '';
+  return `${formatCurrency(e.rate)} ${rateUnitLabel(e.unit)}${gst} · ${e.includesMaterials ? 'materials included' : 'labour only'}${
+    e.notes ? ` · ${e.notes}` : ''
   }`;
+}
+
+export function formatRate(e: RateCardEntry): string {
+  return `${e.label} — ${rateSummary(e)}`;
 }
 
 // ─── Prompt block ───────────────────────────────────────────────────────────
@@ -143,7 +145,7 @@ export function buildQuotingProfileBlock(
     for (const p of prefs) lines.push(`- ${p}`);
   }
   if (rates.length) {
-    lines.push('Rate card (as saved — when one fits the job and you know the quantity, pass it as a rateLine on propose_draft_quote):');
+    lines.push('Rate card:');
     for (const r of rates) lines.push(`- ${formatRate(r)}`);
   }
   return lines.join('\n');
@@ -151,17 +153,11 @@ export function buildQuotingProfileBlock(
 
 // ─── Rate lines on a draft ──────────────────────────────────────────────────
 
-export type { RateLine };
-
 /** The line's unit price converted into the document's display basis. */
 export function rateLineUnitPrice(line: RateLine, docInclusive: boolean, fallbackInclusive: boolean): number {
   const lineInclusive = line.pricesIncludeGst ?? fallbackInclusive;
   if (lineInclusive === docInclusive) return roundToTwoDecimals(line.unitPrice);
   return roundToTwoDecimals(lineInclusive ? line.unitPrice / 1.1 : line.unitPrice * 1.1);
-}
-
-export function rateLineTotal(line: RateLine, docInclusive: boolean, fallbackInclusive: boolean): number {
-  return roundToTwoDecimals(rateLineUnitPrice(line, docInclusive, fallbackInclusive) * line.quantity);
 }
 
 /**
@@ -186,7 +182,6 @@ export function buildRateWorkItem(line: RateLine, docInclusive: boolean, fallbac
       totalPrice: total,
       manualPriceOverride: true,
       pricingSource: 'manual',
-      priceConfidence: 'high',
     } as Material,
     'manual',
   );

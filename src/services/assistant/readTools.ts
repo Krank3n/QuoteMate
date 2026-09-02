@@ -23,10 +23,9 @@ import {
   Timestamp,
 } from 'firebase/firestore';
 import { auth, db } from '../../config/firebase';
-import { Material, RateCardEntry } from '../../types';
+import { Material } from '../../types';
 import { reviewQuoteMaterials } from '../../utils/quoteReview';
 import { resolveSupplierBookLookup } from './supplierBookLookup';
-import { formatRate } from '../quotingProfile';
 import { isProposalId, resolveQuoteId } from './quoteRefMap';
 import { fuzzyScoreQuote } from './quoteFuzzy';
 import { getPillsForNiche } from '../../data/nichePills';
@@ -506,21 +505,6 @@ export async function getBusinessDefaults(): Promise<unknown> {
     pricesIncludeGst: data.pricesIncludeGst,
     gstRegistered: data.gstRegistered,
     abn: data.abn ? `...${String(data.abn).slice(-4)}` : undefined,
-    // The saved quoting profile is also in the system prompt; here so a
-    // direct question ("what's my patio rate?") gets the stored numbers.
-    quotingPreferences: Array.isArray(data.quotingPreferences) ? data.quotingPreferences : [],
-    rateCard: Array.isArray(data.rateCard)
-      ? (data.rateCard as RateCardEntry[]).map((r) => ({
-          id: r.id,
-          label: r.label,
-          unit: r.unit,
-          rate: r.rate,
-          pricesIncludeGst: r.pricesIncludeGst,
-          includesMaterials: r.includesMaterials,
-          ...(r.notes ? { notes: r.notes } : {}),
-          summary: formatRate(r),
-        }))
-      : [],
   };
 }
 

@@ -10,13 +10,12 @@ import {
   addPreference,
   buildQuotingProfileBlock,
   buildRateWorkItem,
-  findRate,
   formatRate,
   normalisePreference,
   normaliseRateUnit,
-  rateLineTotal,
   rateLineUnitPrice,
   rateLinesCoverMaterials,
+  rateSummary,
   removePreference,
   removeRate,
   stripLabourFromQuote,
@@ -66,15 +65,14 @@ describe('preferences', () => {
 });
 
 describe('rate card', () => {
-  it('reads units the way tradies say them', () => {
+  it('accepts the canonical units, a "per" prefix, and the few spellings people type', () => {
+    expect(normaliseRateUnit('m²')).toBe('m²');
+    expect(normaliseRateUnit('Per M²')).toBe('m²');
     expect(normaliseRateUnit('sqm')).toBe('m²');
-    expect(normaliseRateUnit('per square metre')).toBe('m²');
     expect(normaliseRateUnit('lm')).toBe('m');
-    expect(normaliseRateUnit('an hour')).toBeNull();
-    expect(normaliseRateUnit('hour')).toBe('hour');
+    expect(normaliseRateUnit('hours')).toBe('hour');
     expect(normaliseRateUnit('per day')).toBe('day');
-    expect(normaliseRateUnit('bedroom')).toBe('room');
-    expect(normaliseRateUnit('lump sum')).toBe('job');
+    expect(normaliseRateUnit('job')).toBe('job');
     expect(normaliseRateUnit('furlong')).toBeNull();
     expect(normaliseRateUnit(undefined)).toBeNull();
   });
@@ -113,17 +111,19 @@ describe('rate card', () => {
     expect(many[0].label).toBe('Rate 2');
   });
 
-  it('finds and removes', () => {
-    expect(findRate([patio()], 'PATIO ROOF supply and fit')?.id).toBe('r1');
-    expect(findRate([patio()], 'deck')).toBeUndefined();
+  it('removes by id', () => {
     expect(removeRate([patio()], 'r1')).toEqual([]);
+    expect(removeRate([patio()], 'nope')).toHaveLength(1);
   });
 
-  it('formats a rate the way the card and the prompt show it', () => {
-    expect(formatRate(patio())).toBe('Patio roof supply and fit — $220.00 per m² ex GST, materials included');
-    expect(
-      formatRate({ ...patio(), unit: 'each', rate: 45, pricesIncludeGst: true, includesMaterials: false }),
-    ).toBe('Patio roof supply and fit — $45.00 each inc GST, labour only');
+  it('summarises a rate one way for the prompt, the card and the settings row', () => {
+    expect(rateSummary(patio())).toBe('$220.00 per m² ex GST · materials included');
+    expect(rateSummary({ unit: 'each', rate: 45, pricesIncludeGst: true, includesMaterials: false, notes: 'min 3' })).toBe(
+      '$45.00 each inc GST · labour only · min 3',
+    );
+    // A card for a rate whose GST basis the tradie never stated says nothing about GST.
+    expect(rateSummary({ unit: 'room', rate: 90, includesMaterials: true })).toBe('$90.00 per room · materials included');
+    expect(formatRate(patio())).toBe('Patio roof supply and fit — $220.00 per m² ex GST · materials included');
   });
 });
 
@@ -142,8 +142,8 @@ describe('buildQuotingProfileBlock', () => {
     expect(block).toContain("don't recite them back");
     expect(block).toContain('- labour separate from materials');
     expect(block).not.toContain('-  ');
-    expect(block).toContain('- Patio roof supply and fit — $220.00 per m² ex GST, materials included');
-    expect(block).toContain('rateLine on propose_draft_quote');
+    expect(block).toContain('Rate card:');
+    expect(block).toContain('- Patio roof supply and fit — $220.00 per m² ex GST · materials included');
   });
 });
 
@@ -166,12 +166,7 @@ describe('rate lines on a document', () => {
     expect(rateLineUnitPrice(unsaid, false, true)).toBe(200);
   });
 
-  it('totals rate × quantity to cents', () => {
-    expect(rateLineTotal(line, false, false)).toBe(8800);
-    expect(rateLineTotal({ ...line, quantity: 30.86, unitPrice: 55 }, false, false)).toBe(1697.3);
-  });
-
-  it('mints a lump-sum work item the calculators already understand', () => {
+  it('mints a lump-sum work item the calculators already understand, totalled to cents', () => {
     const item = buildRateWorkItem(line, false, false);
     expect(item).toMatchObject({
       name: 'Patio roof supply and fit',
@@ -186,6 +181,7 @@ describe('rate lines on a document', () => {
     });
     expect(item.scope).toBe('40 m² @ $220.00 per m² — materials included');
     expect(item.id).toBeTruthy();
+    expect(buildRateWorkItem({ ...line, quantity: 30.86, unitPrice: 55 }, false, false).price).toBe(1697.3);
   });
 
   it('describes a labour-only rate and a fixed price honestly', () => {

@@ -179,7 +179,6 @@ export interface RateLine {
   /** Undefined = the tradie didn't say; the business default applies at apply. */
   pricesIncludeGst?: boolean;
   includesMaterials: boolean;
-  rateId?: string;
 }
 
 export interface FavoriteProductMapping {
