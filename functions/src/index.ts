@@ -144,6 +144,14 @@ import {
   oauthStateVerdict,
 } from './squareOAuth.helpers';
 import {
+  DEFAULT_GOOGLE_CALENDAR_REDIRECT_URI,
+  GOOGLE_CALENDAR_OAUTH_STATES_COLLECTION,
+  GOOGLE_OAUTH_TOKEN_URL,
+  buildGoogleCalendarAuthUrl,
+  parseGoogleTokenResponse,
+} from './googleCalendarOAuth.helpers';
+import { getGoogleOauthClient, persistCalendarGrant } from './googleCalendarAuth';
+import {
   AccountReclaimRecord,
   reclaimDocIdForEmail,
   shouldReclaim,
@@ -14060,6 +14068,136 @@ const phase3SquareMinter: SquareLinkMinter = {
     return createSquarePaymentLinkInternal(userId, invoiceId);
   },
 };
+
+// ---------------------------------------------------------------------------
+// Google Calendar — web OAuth (mirrors the Square flow above)
+// ---------------------------------------------------------------------------
+
+const GOOGLE_CALENDAR_REDIRECT_URI =
+  process.env.GOOGLE_CALENDAR_REDIRECT_URI || DEFAULT_GOOGLE_CALENDAR_REDIRECT_URI;
+
+/**
+ * Start the Google Calendar OAuth flow for the web app. Native apps get
+ * their refresh token from Google directly (mobile clients have no
+ * secret); the browser can't, so web sends the tab to Google's consent
+ * page and the hosted callback page finishes the exchange server-side
+ * via googleCalendarCallback. `state` is a single-use nonce whose hash
+ * is bound to the uid that authenticated THIS request (PAY-03 pattern).
+ */
+export const getGoogleCalendarAuthUrl = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+
+    const decodedToken = await verifyAuthWithRateLimit(req, res);
+    if (!decodedToken) return;
+
+    const oauth = getGoogleOauthClient();
+    if (!oauth) {
+      res.status(500).json({ error: 'Google Calendar integration not configured' });
+      return;
+    }
+
+    const state = newOAuthState();
+    await admin.firestore()
+      .collection(GOOGLE_CALENDAR_OAUTH_STATES_COLLECTION)
+      .doc(hashOAuthState(state))
+      .set({
+        uid: decodedToken.uid,
+        createdAtMs: Date.now(),
+        // Consumed (deleted) by googleCalendarCallback; abandoned flows are
+        // reaped by a Firestore TTL policy on expiresAt if one is enabled.
+        expiresAt: admin.firestore.Timestamp.fromMillis(Date.now() + SQUARE_OAUTH_STATE_TTL_MS),
+      });
+
+    const authUrl = buildGoogleCalendarAuthUrl({
+      clientId: oauth.id,
+      redirectUri: GOOGLE_CALENDAR_REDIRECT_URI,
+      state,
+    });
+    res.status(200).json({ authUrl, state });
+  });
+});
+
+/**
+ * Google Calendar OAuth callback — exchanges the auth code for tokens
+ * with the web client id + secret and stores the grant. Called from the
+ * Next.js route app/google-calendar/callback/page.tsx in the
+ * QuoteMateAppWebsite repo, which receives Google's redirect and POSTs
+ * { code, state } here.
+ */
+export const googleCalendarCallback = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+
+    const { code, state } = req.body || {};
+    if (!isNonEmptyString(code) || !isNonEmptyString(state)) {
+      res.status(400).json({ error: 'Missing code or state' });
+      return;
+    }
+
+    const oauth = getGoogleOauthClient();
+    if (!oauth) {
+      res.status(500).json({ error: 'Google Calendar integration not configured' });
+      return;
+    }
+
+    // Resolve the uid from the server-side state doc and consume it
+    // atomically (single use) — a forged or replayed state finds no doc.
+    const stateRef = admin.firestore()
+      .collection(GOOGLE_CALENDAR_OAUTH_STATES_COLLECTION)
+      .doc(hashOAuthState(state));
+    const stateVerdict = await admin.firestore().runTransaction(async (tx) => {
+      const snap = await tx.get(stateRef);
+      const verdict = oauthStateVerdict(snap.exists ? (snap.data() as any) : undefined, Date.now());
+      if (verdict.ok || snap.exists) tx.delete(stateRef);
+      return verdict;
+    });
+    if (!stateVerdict.ok) {
+      res.status(stateVerdict.status).json({ error: stateVerdict.error });
+      return;
+    }
+    const userId = stateVerdict.uid;
+
+    try {
+      const body = new URLSearchParams({
+        client_id: oauth.id,
+        client_secret: oauth.secret,
+        code,
+        grant_type: 'authorization_code',
+        redirect_uri: GOOGLE_CALENDAR_REDIRECT_URI,
+      });
+      const tokenResponse = await fetch(GOOGLE_OAUTH_TOKEN_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: body.toString(),
+      });
+      if (!tokenResponse.ok) {
+        const text = await tokenResponse.text().catch(() => '');
+        functions.logger.warn('[gcal] code exchange failed', { status: tokenResponse.status, body: text });
+        res.status(400).json({ error: 'Failed to connect Google Calendar. Please try again.' });
+        return;
+      }
+
+      const verdict = parseGoogleTokenResponse(await tokenResponse.json(), Date.now());
+      if (!verdict.ok) {
+        res.status(400).json({ error: verdict.error });
+        return;
+      }
+
+      const { email } = await persistCalendarGrant(userId, verdict.grant);
+      res.status(200).json({ success: true, email });
+    } catch (error) {
+      functions.logger.error('[gcal] callback failed', error);
+      res.status(500).json({ error: 'Failed to connect Google Calendar. Please try again.' });
+    }
+  });
+});
 
 /**
  * Wrap the legacy mint helper to also rotate the unified active link on the

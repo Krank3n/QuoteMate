@@ -35,7 +35,7 @@ interface OauthClient {
  * Read the OAuth web-client credentials from functions/.env. Returns null
  * when either side is missing so callers can short-circuit cleanly.
  */
-function getOauthClient(): OauthClient | null {
+export function getGoogleOauthClient(): OauthClient | null {
   const id = process.env.GOOGLE_OAUTH_WEB_CLIENT_ID || '';
   const secret = process.env.GOOGLE_OAUTH_WEB_CLIENT_SECRET || '';
   if (!id || !secret) return null;
@@ -57,11 +57,68 @@ interface StoreTokenInput {
   scope?: string;
 }
 
+export interface CalendarGrantInput {
+  refreshToken: string;
+  accessToken?: string | null;
+  /** Epoch ms the cached access token dies, null/undefined when unknown. */
+  expiresAt?: number | null;
+  scope?: string | null;
+}
+
 /**
- * storeGoogleCalendarToken — client uploads the refresh token after the
- * OAuth dance. Light verification: hit Google's tokeninfo endpoint with
- * the access token to grab the email so we can show "Connected as
- * jane@example.com" in the UI.
+ * Persist a calendar grant for `uid`. Shared by the native callable (the
+ * app already holds the tokens) and the web callback (server-side code
+ * exchange). Light verification: hit Google's tokeninfo endpoint with the
+ * access token to grab the email so the UI can show "Connected as
+ * jane@example.com". tokeninfo is best-effort; the connection doesn't
+ * fail on it.
+ */
+export async function persistCalendarGrant(
+  uid: string,
+  grant: CalendarGrantInput,
+): Promise<{ email: string | null }> {
+  let email: string | undefined;
+  if (grant.accessToken) {
+    try {
+      const res = await fetch(
+        `https://oauth2.googleapis.com/tokeninfo?access_token=${encodeURIComponent(
+          grant.accessToken,
+        )}`,
+      );
+      if (res.ok) {
+        const info = (await res.json()) as { email?: string };
+        email = info?.email;
+      }
+    } catch {
+      // best-effort
+    }
+  }
+
+  await calendarIntegrationRef(uid).set(
+    {
+      provider: 'google',
+      connectedAt: Date.now(),
+      refreshToken: grant.refreshToken,
+      // Cache the access token + expiry so the trigger can avoid an
+      // immediate refresh round-trip on the first event push.
+      accessToken: grant.accessToken || null,
+      accessTokenExpiresAt: grant.expiresAt || null,
+      scope: grant.scope || null,
+      email: email || null,
+      // Clear any prior failure when reconnecting.
+      lastSyncError: admin.firestore.FieldValue.delete(),
+    },
+    { merge: true },
+  );
+
+  return { email: email || null };
+}
+
+/**
+ * storeGoogleCalendarToken — the native client uploads the refresh token
+ * after its own OAuth dance (mobile OAuth clients have no secret, so the
+ * device gets the refresh token straight from Google). Web can't do
+ * this — see googleCalendarCallback in index.ts.
  */
 export const storeGoogleCalendarToken = functions
   .runWith({ memory: '256MB' })
@@ -75,41 +132,14 @@ export const storeGoogleCalendarToken = functions
       );
     }
 
-    let email: string | undefined;
-    if (data.accessToken) {
-      try {
-        const res = await fetch(
-          `https://oauth2.googleapis.com/tokeninfo?access_token=${encodeURIComponent(
-            data.accessToken,
-          )}`,
-        );
-        if (res.ok) {
-          const info = (await res.json()) as { email?: string };
-          email = info?.email;
-        }
-      } catch {
-        // tokeninfo is best-effort; we don't fail the connection on it.
-      }
-    }
+    const { email } = await persistCalendarGrant(uid, {
+      refreshToken,
+      accessToken: data.accessToken,
+      expiresAt: data.expiresAt,
+      scope: data.scope,
+    });
 
-    await calendarIntegrationRef(uid).set(
-      {
-        provider: 'google',
-        connectedAt: Date.now(),
-        refreshToken,
-        // Cache the access token + expiry so the trigger can avoid an
-        // immediate refresh round-trip on the first event push.
-        accessToken: data.accessToken || null,
-        accessTokenExpiresAt: data.expiresAt || null,
-        scope: data.scope || null,
-        email: email || null,
-        // Clear any prior failure when reconnecting.
-        lastSyncError: admin.firestore.FieldValue.delete(),
-      },
-      { merge: true },
-    );
-
-    return { ok: true, email: email || null };
+    return { ok: true, email };
   });
 
 /**
@@ -171,7 +201,7 @@ export async function mintAccessTokenForUser(uid: string): Promise<AccessTokenSn
   const refreshToken = data.refreshToken as string | undefined;
   if (!refreshToken) return null;
 
-  const oauth = getOauthClient();
+  const oauth = getGoogleOauthClient();
   if (!oauth) {
     functions.logger.warn(
       '[gcal] missing OAuth client config — set google.web_client_id + google.web_client_secret',
