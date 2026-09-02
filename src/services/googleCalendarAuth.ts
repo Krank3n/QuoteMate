@@ -20,6 +20,14 @@
  * (env vars consumed by AuthScreen). We just request an extra scope on
  * the connection prompt; sign-in continues to ask only for openid /
  * email / profile.
+ *
+ * Web is different: Google won't exchange a code for a "Web application"
+ * client without its secret, so the browser can never hold a refresh
+ * token. `connect()` on web hands off to googleCalendarWebConnect.ts —
+ * a server-minted consent URL, a full-page redirect to Google, and a
+ * hosted callback page that finishes the exchange server-side. The
+ * integration-doc subscription below is what flips the UI to
+ * "Connected" when the tradie lands back in the app.
  */
 
 import { useEffect, useState } from 'react';
@@ -34,6 +42,7 @@ import {
 import { httpsCallable, getFunctions } from 'firebase/functions';
 
 import { auth, db } from '../config/firebase';
+import { startWebCalendarConnect } from './googleCalendarWebConnect';
 
 const CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
 
@@ -156,14 +165,7 @@ export function useGoogleCalendarAuth(): UseGoogleCalendarAuthResult {
     const tokens = response.authentication;
     if (!tokens?.refreshToken) {
       setPending(false);
-      // Web sign-in via the Auth Proxy doesn't currently surface refresh
-      // tokens. Surface a friendly error so the user knows to retry on
-      // mobile / re-grant consent.
-      setLastError(
-        Platform.OS === 'web'
-          ? 'Connect from the mobile app — web OAuth doesn’t return a refresh token.'
-          : 'No refresh token returned. Try connecting again and accept all prompts.',
-      );
+      setLastError('No refresh token returned. Try connecting again and accept all prompts.');
       return;
     }
 
@@ -188,6 +190,23 @@ export function useGoogleCalendarAuth(): UseGoogleCalendarAuthResult {
   }, [response]);
 
   const connect = async () => {
+    if (Platform.OS === 'web') {
+      setLastError(null);
+      setPending(true);
+      try {
+        // Leaves the page: Google → hosted callback → back to /app. Keep
+        // `pending` up so the button doesn't flicker before navigation.
+        await startWebCalendarConnect({
+          getIdToken: () => auth.currentUser?.getIdToken() ?? Promise.resolve(undefined),
+          assign: (url) => window.location.assign(url),
+        });
+      } catch (err: any) {
+        setLastError(err?.message || 'Could not open Google sign-in.');
+        setPending(false);
+      }
+      return;
+    }
+
     if (!request) return;
     setLastError(null);
     setPending(true);
@@ -213,7 +232,8 @@ export function useGoogleCalendarAuth(): UseGoogleCalendarAuthResult {
   };
 
   return {
-    ready: !!request,
+    // Web doesn't go through expo-auth-session, so it's ready immediately.
+    ready: Platform.OS === 'web' ? true : !!request,
     pending,
     lastError,
     connection,

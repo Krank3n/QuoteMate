@@ -41,6 +41,7 @@ export const PROPOSAL_TOOL_NAMES = [
   'propose_convert_to_invoice',
   'propose_reprice',
   'propose_update_quote_rates',
+  'propose_update_quote_scope',
   'propose_mark_paid',
   'propose_import_supplier_list',
   'propose_remember_preference',
@@ -472,6 +473,26 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
     },
   },
   {
+    name: 'propose_update_quote_scope',
+    description:
+      "Change the scope of a quote that ALREADY EXISTS — its job name, job description and/or labour hours — and re-run the materials + pricing pipeline on it. This is how a correction lands after the draft was applied (\"make it Hager gear\", \"the deck's 13.6 m not 9.4\", a second photo with the specs): NEVER call propose_draft_quote again for a job that already has a quote id — that mints a second quote for the same job. Pass the FULL corrected jobDescription (the pipeline regenerates the materials from it), not just the changed sentence. Nothing changes until the tradie taps 'Update it' on the card — say the card is up, not that it is done. Needs the real quote id from a \"[context]\" line, list_recent_quotes or get_quote. Not for price or rate tweaks — use propose_update_line_item / propose_update_quote_rates for those.",
+    parameters: {
+      type: 'object',
+      properties: {
+        quoteId: { type: 'string', description: 'Document id of the existing quote.' },
+        jobName: { type: 'string', description: 'New short title, if it changed.' },
+        jobDescription: {
+          type: 'string',
+          description:
+            "The full corrected scope, written as the tradie would (rooms, surfaces, measurements, colours, finishes, special conditions). Same rules as propose_draft_quote: this PRINTS ON THE CUSTOMER'S QUOTE — scope only, none of your conversation with the tradie.",
+        },
+        estimatedDurationHours: { type: 'number', description: 'Corrected labour hours, if the tradie gave a new duration.' },
+        displayName: { type: 'string', description: "The quote's current job name, from the \"[context]\" line or get_quote — ALWAYS pass it so the card names the quote (display only)." },
+      },
+      required: ['quoteId'],
+    },
+  },
+  {
     name: 'propose_update_quote_rates',
     description:
       "Change the labour or markup numbers on an existing quote or invoice without re-running the pricing pipeline. Use this whenever the tradie wants to bump the markup percentage, change the labour rate, adjust labour hours, or tweak the labour markup on a specific doc (\"bump markup to 30%\", \"change hours to 14\", \"labour rate to $130/h\"). Pass only the fields that are changing \u2014 omitted fields stay as-is. Markup values are percentages (30 means 30%). laborRate is $/hour, laborHours is hours. Always know the quote id first (from list_recent_quotes / get_quote / the [context] line after a draft).",
@@ -623,6 +644,7 @@ export const TOOL_RUNTIME: Record<string, { timeoutSecs: number }> = {
   propose_convert_to_invoice: { timeoutSecs: 10 },
   propose_reprice: { timeoutSecs: 10 },
   propose_update_quote_rates: { timeoutSecs: 10 },
+  propose_update_quote_scope: { timeoutSecs: 10 },
   propose_mark_paid: { timeoutSecs: 10 },
   propose_import_supplier_list: { timeoutSecs: 10 },
   propose_remember_preference: { timeoutSecs: 10 },

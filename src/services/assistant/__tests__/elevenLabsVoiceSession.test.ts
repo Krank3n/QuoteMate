@@ -89,7 +89,7 @@ describe('opening', () => {
   it('registers a client tool for every tool Mate knows about', async () => {
     const f = fakeConversation();
     await open();
-    expect(Object.keys(f.options().clientTools).length).toBe(26);
+    expect(Object.keys(f.options().clientTools).length).toBe(27);
     expect(f.options().clientTools.find_customer).toBeTypeOf('function');
   });
 

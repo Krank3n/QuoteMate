@@ -35,12 +35,13 @@ export type OAuthStateVerdict =
 export function oauthStateVerdict(
   docData: { uid?: unknown; createdAtMs?: unknown } | undefined,
   nowMs: number,
+  ttlMs: number = SQUARE_OAUTH_STATE_TTL_MS,
 ): OAuthStateVerdict {
   if (!docData || typeof docData.uid !== 'string' || !docData.uid) {
     return { ok: false, status: 400, error: 'Invalid state parameter' };
   }
   const createdAtMs = typeof docData.createdAtMs === 'number' ? docData.createdAtMs : NaN;
-  if (!Number.isFinite(createdAtMs) || nowMs - createdAtMs > SQUARE_OAUTH_STATE_TTL_MS) {
+  if (!Number.isFinite(createdAtMs) || nowMs - createdAtMs > ttlMs) {
     return { ok: false, status: 400, error: 'Authorization expired. Please try again.' };
   }
   return { ok: true, uid: docData.uid };

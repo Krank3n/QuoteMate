@@ -142,8 +142,8 @@ describe('buildAgentToolConfigs', () => {
     expect(new Set(names).size).toBe(names.length);
   });
 
-  it('carries all 26 tools — 24 declarations plus the 2 control tools', () => {
-    expect(buildAgentToolConfigs()).toHaveLength(26);
+  it('carries all 27 tools — 25 declarations plus the 2 control tools', () => {
+    expect(buildAgentToolConfigs()).toHaveLength(27);
   });
 
   it('gives every declared tool a TOOL_RUNTIME entry', () => {

@@ -12,6 +12,7 @@ import {
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { makeStyles, useThemeColors } from '../../theme';
 import { ChatAttachment, ChatMessage, SupplierImportCard } from '../../types/assistant';
+import type { ChatReviewBlock } from '../../utils/reviewChatFormat';
 import { useStore } from '../../store/useStore';
 import { useJobStore } from '../../store/useJobStore';
 import { quoteToDocument } from '../../types/documentAdapter';
@@ -328,6 +329,9 @@ function MessageBubbleImpl({
             {message.text}
           </Text>
         )}
+        {!!message.review && message.review.rows.length > 0 && (
+          <ReviewRows block={message.review} />
+        )}
         {!!message.errorMessage && (
           <Text style={styles.errorText}>{message.errorMessage}</Text>
         )}
@@ -494,6 +498,45 @@ const useStyles = makeStyles((t) => ({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: t.colors.border,
   },
+  reviewBlock: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: t.colors.border,
+    gap: 6,
+  },
+  reviewTitle: {
+    color: t.colors.textMuted,
+    fontSize: 11,
+    fontWeight: '600',
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
+  },
+  reviewRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  reviewAmount: {
+    color: t.colors.text,
+    fontSize: 13,
+    fontWeight: '600',
+    fontVariant: ['tabular-nums'],
+    minWidth: 74,
+  },
+  reviewBody: {
+    flex: 1,
+    flexShrink: 1,
+  },
+  reviewName: {
+    color: t.colors.text,
+    fontSize: 13,
+  },
+  reviewReason: {
+    color: t.colors.textMuted,
+    fontSize: 12,
+    marginTop: 1,
+  },
   ctaButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -515,6 +558,36 @@ const useStyles = makeStyles((t) => ({
     marginVertical: 4,
   },
 }));
+
+/**
+ * The flagged rows after a pricing run, one per line. Replaces the sentence
+ * that used to carry them ("…($2,386.50 of Paper Joint Tape, $1,200.00 of
+ * Merbau decking, +3 more)") — the money leads because it is what decides
+ * whether the row matters, and the reason sits under the name so the tradie
+ * knows what to fix without opening the quote.
+ */
+function ReviewRows({ block }: { block: ChatReviewBlock }) {
+  const styles = useStyles();
+  return (
+    <View style={styles.reviewBlock} testID="mate-review-rows">
+      <Text style={styles.reviewTitle}>Rows to check</Text>
+      {block.rows.map((row, idx) => (
+        <View key={`${row.name}-${idx}`} style={styles.reviewRow} testID="mate-review-row">
+          <Text style={styles.reviewAmount}>{row.amount}</Text>
+          <View style={styles.reviewBody}>
+            <Text style={styles.reviewName} numberOfLines={2}>{row.name}</Text>
+            <Text style={styles.reviewReason}>{row.reason}</Text>
+          </View>
+        </View>
+      ))}
+      {block.more > 0 && (
+        <Text style={styles.workingItemsMore}>
+          +{block.more} more on the quote
+        </Text>
+      )}
+    </View>
+  );
+}
 
 // Compact rolling list of materials being searched in the current batch.
 // Renders at most ~6 rows: any items currently `searching`, plus the

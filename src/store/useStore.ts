@@ -38,6 +38,7 @@ import {
   stripLabourFromQuote,
   upsertRate,
 } from '../services/quotingProfile';
+import type { RateLine } from '../types';
 import { calculateDueDate } from '../utils/invoiceCalculator';
 import { canRevertToQuote } from '../utils/revertToQuote';
 import { isEditablePayment, maxAmountForEdit } from '../utils/editablePayment';
@@ -59,7 +60,9 @@ import { trackEvent } from '../services/analyticsService';
 import { maybeRequestReview } from '../services/storeReviewService';
 import { ensureJobForDocument, ensureJobForQuote, useJobStore } from './useJobStore';
 import { canAnalysePhotos, canRunMatePipeline } from './planGates';
-import { markPricingStarted, markPricingFinished } from '../services/assistant/pricingInFlight';
+import { markPricingStarted, markPricingFinished, isPricingInFlight } from '../services/assistant/pricingInFlight';
+import { resetGeneratedScope } from '../utils/scopeReset';
+import { headlineFor } from '../utils/reviewChatFormat';
 import type { CustomerEditPlan } from '../utils/customerEdit';
 import { auth } from '../config/firebase';
 import { searchLocalSources } from '../services/localMaterialSearch';
@@ -336,6 +339,14 @@ interface AppState {
 export interface ApplyProposalContext {
   /** Photos the tradie sent Mate in this chat, to seed onto the draft. */
   photos?: QuotePhoto[];
+  /**
+   * Fires the moment propose_draft_quote has minted its quote — BEFORE the
+   * 15–40 s materials + pricing run. The screen uses it to hand Mate the real
+   * id straight away: a scope correction typed while pricing was still
+   * running used to be re-drafted as a second quote (Overton, 29 Aug 2026)
+   * because the model only learned the id once the pipeline finished.
+   */
+  onMinted?: (quoteId: string) => void;
 }
 
 export type ApplyProposalResult =
@@ -3158,6 +3169,208 @@ export const useStore = create<AppState>((set, get) => ({
             error: "Auto-pricing isn't in the free plan — you can add materials and prices yourself, or go Pro and I'll sort it.",
           };
 
+    // Analyse + price whatever is in get().currentQuote, streaming progress
+    // into the chat's working card. Shared by propose_draft_quote and
+    // propose_update_quote_scope so a scope correction re-runs exactly what
+    // the first draft ran instead of minting a second quote.
+    //
+    // A clean finish stamps draftStep:'JobPreview' — the marker the wizard's
+    // preview screen writes for a finished-but-unsent quote. A Mate-minted
+    // draft never visits the wizard, so without the stamp it was invisible to
+    // the dashboard's draft banner (pickDashboardDraft) and the unsent-quote
+    // nudge (followUpNudge), which both key on that field: 28 of the week's
+    // drafts (2 Sep 2026) sat unstamped with nothing in the app pointing back
+    // at them. A pricing snag parks the quote on 'MaterialsList' instead —
+    // the wizard step that carries Fetch Prices.
+    type ScopePipelineRun =
+      | { kind: 'done'; review: QuoteReview; supplierGap: SupplierGapSummary }
+      | { kind: 'cancelled' }
+      | { kind: 'degraded'; error: string };
+    const runScopePipeline = async (
+      quoteId: string,
+      initial: WorkingStatus,
+      // Rate-card lines already on the quote, and the two modes that skip
+      // phases: lines that include materials ARE the price (no analysis, no
+      // pricing), and labour-only keeps hours + sections but drops the gear
+      // list and the pricing run. Labour on a rate line means the analysis's
+      // hours would be a second labour charge, so they are stripped.
+      options: { rateLines?: RateLine[]; ratesCoverMaterials?: boolean; labourOnly?: boolean } = {},
+    ): Promise<ScopePipelineRun> => {
+      const rateLineCount = options.rateLines?.length ?? 0;
+      let materialCount = 0;
+      // Accumulated outside the event→progress mapper: the fallback event
+      // is one-shot info, not a progress frame, and the caller needs the
+      // terms after the run finishes.
+      const missedSupplierTerms: string[] = [];
+      // Mate keeps talking to the tradie while this runs. Flag the quote as
+      // mid-pricing so show_quote refuses to put an unpriced draft on screen
+      // and call it ready — see pricingInFlight.
+      markPricingStarted(quoteId);
+      try {
+        // Track the current working status so partial updates (e.g. an
+        // item-priced event that only changes the detail line) don't blow
+        // away the phase headline. Without merging, fast per-item events
+        // overwrite the user-visible phase and the card looks like it's
+        // flashing between item names with no context for what's happening.
+        let currentWorking: WorkingStatus = initial;
+        const reportProgress = (next: Partial<WorkingStatus>) => {
+          currentWorking = { ...currentWorking, ...next };
+          onProgress?.(currentWorking);
+        };
+        reportProgress({});
+
+        if (options.ratesCoverMaterials) {
+          // The rate card is the whole price. No analysis, no pricing run —
+          // the minutes a tradie waits for materials they never wanted was
+          // the whole point of saving a rate. Still a finished-but-unsent
+          // draft, so it gets the same stamp.
+          const rated = get().currentQuote!;
+          get().updateQuote({ ...rated, draftStep: 'JobPreview' });
+          await get().saveDraft(get().currentQuote!);
+          const review = reviewQuoteMaterials(rated.materials, rated.sections);
+          const supplierGap = await summariseSupplierGap([], 0, rated.materials);
+          onProgress?.({
+            phase: 'done',
+            status: 'Priced off your rate card.',
+            done: true,
+            summary: `Priced off your rate card — ${rateLineCount} line${rateLineCount === 1 ? '' : 's'}, no materials list.`,
+          });
+          return { kind: 'done', review, supplierGap };
+        }
+
+        const templates = await loadTemplates().catch(() => []);
+        const isPro = canAnalysePhotos(get().getEffectivePlan());
+
+        // ── Phase 1: analyse ──
+        const analyseResult = await generateMaterialsForQuote(
+          {
+            quote: get().currentQuote!,
+            businessSettings: get().businessSettings,
+            isPro,
+            templates,
+          },
+          {
+            onEvent: (event) => {
+              reportProgress({
+                phase: event.phase,
+                status: event.status,
+                detail: event.detail,
+              });
+            },
+          },
+        ).catch((err) => {
+          if (err instanceof PipelineCancelled) return null;
+          throw err;
+        });
+
+        if (!analyseResult) return { kind: 'cancelled' };
+
+        let analysed: Quote = analyseResult.updatedQuote;
+        // Labour charged through rate lines: the analysis's hours would be a
+        // second labour charge on top of them.
+        if (rateLineCount > 0) analysed = stripLabourFromQuote(analysed);
+        // Labour only: keep the hours and sections, drop the gear list.
+        if (options.labourOnly) {
+          analysed = { ...analysed, materials: analysed.materials.filter((m) => m.kind === 'work') };
+        }
+        materialCount = options.labourOnly ? 0 : analyseResult.generatedMaterialCount;
+
+        if (options.labourOnly) {
+          get().updateQuote({ ...analysed, draftStep: 'JobPreview' });
+          await get().saveDraft(get().currentQuote!);
+          const review = reviewQuoteMaterials(analysed.materials, analysed.sections);
+          const supplierGap = await summariseSupplierGap([], 0, analysed.materials);
+          onProgress?.({
+            phase: 'done',
+            status: 'Labour only — nothing to price.',
+            done: true,
+            summary: 'Labour only — hours and sections, no materials list.',
+          });
+          return { kind: 'done', review, supplierGap };
+        }
+
+        get().updateQuote(analysed);
+        await get().saveDraft(get().currentQuote!);
+
+        reportProgress({
+          phase: 'pricing',
+          status: `Pricing ${materialCount} item${materialCount === 1 ? '' : 's'}…`,
+          detail: undefined,
+        });
+
+        // ── Phase 2: pricing ──
+        const pricedResult = await fetchPricesForQuote(
+          {
+            quote: get().currentQuote!,
+            businessSettings: get().businessSettings,
+            reeceConnected: null, // pipeline resolves on demand
+          },
+          {
+            onEvent: (event) => {
+              if (event.kind === 'supplier-priority-fallback') {
+                missedSupplierTerms.push(...event.missedTerms);
+              }
+              const next = pricingEventToProgress(event);
+              if (next) reportProgress(next);
+            },
+          },
+        );
+
+        // Finished but unsent — stamp the wizard step the banner and nudge read.
+        get().updateQuote({ ...pricedResult.updatedQuote, draftStep: 'JobPreview' });
+        await get().saveDraft(get().currentQuote!);
+        let review = reviewQuoteMaterials(pricedResult.updatedQuote.materials, pricedResult.updatedQuote.sections);
+        const integrity = checkDocumentIntegrity(pricedResult.updatedQuote as any);
+        if (integrity.length) {
+          // eslint-disable-next-line no-console
+          console.warn('[Mate] integrity', quoteId, integrity.map((i) => i.code).join(','));
+          review = withIntegrityIssues(review, integrity.map((i) => i.detail));
+        }
+        const supplierGap = await summariseSupplierGap(
+          missedSupplierTerms,
+          review.counts.estimated,
+          pricedResult.updatedQuote.materials,
+        );
+
+        const parts: string[] = [];
+        if (pricedResult.fetchedCount > 0) parts.push(`${pricedResult.fetchedCount} priced`);
+        if (pricedResult.failedCount > 0) parts.push(`${pricedResult.failedCount} need pricing`);
+        if (pricedResult.skippedCount > 0) parts.push(`${pricedResult.skippedCount} already priced`);
+        let pricingSummary = parts.join(' · ') || 'Nothing to price.';
+        const topLines = topLinesSummary(pricedResult.updatedQuote.materials);
+        if (topLines) pricingSummary = `${pricingSummary}\n${topLines}`;
+
+        onProgress?.({
+          phase: 'done',
+          status: `Drafted ${materialCount} item${materialCount === 1 ? '' : 's'}.`,
+          done: true,
+          summary: pricingSummary,
+        });
+        return { kind: 'done', review, supplierGap };
+      } catch (err: any) {
+        // eslint-disable-next-line no-console
+        console.warn('[Mate] pipeline failed', err);
+        onProgress?.({
+          phase: 'failed',
+          status: "Couldn't finish pricing that one.",
+          detail: err?.message,
+          done: true,
+        });
+        // The draft exists but its prices don't. Park it on the wizard step
+        // that carries Fetch Prices so the dashboard banner can resume it.
+        const parked = get().currentQuote;
+        if (parked && parked.id === quoteId) {
+          get().updateQuote({ ...parked, draftStep: 'MaterialsList' });
+          await get().saveDraft(get().currentQuote!).catch(() => {});
+        }
+        return { kind: 'degraded', error: err?.message || 'unknown' };
+      } finally {
+        // Clear on every exit — success, snag, or cancellation. A quote left
+        // flagged would have show_quote refusing it forever.
+        markPricingFinished(quoteId);
+      }
+    };
+
     try {
       switch (proposal.type) {
         case 'propose_create_contact': {
@@ -3399,182 +3612,34 @@ export const useStore = create<AppState>((set, get) => ({
           await get().saveDraft(get().currentQuote!);
           const quoteId = get().currentQuote!.id;
 
+          // The quote exists from here on, even though its prices don't yet.
+          // Hand the id to the screen NOW, not after the pipeline — see
+          // ApplyProposalContext.onMinted.
+          context?.onMinted?.(quoteId);
+
           // Run the FULL pipeline (analyse + pricing) IN CHAT via the shared
-          // materialsPipeline service. The onProgress callback streams events
-          // into the working card the chat already mounted. After both phases
-          // complete, navigate to JobPreview so the tradie sees the priced
-          // draft instead of an empty materials screen.
-          let materialCount = 0;
-          let pricingSummary: string | undefined;
-          let review: QuoteReview | undefined;
-          let supplierGap: SupplierGapSummary | undefined;
-          // Accumulated outside the event→progress mapper: the fallback event
-          // is one-shot info, not a progress frame, and the caller needs the
-          // terms after the run finishes.
-          const missedSupplierTerms: string[] = [];
-          // Mate keeps talking to the tradie while this runs. Flag the quote as
-          // mid-pricing so show_quote refuses to put an unpriced draft on screen
-          // and call it ready — see pricingInFlight.
-          markPricingStarted(quoteId);
-          try {
-            // Track the current working status so partial updates (e.g. an
-            // item-priced event that only changes the detail line) don't blow
-            // away the phase headline. Without merging, fast per-item events
-            // overwrite the user-visible phase and the card looks like it's
-            // flashing between item names with no context for what's happening.
-            let currentWorking: WorkingStatus = {
-              phase: 'preflight',
-              status: 'Getting ready…',
-              done: false,
-            };
-            const reportProgress = (next: Partial<WorkingStatus>) => {
-              currentWorking = { ...currentWorking, ...next };
-              onProgress?.(currentWorking);
-            };
-            reportProgress({});
-
-            if (ratesCoverMaterials) {
-              // The rate card is the whole price. No analysis, no pricing run
-              // — the 1-3 minutes a tradie waits for materials they never
-              // wanted was the whole point of saving a rate.
-              const rated = get().currentQuote!;
-              materialCount = rateItems.length;
-              review = reviewQuoteMaterials(rated.materials, rated.sections);
-              pricingSummary = `Priced off your rate card — ${rateItems.length} line${rateItems.length === 1 ? '' : 's'}, no materials list.`;
-              onProgress?.({ phase: 'done', status: 'Priced off your rate card.', done: true, summary: pricingSummary });
-            } else {
-              const templates = await loadTemplates().catch(() => []);
-              const isPro = canAnalysePhotos(get().getEffectivePlan());
-
-              // ── Phase 1: analyse ──
-              const analyseResult = await generateMaterialsForQuote(
-                {
-                  quote: get().currentQuote!,
-                  businessSettings: get().businessSettings,
-                  isPro,
-                  templates,
-                },
-                {
-                  onEvent: (event) => {
-                    reportProgress({
-                      phase: event.phase,
-                      status: event.status,
-                      detail: event.detail,
-                    });
-                  },
-                },
-              ).catch((err) => {
-                if (err instanceof PipelineCancelled) return null;
-                throw err;
-              });
-
-              if (!analyseResult) {
-                return { ok: false, error: 'Pipeline was cancelled.' };
-              }
-
-              let analysed: Quote = analyseResult.updatedQuote;
-              // Labour charged through rate lines: the analysis's hours would
-              // be a second labour charge on top of them.
-              if (rateLines.length) analysed = stripLabourFromQuote(analysed);
-              // Labour only: keep the hours and sections, drop the gear list.
-              if (labourOnly) {
-                analysed = { ...analysed, materials: analysed.materials.filter((m) => m.kind === 'work') };
-              }
-              get().updateQuote(analysed);
-              await get().saveDraft(get().currentQuote!);
-              materialCount = labourOnly ? 0 : analyseResult.generatedMaterialCount;
-
-              if (labourOnly) {
-                review = reviewQuoteMaterials(analysed.materials, analysed.sections);
-                pricingSummary = 'Labour only — hours and sections, no materials list.';
-                onProgress?.({ phase: 'done', status: 'Labour only — nothing to price.', done: true, summary: pricingSummary });
-              } else {
-                // ── Phase 2: pricing ──
-                // Reuse the same working card. Map PricingEvents → WorkingStatus.
-                // status holds the phase headline (slow-changing) while detail
-                // carries the rapid per-item progress.
-                reportProgress({
-                  phase: 'pricing',
-                  status: `Pricing ${materialCount} item${materialCount === 1 ? '' : 's'}…`,
-                  detail: undefined,
-                });
-
-                const pricedResult = await fetchPricesForQuote(
-                  {
-                    quote: get().currentQuote!,
-                    businessSettings: get().businessSettings,
-                    reeceConnected: null, // pipeline resolves on demand
-                  },
-                  {
-                    onEvent: (event) => {
-                      if (event.kind === 'supplier-priority-fallback') {
-                        missedSupplierTerms.push(...event.missedTerms);
-                      }
-                      const next = pricingEventToProgress(event);
-                      if (next) reportProgress(next);
-                    },
-                  },
-                );
-
-                get().updateQuote(pricedResult.updatedQuote);
-                await get().saveDraft(get().currentQuote!);
-                review = reviewQuoteMaterials(pricedResult.updatedQuote.materials, pricedResult.updatedQuote.sections);
-                // The document's own arithmetic, checked on the live path rather
-                // than only in the offline audit scripts. A switchboard quote
-                // shipped storing 5 hours at $85 while charging $170. Reported,
-                // never blocking — a false positive must not strand a quote.
-                const integrity = checkDocumentIntegrity(pricedResult.updatedQuote as any);
-                if (integrity.length) {
-                  // eslint-disable-next-line no-console
-                  console.warn('[Mate] integrity', quoteId, integrity.map((i) => i.code).join(','));
-                  review = withIntegrityIssues(review, integrity.map((i) => i.detail));
-                }
-                supplierGap = await summariseSupplierGap(
-                  missedSupplierTerms,
-                  review.counts.estimated,
-                  pricedResult.updatedQuote.materials,
-                );
-
-                const parts: string[] = [];
-                if (pricedResult.fetchedCount > 0) parts.push(`${pricedResult.fetchedCount} priced`);
-                if (pricedResult.failedCount > 0) parts.push(`${pricedResult.failedCount} need pricing`);
-                if (pricedResult.skippedCount > 0) parts.push(`${pricedResult.skippedCount} already priced`);
-                pricingSummary = parts.join(' · ') || 'Nothing to price.';
-                // Name where the money actually landed. QU-178763 carried $8,239
-                // of tile adhesive with every flag green — a wrong line usually
-                // exposes itself the moment its dollar figure is put in front of
-                // the tradie, so the done card always says it.
-                const topLines = topLinesSummary(pricedResult.updatedQuote.materials);
-                if (topLines) pricingSummary = `${pricingSummary}\n${topLines}`;
-
-                onProgress?.({
-                  phase: 'done',
-                  status: `Drafted ${materialCount} item${materialCount === 1 ? '' : 's'}.`,
-                  done: true,
-                  summary: pricingSummary,
-                });
-              }
-            }
-          } catch (err: any) {
-            // eslint-disable-next-line no-console
-            console.warn('[Mate] pipeline failed', err);
-            onProgress?.({
-              phase: 'failed',
-              status: "Couldn't finish pricing that one.",
-              detail: err?.message,
-              done: true,
-            });
+          // materialsPipeline service, streaming progress into the working
+          // card the chat already mounted. After both phases complete, land
+          // on JobPreview so the tradie sees the priced draft instead of an
+          // empty materials screen. Rate-card lines and labour-only mode
+          // short-circuit the phases they don't need — see runScopePipeline.
+          const run = await runScopePipeline(
+            quoteId,
+            { phase: 'preflight', status: 'Getting ready…', done: false },
+            { rateLines, ratesCoverMaterials, labourOnly },
+          );
+          if (run.kind === 'cancelled') {
+            return { ok: false, error: 'Pipeline was cancelled.' };
+          }
+          if (run.kind === 'degraded') {
             return {
               ok: true,
               navigate: { kind: 'job_preview', quoteId },
               pipelineDegraded: true,
-              note: `Pipeline snag — opened the draft, tap Fetch Prices in the wizard. (${err?.message || 'unknown'})`,
+              note: `Pipeline snag — opened the draft, tap Fetch Prices in the wizard. (${run.error})`,
             };
-          } finally {
-            // Clear on every exit — success, snag, or cancellation. A quote left
-            // flagged would have show_quote refusing it forever.
-            markPricingFinished(quoteId);
           }
+          const { review, supplierGap } = run;
 
           // If the tradie asked for an invoice up front, auto-convert at the
           // end of the pipeline so they don't have to do a second Apply.
@@ -3604,6 +3669,86 @@ export const useStore = create<AppState>((set, get) => ({
           };
         }
 
+        case 'propose_update_quote_scope': {
+          const gated = planGate();
+          if (gated) return gated;
+          // Two pipelines writing one quote would race each other's saves.
+          // The validator already refuses the card while pricing runs; this is
+          // the belt for a card minted a moment before the run started.
+          if (isPricingInFlight(proposal.quoteId)) {
+            return {
+              ok: false,
+              error: "That one's still being priced — give it a moment, then try the change again.",
+            };
+          }
+          // Prefer the legacy quotes row: it is what Mate minted, what the
+          // dashboard banner reads, and what saveDraft keeps in step with the
+          // unified document. Fall back to the document for anything else.
+          let base: Quote | undefined = get().quotes.find((q) => q.id === proposal.quoteId);
+          if (!base) {
+            const doc = await resolveDocument(proposal.quoteId);
+            if (doc) {
+              const { documentToQuote } = await import('../types/documentAdapter');
+              base = documentToQuote(doc);
+            }
+          }
+          if (!base) return { ok: false, error: 'Quote not found.' };
+          if (base.status && base.status !== 'draft') {
+            return {
+              ok: false,
+              error: "That quote's already gone to the customer — changing the scope now would change what they saw. Draft a new one instead.",
+            };
+          }
+          // The analyse pass is additive over whatever rows exist, so the
+          // previous run's generated list and hours come off first — see
+          // resetGeneratedScope for what survives (the tradie's own rows).
+          const merged: Quote = {
+            ...resetGeneratedScope(base, proposal.estimatedDurationHours),
+            job: {
+              ...base.job,
+              name: proposal.jobName ?? base.job?.name,
+              description: proposal.jobDescription ?? base.job?.description,
+            },
+            // Photos sent since the first draft ride onto the re-run; the ones
+            // already on the quote stay. Same five-photo cap as the draft path.
+            ...(context?.photos?.length
+              ? {
+                  photos: [
+                    ...(base.photos || []),
+                    ...context.photos.filter((p) => !(base!.photos || []).some((q) => q.id === p.id)),
+                  ].slice(0, 5),
+                }
+              : {}),
+          };
+          get().setCurrentQuote(merged);
+          // Persist the new scope before the analyse pass so a snag mid-run
+          // still leaves the corrected description on the quote.
+          await get().saveDraft(merged);
+          const quoteId = get().currentQuote?.id || merged.id;
+
+          const run = await runScopePipeline(quoteId, {
+            phase: 'preflight',
+            status: 'Redoing the materials…',
+            done: false,
+          });
+          if (run.kind === 'cancelled') {
+            return { ok: false, error: 'Pipeline was cancelled.' };
+          }
+          if (run.kind === 'degraded') {
+            return {
+              ok: true,
+              navigate: { kind: 'job_preview', quoteId },
+              pipelineDegraded: true,
+              note: `Pipeline snag — the scope's updated but pricing didn't finish; tap Fetch Prices in the wizard. (${run.error})`,
+            };
+          }
+          return {
+            ok: true,
+            navigate: { kind: 'job_preview', quoteId },
+            review: run.review,
+            supplierGap: run.supplierGap,
+          };
+        }
         case 'propose_update_quote_rates': {
           // Bump a numeric rate on the doc without re-running pricing. We
           // convert to Quote-shape so the shared calculator can re-run totals,
@@ -4022,6 +4167,12 @@ export const useStore = create<AppState>((set, get) => ({
         case 'propose_reprice': {
           const gated = planGate();
           if (gated) return gated;
+          // The working card sits directly above the "Re-priced" bubble, which
+          // now lists the flagged rows one per line (ReviewRows). Repeating the
+          // full one-sentence summary here put the same wall of names on screen
+          // twice, so the card carries just the count.
+          const repriceCardSummary = (r: QuoteReview): string =>
+            r.issues.length > 0 ? `${headlineFor(r)} — listed below.` : 'Every line came back with a real price.';
           // Re-run the pricing pipeline (price fetch + reconcile) on an EXISTING
           // quote/invoice to fix the rows review_quote flagged. We wipe the price
           // off the flagged rows first (fetchPrices skips anything already
@@ -4100,7 +4251,7 @@ export const useStore = create<AppState>((set, get) => ({
               review.counts.estimated,
               priced.materials,
             );
-            onProgress?.({ phase: 'done', status: 'Prices re-checked.', done: true, summary: review.summary });
+            onProgress?.({ phase: 'done', status: 'Prices re-checked.', done: true, summary: repriceCardSummary(review) });
             return { ok: true, navigate: { kind: 'job_preview', quoteId: doc.id }, review, supplierGap };
           }
 
@@ -4115,7 +4266,7 @@ export const useStore = create<AppState>((set, get) => ({
             review.counts.estimated,
             priced.materials,
           );
-          onProgress?.({ phase: 'done', status: 'Prices re-checked.', done: true, summary: review.summary });
+          onProgress?.({ phase: 'done', status: 'Prices re-checked.', done: true, summary: repriceCardSummary(review) });
           return { ok: true, navigate: { kind: 'job_preview', quoteId: quote.id }, review, supplierGap };
         }
 
