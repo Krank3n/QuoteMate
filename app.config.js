@@ -186,7 +186,7 @@ export default {
         backgroundColor: "#0A0E16"  // Dark blue-gray to match app theme
       },
       package: "com.quotemate.app",
-      versionCode: 170,
+      versionCode: 171,
       // Android 16 (targetSdk 36) enforces edge-to-edge and ignores the
       // opt-out flag. Declaring it here makes Expo theme for it deliberately
       // rather than emitting an opt-out Android no longer honours.
