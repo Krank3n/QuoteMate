@@ -356,10 +356,20 @@ function withSquareSDK(config, props = {}) {
   config = withSquareIOSAppDelegate(config, applicationId);
   config = withSquareIOSInfoPlist(config);
   config = withSquareIOSBuildPhase(config);
-  // Granted 16 Apr 2026, development distribution only. The App ID must also
-  // carry the "Tap to Pay on iPhone" capability or signing fails with a
-  // profile/entitlement mismatch rather than anything that names Tap to Pay.
-  config = withSquareIOSTapToPayEntitlement(config);
+  // OFF until Apple grants the PUBLISHING entitlement (see docs/SQUARE_TAP_TO_PAY.md).
+  //
+  // The 16 Apr 2026 grant (Case-ID 19476927) is development-distribution only: it signs
+  // for registered test devices, and no App Store profile carries it. With this line
+  // enabled, `xcodebuild -exportArchive` fails outright —
+  //   Provisioning profile "...doesn't include the
+  //   com.apple.developer.proximity-reader.payment.acceptance entitlement"
+  // — which blocks the iOS release for the whole repo, not just Tap to Pay. It cost the
+  // 1.56 build an extra archive on 2 Sep 2026. Entitlements are baked at archive time,
+  // so this cannot be stripped later at export.
+  //
+  // Re-enable in the same commit that ships the publishing entitlement, and flip
+  // config/squareTapToPay ios only after that build is live.
+  // config = withSquareIOSTapToPayEntitlement(config);
 
   config = withSquareAndroidRootGradle(config);
   config = withSquareAndroidAppGradle(config);
