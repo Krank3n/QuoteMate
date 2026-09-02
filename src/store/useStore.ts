@@ -3766,6 +3766,7 @@ export const useStore = create<AppState>((set, get) => ({
           // delete lines but not correct one, so an unpriced row meant telling
           // the tradie to go and type it in — twice, in the conversation that
           // prompted this.
+          let updatedRow: Material | undefined;
           const applyEdit = (materials: Material[]): { next: Material[]; found: boolean } => {
             let found = false;
             const next = materials.map((m) => {
@@ -3773,7 +3774,7 @@ export const useStore = create<AppState>((set, get) => ({
               found = true;
               const price = proposal.price ?? m.price;
               const quantity = proposal.quantity ?? m.quantity;
-              return {
+              const row: Material = {
                 ...m,
                 name: proposal.name ?? m.name,
                 price,
@@ -3789,8 +3790,20 @@ export const useStore = create<AppState>((set, get) => ({
                   ? { pricingSource: 'manual' as const, priceConfidence: 'high' as const }
                   : {}),
               };
+              updatedRow = row;
+              return row;
             });
             return { next, found };
+          };
+          // A price the tradie gave Mate is remembered in the Supplier Book so
+          // the next quote starts from THEIR number, not retail. Best-effort and
+          // after the save: a failed book write must never fail the edit.
+          const rememberPrice = () => {
+            if (proposal.price === undefined || !updatedRow) return;
+            const row = updatedRow;
+            void import('../services/priceMemory')
+              .then(({ rememberMaterialPrice }) => rememberMaterialPrice(row))
+              .catch(() => {});
           };
 
           const target = await resolveDocument(proposal.quoteId);
@@ -3800,6 +3813,7 @@ export const useStore = create<AppState>((set, get) => ({
               return { ok: false, error: 'That line is not on the quote any more — call get_quote and try again.' };
             }
             await get().saveDocument({ ...target, materials: next });
+            rememberPrice();
             return { ok: true };
           }
           const quote = get().quotes.find((q) => q.id === proposal.quoteId);
@@ -3809,6 +3823,7 @@ export const useStore = create<AppState>((set, get) => ({
               return { ok: false, error: 'That line is not on the quote any more — call get_quote and try again.' };
             }
             await get().saveQuote(updateQuoteCalculations({ ...quote, materials: next, updatedAt: new Date() }));
+            rememberPrice();
             return { ok: true, navigate: { kind: 'job_preview', quoteId: quote.id } };
           }
           const invoice = get().invoices.find((i) => i.id === proposal.quoteId);
@@ -3818,6 +3833,7 @@ export const useStore = create<AppState>((set, get) => ({
               return { ok: false, error: 'That line is not on the invoice any more — call get_quote and try again.' };
             }
             await get().saveInvoice(updateQuoteCalculations({ ...invoice, materials: next, updatedAt: new Date() } as any) as any);
+            rememberPrice();
             return { ok: true, navigate: { kind: 'job_preview', quoteId: invoice.id } };
           }
           return { ok: false, error: 'Quote not found.' };

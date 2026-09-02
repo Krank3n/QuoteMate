@@ -7,7 +7,7 @@
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { getFirestore, doc, setDoc, getDoc, deleteDoc } from 'firebase/firestore';
+import { getFirestore, doc, setDoc, getDoc, getDocs, deleteDoc, collection } from 'firebase/firestore';
 import { getAuth } from 'firebase/auth';
 import { FavoriteProductMapping } from '../types';
 import { logSyncError } from '../store/useStore';
@@ -174,6 +174,9 @@ export async function removeFavoriteProduct(
  * Returns only favorites flagged as isPersonalRate.
  */
 export async function loadAllFavoritesForLLM(): Promise<FavoriteProductMapping[]> {
+  // The pipeline only ever reads local; on a fresh install that is empty
+  // until the cloud copy has been pulled once (cheap after the first call).
+  await syncFavoritesFromCloud();
   const local = await loadFavoritesFromLocal();
   return Object.values(local).filter((f) => f.isPersonalRate === true);
 }
@@ -409,18 +412,100 @@ export async function deleteAllFavoritesByStore(supplierName: string): Promise<n
 }
 
 /**
- * Sync favorites from cloud to local (run on app startup)
+ * Pure merge of the cloud copy of the book into the local cache.
+ *
+ * Local is the read source of truth for every consumer (pricing pipeline,
+ * local search, Mate's snapshot), so the cloud copy only ever ADDS to it or
+ * refreshes an entry the cloud has demonstrably updated more recently:
+ *   - cloud-only key → added (the reinstall / second-device case)
+ *   - local-only key → kept (a cloud write that failed, or a deletion the
+ *                      cloud hasn't caught up on — never silently dropped)
+ *   - both           → cloud wins only when its lastUpdatedAt is strictly
+ *                      newer; otherwise the local entry stands
+ * Returns how many entries changed so callers can skip the AsyncStorage
+ * write when nothing did.
  */
-export async function syncFavoritesFromCloud(): Promise<void> {
+export function mergeCloudFavorites(
+  local: Record<string, FavoriteProductMapping>,
+  cloud: Record<string, FavoriteProductMapping>,
+): { merged: Record<string, FavoriteProductMapping>; added: number; updated: number } {
+  const merged: Record<string, FavoriteProductMapping> = { ...local };
+  let added = 0;
+  let updated = 0;
+  for (const [key, remote] of Object.entries(cloud)) {
+    if (!remote || !remote.productName) continue;
+    const mine = merged[key];
+    if (!mine) {
+      merged[key] = remote;
+      added += 1;
+      continue;
+    }
+    const remoteAt = Date.parse(remote.lastUpdatedAt ?? '') || 0;
+    const mineAt = Date.parse(mine.lastUpdatedAt ?? '') || 0;
+    if (remoteAt > mineAt) {
+      merged[key] = remote;
+      updated += 1;
+    }
+  }
+  return { merged, added, updated };
+}
+
+// One collection read per signed-in uid per app session. Every writer in this
+// module keeps local current, so a second pull would return what we already
+// hold; a FAILED pull leaves the guard unset so the next caller retries.
+let syncedForUid: string | null = null;
+
+export function resetFavoritesSyncForTests(): void {
+  syncedForUid = null;
+}
+
+export interface FavoritesSyncResult {
+  added: number;
+  updated: number;
+  /** True when no read happened: signed out, or already synced this session. */
+  skipped: boolean;
+}
+
+/**
+ * Pull the cloud copy of the supplier book into the local cache.
+ *
+ * This was a no-op for a long time, so a reinstall (or a second phone) showed
+ * an EMPTY book even though Firestore still held every import and saved rate
+ * — and the pricing pipeline, which only reads local, quietly went back to
+ * retail. Runs once per uid per session; pass { force: true } to re-pull.
+ */
+export async function syncFavoritesFromCloud(
+  options?: { force?: boolean },
+): Promise<FavoritesSyncResult> {
+  const none: FavoritesSyncResult = { added: 0, updated: 0, skipped: true };
   try {
     const auth = getAuth();
-    if (!auth.currentUser) return;
+    const uid = auth.currentUser?.uid;
+    if (!uid) return none;
+    if (syncedForUid === uid && !options?.force) return none;
 
     const db = getFirestore();
-    // Note: This would require a collection query, which we'll implement if needed
-    // For now, favorites are synced lazily when accessed
+    const snapshot = await getDocs(collection(db, `users/${uid}/materialFavorites`));
+    const cloud: Record<string, FavoriteProductMapping> = {};
+    for (const d of snapshot.docs) {
+      // `savedAt` is a write stamp, not part of the mapping — drop it so the
+      // local entry matches what saveFavoriteProduct would have written.
+      const { savedAt: _savedAt, ...mapping } = d.data() as Partial<FavoriteProductMapping> & {
+        savedAt?: string;
+      };
+      cloud[d.id] = mapping as FavoriteProductMapping;
+    }
+
+    const local = await loadFavoritesFromLocal();
+    const { merged, added, updated } = mergeCloudFavorites(local, cloud);
+    if (added > 0 || updated > 0) {
+      await saveFavoritesToLocal(merged);
+    }
+    syncedForUid = uid;
+    return { added, updated, skipped: false };
   } catch (error) {
     // eslint-disable-next-line no-console
-    console.warn('[favorites] startup sync failed', error);
+    console.warn('[favorites] cloud sync failed', error);
+    return none;
   }
 }

@@ -15,6 +15,7 @@ import {
   listRecentQuotes,
   listServiceReports,
   reviewQuote,
+  searchSupplierBook,
 } from './readTools';
 import { buildProposal } from './proposalTools';
 import { resolveQuoteId } from './quoteRefMap';
@@ -89,6 +90,9 @@ export async function dispatchToolCall(call: ToolCallInput): Promise<ToolCallOut
           break;
         case 'list_service_reports':
           result = await listServiceReports(input as { query?: string; limit?: number });
+          break;
+        case 'search_supplier_book':
+          result = await searchSupplierBook(input as { query?: string; limit?: number });
           break;
       }
       return { name, id, response: result as any };

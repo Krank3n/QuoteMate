@@ -5,13 +5,14 @@
  * searchLocalSources uses at pricing time, so the flag truthfully predicts
  * what the pipeline will do, and it works with no signal on site.
  *
- * ⚠️ syncFavoritesFromCloud() is a no-op, so after a reinstall this reads
- * empty even though Firestore still holds the import. Every line of copy built
+ * The cloud copy is pulled into that cache once per session before the first
+ * read (syncFavoritesFromCloud), so a reinstall no longer reads empty. It can
+ * still be empty offline or before the pull lands, so every line of copy built
  * on it must say "I can't see a supplier list on this phone" — never "you
  * haven't got one".
  */
 
-import { loadFavoritesFromLocal } from './materialFavorites';
+import { loadFavoritesFromLocal, syncFavoritesFromCloud } from './materialFavorites';
 import { loadGroups } from './supplierGroupService';
 import {
   buildSupplierBookSnapshot,
@@ -28,6 +29,7 @@ let cache: { at: number; snapshot: SupplierBookSnapshot } | null = null;
 export async function loadSupplierBookSnapshot(): Promise<SupplierBookSnapshot> {
   if (cache && Date.now() - cache.at < CACHE_TTL_MS) return cache.snapshot;
   try {
+    await syncFavoritesFromCloud();
     const [favorites, groups] = await Promise.all([
       loadFavoritesFromLocal(),
       loadGroups().catch(() => []),

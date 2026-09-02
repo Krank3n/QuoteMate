@@ -41,6 +41,7 @@ import { RootNavigator } from './src/navigation/RootNavigator';
 import { isDemoCaptureActive } from './src/demo/demoPlayback';
 import { trackEvent } from './src/services/analyticsService';
 import { warmUpTapToPay } from './src/services/squarePayments';
+import { syncFavoritesFromCloud } from './src/services/materialFavorites';
 import { trackWebEvent } from './src/utils/webAnalytics';
 import {
   raceTimeout,
@@ -437,6 +438,10 @@ function App() {
             useJobStore.getState().loadJobs(),
             loadXeroConnection(),
             loadContacts(),
+            // Pull the supplier book's cloud copy into the local cache the
+            // pricing pipeline reads. Without it a reinstall priced from
+            // retail while Firestore still held every saved rate.
+            syncFavoritesFromCloud(),
             // Which pile and sort the Jobs list should open on. Cheap local
             // read; the screen also hydrates on mount, so this only warms it.
             useJobListPrefsStore.getState().hydrate(),

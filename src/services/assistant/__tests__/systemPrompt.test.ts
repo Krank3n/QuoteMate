@@ -225,8 +225,8 @@ describe('supplier book policy', () => {
   });
 
   it("blames the phone, not the tradie, for an empty book", () => {
-    // syncFavoritesFromCloud is a no-op, so a reinstall reads empty even
-    // though Firestore still holds the import.
+    // The cloud copy is pulled once per session, but offline (or before the
+    // pull lands) the local cache still reads empty while Firestore holds it.
     expect(section).toContain("I can't see a supplier list on this phone");
     expect(section).toContain('never "you haven\'t got one"');
   });
@@ -235,6 +235,29 @@ describe('supplier book policy', () => {
     expect(section).toContain(
       'Never claim a price came off the supplier book unless the pricing engine told you it did.',
     );
+  });
+
+  it('can read the book, and says when to', () => {
+    // Before search_supplier_book, "why didn't you use my supplier book?"
+    // had no honest answer — Mate could only see that a book existed.
+    expect(section).toContain('search_supplier_book shows you what\'s IN it');
+    expect(section).toContain('asks why a quote didn\'t use their supplier');
+    expect(section).toContain("pass the entry's exact name as searchTerm to propose_add_line_item");
+    expect(promptSection('Other tools')).toContain('search_supplier_book —');
+    expect(TOOL_DECLARATIONS.find((t) => t.name === 'search_supplier_book')).toBeTruthy();
+  });
+
+  it('a price the tradie gives Mate is remembered, and Mate says so once', () => {
+    expect(section).toContain('saved to the book automatically');
+    expect(section).toContain('Say so in a few words the first time it happens in a conversation, then stop mentioning it.');
+    expect(promptSection('Other tools')).toContain('saves that price to their supplier book');
+  });
+
+  it('a missing price goes to the tradie via propose_update_line_item, never the materials list', () => {
+    const fixing = promptSection('Reviewing & fixing quotes');
+    expect(fixing).toContain('put their number on the row with propose_update_line_item');
+    expect(fixing).not.toContain('set it themselves on the materials list');
+    expect(fixing).toContain('you only ever write one the tradie gave you');
   });
 
   it('Mate never reads prices off the photo itself', () => {

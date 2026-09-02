@@ -26,6 +26,7 @@ export const READ_TOOL_NAMES = [
   'review_quote',
   'get_job_requirements',
   'list_service_reports',
+  'search_supplier_book',
 ] as const;
 
 export const PROPOSAL_TOOL_NAMES = [
@@ -195,6 +196,21 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
     },
   },
   {
+    name: 'search_supplier_book',
+    description:
+      "Look up the tradie's OWN saved prices — their supplier book: rates imported off a supplier's price list, prices they typed in, and prices they corrected on earlier quotes. Pass `query` to find entries for a material (\"R2.5 batts\", \"90x45 treated pine\"); omit it for a summary (count, suppliers, most recent entries). Returns matches[] with name, price (per unit), unit, supplier, coverage and keywords, plus populated, total, suppliers[] and a note on how to read the result. Use it when the tradie asks what their price is for something, asks why a quote didn't use their supplier, or wants a line added at their own rate — then read the entry back rather than guessing, and pass its exact name as searchTerm to propose_add_line_item so the pricing engine hits it. populated:false means THIS PHONE can't see a book — never that they haven't got one.",
+    parameters: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Material to look for, as the tradie said it ("batts", "colorbond sheet", "R2.5"). Omit for a summary of the book.',
+        },
+        limit: { type: 'integer', description: 'Max entries to return (default 10, max 25).' },
+      },
+    },
+  },
+  {
     name: 'propose_draft_quote',
     description:
       'Propose a new draft quote. You do NOT compute materials, quantities, or prices — the existing materials + pricing pipeline handles that on Apply. Your job is to lock down the customer and the scope (a clean job description) and hand off. The Apply path mints the quote, runs analyzeJobDescription with the scope, populates materials, and opens the materials list for the tradie to review.',
@@ -257,7 +273,7 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
   {
     name: 'propose_update_line_item',
     description:
-      "Change a line that's ALREADY on a quote or invoice — its price, its quantity, or its name. Use this whenever the tradie wants a row corrected: \"make the plywood a hundred bucks\", \"that should be 12 not 6\", \"the decking's $8.50 a metre\". NEVER tell them to go and type a price in themselves — that was the old answer and it's wrong, you can do it from here. Always call get_quote first so you have the real material id and can show what's changing (pass displayName, displayCurrentPrice, displayCurrentQty, displayUnit). Setting a price marks the row as manually priced, which also clears any 'estimated' flag review_quote raised against it. Pass only the fields that change. For a row that isn't on the quote at all, use propose_add_line_item; to take one off, propose_delete_line_item.",
+      "Change a line that's ALREADY on a quote or invoice — its price, its quantity, or its name. Use this whenever the tradie wants a row corrected: \"make the plywood a hundred bucks\", \"that should be 12 not 6\", \"the decking's $8.50 a metre\". NEVER tell them to go and type a price in themselves — that was the old answer and it's wrong, you can do it from here. Always call get_quote first so you have the real material id and can show what's changing (pass displayName, displayCurrentPrice, displayCurrentQty, displayUnit). Setting a price marks the row as manually priced, which also clears any 'estimated' flag review_quote raised against it, and saves that price to the tradie's supplier book so the next quote starts from their number. Pass only the fields that change. For a row that isn't on the quote at all, use propose_add_line_item; to take one off, propose_delete_line_item.",
     parameters: {
       type: 'object',
       properties: {
@@ -538,6 +554,8 @@ export const TOOL_RUNTIME: Record<string, { timeoutSecs: number }> = {
   list_service_reports: { timeoutSecs: 20 },
   // Niche inference + supplier-book checks — the slowest read by some way.
   get_job_requirements: { timeoutSecs: 30 },
+  // First call in a session may pull the whole book collection from Firestore.
+  search_supplier_book: { timeoutSecs: 30 },
   // Pure validation + a screen-registered probe. No network.
   show_quote: { timeoutSecs: 10 },
   propose_draft_quote: { timeoutSecs: 10 },

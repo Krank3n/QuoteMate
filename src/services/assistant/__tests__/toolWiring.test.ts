@@ -9,7 +9,7 @@
  * a missing case a compile error), so it isn't re-checked here.
  */
 import { describe, it, expect } from 'vitest';
-import { PROPOSAL_TOOL_NAMES, TOOL_DECLARATIONS } from '../toolSchemas';
+import { PROPOSAL_TOOL_NAMES, READ_TOOL_NAMES, TOOL_DECLARATIONS } from '../toolSchemas';
 import { buildProposal } from '../proposalTools';
 import { applyLabelFor, iconFor, proposalStub, titleFor } from '../../../components/assistant/proposalCardCopy';
 import type { ProposalToolName } from '../toolSchemas';
@@ -35,6 +35,27 @@ const VALID_ARGS: Record<ProposalToolName, Record<string, unknown>> = {
   propose_mark_paid: { quoteId: 'q1' },
   propose_import_supplier_list: {},
 };
+
+describe('read tool wiring', () => {
+  // A read tool has three sites: the name list, the declaration, and the
+  // dispatcher switch. The dispatcher switch is a `switch` over a string
+  // union with no default, so a missing case silently returns undefined —
+  // this pins the two sites TypeScript can't.
+  it('every READ_TOOL_NAMES entry has a declaration with a description and an object schema', () => {
+    for (const name of READ_TOOL_NAMES) {
+      const declaration = TOOL_DECLARATIONS.find((t) => t.name === name);
+      expect(declaration, `${name} has no Gemini declaration`).toBeTruthy();
+      expect(declaration!.description.length).toBeGreaterThan(40);
+      expect(declaration!.parameters.type).toBe('object');
+    }
+  });
+
+  it('search_supplier_book takes an optional query and limit', () => {
+    const declaration = TOOL_DECLARATIONS.find((t) => t.name === 'search_supplier_book')!;
+    expect(Object.keys(declaration.parameters.properties ?? {})).toEqual(['query', 'limit']);
+    expect(declaration.parameters.required ?? []).toEqual([]);
+  });
+});
 
 describe('proposal tool wiring', () => {
   it('every PROPOSAL_TOOL_NAMES entry has a TOOL_DECLARATIONS entry', () => {
