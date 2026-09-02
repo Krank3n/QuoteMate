@@ -5,10 +5,11 @@
  * searchLocalSources uses at pricing time, so the flag truthfully predicts
  * what the pipeline will do, and it works with no signal on site.
  *
- * ⚠️ syncFavoritesFromCloud() is a no-op, so after a reinstall this reads
- * empty even though Firestore still holds the import. Every line of copy built
- * on it must say "I can't see a supplier list on this phone" — never "you
- * haven't got one".
+ * The cloud copy is pulled into that cache once per session at sign-in
+ * (syncFavoritesFromCloud, App.tsx), so a reinstall no longer reads empty. It
+ * can still be empty offline or before the pull lands, so every line of copy
+ * built on it must say "I can't see a supplier list on this phone" — never
+ * "you haven't got one".
  */
 
 import { loadFavoritesFromLocal } from './materialFavorites';

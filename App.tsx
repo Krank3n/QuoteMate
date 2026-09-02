@@ -41,6 +41,8 @@ import { RootNavigator } from './src/navigation/RootNavigator';
 import { isDemoCaptureActive } from './src/demo/demoPlayback';
 import { trackEvent } from './src/services/analyticsService';
 import { warmUpTapToPay } from './src/services/squarePayments';
+import { syncFavoritesFromCloud } from './src/services/materialFavorites';
+import { registerQuotingProfileSource } from './src/services/assistant/quotingProfileContext';
 import { trackWebEvent } from './src/utils/webAnalytics';
 import {
   raceTimeout,
@@ -80,6 +82,11 @@ import { applyPendingReferral, storePendingReferral } from './src/services/pendi
 import { AppUpdateSheet } from './src/components/AppUpdateSheet';
 import { keyboardToolbarVisibleForRoute } from './src/screens/assistant/composerKeyboard';
 import { SplashOverlay } from './src/components/SplashOverlay';
+
+// Mate's prompt carries this business's saved quoting profile (preferences +
+// rate card). Registered here, at the composition root, so the assistant
+// services never import the store.
+registerQuotingProfileSource(() => useStore.getState().businessSettings);
 
 const navigationRef = createNavigationContainerRef<any>();
 
@@ -437,6 +444,10 @@ function App() {
             useJobStore.getState().loadJobs(),
             loadXeroConnection(),
             loadContacts(),
+            // Pull the supplier book's cloud copy into the local cache the
+            // pricing pipeline reads. Without it a reinstall priced from
+            // retail while Firestore still held every saved rate.
+            syncFavoritesFromCloud(),
             // Which pile and sort the Jobs list should open on. Cheap local
             // read; the screen also hydrates on mount, so this only warms it.
             useJobListPrefsStore.getState().hydrate(),

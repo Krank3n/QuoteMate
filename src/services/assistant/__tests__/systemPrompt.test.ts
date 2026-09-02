@@ -199,6 +199,46 @@ describe('never invent app UI', () => {
   });
 });
 
+// The quoting profile: standing rules and a rate card the tradie states once
+// and Mate applies on every quote after. The cards must be offered, never
+// nagged, and never filled with a number Mate worked out itself.
+describe('how they quote', () => {
+  const section = promptSection('How they quote');
+
+  it('reads the saved profile block and applies it silently', () => {
+    expect(section).toContain('"How this business quotes"');
+    expect(section).toContain('never recite them back');
+  });
+
+  it('offers the two cards once, in their words, and never invents', () => {
+    expect(section).toContain('offer propose_remember_preference');
+    expect(section).toContain('offer propose_save_rate');
+    expect(section).toContain('in their words, once');
+    expect(section).toContain('Never invent a rate or a rule');
+  });
+
+  it('drafts off a rate with rateLines and never guesses a quantity', () => {
+    expect(section).toContain('rateLines on propose_draft_quote');
+    expect(section).toContain("materialsMode 'labour_only'");
+    expect(section).toContain('Never guess a quantity');
+  });
+
+  it('keeps the house tone', () => {
+    expectHouseTone(section);
+  });
+
+  it('both cards are listed AND declared', () => {
+    expect(promptSection('Other tools')).toContain('propose_remember_preference —');
+    expect(promptSection('Other tools')).toContain('propose_save_rate —');
+    expect(TOOL_DECLARATIONS.find((t) => t.name === 'propose_remember_preference')).toBeTruthy();
+    expect(TOOL_DECLARATIONS.find((t) => t.name === 'propose_save_rate')).toBeTruthy();
+    const draft = TOOL_DECLARATIONS.find((t) => t.name === 'propose_draft_quote')!;
+    expect(Object.keys(draft.parameters.properties ?? {})).toEqual(
+      expect.arrayContaining(['rateLines', 'materialsMode']),
+    );
+  });
+});
+
 // The supplier-book offer is the easiest thing in the app to make annoying:
 // repeated every turn, or blocking a draft the tradie could have had.
 describe('supplier book policy', () => {
@@ -225,8 +265,8 @@ describe('supplier book policy', () => {
   });
 
   it("blames the phone, not the tradie, for an empty book", () => {
-    // syncFavoritesFromCloud is a no-op, so a reinstall reads empty even
-    // though Firestore still holds the import.
+    // The cloud copy is pulled once per session, but offline (or before the
+    // pull lands) the local cache still reads empty while Firestore holds it.
     expect(section).toContain("I can't see a supplier list on this phone");
     expect(section).toContain('never "you haven\'t got one"');
   });
@@ -235,6 +275,29 @@ describe('supplier book policy', () => {
     expect(section).toContain(
       'Never claim a price came off the supplier book unless the pricing engine told you it did.',
     );
+  });
+
+  it('can read the book, and says when to', () => {
+    // Before search_supplier_book, "why didn't you use my supplier book?"
+    // had no honest answer — Mate could only see that a book existed.
+    expect(section).toContain('search_supplier_book shows you what\'s IN it');
+    expect(section).toContain('asks why a quote didn\'t use their supplier');
+    expect(section).toContain("pass the entry's exact name as searchTerm to propose_add_line_item");
+    expect(promptSection('Other tools')).toContain('search_supplier_book —');
+    expect(TOOL_DECLARATIONS.find((t) => t.name === 'search_supplier_book')).toBeTruthy();
+  });
+
+  it('a price the tradie gives Mate is remembered, and Mate says so once', () => {
+    expect(section).toContain('saved to the book automatically');
+    expect(section).toContain('Say so in a few words the first time it happens in a conversation, then stop mentioning it.');
+    expect(promptSection('Other tools')).toContain('saves that price to their supplier book');
+  });
+
+  it('a missing price goes to the tradie via propose_update_line_item, never the materials list', () => {
+    const fixing = promptSection('Reviewing & fixing quotes');
+    expect(fixing).toContain('put their number on the row with propose_update_line_item');
+    expect(fixing).not.toContain('set it themselves on the materials list');
+    expect(fixing).toContain('you only ever write one the tradie gave you');
   });
 
   it('Mate never reads prices off the photo itself', () => {
@@ -408,5 +471,32 @@ describe('a rough price does not require a customer', () => {
     const placeholder = MATE_SYSTEM_PROMPT.match(/customerDraft: \{ name: "([^"]+)" \}/)?.[1];
     expect(placeholder).toBeTruthy();
     expect(isPlaceholderCustomer(placeholder)).toBe(true);
+  });
+});
+
+describe('drafts that land — the send offer and the scope tool (2 Sep 2026 draft audit)', () => {
+  // 34 drafts applied, 0 send offers, and every post-Apply correction minted a
+  // second quote. The prompt now names the cue and the tool; a reword that
+  // drops either should fail here, not in the next audit.
+  it('names the [context] note as the cue for the send offer', () => {
+    const section = promptSection('Sending & email');
+    expect(section).toContain('The cue is the "[context]" line that says a draft (or a scope update) is priced');
+    expect(section).toContain('want me to send it?');
+    expect(section).toContain("If that line says there's no email or mobile on file, ask for one");
+    expectHouseTone(section);
+  });
+
+  it('routes a post-Apply scope change through propose_update_quote_scope, never a second draft', () => {
+    const notes = promptSection('Context notes');
+    expect(notes).toContain('goes through propose_update_quote_scope on that id');
+    expect(notes).toContain('Do not call propose_draft_quote again for the same job');
+    expect(notes).toContain('the tool refuses while pricing is in flight');
+    expectHouseTone(notes);
+  });
+
+  it('lists the scope tool with the draft-again warning', () => {
+    expect(MATE_SYSTEM_PROMPT).toMatch(/^- propose_update_quote_scope — /m);
+    expect(MATE_SYSTEM_PROMPT).toContain('mints a second quote for the same work — never do that');
+    expect(TOOL_DECLARATIONS.some((t) => t.name === 'propose_update_quote_scope')).toBe(true);
   });
 });

@@ -26,6 +26,7 @@ export const READ_TOOL_NAMES = [
   'review_quote',
   'get_job_requirements',
   'list_service_reports',
+  'search_supplier_book',
 ] as const;
 
 export const PROPOSAL_TOOL_NAMES = [
@@ -40,8 +41,11 @@ export const PROPOSAL_TOOL_NAMES = [
   'propose_convert_to_invoice',
   'propose_reprice',
   'propose_update_quote_rates',
+  'propose_update_quote_scope',
   'propose_mark_paid',
   'propose_import_supplier_list',
+  'propose_remember_preference',
+  'propose_save_rate',
 ] as const;
 
 // Voice-only control tools. Unlike read/proposal tools these never reach
@@ -195,6 +199,21 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
     },
   },
   {
+    name: 'search_supplier_book',
+    description:
+      "Look up the tradie's OWN saved prices — their supplier book: rates imported off a supplier's price list, prices they typed in, and prices they corrected on earlier quotes. Pass `query` to find entries for a material; omit it for the book's most recent entries. Prices are GST-inclusive, as the supplier quotes them. populated:false means THIS PHONE can't see a book — never that they haven't got one.",
+    parameters: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Material to look for, as the tradie said it ("batts", "colorbond sheet", "R2.5"). Omit for a summary of the book.',
+        },
+        limit: { type: 'integer', description: 'Max entries to return (default 10, max 25).' },
+      },
+    },
+  },
+  {
     name: 'propose_draft_quote',
     description:
       'Propose a new draft quote. You do NOT compute materials, quantities, or prices — the existing materials + pricing pipeline handles that on Apply. Your job is to lock down the customer and the scope (a clean job description) and hand off. The Apply path mints the quote, runs analyzeJobDescription with the scope, populates materials, and opens the materials list for the tradie to review.',
@@ -234,8 +253,60 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
           description:
             "Optional. Pass 'invoice' when the tradie has clearly asked for an invoice up front (\"draft an invoice\", \"invoice Tom for the bathroom\"). Apply runs the same materials + pricing pipeline, then auto-converts the result to an invoice so the tradie never has to do a second tap. Defaults to 'quote'.",
         },
+        materialsMode: {
+          type: 'string',
+          enum: ['priced', 'labour_only'],
+          description:
+            "Optional. 'labour_only' when their saved preferences say they don't quote materials, or they say \"just labour\" for this job: the draft gets hours and sections but no materials list and no pricing run. Defaults to 'priced'.",
+        },
+        rateLines: {
+          type: 'array',
+          description:
+            "Optional. Charge the job off their rate card: one line per rate that fits, quantity taken from the job (m², rooms, hours, days — never guessed; ask if you don't know it). Each becomes a lump-sum line on the quote at rate × quantity. When EVERY line has includesMaterials true the rate IS the price: no materials are generated and no labour is added. When a line is labour-only, materials are still worked out and priced on top.",
+          items: {
+            type: 'object',
+            properties: {
+              label: { type: 'string', description: "What the rate is for, as the tradie names it (\"Patio roof supply and fit\")." },
+              quantity: { type: 'number', description: 'How many units this job has.' },
+              unit: { type: 'string', enum: ['m²', 'm', 'm³', 'hour', 'day', 'each', 'room', 'point', 'job'] },
+              unitPrice: { type: 'number', description: 'The rate per unit, in dollars.' },
+              pricesIncludeGst: { type: 'boolean', description: 'True only if the rate was given inc GST. Omit when unsure — the business default applies.' },
+              includesMaterials: { type: 'boolean', description: 'True when the rate is the whole price; false when it is labour only.' },
+            },
+            required: ['label', 'quantity', 'unit', 'unitPrice', 'includesMaterials'],
+          },
+        },
       },
       required: ['jobName', 'jobDescription'],
+    },
+  },
+  {
+    name: 'propose_remember_preference',
+    description:
+      "Remember a STANDING rule about how this tradie quotes, in their words, as one plain sentence: \"labour separate from materials\", \"customers supply their own materials\", \"we only quote labour\", \"round every quote to the nearest $50\". Apply saves it to their settings and it applies to every quote from then on — on this phone and every other. Only for rules that outlast this job, never for this job's details. Propose it once when they state one; if they knock the card back, drop it.",
+    parameters: {
+      type: 'object',
+      properties: {
+        text: { type: 'string', description: 'The rule as one sentence in the tradie\'s words. Under 160 characters.' },
+      },
+      required: ['text'],
+    },
+  },
+  {
+    name: 'propose_save_rate',
+    description:
+      "Save a charge-out rate to the tradie's rate card: \"220 a square ex GST, supply and fit\", \"$90 a room\", \"day rate's 650\". Apply stores it on their settings; you then use it on drafts as a rateLine. Saving a label that already exists replaces that rate. Only ever save a number the tradie said — never one you worked out.",
+    parameters: {
+      type: 'object',
+      properties: {
+        label: { type: 'string', description: "What the rate is for, short and in their words (\"Patio roof supply and fit\", \"End of lease clean\")." },
+        unit: { type: 'string', enum: ['m²', 'm', 'm³', 'hour', 'day', 'each', 'room', 'point', 'job'], description: "Per what. 'job' for a fixed price." },
+        rate: { type: 'number', description: 'Dollars per unit.' },
+        pricesIncludeGst: { type: 'boolean', description: 'True only if they said inc/including GST; false if they said ex/plus GST. Omit when they said neither — the business default applies.' },
+        includesMaterials: { type: 'boolean', description: 'True when the rate is the whole price (supply and fit, all-in). False when it is labour only and materials are charged on top.' },
+        notes: { type: 'string', description: 'Optional qualifier ("minimum 20 m²", "single storey only").' },
+      },
+      required: ['label', 'unit', 'rate', 'includesMaterials'],
     },
   },
   {
@@ -257,7 +328,7 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
   {
     name: 'propose_update_line_item',
     description:
-      "Change a line that's ALREADY on a quote or invoice — its price, its quantity, or its name. Use this whenever the tradie wants a row corrected: \"make the plywood a hundred bucks\", \"that should be 12 not 6\", \"the decking's $8.50 a metre\". NEVER tell them to go and type a price in themselves — that was the old answer and it's wrong, you can do it from here. Always call get_quote first so you have the real material id and can show what's changing (pass displayName, displayCurrentPrice, displayCurrentQty, displayUnit). Setting a price marks the row as manually priced, which also clears any 'estimated' flag review_quote raised against it. Pass only the fields that change. For a row that isn't on the quote at all, use propose_add_line_item; to take one off, propose_delete_line_item.",
+      "Change a line that's ALREADY on a quote or invoice — its price, its quantity, or its name. Use this whenever the tradie wants a row corrected: \"make the plywood a hundred bucks\", \"that should be 12 not 6\", \"the decking's $8.50 a metre\". NEVER tell them to go and type a price in themselves — that was the old answer and it's wrong, you can do it from here. Always call get_quote first so you have the real material id and can show what's changing (pass displayName, displayCurrentPrice, displayCurrentQty, displayUnit). Setting a price marks the row as manually priced, which also clears any 'estimated' flag review_quote raised against it, and saves that price to the tradie's supplier book so the next quote starts from their number. Pass only the fields that change. For a row that isn't on the quote at all, use propose_add_line_item; to take one off, propose_delete_line_item.",
     parameters: {
       type: 'object',
       properties: {
@@ -402,6 +473,26 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
     },
   },
   {
+    name: 'propose_update_quote_scope',
+    description:
+      "Change the scope of a quote that ALREADY EXISTS — its job name, job description and/or labour hours — and re-run the materials + pricing pipeline on it. This is how a correction lands after the draft was applied (\"make it Hager gear\", \"the deck's 13.6 m not 9.4\", a second photo with the specs): NEVER call propose_draft_quote again for a job that already has a quote id — that mints a second quote for the same job. Pass the FULL corrected jobDescription (the pipeline regenerates the materials from it), not just the changed sentence. Nothing changes until the tradie taps 'Update it' on the card — say the card is up, not that it is done. Needs the real quote id from a \"[context]\" line, list_recent_quotes or get_quote. Not for price or rate tweaks — use propose_update_line_item / propose_update_quote_rates for those.",
+    parameters: {
+      type: 'object',
+      properties: {
+        quoteId: { type: 'string', description: 'Document id of the existing quote.' },
+        jobName: { type: 'string', description: 'New short title, if it changed.' },
+        jobDescription: {
+          type: 'string',
+          description:
+            "The full corrected scope, written as the tradie would (rooms, surfaces, measurements, colours, finishes, special conditions). Same rules as propose_draft_quote: this PRINTS ON THE CUSTOMER'S QUOTE — scope only, none of your conversation with the tradie.",
+        },
+        estimatedDurationHours: { type: 'number', description: 'Corrected labour hours, if the tradie gave a new duration.' },
+        displayName: { type: 'string', description: "The quote's current job name, from the \"[context]\" line or get_quote — ALWAYS pass it so the card names the quote (display only)." },
+      },
+      required: ['quoteId'],
+    },
+  },
+  {
     name: 'propose_update_quote_rates',
     description:
       "Change the labour or markup numbers on an existing quote or invoice without re-running the pricing pipeline. Use this whenever the tradie wants to bump the markup percentage, change the labour rate, adjust labour hours, or tweak the labour markup on a specific doc (\"bump markup to 30%\", \"change hours to 14\", \"labour rate to $130/h\"). Pass only the fields that are changing \u2014 omitted fields stay as-is. Markup values are percentages (30 means 30%). laborRate is $/hour, laborHours is hours. Always know the quote id first (from list_recent_quotes / get_quote / the [context] line after a draft).",
@@ -538,6 +629,8 @@ export const TOOL_RUNTIME: Record<string, { timeoutSecs: number }> = {
   list_service_reports: { timeoutSecs: 20 },
   // Niche inference + supplier-book checks — the slowest read by some way.
   get_job_requirements: { timeoutSecs: 30 },
+  // First call in a session may pull the whole book collection from Firestore.
+  search_supplier_book: { timeoutSecs: 30 },
   // Pure validation + a screen-registered probe. No network.
   show_quote: { timeoutSecs: 10 },
   propose_draft_quote: { timeoutSecs: 10 },
@@ -551,8 +644,11 @@ export const TOOL_RUNTIME: Record<string, { timeoutSecs: number }> = {
   propose_convert_to_invoice: { timeoutSecs: 10 },
   propose_reprice: { timeoutSecs: 10 },
   propose_update_quote_rates: { timeoutSecs: 10 },
+  propose_update_quote_scope: { timeoutSecs: 10 },
   propose_mark_paid: { timeoutSecs: 10 },
   propose_import_supplier_list: { timeoutSecs: 10 },
+  propose_remember_preference: { timeoutSecs: 10 },
+  propose_save_rate: { timeoutSecs: 10 },
   apply_pending_proposal: { timeoutSecs: 10 },
   cancel_pending_proposal: { timeoutSecs: 10 },
 };

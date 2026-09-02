@@ -17,6 +17,12 @@
  */
 
 export const GOOGLE_CALENDAR_OAUTH_STATES_COLLECTION = 'googleCalendarOAuthStates';
+/**
+ * Google's consent flow can take a while (account chooser, the unverified-app
+ * interstitial, 2-step verification), so the state nonce lives longer than
+ * Square's 10 minutes. Still single-use.
+ */
+export const GOOGLE_CALENDAR_OAUTH_STATE_TTL_MS = 30 * 60 * 1000;
 export const GOOGLE_CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
 export const GOOGLE_OAUTH_AUTHORIZE_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 export const GOOGLE_OAUTH_TOKEN_URL = 'https://oauth2.googleapis.com/token';

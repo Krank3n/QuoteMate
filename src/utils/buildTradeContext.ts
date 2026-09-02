@@ -12,6 +12,8 @@ export interface TradeContext {
   suggestedMaterials?: string[];
   pricingMethod?: string;
   selectedStore?: string;
+  /** The tradie's saved standing rules (BusinessSettings.quotingPreferences), for the materials prompt. */
+  quotingPreferences?: string[];
 }
 
 export function buildTradeContext(businessSettings: BusinessSettings | null | undefined): TradeContext | undefined {
@@ -57,6 +59,9 @@ export function buildTradeContext(businessSettings: BusinessSettings | null | un
   }
 
   const uniqueMaterials = Array.from(new Set(allSuggestedMaterials));
+  const quotingPreferences = (businessSettings.quotingPreferences ?? [])
+    .filter((p): p is string => typeof p === 'string' && p.trim().length > 0)
+    .map((p) => p.trim());
 
   return {
     categoryName: categoryNames.join(', ') || undefined,
@@ -64,5 +69,6 @@ export function buildTradeContext(businessSettings: BusinessSettings | null | un
     suggestedMaterials: uniqueMaterials.length > 0 ? uniqueMaterials : undefined,
     pricingMethod,
     selectedStore: businessSettings.selectedStore || 'bunnings',
+    ...(quotingPreferences.length > 0 ? { quotingPreferences } : {}),
   };
 }

@@ -59,6 +59,8 @@ import { activateKeepAwakeAsync } from 'expo-keep-awake';
 import { shouldAutoStartMic, resolveAutoStartMic } from './assistant/shouldAutoStartMic';
 import { getMateIntro, isBlankSlate } from './assistant/mateIntro';
 import { buildPipelineDonePrompt } from './assistant/pipelineDoneCopy';
+import { buildSendOfferNote, sendOfferFactsForQuote, shouldOfferSendTurn } from './assistant/sendOfferNote';
+import { reviewBlockForChat } from '../utils/reviewChatFormat';
 import { buildGreetPrompt, withTypeInsteadHint } from './assistant/voiceCopy';
 import { GREET_RETRY_MS, shouldRetryGreet } from './assistant/greetWatchdog';
 import { composerClosedPadding, mateKeyboardOffset } from './assistant/composerKeyboard';
@@ -504,6 +506,9 @@ export function AssistantScreen() {
   // reach handlers defined further down.
   const onImportSavedRef = useRef<(summary: SaveSummary) => void>(() => {});
   const startSupplierImportRef = useRef<(hint: AssistantSheetHint) => Promise<void>>(async () => {});
+  // The post-draft send-offer turn lives after driveTurn (it needs it), but
+  // handleApply runs before either exists — same ref pattern as above.
+  const offerSendTurnRef = useRef<(convoId: string, note: string) => void>(() => {});
   const importer = useSupplierListImport({
     onSaved: (summary) => onImportSavedRef.current(summary),
   });
@@ -806,7 +811,9 @@ export function AssistantScreen() {
       // card up-front so the chat shows live progress instead of a silent
       // gap. Pricing in Phase 2 will extend this same card.
       const wantsProgress =
-        proposal.type === 'propose_draft_quote' || proposal.type === 'propose_reprice';
+        proposal.type === 'propose_draft_quote' ||
+        proposal.type === 'propose_reprice' ||
+        proposal.type === 'propose_update_quote_scope';
       let workingMessageId: string | undefined;
       if (wantsProgress) {
         workingMessageId = generateId();
@@ -836,14 +843,20 @@ export function AssistantScreen() {
       //      short confirmation line.
       const liveSessionForNarration = voiceSessionRef.current;
       const narrating =
-        (proposal.type === 'propose_draft_quote' || proposal.type === 'propose_reprice') &&
+        (proposal.type === 'propose_draft_quote' ||
+          proposal.type === 'propose_reprice' ||
+          proposal.type === 'propose_update_quote_scope') &&
         !!liveSessionForNarration?.isOpen();
       const narrationJobLabel =
         proposal.type === 'propose_draft_quote'
           ? (proposal as Extract<Proposal, { type: 'propose_draft_quote' }>).jobName
           : proposal.type === 'propose_reprice'
             ? (proposal as Extract<Proposal, { type: 'propose_reprice' }>).displayName || 'that quote'
-            : '';
+            : proposal.type === 'propose_update_quote_scope'
+              ? (proposal as Extract<Proposal, { type: 'propose_update_quote_scope' }>).jobName ||
+                (proposal as Extract<Proposal, { type: 'propose_update_quote_scope' }>).displayName ||
+                'that quote'
+              : '';
       if (narrating && liveSessionForNarration) {
         narrationModeRef.current = true;
         // Cut leftover audio from the pre-Apply confirmation reply so the
@@ -891,7 +904,9 @@ export function AssistantScreen() {
       const messagesForPhotos =
         useStore.getState().conversations.find((c) => c.id === conversation.id)?.messages || [];
       const chatPhotos =
-        proposal.type === 'propose_draft_quote' ? collectQuotePhotos(messagesForPhotos) : [];
+        proposal.type === 'propose_draft_quote' || proposal.type === 'propose_update_quote_scope'
+          ? collectQuotePhotos(messagesForPhotos)
+          : [];
 
       const result = await applyProposal(
         proposal,
@@ -899,7 +914,27 @@ export function AssistantScreen() {
           if (!workingMessageId) return;
           updateMessage(conversation.id, workingMessageId, { working: status });
         },
-        chatPhotos.length ? { photos: chatPhotos } : undefined,
+        {
+          ...(chatPhotos.length ? { photos: chatPhotos } : {}),
+          // The quote id exists before the 15–40 s pipeline runs. Hand it to
+          // Mate now: a scope correction typed while pricing was still going
+          // used to be re-drafted as a SECOND quote for the same job, because
+          // the note below only landed once the pipeline finished.
+          onMinted:
+            proposal.type === 'propose_draft_quote'
+              ? (quoteId: string) => {
+                  rememberAppliedQuote(proposal.id, quoteId);
+                  noteToMate(
+                    conversation.id,
+                    `[context] The tradie tapped "Price it up" on propose_draft_quote. ` +
+                      `Quote ${quoteId} ("${proposal.jobName}") now exists and is being priced (15–40 s). ` +
+                      `Use this id from now on. Do NOT call propose_draft_quote again for this job — ` +
+                      `if the tradie changes the scope, say you'll fold it in once pricing lands, then use ` +
+                      `propose_update_quote_scope on ${quoteId} after the "[context]" line that says pricing finished.`,
+                  );
+                }
+              : undefined,
+        },
       );
 
       // If the pipeline beat the narration timer (cached / fast path),
@@ -930,6 +965,25 @@ export function AssistantScreen() {
           : null;
       if (gapNote && gapQuoteId) importOfferRef.current.offeredForQuote.add(gapQuoteId);
 
+      // Who the freshly priced quote is for and what it came to — the send
+      // offer needs both. Read from the store now (the pipeline saved it),
+      // falling back to the unified document for an auto-converted invoice.
+      const offerable =
+        result.ok &&
+        !result.pipelineDegraded &&
+        mintedId &&
+        (proposal.type === 'propose_draft_quote' || proposal.type === 'propose_update_quote_scope');
+      const mintedSource = offerable
+        ? useStore.getState().quotes.find((q) => q.id === mintedId) ||
+          useStore.getState().documents.find((d) => d.id === mintedId)
+        : undefined;
+      const offerFacts = mintedSource
+        ? sendOfferFactsForQuote(
+            mintedSource,
+            proposal.type === 'propose_draft_quote' ? proposal.jobName : narrationJobLabel,
+          )
+        : undefined;
+
       if (narrating) {
         const wrap = buildPipelineDonePrompt({
           jobLabel: narrationJobLabel,
@@ -944,6 +998,7 @@ export function AssistantScreen() {
               ? `Heads up — ${result.review.summary} Work that into the line.`
               : undefined,
           gapNote,
+          sendOffer: offerFacts,
         });
         if (liveSessionForNarration?.isOpen()) {
           liveSessionForNarration.sendUserText(wrap);
@@ -1030,7 +1085,11 @@ export function AssistantScreen() {
       // Read the messages FRESH and stamp only the ids the draft actually got:
       // the pipeline ran for 20-40 s, and writing back the pre-pipeline
       // snapshot would revert any upload that settled in the meantime.
-      if (proposal.type === 'propose_draft_quote' && chatPhotos.length > 0 && mintedId) {
+      if (
+        (proposal.type === 'propose_draft_quote' || proposal.type === 'propose_update_quote_scope') &&
+        chatPhotos.length > 0 &&
+        mintedId
+      ) {
         const live =
           useStore.getState().conversations.find((c) => c.id === conversation.id)?.messages || [];
         const carriedIds = chatPhotos.map((p) => p.id);
@@ -1060,10 +1119,9 @@ export function AssistantScreen() {
           case 'propose_draft_quote':
             if (result.navigate.kind === 'job_preview' || result.navigate.kind === 'quote_materials_list') {
               note(
-                `[context] The tradie tapped Apply on propose_draft_quote. ` +
-                `The resulting quote is ${result.navigate.quoteId} ` +
-                `("${proposal.jobName}"). Reference this id on follow-ups; ` +
-                `do not draft a new quote for the same job.` +
+                `[context] Pricing finished for quote ${result.navigate.quoteId} ` +
+                `("${proposal.jobName}") — it's priced and on screen. Reference this id on follow-ups; ` +
+                `do not draft a new quote for the same job — a scope change goes through propose_update_quote_scope.` +
                 (chatPhotos.length
                   ? ` Their site photos are on it — don't ask them to add photos again.`
                   : '') +
@@ -1114,6 +1172,14 @@ export function AssistantScreen() {
               (gapNote ? ` ${gapNote}` : ''),
             );
             break;
+          case 'propose_update_quote_scope':
+            note(
+              `[context] Updated the scope on quote ${proposal.quoteId} and re-ran materials + pricing — ` +
+              `same quote, no new one.` +
+              (result.review ? ` ${result.review.summary}` : '') +
+              (gapNote ? ` ${gapNote}` : ''),
+            );
+            break;
           case 'propose_update_quote_rates': {
             const parts: string[] = [];
             if (typeof proposal.markup === 'number') parts.push(`markup ${proposal.markup}%`);
@@ -1139,7 +1205,8 @@ export function AssistantScreen() {
         proposal.type === 'propose_draft_quote' ||
         proposal.type === 'propose_reprice' ||
         proposal.type === 'propose_update_customer' ||
-        proposal.type === 'propose_update_quote_rates'
+        proposal.type === 'propose_update_quote_rates' ||
+        proposal.type === 'propose_update_quote_scope'
       ) {
         // Resolve the freshly-minted doc id regardless of whether the
         // pipeline landed on a quote (job_preview) or an auto-converted
@@ -1154,24 +1221,34 @@ export function AssistantScreen() {
         if (renderableId) {
           const isInvoice = result.navigate!.kind === 'open_invoice';
           const docNoun = isInvoice ? 'invoice' : 'draft';
-          const hasIssues = !!result.review && result.review.issues.length > 0;
+          // The flagged rows go under the text as a list (see ReviewRows), so
+          // the sentence only carries the count. The one-line summary with the
+          // names in it stays for voice and the "[context]" notes.
+          const reviewBlock = reviewBlockForChat(result.review);
+          const hasIssues = !!reviewBlock;
+          const heads = reviewBlock ? reviewBlock.headline : '';
           const text =
             proposal.type === 'propose_draft_quote'
               ? hasIssues
-                ? `Here's the ${docNoun} — ${result.review!.summary} Tell me what to tweak, or tap to open it.`
+                ? `Here's the ${docNoun} — ${heads}. Tell me what to tweak, or tap to open it.`
                 : `Here's the ${docNoun} — have a squiz. Tell me what to tweak, or tap to open it.`
               : proposal.type === 'propose_update_customer'
                 ? `Done — this one's on ${proposal.customerName || 'the new contact'} now. Tap to open it.`
                 : proposal.type === 'propose_update_quote_rates'
                   ? "Rates updated and totals re-run. Tap to open it."
+                  : proposal.type === 'propose_update_quote_scope'
+                    ? hasIssues
+                      ? `Scope updated and re-priced — ${heads}. Tap to open it.`
+                      : 'Scope updated and re-priced. Tap to open it.'
                   : hasIssues
-                    ? `Re-priced. ${result.review!.summary} Tap to open it, or say the word and I'll have another go.`
+                    ? `Re-priced — ${heads}. Tap to open it, or say the word and I'll have another go.`
                     : 'Re-priced — every line came back clean. Tap to open it.';
           appendMessage(conversation.id, {
             id: generateId(),
             role: 'assistant',
             text,
             createdAt: new Date().toISOString(),
+            ...(reviewBlock ? { review: reviewBlock } : {}),
           });
           appendMessage(conversation.id, {
             id: generateId(),
@@ -1180,6 +1257,22 @@ export function AssistantScreen() {
             createdAt: new Date().toISOString(),
             inlineQuoteId: renderableId,
           });
+          // Text chat never gave Mate a turn here: the [context] note sat in
+          // the history until the tradie typed again, so the prompt's "offer
+          // the send yourself" rule could not fire — 0 send offers across 44
+          // conversations in the 2 Sep 2026 audit, and the draft just sat.
+          // Voice gets its turn from [pipeline-done]; drive one here.
+          if (
+            offerFacts &&
+            shouldOfferSendTurn({
+              proposalType: proposal.type,
+              ok: true,
+              pipelineDegraded: !!result.pipelineDegraded,
+              voiceOpen: !!voiceSessionRef.current?.isOpen(),
+            })
+          ) {
+            offerSendTurnRef.current(conversation.id, buildSendOfferNote(offerFacts));
+          }
         }
         return;
       }
@@ -1974,6 +2067,40 @@ export function AssistantScreen() {
     },
     [sending, updateMessage, driveTurn],
   );
+
+  // One model turn after a draft (or scope update) lands, so Mate can offer
+  // the send. The hidden [context] note goes on LAST so the history ends on a
+  // user turn — the canned "Here's the draft" line would otherwise be the
+  // tail — then the reply streams into a fresh bubble exactly as a typed
+  // message would. Skipped while a turn is already running; the note still
+  // rides along on the tradie's next message in that case.
+  const offerSendTurn = useCallback(
+    (convoId: string, note: string) => {
+      appendMessage(convoId, {
+        id: generateId(),
+        role: 'user',
+        text: note,
+        createdAt: new Date().toISOString(),
+        hidden: true,
+      });
+      // A turn already streaming (the tradie typed mid-pipeline) carries the
+      // note on its own history; driving a second one would race it.
+      if (sending) return;
+      const streamingId = generateId();
+      appendMessage(convoId, {
+        id: streamingId,
+        role: 'assistant',
+        text: '',
+        createdAt: new Date().toISOString(),
+        thinking: DEFAULT_THINKING_LABEL,
+      });
+      const history =
+        useStore.getState().conversations.find((c) => c.id === convoId)?.messages || [];
+      void driveTurn(convoId, streamingId, history);
+    },
+    [sending, appendMessage, driveTurn],
+  );
+  useEffect(() => { offerSendTurnRef.current = offerSendTurn; }, [offerSendTurn]);
 
   const submit = useCallback(
     async (overrideText?: string) => {

@@ -223,14 +223,18 @@ async function generateMaterialsForQuoteInner(
     const baseQty = m.quantity || 1;
 
     if (matchedRate && typeof matchedRate.price === 'number' && matchedRate.price > 0) {
+      // Book prices are GST-inclusive, as the supplier quotes them — the same
+      // conversion the local pre-pricing pass applies, so a rate matched here
+      // and a rate matched there land on the row at the same number.
+      const ratePrice = supplierPriceForGstMode(matchedRate.price, keepSupplierPriceInclusive(quote));
       return withOrigin({
         id: generateId(),
         name: m.name || matchedRate.productName,
         quantity: baseQty,
         unit: (matchedRate.unit || m.unit || 'each') as Material['unit'],
         searchTerm: m.searchTerm,
-        price: matchedRate.price,
-        totalPrice: matchedRate.price * baseQty,
+        price: ratePrice,
+        totalPrice: ratePrice * baseQty,
         manualPriceOverride: false,
         pricingSource: 'manual',
         priceConfidence: 'high',

@@ -25,6 +25,7 @@ import {
 import { auth, db } from '../../config/firebase';
 import { Material } from '../../types';
 import { reviewQuoteMaterials } from '../../utils/quoteReview';
+import { resolveSupplierBookLookup } from './supplierBookLookup';
 import { isProposalId, resolveQuoteId } from './quoteRefMap';
 import { fuzzyScoreQuote } from './quoteFuzzy';
 import { getPillsForNiche } from '../../data/nichePills';
@@ -792,6 +793,28 @@ export async function getJobRequirements(input: { category?: string; niche?: str
     // usual trade — see JobRequirementsInput.categoryFromSettings.
     categoryFromSettings: !input.category && !input.niche,
     supplierBook,
+  });
+}
+
+// --- Supplier book ----------------------------------------------------------
+//
+// Mate could see THAT a book existed (three booleans on get_job_requirements)
+// but never what was in it, so "why didn't you use my supplier book?" and
+// "what's my price for batts?" had no honest answer. The matching is the
+// pure resolveSupplierBookLookup; this wrapper only gathers its inputs.
+
+export async function searchSupplierBook(input: { query?: string; limit?: number }): Promise<unknown> {
+  requireUid();
+  // Lazy for the same reason as getJobRequirements: keeps the pure helpers in
+  // this module importable under vitest without AsyncStorage at import time.
+  // Reads the local cache, like every other consumer — the cloud copy is
+  // pulled into it at sign-in.
+  const { loadFavoritesFromLocal } = await import('../materialFavorites');
+  const favorites = await loadFavoritesFromLocal();
+  return resolveSupplierBookLookup({
+    query: typeof input?.query === 'string' ? input.query : undefined,
+    limit: typeof input?.limit === 'number' ? input.limit : undefined,
+    favorites: Object.values(favorites),
   });
 }
 

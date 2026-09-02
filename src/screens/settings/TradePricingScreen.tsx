@@ -41,6 +41,7 @@ import { loadGroups } from '../../services/supplierGroupService';
 import { composeSupplierList, type SupplierEntry } from '../../services/supplierPriority';
 import type { SupplierGroup } from '../../types';
 import { GridBackground } from '../../components/GridBackground';
+import { rateSummary, removePreference, removeRate } from '../../services/quotingProfile';
 
 export function TradePricingScreen() {
   const styles = useStyles();
@@ -176,6 +177,31 @@ export function TradePricingScreen() {
     const category = getTradeCategoryById(catId);
     return category?.niches.map(niche => ({ ...niche, categoryId: catId })) || [];
   });
+
+  // "How you quote" — rules and rates Mate saved from chat. Removing one
+  // saves straight away: it is not part of this screen's draft/Save cycle
+  // (the snapshot above tracks categories, niches and priority only), and a
+  // wrong rule left in place is applied to the very next quote.
+  const quotingPreferences = businessSettings?.quotingPreferences ?? [];
+  const rateCard = businessSettings?.rateCard ?? [];
+  const handleRemovePreference = useCallback(async (text: string) => {
+    if (!businessSettings) return;
+    try {
+      const next = removePreference(businessSettings.quotingPreferences, text);
+      await setBusinessSettings({ ...businessSettings, quotingPreferences: next.length ? next : undefined });
+    } catch {
+      setShowErrorModal(true);
+    }
+  }, [businessSettings, setBusinessSettings]);
+  const handleRemoveRate = useCallback(async (id: string) => {
+    if (!businessSettings) return;
+    try {
+      const next = removeRate(businessSettings.rateCard, id);
+      await setBusinessSettings({ ...businessSettings, rateCard: next.length ? next : undefined });
+    } catch {
+      setShowErrorModal(true);
+    }
+  }, [businessSettings, setBusinessSettings]);
 
   const handleSave = async (opts?: { silent?: boolean }): Promise<boolean> => {
     try {
@@ -373,6 +399,46 @@ export function TradePricingScreen() {
                   );
                 })}
               </View>
+            </Surface>
+          )}
+
+          {/* How you quote — only once Mate has saved something, so the 95%
+              who never state a rule or a rate never see an empty card. */}
+          {(quotingPreferences.length > 0 || rateCard.length > 0) && (
+            <Surface style={styles.card}>
+              <Title style={styles.sectionTitle}>How you quote</Title>
+              <Text style={styles.helperText}>
+                Rules and rates Mate has saved from your chats. Every quote follows them — remove anything that's off.
+              </Text>
+              {quotingPreferences.map((pref) => (
+                <View key={pref} style={styles.profileRow}>
+                  <Text style={styles.profileText}>{pref}</Text>
+                  <TouchableOpacity
+                    style={styles.profileRemove}
+                    onPress={() => handleRemovePreference(pref)}
+                    accessibilityLabel={`Remove preference: ${pref}`}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <MaterialCommunityIcons name="close-circle-outline" size={20} color={themeColors.textMuted} />
+                  </TouchableOpacity>
+                </View>
+              ))}
+              {rateCard.map((rate) => (
+                <View key={rate.id} style={styles.profileRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.supplierName}>{rate.label}</Text>
+                    <Text style={styles.supplierSubtitle}>{rateSummary(rate)}</Text>
+                  </View>
+                  <TouchableOpacity
+                    style={styles.profileRemove}
+                    onPress={() => handleRemoveRate(rate.id)}
+                    accessibilityLabel={`Remove rate: ${rate.label}`}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <MaterialCommunityIcons name="close-circle-outline" size={20} color={themeColors.textMuted} />
+                  </TouchableOpacity>
+                </View>
+              ))}
             </Surface>
           )}
 
@@ -660,6 +726,23 @@ const useStyles = makeStyles((t) => ({
     fontWeight: '700',
     color: t.colors.onAccent,
     letterSpacing: 0.4,
+  },
+  profileRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderTopColor: t.colors.border,
+  },
+  profileText: {
+    flex: 1,
+    fontSize: 14,
+    color: t.colors.text,
+    lineHeight: 20,
+  },
+  profileRemove: {
+    paddingLeft: 12,
+    paddingVertical: 4,
   },
   addSupplierButton: {
     flexDirection: 'row',

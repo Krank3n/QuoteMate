@@ -43,7 +43,7 @@ import { generateId } from '../utils/generateId';
 import { lightTap } from '../utils/haptics';
 import { useMaterialSearch } from '../hooks/useMaterialSearch';
 import { supplierPriceForGstMode, formatCurrency } from '../utils/quoteCalculator';
-import { saveFavoriteProduct } from '../services/materialFavorites';
+import { rememberMaterialPrice, shouldAutoRememberPrice } from '../services/priceMemory';
 import { ActionSheet, ActionSheetOption } from './ActionSheet';
 import { PillToggle, type PillToggleOption } from './PillToggle';
 
@@ -241,6 +241,21 @@ function InlineAddMaterialForm({
   // Sticky across rapid-entry saves so a tradie filling in several lines
   // from the same supplier doesn't have to retick. Resets on Cancel.
   const [saveToBook, setSaveToBook] = useState(false);
+  // Once the tradie has tapped the chip themselves, their choice stands — the
+  // auto-tick below never overrides it.
+  const bookChipTouchedRef = useRef(false);
+  // Correcting a pipeline price on an existing row ticks the chip for them: a
+  // price the tradie just overrode is the single most useful thing the book
+  // can hold, and most sent quotes carry one. Typing the pipeline's number
+  // back un-ticks it, so a quantity-only edit never freezes retail in.
+  const handlePriceChange = useCallback(
+    (text: string) => {
+      setPrice(text);
+      if (!isEdit || bookChipTouchedRef.current) return;
+      setSaveToBook(shouldAutoRememberPrice(initialMaterial, text));
+    },
+    [isEdit, initialMaterial],
+  );
   // Result the user picked from the dropdown — kept so its metadata
   // (itemNumber/url/imageUrl/pricingSource) gets carried onto the saved
   // material. Cleared whenever the user edits the name field after picking.
@@ -449,56 +464,20 @@ function InlineAddMaterialForm({
       nameInputRef.current?.focus();
       return;
     }
+    // "Save to book" ticked — by the tradie, or by a price correction (see
+    // handlePriceChange) — also writes a personal rate the pricing engine will
+    // prefer next time. Fire-and-forget: the quote-side save is what matters.
+    if (saveToBook) {
+      void rememberMaterialPrice(material, selectedResultRef.current, { pricesIncludeGst });
+    }
     if (isEdit) {
       onUpdate?.(material);
       lightTap();
-      // Persist a favorite if the user opted in (same as add mode).
-      if (saveToBook) {
-        const picked = selectedResultRef.current;
-        const isPickedSupplier = picked && picked.productName === material.name;
-        const favPayload = {
-          productName: material.name,
-          store: isPickedSupplier ? (picked.store || 'manual') : 'manual',
-          unit: material.unit,
-          price: material.price,
-          ...(isPickedSupplier && picked.itemNumber ? { itemNumber: picked.itemNumber } : {}),
-          ...(material.productUrl ? { productUrl: material.productUrl } : {}),
-          ...(material.imageUrl ? { imageUrl: material.imageUrl } : {}),
-          source: 'manual' as const,
-          lastUpdatedAt: new Date().toISOString(),
-        };
-        saveFavoriteProduct(material.name, material.name, favPayload).catch(() => {
-          /* non-blocking */
-        });
-      }
       onExitEdit?.();
       return;
     }
     onAdd(material);
     lightTap();
-
-    // When the user has ticked "Save to book", also persist a favorite so
-    // this material is reachable from the Supplier Book next time. Fire-and-
-    // forget — the quote-side save has already succeeded; a failed favorite
-    // write shouldn't block the rapid-entry flow.
-    if (saveToBook) {
-      const picked = selectedResultRef.current;
-      const isPickedSupplier = picked && picked.productName === material.name;
-      const favPayload = {
-        productName: material.name,
-        store: isPickedSupplier ? (picked.store || 'manual') : 'manual',
-        unit: material.unit,
-        price: material.price,
-        ...(isPickedSupplier && picked.itemNumber ? { itemNumber: picked.itemNumber } : {}),
-        ...(material.productUrl ? { productUrl: material.productUrl } : {}),
-        ...(material.imageUrl ? { imageUrl: material.imageUrl } : {}),
-        source: 'manual' as const,
-        lastUpdatedAt: new Date().toISOString(),
-      };
-      saveFavoriteProduct(material.name, material.name, favPayload).catch(() => {
-        /* non-blocking */
-      });
-    }
 
     // Rapid-entry mode: clear the form but keep unit + saveToBook sticky,
     // stay expanded and refocus the name input so the user can add another
@@ -511,7 +490,7 @@ function InlineAddMaterialForm({
     selectedResultRef.current = null;
     search.clearResults();
     setTimeout(() => nameInputRef.current?.focus(), 0);
-  }, [buildMaterial, isEdit, onAdd, onExitEdit, onUpdate, search, saveToBook]);
+  }, [buildMaterial, isEdit, onAdd, onExitEdit, onUpdate, search, saveToBook, pricesIncludeGst]);
 
   const incrementQty = useCallback(() => {
     const n = parseFloat(qty) || 0;
@@ -713,7 +692,7 @@ function InlineAddMaterialForm({
           <RNTextInput
             style={styles.priceInput}
             value={price}
-            onChangeText={setPrice}
+            onChangeText={handlePriceChange}
             placeholder="0.00"
             placeholderTextColor={themeColors.textMuted}
             keyboardType="decimal-pad"
@@ -729,7 +708,10 @@ function InlineAddMaterialForm({
         {!isWork && (
         <TouchableOpacity
           style={[styles.saveToBookChip, saveToBook && styles.saveToBookChipActive]}
-          onPress={() => setSaveToBook(v => !v)}
+          onPress={() => {
+            bookChipTouchedRef.current = true;
+            setSaveToBook(v => !v);
+          }}
           accessibilityLabel="Also save to supplier book"
           accessibilityState={{ checked: saveToBook }}
         >

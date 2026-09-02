@@ -3,6 +3,9 @@
 // and the declarations in services/assistant/toolSchemas.ts must stay in step
 // with it.
 
+import type { RateCardUnit, RateLine } from './index';
+import type { ChatReviewBlock } from '../utils/reviewChatFormat';
+
 export type ProposalType =
   | 'propose_draft_quote'
   | 'propose_add_line_item'
@@ -15,8 +18,11 @@ export type ProposalType =
   | 'propose_convert_to_invoice'
   | 'propose_reprice'
   | 'propose_update_quote_rates'
+  | 'propose_update_quote_scope'
   | 'propose_mark_paid'
-  | 'propose_import_supplier_list';
+  | 'propose_import_supplier_list'
+  | 'propose_remember_preference'
+  | 'propose_save_rate';
 
 export interface BaseProposal {
   id: string;
@@ -35,6 +41,35 @@ export interface DraftQuoteProposal extends BaseProposal {
   // When 'invoice', the draft is auto-converted into an invoice once the
   // materials + pricing pipeline finishes. Defaults to 'quote'.
   documentType?: 'quote' | 'invoice';
+  /**
+   * 'labour_only': the draft gets hours and sections from the analysis but no
+   * materials list and no pricing run — for trades that don't quote gear.
+   */
+  materialsMode?: 'priced' | 'labour_only';
+  /**
+   * The job charged off the tradie's rate card. Each becomes a lump-sum work
+   * item at rate × quantity. When every line includes materials, nothing is
+   * generated or priced on top and no labour is added.
+   */
+  rateLines?: RateLine[];
+}
+
+/** A standing rule about how the tradie quotes, saved to their settings on Apply. */
+export interface RememberPreferenceProposal extends BaseProposal {
+  type: 'propose_remember_preference';
+  text: string;
+}
+
+/** A charge-out rate for the tradie's rate card. */
+export interface SaveRateProposal extends BaseProposal {
+  type: 'propose_save_rate';
+  label: string;
+  unit: RateCardUnit;
+  rate: number;
+  /** Undefined = the tradie didn't say; the business default applies on Apply. */
+  pricesIncludeGst?: boolean;
+  includesMaterials: boolean;
+  notes?: string;
 }
 
 export interface AddLineItemProposal extends BaseProposal {
@@ -144,6 +179,23 @@ export interface RepriceQuoteProposal extends BaseProposal {
   displayTotal?: number;
 }
 
+/**
+ * Change the scope of a quote that already exists — name, description, hours
+ * — and re-run materials + pricing on it. Before this tool, the only way to
+ * change a scope after Apply was propose_draft_quote again, which minted a
+ * second quote for the same job (Overton x2, Lee-Anne x2, Aug/Sep 2026).
+ * At least one of the three fields must be present; the validator enforces it.
+ */
+export interface UpdateQuoteScopeProposal extends BaseProposal {
+  type: 'propose_update_quote_scope';
+  quoteId: string;
+  jobName?: string;
+  jobDescription?: string;
+  estimatedDurationHours?: number;
+  /** Display-only — names the quote on the card without a round-trip. */
+  displayName?: string;
+}
+
 // Mark an invoice paid in full — the voice / chat equivalent of opening
 // the doc and tapping "Mark paid". Apply records a payment for the
 // remaining balance with the chosen method so the books stay accurate
@@ -204,8 +256,11 @@ export type Proposal =
   | ConvertToInvoiceProposal
   | RepriceQuoteProposal
   | UpdateQuoteRatesProposal
+  | UpdateQuoteScopeProposal
   | MarkPaidProposal
-  | ImportSupplierListProposal;
+  | ImportSupplierListProposal
+  | RememberPreferenceProposal
+  | SaveRateProposal;
 
 export type ProposalStatus = 'pending' | 'applied' | 'dismissed' | 'failed';
 
@@ -306,6 +361,10 @@ export interface ChatMessage {
   // Optional CTA rendered below the text. Used after pipeline completion to
   // offer "View quote" — keeps the user in chat unless they tap.
   cta?: ChatMessageCta;
+  // Flagged rows from the pricing pass, rendered as a list under the text —
+  // one line per row with the money, the name and a plain reason. The
+  // one-sentence QuoteReview.summary stays for voice and "[context]" notes.
+  review?: ChatReviewBlock;
   // When set, the bubble renders an inline JobScopeCard for this quote so the
   // tradie can review the priced draft (and keep chatting to adjust) without
   // bouncing out to the wizard.

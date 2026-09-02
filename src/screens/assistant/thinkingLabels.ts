@@ -34,6 +34,7 @@ export function labelForToolCall(name: string, args?: Record<string, unknown>): 
     case 'show_quote': return 'Putting it on screen…';
     case 'get_business_defaults': return 'Checking your rates…';
     case 'get_job_requirements': return 'Working out what this job needs…';
+    case 'search_supplier_book': return 'Checking your supplier book…';
     case 'review_quote': return 'Checking the prices…';
     case 'list_service_reports': return 'Looking for service reports…';
     case 'propose_draft_quote': return 'Writing up the scope…';
@@ -41,6 +42,7 @@ export function labelForToolCall(name: string, args?: Record<string, unknown>): 
     case 'propose_send_quote': return 'Getting the send ready…';
     case 'propose_import_supplier_list': return 'Getting the reader ready…';
     case 'propose_reprice': return 'Setting up a re-price…';
+    case 'propose_update_quote_scope': return 'Rewriting the scope…';
     default:
       // Every other propose_* is Mate drafting a card. Anything genuinely
       // unknown falls back to the neutral line rather than naming the tool.

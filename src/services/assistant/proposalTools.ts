@@ -14,14 +14,73 @@ import {
   ImportSupplierListProposal,
   MarkPaidProposal,
   Proposal,
+  RememberPreferenceProposal,
   RepriceQuoteProposal,
+  SaveRateProposal,
   SendQuoteProposal,
   UpdateCustomerProposal,
   UpdateQuoteRatesProposal,
+  UpdateQuoteScopeProposal,
 } from '../../types/assistant';
+import type { RateLine } from '../../types';
 import { resolveQuoteId } from './quoteRefMap';
 import { resolveKnownQuoteId } from './showQuoteGate';
+import { isPricingInFlight } from './pricingInFlight';
 import { sanitizeJobDescription } from '../../utils/sanitizeJobDescription';
+import { MAX_LABEL_CHARS, RATE_CARD_UNITS, normalisePreference, normaliseRateUnit } from '../quotingProfile';
+
+/** Whitespace-folded, trimmed, capped — for text that lands in the prompt on every turn. */
+const shortText = (v: unknown): string =>
+  typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, MAX_LABEL_CHARS) : '';
+
+/** Most rate lines a draft can carry — a job with more than this is not one rate card job. */
+const MAX_RATE_LINES = 10;
+
+/**
+ * Validate the draft's rateLines. Returns the clean lines, or a message that
+ * names the first problem so the model can fix its call rather than guess.
+ */
+function parseRateLines(raw: unknown): { lines?: RateLine[]; error?: string } {
+  if (raw === undefined || raw === null) return { lines: undefined };
+  if (!Array.isArray(raw)) return { error: 'rateLines must be an array of {label, quantity, unit, unitPrice, includesMaterials}.' };
+  if (raw.length === 0) return { lines: undefined };
+  if (raw.length > MAX_RATE_LINES) return { error: `rateLines: at most ${MAX_RATE_LINES} lines.` };
+  const lines: RateLine[] = [];
+  for (const [i, item] of (raw as Array<Record<string, unknown>>).entries()) {
+    const label = shortText(item?.label);
+    if (!label) return { error: `rateLines[${i}] needs a label — what the rate is for.` };
+    const quantity = Number(item.quantity);
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      return { error: `rateLines[${i}] "${label}": quantity must be above zero — ask the tradie for it rather than guessing.` };
+    }
+    const unit = normaliseRateUnit(item.unit);
+    if (!unit) return { error: `rateLines[${i}] "${label}": unit must be one of ${RATE_CARD_UNITS.join(', ')}.` };
+    const unitPrice = Number(item.unitPrice);
+    if (!Number.isFinite(unitPrice) || unitPrice <= 0) return { error: `rateLines[${i}] "${label}": unitPrice must be above zero.` };
+    if (typeof item.includesMaterials !== 'boolean') {
+      return { error: `rateLines[${i}] "${label}": includesMaterials must be true (the rate is the whole price) or false (labour only).` };
+    }
+    lines.push({
+      label,
+      quantity,
+      unit,
+      unitPrice,
+      includesMaterials: item.includesMaterials,
+      ...(typeof item.pricesIncludeGst === 'boolean' ? { pricesIncludeGst: item.pricesIncludeGst } : {}),
+    });
+  }
+  // All-in and labour-only rates cannot share a draft: the labour-only line
+  // would send the pipeline off generating the very materials the all-in
+  // line already covers, and the customer would pay for them twice.
+  const inclusive = lines.filter((l) => l.includesMaterials).length;
+  if (inclusive > 0 && inclusive < lines.length) {
+    return {
+      error:
+        'rateLines must all include materials or all be labour only — a supply-and-fit rate and a labour rate on one draft would price the materials twice. Split the job or pick one.',
+    };
+  }
+  return { lines };
+}
 
 export interface ProposalResult {
   proposal?: Proposal;
@@ -82,6 +141,8 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
       if (!input.customerId && !input.customerDraft?.name) {
         return { error: 'Provide customerId (from find_customer) or customerDraft.name.' };
       }
+      const rateLines = parseRateLines(input.rateLines);
+      if (rateLines.error) return { error: rateLines.error };
       const proposal: DraftQuoteProposal = {
         id,
         toolUseId,
@@ -99,6 +160,84 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
             ? Number(input.estimatedDurationHours)
             : undefined,
         documentType: input.documentType === 'invoice' ? 'invoice' : 'quote',
+        ...(input.materialsMode === 'labour_only' ? { materialsMode: 'labour_only' as const } : {}),
+        ...(rateLines.lines ? { rateLines: rateLines.lines } : {}),
+      };
+      return { proposal };
+    }
+
+    case 'propose_remember_preference': {
+      const text = normalisePreference(input?.text);
+      if (!text) {
+        return { error: 'propose_remember_preference needs text: one plain sentence in the tradie\'s words, under 160 characters.' };
+      }
+      const proposal: RememberPreferenceProposal = { id, toolUseId, createdAt: now, type: 'propose_remember_preference', text };
+      return { proposal };
+    }
+
+    case 'propose_save_rate': {
+      const label = shortText(input?.label);
+      if (!label) return { error: 'propose_save_rate needs a label — what the rate is for.' };
+      const unit = normaliseRateUnit(input?.unit);
+      if (!unit) return { error: `propose_save_rate needs unit as one of ${RATE_CARD_UNITS.join(', ')}.` };
+      const rate = Number(input?.rate);
+      if (!Number.isFinite(rate) || rate <= 0) return { error: 'propose_save_rate needs rate above zero.' };
+      if (typeof input?.includesMaterials !== 'boolean') {
+        return { error: 'propose_save_rate needs includesMaterials: true when the rate is the whole price, false when materials are charged on top.' };
+      }
+      const proposal: SaveRateProposal = {
+        id,
+        toolUseId,
+        createdAt: now,
+        type: 'propose_save_rate',
+        label,
+        unit,
+        rate: Math.round(rate * 100) / 100,
+        includesMaterials: input.includesMaterials,
+        ...(typeof input.pricesIncludeGst === 'boolean' ? { pricesIncludeGst: input.pricesIncludeGst } : {}),
+        ...(shortText(input.notes) ? { notes: shortText(input.notes) } : {}),
+      };
+      return { proposal };
+    }
+
+    case 'propose_update_quote_scope': {
+      const known = requireKnownQuote('propose_update_quote_scope', input);
+      if (known.error) return { error: known.error };
+      const jobName = typeof input.jobName === 'string' && input.jobName.trim() ? String(input.jobName).trim() : undefined;
+      const rawDescription = typeof input.jobDescription === 'string' ? String(input.jobDescription) : '';
+      const jobDescription = rawDescription.trim() ? sanitizeJobDescription(rawDescription).text : undefined;
+      if (rawDescription.trim() && (!jobDescription || jobDescription.trim().length < 10)) {
+        return {
+          error:
+            'propose_update_quote_scope needs the FULL corrected jobDescription — the pipeline regenerates the materials from it.',
+        };
+      }
+      const hours =
+        Number.isFinite(Number(input.estimatedDurationHours)) && Number(input.estimatedDurationHours) > 0
+          ? Number(input.estimatedDurationHours)
+          : undefined;
+      if (jobName === undefined && jobDescription === undefined && hours === undefined) {
+        return { error: 'propose_update_quote_scope needs at least one of jobName, jobDescription or estimatedDurationHours.' };
+      }
+      // Two pipelines on one quote would race each other's saves. Refuse
+      // in-turn so Mate tells the tradie it'll fold the change in once pricing
+      // lands, then proposes it after the "[context]" line says it finished.
+      if (isPricingInFlight(known.quoteId!)) {
+        return {
+          error:
+            `Quote ${known.quoteId} is still being priced. Tell the tradie you'll fold the change in once pricing lands (one short line), and call propose_update_quote_scope only after the "[context]" line says pricing finished.`,
+        };
+      }
+      const proposal: UpdateQuoteScopeProposal = {
+        id,
+        toolUseId,
+        createdAt: now,
+        type: 'propose_update_quote_scope',
+        quoteId: known.quoteId!,
+        jobName,
+        jobDescription,
+        estimatedDurationHours: hours,
+        displayName: input.displayName ? String(input.displayName) : undefined,
       };
       return { proposal };
     }

@@ -27,6 +27,25 @@ export interface MaterialsPromptOptions {
   tradeContext?: { nicheName?: string } | null;
 }
 
+const MAX_QUOTING_PREFERENCES = 20;
+const MAX_QUOTING_PREFERENCE_CHARS = 160;
+
+/**
+ * The tradie's own standing rules ("customers supply their own materials",
+ * "we only quote labour"), as a block of the trade-context section. They come
+ * from BusinessSettings.quotingPreferences, written by Mate through a confirm
+ * card; the client caps them the same way, but this is the boundary, so it
+ * caps again. Empty string when there is nothing to say.
+ */
+export function renderQuotingPreferences(prefs: unknown): string {
+  if (!Array.isArray(prefs)) return '';
+  const lines = prefs
+    .filter((p): p is string => typeof p === 'string' && p.trim().length > 0)
+    .slice(0, MAX_QUOTING_PREFERENCES)
+    .map((p) => `  - ${p.replace(/\s+/g, ' ').trim().slice(0, MAX_QUOTING_PREFERENCE_CHARS)}`);
+  if (lines.length === 0) return '';
+  return `\n- How this tradie quotes (their own standing rules — follow them when deciding what to list and how):\n${lines.join('\n')}`;
+}
 
 export function buildMaterialsPrompt(o: MaterialsPromptOptions): string {
   const {

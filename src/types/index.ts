@@ -154,6 +154,34 @@ export interface ReeceOrder {
   reference?: string;             // PO / job reference echoed to Reece
 }
 
+/** Per what a charge-out rate is stated. 'job' is a fixed price. */
+export type RateCardUnit = 'm²' | 'm' | 'm³' | 'hour' | 'day' | 'each' | 'room' | 'point' | 'job';
+
+/** One saved charge-out rate on BusinessSettings.rateCard. */
+export interface RateCardEntry {
+  id: string;
+  label: string;                // "Patio roof supply and fit"
+  unit: RateCardUnit;
+  rate: number;                 // per unit, in the basis below
+  /** The basis the tradie stated it in. Undefined for a business not registered for GST — there is no basis. */
+  pricesIncludeGst?: boolean;
+  includesMaterials: boolean;   // true = the rate is the whole price; false = labour only
+  notes?: string;
+  updatedAt: string;            // ISO
+}
+
+/** A rate applied to one job on a draft: rate × quantity becomes a lump-sum line. */
+export interface RateLine {
+  label: string;
+  quantity: number;
+  unit: RateCardUnit;
+  /** Per unit, in the basis `pricesIncludeGst` says. */
+  unitPrice: number;
+  /** Undefined = the tradie didn't say; the business default applies at apply. */
+  pricesIncludeGst?: boolean;
+  includesMaterials: boolean;
+}
+
 export interface FavoriteProductMapping {
   productName: string;
   store: string;
@@ -692,6 +720,15 @@ export interface BusinessSettings {
   defaultMarkup: number;
   defaultLaborMarkup?: number; // Default labor markup percentage. Falls back to defaultMarkup if undefined.
   transportMarkupEnabled?: boolean; // Whether to include transport/logistics markup on quotes (default: true)
+  /**
+   * How this business quotes, in the tradie's own words — standing rules Mate
+   * saved through a confirm card ("labour separate from materials"). Injected
+   * into Mate's prompt and the materials prompt. ≤ 20, ≤ 160 chars each; see
+   * services/quotingProfile.ts.
+   */
+  quotingPreferences?: string[];
+  /** Named charge-out rates Mate saved; applied on drafts as rate × quantity. */
+  rateCard?: RateCardEntry[];
   // Trade type
   tradeType?: TradeType; // Default: 'all'
   // New: Trade category and niche for improved targeting (multi-select)

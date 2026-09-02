@@ -4,6 +4,9 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { makeStyles, useThemeColors } from '../../theme';
 import { Proposal, ProposalStatus } from '../../types/assistant';
 import { applyLabelFor, iconFor, titleFor } from './proposalCardCopy';
+import { rateLineUnitPrice, rateLinesCoverMaterials, rateSummary, rateUnitLabel } from '../../services/quotingProfile';
+import { registeredBusinessSettings } from '../../services/assistant/quotingProfileContext';
+import { resolveGstMode } from '../../../shared/document/gstMode';
 
 interface Props {
   proposal: Proposal;
@@ -75,6 +78,11 @@ function ProposalCardImpl({ proposal, status, onApply, onDismiss }: Props) {
 function Body({ proposal }: { proposal: Proposal }) {
   const styles = useStyles();
   const themeColors = useThemeColors();
+  // A Mate draft is minted from business settings, so the document's GST
+  // mode is the business's — read once, here, for the draft card's rate lines.
+  const settings = registeredBusinessSettings();
+  const docMode = resolveGstMode(settings ?? {});
+  const businessInclusive = settings?.pricesIncludeGst === true;
   switch (proposal.type) {
     case 'propose_draft_quote':
       return (
@@ -84,13 +92,46 @@ function Body({ proposal }: { proposal: Proposal }) {
             <Text style={styles.dim}>New contact: {proposal.customerDraft.name}</Text>
           )}
           <Text style={styles.scope} numberOfLines={6}>{proposal.jobDescription}</Text>
+          {(proposal.rateLines ?? []).map((line, i) => {
+            // The same conversion the apply path runs, so the card shows the
+            // money that will land on the quote — not the number as said.
+            const unitPrice = rateLineUnitPrice(line, docMode, businessInclusive);
+            return (
+              <Text key={`${line.label}-${i}`} style={styles.dim}>
+                {line.label}: {line.quantity} {line.unit === 'each' ? '×' : `${line.unit} ×`} {formatCurrency(unitPrice)}
+                {line.unit === 'each' ? '' : ` ${rateUnitLabel(line.unit)}`} = {formatCurrency(Math.round(unitPrice * line.quantity * 100) / 100)}
+                {docMode === 'inclusive' ? ' inc GST' : docMode === 'exclusive' ? ' ex GST' : ''}
+              </Text>
+            );
+          })}
           <Text style={styles.dim}>
-            I'll work out the materials and price them up
-            {proposal.documentType === 'invoice' ? ' and converts the result to an invoice' : ''}.
-            {typeof proposal.estimatedDurationHours === 'number'
-              ? ` Labour seeded at ${proposal.estimatedDurationHours} h.`
-              : ''}
+            {rateLinesCoverMaterials(proposal.rateLines)
+              ? 'Priced off your rate card — no materials list, no extra labour.'
+              : proposal.materialsMode === 'labour_only'
+                ? 'Labour only — hours and sections, no materials list.'
+                : `I'll work out the materials and price them up${
+                    proposal.rateLines?.length ? ' on top of your rate' : ''
+                  }${proposal.documentType === 'invoice' ? ' and convert the result to an invoice' : ''}.${
+                    typeof proposal.estimatedDurationHours === 'number' && !proposal.rateLines?.length
+                      ? ` Labour seeded at ${proposal.estimatedDurationHours} h.`
+                      : ''
+                  }`}
           </Text>
+        </View>
+      );
+    case 'propose_remember_preference':
+      return (
+        <View>
+          <Text style={styles.summary}>“{proposal.text}”</Text>
+          <Text style={styles.dim}>I'll follow this on every quote from now on. Remove it any time under Trade pricing.</Text>
+        </View>
+      );
+    case 'propose_save_rate':
+      return (
+        <View>
+          <Text style={styles.summary}>{proposal.label}</Text>
+          <Text style={styles.dim}>{rateSummary(proposal)}</Text>
+          <Text style={styles.dim}>Goes on your rate card — I'll use it whenever it fits a job.</Text>
         </View>
       );
     case 'propose_add_line_item':
@@ -126,7 +167,10 @@ function Body({ proposal }: { proposal: Proposal }) {
           </Text>
           <Text style={styles.dim}>{changes.join(' · ')}</Text>
           {proposal.price !== undefined && (
-            <Text style={styles.dim}>Priced by you, so it won't be flagged as an estimate.</Text>
+            <Text style={styles.dim}>
+              Priced by you, so it won't be flagged as an estimate.
+              {proposal.price > 0 ? ' Saved to your supplier book for next time.' : ''}
+            </Text>
           )}
         </View>
       );
@@ -256,6 +300,23 @@ function Body({ proposal }: { proposal: Proposal }) {
             <Text style={styles.dim}>Current total {formatCurrency(proposal.displayTotal)}.</Text>
           )}
           <Text style={styles.dim}>I'll re-check the prices on the rows that looked off.</Text>
+        </View>
+      );
+    case 'propose_update_quote_scope':
+      return (
+        <View>
+          <Text style={styles.summary} numberOfLines={2}>
+            {proposal.jobName || proposal.displayName || 'This quote'}
+          </Text>
+          {proposal.jobDescription ? (
+            <Text style={styles.scope} numberOfLines={6}>{proposal.jobDescription}</Text>
+          ) : null}
+          <Text style={styles.dim}>
+            I'll redo the materials and prices for the new scope.
+            {typeof proposal.estimatedDurationHours === 'number'
+              ? ` Labour set to ${proposal.estimatedDurationHours} h.`
+              : ''}
+          </Text>
         </View>
       );
     case 'propose_mark_paid': {

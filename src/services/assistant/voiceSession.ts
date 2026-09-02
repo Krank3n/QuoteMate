@@ -28,7 +28,7 @@
 import { httpsCallable } from 'firebase/functions';
 import { ChatMessage, Proposal } from '../../types/assistant';
 import { functions } from '../../config/firebase';
-import { MATE_SYSTEM_PROMPT } from './systemPrompt';
+import { systemPromptWithProfile } from './quotingProfileContext';
 import { TOOL_DECLARATIONS, CONTROL_TOOL_DECLARATIONS, isControlTool } from './toolSchemas';
 import { dispatchToolCall } from './toolDispatcher';
 import {
@@ -504,7 +504,7 @@ async function openGeminiVoiceSession(
               // comes from the system prompt + the chosen voice, not this.
               speechConfig: { languageCode: 'en-US' },
             },
-            systemInstruction: { parts: [{ text: MATE_SYSTEM_PROMPT }] },
+            systemInstruction: { parts: [{ text: systemPromptWithProfile() }] },
             // Voice gets the control tools on top of the shared set so the tradie
             // can accept/cancel a card by voice when they can't tap.
             tools: [{ functionDeclarations: [...TOOL_DECLARATIONS, ...CONTROL_TOOL_DECLARATIONS] }],

@@ -22,7 +22,7 @@ import { ChatMessage } from '../../types/assistant';
 import { buildClientTools } from './clientTools';
 import { buildSeedContext } from './seedContext';
 import { ALL_TOOL_DECLARATIONS } from './toolSchemas';
-import { MATE_SYSTEM_PROMPT } from './systemPrompt';
+import { systemPromptWithProfile } from './quotingProfileContext';
 import { OpenAiMintedToken, LiveOfflineError } from './liveSession';
 import { base64ToBytes, bytesToBase64 } from './audioCodec';
 import type { VoiceSession, VoiceSessionCallbacks, VoiceSessionOptions } from './voiceSession';
@@ -216,7 +216,7 @@ export async function openOpenAiVoiceSession(
     session: {
       type: 'realtime',
       output_modalities: ['audio'],
-      instructions: MATE_SYSTEM_PROMPT,
+      instructions: systemPromptWithProfile(),
       tools: toOpenAiTools(),
       tool_choice: 'auto',
       audio: {

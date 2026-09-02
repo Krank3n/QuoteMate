@@ -28,6 +28,7 @@ import { ensureElevenLabsRuntime } from './elevenLabsRuntime';
 import { ensureMicPermission } from './micPermission';
 import { buildClientTools } from './clientTools';
 import { buildSeedContext } from './seedContext';
+import { quotingProfileContextNote } from './quotingProfileContext';
 import { elapsedVoiceSeconds } from './voiceMinutes';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '../../config/firebase';
@@ -247,10 +248,14 @@ export async function openElevenLabsVoiceSession(
     throw err instanceof Error ? err : new LiveOfflineError('Voice failed to start.');
   }
 
-  // Prior turns, as a contextual update so it doesn't trigger a reply. Sent
-  // after connect — before it, there is nothing to send it down.
-  if (seed) {
-    try { (conv as any).sendContextualUpdate(seed); } catch { /* best-effort */ }
+  // Two silent notes, sent after connect (before it there is nothing to send
+  // them down): this business's saved quoting profile — the agent's prompt is
+  // provisioned server-side and shared by every tradie, so the per-business
+  // part rides in as a "[context]" update — then the prior turns. Neither
+  // triggers a reply.
+  for (const note of [quotingProfileContextNote(), seed]) {
+    if (!note) continue;
+    try { (conv as any).sendContextualUpdate(note); } catch { /* best-effort */ }
   }
 
   const session: VoiceSession = {
