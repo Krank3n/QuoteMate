@@ -410,3 +410,30 @@ describe('a rough price does not require a customer', () => {
     expect(isPlaceholderCustomer(placeholder)).toBe(true);
   });
 });
+
+describe('drafts that land — the send offer and the scope tool (2 Sep 2026 draft audit)', () => {
+  // 34 drafts applied, 0 send offers, and every post-Apply correction minted a
+  // second quote. The prompt now names the cue and the tool; a reword that
+  // drops either should fail here, not in the next audit.
+  it('names the [context] note as the cue for the send offer', () => {
+    const section = promptSection('Sending & email');
+    expect(section).toContain('The cue is the "[context]" line that says a draft (or a scope update) is priced');
+    expect(section).toContain('want me to send it?');
+    expect(section).toContain("If that line says there's no email or mobile on file, ask for one");
+    expectHouseTone(section);
+  });
+
+  it('routes a post-Apply scope change through propose_update_quote_scope, never a second draft', () => {
+    const notes = promptSection('Context notes');
+    expect(notes).toContain('goes through propose_update_quote_scope on that id');
+    expect(notes).toContain('Do not call propose_draft_quote again for the same job');
+    expect(notes).toContain('the tool refuses while pricing is in flight');
+    expectHouseTone(notes);
+  });
+
+  it('lists the scope tool with the draft-again warning', () => {
+    expect(MATE_SYSTEM_PROMPT).toMatch(/^- propose_update_quote_scope — /m);
+    expect(MATE_SYSTEM_PROMPT).toContain('mints a second quote for the same work — never do that');
+    expect(TOOL_DECLARATIONS.some((t) => t.name === 'propose_update_quote_scope')).toBe(true);
+  });
+});

@@ -146,6 +146,7 @@ import {
 import {
   DEFAULT_GOOGLE_CALENDAR_REDIRECT_URI,
   GOOGLE_CALENDAR_OAUTH_STATES_COLLECTION,
+  GOOGLE_CALENDAR_OAUTH_STATE_TTL_MS,
   GOOGLE_OAUTH_TOKEN_URL,
   buildGoogleCalendarAuthUrl,
   parseGoogleTokenResponse,
@@ -14109,7 +14110,7 @@ export const getGoogleCalendarAuthUrl = functions.https.onRequest((req, res) => 
         createdAtMs: Date.now(),
         // Consumed (deleted) by googleCalendarCallback; abandoned flows are
         // reaped by a Firestore TTL policy on expiresAt if one is enabled.
-        expiresAt: admin.firestore.Timestamp.fromMillis(Date.now() + SQUARE_OAUTH_STATE_TTL_MS),
+        expiresAt: admin.firestore.Timestamp.fromMillis(Date.now() + GOOGLE_CALENDAR_OAUTH_STATE_TTL_MS),
       });
 
     const authUrl = buildGoogleCalendarAuthUrl({
@@ -14154,7 +14155,11 @@ export const googleCalendarCallback = functions.https.onRequest((req, res) => {
       .doc(hashOAuthState(state));
     const stateVerdict = await admin.firestore().runTransaction(async (tx) => {
       const snap = await tx.get(stateRef);
-      const verdict = oauthStateVerdict(snap.exists ? (snap.data() as any) : undefined, Date.now());
+      const verdict = oauthStateVerdict(
+        snap.exists ? (snap.data() as any) : undefined,
+        Date.now(),
+        GOOGLE_CALENDAR_OAUTH_STATE_TTL_MS,
+      );
       if (verdict.ok || snap.exists) tx.delete(stateRef);
       return verdict;
     });

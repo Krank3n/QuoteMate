@@ -18,9 +18,11 @@ import {
   SendQuoteProposal,
   UpdateCustomerProposal,
   UpdateQuoteRatesProposal,
+  UpdateQuoteScopeProposal,
 } from '../../types/assistant';
 import { resolveQuoteId } from './quoteRefMap';
 import { resolveKnownQuoteId } from './showQuoteGate';
+import { isPricingInFlight } from './pricingInFlight';
 import { sanitizeJobDescription } from '../../utils/sanitizeJobDescription';
 
 export interface ProposalResult {
@@ -99,6 +101,48 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
             ? Number(input.estimatedDurationHours)
             : undefined,
         documentType: input.documentType === 'invoice' ? 'invoice' : 'quote',
+      };
+      return { proposal };
+    }
+
+    case 'propose_update_quote_scope': {
+      const known = requireKnownQuote('propose_update_quote_scope', input);
+      if (known.error) return { error: known.error };
+      const jobName = typeof input.jobName === 'string' && input.jobName.trim() ? String(input.jobName).trim() : undefined;
+      const rawDescription = typeof input.jobDescription === 'string' ? String(input.jobDescription) : '';
+      const jobDescription = rawDescription.trim() ? sanitizeJobDescription(rawDescription).text : undefined;
+      if (rawDescription.trim() && (!jobDescription || jobDescription.trim().length < 10)) {
+        return {
+          error:
+            'propose_update_quote_scope needs the FULL corrected jobDescription — the pipeline regenerates the materials from it.',
+        };
+      }
+      const hours =
+        Number.isFinite(Number(input.estimatedDurationHours)) && Number(input.estimatedDurationHours) > 0
+          ? Number(input.estimatedDurationHours)
+          : undefined;
+      if (jobName === undefined && jobDescription === undefined && hours === undefined) {
+        return { error: 'propose_update_quote_scope needs at least one of jobName, jobDescription or estimatedDurationHours.' };
+      }
+      // Two pipelines on one quote would race each other's saves. Refuse
+      // in-turn so Mate tells the tradie it'll fold the change in once pricing
+      // lands, then proposes it after the "[context]" line says it finished.
+      if (isPricingInFlight(known.quoteId!)) {
+        return {
+          error:
+            `Quote ${known.quoteId} is still being priced. Tell the tradie you'll fold the change in once pricing lands (one short line), and call propose_update_quote_scope only after the "[context]" line says pricing finished.`,
+        };
+      }
+      const proposal: UpdateQuoteScopeProposal = {
+        id,
+        toolUseId,
+        createdAt: now,
+        type: 'propose_update_quote_scope',
+        quoteId: known.quoteId!,
+        jobName,
+        jobDescription,
+        estimatedDurationHours: hours,
+        displayName: input.displayName ? String(input.displayName) : undefined,
       };
       return { proposal };
     }

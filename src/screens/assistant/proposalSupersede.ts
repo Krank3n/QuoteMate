@@ -21,7 +21,7 @@ export interface SupersededRef {
 // supersedes per-conversation (no quote id exists yet); the others supersede
 // per-quote.
 const PER_CONVERSATION = new Set(['propose_draft_quote']);
-const PER_QUOTE = new Set(['propose_update_customer', 'propose_update_quote_rates']);
+const PER_QUOTE = new Set(['propose_update_customer', 'propose_update_quote_rates', 'propose_update_quote_scope']);
 
 function isPending(message: ChatMessage, proposal: Proposal): boolean {
   return (message.proposalStatus?.[proposal.id] ?? 'pending') === 'pending';

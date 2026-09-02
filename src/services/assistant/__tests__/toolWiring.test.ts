@@ -32,6 +32,7 @@ const VALID_ARGS: Record<ProposalToolName, Record<string, unknown>> = {
   propose_convert_to_invoice: { quoteId: 'q1' },
   propose_reprice: { quoteId: 'q1' },
   propose_update_quote_rates: { quoteId: 'q1', markup: 30 },
+  propose_update_quote_scope: { quoteId: 'q1', jobDescription: 'Replace 22 m of paling fence along the back boundary, Hager gear.' },
   propose_mark_paid: { quoteId: 'q1' },
   propose_import_supplier_list: {},
 };

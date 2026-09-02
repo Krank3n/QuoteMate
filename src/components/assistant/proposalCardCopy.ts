@@ -23,6 +23,7 @@ export function titleFor(p: Proposal): string {
     case 'propose_convert_to_invoice': return 'Convert to invoice';
     case 'propose_reprice': return 'Re-price quote';
     case 'propose_update_quote_rates': return 'Update rates';
+    case 'propose_update_quote_scope': return 'Update scope';
     case 'propose_mark_paid': return 'Mark invoice paid';
     case 'propose_import_supplier_list': return 'Add supplier prices';
   }
@@ -41,6 +42,7 @@ export function iconFor(p: Proposal): string {
     case 'propose_convert_to_invoice': return 'cash-multiple';
     case 'propose_reprice': return 'refresh';
     case 'propose_update_quote_rates': return 'tune-variant';
+    case 'propose_update_quote_scope': return 'note-edit-outline';
     case 'propose_mark_paid': return 'check-decagram-outline';
     case 'propose_import_supplier_list': return 'clipboard-list-outline';
   }
@@ -65,6 +67,7 @@ export function applyLabelFor(p: Proposal): string {
     case 'propose_convert_to_invoice': return 'Convert';
     case 'propose_reprice': return 'Re-price';
     case 'propose_update_quote_rates': return 'Update';
+    case 'propose_update_quote_scope': return 'Update it';
     case 'propose_mark_paid': return 'Mark paid';
     case 'propose_import_supplier_list': return 'Read list';
   }

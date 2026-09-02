@@ -100,3 +100,32 @@ describe('findSupersededProposals', () => {
     expect(refs).toEqual([]);
   });
 });
+
+describe('findSupersededProposals — scope updates', () => {
+  function updateScope(id: string, quoteId: string, description: string): Proposal {
+    return {
+      id,
+      toolUseId: `t_${id}`,
+      createdAt: new Date(2026, 8, 2).toISOString(),
+      type: 'propose_update_quote_scope',
+      quoteId,
+      jobDescription: description,
+    } as Proposal;
+  }
+
+  it('a newer scope update dismisses the older pending one for the same quote', () => {
+    const old = msg([updateScope('s1', 'q1', 'Full board upgrade, 15 RCBOs.')]);
+    const incoming = updateScope('s2', 'q1', 'Full board upgrade, 15 Hager RCBOs.');
+    const fresh = msg([incoming]);
+    expect(findSupersededProposals([old, fresh], [incoming], fresh.id)).toEqual([
+      { messageId: old.id, proposalId: 's1' },
+    ]);
+  });
+
+  it('leaves a pending scope update on a different quote alone', () => {
+    const other = msg([updateScope('s1', 'q2', 'Deck, 13.6 m.')]);
+    const incoming = updateScope('s2', 'q1', 'Full board upgrade.');
+    const fresh = msg([incoming]);
+    expect(findSupersededProposals([other, fresh], [incoming], fresh.id)).toEqual([]);
+  });
+});

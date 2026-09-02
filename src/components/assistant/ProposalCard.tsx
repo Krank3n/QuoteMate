@@ -258,6 +258,23 @@ function Body({ proposal }: { proposal: Proposal }) {
           <Text style={styles.dim}>I'll re-check the prices on the rows that looked off.</Text>
         </View>
       );
+    case 'propose_update_quote_scope':
+      return (
+        <View>
+          <Text style={styles.summary} numberOfLines={2}>
+            {proposal.jobName || proposal.displayName || 'This quote'}
+          </Text>
+          {proposal.jobDescription ? (
+            <Text style={styles.scope} numberOfLines={6}>{proposal.jobDescription}</Text>
+          ) : null}
+          <Text style={styles.dim}>
+            I'll redo the materials and prices for the new scope.
+            {typeof proposal.estimatedDurationHours === 'number'
+              ? ` Labour set to ${proposal.estimatedDurationHours} h.`
+              : ''}
+          </Text>
+        </View>
+      );
     case 'propose_mark_paid': {
       const title = [proposal.displayCustomerName, proposal.displayName]
         .filter(Boolean)

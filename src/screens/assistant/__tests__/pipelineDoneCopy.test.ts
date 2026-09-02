@@ -142,3 +142,42 @@ describe('the three outcomes stay distinguishable', () => {
       .not.toMatch(DONE_WORDS);
   });
 });
+
+describe('buildPipelineDonePrompt — the send offer', () => {
+  // Voice Mate acknowledged every draft and offered to send none of them:
+  // one line, no numbers, and the total is a number. With the facts in hand
+  // the clean-run line ends on the offer.
+  const facts = { jobName: 'Raised deck', customerName: 'Katie', total: 1183, hasContact: true, docType: 'quote' as const };
+
+  it('ends the clean-run line with the offer, customer and total included', () => {
+    const prompt = buildPipelineDonePrompt({ jobLabel: 'Raised deck', ok: true, sendOffer: facts });
+    expect(prompt).toContain('Pipeline finished');
+    expect(prompt).toContain("that's Katie's quote at $1,183 — want me to send it?");
+    expect(prompt).toMatch(/never say the tag/i);
+    expect(prompt).toMatch(/no item lists/i);
+    // The blanket number ban would forbid the total itself.
+    expect(prompt).not.toMatch(/no numbers/i);
+  });
+
+  it('asks for an email or mobile instead when there is nobody to send to', () => {
+    const prompt = buildPipelineDonePrompt({
+      jobLabel: 'Raised deck', ok: true, sendOffer: { ...facts, hasContact: false },
+    });
+    expect(prompt).toContain('email or mobile');
+    expect(prompt).not.toContain('want me to send it?');
+  });
+
+  it('a degraded run never offers a send — there is nothing priced to send', () => {
+    const prompt = buildPipelineDonePrompt({
+      jobLabel: 'Raised deck', ok: true, pipelineDegraded: true, sendOffer: facts,
+    });
+    expect(prompt).not.toContain('want me to send it?');
+    expect(prompt).toContain('Fetch Prices');
+  });
+
+  it('without the facts the clean-run line is unchanged', () => {
+    const prompt = buildPipelineDonePrompt({ jobLabel: 'Raised deck', ok: true });
+    expect(prompt).toMatch(/no numbers/i);
+    expect(prompt).not.toContain('want me to send it?');
+  });
+});

@@ -2,8 +2,10 @@ import { afterEach } from 'vitest';
 import { buildProposal, setUnconsumedAttachmentProbe } from '../proposalTools';
 import { rememberAppliedQuote } from '../quoteRefMap';
 import { setRenderableQuoteProbe } from '../showQuoteGate';
+import { markPricingStarted, __resetPricingInFlight } from '../pricingInFlight';
 import type { ImportSupplierListProposal } from '../../../types/assistant';
 import type {
+  UpdateQuoteScopeProposal,
   RepriceQuoteProposal,
   DeleteLineItemProposal,
   DeleteQuoteProposal,
@@ -359,5 +361,79 @@ describe('propose_update_line_item (real conversation, 28 Aug 2026)', () => {
     expect(proposal).toMatchObject({
       displayName: 'Plywood panel', displayCurrentPrice: 0, displayUnit: 'each',
     });
+  });
+});
+
+describe('buildProposal propose_update_quote_scope', () => {
+  // A scope correction after Apply used to be a second propose_draft_quote —
+  // and a second quote for the same job (Overton x2, Lee-Anne x2, Aug/Sep 2026).
+  afterEach(() => {
+    setRenderableQuoteProbe(null);
+    __resetPricingInFlight();
+  });
+
+  it('builds a proposal that edits the existing quote in place', () => {
+    const { proposal, error } = buildProposal('propose_update_quote_scope', 'tool_s1', {
+      quoteId: 'doc_real',
+      jobDescription: 'Full board upgrade — Hager 100A 3-pole main switch, 15 Hager RCBOs, keep the chassis.',
+      estimatedDurationHours: 6,
+    });
+    expect(error).toBeUndefined();
+    expect(proposal).toMatchObject({
+      type: 'propose_update_quote_scope',
+      quoteId: 'doc_real',
+      estimatedDurationHours: 6,
+    });
+    expect((proposal as UpdateQuoteScopeProposal).jobDescription).toContain('Hager');
+  });
+
+  it('resolves a proposal id to the minted quote id, like every other quote-scoped tool', () => {
+    rememberAppliedQuote('prop_scope-1', 'doc_minted_9');
+    const { proposal } = buildProposal('propose_update_quote_scope', 'tool_s2', {
+      quoteId: 'prop_scope-1',
+      jobName: 'Patio roof — Lee-Anne',
+    });
+    expect((proposal as UpdateQuoteScopeProposal).quoteId).toBe('doc_minted_9');
+  });
+
+  it('needs something to change', () => {
+    const { error } = buildProposal('propose_update_quote_scope', 'tool_s3', { quoteId: 'doc_real' });
+    expect(error).toMatch(/at least one of/);
+  });
+
+  it('refuses a description too short to regenerate materials from', () => {
+    const { error } = buildProposal('propose_update_quote_scope', 'tool_s4', {
+      quoteId: 'doc_real',
+      jobDescription: 'Hager',
+    });
+    expect(error).toMatch(/FULL corrected jobDescription/);
+  });
+
+  it('strips conversation chatter out of the description, same as the draft tool', () => {
+    const { proposal } = buildProposal('propose_update_quote_scope', 'tool_s5', {
+      quoteId: 'doc_real',
+      jobDescription: "Replace 22 m of paling fence along the back boundary. What's their phone number?",
+    });
+    expect((proposal as UpdateQuoteScopeProposal).jobDescription).not.toMatch(/phone number/i);
+  });
+
+  it('refuses while that quote is still being priced, and says what to do instead', () => {
+    markPricingStarted('doc_real');
+    const { proposal, error } = buildProposal('propose_update_quote_scope', 'tool_s6', {
+      quoteId: 'doc_real',
+      jobName: 'Patio roof',
+    });
+    expect(proposal).toBeUndefined();
+    expect(error).toMatch(/still being priced/);
+    expect(error).toMatch(/pricing finished/);
+  });
+
+  it('refuses an id that is not on this phone, like the other quote-scoped tools', () => {
+    setRenderableQuoteProbe((id) => (id === 'doc_real' ? id : null));
+    const { error } = buildProposal('propose_update_quote_scope', 'tool_s7', {
+      quoteId: 'quote_pending_123',
+      jobName: 'Patio roof',
+    });
+    expect(error).toMatch(/never invent a quoteId/);
   });
 });

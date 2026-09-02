@@ -59,3 +59,12 @@ describe('oauthStateVerdict (PAY-03)', () => {
     expect(v).toEqual({ ok: true, uid: 'user-1' });
   });
 });
+
+describe('oauthStateVerdict ttl override', () => {
+  it('honours a longer TTL for flows that legitimately take longer than Square (Google consent)', () => {
+    const doc = { uid: 'u1', createdAtMs: NOW_MS - 20 * 60 * 1000 };
+    expect(oauthStateVerdict(doc, NOW_MS).ok).toBe(false);
+    expect(oauthStateVerdict(doc, NOW_MS, 30 * 60 * 1000)).toEqual({ ok: true, uid: 'u1' });
+    expect(oauthStateVerdict({ ...doc, createdAtMs: NOW_MS - 31 * 60 * 1000 }, NOW_MS, 30 * 60 * 1000).ok).toBe(false);
+  });
+});

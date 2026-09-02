@@ -14,6 +14,8 @@
 // Saying it landed when it didn't is the single most expensive thing Mate can
 // do: the tradie stops watching, and finds out at the customer's place.
 
+import { sendOfferLine, type SendOfferFacts } from './sendOfferNote';
+
 export interface PipelineDoneArgs {
   /** Job name, for the model's own reference — never read aloud as an id. */
   jobLabel: string;
@@ -27,6 +29,13 @@ export interface PipelineDoneArgs {
   reviewNote?: string;
   /** Supplier-book gap offer, when this run is worth mentioning. */
   gapNote?: string | null;
+  /**
+   * Who the quote is for and what it came to. When present the clean-run
+   * line ends with the send offer — the audit found voice Mate acknowledging
+   * every draft and offering to send none of them, because this prompt asked
+   * for one line and banned numbers, and the total is a number.
+   */
+  sendOffer?: SendOfferFacts;
 }
 
 /**
@@ -58,6 +67,18 @@ export function buildPipelineDonePrompt(args: PipelineDoneArgs): string {
       `the quote currently has no prices on it.${extras} ` +
       `One short honest line: the draft's there but pricing didn't get through, and they'll need to ` +
       `tap Fetch Prices on it. Do NOT say it's done, drafted, sorted, ready, or finished — it isn't. ${NO_ECHO}`
+    );
+  }
+
+  if (args.sendOffer) {
+    const offer = args.sendOffer;
+    const ask = offer.hasContact
+      ? `then, in the same breath, offer to send it: "${sendOfferLine(offer)}"`
+      : `then, in the same breath, ask for the customer's email or mobile so you can send it — there's none on file.`;
+    // The total is the one number that belongs in this line; item lists still don't.
+    return (
+      `[pipeline-done] Pipeline finished for "${args.jobLabel}".${extras} ` +
+      `One short acknowledging line — "right, that's drafted" — ${ask} Never say the tag. No item lists.`
     );
   }
 
