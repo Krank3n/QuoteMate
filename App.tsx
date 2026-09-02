@@ -14,7 +14,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 LogBox.ignoreLogs(['ref.measureLayout must be called with a ref to a native component']);
 import { NavigationContainer, DarkTheme, LinkingOptions, createNavigationContainerRef, getStateFromPath as defaultGetStateFromPath, getPathFromState as defaultGetPathFromState } from '@react-navigation/native';
 import * as Linking from 'expo-linking';
-import { LINKING_SCREENS } from './src/navigation/linkingConfig';
+import { LINKING_CONFIG } from './src/navigation/linkingConfig';
 import { Provider as PaperProvider } from 'react-native-paper';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -137,9 +137,7 @@ const linking: LinkingOptions<any> = {
   // Route map lives in src/navigation/linkingConfig.ts so it can be unit
   // tested (see linkingConfig.test.ts) and cross-checked against the native
   // Universal Link / App Link path allow-lists.
-  config: {
-    screens: { ...LINKING_SCREENS },
-  },
+  config: LINKING_CONFIG,
   ...(Platform.OS === 'web'
     ? {
         getPathFromState(state, config) {

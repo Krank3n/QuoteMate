@@ -20,3 +20,18 @@ export const LINKING_SCREENS = {
   // `/app/ref/undefined`, which 404s on a hard refresh of the web build.
   Referral: 'ref/:code?',
 } as const;
+
+/**
+ * Full linking config for NavigationContainer.
+ *
+ * `initialRouteName` matters on native: a cold open on a deep link (a scanned
+ * referral QR, a supplier /join link, a notification) would otherwise build a
+ * navigation state holding only that screen, so the first back press has
+ * nothing to pop to and leaves the app. Seeding Main beneath it makes back
+ * land on the Dashboard instead. On web it means a refresh on /app/ref/… still
+ * has the app behind the browser's back button.
+ */
+export const LINKING_CONFIG = {
+  initialRouteName: 'Main',
+  screens: { ...LINKING_SCREENS },
+};
