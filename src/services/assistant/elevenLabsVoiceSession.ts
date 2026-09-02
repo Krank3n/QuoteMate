@@ -28,6 +28,7 @@ import { ensureElevenLabsRuntime } from './elevenLabsRuntime';
 import { ensureMicPermission } from './micPermission';
 import { buildClientTools } from './clientTools';
 import { buildSeedContext } from './seedContext';
+import { quotingProfileContextNote } from './quotingProfileContext';
 import { elapsedVoiceSeconds } from './voiceMinutes';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '../../config/firebase';
@@ -245,6 +246,14 @@ export async function openElevenLabsVoiceSession(
   } catch (err: any) {
     alive = false;
     throw err instanceof Error ? err : new LiveOfflineError('Voice failed to start.');
+  }
+
+  // This business's saved quoting profile. The agent's prompt is provisioned
+  // server-side and shared by every tradie, so the per-business part rides in
+  // as a contextual update — the same "[context]" framing the prompt teaches.
+  const profile = quotingProfileContextNote();
+  if (profile) {
+    try { (conv as any).sendContextualUpdate(profile); } catch { /* best-effort */ }
   }
 
   // Prior turns, as a contextual update so it doesn't trigger a reply. Sent

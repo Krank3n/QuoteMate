@@ -42,6 +42,12 @@ import { isDemoCaptureActive } from './src/demo/demoPlayback';
 import { trackEvent } from './src/services/analyticsService';
 import { warmUpTapToPay } from './src/services/squarePayments';
 import { syncFavoritesFromCloud } from './src/services/materialFavorites';
+import { registerQuotingProfileSource } from './src/services/assistant/quotingProfileContext';
+
+// Mate's prompt carries this business's saved quoting profile (preferences +
+// rate card). Registered here, at the composition root, so the assistant
+// services never import the store.
+registerQuotingProfileSource(() => useStore.getState().businessSettings);
 import { trackWebEvent } from './src/utils/webAnalytics';
 import {
   raceTimeout,

@@ -28,8 +28,8 @@
  * succeeds with the supplier rows present.
  */
 import React from 'react';
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, waitFor } from '@testing-library/react';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { render, waitFor, fireEvent } from '@testing-library/react';
 import { View, findNodeHandle } from 'react-native';
 
 // Faithful stand-in for react-native-draggable-flatlist. The Nestable
@@ -153,5 +153,57 @@ describe('TradePricingScreen on web', () => {
     // suppliers must appear in the DOM via the static web list.
     expect(await findByText('Reece')).toBeTruthy();
     await waitFor(() => expect(getByText('Bunnings')).toBeTruthy());
+  });
+
+  // "How you quote": rules and rates Mate saved from chat. They must be
+  // visible and removable here — a wrong rule left in place is applied to
+  // the very next quote — and removing one saves straight away, outside the
+  // screen's own Save button.
+  describe('How you quote', () => {
+    const plain = { supplierPriority: [] as string[] };
+    const withProfile = {
+      supplierPriority: [] as string[],
+      quotingPreferences: ['Labour separate from materials', 'Customers supply their own materials'],
+      rateCard: [
+        { id: 'r1', label: 'Patio roof supply and fit', unit: 'm²', rate: 220, pricesIncludeGst: false, includesMaterials: true, updatedAt: '' },
+      ],
+    };
+
+    afterEach(() => {
+      storeValue.state.businessSettings = plain;
+      storeValue.state.setBusinessSettings = async () => {};
+    });
+
+    it('is absent until Mate has saved something', () => {
+      const { queryByText } = render(<TradePricingScreen />);
+      expect(queryByText('How you quote')).toBeNull();
+    });
+
+    it('lists the saved rules and rates', () => {
+      storeValue.state.businessSettings = withProfile as any;
+      const { getByText } = render(<TradePricingScreen />);
+      expect(getByText('How you quote')).toBeTruthy();
+      expect(getByText('Labour separate from materials')).toBeTruthy();
+      expect(getByText('Patio roof supply and fit')).toBeTruthy();
+      expect(getByText(/\$220\.00 per m² ex GST · materials included/)).toBeTruthy();
+    });
+
+    it('removing a rule or a rate saves the settings without it, straight away', async () => {
+      const setBusinessSettings = vi.fn(async () => {});
+      storeValue.state.businessSettings = withProfile as any;
+      storeValue.state.setBusinessSettings = setBusinessSettings;
+      const { getByLabelText } = render(<TradePricingScreen />);
+
+      fireEvent.click(getByLabelText('Remove preference: Labour separate from materials'));
+      await waitFor(() => expect(setBusinessSettings).toHaveBeenCalledTimes(1));
+      expect(setBusinessSettings.mock.calls[0][0]).toMatchObject({
+        quotingPreferences: ['Customers supply their own materials'],
+        rateCard: withProfile.rateCard,
+      });
+
+      fireEvent.click(getByLabelText('Remove rate: Patio roof supply and fit'));
+      await waitFor(() => expect(setBusinessSettings).toHaveBeenCalledTimes(2));
+      expect(setBusinessSettings.mock.calls[1][0]).toMatchObject({ rateCard: undefined });
+    });
   });
 });

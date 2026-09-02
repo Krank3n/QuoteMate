@@ -206,7 +206,7 @@ import { dollarsToCents, centsToDollars } from './shared/pdf/money';
 import { validateAndRepairAiOutput } from './shared/ai/validateAiOutput';
 import { getFeedbackDocId, getCategoryLabel, isSideEffectFreeRequest, isRatingRecordRequest } from './quickFeedback.helpers';
 import { buildReconcilePrompt } from './reconcile.helpers';
-import { buildMaterialsPrompt } from './materialsPrompt';
+import { buildMaterialsPrompt, renderQuotingPreferences } from './materialsPrompt';
 import { buildEstimatorPrompt } from './estimatorPrompt';
 import { buildQuantitySanityPrompt, applySanityDecisions, indexMaterialsForSanity } from './quantitySanity';
 import { claudeText } from './claudeText';
@@ -2183,6 +2183,7 @@ export const analyzeJobDescription = functions.runWith({ timeoutSeconds: 420, me
           contextSection += `\n- Common Materials for This Type of Job: ${tradeContext.suggestedMaterials.join(', ')}`;
           contextSection += '\n  (Consider these materials, but also include any others that would be needed)';
         }
+        contextSection += renderQuotingPreferences(tradeContext.quotingPreferences);
       }
 
       // Determine store name

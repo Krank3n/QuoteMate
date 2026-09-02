@@ -90,6 +90,7 @@ export async function analyzeJobDescription(
     suggestedMaterials?: string[];
     pricingMethod?: string;
     selectedStore?: string; // Which store will be used for pricing
+    quotingPreferences?: string[]; // The tradie's saved standing rules
   },
   photoUrls?: string[],
   existingMaterials?: { name: string; quantity: number; unit: string; section?: string }[],

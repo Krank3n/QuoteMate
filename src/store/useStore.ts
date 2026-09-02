@@ -31,6 +31,13 @@ import { updateQuoteCalculations, healBrokenLabourSections } from '../utils/quot
 import { normaliseLabourToHours } from '../../shared/document/labourUnits';
 import { isAlreadyInvoiced } from '../../shared/document/convertGuard';
 import { keepSupplierPriceInclusive } from '../../shared/document/gstMode';
+import {
+  addPreference,
+  buildRateWorkItem,
+  rateLinesCoverMaterials,
+  stripLabourFromQuote,
+  upsertRate,
+} from '../services/quotingProfile';
 import { calculateDueDate } from '../utils/invoiceCalculator';
 import { canRevertToQuote } from '../utils/revertToQuote';
 import { isEditablePayment, maxAmountForEdit } from '../utils/editablePayment';
@@ -3354,6 +3361,18 @@ export const useStore = create<AppState>((set, get) => ({
           const fresh = get().currentQuote;
           if (!fresh) return { ok: false, error: 'Failed to create draft quote.' };
 
+          // Rate-card lines, when Mate charged the job off the tradie's own
+          // rates: lump-sum work items at rate × quantity, in the document's
+          // GST basis. Labour is then on those lines, so the analysis pass's
+          // hours must not land on top — and when every line includes
+          // materials, the lines ARE the price: nothing to generate or price.
+          const businessInclusive = get().businessSettings?.pricesIncludeGst === true;
+          const docInclusive = keepSupplierPriceInclusive(fresh);
+          const rateLines = proposal.rateLines ?? [];
+          const rateItems = rateLines.map((line) => buildRateWorkItem(line, docInclusive, businessInclusive));
+          const ratesCoverMaterials = rateLinesCoverMaterials(rateLines);
+          const labourOnly = proposal.materialsMode === 'labour_only';
+
           // Stamp customer + scope. Materials come from the pipeline.
           const seeded: Quote = {
             ...fresh,
@@ -3367,7 +3386,8 @@ export const useStore = create<AppState>((set, get) => ({
               name: proposal.jobName,
               description: proposal.jobDescription,
             },
-            laborHours: proposal.estimatedDurationHours ?? fresh.laborHours,
+            ...(rateItems.length ? { materials: [...(fresh.materials ?? []), ...rateItems] } : {}),
+            laborHours: rateLines.length ? 0 : (proposal.estimatedDurationHours ?? fresh.laborHours),
             // Photos the tradie sent Mate in this chat. Seeded BEFORE the
             // analyse pass so materialsPipeline reads photos[].storageUrl on
             // its first look at the job, not after the fact.
@@ -3410,103 +3430,129 @@ export const useStore = create<AppState>((set, get) => ({
               onProgress?.(currentWorking);
             };
             reportProgress({});
-            const templates = await loadTemplates().catch(() => []);
-            const isPro = canAnalysePhotos(get().getEffectivePlan());
 
-            // ── Phase 1: analyse ──
-            const analyseResult = await generateMaterialsForQuote(
-              {
-                quote: get().currentQuote!,
-                businessSettings: get().businessSettings,
-                isPro,
-                templates,
-              },
-              {
-                onEvent: (event) => {
-                  reportProgress({
-                    phase: event.phase,
-                    status: event.status,
-                    detail: event.detail,
-                  });
+            if (ratesCoverMaterials) {
+              // The rate card is the whole price. No analysis, no pricing run
+              // — the 1-3 minutes a tradie waits for materials they never
+              // wanted was the whole point of saving a rate.
+              const rated = get().currentQuote!;
+              materialCount = rateItems.length;
+              review = reviewQuoteMaterials(rated.materials, rated.sections);
+              pricingSummary = `Priced off your rate card — ${rateItems.length} line${rateItems.length === 1 ? '' : 's'}, no materials list.`;
+              onProgress?.({ phase: 'done', status: 'Priced off your rate card.', done: true, summary: pricingSummary });
+            } else {
+              const templates = await loadTemplates().catch(() => []);
+              const isPro = canAnalysePhotos(get().getEffectivePlan());
+
+              // ── Phase 1: analyse ──
+              const analyseResult = await generateMaterialsForQuote(
+                {
+                  quote: get().currentQuote!,
+                  businessSettings: get().businessSettings,
+                  isPro,
+                  templates,
                 },
-              },
-            ).catch((err) => {
-              if (err instanceof PipelineCancelled) return null;
-              throw err;
-            });
-
-            if (!analyseResult) {
-              return { ok: false, error: 'Pipeline was cancelled.' };
-            }
-
-            get().updateQuote(analyseResult.updatedQuote);
-            await get().saveDraft(get().currentQuote!);
-            materialCount = analyseResult.generatedMaterialCount;
-
-            // ── Phase 2: pricing ──
-            // Reuse the same working card. Map PricingEvents → WorkingStatus.
-            // status holds the phase headline (slow-changing) while detail
-            // carries the rapid per-item progress.
-            reportProgress({
-              phase: 'pricing',
-              status: `Pricing ${materialCount} item${materialCount === 1 ? '' : 's'}…`,
-              detail: undefined,
-            });
-
-            const pricedResult = await fetchPricesForQuote(
-              {
-                quote: get().currentQuote!,
-                businessSettings: get().businessSettings,
-                reeceConnected: null, // pipeline resolves on demand
-              },
-              {
-                onEvent: (event) => {
-                  if (event.kind === 'supplier-priority-fallback') {
-                    missedSupplierTerms.push(...event.missedTerms);
-                  }
-                  const next = pricingEventToProgress(event);
-                  if (next) reportProgress(next);
+                {
+                  onEvent: (event) => {
+                    reportProgress({
+                      phase: event.phase,
+                      status: event.status,
+                      detail: event.detail,
+                    });
+                  },
                 },
-              },
-            );
+              ).catch((err) => {
+                if (err instanceof PipelineCancelled) return null;
+                throw err;
+              });
 
-            get().updateQuote(pricedResult.updatedQuote);
-            await get().saveDraft(get().currentQuote!);
-            review = reviewQuoteMaterials(pricedResult.updatedQuote.materials, pricedResult.updatedQuote.sections);
-            // The document's own arithmetic, checked on the live path rather
-            // than only in the offline audit scripts. A switchboard quote
-            // shipped storing 5 hours at $85 while charging $170. Reported,
-            // never blocking — a false positive must not strand a quote.
-            const integrity = checkDocumentIntegrity(pricedResult.updatedQuote as any);
-            if (integrity.length) {
-              // eslint-disable-next-line no-console
-              console.warn('[Mate] integrity', quoteId, integrity.map((i) => i.code).join(','));
-              review = withIntegrityIssues(review, integrity.map((i) => i.detail));
+              if (!analyseResult) {
+                return { ok: false, error: 'Pipeline was cancelled.' };
+              }
+
+              let analysed: Quote = analyseResult.updatedQuote;
+              // Labour charged through rate lines: the analysis's hours would
+              // be a second labour charge on top of them.
+              if (rateLines.length) analysed = stripLabourFromQuote(analysed);
+              // Labour only: keep the hours and sections, drop the gear list.
+              if (labourOnly) {
+                analysed = { ...analysed, materials: analysed.materials.filter((m) => m.kind === 'work') };
+              }
+              get().updateQuote(analysed);
+              await get().saveDraft(get().currentQuote!);
+              materialCount = labourOnly ? 0 : analyseResult.generatedMaterialCount;
+
+              if (labourOnly) {
+                review = reviewQuoteMaterials(analysed.materials, analysed.sections);
+                pricingSummary = 'Labour only — hours and sections, no materials list.';
+                onProgress?.({ phase: 'done', status: 'Labour only — nothing to price.', done: true, summary: pricingSummary });
+              } else {
+                // ── Phase 2: pricing ──
+                // Reuse the same working card. Map PricingEvents → WorkingStatus.
+                // status holds the phase headline (slow-changing) while detail
+                // carries the rapid per-item progress.
+                reportProgress({
+                  phase: 'pricing',
+                  status: `Pricing ${materialCount} item${materialCount === 1 ? '' : 's'}…`,
+                  detail: undefined,
+                });
+
+                const pricedResult = await fetchPricesForQuote(
+                  {
+                    quote: get().currentQuote!,
+                    businessSettings: get().businessSettings,
+                    reeceConnected: null, // pipeline resolves on demand
+                  },
+                  {
+                    onEvent: (event) => {
+                      if (event.kind === 'supplier-priority-fallback') {
+                        missedSupplierTerms.push(...event.missedTerms);
+                      }
+                      const next = pricingEventToProgress(event);
+                      if (next) reportProgress(next);
+                    },
+                  },
+                );
+
+                get().updateQuote(pricedResult.updatedQuote);
+                await get().saveDraft(get().currentQuote!);
+                review = reviewQuoteMaterials(pricedResult.updatedQuote.materials, pricedResult.updatedQuote.sections);
+                // The document's own arithmetic, checked on the live path rather
+                // than only in the offline audit scripts. A switchboard quote
+                // shipped storing 5 hours at $85 while charging $170. Reported,
+                // never blocking — a false positive must not strand a quote.
+                const integrity = checkDocumentIntegrity(pricedResult.updatedQuote as any);
+                if (integrity.length) {
+                  // eslint-disable-next-line no-console
+                  console.warn('[Mate] integrity', quoteId, integrity.map((i) => i.code).join(','));
+                  review = withIntegrityIssues(review, integrity.map((i) => i.detail));
+                }
+                supplierGap = await summariseSupplierGap(
+                  missedSupplierTerms,
+                  review.counts.estimated,
+                  pricedResult.updatedQuote.materials,
+                );
+
+                const parts: string[] = [];
+                if (pricedResult.fetchedCount > 0) parts.push(`${pricedResult.fetchedCount} priced`);
+                if (pricedResult.failedCount > 0) parts.push(`${pricedResult.failedCount} need pricing`);
+                if (pricedResult.skippedCount > 0) parts.push(`${pricedResult.skippedCount} already priced`);
+                pricingSummary = parts.join(' · ') || 'Nothing to price.';
+                // Name where the money actually landed. QU-178763 carried $8,239
+                // of tile adhesive with every flag green — a wrong line usually
+                // exposes itself the moment its dollar figure is put in front of
+                // the tradie, so the done card always says it.
+                const topLines = topLinesSummary(pricedResult.updatedQuote.materials);
+                if (topLines) pricingSummary = `${pricingSummary}\n${topLines}`;
+
+                onProgress?.({
+                  phase: 'done',
+                  status: `Drafted ${materialCount} item${materialCount === 1 ? '' : 's'}.`,
+                  done: true,
+                  summary: pricingSummary,
+                });
+              }
             }
-            supplierGap = await summariseSupplierGap(
-              missedSupplierTerms,
-              review.counts.estimated,
-              pricedResult.updatedQuote.materials,
-            );
-
-            const parts: string[] = [];
-            if (pricedResult.fetchedCount > 0) parts.push(`${pricedResult.fetchedCount} priced`);
-            if (pricedResult.failedCount > 0) parts.push(`${pricedResult.failedCount} need pricing`);
-            if (pricedResult.skippedCount > 0) parts.push(`${pricedResult.skippedCount} already priced`);
-            pricingSummary = parts.join(' · ') || 'Nothing to price.';
-            // Name where the money actually landed. QU-178763 carried $8,239
-            // of tile adhesive with every flag green — a wrong line usually
-            // exposes itself the moment its dollar figure is put in front of
-            // the tradie, so the done card always says it.
-            const topLines = topLinesSummary(pricedResult.updatedQuote.materials);
-            if (topLines) pricingSummary = `${pricingSummary}\n${topLines}`;
-
-            onProgress?.({
-              phase: 'done',
-              status: `Drafted ${materialCount} item${materialCount === 1 ? '' : 's'}.`,
-              done: true,
-              summary: pricingSummary,
-            });
           } catch (err: any) {
             // eslint-disable-next-line no-console
             console.warn('[Mate] pipeline failed', err);
@@ -3760,6 +3806,37 @@ export const useStore = create<AppState>((set, get) => ({
             return { ok: true };
           }
           return { ok: false, error: 'Quote not found — it may have already been deleted.' };
+        }
+
+        case 'propose_remember_preference': {
+          // A standing rule about how they quote, saved to business settings so
+          // it rides into every Mate session and every materials run — on this
+          // phone and every other. Visible and removable under Trade pricing.
+          const settings = get().businessSettings;
+          if (!settings) return { ok: false, error: 'Set the business up first — there is nowhere to keep this yet.' };
+          await get().setBusinessSettings({
+            ...settings,
+            quotingPreferences: addPreference(settings.quotingPreferences, proposal.text),
+          });
+          return { ok: true };
+        }
+
+        case 'propose_save_rate': {
+          const settings = get().businessSettings;
+          if (!settings) return { ok: false, error: 'Set the business up first — there is nowhere to keep this yet.' };
+          await get().setBusinessSettings({
+            ...settings,
+            rateCard: upsertRate(settings.rateCard, {
+              label: proposal.label,
+              unit: proposal.unit,
+              rate: proposal.rate,
+              // The tradie's own basis when they said it; their usual one otherwise.
+              pricesIncludeGst: proposal.pricesIncludeGst ?? settings.pricesIncludeGst === true,
+              includesMaterials: proposal.includesMaterials,
+              notes: proposal.notes,
+            }),
+          });
+          return { ok: true };
         }
 
         case 'propose_update_line_item': {

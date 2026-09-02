@@ -42,6 +42,8 @@ export function labelForToolCall(name: string, args?: Record<string, unknown>): 
     case 'propose_send_quote': return 'Getting the send ready…';
     case 'propose_import_supplier_list': return 'Getting the reader ready…';
     case 'propose_reprice': return 'Setting up a re-price…';
+    case 'propose_remember_preference': return 'Noting how you quote…';
+    case 'propose_save_rate': return 'Saving that rate…';
     default:
       // Every other propose_* is Mate drafting a card. Anything genuinely
       // unknown falls back to the neutral line rather than naming the tool.

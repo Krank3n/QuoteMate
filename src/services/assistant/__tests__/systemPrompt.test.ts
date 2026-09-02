@@ -199,6 +199,51 @@ describe('never invent app UI', () => {
   });
 });
 
+// The quoting profile: standing rules and a rate card the tradie states once
+// and Mate applies on every quote after. The cards must be offered, never
+// nagged, and never filled with a number Mate worked out itself.
+describe('how they quote', () => {
+  const section = promptSection('How they quote');
+
+  it('reads the saved profile block and applies it silently', () => {
+    expect(section).toContain('"How this business quotes"');
+    expect(section).toContain('never recite them back');
+  });
+
+  it('saves standing rules and rates through the two cards, once each', () => {
+    expect(section).toContain('call propose_remember_preference');
+    expect(section).toContain('Standing rules only');
+    expect(section).toContain('call propose_save_rate');
+    expect(section).toContain('One card per rate');
+    expect(section).toContain('save it again under the same label');
+  });
+
+  it('drafts off a rate with rateLines and never guesses a quantity', () => {
+    expect(section).toContain('pass rateLines on propose_draft_quote');
+    expect(section).toContain('Never guess a quantity');
+    expect(section).toContain("pass materialsMode 'labour_only'");
+  });
+
+  it('never invents a rate or a rule', () => {
+    expect(section).toContain('Never invent a rate or a rule');
+  });
+
+  it('keeps the house tone', () => {
+    expectHouseTone(section);
+  });
+
+  it('both cards are listed AND declared', () => {
+    expect(promptSection('Other tools')).toContain('propose_remember_preference —');
+    expect(promptSection('Other tools')).toContain('propose_save_rate —');
+    expect(TOOL_DECLARATIONS.find((t) => t.name === 'propose_remember_preference')).toBeTruthy();
+    expect(TOOL_DECLARATIONS.find((t) => t.name === 'propose_save_rate')).toBeTruthy();
+    const draft = TOOL_DECLARATIONS.find((t) => t.name === 'propose_draft_quote')!;
+    expect(Object.keys(draft.parameters.properties ?? {})).toEqual(
+      expect.arrayContaining(['rateLines', 'materialsMode']),
+    );
+  });
+});
+
 // The supplier-book offer is the easiest thing in the app to make annoying:
 // repeated every turn, or blocking a draft the tradie could have had.
 describe('supplier book policy', () => {

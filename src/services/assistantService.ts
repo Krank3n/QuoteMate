@@ -30,7 +30,7 @@ import {
   inlineAttachmentIds,
 } from './assistant/attachmentParts';
 import { resolveInlineBytes } from './assistant/attachmentBytes';
-import { MATE_SYSTEM_PROMPT } from './assistant/systemPrompt';
+import { systemPromptWithProfile } from './assistant/quotingProfileContext';
 import { CONTROL_TOOL_DECLARATIONS, TOOL_DECLARATIONS } from './assistant/toolSchemas';
 import { dispatchToolCall } from './assistant/toolDispatcher';
 import {
@@ -144,7 +144,8 @@ async function callChat(
 
   const response = await postChatWithRetry(idToken, JSON.stringify({
     contents,
-    systemInstruction: { parts: [{ text: MATE_SYSTEM_PROMPT }] },
+    // The static prompt plus this business's saved quoting profile, when any.
+    systemInstruction: { parts: [{ text: systemPromptWithProfile() }] },
     // Control tools included: a typed "yes" resolves the waiting card the
     // same way a spoken one does in voice.
     tools: [{ functionDeclarations: [...TOOL_DECLARATIONS, ...CONTROL_TOOL_DECLARATIONS] }],

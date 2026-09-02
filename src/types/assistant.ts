@@ -3,6 +3,8 @@
 // and the declarations in services/assistant/toolSchemas.ts must stay in step
 // with it.
 
+import type { RateCardUnit, RateLine } from './index';
+
 export type ProposalType =
   | 'propose_draft_quote'
   | 'propose_add_line_item'
@@ -16,7 +18,9 @@ export type ProposalType =
   | 'propose_reprice'
   | 'propose_update_quote_rates'
   | 'propose_mark_paid'
-  | 'propose_import_supplier_list';
+  | 'propose_import_supplier_list'
+  | 'propose_remember_preference'
+  | 'propose_save_rate';
 
 export interface BaseProposal {
   id: string;
@@ -35,6 +39,35 @@ export interface DraftQuoteProposal extends BaseProposal {
   // When 'invoice', the draft is auto-converted into an invoice once the
   // materials + pricing pipeline finishes. Defaults to 'quote'.
   documentType?: 'quote' | 'invoice';
+  /**
+   * 'labour_only': the draft gets hours and sections from the analysis but no
+   * materials list and no pricing run — for trades that don't quote gear.
+   */
+  materialsMode?: 'priced' | 'labour_only';
+  /**
+   * The job charged off the tradie's rate card. Each becomes a lump-sum work
+   * item at rate × quantity. When every line includes materials, nothing is
+   * generated or priced on top and no labour is added.
+   */
+  rateLines?: RateLine[];
+}
+
+/** A standing rule about how the tradie quotes, saved to their settings on Apply. */
+export interface RememberPreferenceProposal extends BaseProposal {
+  type: 'propose_remember_preference';
+  text: string;
+}
+
+/** A charge-out rate for the tradie's rate card. */
+export interface SaveRateProposal extends BaseProposal {
+  type: 'propose_save_rate';
+  label: string;
+  unit: RateCardUnit;
+  rate: number;
+  /** Undefined = the tradie didn't say; the business default applies on Apply. */
+  pricesIncludeGst?: boolean;
+  includesMaterials: boolean;
+  notes?: string;
 }
 
 export interface AddLineItemProposal extends BaseProposal {
@@ -205,7 +238,9 @@ export type Proposal =
   | RepriceQuoteProposal
   | UpdateQuoteRatesProposal
   | MarkPaidProposal
-  | ImportSupplierListProposal;
+  | ImportSupplierListProposal
+  | RememberPreferenceProposal
+  | SaveRateProposal;
 
 export type ProposalStatus = 'pending' | 'applied' | 'dismissed' | 'failed';
 

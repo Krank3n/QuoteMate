@@ -34,6 +34,8 @@ const VALID_ARGS: Record<ProposalToolName, Record<string, unknown>> = {
   propose_update_quote_rates: { quoteId: 'q1', markup: 30 },
   propose_mark_paid: { quoteId: 'q1' },
   propose_import_supplier_list: {},
+  propose_remember_preference: { text: 'Labour separate from materials' },
+  propose_save_rate: { label: 'Patio roof', unit: 'm²', rate: 220, includesMaterials: true },
 };
 
 describe('read tool wiring', () => {

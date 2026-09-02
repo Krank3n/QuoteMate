@@ -14,14 +14,58 @@ import {
   ImportSupplierListProposal,
   MarkPaidProposal,
   Proposal,
+  RememberPreferenceProposal,
   RepriceQuoteProposal,
+  SaveRateProposal,
   SendQuoteProposal,
   UpdateCustomerProposal,
   UpdateQuoteRatesProposal,
 } from '../../types/assistant';
+import type { RateLine } from '../../types';
 import { resolveQuoteId } from './quoteRefMap';
 import { resolveKnownQuoteId } from './showQuoteGate';
 import { sanitizeJobDescription } from '../../utils/sanitizeJobDescription';
+import { RATE_CARD_UNITS, normalisePreference, normaliseRateUnit } from '../quotingProfile';
+
+/** Most rate lines a draft can carry — a job with more than this is not one rate card job. */
+const MAX_RATE_LINES = 10;
+
+/**
+ * Validate the draft's rateLines. Returns the clean lines, or a message that
+ * names the first problem so the model can fix its call rather than guess.
+ */
+function parseRateLines(raw: unknown): { lines?: RateLine[]; error?: string } {
+  if (raw === undefined || raw === null) return { lines: undefined };
+  if (!Array.isArray(raw)) return { error: 'rateLines must be an array of {label, quantity, unit, unitPrice, includesMaterials}.' };
+  if (raw.length === 0) return { lines: undefined };
+  if (raw.length > MAX_RATE_LINES) return { error: `rateLines: at most ${MAX_RATE_LINES} lines.` };
+  const lines: RateLine[] = [];
+  for (const [i, item] of (raw as Array<Record<string, unknown>>).entries()) {
+    const label = typeof item?.label === 'string' ? item.label.replace(/\s+/g, ' ').trim() : '';
+    if (!label) return { error: `rateLines[${i}] needs a label — what the rate is for.` };
+    const quantity = Number(item.quantity);
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      return { error: `rateLines[${i}] "${label}": quantity must be above zero — ask the tradie for it rather than guessing.` };
+    }
+    const unit = normaliseRateUnit(item.unit);
+    if (!unit) return { error: `rateLines[${i}] "${label}": unit must be one of ${RATE_CARD_UNITS.join(', ')}.` };
+    const unitPrice = Number(item.unitPrice);
+    if (!Number.isFinite(unitPrice) || unitPrice <= 0) return { error: `rateLines[${i}] "${label}": unitPrice must be above zero.` };
+    if (typeof item.includesMaterials !== 'boolean') {
+      return { error: `rateLines[${i}] "${label}": includesMaterials must be true (the rate is the whole price) or false (labour only).` };
+    }
+    lines.push({
+      label,
+      quantity,
+      unit,
+      unitPrice,
+      includesMaterials: item.includesMaterials,
+      ...(typeof item.pricesIncludeGst === 'boolean' ? { pricesIncludeGst: item.pricesIncludeGst } : {}),
+      ...(typeof item.rateId === 'string' && item.rateId ? { rateId: item.rateId } : {}),
+    });
+  }
+  return { lines };
+}
 
 export interface ProposalResult {
   proposal?: Proposal;
@@ -82,6 +126,8 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
       if (!input.customerId && !input.customerDraft?.name) {
         return { error: 'Provide customerId (from find_customer) or customerDraft.name.' };
       }
+      const rateLines = parseRateLines(input.rateLines);
+      if (rateLines.error) return { error: rateLines.error };
       const proposal: DraftQuoteProposal = {
         id,
         toolUseId,
@@ -99,6 +145,42 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
             ? Number(input.estimatedDurationHours)
             : undefined,
         documentType: input.documentType === 'invoice' ? 'invoice' : 'quote',
+        ...(input.materialsMode === 'labour_only' ? { materialsMode: 'labour_only' as const } : {}),
+        ...(rateLines.lines ? { rateLines: rateLines.lines } : {}),
+      };
+      return { proposal };
+    }
+
+    case 'propose_remember_preference': {
+      const text = normalisePreference(input?.text);
+      if (!text) {
+        return { error: 'propose_remember_preference needs text: one plain sentence in the tradie\'s words, under 160 characters.' };
+      }
+      const proposal: RememberPreferenceProposal = { id, toolUseId, createdAt: now, type: 'propose_remember_preference', text };
+      return { proposal };
+    }
+
+    case 'propose_save_rate': {
+      const label = typeof input?.label === 'string' ? input.label.replace(/\s+/g, ' ').trim() : '';
+      if (!label) return { error: 'propose_save_rate needs a label — what the rate is for.' };
+      const unit = normaliseRateUnit(input?.unit);
+      if (!unit) return { error: `propose_save_rate needs unit as one of ${RATE_CARD_UNITS.join(', ')}.` };
+      const rate = Number(input?.rate);
+      if (!Number.isFinite(rate) || rate <= 0) return { error: 'propose_save_rate needs rate above zero.' };
+      if (typeof input?.includesMaterials !== 'boolean') {
+        return { error: 'propose_save_rate needs includesMaterials: true when the rate is the whole price, false when materials are charged on top.' };
+      }
+      const proposal: SaveRateProposal = {
+        id,
+        toolUseId,
+        createdAt: now,
+        type: 'propose_save_rate',
+        label,
+        unit,
+        rate: Math.round(rate * 100) / 100,
+        includesMaterials: input.includesMaterials,
+        ...(typeof input.pricesIncludeGst === 'boolean' ? { pricesIncludeGst: input.pricesIncludeGst } : {}),
+        ...(typeof input.notes === 'string' && input.notes.trim() ? { notes: input.notes.trim().slice(0, 120) } : {}),
       };
       return { proposal };
     }

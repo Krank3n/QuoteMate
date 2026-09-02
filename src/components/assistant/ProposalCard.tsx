@@ -4,6 +4,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { makeStyles, useThemeColors } from '../../theme';
 import { Proposal, ProposalStatus } from '../../types/assistant';
 import { applyLabelFor, iconFor, titleFor } from './proposalCardCopy';
+import { rateLinesCoverMaterials, rateUnitLabel } from '../../services/quotingProfile';
 
 interface Props {
   proposal: Proposal;
@@ -84,13 +85,47 @@ function Body({ proposal }: { proposal: Proposal }) {
             <Text style={styles.dim}>New contact: {proposal.customerDraft.name}</Text>
           )}
           <Text style={styles.scope} numberOfLines={6}>{proposal.jobDescription}</Text>
+          {(proposal.rateLines ?? []).map((line, i) => (
+            <Text key={`${line.label}-${i}`} style={styles.dim}>
+              {line.label}: {line.quantity} {line.unit === 'each' ? '×' : `${line.unit} ×`} {formatCurrency(line.unitPrice)}
+              {line.unit === 'each' ? '' : ` ${rateUnitLabel(line.unit)}`} = {formatCurrency(line.quantity * line.unitPrice)}
+              {line.pricesIncludeGst === true ? ' inc GST' : line.pricesIncludeGst === false ? ' ex GST' : ''}
+            </Text>
+          ))}
           <Text style={styles.dim}>
-            I'll work out the materials and price them up
-            {proposal.documentType === 'invoice' ? ' and converts the result to an invoice' : ''}.
-            {typeof proposal.estimatedDurationHours === 'number'
-              ? ` Labour seeded at ${proposal.estimatedDurationHours} h.`
-              : ''}
+            {rateLinesCoverMaterials(proposal.rateLines)
+              ? 'Priced off your rate card — no materials list, no extra labour.'
+              : proposal.materialsMode === 'labour_only'
+                ? 'Labour only — hours and sections, no materials list.'
+                : `I'll work out the materials and price them up${
+                    proposal.rateLines?.length ? ' on top of your rate' : ''
+                  }${proposal.documentType === 'invoice' ? ' and convert the result to an invoice' : ''}.${
+                    typeof proposal.estimatedDurationHours === 'number' && !proposal.rateLines?.length
+                      ? ` Labour seeded at ${proposal.estimatedDurationHours} h.`
+                      : ''
+                  }`}
           </Text>
+        </View>
+      );
+    case 'propose_remember_preference':
+      return (
+        <View>
+          <Text style={styles.summary}>“{proposal.text}”</Text>
+          <Text style={styles.dim}>I'll follow this on every quote from now on. Remove it any time under Trade pricing.</Text>
+        </View>
+      );
+    case 'propose_save_rate':
+      return (
+        <View>
+          <Text style={styles.summary}>{proposal.label}</Text>
+          <Text style={styles.dim}>
+            {formatCurrency(proposal.rate)} {rateUnitLabel(proposal.unit)}
+            {proposal.pricesIncludeGst === true ? ' inc GST' : proposal.pricesIncludeGst === false ? ' ex GST' : ''}
+            {' · '}
+            {proposal.includesMaterials ? 'materials included' : 'labour only, materials on top'}
+            {proposal.notes ? ` · ${proposal.notes}` : ''}
+          </Text>
+          <Text style={styles.dim}>Goes on your rate card — I'll use it whenever it fits a job.</Text>
         </View>
       );
     case 'propose_add_line_item':

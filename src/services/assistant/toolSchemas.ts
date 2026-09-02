@@ -43,6 +43,8 @@ export const PROPOSAL_TOOL_NAMES = [
   'propose_update_quote_rates',
   'propose_mark_paid',
   'propose_import_supplier_list',
+  'propose_remember_preference',
+  'propose_save_rate',
 ] as const;
 
 // Voice-only control tools. Unlike read/proposal tools these never reach
@@ -250,8 +252,60 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
           description:
             "Optional. Pass 'invoice' when the tradie has clearly asked for an invoice up front (\"draft an invoice\", \"invoice Tom for the bathroom\"). Apply runs the same materials + pricing pipeline, then auto-converts the result to an invoice so the tradie never has to do a second tap. Defaults to 'quote'.",
         },
+        materialsMode: {
+          type: 'string',
+          enum: ['priced', 'labour_only'],
+          description:
+            "Optional. 'labour_only' when their saved preferences say they don't quote materials, or they say \"just labour\" for this job: the draft gets hours and sections but no materials list and no pricing run. Defaults to 'priced'.",
+        },
+        rateLines: {
+          type: 'array',
+          description:
+            "Optional. Charge the job off their rate card: one line per rate that fits, quantity taken from the job (m², rooms, hours, days — never guessed; ask if you don't know it). Each becomes a lump-sum line on the quote at rate × quantity. When EVERY line has includesMaterials true the rate IS the price: no materials are generated and no labour is added. When a line is labour-only, materials are still worked out and priced on top.",
+          items: {
+            type: 'object',
+            properties: {
+              label: { type: 'string', description: "What the rate is for, as the tradie names it (\"Patio roof supply and fit\")." },
+              quantity: { type: 'number', description: 'How many units this job has.' },
+              unit: { type: 'string', enum: ['m²', 'm', 'm³', 'hour', 'day', 'each', 'room', 'point', 'job'] },
+              unitPrice: { type: 'number', description: 'The rate per unit, in dollars.' },
+              pricesIncludeGst: { type: 'boolean', description: 'True only if the rate was given inc GST. Omit when unsure — the business default applies.' },
+              includesMaterials: { type: 'boolean', description: 'True when the rate is the whole price; false when it is labour only.' },
+            },
+            required: ['label', 'quantity', 'unit', 'unitPrice', 'includesMaterials'],
+          },
+        },
       },
       required: ['jobName', 'jobDescription'],
+    },
+  },
+  {
+    name: 'propose_remember_preference',
+    description:
+      "Remember a STANDING rule about how this tradie quotes, in their words, as one plain sentence: \"labour separate from materials\", \"customers supply their own materials\", \"we only quote labour\", \"round every quote to the nearest $50\". Apply saves it to their settings and it applies to every quote from then on — on this phone and every other. Only for rules that outlast this job, never for this job's details. Propose it once when they state one; if they knock the card back, drop it.",
+    parameters: {
+      type: 'object',
+      properties: {
+        text: { type: 'string', description: 'The rule as one sentence in the tradie\'s words. Under 160 characters.' },
+      },
+      required: ['text'],
+    },
+  },
+  {
+    name: 'propose_save_rate',
+    description:
+      "Save a charge-out rate to the tradie's rate card: \"220 a square ex GST, supply and fit\", \"$90 a room\", \"day rate's 650\". Apply stores it on their settings; you then use it on drafts as a rateLine. Saving a label that already exists replaces that rate. Only ever save a number the tradie said — never one you worked out.",
+    parameters: {
+      type: 'object',
+      properties: {
+        label: { type: 'string', description: "What the rate is for, short and in their words (\"Patio roof supply and fit\", \"End of lease clean\")." },
+        unit: { type: 'string', enum: ['m²', 'm', 'm³', 'hour', 'day', 'each', 'room', 'point', 'job'], description: "Per what. 'job' for a fixed price." },
+        rate: { type: 'number', description: 'Dollars per unit.' },
+        pricesIncludeGst: { type: 'boolean', description: 'True only if they said inc/including GST; false if they said ex/plus GST. Omit when they said neither — the business default applies.' },
+        includesMaterials: { type: 'boolean', description: 'True when the rate is the whole price (supply and fit, all-in). False when it is labour only and materials are charged on top.' },
+        notes: { type: 'string', description: 'Optional qualifier ("minimum 20 m²", "single storey only").' },
+      },
+      required: ['label', 'unit', 'rate', 'includesMaterials'],
     },
   },
   {
@@ -571,6 +625,8 @@ export const TOOL_RUNTIME: Record<string, { timeoutSecs: number }> = {
   propose_update_quote_rates: { timeoutSecs: 10 },
   propose_mark_paid: { timeoutSecs: 10 },
   propose_import_supplier_list: { timeoutSecs: 10 },
+  propose_remember_preference: { timeoutSecs: 10 },
+  propose_save_rate: { timeoutSecs: 10 },
   apply_pending_proposal: { timeoutSecs: 10 },
   cancel_pending_proposal: { timeoutSecs: 10 },
 };

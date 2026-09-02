@@ -25,6 +25,8 @@ export function titleFor(p: Proposal): string {
     case 'propose_update_quote_rates': return 'Update rates';
     case 'propose_mark_paid': return 'Mark invoice paid';
     case 'propose_import_supplier_list': return 'Add supplier prices';
+    case 'propose_remember_preference': return 'Remember how you quote';
+    case 'propose_save_rate': return 'Save a rate';
   }
 }
 
@@ -43,6 +45,8 @@ export function iconFor(p: Proposal): string {
     case 'propose_update_quote_rates': return 'tune-variant';
     case 'propose_mark_paid': return 'check-decagram-outline';
     case 'propose_import_supplier_list': return 'clipboard-list-outline';
+    case 'propose_remember_preference': return 'lightbulb-on-outline';
+    case 'propose_save_rate': return 'tag-outline';
   }
 }
 
@@ -67,6 +71,8 @@ export function applyLabelFor(p: Proposal): string {
     case 'propose_update_quote_rates': return 'Update';
     case 'propose_mark_paid': return 'Mark paid';
     case 'propose_import_supplier_list': return 'Read list';
+    case 'propose_remember_preference': return 'Remember it';
+    case 'propose_save_rate': return 'Save rate';
   }
 }
 
