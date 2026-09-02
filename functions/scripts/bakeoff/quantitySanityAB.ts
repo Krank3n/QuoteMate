@@ -115,6 +115,37 @@ async function geminiSanity(prompt: string): Promise<any> {
   }
 }
 
+/**
+ * Variant D: the widened charter, built by TRANSFORMING the production prompt
+ * so every other word stays byte-identical and the measured variable is the
+ * charter alone. What the corrected eval showed the current charter cannot
+ * touch: under-counts (2 posts for a 100 m fence — "reduce excessive" cannot
+ * raise anything), and elements split across lines (line posts 9 + end posts 1
+ * judged separately against a ~76-post fence). If production's passages drift,
+ * the asserts here fail loudly rather than silently measuring a stale hybrid.
+ */
+function buildWidenedSanityPrompt(jobDescription: string, tradeContext: any, indexed: any[]): string {
+  let prompt = buildQuantitySanityPrompt(jobDescription, tradeContext, indexed);
+
+  const oldDecide = `For each material, decide:
+- "keep" — quantity is reasonable for the scope (within 30% over for waste is fine).
+- "adjust" — quantity is clearly excessive (roughly 2× or more over what the scope requires). Reduce to a sensible count.`;
+  const newDecide = `For each material, decide:
+- "keep" — quantity is reasonable for the scope (within 30% over for waste is fine).
+- "adjust" — quantity is clearly WRONG IN EITHER DIRECTION for the stated scope: excessive (roughly 2× or more over) OR clearly short of what the stated dimensions require (a 100 m fence cannot be built with 2 posts). Set newQuantity to the figure you derive.
+
+DERIVE, don't eyeball: when the job states a length, area or count, COMPUTE the count for repeating structural elements (posts, palings, pickets, joists, sheets, panels) from those dimensions using the rules below, and adjust to your derived figure when the listed quantity is off by more than ~30% either way.
+
+ELEMENTS SPLIT ACROSS LINES: when several lines are the SAME physical element in variants (line posts + end posts + corner posts; several paling lines), judge them TOGETHER — derive the TOTAL the job needs, check the SUM of those lines against it, and set each line so the sum comes out right (ends/corners keep their small counts; the line-post line carries the remainder).`;
+  if (!prompt.includes(oldDecide)) throw new Error('production decide-block drifted — update variant D');
+  prompt = prompt.replace(oldDecide, newDecide);
+
+  const oldCrit = 'CRITICAL — be conservative. A 20-30% over-spec is normal for waste; do NOT adjust those. Only adjust when the count is clearly disproportionate. When in doubt, keep.';
+  const newCrit = 'CRITICAL — for quantities you cannot derive from stated dimensions, stay conservative: a 20-30% over-spec is normal waste, only adjust the clearly disproportionate, and when in doubt keep. For quantities you CAN derive, the derivation wins — in both directions.';
+  if (!prompt.includes(oldCrit)) throw new Error('production conservative-block drifted — update variant D');
+  return prompt.replace(oldCrit, newCrit);
+}
+
 const SANITY_SCHEMA = {
   type: 'object', additionalProperties: false, required: ['results'],
   properties: { results: { type: 'array', items: {
@@ -173,10 +204,13 @@ async function main() {
   }
 
   // ── phase 2: variants over identical lists ──
-  const VARIANTS: Array<{ key: string; run: (p: string) => Promise<any> }> = [
-    { key: 'A prod (gemini-flash)', run: geminiSanity },
-    { key: 'B sonnet-5', run: async (p) => (await askJson<any>(p, SANITY_SCHEMA as any, { model: 'claude-sonnet-5', maxTokens: 16000 })).value },
-    { key: 'C opus-5', run: async (p) => (await askJson<any>(p, SANITY_SCHEMA as any, { model: 'claude-opus-5', effort: 'high', maxTokens: 16000 })).value },
+  // Variants take (job, indexed) so charter variants can rebuild their own
+  // prompt; A runs production's prompt on production's model as the baseline.
+  const VARIANTS: Array<{ key: string; run: (job: any, indexed: any[]) => Promise<any> }> = [
+    { key: 'A prod (flash)', run: (j2, idx) => geminiSanity(buildQuantitySanityPrompt(j2.jobDescription, null, idx)) },
+    { key: 'D charter (flash)', run: (j2, idx) => geminiSanity(buildWidenedSanityPrompt(j2.jobDescription, null, idx)) },
+    { key: 'D charter (sonnet5)', run: async (j2, idx) =>
+      (await askJson<any>(buildWidenedSanityPrompt(j2.jobDescription, null, idx), SANITY_SCHEMA as any, { model: 'claude-sonnet-5', maxTokens: 16000 })).value },
   ];
 
   const tally: Record<string, { inBand: number; out: number; excess: number[]; collateral: number; adjusted: number }> = {};
@@ -187,12 +221,12 @@ async function main() {
   for (const [i, j] of jobs.entries()) {
     const materials = gen[j.docId];
     if (!materials?.length) continue;
-    const prompt = buildQuantitySanityPrompt(j.jobDescription, null, indexMaterialsForSanity(materials));
+    const indexed = indexMaterialsForSanity(materials);
     const outcomes: Record<string, any[]> = {};
     let variantFailed = false;
     await Promise.all(VARIANTS.map(async (v) => {
       try {
-        const parsed = await v.run(prompt);
+        const parsed = await v.run(j, indexed);
         outcomes[v.key] = applySanityDecisions(JSON.parse(JSON.stringify(materials)), parsed.results || []);
         tally[v.key].adjusted += (parsed.results || []).filter((r: any) => r.decision === 'adjust').length;
       } catch (err: any) {
