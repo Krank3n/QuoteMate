@@ -236,6 +236,17 @@ reproduced here — it is a bearer token and this repo is public.
 | 5.5 | SF Symbol `wave.3.right.circle` via `expo-symbols` | all three |
 | 5.10 | Square's receipt on approval; `buildDeclineRecord()` offers a shareable record on decline | Checkout Flow (film a decline too) |
 
+### Answers for the checklist's free-text cells
+
+- **Distribution type:** Public
+- **Existing or New app:** Existing
+- **PSP:** Square · **Team ID:** 5GHUTAV35B · **Region:** Australia
+- **3.8 / 3.8.1 / 3.8.2** — see the table above: single-user accounts, so the
+  authorised-party requirement is structural rather than implemented.
+- **Supported schemes / refunds / receipt methods** — the "Other Information" tab.
+  Receipt methods to tick include **"using iOS Share (ie with AirDrop and other
+  apps)"**, which is exactly how `buildDeclineRecord` delivers the req 5.10 record.
+
 ### Prerequisites that are not code
 
 1. **Marketing Toolkit assets** — blocks reqs 3.1–3.3, and therefore the entire Existing
@@ -290,6 +301,9 @@ to be true *before* the videos are shot, because the videos are the evidence.
 | 2.1 | New user can discover account creation and how to access Tap to Pay on iPhone | ✅ sign-up → onboarding → Payments step (always last) → setup button |
 | 2.2 | Fully digital onboarding, in-app, completed on iPhone | ✅ every step in-app; Square OAuth opens in `SFSafariViewController` via `WebBrowser.openBrowserAsync`, not a kick-out to Safari |
 | 2.3 | Onboarding under 15 minutes for most users | ⚠️ **unverified** — 7–8 steps, every one skippable. Needs timing on a real device, not a code read |
+| 3.8 | T&Cs accepted only by an admin or authorised party | ✅ **inherently satisfied** — one Firebase user per account. `firestore.rules` scopes every document with `isOwner(userId)`; there is no team, role or membership model, so the only person who can reach the button is the account holder |
+| 3.8.1 | Tell an unauthorised user to contact an admin | **N/A** — no unauthorised-user state can exist (see 3.8) |
+| 3.8.2 | Enterprise / Custom / Unlisted: accept T&Cs via Apple Business Connect | **N/A** — public App Store distribution only |
 | 3.4 | Show how to enable at the end of onboarding | ✅ on the Payments step once Square connects |
 | 3.5 | A clear action to accept the Tap to Pay T&Cs | ✅ `linkAppleAccountIfNeeded()` wired into all three paths |
 | 3.7 / 5.3 | Button never greyed out; pressing it opens T&C acceptance | ✅ terms gate moved to press; row never disabled |
