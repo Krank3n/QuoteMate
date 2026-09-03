@@ -177,6 +177,41 @@ class FirestoreService {
   }
 
   /**
+   * A stored quote record → Quote. Dates round-trip through Firestore as
+   * Timestamps or ISO strings depending on who wrote them (the app writes
+   * ISO, cloud functions write serverTimestamp), so every reader goes
+   * through here.
+   */
+  private quoteFromData(data: any): Quote {
+    const createdAt = toDate(data.createdAt) || new Date();
+    return {
+      ...data,
+      createdAt,
+      updatedAt: toDate(data.updatedAt) || createdAt,
+      status: normalizeQuoteStatus(data.status),
+      invoicedAt: toDate(data.invoicedAt),
+      // Declared as epoch-ms on Quote, but the send cloud function
+      // writes a serverTimestamp — normalize so readers can trust it.
+      sentAt: typeof data.sentAt === 'number' ? data.sentAt : toDate(data.sentAt)?.getTime(),
+      // Handle new quote acceptance fields
+      acceptanceTokenCreatedAt: toDate(data.acceptanceTokenCreatedAt),
+      respondedAt: toDate(data.respondedAt),
+    } as Quote;
+  }
+
+  /**
+   * One quote, straight from the server. The realtime listener caps itself
+   * at the 100 most recent quotes and may deliver a stale snapshot first, so
+   * the pricing run reads its result back directly.
+   */
+  async getQuote(quoteId: string): Promise<Quote | null> {
+    const userId = this.getUserId();
+    if (!userId) return null;
+    const snap = await getDoc(doc(db, 'users', userId, 'quotes', quoteId));
+    return snap.exists() ? this.quoteFromData(snap.data()) : null;
+  }
+
+  /**
    * Save a quote to Firestore
    */
   async saveQuote(quote: Quote): Promise<void> {
@@ -233,21 +268,7 @@ class FirestoreService {
       const snapshot = await getDocs(q);
 
       const quotes: Quote[] = snapshot.docs.map((doc) => {
-        const data = doc.data();
-        const createdAt = toDate(data.createdAt) || new Date();
-        return {
-          ...data,
-          createdAt,
-          updatedAt: toDate(data.updatedAt) || createdAt,
-          status: normalizeQuoteStatus(data.status),
-          invoicedAt: toDate(data.invoicedAt),
-          // Declared as epoch-ms on Quote, but the send cloud function
-          // writes a serverTimestamp — normalize so readers can trust it.
-          sentAt: typeof data.sentAt === 'number' ? data.sentAt : toDate(data.sentAt)?.getTime(),
-          // Handle new quote acceptance fields
-          acceptanceTokenCreatedAt: toDate(data.acceptanceTokenCreatedAt),
-          respondedAt: toDate(data.respondedAt),
-        } as Quote;
+        return this.quoteFromData(doc.data());
       });
 
       return quotes;
@@ -502,21 +523,7 @@ class FirestoreService {
 
       this.quotesUnsubscribe = onSnapshot(q, (snapshot) => {
         const quotes: Quote[] = snapshot.docs.map((doc) => {
-          const data = doc.data();
-          const createdAt = toDate(data.createdAt) || new Date();
-          return {
-            ...data,
-            createdAt,
-            updatedAt: toDate(data.updatedAt) || createdAt,
-            status: normalizeQuoteStatus(data.status),
-            invoicedAt: toDate(data.invoicedAt),
-            // Declared as epoch-ms on Quote, but the send cloud function
-            // writes a serverTimestamp — normalize so readers can trust it.
-            sentAt: typeof data.sentAt === 'number' ? data.sentAt : toDate(data.sentAt)?.getTime(),
-            // Handle new quote acceptance fields
-            acceptanceTokenCreatedAt: toDate(data.acceptanceTokenCreatedAt),
-            respondedAt: toDate(data.respondedAt),
-          } as Quote;
+          return this.quoteFromData(doc.data());
         });
 
         callback(quotes);

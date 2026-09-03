@@ -61,6 +61,7 @@ import { maybeRequestReview } from '../services/storeReviewService';
 import { ensureJobForDocument, ensureJobForQuote, useJobStore } from './useJobStore';
 import { canAnalysePhotos, canRunMatePipeline } from './planGates';
 import { markPricingStarted, markPricingFinished, isPricingInFlight } from '../services/assistant/pricingInFlight';
+import { runPipelineOnServer } from '../services/serverPricingRun';
 import { resetGeneratedScope } from '../utils/scopeReset';
 import { headlineFor } from '../utils/reviewChatFormat';
 import type { CustomerEditPlan } from '../utils/customerEdit';
@@ -3194,7 +3195,13 @@ export const useStore = create<AppState>((set, get) => ({
       // pricing), and labour-only keeps hours + sections but drops the gear
       // list and the pricing run. Labour on a rate line means the analysis's
       // hours would be a second labour charge, so they are stripped.
-      options: { rateLines?: RateLine[]; ratesCoverMaterials?: boolean; labourOnly?: boolean } = {},
+      options: {
+        rateLines?: RateLine[];
+        ratesCoverMaterials?: boolean;
+        labourOnly?: boolean;
+        /** Recorded on the server-side run — a first draft or a scope correction. */
+        kind?: 'draft' | 'scope';
+      } = {},
     ): Promise<ScopePipelineRun> => {
       const rateLineCount = options.rateLines?.length ?? 0;
       let materialCount = 0;
@@ -3238,8 +3245,88 @@ export const useStore = create<AppState>((set, get) => ({
           return { kind: 'done', review, supplierGap };
         }
 
-        const templates = await loadTemplates().catch(() => []);
         const isPro = canAnalysePhotos(get().getEffectivePlan());
+
+        // Wraps up a labour-only draft: hours and sections, no gear list.
+        const finishLabourOnly = async (analysedQuote: Quote): Promise<ScopePipelineRun> => {
+          get().updateQuote({ ...analysedQuote, draftStep: 'JobPreview' });
+          await get().saveDraft(get().currentQuote!);
+          const review = reviewQuoteMaterials(analysedQuote.materials, analysedQuote.sections);
+          const supplierGap = await summariseSupplierGap([], 0, analysedQuote.materials);
+          onProgress?.({
+            phase: 'done',
+            status: 'Labour only — nothing to price.',
+            done: true,
+            summary: 'Labour only — hours and sections, no materials list.',
+          });
+          return { kind: 'done', review, supplierGap };
+        };
+
+        // Wraps up a priced quote — the review, the integrity check, the
+        // supplier-book gap and the card's summary — whichever side priced it.
+        const finishPriced = async (
+          priced: Quote,
+          counts: { fetchedCount: number; failedCount: number; skippedCount: number },
+        ): Promise<ScopePipelineRun> => {
+          // Finished but unsent — stamp the wizard step the banner and nudge read.
+          get().updateQuote({ ...priced, draftStep: 'JobPreview' });
+          await get().saveDraft(get().currentQuote!);
+          let review = reviewQuoteMaterials(priced.materials, priced.sections);
+          const integrity = checkDocumentIntegrity(priced as any);
+          if (integrity.length) {
+            // eslint-disable-next-line no-console
+            console.warn('[Mate] integrity', quoteId, integrity.map((i) => i.code).join(','));
+            review = withIntegrityIssues(review, integrity.map((i) => i.detail));
+          }
+          const supplierGap = await summariseSupplierGap(
+            missedSupplierTerms,
+            review.counts.estimated,
+            priced.materials,
+          );
+
+          const parts: string[] = [];
+          if (counts.fetchedCount > 0) parts.push(`${counts.fetchedCount} priced`);
+          if (counts.failedCount > 0) parts.push(`${counts.failedCount} need pricing`);
+          if (counts.skippedCount > 0) parts.push(`${counts.skippedCount} already priced`);
+          let pricingSummary = parts.join(' · ') || 'Nothing to price.';
+          const topLines = topLinesSummary(priced.materials);
+          if (topLines) pricingSummary = `${pricingSummary}\n${topLines}`;
+
+          onProgress?.({
+            phase: 'done',
+            status: `Drafted ${materialCount} item${materialCount === 1 ? '' : 's'}.`,
+            done: true,
+            summary: pricingSummary,
+          });
+          return { kind: 'done', review, supplierGap };
+        };
+
+        // ── On the server, when the server will take it ──
+        // The same pipeline runs inside a Cloud Function, so locking the
+        // phone or switching apps no longer kills the run, and a push says
+        // when it's ready. The card streams from the run document. If the
+        // server never claims the run (flag off, offline, not deployed) the
+        // phone prices it below, exactly as it always has.
+        const serverRun = await runPipelineOnServer(
+          {
+            quoteId,
+            kind: options.kind ?? 'draft',
+            options: { isPro, stripLabour: rateLineCount > 0, labourOnly: !!options.labourOnly },
+          },
+          { onProgress: (status) => reportProgress(status) },
+        );
+        if (serverRun.kind === 'failed') throw new Error(serverRun.error);
+        if (serverRun.kind === 'done') {
+          materialCount = serverRun.result.generatedMaterialCount;
+          missedSupplierTerms.push(...serverRun.result.missedSupplierTerms);
+          if (options.labourOnly) return finishLabourOnly(serverRun.quote);
+          return finishPriced(serverRun.quote, serverRun.result);
+        }
+        // eslint-disable-next-line no-console
+        console.log('[Mate] pricing on the phone —', serverRun.reason);
+        reportProgress({ phase: 'preflight', status: 'Getting ready…', runsOnServer: false });
+
+        const templates = await loadTemplates().catch(() => []);
 
         // ── Phase 1: analyse ──
         const analyseResult = await generateMaterialsForQuote(
@@ -3275,19 +3362,7 @@ export const useStore = create<AppState>((set, get) => ({
         }
         materialCount = options.labourOnly ? 0 : analyseResult.generatedMaterialCount;
 
-        if (options.labourOnly) {
-          get().updateQuote({ ...analysed, draftStep: 'JobPreview' });
-          await get().saveDraft(get().currentQuote!);
-          const review = reviewQuoteMaterials(analysed.materials, analysed.sections);
-          const supplierGap = await summariseSupplierGap([], 0, analysed.materials);
-          onProgress?.({
-            phase: 'done',
-            status: 'Labour only — nothing to price.',
-            done: true,
-            summary: 'Labour only — hours and sections, no materials list.',
-          });
-          return { kind: 'done', review, supplierGap };
-        }
+        if (options.labourOnly) return finishLabourOnly(analysed);
 
         get().updateQuote(analysed);
         await get().saveDraft(get().currentQuote!);
@@ -3316,37 +3391,7 @@ export const useStore = create<AppState>((set, get) => ({
           },
         );
 
-        // Finished but unsent — stamp the wizard step the banner and nudge read.
-        get().updateQuote({ ...pricedResult.updatedQuote, draftStep: 'JobPreview' });
-        await get().saveDraft(get().currentQuote!);
-        let review = reviewQuoteMaterials(pricedResult.updatedQuote.materials, pricedResult.updatedQuote.sections);
-        const integrity = checkDocumentIntegrity(pricedResult.updatedQuote as any);
-        if (integrity.length) {
-          // eslint-disable-next-line no-console
-          console.warn('[Mate] integrity', quoteId, integrity.map((i) => i.code).join(','));
-          review = withIntegrityIssues(review, integrity.map((i) => i.detail));
-        }
-        const supplierGap = await summariseSupplierGap(
-          missedSupplierTerms,
-          review.counts.estimated,
-          pricedResult.updatedQuote.materials,
-        );
-
-        const parts: string[] = [];
-        if (pricedResult.fetchedCount > 0) parts.push(`${pricedResult.fetchedCount} priced`);
-        if (pricedResult.failedCount > 0) parts.push(`${pricedResult.failedCount} need pricing`);
-        if (pricedResult.skippedCount > 0) parts.push(`${pricedResult.skippedCount} already priced`);
-        let pricingSummary = parts.join(' · ') || 'Nothing to price.';
-        const topLines = topLinesSummary(pricedResult.updatedQuote.materials);
-        if (topLines) pricingSummary = `${pricingSummary}\n${topLines}`;
-
-        onProgress?.({
-          phase: 'done',
-          status: `Drafted ${materialCount} item${materialCount === 1 ? '' : 's'}.`,
-          done: true,
-          summary: pricingSummary,
-        });
-        return { kind: 'done', review, supplierGap };
+        return finishPriced(pricedResult.updatedQuote, pricedResult);
       } catch (err: any) {
         // eslint-disable-next-line no-console
         console.warn('[Mate] pipeline failed', err);
@@ -3726,11 +3771,11 @@ export const useStore = create<AppState>((set, get) => ({
           await get().saveDraft(merged);
           const quoteId = get().currentQuote?.id || merged.id;
 
-          const run = await runScopePipeline(quoteId, {
-            phase: 'preflight',
-            status: 'Redoing the materials…',
-            done: false,
-          });
+          const run = await runScopePipeline(
+            quoteId,
+            { phase: 'preflight', status: 'Redoing the materials…', done: false },
+            { kind: 'scope' },
+          );
           if (run.kind === 'cancelled') {
             return { ok: false, error: 'Pipeline was cancelled.' };
           }
