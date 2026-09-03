@@ -17,6 +17,7 @@ ready.
 | Phone watcher | `src/services/serverPricingRun.ts` | Creates the run document, mirrors progress into the working card, keeps the `foreground` flag honest, resolves with the priced quote. |
 | Store | `src/store/useStore.ts` (`runScopePipeline`) | Tries the server first; prices on the phone when the server never claims the run. |
 | Working card | `src/components/assistant/PricingNotifyLine.tsx` | "Lock your phone if you like" or "Tell me when it's done" while a server run is going. |
+| Relaunch | `src/services/pricingRunLedger.ts`, `src/services/assistant/pricingRunResume.ts` | Runs this phone started are noted on the device; the next chat reads each unsettled one back and shows a "while you were away" card plus Mate's context note. |
 
 ## The run document
 
@@ -60,6 +61,27 @@ Permission is only ever requested from the card's "Tell me when it's done"
 line, where the tap itself is the consent; it does not touch the send-time
 prompt's "already asked" marker.
 
+## After an app kill
+
+Chat history is in-memory, so an app killed mid-run loses the working card
+and the "[context]" note that tells Mate the quote is priced. The phone
+therefore keeps a small ledger (`@quotemate:pricing_runs_in_flight`) of the
+runs it started; when the next chat opens, each unsettled run under 24 h old
+is read back from the server:
+
+- **done** → a finished card, a bubble ("Deck rebuild's priced — 12 items,
+  $4,120 all up. Tap to open it…") with an Open the quote button, and the same
+  context note the live path sends, so Mate references the id instead of
+  drafting the job again;
+- **failed / cancelled / never claimed** → a snag card pointing at Continue
+  Quote, and a note offering `propose_reprice`; a never-claimed run is
+  cancelled so it can't start later behind the tradie's back;
+- **still running** → the live card re-attaches to the run document and
+  finishes like any other;
+- **document gone** → nothing is said.
+
+This runs once per app process. The push (if any) is independent of it.
+
 ## Fallbacks and the kill switch
 
 The phone prices the quote itself, exactly as before, when:
@@ -93,6 +115,3 @@ handlers keep their own per-user rate limits for the phone path.
 
 - Mate's reprice (`propose_reprice`) and the wizard's own Get Recommended
   Gear / Fetch Prices still run on the phone.
-- A working card left "pricing" when the app was killed mid-run is not
-  reconciled on relaunch; the quote itself is priced and the dashboard draft
-  banner points at it.

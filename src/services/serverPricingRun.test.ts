@@ -38,6 +38,7 @@ function fakeIo(overrides: Partial<ServerRunIo> = {}) {
   const foregroundWrites: boolean[] = [];
   const deleted: string[] = [];
   const cancels: string[] = [];
+  const ledger: string[] = [];
   const io: ServerRunIo = {
     uid: () => 'u1',
     isEnabled: async () => true,
@@ -56,6 +57,7 @@ function fakeIo(overrides: Partial<ServerRunIo> = {}) {
         watcher = null;
       };
     },
+    readRun: async () => record,
     cancelIfQueued: async (id) => {
       cancels.push(id);
       if (record && record.status === 'queued') {
@@ -75,6 +77,15 @@ function fakeIo(overrides: Partial<ServerRunIo> = {}) {
       };
     },
     now: () => Date.now(),
+    ledger: {
+      started: async (entry) => {
+        ledger.push(`started:${entry.runId}`);
+      },
+      settled: async (runId) => {
+        ledger.push(`settled:${runId}`);
+      },
+      unsettled: async () => [],
+    },
     ...overrides,
   };
   const server = {
@@ -95,6 +106,7 @@ function fakeIo(overrides: Partial<ServerRunIo> = {}) {
     foregroundWrites,
     deleted,
     cancels,
+    ledger,
   };
   return { io, server };
 }
@@ -216,6 +228,19 @@ describe('runPipelineOnServer', () => {
     const outcome = await pending;
     expect(outcome.kind).toBe('unavailable');
     expect(server.deleted).toHaveLength(1);
+  });
+
+  it('notes the run on the phone when it starts and clears it when it settles', async () => {
+    const { io, server } = fakeIo();
+    const pending = runPipelineOnServer({ ...request, jobName: 'Deck rebuild' }, {}, io);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(server.ledger).toHaveLength(1);
+    expect(server.ledger[0]).toMatch(/^started:/);
+    server.advance({ status: 'running' });
+    server.advance({ status: 'failed', error: 'x' });
+    await pending;
+    await vi.advanceTimersByTimeAsync(10);
+    expect(server.ledger[1]).toBe(server.ledger[0].replace('started', 'settled'));
   });
 
   it('reports a failed run with the server’s reason', async () => {

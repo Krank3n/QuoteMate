@@ -41,11 +41,14 @@ import type {
 } from '../../shared/pricing/pricingRunDoc';
 import { generateId } from '../utils/generateId';
 import { firestoreService } from './firestoreService';
+import { listUnsettledRuns, recordRunSettled, recordRunStarted, type LedgerEntry } from './pricingRunLedger';
 
 export interface ServerRunRequest {
   quoteId: string;
   kind: PricingRunKind;
   options: PricingRunOptions;
+  /** For the "while you were away" card if the app dies mid-run. */
+  jobName?: string;
 }
 
 export type ServerRunOutcome =
@@ -65,12 +68,20 @@ export interface ServerRunIo {
     onChange: (record: PricingRunRecord | null) => void,
     onError: (error: unknown) => void,
   ): () => void;
+  /** One read of the run document. */
+  readRun(runId: string): Promise<PricingRunRecord | null>;
   /** Cancel the run if the server hasn't claimed it. True when cancelled. */
   cancelIfQueued(runId: string): Promise<boolean>;
   setForeground(runId: string, foreground: boolean): Promise<void>;
   fetchQuote(quoteId: string): Promise<Quote | null>;
   subscribeAppState(listener: (state: string) => void): () => void;
   now(): number;
+  /** Runs this phone started and hasn't heard the end of — see pricingRunLedger. */
+  ledger: {
+    started(entry: LedgerEntry): Promise<void>;
+    settled(runId: string): Promise<void>;
+    unsettled(nowMs: number): Promise<LedgerEntry[]>;
+  };
 }
 
 /** How long a Firestore write may take before the phone decides it's offline. */
@@ -146,6 +157,12 @@ export const defaultServerRunIo: ServerRunIo = {
       onError,
     );
   },
+  readRun: async (runId) => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) return null;
+    const snap = await getDoc(doc(db, 'users', uid, 'pricingRuns', runId));
+    return snap.exists() ? (snap.data() as PricingRunRecord) : null;
+  },
   cancelIfQueued: async (runId) => {
     const uid = auth.currentUser?.uid;
     if (!uid) return false;
@@ -173,6 +190,11 @@ export const defaultServerRunIo: ServerRunIo = {
     return () => sub.remove();
   },
   now: () => Date.now(),
+  ledger: {
+    started: (entry) => recordRunStarted(entry),
+    settled: (runId) => recordRunSettled(runId),
+    unsettled: (nowMs) => listUnsettledRuns(nowMs),
+  },
 };
 
 /**
@@ -215,9 +237,30 @@ export async function runPipelineOnServer(
     return { kind: 'unavailable', reason: err instanceof Error ? err.message : 'create failed' };
   }
 
+  // Noted on the phone so the next chat can pick the thread up if this
+  // process dies before the run settles.
+  io.ledger.started({ runId, quoteId: request.quoteId, jobName: request.jobName, createdAt }).catch(() => {});
+  const outcome = await watchServerRun(runId, request.quoteId, callbacks, io, { initiallyClaimed: false });
+  io.ledger.settled(runId).catch(() => {});
+  return outcome;
+}
+
+/**
+ * Wait on a run document until it settles, streaming its progress. Used by
+ * runPipelineOnServer for a run this call just created, and by the resume
+ * path for a run a previous app process created and never heard the end of
+ * (`initiallyClaimed` skips the queue watchdog for a run already running).
+ */
+export function watchServerRun(
+  runId: string,
+  quoteId: string,
+  callbacks: { onProgress?: (status: WorkingStatus) => void },
+  io: ServerRunIo,
+  options: { initiallyClaimed: boolean },
+): Promise<ServerRunOutcome> {
   return new Promise<ServerRunOutcome>((resolve) => {
     let settled = false;
-    let claimed = false;
+    let claimed = options.initiallyClaimed;
     let weCancelled = false;
     let lastProgressAt = io.now();
     let unsubscribeWatch: (() => void) | null = null;
@@ -255,23 +298,25 @@ export async function runPipelineOnServer(
     };
 
     // The queue watchdog: nothing has claimed the run.
-    timers.push(
-      setTimeout(() => {
-        if (!claimed) {
-          callbacks.onProgress?.({
-            phase: 'preflight',
-            status: 'Still lining up a spot — hang tight.',
-            done: false,
-            runsOnServer: false,
-          });
-        }
-      }, QUEUE_NUDGE_MS),
-    );
-    timers.push(
-      setTimeout(() => {
-        if (!claimed) void fallBack('no server pickup');
-      }, QUEUE_TIMEOUT_MS),
-    );
+    if (!claimed) {
+      timers.push(
+        setTimeout(() => {
+          if (!claimed) {
+            callbacks.onProgress?.({
+              phase: 'preflight',
+              status: 'Still lining up a spot — hang tight.',
+              done: false,
+              runsOnServer: false,
+            });
+          }
+        }, QUEUE_NUDGE_MS),
+      );
+      timers.push(
+        setTimeout(() => {
+          if (!claimed) void fallBack('no server pickup');
+        }, QUEUE_TIMEOUT_MS),
+      );
+    }
     // The stale watchdog: claimed, then silence.
     const staleCheck = () => {
       if (settled) return;
@@ -323,7 +368,7 @@ export async function runPipelineOnServer(
             finish({ kind: 'failed', error: 'The run finished without a result.' });
             return;
           }
-          io.fetchQuote(request.quoteId).then(
+          io.fetchQuote(quoteId).then(
             (quote) => {
               if (!quote) {
                 finish({ kind: 'failed', error: 'The priced quote could not be read back.' });

@@ -62,6 +62,7 @@ import { ensureJobForDocument, ensureJobForQuote, useJobStore } from './useJobSt
 import { canAnalysePhotos, canRunMatePipeline } from './planGates';
 import { markPricingStarted, markPricingFinished, isPricingInFlight } from '../services/assistant/pricingInFlight';
 import { runPipelineOnServer } from '../services/serverPricingRun';
+import { PRICING_RUN_LEDGER_KEY } from '../services/pricingRunLedger';
 
 /**
  * A run the server owned failed (or went quiet). The server has already
@@ -3321,6 +3322,7 @@ export const useStore = create<AppState>((set, get) => ({
             quoteId,
             kind: options.kind ?? 'draft',
             options: { stripLabour: rateLineCount > 0, labourOnly: !!options.labourOnly },
+            jobName: get().currentQuote?.job?.name,
           },
           { onProgress: (status) => reportProgress(status) },
         );
@@ -4434,6 +4436,7 @@ export const useStore = create<AppState>((set, get) => ({
         STORAGE_KEYS.CONTACTS,
         STORAGE_KEYS.CONTACTS_MIGRATED,
         STORAGE_KEYS.CONVERSATIONS,
+        PRICING_RUN_LEDGER_KEY,
         // The Supplier Book cache (materialFavorites.ts, which can't be
         // imported here without a cycle). It is user data: left behind, the
         // next account on this phone would be priced off this one's rates,
