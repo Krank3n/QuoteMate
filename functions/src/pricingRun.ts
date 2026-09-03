@@ -48,6 +48,13 @@ export const RATE_WINDOW_MS = 10 * 60 * 1000;
 /** Progress writes are coalesced to at most one per this many milliseconds. */
 export const PROGRESS_WRITE_INTERVAL_MS = 600;
 /**
+ * The phone saves the quote and creates the run back to back, and its quote
+ * write is not awaited. Firestore applies one client's writes in order, so
+ * the quote should always be there first — this is the belt for the braces.
+ */
+export const QUOTE_LOAD_ATTEMPTS = 3;
+export const QUOTE_LOAD_RETRY_MS = 1_000;
+/**
  * The phone re-stamps foregroundAt every 20 s while it is in front. A stamp
  * older than this means the phone went away (or its "I'm away" write never
  * left it), and either way the tradie isn't watching the card.
@@ -300,7 +307,11 @@ export async function runPricingRun(args: {
     // canAnalysePhotos on the phone: a trial user gets plan vision too.
     const isPro = plan === 'pro' || plan === 'trial';
 
-    const quote = await store.loadQuote(run.quoteId);
+    let quote = await store.loadQuote(run.quoteId);
+    for (let attempt = 1; !quote && attempt < QUOTE_LOAD_ATTEMPTS; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, QUOTE_LOAD_RETRY_MS));
+      quote = await store.loadQuote(run.quoteId);
+    }
     if (!quote) throw new Error('Quote not found — it may have been deleted before pricing started.');
     if (!quote.job?.description) throw new Error('Quote has no job description — add a scope first.');
     jobName = quote.job.name || jobName;

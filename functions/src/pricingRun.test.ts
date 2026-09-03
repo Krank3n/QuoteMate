@@ -3,6 +3,8 @@ import {
   MAX_RUNS_PER_WINDOW,
   ProgressWriter,
   formatAud,
+  QUOTE_LOAD_ATTEMPTS,
+  QUOTE_LOAD_RETRY_MS,
   quotePatch,
   runPricingRun,
   scrubNonFinite,
@@ -254,9 +256,27 @@ describe('runPricingRun', () => {
     expect(store.pushes[0]?.vars.amount).toBe('$594');
   });
 
+  it('waits briefly for a quote whose write is still landing, then prices it', async () => {
+    vi.useFakeTimers();
+    try {
+      const store = fakeStore(run(), {});
+      const pending = runPricingRun({ store, deps: fakeDeps(), log: silent });
+      await vi.advanceTimersByTimeAsync(QUOTE_LOAD_RETRY_MS - 10);
+      store.quotes.q1 = quote(); // the phone's write arrives
+      await vi.advanceTimersByTimeAsync(QUOTE_LOAD_RETRY_MS * QUOTE_LOAD_ATTEMPTS);
+      expect(await pending).toBe('done');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('fails cleanly when the quote was deleted before the run started', async () => {
+    vi.useFakeTimers();
     const store = fakeStore(run(), {});
-    expect(await runPricingRun({ store, deps: fakeDeps(), log: silent })).toBe('failed');
+    const pending = runPricingRun({ store, deps: fakeDeps(), log: silent });
+    await vi.advanceTimersByTimeAsync(QUOTE_LOAD_RETRY_MS * QUOTE_LOAD_ATTEMPTS + 100);
+    vi.useRealTimers();
+    expect(await pending).toBe('failed');
     expect(store.record?.error).toMatch(/Quote not found/);
     // Nothing to park — the quote is gone — but the run record still says why.
     expect(store.record?.status).toBe('failed');
