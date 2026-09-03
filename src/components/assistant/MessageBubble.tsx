@@ -20,6 +20,7 @@ import { JobScopeCard, ScopeStep } from '../JobScopeCard';
 import { JobDetailHeader } from '../JobDetailHeader';
 import { Document } from '../../types/document';
 import { formatScheduledDateLong } from '../../utils/formatSchedule';
+import { PricingNotifyLine } from './PricingNotifyLine';
 
 interface Props {
   message: ChatMessage;
@@ -288,6 +289,7 @@ function MessageBubbleImpl({
           </View>
           {!!w.detail && <Text style={styles.workingDetail}>{w.detail}</Text>}
           {!!w.items && w.items.length > 0 && <WorkingItems items={w.items} />}
+          {!w.done && !!w.runsOnServer && <PricingNotifyLine />}
           {!!w.summary && <Text style={styles.workingSummary}>{w.summary}</Text>}
         </View>
       </View>

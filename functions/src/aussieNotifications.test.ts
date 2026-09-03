@@ -11,6 +11,8 @@ const ALL_EVENTS: AussieEvent[] = [
   'milestone',
   'inactivity',
   'draft_nudge',
+  'quote_priced',
+  'quote_pricing_snag',
 ];
 
 /** Run a message many times so a random variant choice can't hide a bad one. */
@@ -105,6 +107,26 @@ describe('notification copy', () => {
     for (const msg of everyVariant('quote_viewed', { customer: 'Dave', job: 'Deck', amount: '' })) {
       expect(msg.body).not.toMatch(/\s{2,}/);
       expect(msg.body).toContain('Dave');
+    }
+  });
+});
+
+describe('pricing-run pushes', () => {
+  it('carries the job and the money, and reads cleanly without a count', () => {
+    for (const msg of everyVariant('quote_priced', { job: 'Deck rebuild', amount: '$4,120', count: '14 items' })) {
+      expect(msg.body).toContain('Deck rebuild');
+      expect(msg.body).toContain('$4,120');
+    }
+    for (const msg of everyVariant('quote_priced', { job: 'Deck rebuild', amount: '$4,120' })) {
+      expect(msg.body).toContain('$4,120');
+      expect(msg.body).not.toMatch(/\{[a-zA-Z0-9_]+\}/);
+    }
+  });
+
+  it('points a snag at the button that is actually on the screen the tap opens', () => {
+    for (const msg of everyVariant('quote_pricing_snag', { job: 'Deck rebuild' })) {
+      expect(msg.body).toContain('Deck rebuild');
+      expect(msg.body).toMatch(/Continue Quote/);
     }
   });
 });

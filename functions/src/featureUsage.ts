@@ -27,7 +27,7 @@ const db = () => admin.firestore();
 /** Apply a plain delta map as FieldValue.increment onto the per-user + global
  * daily featureUsage docs. Swallowing failures is the caller's job (telemetry
  * is best-effort) — this just awaits the two writes. */
-async function applyFeatureUsagePatch(
+export async function applyFeatureUsagePatch(
   uid: string,
   deltas: Record<string, number>,
 ): Promise<void> {

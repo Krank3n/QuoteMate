@@ -11,12 +11,12 @@
  * prices are used as-is.
  */
 
-import { coverageSanePurchaseCount, coverageFloorPurchaseCount } from '../../src/utils/purchaseCoverage';
-import { parseJobAreaM2, geometricSanePieceCount } from '../../src/utils/geometricCoverage';
-import { parsePackInfo } from '../../src/utils/parsePackInfo';
-import { simplifySearchTerm } from '../../src/utils/simplifySearchTerm';
-import { isSemanticallyCompatible } from '../../src/services/candidateRanker';
-import { matchEvidence } from '../../src/utils/matchEvidence';
+import { coverageSanePurchaseCount, coverageFloorPurchaseCount } from '../../shared/pricing/purchaseCoverage';
+import { parseJobAreaM2, geometricSanePieceCount } from '../../shared/pricing/geometricCoverage';
+import { parsePackInfo } from '../../shared/pricing/parsePackInfo';
+import { simplifySearchTerm } from '../../shared/pricing/simplifySearchTerm';
+import { isSemanticallyCompatible } from '../../shared/pricing/candidateRanker';
+import { matchEvidence } from '../../shared/pricing/matchEvidence';
 import { ReconcileItem, ReconcileItemCandidate, ReconcileDecision } from '../src/reconcile.helpers';
 
 export interface ReplayScraperCandidate {

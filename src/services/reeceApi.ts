@@ -10,6 +10,8 @@
  */
 
 import { auth } from '../config/firebase';
+import type { ReeceCandidate } from '../../shared/pricing/types';
+import { mapReeceSearchResponse } from '../../shared/pricing/reeceCandidates';
 
 const USE_EMULATOR = process.env.USE_FIREBASE_EMULATOR === 'true';
 const FIREBASE_FUNCTIONS_URL = USE_EMULATOR
@@ -52,29 +54,9 @@ export interface ReeceConnectionStatus {
   connectedAt?: string | null;
 }
 
-interface PriceSearchResult {
-  price: number | null;
-  productName?: string;
-  store?: string;
-  itemNumber?: string;
-  imageUrl?: string | null;
-  productUrl?: string;
-  // Required later for order placement — captured at price-search time so we
-  // don't need a second API round trip when the user taps "Order from Reece".
-  unitOfMeasure?: string | null;
-  unitPriceExcludingGst?: number | null;
-  /**
-   * Set when the backend reports the user's customer token has been revoked
-   * or expired. Callers should surface a "reconnect Reece" prompt instead of
-   * silently falling back to estimation.
-   */
-  reauthRequired?: boolean;
-  /**
-   * Set when the user simply hasn't connected Reece yet. Callers can prompt
-   * them to connect from settings.
-   */
-  notConnected?: boolean;
-}
+// The candidate shape and the search-answer mapping live in shared/pricing so
+// the server-side pricing run reads Reece answers exactly as the app does.
+type PriceSearchResult = ReeceCandidate;
 
 async function authedFetch(
   endpoint: string,
@@ -170,43 +152,7 @@ export async function searchReeceMaterialCandidates(
       body: { productName: materialName },
     });
     if (!searchResponse.ok) return [];
-    const searchData = await searchResponse.json();
-
-    if (searchData.error === 'reece_reauth_required') {
-      return [{ price: null, reauthRequired: true }];
-    }
-    if (searchData.error === 'reece_not_connected') {
-      return [{ price: null, notConnected: true }];
-    }
-
-    const products: any[] = Array.isArray(searchData.products)
-      ? searchData.products
-      : searchData.product
-        ? [searchData.product]
-        : [];
-
-    const results: PriceSearchResult[] = [];
-    for (const product of products) {
-      const price = product.unitPriceIncludingGst ?? product.unitPriceExcludingGst;
-      if (price == null) continue;
-      // Cache-sourced results carry their own productUrl (built from the
-      // description because the price-file's productCode lives in a different
-      // ID space than reece.com.au's web search). Live results don't, so we
-      // fall back to the legacy itemNumber query.
-      const productUrl = product.productUrl
-        || `https://www.reece.com.au/search?query=${encodeURIComponent(product.itemNumber)}`;
-      results.push({
-        price,
-        productName: product.description,
-        store: 'Reece Plumbing',
-        itemNumber: product.itemNumber,
-        imageUrl: product.imageUrl ?? null,
-        productUrl,
-        unitOfMeasure: product.unitOfMeasure || null,
-        unitPriceExcludingGst: product.unitPriceExcludingGst ?? null,
-      });
-    }
-    return results;
+    return mapReeceSearchResponse(await searchResponse.json());
   } catch {
     return [];
   }

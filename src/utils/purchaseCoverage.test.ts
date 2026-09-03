@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isLumpSumRow, coverageSanePurchaseCount, coverageFloorPurchaseCount, recoverPackInfo } from './purchaseCoverage';
+import { isLumpSumRow, coverageSanePurchaseCount, coverageFloorPurchaseCount, recoverPackInfo } from '../../shared/pricing/purchaseCoverage';
 import { parsePackInfo } from './parsePackInfo';
 
 describe('coverageSanePurchaseCount', () => {

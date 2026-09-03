@@ -14,7 +14,7 @@
  * pick. No new network calls.
  */
 
-import { matchEvidence } from '../utils/matchEvidence';
+import { matchEvidence } from './matchEvidence';
 
 export type QualityTier = 'budget' | 'standard' | 'premium';
 

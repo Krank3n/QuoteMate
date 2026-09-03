@@ -264,23 +264,10 @@ export type Proposal =
 
 export type ProposalStatus = 'pending' | 'applied' | 'dismissed' | 'failed';
 
-export interface WorkingStatus {
-  /** Pipeline phase identifier — drives icon + style. */
-  phase: 'preflight' | 'analyzing' | 'building' | 'pricing' | 'done' | 'failed';
-  /** Single short line — what's happening right now. */
-  status: string;
-  /** Optional secondary line — e.g. names of items being processed. */
-  detail?: string;
-  /** Optional rolling list of items being searched — shown under the status
-   *  line so the user can see WHAT Mate is currently looking up, not just
-   *  a generic "batch X of Y" progress headline. Populated during the
-   *  Bunnings batch phase. */
-  items?: Array<{ name: string; status: 'pending' | 'searching' | 'done' | 'failed' }>;
-  /** When true, the spinner stops and the card renders the final state. */
-  done: boolean;
-  /** Final summary text shown when done. */
-  summary?: string;
-}
+// Lives in shared/pricing so the server-side pricing run writes the same
+// shape the chat renders. Re-exported here for existing imports.
+import type { WorkingStatus } from '../../shared/pricing/progress';
+export type { WorkingStatus };
 
 /**
  * The in-chat state of one supplier-list import.

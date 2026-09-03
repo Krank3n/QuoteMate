@@ -28,6 +28,9 @@ export const PUSH_CLASS: Record<AussieEvent, PushClass> = {
   milestone: 'nudge',
   inactivity: 'nudge',
   draft_nudge: 'nudge',
+  // The tradie asked for these by locking the phone mid-run; never hold them.
+  quote_priced: 'event',
+  quote_pricing_snag: 'event',
 };
 
 /**
@@ -45,6 +48,8 @@ export const ANDROID_CHANNEL: Record<AussieEvent, string> = {
   milestone: 'reminders',
   inactivity: 'reminders',
   draft_nudge: 'reminders',
+  quote_priced: 'quote-responses',
+  quote_pricing_snag: 'quote-responses',
 };
 
 /** Which notificationPreferences toggle governs each event. */
@@ -58,6 +63,8 @@ export const PREF_KEY: Record<AussieEvent, string> = {
   milestone: 'milestoneCelebrations',
   inactivity: 'inactivityNudges',
   draft_nudge: 'inactivityNudges',
+  quote_priced: 'quoteUpdates',
+  quote_pricing_snag: 'quoteUpdates',
 };
 
 /** Nudge-class pushes allowed per user per local day, across all nudge types. */

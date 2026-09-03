@@ -66,28 +66,47 @@ export async function runPushPermissionPrompt(
   return token ? 'granted' : 'declined';
 }
 
-/** Production wiring for the above. Safe to call anywhere; no-ops off-device. */
-export async function maybePromptForPushPermission(
-  { isSelfSend = false }: { isSelfSend?: boolean } = {}
-): Promise<PromptOutcome> {
-  if (Platform.OS === 'web') return 'unsupported';
+export interface PushDeviceIo {
+  hasPermission(): Promise<boolean>;
+  canAskPermission(): Promise<boolean>;
+  /** Registers for push, showing the OS prompt if needed. Null when refused. */
+  register(): Promise<string | null>;
+}
 
-  // Required lazily so importing this module doesn't drag expo-notifications
-  // into every test that touches a send path. If the native module can't be
-  // resolved at all, there is nothing to ask for — never let that surface as a
-  // rejection in the middle of a send.
+/**
+ * The device's push surface, or null where there is none (web, or no native
+ * module — Expo Go, the simulator). Required lazily so importing this module
+ * doesn't drag expo-notifications into every test that touches a send path.
+ * If the native module can't be resolved at all, there is nothing to ask for
+ * — never let that surface as a rejection in the middle of a send.
+ */
+export function pushDeviceIo(): PushDeviceIo | null {
+  if (Platform.OS === 'web') return null;
   let notificationService: any;
   try {
     ({ notificationService } = require('./notificationService'));
   } catch {
-    return 'unsupported';
+    return null;
   }
-  if (!notificationService?.isAvailable?.()) return 'unsupported';
-
-  return runPushPermissionPrompt({
+  if (!notificationService?.isAvailable?.()) return null;
+  return {
     hasPermission: () => notificationService.hasPermission(),
     canAskPermission: () => notificationService.canAskPermission(),
     register: () => notificationService.registerForPushNotifications({ promptIfNeeded: true }),
+  };
+}
+
+/** Production wiring for the above. Safe to call anywhere; no-ops off-device. */
+export async function maybePromptForPushPermission(
+  { isSelfSend = false }: { isSelfSend?: boolean } = {}
+): Promise<PromptOutcome> {
+  const device = pushDeviceIo();
+  if (!device) return 'unsupported';
+
+  return runPushPermissionPrompt({
+    hasPermission: device.hasPermission,
+    canAskPermission: device.canAskPermission,
+    register: device.register,
     wasAsked: async () => Boolean(await AsyncStorage.getItem(ASKED_KEY)),
     markAsked: async () => { await AsyncStorage.setItem(ASKED_KEY, new Date().toISOString()); },
     confirm: (onAccept, onDecline) => {

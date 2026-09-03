@@ -29,7 +29,7 @@
  * a rule that needs a network call or a model would not be a backstop.
  */
 
-import type { Material } from '../types';
+import type { Material } from './types';
 import { tradeFallbackUnitPriceWithUnit } from './tradeFallback';
 
 export type MatchEvidence = 'strong' | 'weak' | 'none';

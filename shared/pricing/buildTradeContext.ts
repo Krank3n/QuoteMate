@@ -3,8 +3,16 @@
 // Mate's applyProposal needs the same thing when handing a draft off to the
 // pipeline. Extracted so all three callers stay in sync.
 
-import { BusinessSettings } from '../types';
-import { getTradeCategoryById, getTradeNicheById } from '../constants/tradeCategories';
+/** The slice of BusinessSettings the trade context is built from. */
+export interface TradeContextSource {
+  tradeCategories?: string[];
+  tradeNiches?: string[];
+  tradeCategory?: string;
+  tradeNiche?: string;
+  selectedStore?: string;
+  quotingPreferences?: string[];
+}
+import { getTradeCategoryById, getTradeNicheById } from './tradeCategories';
 
 export interface TradeContext {
   categoryName?: string;
@@ -16,7 +24,7 @@ export interface TradeContext {
   quotingPreferences?: string[];
 }
 
-export function buildTradeContext(businessSettings: BusinessSettings | null | undefined): TradeContext | undefined {
+export function buildTradeContext(businessSettings: TradeContextSource | null | undefined): TradeContext | undefined {
   if (!businessSettings) return undefined;
 
   const categoryNames: string[] = [];

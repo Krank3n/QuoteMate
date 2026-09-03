@@ -5,7 +5,7 @@
 // price, wrong product, wrong count). Unlike replay audits judged by an LLM,
 // these are ground truth — a tradie doesn't edit a row that was right.
 
-import { Material } from '../types';
+import { Material } from './types';
 
 export interface AsPricedSnapshot {
   price: number;

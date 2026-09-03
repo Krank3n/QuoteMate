@@ -5,7 +5,7 @@
 // telemetry-bucket mapping is unit-testable without dragging materialsPipeline's
 // react-native / LLM import graph into the test runner.
 
-import type { Material } from '../types';
+import type { Material } from './types';
 
 export interface PriceFetchOutcomeCounts {
   fetchedCount: number;
