@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { matchEvidence, stampMatchConfidence, WEAK_MATCH_NOTE } from './matchEvidence';
+import { matchEvidence, stampMatchConfidence, WEAK_MATCH_NOTE } from '../../shared/pricing/matchEvidence';
 import type { Material } from '../types';
 
 describe('matchEvidence', () => {

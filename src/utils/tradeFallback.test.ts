@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isNonRetailTradeRow, tradeFallbackUnitPrice, tradeFallbackUnitPriceWithUnit } from './tradeFallback';
+import { isNonRetailTradeRow, tradeFallbackUnitPrice, tradeFallbackUnitPriceWithUnit } from '../../shared/pricing/tradeFallback';
 
 describe('isNonRetailTradeRow — the audit failures it exists to fix', () => {
   it('routes MPa-rated ready-mix concrete away from retail (the umbrella-base bug)', () => {

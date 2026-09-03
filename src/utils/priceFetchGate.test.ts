@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { needsPriceFetch } from './priceFetchGate';
+import { needsPriceFetch } from '../../shared/pricing/priceFetchGate';
 
 describe('needsPriceFetch — pricing pipeline gate', () => {
   it('never re-fetches a priced row, locked or not', () => {

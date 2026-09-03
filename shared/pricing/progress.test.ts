@@ -3,7 +3,7 @@
 // whose saved rates missed a row never learned Bunnings had filled it.
 
 import { describe, it, expect } from 'vitest';
-import { pricingEventToProgress } from './pricingProgress';
+import { pricingEventToProgress } from './progress';
 import type { PricingEvent } from '../services/materialsPipeline';
 
 describe('pricingEventToProgress', () => {

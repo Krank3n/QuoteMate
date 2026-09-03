@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { summarizePriceFetchOutcome } from '../priceFetchTelemetry';
+import { summarizePriceFetchOutcome } from '../../../shared/pricing/priceFetchTelemetry';
 import type { Material } from '../../types';
 
 function mat(overrides: Partial<Material>): Material {

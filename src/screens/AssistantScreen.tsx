@@ -46,6 +46,8 @@ import { sendAssistantTurn } from '../services/assistantService';
 import { openVoiceSession, VoiceSession } from '../services/assistant/voiceSession';
 import { LiveAuthError, LiveOfflineError, LiveQuotaError } from '../services/assistant/liveSession';
 import { rememberAppliedQuote, resolveQuoteId } from '../services/assistant/quoteRefMap';
+import { resumeUnfinishedPricingRuns } from '../services/assistant/pricingRunResume';
+import { defaultServerRunIo } from '../services/serverPricingRun';
 import { startMicCapture, MicCaptureHandle, MicUnavailableError, micPermissionGranted } from '../services/assistant/mic';
 import { AudioQueue, createAudioQueue, ensureAudioMode } from '../services/assistant/audioPlayer';
 import { nextMatePlaying } from '../services/assistant/micGate';
@@ -798,6 +800,23 @@ export function AssistantScreen() {
     },
     [appendMessage],
   );
+
+  // A pricing run the server finished (or lost) while the app was closed.
+  // Chat history is in-memory, so the working card and Mate's "[context]"
+  // note died with the last process; without this the next chat would draft
+  // the same job again. Runs once per app process — see pricingRunResume.
+  useEffect(() => {
+    if (!conversation) return;
+    const convoId = conversation.id;
+    void resumeUnfinishedPricingRuns({
+      io: defaultServerRunIo,
+      now: () => Date.now(),
+      quoteTotal: (quoteId) => useStore.getState().quotes.find((q) => q.id === quoteId)?.total,
+      appendMessage: (message) => appendMessage(convoId, message),
+      updateMessage: (messageId, patch) => updateMessage(convoId, messageId, patch),
+      noteToMate: (text) => noteToMate(convoId, text),
+    });
+  }, [conversation?.id, appendMessage, updateMessage, noteToMate]);
 
   // Append an error bubble unless the tail of the chat already says the same
   // thing. A voice reconnect storm used to stack eleven identical "too many

@@ -205,22 +205,6 @@ export function rateLinesCoverMaterials(lines: RateLine[] | undefined): boolean 
   return !!lines && lines.length > 0 && lines.every((l) => l.includesMaterials);
 }
 
-/**
- * Zero the labour on a quote whose labour is charged through rate lines,
- * otherwise the analysis pass's hours × rate lands on top of the rate. The
- * sections become lump sums: an hourly section with no hours is exactly the
- * shape the integrity check flags as broken.
- */
-export function stripLabourFromQuote<T extends Pick<Quote, 'laborHours' | 'sections'>>(quote: T): T {
-  return {
-    ...quote,
-    laborHours: 0,
-    sections: (quote.sections ?? []).map((s) => ({
-      ...s,
-      pricing: 'lumpSum' as const,
-      laborHours: 0,
-      laborHoursTotal: 0,
-      laborTotal: 0,
-    })),
-  };
-}
+// Lives in shared/pricing so the server-side pricing run applies the same
+// rule when labour is charged through rate lines.
+export { stripLabourFromQuote } from '../../shared/pricing/documentTotals';

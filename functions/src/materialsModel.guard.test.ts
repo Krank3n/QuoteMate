@@ -95,7 +95,9 @@ describe('materials generator model', () => {
   });
 
   it('calls Claude before Gemini in the analyze handler', () => {
-    const handler = source.slice(source.indexOf('export const analyzeJobDescription'));
+    // The handler's body lives in analyzeJobDescriptionCore (shared with the
+    // server-side pricing run); the export below it is a thin HTTP wrapper.
+    const handler = source.slice(source.indexOf('async function analyzeJobDescriptionCore'));
     const claudeAt = handler.indexOf('callClaudeForMaterials(anthropicApiKey, finalPrompt, attachments)');
     const geminiAt = handler.indexOf('callGeminiForMaterials(geminiApiKey, finalPrompt, attachments)');
     expect(claudeAt).toBeGreaterThan(-1);

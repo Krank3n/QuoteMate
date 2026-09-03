@@ -1,32 +1,14 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 
-// Same native stubs as materialsPipeline.matchConfidence.test.ts —
-// applyReconcileResult is pure, but the module graph is not.
-vi.mock('expo-modules-core', () => ({
-  default: {},
-  NativeModule: class {},
-  SharedObject: class {},
-  SharedRef: class {},
-  EventEmitter: class {},
-  NativeModulesProxy: {},
-  requireNativeModule: () => ({}),
-  requireOptionalNativeModule: () => null,
-  registerWebModule: (m: unknown) => m,
-  Platform: { OS: 'ios' },
-  uuid: { v4: () => 'test-uuid' },
-}));
-vi.mock('expo-constants', () => ({ default: { expoConfig: { extra: {} } } }));
-vi.mock('expo-keep-awake', () => ({ activateKeepAwakeAsync: vi.fn(), deactivateKeepAwake: vi.fn() }));
-vi.mock('../../config/firebase', () => ({ auth: { currentUser: null }, functions: {} }));
 
 import {
   applyReconcileResult,
   applyLastResortGuess,
   LAST_RESORT_GUESS_PRICE,
   LAST_RESORT_GUESS_PREFIX,
-} from '../materialsPipeline';
-import { normaliseScraperProduct } from '../bunningsScraperClient';
-import { applyPackAwarePricing } from '../../utils/packAwarePricing';
+} from '../../../shared/pricing/pipeline';
+import { normaliseScraperProduct } from '../../../shared/pricing/scraperCandidates';
+import { applyPackAwarePricing } from '../../../shared/pricing/packAwarePricing';
 import type { Material } from '../../types';
 
 /**

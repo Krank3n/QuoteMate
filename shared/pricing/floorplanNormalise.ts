@@ -1,4 +1,4 @@
-import { FloorplanAnalysis } from '../types';
+import { FloorplanAnalysis } from './types';
 
 /**
  * Coerce a raw floorplanAnalysis blob from the LLM into our typed shape, or

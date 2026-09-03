@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { stampAsPriced } from './asPriced';
+import { stampAsPriced } from '../../shared/pricing/asPriced';
 import { Material } from '../types';
 
 const mat = (over: Partial<Material> = {}): Material => ({

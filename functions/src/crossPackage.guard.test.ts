@@ -58,6 +58,9 @@ describe('estimated-price pack info (src/services/webSearchPricing.ts)', () => {
     path.join(__dirname, '..', '..', 'src', 'services', 'webSearchPricing.ts'),
     'utf8',
   );
+  // The app's client and the server-side pricing run both coerce the answer
+  // through shared/pricing/estimate.ts; the prompt lives in the client file.
+  const shared = fs.readFileSync(path.join(__dirname, 'shared', 'pricing', 'estimate.ts'), 'utf8');
 
   it('asks the estimator what one purchase contains, on both sides', () => {
     // Drop this from the prompt and the pipeline goes back to multiplying a
@@ -71,13 +74,14 @@ describe('estimated-price pack info (src/services/webSearchPricing.ts)', () => {
 
   it('returns the pack info to the caller', () => {
     expect(handler).toMatch(/packSize:\s*Number\.isFinite/);
-    expect(client).toMatch(/packSize:\s*positivePack/);
+    expect(shared).toMatch(/packSize:\s*positivePack/);
+    expect(client).toMatch(/normaliseEstimateResponse\(/);
   });
 
-  it('normalises ASCII m2 to canonical m² on both sides', () => {
+  it('normalises ASCII m2 to canonical m² on every side', () => {
     // The prompt asks for 'm2'; every guard downstream compares against 'm²'.
     // An unnormalised unit silently discards the pack size.
-    for (const src of [handler, client]) {
+    for (const src of [handler, shared]) {
       expect(src).toMatch(/m2:\s*'m²'/);
       expect(src).toMatch(/m3:\s*'m³'/);
     }
@@ -95,8 +99,10 @@ describe('price estimator must not decline trade-supply goods', () => {
     path.join(__dirname, '..', '..', 'src', 'services', 'webSearchPricing.ts'),
     'utf8',
   );
+  // The pipeline lives in shared/pricing (symlinked under src/shared) so the
+  // server-side pricing run and the app execute one implementation.
   const pipeline = fs.readFileSync(
-    path.join(__dirname, '..', '..', 'src', 'services', 'materialsPipeline.ts'),
+    path.join(__dirname, 'shared', 'pricing', 'pipeline.ts'),
     'utf8',
   );
 
@@ -121,7 +127,7 @@ describe('price estimator must not decline trade-supply goods', () => {
   it('tries a real estimate before falling back to the placeholder', () => {
     // Order matters: the placeholder is a fixed nominal price, so anything
     // that can produce a material-specific estimate must run ahead of it.
-    const byName = pipeline.indexOf('searchMaterialPrice(m.name, hardwareStores)');
+    const byName = pipeline.indexOf('estimateMaterialPrice(m.name, hardwareStores)');
     const placeholder = pipeline.indexOf('applyLastResortGuess(m, gstInclusive)');
     expect(byName).toBeGreaterThan(-1);
     expect(placeholder).toBeGreaterThan(-1);

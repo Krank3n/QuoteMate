@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { normaliseFloorplanAnalysis } from '../floorplanNormalise';
+import { normaliseFloorplanAnalysis } from '../../../shared/pricing/floorplanNormalise';
 
 const detected = { detected: true, confidence: 'medium', assumptions: '' };
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { withScraperRetry, isTransientScraperError } from './scraperRetry';
+import { withScraperRetry, isTransientScraperError } from '../../shared/pricing/scraperRetry';
 
 describe('isTransientScraperError', () => {
   it('treats the failures that killed audit runs as transient', () => {
