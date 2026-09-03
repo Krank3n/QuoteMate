@@ -5,11 +5,18 @@
  * "Monetised" counts BOTH revenue paths:
  *   Path A (Pro subscription):  paywall_viewed → checkout_started → pro_paid
  *   Path B (Square collecting): square_connected → first_payment_collected
- * sharing the top of the funnel: signup → quote_draft → quote_sent.
+ * sharing the top of the funnel: signup → quote_draft → quote_sent, which
+ * then runs on into what the CUSTOMER did with the quote:
+ *   quote_sent → customer_viewed → quote_accepted
+ * Sending is the activation event (2026-07 audit), but the stretch between
+ * a send and a paywall view was dark: nothing recorded whether the customer
+ * opened the quote, said yes, or whether the tradie ever came back to see
+ * it. `monetizedByStage` is the read on whether a customer's response
+ * predicts paying, and `returns` is the read on whether anyone comes back.
  *
- * Inputs join durable Firestore state (subscription, documents, the
- * squareConnection settings doc) with event-derived booleans from
- * users/{uid}/events. Durable evidence ALWAYS wins over lossy events: a billed
+ * Inputs join durable Firestore state (subscription, documents, the legacy
+ * quotes' view stamps, the squareConnection settings doc) with event-derived
+ * booleans from users/{uid}/events. Durable evidence ALWAYS wins over lossy events: a billed
  * sub counts as pro_paid even if no paywall/checkout event was ever recorded
  * (event writes are fire-and-forget and predate this instrumentation).
  *
@@ -23,11 +30,36 @@
 import { deriveSubFields, isBilledSub } from './subscription.helpers';
 import { safeRatio } from './adminFunnel.helpers';
 
-export type SharedStage = 'signup' | 'quote_draft' | 'quote_sent';
+export type SharedStage =
+  | 'signup'
+  | 'quote_draft'
+  | 'quote_sent'
+  | 'customer_viewed'
+  | 'quote_accepted';
 export type PathAStage = 'paywall_viewed' | 'checkout_started' | 'pro_paid';
 export type PathBStage = 'square_connected' | 'first_payment_collected';
 
-export const SHARED_STAGES: SharedStage[] = ['signup', 'quote_draft', 'quote_sent'];
+export const SHARED_STAGES: SharedStage[] = [
+  'signup',
+  'quote_draft',
+  'quote_sent',
+  'customer_viewed',
+  'quote_accepted',
+];
+
+/** Position on the shared ladder, so "at or past" comparisons read as maths. */
+export function sharedStageRank(stage: SharedStage): number {
+  return SHARED_STAGES.indexOf(stage);
+}
+
+/**
+ * An app open at least this many hours after the previous one is a RETURN
+ * VISIT — a later sitting — rather than the same session resumed after a
+ * phone call or a switch to the calculator. Half a day separates "came back
+ * tomorrow" from "came back in a minute" without depending on time zones or
+ * calendar-day boundaries.
+ */
+export const RETURN_GAP_HOURS = 12;
 export const PATH_A_STAGES: PathAStage[] = ['paywall_viewed', 'checkout_started', 'pro_paid'];
 export const PATH_B_STAGES: PathBStage[] = ['square_connected', 'first_payment_collected'];
 
@@ -40,6 +72,14 @@ export interface EventFunnelUserInput {
   hasQuoteDraft: boolean;
   /** True iff ≥1 document is activating (sent) — see isActivatingDoc. */
   hasSentDoc: boolean;
+  /** True iff a customer opened ≥1 quote's acceptance link — see isViewedDoc. */
+  hasViewedDoc: boolean;
+  /**
+   * True iff ≥1 quote was accepted — by the customer on the link or by the
+   * tradie marking it in the app — see isAcceptedDoc. Either way the job was
+   * won, which is the first moment the app has visibly earned its keep.
+   */
+  hasAcceptedDoc: boolean;
   /** True iff users/{uid}/settings/squareConnection exists (ever OAuth'd). */
   hasSquareConnection: boolean;
   /** True iff ≥1 document payment has method 'square' (real collected money). */
@@ -54,6 +94,11 @@ export interface EventFunnelUserInput {
    * before the send instrumentation shipped, NOT evidence they skipped a step.
    */
   send?: SendFlowFlags;
+  /**
+   * app_opened event flags, same window and same caveat as `send`: undefined
+   * means no events at all, not evidence the app was never opened.
+   */
+  opens?: AppOpenFlags;
 }
 
 /**
@@ -80,11 +125,17 @@ export interface FurthestStages {
  * first_payment_collected even if the connection doc was later deleted.
  */
 export function furthestStage(input: EventFunnelUserInput): FurthestStages {
-  const shared: SharedStage = input.hasSentDoc
-    ? 'quote_sent'
-    : input.hasQuoteDraft
-      ? 'quote_draft'
-      : 'signup';
+  // Later stages imply earlier ones: an accepted quote counts as viewed even
+  // when the tradie marked it accepted by hand and no view was ever stamped.
+  const shared: SharedStage = input.hasAcceptedDoc
+    ? 'quote_accepted'
+    : input.hasViewedDoc
+      ? 'customer_viewed'
+      : input.hasSentDoc
+        ? 'quote_sent'
+        : input.hasQuoteDraft
+          ? 'quote_draft'
+          : 'signup';
 
   const pathA: PathAStage | null = isBilledSub(input.sub)
     ? 'pro_paid'
@@ -105,7 +156,13 @@ export function furthestStage(input: EventFunnelUserInput): FurthestStages {
 
 export interface EventFunnelPayload {
   /** Cumulative reach counts — every user at-or-past each stage. */
-  shared: { signups: number; quoteDraft: number; quoteSent: number };
+  shared: {
+    signups: number;
+    quoteDraft: number;
+    quoteSent: number;
+    customerViewed: number;
+    quoteAccepted: number;
+  };
   pathA: {
     paywallViewed: number;
     checkoutStarted: number;
@@ -130,8 +187,27 @@ export interface EventFunnelPayload {
     trialToMonetized: number;
     /** quote_sent / signups. */
     activationRate: number;
+    /** customer_viewed / quote_sent — did the quote get in front of anyone. */
+    sentToViewed: number;
+    /** quote_accepted / quote_sent — did the tradie win the job. */
+    sentToAccepted: number;
   };
   trialStarted: number;
+  /**
+   * Monetised users bucketed by their FURTHEST shared stage. Read against
+   * histogram.shared (the same buckets, all users) for the rate: if
+   * quote_accepted converts and quote_sent doesn't, the lever is getting the
+   * quote answered, not the paywall.
+   */
+  monetizedByStage: Record<SharedStage, number>;
+  /**
+   * Return visits, from app_opened events in the window. `opened` is anyone
+   * who opened the app at all; `returnedLater` came back after a gap of at
+   * least RETURN_GAP_HOURS; `viaPush` opened from a notification tap at
+   * least once. Before the app_opened instrumentation shipped every user
+   * reads as zero here — that is missing data, not a retention verdict.
+   */
+  returns: { opened: number; returnedLater: number; viaPush: number };
   /**
    * Per-user furthest-stage histograms — where people STALL. pathA/pathB
    * count only users who entered the path; shared counts everyone.
@@ -155,14 +231,26 @@ export function rollupEventFunnel(
   now: number,
   eventWindowDays: number
 ): EventFunnelPayload {
+  const emptyShared = (): Record<SharedStage, number> => ({
+    signup: 0,
+    quote_draft: 0,
+    quote_sent: 0,
+    customer_viewed: 0,
+    quote_accepted: 0,
+  });
   const histogram = {
-    shared: { signup: 0, quote_draft: 0, quote_sent: 0 } as Record<SharedStage, number>,
+    shared: emptyShared(),
     pathA: { paywall_viewed: 0, checkout_started: 0, pro_paid: 0 } as Record<PathAStage, number>,
     pathB: { square_connected: 0, first_payment_collected: 0 } as Record<PathBStage, number>,
   };
 
+  const monetizedByStage = emptyShared();
+  const returns = { opened: 0, returnedLater: 0, viaPush: 0 };
+
   let quoteDraft = 0;
   let quoteSent = 0;
+  let customerViewed = 0;
+  let quoteAccepted = 0;
   let paywallViewed = 0;
   let checkoutStarted = 0;
   let proPaid = 0;
@@ -180,8 +268,16 @@ export function rollupEventFunnel(
     if (stages.pathB) histogram.pathB[stages.pathB]++;
 
     // Cumulative reach: at-or-past each stage.
-    if (stages.shared !== 'signup') quoteDraft++;
-    if (stages.shared === 'quote_sent') quoteSent++;
+    const rank = sharedStageRank(stages.shared);
+    if (rank >= sharedStageRank('quote_draft')) quoteDraft++;
+    if (rank >= sharedStageRank('quote_sent')) quoteSent++;
+    if (rank >= sharedStageRank('customer_viewed')) customerViewed++;
+    if (rank >= sharedStageRank('quote_accepted')) quoteAccepted++;
+    if (isMonetized(input)) monetizedByStage[stages.shared]++;
+
+    if (input.opens?.openedApp) returns.opened++;
+    if (input.opens?.returnedLater) returns.returnedLater++;
+    if (input.opens?.returnedViaPush) returns.viaPush++;
 
     if (stages.pathA) paywallViewed++;
     if (stages.pathA === 'checkout_started' || stages.pathA === 'pro_paid') checkoutStarted++;
@@ -201,7 +297,7 @@ export function rollupEventFunnel(
   const monetizedCount = viaPro + viaSquare - viaBoth;
 
   return {
-    shared: { signups: inputs.length, quoteDraft, quoteSent },
+    shared: { signups: inputs.length, quoteDraft, quoteSent, customerViewed, quoteAccepted },
     pathA: {
       paywallViewed,
       checkoutStarted,
@@ -218,8 +314,12 @@ export function rollupEventFunnel(
     conversion: {
       trialToMonetized: safeRatio(monetizedCount, trialStarted),
       activationRate: safeRatio(quoteSent, inputs.length),
+      sentToViewed: safeRatio(customerViewed, quoteSent),
+      sentToAccepted: safeRatio(quoteAccepted, quoteSent),
     },
     trialStarted,
+    monetizedByStage,
+    returns,
     histogram,
     sendFlow: rollupSendFlow(inputs),
     asOf: now,
@@ -236,13 +336,47 @@ export function rollupEventFunnel(
  * events don't need it; the send-flow ones carry the method, the self-send flag
  * and the email-generation wait we want to measure.
  */
-export interface UserEventFlags extends SendFlowFlags {
+/** One user's app_opened flags, de-duped across repeated events. */
+export interface AppOpenFlags {
+  /** At least one app_opened in the window. */
+  openedApp: boolean;
+  /** An open at least RETURN_GAP_HOURS after the previous one — a later sitting. */
+  returnedLater: boolean;
+  /** At least one open attributed to a notification tap (source 'push'). */
+  returnedViaPush: boolean;
+}
+
+export function emptyAppOpenFlags(): AppOpenFlags {
+  return { openedApp: false, returnedLater: false, returnedViaPush: false };
+}
+
+/**
+ * Fold one app_opened event into a user's flags, in place. The client sends
+ * `source` (cold | foreground | push) and `hours_since_last_open` (null on
+ * the first open a device has ever seen); unusable props degrade to "opened,
+ * details unknown", same as the send-flow folds.
+ */
+export function foldAppOpenEvent(flags: AppOpenFlags, event: unknown, props?: unknown): void {
+  if (event !== 'app_opened') return;
+  const p = (props && typeof props === 'object' ? props : {}) as Record<string, unknown>;
+  flags.openedApp = true;
+  const gap = typeof p.hours_since_last_open === 'number' ? p.hours_since_last_open : NaN;
+  if (Number.isFinite(gap) && gap >= RETURN_GAP_HOURS) flags.returnedLater = true;
+  if (p.source === 'push') flags.returnedViaPush = true;
+}
+
+export interface UserEventFlags extends SendFlowFlags, AppOpenFlags {
   viewedPaywall: boolean;
   startedCheckout: boolean;
 }
 
 function emptyEventFlags(): UserEventFlags {
-  return { viewedPaywall: false, startedCheckout: false, ...emptySendFlowFlags() };
+  return {
+    viewedPaywall: false,
+    startedCheckout: false,
+    ...emptySendFlowFlags(),
+    ...emptyAppOpenFlags(),
+  };
 }
 
 export function foldEvent(
@@ -254,7 +388,58 @@ export function foldEvent(
   if (event === 'paywall_viewed') next.viewedPaywall = true;
   if (event === 'checkout_started') next.startedCheckout = true;
   foldSendEvent(next, event, props);
+  foldAppOpenEvent(next, event, props);
   return next;
+}
+
+/**
+ * True iff a customer opened this quote's acceptance link. The public quote
+ * page (getQuoteForAcceptance in index.ts) stamps firstViewedAt /
+ * lastViewedAt / viewCount on the legacy users/{uid}/quotes doc, and the
+ * documents mirror does NOT carry those fields across — so the cron runs
+ * this over BOTH collections, and a documents twin without the stamps is
+ * not evidence that nobody looked.
+ */
+export function isViewedDoc(
+  doc: { firstViewedAt?: unknown; lastViewedAt?: unknown; viewCount?: unknown } | null | undefined
+): boolean {
+  if (!doc) return false;
+  if (doc.firstViewedAt != null || doc.lastViewedAt != null) return true;
+  return typeof doc.viewCount === 'number' && doc.viewCount > 0;
+}
+
+/**
+ * True iff the quote was accepted — the job was won. That is either the
+ * customer tapping Accept on the link (the acceptance handler writes
+ * respondedAt + status 'accepted', which the mirror projects to stage
+ * quote_accepted and setDocumentStage stamps as acceptedAt) or the tradie
+ * marking it accepted in the app (same stage transition). A quote converted
+ * to an invoice was won too, even if it skipped the accepted stage.
+ *
+ * Rejected and cancelled never count, whatever else is stamped, and an
+ * invoice-only document (no quote step) is not an acceptance.
+ */
+export function isAcceptedDoc(
+  doc:
+    | {
+        stage?: unknown;
+        acceptedAt?: unknown;
+        invoicedAt?: unknown;
+        respondedAt?: unknown;
+      }
+    | null
+    | undefined
+): boolean {
+  if (!doc) return false;
+  const stage = typeof doc.stage === 'string' ? doc.stage : '';
+  if (stage === 'quote_rejected' || stage === 'cancelled') return false;
+  if (stage === 'quote_accepted') return true;
+  if (doc.acceptedAt != null || doc.invoicedAt != null) return true;
+  // Legacy accept: respondedAt on a doc that isn't rejected. The mirror maps
+  // the accompanying status forward (accepted → quote_accepted, then on to
+  // invoice_sent / paid as the job progresses), so the stage alone can't be
+  // relied on to still say "accepted" by the time the cron reads it.
+  return doc.respondedAt != null;
 }
 
 /**

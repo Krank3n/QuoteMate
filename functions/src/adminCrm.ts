@@ -47,6 +47,8 @@ import {
   sumSquarePayments,
   isMonetized,
   type EventFunnelUserInput,
+  isAcceptedDoc,
+  isViewedDoc,
   type EventFunnelPayload,
   type UserEventFlags,
 } from './eventFunnel.helpers';
@@ -1981,19 +1983,28 @@ export async function computeEventFunnelPayload(): Promise<
   const now = Date.now();
   const cutoff = admin.firestore.Timestamp.fromMillis(now - EVENT_WINDOW_DAYS * 24 * 60 * 60 * 1000);
 
-  const [authUsers, subs, userSettings, docsSnap, eventsSnap, attributionMap] = await Promise.all([
-    listAllAuthUsers(),
-    fetchAllSubscriptions(),
-    fetchAllUserSettings(),
-    firestore.collectionGroup('documents').get(),
-    firestore.collectionGroup('events').where('ts', '>=', cutoff).get(),
-    fetchAllAttribution(),
-  ]);
+  // The legacy quotes collection rides along because the customer-view stamps
+  // (firstViewedAt / viewCount, written by the public acceptance page) live
+  // ONLY there — the documents mirror doesn't project them. Read unfiltered:
+  // a where() on viewCount would need a collection-group field override.
+  const [authUsers, subs, userSettings, docsSnap, quotesSnap, eventsSnap, attributionMap] =
+    await Promise.all([
+      listAllAuthUsers(),
+      fetchAllSubscriptions(),
+      fetchAllUserSettings(),
+      firestore.collectionGroup('documents').get(),
+      firestore.collectionGroup('quotes').get(),
+      firestore.collectionGroup('events').where('ts', '>=', cutoff).get(),
+      fetchAllAttribution(),
+    ]);
 
-  // One pass over every document: draft / activated / square-paid per uid.
-  // Reconstructed `recovered-` docs are skipped outright — see the header.
+  // One pass over every document: draft / activated / viewed / accepted /
+  // square-paid per uid. Reconstructed `recovered-` docs are skipped outright
+  // — see the header.
   const draftUids = new Set<string>();
   const activatedUids = new Set<string>();
+  const viewedUids = new Set<string>();
+  const acceptedUids = new Set<string>();
   const squarePaidUids = new Set<string>();
   let recoveredDocs = 0;
   for (const d of docsSnap.docs) {
@@ -2006,7 +2017,17 @@ export async function computeEventFunnelPayload(): Promise<
     const data = d.data() as any;
     draftUids.add(uid);
     if (isActivatingDoc(data)) activatedUids.add(uid);
+    if (isViewedDoc(data)) viewedUids.add(uid);
+    if (isAcceptedDoc(data)) acceptedUids.add(uid);
     if (docHasSquarePayment(data)) squarePaidUids.add(uid);
+  }
+  // Legacy quotes contribute the view stamps only; draft/sent/accepted are
+  // already answered by their documents twin, and recovered ids are skipped
+  // for the same reason as above (their count is reported once, from docs).
+  for (const d of quotesSnap.docs) {
+    const uid = d.ref.parent.parent?.id;
+    if (!uid || isRecoveredDocId(d.id)) continue;
+    if (isViewedDoc(d.data() as any)) viewedUids.add(uid);
   }
 
   // Bucket events by parent uid into de-duped per-user flags. `props` carries
@@ -2029,12 +2050,15 @@ export async function computeEventFunnelPayload(): Promise<
       sub: subs.get(u.uid) || null,
       hasQuoteDraft: draftUids.has(u.uid),
       hasSentDoc: activatedUids.has(u.uid),
+      hasViewedDoc: viewedUids.has(u.uid),
+      hasAcceptedDoc: acceptedUids.has(u.uid),
       hasSquareConnection: userSettings.squareConnection.has(u.uid),
       hasSquarePayment: squarePaidUids.has(u.uid),
       viewedPaywall: flags?.viewedPaywall ?? false,
       startedCheckout: flags?.startedCheckout ?? false,
-      // UserEventFlags is a superset of SendFlowFlags, so this passes through.
+      // UserEventFlags is a superset of both flag bags, so these pass through.
       send: flags,
+      opens: flags,
     };
   });
 
@@ -2087,6 +2111,11 @@ export const aggregateEventFunnel = functions
         `(pro=${payload.monetized.viaPro}, square=${payload.monetized.viaSquare}), ` +
         `trialToMonetized=${(payload.conversion.trialToMonetized * 100).toFixed(1)}%, ` +
         `foundingSpotsLeft=${founding.spotsLeft}/${founding.cap}; ` +
+        `outcome: sent=${payload.shared.quoteSent} viewed=${payload.shared.customerViewed} ` +
+        `accepted=${payload.shared.quoteAccepted}, monetizedByStage=` +
+        `${JSON.stringify(payload.monetizedByStage)}; ` +
+        `returns: opened=${payload.returns.opened} later=${payload.returns.returnedLater} ` +
+        `viaPush=${payload.returns.viaPush}; ` +
         `sendFlow: sheet=${send.sheetOpened} method=${send.methodChosen} sent=${send.sent} ` +
         `(durableOnly=${send.durableOnlySends}), preview=${send.email.previewOpened} ` +
         `abandoned=${send.email.previewAbandoned}, waitMedian=${send.email.waitMs.median}ms ` +
