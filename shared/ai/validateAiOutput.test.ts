@@ -799,3 +799,38 @@ describe('thin-layer density guard', () => {
     expect(materials[0].quantity).toBe(350);
   });
 });
+
+// The generator has emitted Cyrillic mid-name twice in 743 stored documents.
+// One reached a customer on an invoice.
+describe('validateAndRepairAiOutput — Latin-script guard', () => {
+  const silentLog = { warn: () => {} };
+
+  it('strips the foreign word out of the two real names and counts it', () => {
+    const { materials, flags } = validateAndRepairAiOutput(
+      [
+        { name: 'Consumer mains cable 16mm² двух core and earth', searchTerm: 'consumer mains cable 16mm² двух core', quantity: 10, unit: 'm', price: 12 },
+        { name: 'Builders String Line ролик 100m', quantity: 1, unit: 'each', price: 8 },
+      ],
+      silentLog,
+    );
+    expect(materials[0].name).toBe('Consumer mains cable 16mm² core and earth');
+    expect(materials[0].searchTerm).toBe('consumer mains cable 16mm² core');
+    expect(materials[1].name).toBe('Builders String Line 100m');
+    expect(flags.hasNonLatinText).toBe(true);
+    expect(flags.nonLatinTokenCount).toBe(3);
+  });
+
+  it('leaves real product names alone — symbols, degrees, accents and units are not another script', () => {
+    const names = ['Colorbond® sheet 0.42 BMT', '90° elbow 15mm', 'Sikaflex-11FC 310mL', 'Café blend (½ pack)', 'R2.5 batts 1160×430', 'Ø16 rebar'];
+    const { materials, flags } = validateAndRepairAiOutput(names.map((name) => ({ name, quantity: 1, unit: 'each', price: 5 })), silentLog);
+    expect(materials.map((m) => m.name)).toEqual(names);
+    expect(flags.hasNonLatinText).toBe(false);
+    expect(flags.nonLatinTokenCount).toBe(0);
+  });
+
+  it('never empties a name that is entirely another script', () => {
+    const { materials, flags } = validateAndRepairAiOutput([{ name: 'ролик', quantity: 1, unit: 'each', price: 5 }], silentLog);
+    expect(materials[0].name).toBe('ролик');
+    expect(flags.nonLatinTokenCount).toBe(1);
+  });
+});

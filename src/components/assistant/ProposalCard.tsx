@@ -135,6 +135,17 @@ function Body({ proposal }: { proposal: Proposal }) {
         </View>
       );
     case 'propose_add_line_item':
+      if (proposal.kind === 'work') {
+        const gst =
+          proposal.pricesIncludeGst === true ? ' inc GST' : proposal.pricesIncludeGst === false ? ' ex GST' : '';
+        return (
+          <View>
+            <Text style={styles.summary}>{proposal.searchTerm} · {formatCurrency(proposal.price ?? 0)}{gst}</Text>
+            {!!proposal.scope && <Text style={styles.scope} numberOfLines={4}>{proposal.scope}</Text>}
+            <Text style={styles.dim}>Lump sum at your price — no quantity, no markup, nothing to price up.</Text>
+          </View>
+        );
+      }
       return (
         <View>
           <Text style={styles.summary}>{proposal.qty} {proposal.unit} · {proposal.searchTerm}</Text>
@@ -146,10 +157,12 @@ function Body({ proposal }: { proposal: Proposal }) {
       // the tradie whether Mate heard them right.
       const changes: string[] = [];
       if (proposal.price !== undefined) {
+        // A lump sum's price is the whole line — never "per each".
+        const per = proposal.lumpSum ? '' : proposal.displayUnit ? ` per ${proposal.displayUnit}` : '';
         changes.push(
           proposal.displayCurrentPrice != null
-            ? `${formatCurrency(proposal.displayCurrentPrice)} → ${formatCurrency(proposal.price)}${proposal.displayUnit ? ` per ${proposal.displayUnit}` : ''}`
-            : `${formatCurrency(proposal.price)}${proposal.displayUnit ? ` per ${proposal.displayUnit}` : ''}`,
+            ? `${formatCurrency(proposal.displayCurrentPrice)} → ${formatCurrency(proposal.price)}${per}`
+            : `${formatCurrency(proposal.price)}${per}`,
         );
       }
       if (proposal.quantity !== undefined) {
@@ -168,13 +181,47 @@ function Body({ proposal }: { proposal: Proposal }) {
           <Text style={styles.dim}>{changes.join(' · ')}</Text>
           {proposal.price !== undefined && (
             <Text style={styles.dim}>
-              Priced by you, so it won't be flagged as an estimate.
-              {proposal.price > 0 ? ' Saved to your supplier book for next time.' : ''}
+              {proposal.lumpSum
+                ? 'Lump sum — this is the whole line, no markup on top.'
+                : `Priced by you, so it won't be flagged as an estimate.${proposal.price > 0 ? ' Saved to your supplier book for next time.' : ''}`}
             </Text>
           )}
         </View>
       );
     }
+    case 'propose_set_total': {
+      const p = proposal.preview;
+      const moved =
+        p?.mechanism === 'labour' && p.labourBefore != null && p.labourAfter != null
+          ? `Labour ${formatCurrency(p.labourBefore)} → ${formatCurrency(p.labourAfter)}. Materials stay as they are.`
+          : p?.mechanism === 'adjustment' && p.adjustment != null
+            ? `A "Price adjustment" line of ${formatCurrency(p.adjustment)} carries it. Materials and labour stay as they are.`
+            : 'Labour takes up the difference if there is any; otherwise a "Price adjustment" line carries it. Materials stay as they are.';
+      return (
+        <View>
+          {proposal.displayName ? (
+            <Text style={styles.summary} numberOfLines={2}>{proposal.displayName}</Text>
+          ) : null}
+          <Text style={styles.summary}>
+            {p ? `${formatCurrency(p.currentTotal)} → ` : 'Total → '}{formatCurrency(proposal.targetTotal)}
+          </Text>
+          <Text style={styles.dim}>{moved}</Text>
+        </View>
+      );
+    }
+    case 'propose_pick_contact':
+      return (
+        <View>
+          {proposal.displayName ? (
+            <Text style={styles.summary} numberOfLines={2}>{proposal.displayName}</Text>
+          ) : null}
+          <Text style={styles.dim}>
+            {proposal.quoteId
+              ? "Opens your phone's contacts — the one you pick goes on this one and into your QuoteMate contacts."
+              : "Opens your phone's contacts — the one you pick goes into your QuoteMate contacts and onto the draft."}
+          </Text>
+        </View>
+      );
     case 'propose_delete_line_item':
       return (
         <View>

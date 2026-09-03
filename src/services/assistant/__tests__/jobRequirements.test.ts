@@ -197,3 +197,33 @@ describe('a defaulted trade must not outvote the job in front of you', () => {
     expect(r.matched.categoryId).toBe('cabinet_making');
   });
 });
+
+// An invoice is for work already done. The electrician invoicing a
+// switchboard (3 Sep 2026) was asked poles, circuits, RCDs and asbestos and
+// offered a supplier list — twelve messages before the draft.
+describe('resolveJobRequirements — invoice fast path', () => {
+  it('collapses the questions to what was done and who for, and turns the supply flags off', () => {
+    const result = resolveJobRequirements({ freeText: 'supply and install a new switchboard', documentType: 'invoice', supplierBook: COLORBOND_BOOK });
+    expect(result.invoiceFastPath).toBe(true);
+    expect(result.mustAskQuestions).toHaveLength(2);
+    expect(result.mustAskQuestions[0].toLowerCase()).toContain('what work was done');
+    expect(result.mustAskQuestions[1].toLowerCase()).toContain('who it is for');
+    expect(result.genericScope).toBe(false);
+    expect(result.specialistSupply).toBe(false);
+    expect(result.planHelps).toBe(false);
+    expect(result.measurementDriven).toBe(false);
+    expect(result.supplierBookCoversTrade).toBe(false);
+  });
+
+  it('still names the trade it matched, so the pricing engine knows the niche', () => {
+    const result = resolveJobRequirements({ freeText: 'colorbond fence', documentType: 'invoice' });
+    expect(result.matched.nicheId).toBe('fencing');
+  });
+
+  it('is off for a quote — a fence quote keeps its own questions and specialist-supply flag', () => {
+    const result = resolveJobRequirements({ freeText: 'colorbond fence', documentType: 'quote' });
+    expect(result.invoiceFastPath).toBe(false);
+    expect(result.mustAskQuestions.length).toBeGreaterThan(0);
+    expect(result.specialistSupply).toBe(true);
+  });
+});

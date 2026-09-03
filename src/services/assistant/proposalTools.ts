@@ -13,21 +13,27 @@ import {
   DraftQuoteProposal,
   ImportSupplierListProposal,
   MarkPaidProposal,
+  PickContactProposal,
   Proposal,
   RememberPreferenceProposal,
   RepriceQuoteProposal,
   SaveRateProposal,
   SendQuoteProposal,
+  SetTotalProposal,
   UpdateCustomerProposal,
   UpdateQuoteRatesProposal,
   UpdateQuoteScopeProposal,
 } from '../../types/assistant';
-import type { RateLine } from '../../types';
+import type { Material, RateLine } from '../../types';
 import { resolveQuoteId } from './quoteRefMap';
 import { resolveKnownQuoteId } from './showQuoteGate';
 import { isPricingInFlight } from './pricingInFlight';
 import { sanitizeJobDescription } from '../../utils/sanitizeJobDescription';
 import { MAX_LABEL_CHARS, RATE_CARD_UNITS, normalisePreference, normaliseRateUnit } from '../quotingProfile';
+import { planSetTotal, type SetTotalSource } from '../../utils/setTotal';
+import { phoneForRecord } from '../../utils/auPhone';
+import { formatCurrency, roundToTwoDecimals } from '../../utils/documentCalculator';
+import { isWorkItem } from '../../../shared/document/lumpSum';
 
 /** Whitespace-folded, trimmed, capped — for text that lands in the prompt on every turn. */
 const shortText = (v: unknown): string =>
@@ -85,7 +91,52 @@ function parseRateLines(raw: unknown): { lines?: RateLine[]; error?: string } {
 export interface ProposalResult {
   proposal?: Proposal;
   error?: string;
+  /** Rides back to the model with the ok — something it must tell the tradie or act on. */
+  note?: string;
 }
+
+/**
+ * The document a quote-targeting proposal is about, as the screen can see it
+ * right now. Registered by the chat screen (same pattern as the renderable-
+ * quote probe) so a validator can plan against the real figures inside the
+ * turn: a set-total below the materials is refused before a card goes up, and
+ * the card shows what will move rather than just the target. No probe (tests,
+ * screen unmounted) → the card carries the target alone and Apply plans.
+ */
+export type ProposalDocumentSnapshot = SetTotalSource & { materials?: Material[] };
+let documentProbe: ((quoteId: string) => ProposalDocumentSnapshot | null) | null = null;
+
+export function setProposalDocumentProbe(probe: ((quoteId: string) => ProposalDocumentSnapshot | null) | null): void {
+  documentProbe = probe;
+}
+
+/**
+ * A customer draft the model built, with the phone kept only when it is a
+ * whole Australian number. Voice hands numbers over in chunks and the model
+ * pads what is missing; a padded number on the contact is worse than none.
+ */
+function cleanCustomerDraft(raw: any): { draft?: { name: string; phone?: string; email?: string; address?: string }; note?: string } {
+  const name = typeof raw?.name === 'string' ? raw.name.trim() : '';
+  if (!name) return {};
+  const { phone, dropped } = phoneForRecord(raw.phone);
+  const email = typeof raw.email === 'string' && raw.email.trim() ? raw.email.trim() : undefined;
+  const address = typeof raw.address === 'string' && raw.address.trim() ? raw.address.trim() : undefined;
+  return {
+    draft: { name, ...(phone ? { phone } : {}), ...(email ? { email } : {}), ...(address ? { address } : {}) },
+    note: dropped
+      ? `The phone "${dropped}" was left off — it isn't a whole Australian number. Tell the tradie in one line that you couldn't get a whole number and left it off; do NOT ask for the rest again.`
+      : undefined,
+  };
+}
+
+// Customer details are not scope: the jobDescription prints on the customer's
+// document. A real scope update carried "New customer details. Full Name: …
+// Phone number: …" (3 Sep 2026); this sends it to the right tool instead.
+const CONTACT_DETAILS_IN_SCOPE = /\b(?:new customer details|customer details|full name|phone number|email address)\s*:/i;
+
+// Placeholders the model leaves in a customer email when it never fetched the
+// real figure or business name. One went out reading "Total materials: $X".
+const EMAIL_PLACEHOLDER = /\$[XYZ]\b|\[(?:business name|name|customer name|total)\]|<(?:business|name)>|\{(?:business|name)\}/i;
 
 function newProposalId(): string {
   return `prop_${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
@@ -141,15 +192,19 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
       if (!input.customerId && !input.customerDraft?.name) {
         return { error: 'Provide customerId (from find_customer) or customerDraft.name.' };
       }
+      if (CONTACT_DETAILS_IN_SCOPE.test(String(input.jobDescription))) {
+        return { error: "jobDescription is the work, and it prints on the customer's document — customer details go in customerDraft, never in the scope." };
+      }
       const rateLines = parseRateLines(input.rateLines);
       if (rateLines.error) return { error: rateLines.error };
+      const customer = input.customerId ? {} : cleanCustomerDraft(input.customerDraft);
       const proposal: DraftQuoteProposal = {
         id,
         toolUseId,
         createdAt: now,
         type: 'propose_draft_quote',
         customerId: input.customerId,
-        customerDraft: input.customerDraft,
+        customerDraft: input.customerId ? undefined : customer.draft,
         jobName: String(input.jobName),
         // The description prints on the customer's quote — strip any Mate
         // conversation the model concatenated onto the scope ("what's their
@@ -163,7 +218,7 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
         ...(input.materialsMode === 'labour_only' ? { materialsMode: 'labour_only' as const } : {}),
         ...(rateLines.lines ? { rateLines: rateLines.lines } : {}),
       };
-      return { proposal };
+      return { proposal, note: customer.note };
     }
 
     case 'propose_remember_preference': {
@@ -205,6 +260,12 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
       if (known.error) return { error: known.error };
       const jobName = typeof input.jobName === 'string' && input.jobName.trim() ? String(input.jobName).trim() : undefined;
       const rawDescription = typeof input.jobDescription === 'string' ? String(input.jobDescription) : '';
+      if (CONTACT_DETAILS_IN_SCOPE.test(rawDescription)) {
+        return {
+          error:
+            "That's customer details, not scope — the jobDescription prints on the customer's document. To change who the quote is for, or their phone, email or address, use propose_update_customer.",
+        };
+      }
       const jobDescription = rawDescription.trim() ? sanitizeJobDescription(rawDescription).text : undefined;
       if (rawDescription.trim() && (!jobDescription || jobDescription.trim().length < 10)) {
         return {
@@ -277,7 +338,37 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
     case 'propose_add_line_item': {
       const known = requireKnownQuote('propose_add_line_item', input);
       if (known.error) return { error: known.error };
-      if (!input?.searchTerm) return { error: 'propose_add_line_item requires searchTerm — the pipeline prices it.' };
+      const hasPrice = input?.price !== undefined && input?.price !== null && input?.price !== '';
+      if (hasPrice) {
+        // Lump-sum form: a price the tradie said, minted as a work item — the
+        // same shape the inline editor's Work item chip mints. No pipeline,
+        // no markup, no quantity.
+        const price = Number(input.price);
+        if (!Number.isFinite(price)) return { error: 'price must be the line in dollars, as a number.' };
+        if (price < 0) return { error: 'A lump sum can\'t be negative — to bring the total down, use propose_set_total.' };
+        const label = shortText(input.label) || shortText(input.searchTerm);
+        if (!label) return { error: 'A lump-sum line needs a label — what the line is for, as the tradie names it.' };
+        const scope = shortText(input.scope);
+        const proposal: AddLineItemProposal = {
+          id,
+          toolUseId,
+          createdAt: now,
+          type: 'propose_add_line_item',
+          quoteId: known.quoteId!,
+          searchTerm: label,
+          qty: 1,
+          unit: 'each',
+          kind: 'work',
+          price: roundToTwoDecimals(price),
+          ...(scope ? { scope } : {}),
+          ...(typeof input.pricesIncludeGst === 'boolean' ? { pricesIncludeGst: input.pricesIncludeGst } : {}),
+          section: input.section ? String(input.section) : undefined,
+        };
+        return { proposal };
+      }
+      if (!input?.searchTerm) {
+        return { error: 'propose_add_line_item needs searchTerm + qty + unit for a material the pipeline prices, or label + price for a lump sum at a price the tradie said.' };
+      }
       const proposal: AddLineItemProposal = {
         id,
         toolUseId,
@@ -288,6 +379,70 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
         qty: Number(input.qty) || 1,
         unit: String(input.unit || 'each'),
         section: input.section ? String(input.section) : undefined,
+      };
+      return { proposal };
+    }
+
+    case 'propose_set_total': {
+      const known = requireKnownQuote('propose_set_total', input);
+      if (known.error) return { error: known.error };
+      const target = Number(input.targetTotal);
+      if (!Number.isFinite(target) || target <= 0) {
+        return { error: 'propose_set_total needs targetTotal — the dollar figure the tradie said, above zero.' };
+      }
+      if (isPricingInFlight(known.quoteId!)) {
+        return {
+          error: `Quote ${known.quoteId} is still being priced — its total isn't real yet. Tell the tradie you'll set it once pricing lands, and call propose_set_total after the "[context]" line that says pricing finished.`,
+        };
+      }
+      const snapshot = documentProbe?.(known.quoteId!) ?? null;
+      let preview: SetTotalProposal['preview'];
+      if (snapshot) {
+        const planned = planSetTotal(snapshot, target);
+        if (!planned.ok) {
+          return {
+            error:
+              planned.reason === 'below_materials'
+                ? `${planned.message} Tell the tradie that in one line and ask what they'd like the total to be instead — don't put a card up.`
+                : planned.message,
+          };
+        }
+        const plan = planned.plan;
+        if (plan.mechanism === 'none') {
+          return { error: `The total is already ${formatCurrency(plan.currentTotal)} — say so in one line, there's nothing to change.` };
+        }
+        preview =
+          plan.mechanism === 'labour'
+            ? { currentTotal: plan.currentTotal, mechanism: 'labour', labourBefore: plan.labourBefore, labourAfter: plan.labourAfter }
+            : { currentTotal: plan.currentTotal, mechanism: 'adjustment', adjustment: plan.amount };
+      }
+      const proposal: SetTotalProposal = {
+        id,
+        toolUseId,
+        createdAt: now,
+        type: 'propose_set_total',
+        quoteId: known.quoteId!,
+        targetTotal: roundToTwoDecimals(target),
+        displayName: input.displayName ? String(input.displayName) : undefined,
+        ...(preview ? { preview } : {}),
+      };
+      return { proposal };
+    }
+
+    case 'propose_pick_contact': {
+      let quoteId: string | undefined;
+      if (input?.quoteId) {
+        const known = requireKnownQuote('propose_pick_contact', input);
+        if (known.error) return { error: known.error };
+        quoteId = known.quoteId;
+      }
+      const proposal: PickContactProposal = {
+        id,
+        toolUseId,
+        createdAt: now,
+        type: 'propose_pick_contact',
+        ...(quoteId ? { quoteId } : {}),
+        displayName: input?.displayName ? String(input.displayName) : undefined,
       };
       return { proposal };
     }
@@ -330,6 +485,12 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
       if (hasQty && quantity <= 0) {
         return { error: 'Quantity must be above zero — to take the line off, use propose_delete_line_item.' };
       }
+      // A lump-sum row has no quantity to change: its price is the line.
+      const row = documentProbe?.(known.quoteId!)?.materials?.find((m) => m.id === String(input.materialId));
+      const lumpSum = row ? isWorkItem(row) : false;
+      if (lumpSum && hasQty && !hasPrice && !hasName) {
+        return { error: `"${row!.name}" is a lump sum — it has no quantity. Set its price (the whole line) instead.` };
+      }
       const proposal: UpdateLineItemProposal = {
         id,
         toolUseId,
@@ -338,12 +499,13 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
         quoteId: known.quoteId!,
         materialId: String(input.materialId),
         ...(hasPrice ? { price } : {}),
-        ...(hasQty ? { quantity } : {}),
+        ...(hasQty && !lumpSum ? { quantity } : {}),
         ...(hasName ? { name: String(input.name).trim() } : {}),
-        displayName: input.displayName ? String(input.displayName) : undefined,
-        displayCurrentPrice: Number.isFinite(Number(input.displayCurrentPrice)) ? Number(input.displayCurrentPrice) : undefined,
-        displayCurrentQty: Number.isFinite(Number(input.displayCurrentQty)) ? Number(input.displayCurrentQty) : undefined,
-        displayUnit: input.displayUnit ? String(input.displayUnit) : undefined,
+        displayName: input.displayName ? String(input.displayName) : lumpSum ? row!.name : undefined,
+        displayCurrentPrice: Number.isFinite(Number(input.displayCurrentPrice)) ? Number(input.displayCurrentPrice) : lumpSum ? row!.price : undefined,
+        displayCurrentQty: Number.isFinite(Number(input.displayCurrentQty)) && !lumpSum ? Number(input.displayCurrentQty) : undefined,
+        displayUnit: input.displayUnit && !lumpSum ? String(input.displayUnit) : undefined,
+        ...(lumpSum ? { lumpSum: true } : {}),
       };
       return { proposal };
     }
@@ -371,17 +533,18 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
 
     case 'propose_create_contact': {
       if (!input?.name) return { error: 'propose_create_contact requires name.' };
+      const cleaned = cleanCustomerDraft(input);
       const proposal: CreateContactProposal = {
         id,
         toolUseId,
         createdAt: now,
         type: 'propose_create_contact',
-        name: String(input.name),
-        phone: input.phone ? String(input.phone) : undefined,
-        email: input.email ? String(input.email) : undefined,
-        address: input.address ? String(input.address) : undefined,
+        name: cleaned.draft!.name,
+        phone: cleaned.draft!.phone,
+        email: cleaned.draft!.email,
+        address: cleaned.draft!.address,
       };
-      return { proposal };
+      return { proposal, note: cleaned.note };
     }
 
     case 'propose_update_customer': {
@@ -390,6 +553,7 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
       if (!input.customerId && !input.customerDraft?.name) {
         return { error: 'Provide customerId (from find_customer) or customerDraft.name.' };
       }
+      const customer = input.customerId ? {} : cleanCustomerDraft(input.customerDraft);
       const proposal: UpdateCustomerProposal = {
         id,
         toolUseId,
@@ -397,19 +561,26 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
         type: 'propose_update_customer',
         quoteId: known.quoteId!,
         customerId: input.customerId ? String(input.customerId) : undefined,
-        customerDraft: input.customerDraft?.name ? input.customerDraft : undefined,
+        customerDraft: input.customerId ? undefined : customer.draft,
         customerName: input.customerName
           ? String(input.customerName)
           : input.customerDraft?.name
             ? String(input.customerDraft.name)
             : undefined,
       };
-      return { proposal };
+      return { proposal, note: customer.note };
     }
 
     case 'propose_send_quote': {
       const known = requireKnownQuote('propose_send_quote', input);
       if (known.error) return { error: known.error };
+      const emailText = `${input.draftEmailSubject ?? ''}\n${input.draftEmailBody ?? ''}`;
+      const placeholder = EMAIL_PLACEHOLDER.exec(emailText);
+      if (placeholder) {
+        return {
+          error: `The email has a placeholder in it ("${placeholder[0]}") and it goes to the customer. Put the real figure from get_quote or the business name from get_business_defaults in its place, or leave that line out, then call propose_send_quote again.`,
+        };
+      }
       const proposal: SendQuoteProposal = {
         id,
         toolUseId,

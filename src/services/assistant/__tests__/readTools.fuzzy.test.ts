@@ -71,3 +71,23 @@ describe('fuzzyScoreQuote', () => {
     expect(fuzzyScoreQuote('   ', 'foo', 'bar')).toBe(0);
   });
 });
+
+// "I need to edit invoice 004" came back "couldn't find that one" (3 Sep
+// 2026): the document number was never part of the match.
+describe('fuzzyScoreQuote — document numbers', () => {
+  it('matches a bare number, with or without the prefix and leading zeros, against the document number', () => {
+    for (const q of ['004', '4', 'inv 004', 'INV-004', 'invoice 004', 'invoice 4', 'number 4', '#4']) {
+      expect(fuzzyScoreQuote(q, 'Switchboard install', 'Sue and Peter Williamson', 'INV-004'), q).toBeGreaterThanOrEqual(60);
+    }
+  });
+
+  it('does not match a different number, and still scores names when the query is not a number', () => {
+    expect(fuzzyScoreQuote('005', 'Switchboard install', 'Sue Williamson', 'INV-004')).toBe(0);
+    expect(fuzzyScoreQuote('004', 'Switchboard install', 'Sue Williamson', undefined)).toBe(0);
+    expect(fuzzyScoreQuote('switchboard', 'Switchboard install', 'Sue Williamson', 'INV-004')).toBeGreaterThan(0);
+  });
+
+  it('a query that happens to contain digits alongside words is matched on words, not the number', () => {
+    expect(fuzzyScoreQuote('deck 4 posts', 'Switchboard install', 'Sue', 'INV-004')).toBe(0);
+  });
+});

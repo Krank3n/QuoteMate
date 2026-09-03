@@ -115,6 +115,15 @@ export function scoreCustomerCandidates(
     hasEmail: boolean;
     matchType: 'phone' | 'exact' | 'close' | 'fuzzy' | 'sounds_like';
     confidence: number;
+    /**
+     * Where the person lives. Only 'saved' is a QuoteMate contact whose
+     * contactId can go on a quote; a 'phone' (address book) or 'recent'
+     * (an earlier quote's customer) hit carries `draft` instead — pass it as
+     * customerDraft and Apply saves the contact. Before this, a phone-book
+     * hit's contactId was a throwaway id and every Apply on it failed.
+     */
+    source: 'saved' | 'recent' | 'phone';
+    draft?: { name: string; phone?: string; email?: string };
   }>;
   confidence: number;
   ambiguous: boolean;
@@ -211,6 +220,16 @@ export function scoreCustomerCandidates(
     hasEmail: !!candidate.email,
     matchType: matchType as 'phone' | 'exact' | 'close' | 'fuzzy' | 'sounds_like',
     confidence: Math.round(conf * 100) / 100,
+    source: candidate.source,
+    ...(candidate.source === 'saved'
+      ? {}
+      : {
+          draft: {
+            name: candidate.name,
+            ...(candidate.phone ? { phone: candidate.phone } : {}),
+            ...(candidate.email ? { email: candidate.email } : {}),
+          },
+        }),
   }));
 
   return {
@@ -412,7 +431,7 @@ export async function listRecentQuotes(input: {
 
   if (hasQuery) {
     const scored = merged
-      .map((row) => ({ row, score: fuzzyScoreQuote(rawQuery, row.jobName, row.customerName) }))
+      .map((row) => ({ row, score: fuzzyScoreQuote(rawQuery, row.jobName, row.customerName, row.number) }))
       .filter((x) => x.score > 0)
       .sort((a, b) => {
         if (b.score !== a.score) return b.score - a.score;
@@ -542,11 +561,27 @@ export interface JobRequirementsInput {
   jobType?: string;
   /** Injected so resolveJobRequirements stays pure and synchronous. */
   supplierBook?: SupplierBookSnapshot;
+  /**
+   * 'invoice' means the work is already done. The niche's must-ask questions
+   * are for scoping a job that hasn't happened yet — an electrician invoicing
+   * a switchboard was asked poles, circuits, RCDs, asbestos and offered a
+   * supplier list, twelve messages before the draft (3 Sep 2026). An invoice
+   * needs what was done and who for, and nothing about supply.
+   */
+  documentType?: 'quote' | 'invoice';
 }
+
+/** What an invoice needs asked: the work is done, so only these two. */
+export const INVOICE_QUESTIONS: string[] = [
+  'What work was done — enough for a line or two the customer will recognise',
+  'Who it is for',
+];
 
 export interface JobRequirementsResult {
   matched: { categoryId?: string; nicheId?: string; templateName?: string };
   mustAskQuestions: string[];
+  /** True when documentType was 'invoice': the questions are the invoice pair and the supply flags are off. */
+  invoiceFastPath: boolean;
   /**
    * True when mustAskQuestions are the generic fallback rather than a niche's
    * own. Mate should still ask them, but shouldn't imply this trade was
@@ -741,6 +776,25 @@ function buildRequirements(
   const pricingMethod = template?.pricingMethod || undefined;
   const measurementDriven = !!pricingMethod && MEASUREMENT_DRIVEN_METHODS.has(pricingMethod);
 
+  // An invoice is for work already done: no scoping questions, no plan, no
+  // supplier-list offer. The niche match still rides along so the pricing
+  // engine knows the trade.
+  if (input.documentType === 'invoice') {
+    return {
+      matched: { categoryId: resolvedCategoryId, nicheId: resolvedNicheId, templateName: template?.name },
+      mustAskQuestions: [...INVOICE_QUESTIONS],
+      invoiceFastPath: true,
+      genericScope: false,
+      pricingMethod,
+      measurementDriven: false,
+      planHelps: false,
+      specialistSupply: false,
+      supplierBookPopulated: (input.supplierBook?.personalRateCount ?? 0) > 0,
+      supplierBookSuppliers: input.supplierBook?.supplierNames ?? [],
+      supplierBookCoversTrade: false,
+    };
+  }
+
   // The book is "populated" only when it holds the tradie's own rates. Coverage
   // is scored against this niche's core gear, so a plumber's list doesn't read
   // as covering a fence.
@@ -757,6 +811,7 @@ function buildRequirements(
       templateName: template?.name,
     },
     mustAskQuestions,
+    invoiceFastPath: false,
     genericScope,
     pricingMethod,
     measurementDriven,
@@ -768,7 +823,13 @@ function buildRequirements(
   };
 }
 
-export async function getJobRequirements(input: { category?: string; niche?: string; freeText?: string; jobType?: string }): Promise<unknown> {
+export async function getJobRequirements(input: {
+  category?: string;
+  niche?: string;
+  freeText?: string;
+  jobType?: string;
+  documentType?: string;
+}): Promise<unknown> {
   const uid = requireUid();
   let { category, niche } = input;
   if (!category && !niche) {
@@ -789,6 +850,7 @@ export async function getJobRequirements(input: { category?: string; niche?: str
     nicheId: niche,
     freeText: input.freeText,
     jobType: input.jobType,
+    ...(input.documentType === 'invoice' ? { documentType: 'invoice' as const } : {}),
     // Flag defaults so a freeText describing THIS job can outvote the tradie's
     // usual trade — see JobRequirementsInput.categoryFromSettings.
     categoryFromSettings: !input.category && !input.niche,

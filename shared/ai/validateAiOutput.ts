@@ -26,11 +26,44 @@ export interface AiValidationFlags {
   hasZeroPricedMaterial: boolean;
   hasAbsurdQuantity: boolean;
   hasLaunderedSection: boolean;
+  /** A name or searchTerm carried a word in a non-Latin script; the word was stripped. */
+  hasNonLatinText: boolean;
   invalidUnitCount: number;
   zeroLabourSections: string[];
   zeroPricedMaterialCount: number;
   absurdQuantityCount: number;
   launderedSections: string[];
+  nonLatinTokenCount: number;
+}
+
+// A word containing a letter from any script but Latin. The generator has
+// emitted Cyrillic mid-name twice in 743 stored documents — "Consumer mains
+// cable 16mm² двух core and earth" reached a customer on an invoice, and
+// "Builders String Line ролик 100m" sat on a draft. Symbols, digits and the
+// Latin-1/Latin Extended letters in real product names (², °, é, ø) all pass;
+// only letters of another script fail the word.
+const NON_LATIN_WORD_RE = /^\S*(?![\p{Script=Latin}\p{Script=Common}\p{Script=Inherited}])\p{L}\S*$/u;
+
+/**
+ * The text with any non-Latin-script word removed. Returns the input
+ * untouched when every word is fine, and never empties a name: a name that is
+ * ALL foreign words is kept as-is (and still counted) rather than replaced
+ * with nothing.
+ */
+export function stripNonLatinWords(text: string): { text: string; stripped: number } {
+  const words = text.split(/(\s+)/);
+  let stripped = 0;
+  const kept = words.filter((w) => {
+    if (!w || /^\s+$/.test(w)) return true;
+    if (NON_LATIN_WORD_RE.test(w)) {
+      stripped++;
+      return false;
+    }
+    return true;
+  });
+  if (!stripped) return { text, stripped: 0 };
+  const cleaned = kept.join('').replace(/\s{2,}/g, ' ').trim();
+  return cleaned ? { text: cleaned, stripped } : { text, stripped };
 }
 
 const PIECE_GOOD_NAME_RE = /\b(pavers?|tiles?|decking boards?|plasterboards?|weatherboards?|downlights?|gpos?|hinges?|door handles?)\b/i;
@@ -200,10 +233,25 @@ export function validateAndRepairAiOutput(
   let invalidUnitCount = 0;
   let zeroPricedMaterialCount = 0;
   let absurdQuantityCount = 0;
+  let nonLatinTokenCount = 0;
   // Lowest sectionLaborHours seen per section name — flagged when zero/missing.
   const sectionHours = new Map<string, number>();
 
-  const repaired = materials.map((m) => {
+  const repaired = materials.map((raw) => {
+    let m = raw;
+    // Latin-script guard on the two strings that reach the customer and the
+    // supplier search. Stripping the foreign word keeps the line usable;
+    // the count is what makes the leak visible.
+    for (const field of ['name', 'searchTerm'] as const) {
+      const value = m?.[field];
+      if (typeof value !== 'string' || !value) continue;
+      const cleaned = stripNonLatinWords(value);
+      if (cleaned.stripped > 0) {
+        nonLatinTokenCount += cleaned.stripped;
+        log.warn('[ai-validate] non-Latin text in material', { field, value, cleaned: cleaned.text });
+        m = { ...m, [field]: cleaned.text };
+      }
+    }
     const name = typeof m?.name === 'string' ? m.name : '';
     const unit = typeof m?.unit === 'string' ? m.unit : '';
     let next = m;
@@ -308,11 +356,13 @@ export function validateAndRepairAiOutput(
       hasZeroPricedMaterial: zeroPricedMaterialCount > 0,
       hasAbsurdQuantity: absurdQuantityCount > 0,
       hasLaunderedSection: launderedSections.length > 0,
+      hasNonLatinText: nonLatinTokenCount > 0,
       invalidUnitCount,
       zeroLabourSections,
       zeroPricedMaterialCount,
       absurdQuantityCount,
       launderedSections,
+      nonLatinTokenCount,
     },
   };
 }

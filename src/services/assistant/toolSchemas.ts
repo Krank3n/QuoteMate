@@ -46,6 +46,8 @@ export const PROPOSAL_TOOL_NAMES = [
   'propose_import_supplier_list',
   'propose_remember_preference',
   'propose_save_rate',
+  'propose_set_total',
+  'propose_pick_contact',
 ] as const;
 
 // Voice-only control tools. Unlike read/proposal tools these never reach
@@ -167,7 +169,7 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
   {
     name: 'get_job_requirements',
     description:
-      "Call this first when a job type is mentioned. Returns the must-ask questions for this niche, pricing method, and flags for measurement-driven and specialist-supply jobs. Use the returned mustAskQuestions — do not invent questions. mustAskQuestions is NEVER empty: when no niche matches, it returns general scope questions and genericScope is true, so there is never a case where you should draft without asking anything. Also returns supplierBookPopulated (true when this phone can see the tradie's own imported/saved supplier rates), supplierBookSuppliers (up to 3 of those supplier names) and supplierBookCoversTrade (true when those rates would actually price this niche's core gear). specialistSupply true + supplierBookPopulated false is the one combination worth mentioning — the core materials for this job don't come off a Bunnings or Reece shelf and there's no price list on the phone to fall back on. KNOWN JOB TYPES (pass one of these verbatim as jobType, or \"none\"): " + KNOWN_JOB_TYPE_LIST + ".",
+      "Call this first when a job type is mentioned. Returns the must-ask questions for this niche, pricing method, and flags for measurement-driven and specialist-supply jobs. Use the returned mustAskQuestions — do not invent questions. mustAskQuestions is NEVER empty: when no niche matches, it returns general scope questions and genericScope is true, so there is never a case where you should draft without asking anything. Pass documentType 'invoice' when the tradie is invoicing — the work is already done, so the questions collapse to what was done and who for (invoiceFastPath true) and the supplier-list flags are off. Also returns supplierBookPopulated (true when this phone can see the tradie's own imported/saved supplier rates), supplierBookSuppliers (up to 3 of those supplier names) and supplierBookCoversTrade (true when those rates would actually price this niche's core gear). specialistSupply true + supplierBookPopulated false is the one combination worth mentioning — the core materials for this job don't come off a Bunnings or Reece shelf and there's no price list on the phone to fall back on. KNOWN JOB TYPES (pass one of these verbatim as jobType, or \"none\"): " + KNOWN_JOB_TYPE_LIST + ".",
     parameters: {
       type: 'object',
       properties: {
@@ -179,6 +181,11 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
         category: { type: 'string', description: 'Trade category ID (optional; loaded from business settings if omitted)' },
         niche: { type: 'string', description: 'Niche ID (optional; inferred from freeText if omitted). NOT unique — several job types share one category/niche pair, so prefer jobType.' },
         freeText: { type: 'string', description: 'The job description or blurb, always worth passing. Used to match a job type when jobType is omitted, and to pick between job types that share a niche.' },
+        documentType: {
+          type: 'string',
+          enum: ['quote', 'invoice'],
+          description: "'invoice' when the tradie asked for an invoice — the work is done, so only what was done and who for are asked. Defaults to 'quote'.",
+        },
       },
       required: [],
     },
@@ -312,29 +319,33 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
   {
     name: 'propose_add_line_item',
     description:
-      'Propose adding a single line item to an existing quote. Apply opens the Add Material flow with the search term pre-filled — the existing pricing pipeline finds the product and price. You do NOT compute or pass a price; provide what to add and let the pipeline price it.',
+      "Add ONE line to an existing quote or invoice. Two forms. (1) A material: pass searchTerm + qty + unit and the pricing engine finds the product and price on Apply — you never pass a price for a material. (2) A lump sum at a price the TRADIE said (\"add a $180 callout\", \"$450 for the disposal\", \"put $300 on for the skip\"): pass label + price (and scope if they described the work) — it lands as a lump-sum work line at exactly that figure: no product search, no markup, no quantity. Never turn a price the tradie stated into a material search, and never invent a price to make a lump sum. Say 'inc GST' / 'ex GST' only via pricesIncludeGst when they said it; otherwise the figure goes on in the document's own basis.",
     parameters: {
       type: 'object',
       properties: {
         quoteId: { type: 'string' },
-        searchTerm: { type: 'string', description: 'What to search for. Be specific: "90x45 treated pine 2.4m" not "timber".' },
-        qty: { type: 'number' },
-        unit: { type: 'string' },
+        searchTerm: { type: 'string', description: 'Material form: what to search for. Be specific: "90x45 treated pine 2.4m" not "timber".' },
+        qty: { type: 'number', description: 'Material form: how many.' },
+        unit: { type: 'string', description: 'Material form: each, m, m², L, kg, box, pack.' },
+        label: { type: 'string', description: 'Lump-sum form: the line as the tradie names it ("Callout", "Skip bin and disposal").' },
+        price: { type: 'number', description: 'Lump-sum form: the whole line in dollars, exactly as the tradie said it. Never for a material.' },
+        scope: { type: 'string', description: 'Lump-sum form, optional: a sentence of customer-facing scope under the line.' },
+        pricesIncludeGst: { type: 'boolean', description: 'Lump-sum form: true only if they said inc GST, false only if they said ex/plus GST. Omit otherwise.' },
         section: { type: 'string', description: 'Optional section to add the row under.' },
       },
-      required: ['quoteId', 'searchTerm', 'qty', 'unit'],
+      required: ['quoteId'],
     },
   },
   {
     name: 'propose_update_line_item',
     description:
-      "Change a line that's ALREADY on a quote or invoice — its price, its quantity, or its name. Use this whenever the tradie wants a row corrected: \"make the plywood a hundred bucks\", \"that should be 12 not 6\", \"the decking's $8.50 a metre\". NEVER tell them to go and type a price in themselves — that was the old answer and it's wrong, you can do it from here. Always call get_quote first so you have the real material id and can show what's changing (pass displayName, displayCurrentPrice, displayCurrentQty, displayUnit). Setting a price marks the row as manually priced, which also clears any 'estimated' flag review_quote raised against it, and saves that price to the tradie's supplier book so the next quote starts from their number. Pass only the fields that change. For a row that isn't on the quote at all, use propose_add_line_item; to take one off, propose_delete_line_item.",
+      "Change a line that's ALREADY on a quote or invoice — its price, its quantity, or its name. Use this whenever the tradie wants a row corrected: \"make the plywood a hundred bucks\", \"that should be 12 not 6\", \"the decking's $8.50 a metre\". NEVER tell them to go and type a price in themselves — that was the old answer and it's wrong, you can do it from here. Always call get_quote first so you have the real material id and can show what's changing (pass displayName, displayCurrentPrice, displayCurrentQty, displayUnit). Setting a price marks the row as manually priced, which also clears any 'estimated' flag review_quote raised against it, and saves that price to the tradie's supplier book so the next quote starts from their number. A row with kind 'work' is a lump sum: its price IS the line total, it has no real quantity, and it is never saved to the book — pass price only. Pass only the fields that change. For a row that isn't on the quote at all, use propose_add_line_item; to take one off, propose_delete_line_item.",
     parameters: {
       type: 'object',
       properties: {
         quoteId: { type: 'string', description: 'Document id of the quote or invoice.' },
         materialId: { type: 'string', description: 'Material id from get_quote — not the name.' },
-        price: { type: 'number', description: 'New PER-UNIT price in dollars. The line total is recalculated from price x quantity.' },
+        price: { type: 'number', description: 'New PER-UNIT price in dollars; the line total is recalculated from price x quantity. On a lump-sum (kind work) row this is the whole line.' },
         quantity: { type: 'number', description: 'New quantity.' },
         name: { type: 'string', description: 'Corrected line name, when the tradie is renaming rather than repricing.' },
         displayName: { type: 'string', description: "The row's current name, for the card." },
@@ -563,6 +574,33 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
       required: [],
     },
   },
+  {
+    name: 'propose_set_total',
+    description:
+      "Set the customer-facing TOTAL of an existing quote or invoice to the figure the tradie said: \"make the total $1,232\", \"call it twelve hundred\", \"bring it down to fifteen hundred all up\", \"round it to $2,000\". This is the tool for a total — never steer them to markup or a labour rate instead, and never say you can't set the final price. Apply moves the labour to land on that figure when the document has labour (what a tradie does themselves), otherwise it puts a lump-sum 'Price adjustment' line on; materials and their prices are never touched. The target is what the customer reads at the bottom, GST included where it applies. A total under the materials alone is refused. Needs the real quote id (a \"[context]\" line, list_recent_quotes or get_quote). Pass displayName so the card names the document. After it applies, the new total arrives in a \"[context]\" line — read totals from there or from get_quote, never from memory.",
+    parameters: {
+      type: 'object',
+      properties: {
+        quoteId: { type: 'string', description: 'Document id of the quote or invoice.' },
+        targetTotal: { type: 'number', description: 'The total the tradie wants the customer to see, in dollars.' },
+        displayName: { type: 'string', description: 'Job name to show on the card (display only).' },
+      },
+      required: ['quoteId', 'targetTotal'],
+    },
+  },
+  {
+    name: 'propose_pick_contact',
+    description:
+      "Open the phone's own contact picker so the tradie can choose the customer from their address book. Use it whenever they say the customer is in their phone — \"access my contacts\", \"open contacts\", \"it's in my phone\", \"pick them from my contacts\" — or when find_customer found nobody and they say the person is on their phone. Apply opens the picker; the pick is saved as a contact and goes on the quote you pass in quoteId, or, with no quoteId, comes back to you in a \"[context]\" line with a contact id to put on the draft. Never ask them to read a number out instead when they have offered their contacts.",
+    parameters: {
+      type: 'object',
+      properties: {
+        quoteId: { type: 'string', description: 'Optional. The existing quote or invoice the pick becomes the customer of. Leave off while you are still drafting.' },
+        displayName: { type: 'string', description: 'Job name to show on the card when quoteId is set (display only).' },
+      },
+      required: [],
+    },
+  },
 ];
 
 // Both surfaces: when a proposal card is waiting, a clear spoken OR typed yes
@@ -649,6 +687,8 @@ export const TOOL_RUNTIME: Record<string, { timeoutSecs: number }> = {
   propose_import_supplier_list: { timeoutSecs: 10 },
   propose_remember_preference: { timeoutSecs: 10 },
   propose_save_rate: { timeoutSecs: 10 },
+  propose_set_total: { timeoutSecs: 10 },
+  propose_pick_contact: { timeoutSecs: 10 },
   apply_pending_proposal: { timeoutSecs: 10 },
   cancel_pending_proposal: { timeoutSecs: 10 },
 };

@@ -122,8 +122,10 @@ import {
   mostRecentUnconsumedAttachment,
 } from './assistant/chatAttachments';
 import { buildSupplierGapNote } from '../services/assistant/supplierGapNote';
-import { setUnconsumedAttachmentProbe } from '../services/assistant/proposalTools';
+import { setProposalDocumentProbe, setUnconsumedAttachmentProbe } from '../services/assistant/proposalTools';
 import { setRenderableQuoteProbe } from '../services/assistant/showQuoteGate';
+import { createBubbleContinuity, joinFragments } from './assistant/bubbleContinuity';
+import { formatCurrency } from '../utils/documentCalculator';
 import { setPendingProposalProbe } from '../services/assistant/pendingProposalGate';
 import { findSupersededProposals } from './assistant/proposalSupersede';
 import { findPendingProposal } from './assistant/pendingProposal';
@@ -592,6 +594,12 @@ export function AssistantScreen() {
   // part-written — generation ends seconds before the audio does.
   const pendingBubbleCloseRef = useRef(false);
   const pacedRenderRef = useRef('');
+  // A reopened bubble's earlier text. The pacer only ever paces the fragment
+  // in hand; what was already on screen is prepended at render.
+  const assistantBubblePrefixRef = useRef('');
+  // One bubble per reply, however many pieces the transport hands it over in
+  // — see screens/assistant/bubbleContinuity.ts.
+  const bubbleContinuityRef = useRef(createBubbleContinuity());
   const pacerTickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // Set when the tradie accepted/cancelled a card by voice this turn (Mate
   // called a control tool). We run the actual Apply / dismiss on turnComplete
@@ -802,6 +810,19 @@ export function AssistantScreen() {
     [appendMessage],
   );
 
+  // Give Mate a turn on something that just happened (a contact picked off the
+  // phone for the draft in hand). Voice: a user-text frame, so the agent
+  // replies. Text: the same hidden-note-plus-turn the send offer uses.
+  const continueMateTurn = useCallback((convoId: string, note: string) => {
+    const live = voiceSessionRef.current;
+    if (live?.isOpen()) {
+      bubbleContinuityRef.current.userTurn();
+      live.sendUserText(note);
+      return;
+    }
+    offerSendTurnRef.current(convoId, note);
+  }, []);
+
   const handleApply = useCallback(
     async (message: ChatMessage, proposal: Proposal) => {
       if (!conversation) return;
@@ -892,6 +913,7 @@ export function AssistantScreen() {
               // into answering in kind and leaked reasoning to a tradie in
               // August. One short reminder is the belt; the prompt is the
               // braces.
+              bubbleContinuityRef.current.userTurn();
               liveSessionForNarration.sendUserText(
                 `[narrate] ${intro} One short line, then stop. Never say the tag.`,
               );
@@ -1001,6 +1023,7 @@ export function AssistantScreen() {
           sendOffer: offerFacts,
         });
         if (liveSessionForNarration?.isOpen()) {
+          bubbleContinuityRef.current.userTurn();
           liveSessionForNarration.sendUserText(wrap);
         }
         // Disarm regardless of whether the socket survived the pipeline. This
@@ -1012,6 +1035,13 @@ export function AssistantScreen() {
         setTimeout(() => { narrationModeRef.current = false; }, 8000);
       }
 
+      if (!result.ok && result.code === 'CANCELLED') {
+        // The tradie backed out of a picker the card opened. Not a failure —
+        // the card reads Dismissed and Mate is told nothing happened.
+        updateProposalStatus(conversation.id, message.id, proposal.id, 'dismissed');
+        noteToMate(conversation.id, `[context] The tradie closed the contact picker without choosing anyone. Ask for the name instead, in one line.`);
+        return;
+      }
       if (!result.ok) {
         updateProposalStatus(conversation.id, message.id, proposal.id, 'failed');
         // Settle the working card. The pipeline's own catch emits done:true,
@@ -1114,6 +1144,77 @@ export function AssistantScreen() {
             `It's gone — do NOT reference this id on follow-ups, and don't list it.`,
         );
       }
+      // Anything that changed money carries the real total. These land
+      // whether or not the apply navigated: a line added on the unified
+      // Document path returns no navigate hint, and text-mode Mate never
+      // learned the line had landed at all.
+      const totalClause =
+        typeof result.appliedTotal === 'number'
+          ? ` The total is now ${formatCurrency(result.appliedTotal)} — read it from here or get_quote, never from memory.`
+          : '';
+      switch (proposal.type) {
+        case 'propose_set_total':
+          note(
+            `[context] Set the total on quote ${proposal.quoteId} to ${formatCurrency(proposal.targetTotal)}` +
+              `${result.moved ? ` (${result.moved})` : ''}. Materials untouched.${totalClause} ` +
+              `Tell the tradie in one short line — the card shows the new figure.`,
+          );
+          break;
+        case 'propose_add_line_item':
+          note(
+            proposal.kind === 'work'
+              ? `[context] Added a lump-sum line "${proposal.searchTerm}" at ${formatCurrency(proposal.price ?? 0)} to quote ${proposal.quoteId}.${totalClause}`
+              : `[context] Added "${proposal.searchTerm}" (${proposal.qty} ${proposal.unit}) to quote ${proposal.quoteId}.${totalClause}`,
+          );
+          break;
+        case 'propose_delete_line_item':
+          note(`[context] Removed material ${proposal.materialId} from quote ${proposal.quoteId}.${totalClause}`);
+          break;
+        case 'propose_update_line_item': {
+          const changes: string[] = [];
+          if (typeof proposal.price === 'number') changes.push(`${proposal.lumpSum ? 'lump sum' : 'price'} ${formatCurrency(proposal.price)}`);
+          if (typeof proposal.quantity === 'number') changes.push(`quantity ${proposal.quantity}`);
+          if (proposal.name) changes.push(`renamed "${proposal.name}"`);
+          note(
+            `[context] Updated "${proposal.displayName || proposal.materialId}" on quote ${proposal.quoteId}` +
+              `${changes.length ? ` — ${changes.join(', ')}` : ''}.${totalClause}`,
+          );
+          break;
+        }
+        case 'propose_update_quote_rates': {
+          const parts: string[] = [];
+          if (typeof proposal.markup === 'number') parts.push(`markup ${proposal.markup}%`);
+          if (typeof proposal.laborMarkup === 'number') parts.push(`labour markup ${proposal.laborMarkup}%`);
+          if (typeof proposal.laborRate === 'number') parts.push(`labour rate $${proposal.laborRate}/h`);
+          if (typeof proposal.laborHours === 'number') parts.push(`labour hours ${proposal.laborHours}`);
+          note(`[context] Updated rates on quote ${proposal.quoteId}: ${parts.join(', ')}.${totalClause}`);
+          break;
+        }
+        case 'propose_pick_contact': {
+          const picked = result.pickedContact;
+          if (picked) {
+            const details = [picked.phone ? `phone ${picked.phone}` : 'no phone', picked.email ? `email ${picked.email}` : 'no email'].join(', ');
+            if (proposal.quoteId) {
+              note(
+                `[context] The tradie picked ${picked.name} (${details}) from their phone — saved as contact ${picked.id} and put on quote ${proposal.quoteId}. ` +
+                  `Confirm in one short line.`,
+              );
+            } else {
+              // No quote yet: this is the customer for the draft in hand, and
+              // Mate needs a turn to get on with it — the same turn-drive the
+              // send offer uses.
+              continueMateTurn(
+                conversation.id,
+                `[context] The tradie picked ${picked.name} (${details}) from their phone — saved as contact ${picked.id}. ` +
+                  `Use customerId ${picked.id} on the draft and carry on from where you were, in one short line. Never say the tag.`,
+              );
+            }
+          }
+          break;
+        }
+        default:
+          break;
+      }
       if (result.navigate) {
         switch (proposal.type) {
           case 'propose_draft_quote':
@@ -1129,17 +1230,6 @@ export function AssistantScreen() {
               );
             }
             break;
-          case 'propose_add_line_item':
-            note(
-              `[context] Added "${proposal.searchTerm}" (${proposal.qty} ${proposal.unit}) to quote ${proposal.quoteId}.`,
-            );
-            break;
-          case 'propose_delete_line_item':
-            note(
-              `[context] Removed material ${proposal.materialId} from quote ${proposal.quoteId}.`,
-            );
-            break;
-
           case 'propose_send_quote':
             note(
               `[context] Sent quote ${proposal.quoteId} to the customer.`,
@@ -1180,17 +1270,6 @@ export function AssistantScreen() {
               (gapNote ? ` ${gapNote}` : ''),
             );
             break;
-          case 'propose_update_quote_rates': {
-            const parts: string[] = [];
-            if (typeof proposal.markup === 'number') parts.push(`markup ${proposal.markup}%`);
-            if (typeof proposal.laborMarkup === 'number') parts.push(`labour markup ${proposal.laborMarkup}%`);
-            if (typeof proposal.laborRate === 'number') parts.push(`labour rate $${proposal.laborRate}/h`);
-            if (typeof proposal.laborHours === 'number') parts.push(`labour hours ${proposal.laborHours}`);
-            note(
-              `[context] Updated rates on quote ${proposal.quoteId}: ${parts.join(', ')}.`,
-            );
-            break;
-          }
         }
       }
 
@@ -1206,7 +1285,9 @@ export function AssistantScreen() {
         proposal.type === 'propose_reprice' ||
         proposal.type === 'propose_update_customer' ||
         proposal.type === 'propose_update_quote_rates' ||
-        proposal.type === 'propose_update_quote_scope'
+        proposal.type === 'propose_update_quote_scope' ||
+        proposal.type === 'propose_set_total' ||
+        (proposal.type === 'propose_pick_contact' && !!proposal.quoteId)
       ) {
         // Resolve the freshly-minted doc id regardless of whether the
         // pipeline landed on a quote (job_preview) or an auto-converted
@@ -1234,8 +1315,12 @@ export function AssistantScreen() {
                 : `Here's the ${docNoun} — have a squiz. Tell me what to tweak, or tap to open it.`
               : proposal.type === 'propose_update_customer'
                 ? `Done — this one's on ${proposal.customerName || 'the new contact'} now. Tap to open it.`
+                : proposal.type === 'propose_pick_contact'
+                  ? `Done — this one's on ${result.pickedContact?.name || 'the contact you picked'} now. Tap to open it.`
+                : proposal.type === 'propose_set_total'
+                  ? `Total's now ${formatCurrency(result.appliedTotal ?? proposal.targetTotal)}${result.moved ? ` — ${result.moved}` : ''}. Tap to open it.`
                 : proposal.type === 'propose_update_quote_rates'
-                  ? "Rates updated and totals re-run. Tap to open it."
+                  ? `Rates updated and totals re-run${typeof result.appliedTotal === 'number' ? ` — ${formatCurrency(result.appliedTotal)}` : ''}. Tap to open it.`
                   : proposal.type === 'propose_update_quote_scope'
                     ? hasIssues
                       ? `Scope updated and re-priced — ${heads}. Tap to open it.`
@@ -1300,6 +1385,7 @@ export function AssistantScreen() {
       appendMessage,
       appendErrorMessage,
       noteToMate,
+      continueMateTurn,
       updateMessage,
       updateProposalStatus,
       handleNavigate,
@@ -1353,6 +1439,25 @@ export function AssistantScreen() {
   useEffect(() => {
     setRenderableQuoteProbe(resolveRenderableQuoteId);
     return () => setRenderableQuoteProbe(null);
+  }, []);
+
+  // The document itself, for validators that plan against real figures:
+  // propose_set_total refuses a total under the materials inside the turn and
+  // puts the figure that will move on the card; a lump-sum row is recognised
+  // as one before its card goes up.
+  useEffect(() => {
+    setProposalDocumentProbe((quoteId) => {
+      const renderable = resolveRenderableQuoteId(quoteId);
+      if (!renderable) return null;
+      const state = useStore.getState();
+      return (
+        state.getDocumentById(renderable) ??
+        state.quotes.find((q) => q.id === renderable) ??
+        state.invoices.find((i) => i.id === renderable) ??
+        null
+      );
+    });
+    return () => setProposalDocumentProbe(null);
   }, []);
 
   // A typed "yes"/"nah" resolves the waiting card like a tap. The dispatcher
@@ -2185,6 +2290,8 @@ export function AssistantScreen() {
     pacerRef.current = createPacerState();
     audioTimelineEndRef.current = 0;
     pacedRenderRef.current = '';
+    assistantBubblePrefixRef.current = '';
+    bubbleContinuityRef.current.reset();
     // Kill the idle watchdog so it can't fire after teardown.
     if (idleWatchdogRef.current) {
       clearInterval(idleWatchdogRef.current);
@@ -2323,6 +2430,20 @@ export function AssistantScreen() {
       // stopped the paced reveal dead, leaving "Good afternoon. I" on screen
       // for the rest of the reply. So when pacing, hand the close to the
       // ticker and let it fire once the words have caught up with the audio.
+      // Release the bubble. Remembered by the continuity rule: text that
+      // arrives next with no tradie speech in between continues it.
+      const releaseAssistantBubble = () => {
+        if (assistantBubbleIdRef.current) {
+          bubbleContinuityRef.current.closed({ id: assistantBubbleIdRef.current, text: assistantBubbleTextRef.current });
+        }
+        pendingBubbleCloseRef.current = false;
+        pacerRef.current = createPacerState();
+        pacedRenderRef.current = '';
+        assistantBubblePrefixRef.current = '';
+        assistantBubbleIdRef.current = null;
+        assistantBubbleTextRef.current = '';
+      };
+
       const finishAssistantBubble = () => {
         if (!assistantBubbleIdRef.current) {
           pendingBubbleCloseRef.current = false;
@@ -2339,14 +2460,44 @@ export function AssistantScreen() {
           // leaving an empty bubble open forever.
           const full = pacerFlush(pacerRef.current);
           if (full !== pacedRenderRef.current) {
-            updateMessage(convoId!, assistantBubbleIdRef.current, { text: full });
+            updateMessage(convoId!, assistantBubbleIdRef.current, { text: assistantBubblePrefixRef.current + full });
           }
         }
-        pendingBubbleCloseRef.current = false;
-        pacerRef.current = createPacerState();
-        pacedRenderRef.current = '';
-        assistantBubbleIdRef.current = null;
-        assistantBubbleTextRef.current = '';
+        releaseAssistantBubble();
+      };
+
+      // Open the bubble the next piece of Mate's reply goes into: the one
+      // that just closed, when nothing from the tradie came between (a model
+      // ends a turn at every tool call, and a single sentence reached a
+      // tradie as three bubbles), otherwise a fresh one. `rendered` is the
+      // paced slice of `text`; the reopened bubble's earlier words are the
+      // prefix every later render prepends.
+      const startOrContinueBubble = (text: string, rendered: string | null) => {
+        const cont = bubbleContinuityRef.current.takeContinuation();
+        if (cont) {
+          const joined = joinFragments(cont.text, text);
+          const prefix = joined.slice(0, joined.length - text.length);
+          assistantBubbleIdRef.current = cont.id;
+          assistantBubblePrefixRef.current = prefix;
+          assistantBubbleTextRef.current = joined;
+          const live = useStore.getState().conversations.find((c) => c.id === convoId)?.messages || [];
+          turnProposals = live.find((m) => m.id === cont.id)?.proposals ?? [];
+          pacedRenderRef.current = rendered ?? text;
+          updateMessage(convoId!, cont.id, { text: prefix + (rendered ?? text) });
+          return;
+        }
+        const id = generateId();
+        assistantBubbleIdRef.current = id;
+        assistantBubblePrefixRef.current = '';
+        assistantBubbleTextRef.current = text;
+        turnProposals = [];
+        pacedRenderRef.current = rendered ?? text;
+        appendMessage(convoId!, {
+          id,
+          role: 'assistant',
+          text: rendered ?? text,
+          createdAt: new Date().toISOString(),
+        });
       };
 
       // The audio queue is single-use — stop() is terminal (no restart), so a
@@ -2372,6 +2523,8 @@ export function AssistantScreen() {
           userBubbleTextRef.current = '';
           assistantBubbleIdRef.current = null;
           assistantBubbleTextRef.current = '';
+          assistantBubblePrefixRef.current = '';
+          bubbleContinuityRef.current.reset();
           const staleQueue = audioQueueRef.current;
           audioQueueRef.current = null;
           matePlayingRef.current = false;
@@ -2389,6 +2542,7 @@ export function AssistantScreen() {
           if (!text) return;
           // Real speech detected by server VAD — keep the watchdog at bay.
           touchVoiceActivity();
+          bubbleContinuityRef.current.userTurn();
           if (!userBubbleIdRef.current) {
             const id = generateId();
             userBubbleIdRef.current = id;
@@ -2436,13 +2590,9 @@ export function AssistantScreen() {
           if (pendingBubbleCloseRef.current && assistantBubbleIdRef.current) {
             const full = pacerFlush(pacerRef.current);
             if (full && full !== pacedRenderRef.current) {
-              updateMessage(convoId!, assistantBubbleIdRef.current, { text: full });
+              updateMessage(convoId!, assistantBubbleIdRef.current, { text: assistantBubblePrefixRef.current + full });
             }
-            pendingBubbleCloseRef.current = false;
-            pacerRef.current = createPacerState();
-            pacedRenderRef.current = '';
-            assistantBubbleIdRef.current = null;
-            assistantBubbleTextRef.current = '';
+            releaseAssistantBubble();
           }
           // Hard guard: any transcript that leaks one of our bracketed
           // prompt tags is a prompt-format echo from the model, never
@@ -2482,23 +2632,13 @@ export function AssistantScreen() {
             ? pacerVisibleText(pacerRef.current, Date.now())
             : null;
           if (!assistantBubbleIdRef.current) {
-            const id = generateId();
-            assistantBubbleIdRef.current = id;
-            assistantBubbleTextRef.current = text;
-            turnProposals = [];
-            pacedRenderRef.current = rendered ?? text;
-            appendMessage(convoId!, {
-              id,
-              role: 'assistant',
-              text: rendered ?? text,
-              createdAt: new Date().toISOString(),
-            });
+            startOrContinueBubble(text, rendered);
           } else {
             assistantBubbleTextRef.current += text;
-            const next = rendered ?? assistantBubbleTextRef.current;
+            const next = rendered ?? assistantBubbleTextRef.current.slice(assistantBubblePrefixRef.current.length);
             if (next !== pacedRenderRef.current) {
               pacedRenderRef.current = next;
-              updateMessage(convoId!, assistantBubbleIdRef.current, { text: next });
+              updateMessage(convoId!, assistantBubbleIdRef.current, { text: assistantBubblePrefixRef.current + next });
             }
           }
           if (finished) finishAssistantBubble();
@@ -2522,16 +2662,7 @@ export function AssistantScreen() {
           }
           flushUserBubbleIfOpen();
           if (!assistantBubbleIdRef.current) {
-            const id = generateId();
-            assistantBubbleIdRef.current = id;
-            assistantBubbleTextRef.current = delta;
-            turnProposals = [];
-            appendMessage(convoId!, {
-              id,
-              role: 'assistant',
-              text: delta,
-              createdAt: new Date().toISOString(),
-            });
+            startOrContinueBubble(delta, null);
           } else {
             assistantBubbleTextRef.current += delta;
             updateMessage(convoId!, assistantBubbleIdRef.current, {
@@ -2564,15 +2695,14 @@ export function AssistantScreen() {
           // call without speaking any words first.
           let bubbleId = assistantBubbleIdRef.current;
           if (!bubbleId) {
-            bubbleId = generateId();
-            assistantBubbleIdRef.current = bubbleId;
-            assistantBubbleTextRef.current = '';
-            appendMessage(convoId!, {
-              id: bubbleId,
-              role: 'assistant',
-              text: '',
-              createdAt: new Date().toISOString(),
-            });
+            // A tool call with no words first: continue the bubble that just
+            // closed if nothing from the tradie came between, else mint one.
+            // The card the tool made rides with whatever proposals that
+            // bubble already carried.
+            const pending = turnProposals;
+            startOrContinueBubble('', null);
+            bubbleId = assistantBubbleIdRef.current!;
+            turnProposals = [...turnProposals, ...pending.filter((p) => !turnProposals.some((q) => q.id === p.id))];
           }
           updateMessage(convoId!, bubbleId, {
             proposals: turnProposals,
@@ -2744,6 +2874,8 @@ export function AssistantScreen() {
       pacerRef.current = createPacerState();
       audioTimelineEndRef.current = 0;
       pacedRenderRef.current = '';
+      assistantBubblePrefixRef.current = '';
+      bubbleContinuityRef.current.reset();
       // Deltas stop arriving as soon as the model finishes generating, but the
       // voice keeps talking for seconds afterwards. Without a ticker the
       // reveal would freeze wherever the last delta left it.
@@ -2756,7 +2888,7 @@ export function AssistantScreen() {
         const next = pacerVisibleText(pacerRef.current, Date.now());
         if (next !== pacedRenderRef.current) {
           pacedRenderRef.current = next;
-          updateMessage(convoId!, bubbleId, { text: next });
+          updateMessage(convoId!, bubbleId, { text: assistantBubblePrefixRef.current + next });
         }
         // Backstop: if playback under-ran or stalled, don't strand the rest
         // of the words behind a clock that has stopped advancing.
@@ -2770,16 +2902,12 @@ export function AssistantScreen() {
           const full = pacerFlush(p);
           if (full !== pacedRenderRef.current) {
             pacedRenderRef.current = full;
-            updateMessage(convoId!, bubbleId, { text: full });
+            updateMessage(convoId!, bubbleId, { text: assistantBubblePrefixRef.current + full });
           }
         }
         // The words have caught up with the voice — now the turn can close.
         if (pendingBubbleCloseRef.current && pacerIsSettled(pacerRef.current)) {
-          pendingBubbleCloseRef.current = false;
-          pacerRef.current = createPacerState();
-          pacedRenderRef.current = '';
-          assistantBubbleIdRef.current = null;
-          assistantBubbleTextRef.current = '';
+          releaseAssistantBubble();
         }
       }, PACER_TICK_MS);
 
@@ -2831,6 +2959,7 @@ export function AssistantScreen() {
       // [greet] as well produces two greetings back to back.
       if (mode === 'sticky' && isBlankSlate(seedHistory) && !session.ownsGreeting) {
         greetHeardRef.current = false;
+        bubbleContinuityRef.current.userTurn();
         session.sendUserText(buildGreetPrompt({ hour: new Date().getHours() }));
         // The session right after a mic-permission grant has twice connected
         // and never greeted (AppState churn / a filtered reply eating the
@@ -2848,6 +2977,7 @@ export function AssistantScreen() {
           if (retry) {
             // eslint-disable-next-line no-console
             console.log('[Mate voice] greet unheard after', GREET_RETRY_MS, 'ms — re-sending');
+            bubbleContinuityRef.current.userTurn();
             try { greetSession.sendUserText(buildGreetPrompt({ hour: new Date().getHours() })); } catch { /* session died — nothing to do */ }
           }
         }, GREET_RETRY_MS);

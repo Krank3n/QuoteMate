@@ -43,12 +43,31 @@ function tokenCloseMatch(needle: string, haystack: string): boolean {
   return false;
 }
 
+/**
+ * The digits a tradie says for a document number, with leading zeros gone:
+ * "004", "inv 4", "invoice 004", "QU-178840" all reduce to the digit run.
+ * Only the numeric part is compared — the prefix is the app's, not theirs.
+ */
+export function documentNumberKey(text: string | undefined): string {
+  const m = /\d+/.exec(text || '');
+  return m ? m[0].replace(/^0+(?=\d)/, '') : '';
+}
+
 export function fuzzyScoreQuote(
   query: string,
   jobName: string | undefined,
   customerName: string | undefined,
+  number?: string,
 ): number {
   const q = (query || '').toLowerCase().trim();
+  // "Edit invoice 004" came back "couldn't find that one" (3 Sep 2026): the
+  // number on the document was never part of the match. A query that is a
+  // number (with or without inv/qu/invoice/quote around it) hits its document
+  // outright — checked before the length floor, since "4" is a fine number.
+  const numberKey = documentNumberKey(number);
+  if (numberKey && /^(?:(?:inv|invoice|qu|quote|q|number|no\.?|#)\s*[-#]?\s*)?0*\d+$/i.test(q) && documentNumberKey(q) === numberKey) {
+    return 60;
+  }
   // Single-char queries are noise — they substring-match every doc.
   if (q.length < 2) return 0;
   const j = (jobName || '').toLowerCase();

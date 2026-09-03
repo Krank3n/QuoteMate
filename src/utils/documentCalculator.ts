@@ -215,23 +215,37 @@ export function syncJobEstimatedHours<
   return { ...doc.job, estimatedHours: rounded };
 }
 
-/** Recalculate and merge totals onto a Document in place. */
+/**
+ * Recalculate and merge totals onto a Document in place.
+ *
+ * Every numeric input is coerced through finiteNumber: a document that reached
+ * here from an untyped source (a legacy import, a partial test fixture, a row
+ * that never had a rate stamped) must not turn one undefined field into a NaN
+ * total — Firestore rejects the write silently and the tradie's edit is lost.
+ * Materials are re-totalled from quantity × price first, so a row whose unit
+ * price changed without its totalPrice can't leave the subtotal stale.
+ */
 export function updateDocumentCalculations(doc: Document): Document {
+  const materials = (Array.isArray(doc.materials) ? doc.materials : []).map((m) => ({
+    ...m,
+    totalPrice: roundToTwoDecimals(finiteNumber(m.quantity) * finiteNumber(m.price)),
+  }));
   const calc = calculateDocumentTotals(
-    doc.materials,
-    doc.laborRate,
-    doc.laborHours,
-    doc.markup,
-    doc.travelAdjustment || 0,
+    materials,
+    finiteNumber(doc.laborRate),
+    finiteNumber(doc.laborHours),
+    finiteNumber(doc.markup),
+    finiteNumber(doc.travelAdjustment),
     doc.sections,
-    doc.laborMarkup ?? doc.markup ?? 0,
-    doc.laborExtraHours ?? 0,
+    finiteNumber(doc.laborMarkup ?? doc.markup),
+    finiteNumber(doc.laborExtraHours),
     doc.pricesIncludeGst === true,
     doc.gstRegistered !== false,
   );
   return {
     ...doc,
-    job: syncJobEstimatedHours(doc),
+    materials,
+    ...(doc.job ? { job: syncJobEstimatedHours(doc) } : {}),
     materialsSubtotal: calc.materialsSubtotal,
     laborTotal: calc.laborTotal,
     subtotal: calc.subtotal,

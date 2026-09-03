@@ -53,3 +53,33 @@ describe('scoreCustomerCandidates', () => {
     expect(result.totalScanned).toBe(candidates.length);
   });
 });
+
+// A phone-book or recent-quote hit is not a saved contact: its contactId is a
+// throwaway, and every Apply on one failed with "Couldn't find that contact".
+// The match now says where it came from and carries a draft to save instead.
+describe('scoreCustomerCandidates — where a match lives', () => {
+  const candidates: CustomerCandidate[] = [
+    { id: 'saved-1', name: 'Bob Smith', phone: '0412345678', email: 'bob@example.com', source: 'saved' },
+    { id: 'doc-9', name: 'Sue Williamson', phone: '0428753564', source: 'recent' },
+    { id: 'tmp-3', name: 'Diane Bunk', phone: '0477535423', email: 'di@example.com', source: 'phone' },
+  ];
+
+  it('a saved contact carries its id and no draft', () => {
+    const [m] = scoreCustomerCandidates('Bob Smith', candidates).matches;
+    expect(m.source).toBe('saved');
+    expect(m.contactId).toBe('saved-1');
+    expect(m.draft).toBeUndefined();
+  });
+
+  it('a phone-book hit carries a draft with the details the picker saw', () => {
+    const [m] = scoreCustomerCandidates('Diane Bunk', candidates).matches;
+    expect(m.source).toBe('phone');
+    expect(m.draft).toEqual({ name: 'Diane Bunk', phone: '0477535423', email: 'di@example.com' });
+  });
+
+  it('a recent-quote customer carries a draft too, without inventing an email', () => {
+    const [m] = scoreCustomerCandidates('Sue Williamson', candidates).matches;
+    expect(m.source).toBe('recent');
+    expect(m.draft).toEqual({ name: 'Sue Williamson', phone: '0428753564' });
+  });
+});
