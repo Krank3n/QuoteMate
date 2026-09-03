@@ -37,11 +37,11 @@ The release signing config in `android/app/build.gradle` reads from `keystore.pr
 4. Set the new versions:
    - `versionCode` = current build.gradle value + 1 (or max with a user-supplied Play Store value, if given)
    - `versionName` = bump the patch number by 1 (e.g. "1.0.87" → "1.0.88")
-   - Use the Edit tool to update the values in `android/app/build.gradle`.
+   - Use the Edit tool to update the values in `android/app/build.gradle`, and set `android.versionCode` in `app.config.js` to the same value — the prebuild in step 5 rewrites `build.gradle` from it.
 
-5. Run the Gradle release bundle build (**do NOT run `clean` first** — it wipes native CMake caches and causes prefab errors):
+5. Regenerate `android/` from the config, then run the Gradle release bundle build (**do NOT run `clean` first** — it wipes native CMake caches and causes prefab errors). The prebuild is what puts the EAS Update channel header (`updates.requestHeaders` in `app.config.js`) into the manifest; a build without it never receives an OTA:
    ```
-   cd android && ./gradlew bundleRelease
+   npx expo prebuild --platform android --no-install && cd android && ./gradlew bundleRelease
    ```
    Set the timeout to 600000ms (10 minutes) to allow for the full Gradle build.
 

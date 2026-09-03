@@ -38,6 +38,14 @@ VERSION=$(grep -m1 -E '^[[:space:]]*version:' app.config.js | sed -E 's/.*versio
 echo "📦 Building version: $VERSION"
 echo ""
 
+# Regenerate android/ from app.config.js so the manifest carries what the
+# config says — the EAS Update channel header above all: without it no
+# Android build had ever received an OTA (3 Sep 2026). android/ is
+# gitignored, so it only goes stale by skipping this.
+echo "🧬 Prebuilding android/ from app.config.js..."
+npx expo prebuild --platform android --no-install
+echo ""
+
 # Clean previous build
 echo "🧹 Cleaning previous build..."
 cd android
