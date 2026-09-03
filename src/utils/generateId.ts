@@ -1,7 +1,3 @@
-/**
- * Generate a unique ID
- * Simple ID generator for React Native without external dependencies
- */
-export function generateId(): string {
-  return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-}
+// Moved to shared/pricing so the server-side pricing run and the app share one
+// implementation. Re-exported here so existing imports keep working.
+export * from '../../shared/pricing/generateId';
