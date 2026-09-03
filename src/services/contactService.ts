@@ -27,8 +27,16 @@ export const normalizePhone = normalizePhoneTail;
 /**
  * Request permission to access device contacts.
  * Returns { granted, canAskAgain } so callers know whether to retry or direct to settings.
+ *
+ * Checks first and asks only when asking can change the answer. On Android a
+ * request for a permission that is already granted (or can no longer be
+ * asked) shows no dialog, and React Native only delivers the result on the
+ * next resume — so the promise never settled and Mate's contact picker hung
+ * on its second use (API 36 emulator, 3 Sep 2026).
  */
 export async function requestPhoneContactsPermission(): Promise<{ granted: boolean; canAskAgain: boolean }> {
+  const current = await checkPhoneContactsPermission();
+  if (current.granted || !current.canAskAgain) return current;
   const { status, canAskAgain } = await ExpoContacts.requestPermissionsAsync();
   return { granted: status === 'granted', canAskAgain: canAskAgain !== false };
 }

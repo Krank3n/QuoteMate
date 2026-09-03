@@ -1091,7 +1091,9 @@ export function AssistantScreen() {
           conversation.id,
           result.code === 'CANCELLED'
             ? '[context] The tradie closed the contact picker without choosing anyone. Ask for the name instead, in one line.'
-            : "[context] The tradie hasn't given contacts access. Ask for the name instead, in one line. If they turn access on and ask again, propose_pick_contact is fine to retry.",
+            : `[context] ${result.canAskAgain
+                ? 'The tradie said no to contacts access; the phone will ask again if they want it.'
+                : "The tradie hasn't given contacts access."} Ask for the name instead, in one line. If they ask for their contacts again, propose_pick_contact is fine to retry.`,
         );
         return;
       }

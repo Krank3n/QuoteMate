@@ -401,7 +401,7 @@ export type ApplyProposalResult =
   // `code` names machine-readable failures the screen branches on
   // ('PLAN_GATED' → Paywall; 'CANCELLED' / 'CONTACTS_DENIED' → a dismissed
   // picker card); `error` stays the line shown to the tradie.
-  | { ok: false; error: string; code?: string };
+  | { ok: false; error: string; code?: string; canAskAgain?: boolean };
 
 /**
  * Something the chat screen opens ON TOP of the conversation. Kept apart from
@@ -4067,12 +4067,18 @@ export const useStore = create<AppState>((set, get) => ({
           try {
             const expoContacts = await import('expo-contacts');
             if (Platform.OS === 'android') {
-              const perm = await expoContacts.requestPermissionsAsync();
-              if (perm.status !== 'granted') {
+              const { requestPhoneContactsPermission } = await import('../services/contactService');
+              const perm = await requestPhoneContactsPermission();
+              if (!perm.granted) {
+                // A first "Don't allow" can be asked again; only a repeat
+                // denial needs the trip to Settings.
                 return {
                   ok: false,
                   code: 'CONTACTS_DENIED',
-                  error: "Contacts access is off for QuoteMate — turn it on under the phone's Settings, then say the word and I'll open them.",
+                  canAskAgain: perm.canAskAgain,
+                  error: perm.canAskAgain
+                    ? "Say the word and I'll ask for contacts access again, or just tell me the name."
+                    : "Contacts access is off for QuoteMate — turn it on under the phone's Settings, then say the word and I'll open them.",
                 };
               }
             }

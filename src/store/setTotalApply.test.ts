@@ -36,6 +36,7 @@ vi.mock('expo-image-manipulator', () => ({ manipulateAsync: vi.fn(), SaveFormat:
 vi.mock('expo-mail-composer', () => ({ composeAsync: vi.fn(), isAvailableAsync: vi.fn(async () => false) }));
 
 const contactsMock = vi.hoisted(() => ({
+  getPermissionsAsync: vi.fn(async () => ({ status: 'undetermined', canAskAgain: true })),
   requestPermissionsAsync: vi.fn(async () => ({ status: 'granted', canAskAgain: true })),
   getContactsAsync: vi.fn(async () => ({ data: [] })),
   presentContactPickerAsync: vi.fn(async () => null as any),
@@ -422,7 +423,26 @@ describe('propose_pick_contact', () => {
     const result = await useStore.getState().applyProposal({ ...base, type: 'propose_pick_contact', quoteId: DOC_ID });
     expect(!result.ok && result.error).toContain('Contacts access is off');
     expect(!result.ok && result.code).toBe('CONTACTS_DENIED');
+    expect(!result.ok && result.canAskAgain).toBe(false);
     expect(contactsMock.presentContactPickerAsync).not.toHaveBeenCalled();
+  });
+
+  it('a first Android denial says the phone will ask again, not to go to Settings', async () => {
+    platform.OS = 'android';
+    contactsMock.requestPermissionsAsync.mockResolvedValueOnce({ status: 'denied', canAskAgain: true } as any);
+    const result = await useStore.getState().applyProposal({ ...base, type: 'propose_pick_contact', quoteId: DOC_ID });
+    expect(!result.ok && result.code).toBe('CONTACTS_DENIED');
+    expect(!result.ok && result.canAskAgain).toBe(true);
+    expect(!result.ok && result.error).toContain("ask for contacts access again");
+    expect(contactsMock.presentContactPickerAsync).not.toHaveBeenCalled();
+  });
+
+  it('on Android with access already granted it opens the picker without asking again', async () => {
+    platform.OS = 'android';
+    contactsMock.getPermissionsAsync.mockResolvedValueOnce({ status: 'granted', canAskAgain: true } as any);
+    await useStore.getState().applyProposal({ ...base, type: 'propose_pick_contact', quoteId: DOC_ID });
+    expect(contactsMock.requestPermissionsAsync).not.toHaveBeenCalled();
+    expect(contactsMock.presentContactPickerAsync).toHaveBeenCalledTimes(1);
   });
 
   it('a picker that throws is a plain failure with a usable line, and saves nothing', async () => {
