@@ -188,6 +188,14 @@ export const TRADE_CATEGORIES: TradeCategory[] = [
         commonServices: ['Power Point Install', 'Light Fitting', 'LED Downlights', 'Dimmer Switch'],
       },
       {
+        id: 'smoke_alarms',
+        name: 'Smoke Alarms',
+        description: 'Hardwired and battery alarms, interconnect',
+        icon: 'smoke-detector',
+        pricingMethods: [PRICING_METHODS.PER_POINT, PRICING_METHODS.PER_UNIT],
+        commonServices: ['Smoke Alarm Install', 'Smoke Alarm Replacement', 'Interconnect Upgrade', 'Compliance Check'],
+      },
+      {
         id: 'switchboards',
         name: 'Switchboards & Safety',
         description: 'Upgrades, RCDs, testing',

@@ -6,7 +6,10 @@ import { Proposal, ProposalStatus } from '../../types/assistant';
 import { applyLabelFor, iconFor, titleFor } from './proposalCardCopy';
 import { rateLineUnitPrice, rateLinesCoverMaterials, rateSummary, rateUnitLabel } from '../../services/quotingProfile';
 import { registeredBusinessSettings } from '../../services/assistant/quotingProfileContext';
-import { resolveGstMode } from '../../../shared/document/gstMode';
+import { resolveGstMode, type GstMode } from '../../../shared/document/gstMode';
+import { DISCOUNT_NAME, PRICE_ADJUSTMENT_NAME } from '../../utils/setTotal';
+// The Intl formatter: a negative figure prints as -$183.70, not $-183.70.
+import { formatCurrency } from '../../utils/documentCalculator';
 
 interface Props {
   proposal: Proposal;
@@ -15,9 +18,8 @@ interface Props {
   onDismiss: () => void;
 }
 
-function formatCurrency(n: number): string {
-  return `$${n.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
+/** " inc GST" / " ex GST" / nothing — the same suffix the draft card's rate lines carry. */
+const gstSuffix = (mode: GstMode): string => (mode === 'inclusive' ? ' inc GST' : mode === 'exclusive' ? ' ex GST' : '');
 
 function ProposalCardImpl({ proposal, status, onApply, onDismiss }: Props) {
   const styles = useStyles();
@@ -48,13 +50,19 @@ function ProposalCardImpl({ proposal, status, onApply, onDismiss }: Props) {
 
       {status === 'pending' ? (
         <View style={styles.actions}>
-          <TouchableOpacity style={styles.dismissBtn} onPress={onDismiss} accessibilityRole="button">
+          <TouchableOpacity
+            style={styles.dismissBtn}
+            onPress={onDismiss}
+            accessibilityRole="button"
+            accessibilityLabel={`Dismiss — ${titleFor(proposal)}`}
+          >
             <Text style={styles.dismissText}>Dismiss</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.applyBtn, { backgroundColor: applyColor }]}
             onPress={onApply}
             accessibilityRole="button"
+            accessibilityLabel={`${applyLabel} — ${titleFor(proposal)}`}
           >
             <Text style={styles.applyText}>{applyLabel}</Text>
           </TouchableOpacity>
@@ -135,6 +143,19 @@ function Body({ proposal }: { proposal: Proposal }) {
         </View>
       );
     case 'propose_add_line_item':
+      if (proposal.kind === 'work') {
+        // The basis the tradie named, else the document's own — the figure on
+        // the card is the figure that lands.
+        const gst =
+          proposal.pricesIncludeGst === true ? ' inc GST' : proposal.pricesIncludeGst === false ? ' ex GST' : gstSuffix(docMode);
+        return (
+          <View>
+            <Text style={styles.summary}>{proposal.searchTerm} · {formatCurrency(proposal.price ?? 0)}{gst}</Text>
+            {!!proposal.scope && <Text style={styles.scope} numberOfLines={4}>{proposal.scope}</Text>}
+            <Text style={styles.dim}>Lump sum at your price — no quantity, no markup, nothing to price up.</Text>
+          </View>
+        );
+      }
       return (
         <View>
           <Text style={styles.summary}>{proposal.qty} {proposal.unit} · {proposal.searchTerm}</Text>
@@ -146,10 +167,12 @@ function Body({ proposal }: { proposal: Proposal }) {
       // the tradie whether Mate heard them right.
       const changes: string[] = [];
       if (proposal.price !== undefined) {
+        // A lump sum's price is the whole line — never "per each".
+        const per = proposal.lumpSum ? '' : proposal.displayUnit ? ` per ${proposal.displayUnit}` : '';
         changes.push(
           proposal.displayCurrentPrice != null
-            ? `${formatCurrency(proposal.displayCurrentPrice)} → ${formatCurrency(proposal.price)}${proposal.displayUnit ? ` per ${proposal.displayUnit}` : ''}`
-            : `${formatCurrency(proposal.price)}${proposal.displayUnit ? ` per ${proposal.displayUnit}` : ''}`,
+            ? `${formatCurrency(proposal.displayCurrentPrice)} → ${formatCurrency(proposal.price)}${per}`
+            : `${formatCurrency(proposal.price)}${per}`,
         );
       }
       if (proposal.quantity !== undefined) {
@@ -168,13 +191,49 @@ function Body({ proposal }: { proposal: Proposal }) {
           <Text style={styles.dim}>{changes.join(' · ')}</Text>
           {proposal.price !== undefined && (
             <Text style={styles.dim}>
-              Priced by you, so it won't be flagged as an estimate.
-              {proposal.price > 0 ? ' Saved to your supplier book for next time.' : ''}
+              {proposal.lumpSum
+                ? 'Lump sum — this is the whole line, no markup on top.'
+                : `Priced by you, so it won't be flagged as an estimate.${proposal.price > 0 ? ' Saved to your supplier book for next time.' : ''}`}
             </Text>
           )}
         </View>
       );
     }
+    case 'propose_set_total': {
+      const p = proposal.preview;
+      // Labour is named, never quantified: the labour figure on the quote
+      // rolls the labour markup in, so a number here would be a third figure.
+      const moved =
+        p?.mechanism === 'labour'
+          ? 'Comes out of the labour.'
+          : p?.mechanism === 'adjustment' && p.adjustment != null
+            ? p.adjustment < 0
+              ? `Takes ${formatCurrency(Math.abs(p.adjustment))} off with a "${DISCOUNT_NAME}" line.`
+              : `Adds ${formatCurrency(p.adjustment)} as a "${PRICE_ADJUSTMENT_NAME}" line.`
+            : `Labour takes the difference, or a "${PRICE_ADJUSTMENT_NAME}" line does.`;
+      return (
+        <View>
+          {proposal.displayName ? (
+            <Text style={styles.summary} numberOfLines={2}>{proposal.displayName}</Text>
+          ) : null}
+          <Text style={styles.summary}>
+            {p ? `${formatCurrency(p.currentTotal)} → ` : 'New total '}
+            {formatCurrency(proposal.targetTotal)}
+            {p ? gstSuffix(p.gstMode) : gstSuffix(docMode)}
+          </Text>
+          <Text style={styles.dim}>{moved} Materials stay as they are.</Text>
+        </View>
+      );
+    }
+    case 'propose_pick_contact':
+      return (
+        <View>
+          {proposal.displayName ? (
+            <Text style={styles.summary} numberOfLines={2}>{proposal.displayName}</Text>
+          ) : null}
+          <Text style={styles.dim}>Opens your phone's contacts — whoever you pick gets saved here and goes on this job.</Text>
+        </View>
+      );
     case 'propose_delete_line_item':
       return (
         <View>

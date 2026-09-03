@@ -44,6 +44,7 @@ import { WebContainer } from '../../components/WebContainer';
 import { AlertModal } from '../../components/AlertModal';
 import { updateEmailPreferences } from '../../services/emailService';
 import { GridBackground } from '../../components/GridBackground';
+import { clearCustomerDraftRefs } from '../../services/assistant/readTools';
 
 export function AccountSettingsScreen() {
   const styles = useStyles();
@@ -107,6 +108,8 @@ export function AccountSettingsScreen() {
     setShowLogoutModal(false);
 
     try {
+      // Device-held customer details from find_customer die with the session.
+      clearCustomerDraftRefs();
       await signOut(auth);
       await clearAllData();
 

@@ -462,6 +462,17 @@ describe('topLinesSummary', () => {
     expect(topLinesSummary([])).toBe('');
     expect(topLinesSummary([mat({ id: 'w', name: 'Prep', kind: 'work', price: 0 })])).toBe('');
   });
+
+  it('names the pack when the biggest line is one — four alarms as one $229 four-pack', () => {
+    const materials = [
+      mat({ id: 'a', name: '10 year lithium battery photoelectric smoke alarm', quantity: 1, price: 229, packSize: 4, packUnit: 'each', requiredQty: 4, requiredUnit: 'each' }),
+      mat({ id: 'b', name: 'Twin and earth cable 1.5mm', quantity: 2, price: 45, packSize: 100, packUnit: 'm', requiredQty: 160, requiredUnit: 'm' }),
+      mat({ id: 'c', name: 'Junction box', quantity: 3, price: 4, unit: 'each' }),
+    ];
+    expect(topLinesSummary(materials, 3)).toBe(
+      'Biggest lines: 10 year lithium battery photoelectric smoke alarm · 1 pack of 4 $229.00, Twin and earth cable 1.5mm · 2 packs of 100 m $90.00, Junction box $12.00.',
+    );
+  });
 });
 
 describe('priceResettableIds — the reprice Mate offers must actually reset the rows', () => {

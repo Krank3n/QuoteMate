@@ -50,23 +50,58 @@ export function calculateProfitMargin(total: number, costs: number): number {
   return roundToTwoDecimals((profit / total) * 100);
 }
 
-/** Recalculate and merge totals onto a Document in place. */
+/**
+ * Coerce any field to a finite number. NaN and Infinity become 0 so they
+ * never propagate into Firestore writes — the SDK rejects non-finite values
+ * silently, and the tradie's edit is lost.
+ */
+export function finiteNumber(value: unknown): number {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/**
+ * Recalculate and merge totals onto a Document in place.
+ *
+ * Every numeric input is coerced through finiteNumber: a document that reached
+ * here from an untyped source (a legacy import, a partial test fixture, a row
+ * that never had a rate stamped) must not turn one undefined field into a NaN
+ * total — Firestore rejects the write silently and the tradie's edit is lost.
+ * Materials are re-totalled from quantity × price first, so a row whose unit
+ * price changed without its totalPrice can't leave the subtotal stale; a
+ * section missing laborTotal is coerced too, since the calculator sums it raw.
+ */
 export function updateDocumentCalculations(doc: Document): Document {
+  const materials = (Array.isArray(doc.materials) ? doc.materials : []).map((m) => ({
+    ...m,
+    totalPrice: roundToTwoDecimals(finiteNumber(m.quantity) * finiteNumber(m.price)),
+  }));
+  const sections = Array.isArray(doc.sections)
+    ? doc.sections.map((s) => ({
+        ...s,
+        laborHours: finiteNumber(s.laborHours),
+        laborRate: finiteNumber(s.laborRate),
+        laborTotal: finiteNumber(s.laborTotal),
+        multiplier: finiteNumber(s.multiplier) || 1,
+      }))
+    : doc.sections;
   const calc = calculateDocumentTotals(
-    doc.materials,
-    doc.laborRate,
-    doc.laborHours,
-    doc.markup,
-    doc.travelAdjustment || 0,
-    doc.sections,
-    doc.laborMarkup ?? doc.markup ?? 0,
-    doc.laborExtraHours ?? 0,
+    materials,
+    finiteNumber(doc.laborRate),
+    finiteNumber(doc.laborHours),
+    finiteNumber(doc.markup),
+    finiteNumber(doc.travelAdjustment),
+    sections,
+    finiteNumber(doc.laborMarkup ?? doc.markup),
+    finiteNumber(doc.laborExtraHours),
     doc.pricesIncludeGst === true,
     doc.gstRegistered !== false,
   );
   return {
     ...doc,
-    job: syncJobEstimatedHours(doc),
+    materials,
+    ...(sections ? { sections } : {}),
+    ...(doc.job ? { job: syncJobEstimatedHours(doc) } : {}),
     materialsSubtotal: calc.materialsSubtotal,
     laborTotal: calc.laborTotal,
     subtotal: calc.subtotal,

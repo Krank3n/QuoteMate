@@ -86,7 +86,9 @@ export async function dispatchToolCall(call: ToolCallInput): Promise<ToolCallOut
           result = await reviewQuote(input);
           break;
         case 'get_job_requirements':
-          result = await getJobRequirements(input as { category?: string; niche?: string; freeText?: string; jobType?: string });
+          result = await getJobRequirements(
+            input as { category?: string; niche?: string; freeText?: string; jobType?: string; documentType?: string },
+          );
           break;
         case 'list_service_reports':
           result = await listServiceReports(input as { query?: string; limit?: number });
@@ -130,16 +132,30 @@ export async function dispatchToolCall(call: ToolCallInput): Promise<ToolCallOut
   }
 
   if (isProposalTool(name)) {
-    const { proposal, error } = buildProposal(name, id, input);
+    // A validator that throws must answer the model, not kill the turn: the
+    // text path runs these inside a bare Promise.all.
+    let built: ReturnType<typeof buildProposal>;
+    try {
+      built = buildProposal(name, id, input);
+    } catch (err: any) {
+      return { name, id, response: { error: err?.message || 'Proposal validation failed.' } };
+    }
+    const { proposal, error, note } = built;
     if (proposal) {
       const response: Record<string, unknown> = { ok: true, proposalId: proposal.id };
+      const notes: string[] = [];
       if (proposal.type === 'propose_draft_quote') {
         // The proposalId is NOT a quote id — no quote exists until the tradie
         // taps Apply. Spell that out so the model doesn't later pass proposalId
         // to get_quote / review_quote / propose_reprice.
-        response.note =
-          'Card shown — nothing is saved until the tradie taps Apply. proposalId is not a quote id; the real quote id arrives in a "[context]" line after Apply.';
+        notes.push(
+          'Card shown — nothing is saved until the tradie taps Apply. proposalId is not a quote id; the real quote id arrives in a "[context]" line after Apply.',
+        );
       }
+      // Something the validator changed on the way through (a phone it
+      // dropped) — the model has to tell the tradie, so it rides on the ok.
+      if (note) notes.push(note);
+      if (notes.length) response.note = notes.join(' ');
       return { name, id, response, proposal };
     }
     return { name, id, response: { error: error || 'Proposal validation failed.' } };

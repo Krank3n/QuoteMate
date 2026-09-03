@@ -28,25 +28,29 @@ function isPending(message: ChatMessage, proposal: Proposal): boolean {
 }
 
 /**
- * Older pending proposals that `incoming` makes stale. `excludeMessageId` is
- * the message carrying the new proposals — never dismiss the cards being
- * appended right now (a turn can re-issue into the same bubble).
+ * Older pending proposals that `incoming` makes stale. The cards being
+ * appended right now are never dismissed — but they are excluded by THEIR
+ * ids, not by the bubble they land in: a reply that continues the previous
+ * bubble (a turn boundary with no tradie speech between) can re-propose
+ * into the very message that holds the stale card, and that card must still
+ * go. `excludeMessageId` is kept for callers that pass it; it no longer
+ * shields a whole message.
  */
 export function findSupersededProposals(
   messages: ChatMessage[],
   incoming: Proposal[],
-  excludeMessageId: string,
+  _excludeMessageId?: string,
 ): SupersededRef[] {
   const refs: SupersededRef[] = [];
+  const incomingIds = new Set(incoming.map((p) => p.id));
   for (const next of incoming) {
     const perConvo = PER_CONVERSATION.has(next.type);
     const perQuote = PER_QUOTE.has(next.type);
     if (!perConvo && !perQuote) continue;
     const nextQuoteId = (next as { quoteId?: string }).quoteId;
     for (const message of messages) {
-      if (message.id === excludeMessageId) continue;
       for (const prior of message.proposals || []) {
-        if (prior.type !== next.type || prior.id === next.id) continue;
+        if (prior.type !== next.type || incomingIds.has(prior.id)) continue;
         if (!isPending(message, prior)) continue;
         if (perQuote && (prior as { quoteId?: string }).quoteId !== nextQuoteId) continue;
         refs.push({ messageId: message.id, proposalId: prior.id });

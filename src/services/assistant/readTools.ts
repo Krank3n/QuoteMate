@@ -100,6 +100,45 @@ export interface CustomerCandidate {
   source: 'saved' | 'recent' | 'phone';
 }
 
+// A phone-book or recent-quote hit is not a saved contact, so its details
+// have to travel to Apply somehow — but never through the model: every
+// match already masks the phone, and the tool response is logged to
+// Firestore and read at /admin/conversations. The details stay here, on the
+// device, behind an opaque ref the model passes back as customerDraftRef.
+// Bounded; the oldest ref is forgotten first.
+const MAX_DRAFT_REFS = 50;
+const draftRefs = new Map<string, { name: string; phone?: string; email?: string }>();
+let draftRefSeq = 0;
+
+function rememberCustomerDraft(c: CustomerCandidate): string {
+  const ref = `draft_${++draftRefSeq}`;
+  draftRefs.set(ref, { name: c.name, ...(c.phone ? { phone: c.phone } : {}), ...(c.email ? { email: c.email } : {}) });
+  while (draftRefs.size > MAX_DRAFT_REFS) {
+    const oldest = draftRefs.keys().next().value;
+    if (oldest === undefined) break;
+    draftRefs.delete(oldest);
+  }
+  return ref;
+}
+
+/** The details behind a customerDraftRef from find_customer, or null when the ref is unknown. */
+export function resolveCustomerDraftRef(ref: unknown): { name: string; phone?: string; email?: string } | null {
+  return typeof ref === 'string' ? draftRefs.get(ref) ?? null : null;
+}
+
+/**
+ * Forget every held draft. Called on sign-out — the refs are module state,
+ * and a model-invented "draft_3" under the next account must never resolve
+ * to the previous account's address book.
+ */
+export function clearCustomerDraftRefs(): void {
+  draftRefs.clear();
+  draftRefSeq = 0;
+}
+
+/** Test seam. */
+export const __resetCustomerDraftRefs = clearCustomerDraftRefs;
+
 // Pure scoring/merge core shared by findCustomer (extracted so it's testable
 // without Firestore). Preserves the exact matchType/confidence/needsConfirmation
 // /ambiguous contract the system prompt reasons over — do not change the
@@ -115,6 +154,16 @@ export function scoreCustomerCandidates(
     hasEmail: boolean;
     matchType: 'phone' | 'exact' | 'close' | 'fuzzy' | 'sounds_like';
     confidence: number;
+    /**
+     * Where the person lives. Only 'saved' is a QuoteMate contact whose
+     * contactId can go on a quote; a 'phone' (address book) or 'recent'
+     * (an earlier quote's customer) hit carries `draftRef` instead — pass it
+     * as customerDraftRef and Apply saves the contact with the details held
+     * on this device. Before this, a phone-book hit's contactId was a
+     * throwaway id and every Apply on it failed.
+     */
+    source: 'saved' | 'recent' | 'phone';
+    draftRef?: string;
   }>;
   confidence: number;
   ambiguous: boolean;
@@ -211,6 +260,8 @@ export function scoreCustomerCandidates(
     hasEmail: !!candidate.email,
     matchType: matchType as 'phone' | 'exact' | 'close' | 'fuzzy' | 'sounds_like',
     confidence: Math.round(conf * 100) / 100,
+    source: candidate.source,
+    ...(candidate.source === 'saved' ? {} : { draftRef: rememberCustomerDraft(candidate) }),
   }));
 
   return {
@@ -412,7 +463,7 @@ export async function listRecentQuotes(input: {
 
   if (hasQuery) {
     const scored = merged
-      .map((row) => ({ row, score: fuzzyScoreQuote(rawQuery, row.jobName, row.customerName) }))
+      .map((row) => ({ row, score: fuzzyScoreQuote(rawQuery, row.jobName, row.customerName, row.number) }))
       .filter((x) => x.score > 0)
       .sort((a, b) => {
         if (b.score !== a.score) return b.score - a.score;
@@ -542,11 +593,21 @@ export interface JobRequirementsInput {
   jobType?: string;
   /** Injected so resolveJobRequirements stays pure and synchronous. */
   supplierBook?: SupplierBookSnapshot;
+  /**
+   * 'invoice' means the work is already done. The niche's must-ask questions
+   * are for scoping a job that hasn't happened yet — an electrician invoicing
+   * a switchboard was asked poles, circuits, RCDs, asbestos and offered a
+   * supplier list, twelve messages before the draft (3 Sep 2026). An invoice
+   * needs what was done and who for, and nothing about supply.
+   */
+  documentType?: 'quote' | 'invoice';
 }
 
 export interface JobRequirementsResult {
   matched: { categoryId?: string; nicheId?: string; templateName?: string };
   mustAskQuestions: string[];
+  /** True when documentType was 'invoice': the questions are the invoice pair and the supply flags are off. */
+  invoiceFastPath: boolean;
   /**
    * True when mustAskQuestions are the generic fallback rather than a niche's
    * own. Mate should still ask them, but shouldn't imply this trade was
@@ -586,6 +647,19 @@ export const GENERIC_SCOPE_QUESTIONS: string[] = [
 ];
 
 const MEASUREMENT_DRIVEN_METHODS = new Set(['per_sqm', 'per_linear_m', 'per_cubic_m']);
+
+/** The supply question every install-type job carries. */
+export const SUPPLY_OR_REPLACE_QUESTION =
+  'Supplying the gear new, or replacing existing units — and is any of it customer-supplied?';
+const INSTALL_TYPE_RE = /\b(install|installation|fit|fit-?out|replace|replacement|supply)\b/i;
+// "Off existing" (a circuit) is not the same question; the niche has to ask
+// about replacing or customer-supplied gear outright to be counted as covered.
+const SUPPLY_COVERED_RE = /\b(replac\w*|customer[- ]supplied|supplied by|new or replac\w*|existing units?)\b/i;
+
+/** A template for putting gear in, as opposed to a service, a repair or a clean. */
+function isInstallType(t: { name: string; description: string }): boolean {
+  return INSTALL_TYPE_RE.test(`${t.name} ${t.description}`);
+}
 
 /**
  * Every job type Mate knows, by name.
@@ -738,8 +812,36 @@ function buildRequirements(
     genericScope = true;
   }
 
+  // Every install-type job asks whether the gear is being supplied new or
+  // whether existing / customer-supplied units are being replaced. A
+  // smoke-alarm quote (3 Sep 2026) supplied four battery alarms the customer
+  // already owned — a third of the price — because nothing ever asked.
+  if (template && isInstallType(template) && !template.questionsLine?.match(SUPPLY_COVERED_RE)) {
+    mustAskQuestions.push(SUPPLY_OR_REPLACE_QUESTION);
+  }
+
   const pricingMethod = template?.pricingMethod || undefined;
   const measurementDriven = !!pricingMethod && MEASUREMENT_DRIVEN_METHODS.has(pricingMethod);
+
+  // An invoice is for work already done: no scoping questions, no plan, no
+  // supplier-list offer. The niche match still rides along so the pricing
+  // engine knows the trade.
+  if (input.documentType === 'invoice') {
+    return {
+      matched: { categoryId: resolvedCategoryId, nicheId: resolvedNicheId, templateName: template?.name },
+      // The work is done, so only these two.
+      mustAskQuestions: ['What work was done — enough for a line or two the customer will recognise', 'Who it is for'],
+      invoiceFastPath: true,
+      genericScope: false,
+      pricingMethod,
+      measurementDriven: false,
+      planHelps: false,
+      specialistSupply: false,
+      supplierBookPopulated: (input.supplierBook?.personalRateCount ?? 0) > 0,
+      supplierBookSuppliers: input.supplierBook?.supplierNames ?? [],
+      supplierBookCoversTrade: false,
+    };
+  }
 
   // The book is "populated" only when it holds the tradie's own rates. Coverage
   // is scored against this niche's core gear, so a plumber's list doesn't read
@@ -757,6 +859,7 @@ function buildRequirements(
       templateName: template?.name,
     },
     mustAskQuestions,
+    invoiceFastPath: false,
     genericScope,
     pricingMethod,
     measurementDriven,
@@ -768,7 +871,13 @@ function buildRequirements(
   };
 }
 
-export async function getJobRequirements(input: { category?: string; niche?: string; freeText?: string; jobType?: string }): Promise<unknown> {
+export async function getJobRequirements(input: {
+  category?: string;
+  niche?: string;
+  freeText?: string;
+  jobType?: string;
+  documentType?: string;
+}): Promise<unknown> {
   const uid = requireUid();
   let { category, niche } = input;
   if (!category && !niche) {
@@ -789,6 +898,7 @@ export async function getJobRequirements(input: { category?: string; niche?: str
     nicheId: niche,
     freeText: input.freeText,
     jobType: input.jobType,
+    ...(input.documentType === 'invoice' ? { documentType: 'invoice' as const } : {}),
     // Flag defaults so a freeText describing THIS job can outvote the tradie's
     // usual trade — see JobRequirementsInput.categoryFromSettings.
     categoryFromSettings: !input.category && !input.niche,

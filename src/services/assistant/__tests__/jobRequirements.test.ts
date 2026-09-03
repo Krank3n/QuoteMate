@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { resolveJobRequirements } from '../readTools';
+import { resolveJobRequirements, SUPPLY_OR_REPLACE_QUESTION } from '../readTools';
+import { NICHE_TEMPLATES } from '../../../data/nicheTemplates';
+import { TRADE_CATEGORIES } from '../../../../shared/pricing/tradeCategories';
 import { buildSupplierBookSnapshot } from '../../supplierBookCoverage';
 import type { FavoriteProductMapping } from '../../../types';
 
@@ -195,5 +197,91 @@ describe('a defaulted trade must not outvote the job in front of you', () => {
       categoryFromSettings: true,
     });
     expect(r.matched.categoryId).toBe('cabinet_making');
+  });
+});
+
+// An invoice is for work already done. The electrician invoicing a
+// switchboard (3 Sep 2026) was asked poles, circuits, RCDs and asbestos and
+// offered a supplier list — twelve messages before the draft.
+describe('resolveJobRequirements — invoice fast path', () => {
+  it('collapses the questions to what was done and who for, and turns the supply flags off', () => {
+    const result = resolveJobRequirements({ freeText: 'supply and install a new switchboard', documentType: 'invoice', supplierBook: COLORBOND_BOOK });
+    expect(result.invoiceFastPath).toBe(true);
+    expect(result.mustAskQuestions).toHaveLength(2);
+    expect(result.mustAskQuestions[0].toLowerCase()).toContain('what work was done');
+    expect(result.mustAskQuestions[1].toLowerCase()).toContain('who it is for');
+    expect(result.genericScope).toBe(false);
+    expect(result.specialistSupply).toBe(false);
+    expect(result.planHelps).toBe(false);
+    expect(result.measurementDriven).toBe(false);
+    expect(result.supplierBookCoversTrade).toBe(false);
+  });
+
+  it('still names the trade it matched, so the pricing engine knows the niche', () => {
+    const result = resolveJobRequirements({ freeText: 'colorbond fence', documentType: 'invoice' });
+    expect(result.matched.nicheId).toBe('fencing');
+  });
+
+  it('is off for a quote — a fence quote keeps its own questions and specialist-supply flag', () => {
+    const result = resolveJobRequirements({ freeText: 'colorbond fence', documentType: 'quote' });
+    expect(result.invoiceFastPath).toBe(false);
+    expect(result.mustAskQuestions.length).toBeGreaterThan(0);
+    expect(result.specialistSupply).toBe(true);
+  });
+});
+
+
+// A smoke-alarm quote (3 Sep 2026): no such job type existed, so Mate forced
+// the nearest niche (Power Points) and opened with singles-or-doubles and USB
+// questions — and then supplied four battery alarms the customer already
+// owned, a third of the price.
+describe('smoke alarms, and supply-or-replace on every install-type job', () => {
+  it('matches a smoke-alarm job to its own niche, not Power Points', () => {
+    const named = resolveJobRequirements({ jobType: 'Smoke Alarms' });
+    expect(named.matched).toMatchObject({ categoryId: 'electrical', nicheId: 'smoke_alarms', templateName: 'Smoke Alarms' });
+    const fuzzy = resolveJobRequirements({ freeText: 'install fire detectors — smoke alarms, two hardwired and four battery' });
+    expect(fuzzy.matched.templateName).toBe('Smoke Alarms');
+    const q = named.mustAskQuestions.join(' ').toLowerCase();
+    expect(q).toContain('hardwired');
+    expect(q).toContain('replacing existing');
+    expect(q).not.toContain('usb');
+  });
+
+  it('adds the supply-or-replace question to an install-type job whose own questions never ask', () => {
+    const points = resolveJobRequirements({ jobType: 'Power Points' });
+    expect(points.mustAskQuestions).toContain(SUPPLY_OR_REPLACE_QUESTION);
+    // "off existing" (a circuit) is not the supply question — it still gets asked.
+    expect(points.mustAskQuestions).toHaveLength(2);
+  });
+
+  it('does not double up when the niche already asks about replacing existing gear', () => {
+    const alarms = resolveJobRequirements({ jobType: 'Smoke Alarms' });
+    expect(alarms.mustAskQuestions).not.toContain(SUPPLY_OR_REPLACE_QUESTION);
+    expect(alarms.mustAskQuestions).toHaveLength(1);
+    // "New install or replacing halogen?" already covers it.
+    const downlights = resolveJobRequirements({ jobType: 'LED Downlights' });
+    expect(downlights.mustAskQuestions).not.toContain(SUPPLY_OR_REPLACE_QUESTION);
+  });
+
+  it('leaves non-install work alone', () => {
+    const result = resolveJobRequirements({ jobType: 'none', freeText: 'end of lease clean' });
+    expect(result.mustAskQuestions).not.toContain(SUPPLY_OR_REPLACE_QUESTION);
+  });
+
+  it('an invoice never asks it — the work is done', () => {
+    const result = resolveJobRequirements({ jobType: 'Power Points', documentType: 'invoice' });
+    expect(result.mustAskQuestions).not.toContain(SUPPLY_OR_REPLACE_QUESTION);
+  });
+});
+
+
+// A template whose category/niche pair is not in TRADE_CATEGORIES is
+// invisible to the wizard's job-type list (JobDetailsScreen iterates
+// cat.niches) — the Smoke Alarms template shipped that way once.
+describe('every niche template belongs to a niche the wizard can show', () => {
+  it('has a TRADE_CATEGORIES entry for each template\'s category/niche pair', () => {
+    const known = new Set(TRADE_CATEGORIES.flatMap((c) => c.niches.map((n) => `${c.id}:${n.id}`)));
+    const orphans = NICHE_TEMPLATES.filter((t) => !known.has(`${t.categoryId}:${t.nicheId}`)).map((t) => `${t.name} (${t.categoryId}:${t.nicheId})`);
+    expect(orphans).toEqual([]);
   });
 });

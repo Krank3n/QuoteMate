@@ -9,13 +9,7 @@ import { generateId } from '../utils/generateId';
 import { withOrigin } from '../utils/materialOrigin';
 import { Quote, BusinessSettings, Material, QuoteSection, SubscriptionStatus, Invoice, PaymentMethod, ReferralInfo, XeroConnection, XeroSyncStatus, Contact, QuotePhoto } from '../types';
 import { Document, DocumentPayment, DocumentPaymentMethod } from '../types/document';
-import {
-  ChatMessage,
-  Conversation,
-  Proposal,
-  ProposalStatus,
-  WorkingStatus,
-} from '../types/assistant';
+import { ChatMessage, Conversation, Proposal, ProposalStatus, WorkingStatus, DraftQuoteProposal } from '../types/assistant';
 import {
   generateMaterialsForQuote,
   fetchPricesForQuote,
@@ -28,12 +22,16 @@ import { reviewQuoteMaterials, isFlaggedRow, priceResettableIds, topLinesSummary
 import { checkDocumentIntegrity } from '../../shared/document/integrityCheck';
 import { loadTemplates } from '../services/sectionTemplateService';
 import { updateQuoteCalculations, healBrokenLabourSections } from '../utils/quoteCalculator';
+import { finiteNumber, updateAllMaterialPrices, updateDocumentCalculations } from '../utils/documentCalculator';
+import { applySetTotal, describeSetTotalPlan } from '../utils/setTotal';
+import { normalizePhoneTail } from '../utils/textMatch';
 import { normaliseLabourToHours } from '../../shared/document/labourUnits';
 import { isAlreadyInvoiced } from '../../shared/document/convertGuard';
 import { keepSupplierPriceInclusive, resolveGstMode } from '../../shared/document/gstMode';
 import {
   addPreference,
   buildRateWorkItem,
+  rateLineUnitPrice,
   rateLinesCoverMaterials,
   stripLabourFromQuote,
   upsertRate,
@@ -387,6 +385,17 @@ export type ApplyProposalResult =
       /** Open a sheet over the chat. Deliberately not a NavigateHint — this
        *  one must NOT leave the conversation. */
       sheet?: AssistantSheetHint;
+      /**
+       * The document's total after this apply, for the "[context]" line. Mate
+       * read out $1,260 and then $1,416 for a document that was never either
+       * (3 Sep 2026) because the note after a rates change carried no total
+       * and it guessed. Anything that changes money reports the real figure.
+       */
+      appliedTotal?: number;
+      /** For propose_set_total: what absorbed the difference, as one clause. */
+      moved?: string;
+      /** For propose_pick_contact: the contact the tradie chose, now saved. */
+      pickedContact?: { id: string; name: string; phone?: string; email?: string };
     }
   // `code` names machine-readable failures the screen branches on
   // (currently only 'PLAN_GATED' → Paywall); `error` stays the line shown
@@ -3184,6 +3193,136 @@ export const useStore = create<AppState>((set, get) => ({
             error: "Auto-pricing isn't in the free plan — you can add materials and prices yourself, or go Pro and I'll sort it.",
           };
 
+    // Every Mate edit on the unified Document path used to save the rows and
+    // leave the stored totals where they were — saveDocument recalculates
+    // nothing, and nothing on the server does either — so get_quote and the
+    // inline card showed the old total after a line was added, changed or
+    // removed. Recalculate on the way through, and hand the total back.
+    const saveRecalculated = async (doc: Document): Promise<Document> => {
+      const next = updateDocumentCalculations(doc);
+      await get().saveDocument(next);
+      return next;
+    };
+
+    // A quote-targeting proposal may name a unified Document (the usual case),
+    // a legacy quote that is only in the quotes array, or a legacy invoice.
+    // One lookup and one recalculating save for all three, so the money
+    // paths don't each carry three near-identical branches.
+    type Targeted =
+      | { kind: 'document'; doc: Document }
+      | { kind: 'quote'; doc: Quote }
+      | { kind: 'invoice'; doc: Invoice };
+    // A legacy record is handed over already healed and re-totalled — the
+    // exact state saveAny's updateQuoteCalculations will write — so a plan
+    // made against it (set-total verifies with updateDocumentCalculations)
+    // and the save can't disagree: a $0 section the heal fills in, or a row
+    // whose stored totalPrice drifted from quantity × price, would otherwise
+    // move the stored total after the plan had landed on the target.
+    const settled = <T extends Quote | Invoice>(doc: T): T =>
+      updateQuoteCalculations({
+        ...doc,
+        materials: updateAllMaterialPrices(doc.materials ?? []),
+        // The heal skips lump-sum sections, so a lump sum with no laborTotal
+        // would survive as NaN — coerce the way the Document path does.
+        ...(Array.isArray(doc.sections)
+          ? {
+              sections: doc.sections.map((sec) => ({
+                ...sec,
+                laborHours: finiteNumber(sec.laborHours),
+                laborRate: finiteNumber(sec.laborRate),
+                laborTotal: finiteNumber(sec.laborTotal),
+                multiplier: finiteNumber(sec.multiplier) || 1,
+              })),
+            }
+          : {}),
+      } as any) as any;
+    const resolveAny = async (id: string): Promise<Targeted | null> => {
+      const doc = await resolveDocument(id);
+      if (doc) return { kind: 'document', doc };
+      const quote = get().quotes.find((q) => q.id === id);
+      if (quote) return { kind: 'quote', doc: settled(quote) };
+      const invoice = get().invoices.find((i) => i.id === id);
+      if (invoice) return { kind: 'invoice', doc: settled(invoice) };
+      return null;
+    };
+    const saveAny = async (target: Targeted, patch: object): Promise<number> => {
+      if (target.kind === 'document') return (await saveRecalculated({ ...target.doc, ...patch } as Document)).total;
+      const next = updateQuoteCalculations({ ...target.doc, ...patch, updatedAt: new Date() } as any) as any;
+      if (target.kind === 'quote') await get().saveQuote(next);
+      else await get().saveInvoice(next);
+      return next.total;
+    };
+    // Money paid against a record is reconciled by saveDocumentWithLedger,
+    // not by a recalculation: a new total on a paid or part-paid invoice would
+    // leave its balance where it was. Those belong to a credit or a new
+    // invoice, the same line propose_delete_quote draws.
+    // The contact a customerDraft names: the saved one when the tradie
+    // already has this person, else a fresh one. One smoke-alarm job put the
+    // customer in the book three times (3 Sep 2026). "This person" is the
+    // same name AND the same number; or the same name with no number on
+    // either side; or the same name where the saved contact has no number
+    // and was made in the last day — the re-draft that finally carries the
+    // phone the tradie read out. A stranger who happens to share a name with
+    // an old number-less contact stays a separate person. Details the draft
+    // adds fill gaps on the saved contact; they never overwrite what is there.
+    const RECENT_CONTACT_MS = 24 * 60 * 60 * 1000;
+    const contactFromDraft = async (draft: NonNullable<DraftQuoteProposal['customerDraft']>): Promise<Contact> => {
+      const nameKey = draft.name.replace(/\s+/g, ' ').trim().toLowerCase();
+      const tail = draft.phone ? normalizePhoneTail(draft.phone) : '';
+      const existing = get().contacts.find((c) => {
+        if (c.name.replace(/\s+/g, ' ').trim().toLowerCase() !== nameKey) return false;
+        const theirs = c.phone ? normalizePhoneTail(c.phone) : '';
+        if (tail && theirs) return tail === theirs;
+        if (!tail && !theirs) return true;
+        if (theirs) return false;
+        const created = Date.parse(c.createdAt || '');
+        return Number.isFinite(created) && Date.now() - created < RECENT_CONTACT_MS;
+      });
+      if (existing) {
+        const filled: Contact = {
+          ...existing,
+          ...(existing.phone || !draft.phone ? {} : { phone: draft.phone }),
+          ...(existing.email || !draft.email ? {} : { email: draft.email }),
+          ...(existing.address || !draft.address ? {} : { address: draft.address }),
+        };
+        if (filled.phone !== existing.phone || filled.email !== existing.email || filled.address !== existing.address) {
+          await get().saveContact({ ...filled, updatedAt: new Date().toISOString() });
+          return filled;
+        }
+        return existing;
+      }
+      const fresh: Contact = {
+        id: generateId(),
+        name: draft.name,
+        email: draft.email,
+        phone: draft.phone,
+        address: draft.address,
+        source: 'manual',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      await get().saveContact(fresh);
+      return fresh;
+    };
+
+    // Both record shapes: a Document's stage is 'partially_paid', a legacy
+    // Invoice's status is 'partial' (applyStageChange maps between them).
+    // Recorded money is the stage-independent tell — a deposit against an
+    // accepted quote has the same balance problem.
+    const PAID_STAGES = new Set(['paid', 'partially_paid', 'partial']);
+    const paidGuard = (target: Targeted): ApplyProposalResult | null => {
+      const doc = target.doc as any;
+      const stage = doc.stage ?? doc.status;
+      const payments: Array<{ amount?: number }> = Array.isArray(doc.payments) ? doc.payments : [];
+      const moneyIn = payments.some((p) => Number(p?.amount) > 0) || Number(doc.paidTotal) > 0 || Number(doc.depositPaid) > 0;
+      return PAID_STAGES.has(stage) || moneyIn
+        ? {
+            ok: false,
+            error: "That one's had money paid against it — changing what's on it would throw the balance out. Record a credit or a new invoice instead.",
+          }
+        : null;
+    };
+
     // Analyse + price whatever is in get().currentQuote, streaming progress
     // into the chat's working card. Shared by propose_draft_quote and
     // propose_update_quote_scope so a scope correction re-runs exactly what
@@ -3515,17 +3654,7 @@ export const useStore = create<AppState>((set, get) => ({
               };
             }
           } else if (proposal.customerDraft?.name) {
-            contact = {
-              id: generateId(),
-              name: proposal.customerDraft.name,
-              email: proposal.customerDraft.email,
-              phone: proposal.customerDraft.phone,
-              address: proposal.customerDraft.address,
-              source: 'manual',
-              createdAt: new Date().toISOString(),
-              updatedAt: new Date().toISOString(),
-            };
-            await get().saveContact(contact);
+            contact = await contactFromDraft(proposal.customerDraft);
           } else {
             return { ok: false, error: 'No customer provided.' };
           }
@@ -3638,17 +3767,7 @@ export const useStore = create<AppState>((set, get) => ({
               };
             }
           } else if (proposal.customerDraft?.name) {
-            contact = {
-              id: generateId(),
-              name: proposal.customerDraft.name,
-              email: proposal.customerDraft.email,
-              phone: proposal.customerDraft.phone,
-              address: proposal.customerDraft.address,
-              source: 'manual',
-              createdAt: new Date().toISOString(),
-              updatedAt: new Date().toISOString(),
-            };
-            await get().saveContact(contact);
+            contact = await contactFromDraft(proposal.customerDraft);
           }
 
           // Mint a new quote so business defaults (labour rate, markup, GST)
@@ -3656,6 +3775,14 @@ export const useStore = create<AppState>((set, get) => ({
           get().createNewQuote('mate');
           const fresh = get().currentQuote;
           if (!fresh) return { ok: false, error: 'Failed to create draft quote.' };
+          // A real number from the counter, the way the wizard's first save
+          // assigns one. A Mate draft only ever went through saveDraft, which
+          // assigns nothing, so the mirror fell back to QU- + six digits of
+          // the id — a figure that only ticks over every ~2.8 hours. Three
+          // drafts of one smoke-alarm job were all QU-178840 (3 Sep 2026);
+          // 104 numbers are shared across 51 accounts.
+          // A storage hiccup allocating the number must not cost the draft.
+          const quoteNumber = await get().getNextQuoteNumber().catch(() => undefined);
 
           // Rate-card lines, when Mate charged the job off the tradie's own
           // rates: lump-sum work items at rate × quantity, in the document's
@@ -3674,6 +3801,7 @@ export const useStore = create<AppState>((set, get) => ({
           // Stamp customer + scope. Materials come from the pipeline.
           const seeded: Quote = {
             ...fresh,
+            ...(quoteNumber ? { quoteNumber } : {}),
             customerName: contact?.name || proposal.customerDraft?.name || '',
             customerEmail: contact?.email,
             customerPhone: contact?.phone,
@@ -3840,20 +3968,55 @@ export const useStore = create<AppState>((set, get) => ({
           if (!target) {
             return { ok: false, error: 'Quote not found.' };
           }
+          const paid = paidGuard({ kind: 'document', doc: target });
+          if (paid) return paid;
           const { documentToQuote } = await import('../types/documentAdapter');
           const sourceQuote = documentToQuote(target);
+          // On a document with sections the labour is the SECTIONS: the
+          // top-level hours and rate are display fields, so writing them
+          // changed nothing on the customer copy — "labour to 2 hours" and
+          // then "8 hours" both left INV-004 at $1,415.70 (3 Sep 2026). Hours
+          // go through laborExtraHours (what the labour screen derives from
+          // its total-hours input); a new rate is written onto every hourly
+          // section, the way the labour screen keeps one rate per document.
+          const sections = sourceQuote.sections ?? [];
+          const hasSections = sections.length > 0;
+          const sectionHours = sections.reduce(
+            (sum, s) =>
+              sum + (typeof s.laborHoursTotal === 'number' ? s.laborHoursTotal : (Number(s.laborHours) || 0) * (Number(s.multiplier) || 1)),
+            0,
+          );
+          const nextRate = proposal.laborRate ?? sourceQuote.laborRate;
           const nextQuote: Quote = {
             ...sourceQuote,
             markup: proposal.markup ?? sourceQuote.markup,
             laborMarkup: proposal.laborMarkup ?? sourceQuote.laborMarkup,
-            laborRate: proposal.laborRate ?? sourceQuote.laborRate,
+            laborRate: nextRate,
             laborHours: proposal.laborHours ?? sourceQuote.laborHours,
+            ...(hasSections && proposal.laborHours !== undefined
+              ? { laborExtraHours: Math.round((proposal.laborHours - sectionHours) * 10000) / 10000 }
+              : {}),
+            ...(hasSections && proposal.laborRate !== undefined
+              ? {
+                  sections: sections.map((s) =>
+                    s.pricing === 'lumpSum'
+                      ? s
+                      : {
+                          ...s,
+                          laborRate: nextRate,
+                          laborTotal: Math.round((Number(s.laborHours) || 0) * nextRate * (Number(s.multiplier) || 1) * 100) / 100,
+                        },
+                  ),
+                }
+              : {}),
           };
           const recalced = updateQuoteCalculations(nextQuote);
           const nextDoc: Document = {
             ...target,
             laborRate: recalced.laborRate,
             laborHours: recalced.laborHours,
+            laborExtraHours: recalced.laborExtraHours,
+            sections: recalced.sections,
             laborTotal: recalced.laborTotal,
             markup: recalced.markup,
             laborMarkup: recalced.laborMarkup,
@@ -3864,12 +4027,145 @@ export const useStore = create<AppState>((set, get) => ({
             total: recalced.total,
           };
           await get().saveDocument(nextDoc);
-          return { ok: true, navigate: { kind: 'job_preview', quoteId: target.id } };
+          return { ok: true, navigate: { kind: 'job_preview', quoteId: target.id }, appliedTotal: recalced.total };
+        }
+
+        case 'propose_set_total': {
+          // "Make the total $1,232." The planner (utils/setTotal.ts) decides
+          // what absorbs the difference — labour when there is any, otherwise
+          // a lump-sum "Price adjustment" line — and lands on the figure to
+          // the cent; materials are never touched. Re-planned here against
+          // the live document, not the card's preview.
+          const target = await resolveAny(proposal.quoteId);
+          if (!target) return { ok: false, error: 'Quote not found.' };
+          const paid = paidGuard(target);
+          if (paid) return paid;
+          const result = applySetTotal(target.doc, proposal.targetTotal);
+          if (!result.ok) return { ok: false, error: result.message };
+          const appliedTotal = await saveAny(target, result.patch);
+          return {
+            ok: true,
+            navigate: { kind: 'job_preview', quoteId: target.doc.id },
+            appliedTotal,
+            moved: describeSetTotalPlan(result.plan),
+          };
+        }
+
+        case 'propose_pick_contact': {
+          // The phone's own contact picker. iOS needs no permission for it;
+          // Android needs READ_CONTACTS, asked for here rather than at import.
+          // Web has no picker — Mate is told, and asks for the name instead.
+          const { Platform } = await import('react-native');
+          if (Platform.OS === 'web') {
+            return { ok: false, error: "Can't open the phone's contacts from the web app — tell me the name and I'll look them up." };
+          }
+          const expoContacts = await import('expo-contacts');
+          if (Platform.OS === 'android') {
+            const perm = await expoContacts.requestPermissionsAsync();
+            if (perm.status !== 'granted') {
+              return {
+                ok: false,
+                code: 'CONTACTS_DENIED',
+                error: "Contacts access is off for QuoteMate — turn it on under the phone's Settings, then say the word and I'll open them.",
+              };
+            }
+          }
+          const picked = await expoContacts.presentContactPickerAsync();
+          if (!picked) return { ok: false, error: 'No contact picked.', code: 'CANCELLED' };
+          const { phoneContactToContact } = await import('../services/contactService');
+          const fresh = phoneContactToContact(picked);
+          // The same person already saved — same number or email — is linked,
+          // not duplicated. Two "Sue and Peter Williamson" contacts came out
+          // of one conversation before this existed.
+          const tail = fresh.phone ? normalizePhoneTail(fresh.phone) : '';
+          const email = fresh.email?.toLowerCase();
+          const nameKey = fresh.name.replace(/\s+/g, ' ').trim().toLowerCase();
+          const existing = get().contacts.find(
+            (c) =>
+              (tail && c.phone && normalizePhoneTail(c.phone) === tail) ||
+              (email && c.email?.toLowerCase() === email) ||
+              // A phone-book entry with no number and no email: the name is
+              // all there is to match on.
+              (!tail && !email && c.name.replace(/\s+/g, ' ').trim().toLowerCase() === nameKey),
+          );
+          const contact = existing ?? fresh;
+          if (!existing) await get().saveContact(contact);
+          const pickedContact = { id: contact.id, name: contact.name, phone: contact.phone, email: contact.email };
+          if (!proposal.quoteId) return { ok: true, pickedContact };
+          const repointed = await get().applyProposal(
+            {
+              id: proposal.id,
+              toolUseId: proposal.toolUseId,
+              createdAt: proposal.createdAt,
+              type: 'propose_update_customer',
+              quoteId: proposal.quoteId,
+              customerId: contact.id,
+              customerName: contact.name,
+            },
+            onProgress,
+            context,
+          );
+          return repointed.ok ? { ...repointed, pickedContact } : repointed;
         }
 
         case 'propose_add_line_item': {
+          if (proposal.kind === 'work') {
+            // A lump sum at a price the tradie said. Minted exactly as the
+            // inline editor's Work item chip mints one — quantity 1, unit
+            // 'each', price = line total, manual, no markup — so every
+            // calculator, adapter and PDF path handles it unchanged. No
+            // pipeline runs, so no plan gate either: a free account can type
+            // a lump sum into the editor and this is the same act.
+            const target = await resolveAny(proposal.quoteId);
+            if (!target) return { ok: false, error: 'Quote not found.' };
+            const paid = paidGuard(target);
+            if (paid) return paid;
+            const source = target.doc;
+            // The figure as said, in the document's basis — the tradie's own
+            // basis when they named one, otherwise no conversion at all.
+            const price = rateLineUnitPrice(
+              {
+                label: proposal.searchTerm,
+                quantity: 1,
+                unit: 'job',
+                unitPrice: proposal.price ?? 0,
+                includesMaterials: true,
+                ...(typeof proposal.pricesIncludeGst === 'boolean' ? { pricesIncludeGst: proposal.pricesIncludeGst } : {}),
+              },
+              resolveGstMode(source),
+              get().businessSettings?.pricesIncludeGst === true,
+            );
+            const line: Material = withOrigin(
+              {
+                id: generateId(),
+                name: proposal.searchTerm,
+                kind: 'work',
+                ...(proposal.scope ? { scope: proposal.scope } : {}),
+                quantity: 1,
+                unit: 'each',
+                price,
+                totalPrice: price,
+                manualPriceOverride: true,
+                pricingSource: 'manual',
+                ...(proposal.section ? { section: proposal.section } : {}),
+              } as Material,
+              'manual',
+            );
+            const appliedTotal = await saveAny(target, { materials: [...(source.materials ?? []), line] });
+            return {
+              ok: true,
+              ...(target.kind === 'document' ? {} : { navigate: { kind: 'job_preview', quoteId: source.id } }),
+              appliedTotal,
+            };
+          }
           const gated = planGate();
           if (gated) return gated;
+          {
+            const guarded = await resolveAny(proposal.quoteId);
+            if (!guarded) return { ok: false, error: 'Quote not found.' };
+            const paid = paidGuard(guarded);
+            if (paid) return paid;
+          }
           // Try the user's supplier book FIRST — if the line item the
           // assistant is adding matches a saved supplier rate, price it
           // inline so the tradie doesn't have to wait for the pricing
@@ -3927,17 +4223,14 @@ export const useStore = create<AppState>((set, get) => ({
 
           const target = await resolveDocument(proposal.quoteId);
           if (target) {
-            const nextDoc: Document = {
-              ...target,
-              materials: [...(target.materials ?? []), stub],
-            };
-            await get().saveDocument(nextDoc);
-            return { ok: true };
+            const next = await saveRecalculated({ ...target, materials: [...(target.materials ?? []), stub] });
+            return { ok: true, appliedTotal: next.total };
           }
           const quote = get().quotes.find((q) => q.id === proposal.quoteId);
           if (!quote) return { ok: false, error: 'Quote not found.' };
-          await get().saveQuote({ ...quote, materials: [...quote.materials, stub], updatedAt: new Date() });
-          return { ok: true, navigate: { kind: 'job_preview', quoteId: quote.id } };
+          const next = updateQuoteCalculations({ ...quote, materials: [...quote.materials, stub], updatedAt: new Date() });
+          await get().saveQuote(next);
+          return { ok: true, navigate: { kind: 'job_preview', quoteId: quote.id }, appliedTotal: next.total };
         }
 
         case 'propose_delete_quote': {
@@ -4086,7 +4379,9 @@ export const useStore = create<AppState>((set, get) => ({
               if (m.id !== proposal.materialId) return m;
               found = true;
               const price = proposal.price ?? m.price;
-              const quantity = proposal.quantity ?? m.quantity;
+              // A lump sum keeps its shape: quantity 1, and the price IS the
+              // line. A quantity the model passed for one is ignored.
+              const quantity = m.kind === 'work' ? 1 : proposal.quantity ?? m.quantity;
               const row: Material = {
                 ...m,
                 name: proposal.name ?? m.name,
@@ -4114,6 +4409,9 @@ export const useStore = create<AppState>((set, get) => ({
           // book holds GST-inclusive prices, so the document's mode rides along.
           const rememberPrice = (source: { gstRegistered?: boolean; pricesIncludeGst?: boolean }) => {
             if (proposal.price === undefined || !updatedRow) return;
+            // A lump sum is not a product price — "Callout $180" has no place
+            // in a supplier book.
+            if (updatedRow.kind === 'work') return;
             const row = updatedRow;
             const options = { pricesIncludeGst: keepSupplierPriceInclusive(source) };
             void import('../services/priceMemory')
@@ -4121,15 +4419,22 @@ export const useStore = create<AppState>((set, get) => ({
               .catch(() => {});
           };
 
+          // A price or quantity change moves the total; a rename does not.
+          if (proposal.price !== undefined || proposal.quantity !== undefined) {
+            const guarded = await resolveAny(proposal.quoteId);
+            if (!guarded) return { ok: false, error: 'Quote not found.' };
+            const paid = paidGuard(guarded);
+            if (paid) return paid;
+          }
           const target = await resolveDocument(proposal.quoteId);
           if (target) {
             const { next, found } = applyEdit(target.materials ?? []);
             if (!found) {
               return { ok: false, error: 'That line is not on the quote any more — call get_quote and try again.' };
             }
-            await get().saveDocument({ ...target, materials: next });
+            const saved = await saveRecalculated({ ...target, materials: next });
             rememberPrice(target);
-            return { ok: true };
+            return { ok: true, appliedTotal: saved.total };
           }
           const quote = get().quotes.find((q) => q.id === proposal.quoteId);
           if (quote) {
@@ -4137,9 +4442,10 @@ export const useStore = create<AppState>((set, get) => ({
             if (!found) {
               return { ok: false, error: 'That line is not on the quote any more — call get_quote and try again.' };
             }
-            await get().saveQuote(updateQuoteCalculations({ ...quote, materials: next, updatedAt: new Date() }));
+            const saved = updateQuoteCalculations({ ...quote, materials: next, updatedAt: new Date() });
+            await get().saveQuote(saved);
             rememberPrice(quote);
-            return { ok: true, navigate: { kind: 'job_preview', quoteId: quote.id } };
+            return { ok: true, navigate: { kind: 'job_preview', quoteId: quote.id }, appliedTotal: saved.total };
           }
           const invoice = get().invoices.find((i) => i.id === proposal.quoteId);
           if (invoice) {
@@ -4147,48 +4453,32 @@ export const useStore = create<AppState>((set, get) => ({
             if (!found) {
               return { ok: false, error: 'That line is not on the invoice any more — call get_quote and try again.' };
             }
-            await get().saveInvoice(updateQuoteCalculations({ ...invoice, materials: next, updatedAt: new Date() } as any) as any);
+            const saved = updateQuoteCalculations({ ...invoice, materials: next, updatedAt: new Date() } as any) as any;
+            await get().saveInvoice(saved);
             rememberPrice(invoice);
-            return { ok: true, navigate: { kind: 'job_preview', quoteId: invoice.id } };
+            return { ok: true, navigate: { kind: 'job_preview', quoteId: invoice.id }, appliedTotal: saved.total };
           }
           return { ok: false, error: 'Quote not found.' };
         }
 
         case 'propose_delete_line_item': {
-          // Prefer the unified Document path so the legacy mirror tracks the
-          // change; fall back to legacy quote/invoice arrays.
-          const target = await resolveDocument(proposal.quoteId);
-          if (target) {
-            const before = (target.materials ?? []).length;
-            const nextMaterials = (target.materials ?? []).filter((m) => m.id !== proposal.materialId);
-            if (nextMaterials.length === before) {
-              return { ok: false, error: 'Line not found — it may have already been removed.' };
-            }
-            const nextDoc: Document = { ...target, materials: nextMaterials };
-            await get().saveDocument(nextDoc);
-            return { ok: true };
+          // Unified Document first so the legacy mirror tracks the change,
+          // then the legacy quote/invoice arrays — one recalculating save.
+          const target = await resolveAny(proposal.quoteId);
+          if (!target) return { ok: false, error: 'Quote not found.' };
+          const paid = paidGuard(target);
+          if (paid) return paid;
+          const materials = target.doc.materials ?? [];
+          const nextMaterials = materials.filter((m) => m.id !== proposal.materialId);
+          if (nextMaterials.length === materials.length) {
+            return { ok: false, error: 'Line not found — it may have already been removed.' };
           }
-          const quote = get().quotes.find((q) => q.id === proposal.quoteId);
-          if (quote) {
-            const before = quote.materials.length;
-            const nextMaterials = quote.materials.filter((m) => m.id !== proposal.materialId);
-            if (nextMaterials.length === before) {
-              return { ok: false, error: 'Line not found — it may have already been removed.' };
-            }
-            await get().saveQuote({ ...quote, materials: nextMaterials, updatedAt: new Date() });
-            return { ok: true, navigate: { kind: 'job_preview', quoteId: quote.id } };
-          }
-          const invoice = get().invoices.find((i) => i.id === proposal.quoteId);
-          if (invoice) {
-            const before = invoice.materials.length;
-            const nextMaterials = invoice.materials.filter((m) => m.id !== proposal.materialId);
-            if (nextMaterials.length === before) {
-              return { ok: false, error: 'Line not found — it may have already been removed.' };
-            }
-            await get().saveInvoice({ ...invoice, materials: nextMaterials, updatedAt: new Date() });
-            return { ok: true };
-          }
-          return { ok: false, error: 'Quote not found.' };
+          const appliedTotal = await saveAny(target, { materials: nextMaterials });
+          return {
+            ok: true,
+            ...(target.kind === 'quote' ? { navigate: { kind: 'job_preview', quoteId: target.doc.id } } : {}),
+            appliedTotal,
+          };
         }
 
         case 'propose_send_quote': {

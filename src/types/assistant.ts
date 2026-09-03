@@ -22,7 +22,9 @@ export type ProposalType =
   | 'propose_mark_paid'
   | 'propose_import_supplier_list'
   | 'propose_remember_preference'
-  | 'propose_save_rate';
+  | 'propose_save_rate'
+  | 'propose_set_total'
+  | 'propose_pick_contact';
 
 export interface BaseProposal {
   id: string;
@@ -75,10 +77,24 @@ export interface SaveRateProposal extends BaseProposal {
 export interface AddLineItemProposal extends BaseProposal {
   type: 'propose_add_line_item';
   quoteId: string;
+  /** For a priced material: what the pipeline searches for. For a lump sum: the line's name. */
   searchTerm: string;
   qty: number;
   unit: string;
   section?: string;
+  /**
+   * 'work': a lump-sum scope line at a price the TRADIE said — "add a $180
+   * callout". Minted exactly as the inline editor's Work item chip mints one
+   * (quantity 1, unit 'each', price = line total, no markup, no pipeline).
+   * Absent = a material the pricing pipeline prices on Apply.
+   */
+  kind?: 'work';
+  /** The lump sum, in dollars, in the basis `pricesIncludeGst` says (or the document's). */
+  price?: number;
+  /** Customer-facing scope text under the line, when the tradie gave one. */
+  scope?: string;
+  /** Only when the tradie said inc/ex GST; otherwise the document's own basis. */
+  pricesIncludeGst?: boolean;
 }
 
 /**
@@ -104,6 +120,53 @@ export interface UpdateLineItemProposal extends BaseProposal {
   displayCurrentPrice?: number;
   displayCurrentQty?: number;
   displayUnit?: string;
+  /**
+   * The row is a lump-sum work item, so `price` is the line total and the
+   * quantity means nothing. Stamped by the validator when the document is
+   * visible to it; the card drops "per unit" and the apply path keeps the
+   * lump-sum shape.
+   */
+  lumpSum?: boolean;
+}
+
+/**
+ * Set the document's customer-facing total to a figure the tradie said.
+ *
+ * "Make the total one thousand two hundred and thirty-two" is how tradies
+ * price a job; before this Mate could only get there through markup and
+ * rates, and read out two different wrong totals on the way (3 Sep 2026).
+ * The mechanism (labour absorbs it, or a lump-sum "Price adjustment" line)
+ * lives in utils/setTotal.ts; `preview` is that plan as the validator saw the
+ * document, for the card — the apply path re-plans against the live one.
+ */
+export interface SetTotalProposal extends BaseProposal {
+  type: 'propose_set_total';
+  quoteId: string;
+  /** What the customer will read at the bottom of the document. */
+  targetTotal: number;
+  displayName?: string;
+  preview?: {
+    currentTotal: number;
+    /** 'labour': the labour takes the difference. 'adjustment': a lump-sum line carries it. */
+    mechanism: 'labour' | 'adjustment';
+    /** The adjustment line's price after the move — negative is a discount. */
+    adjustment?: number;
+    /** How the customer reads the figures: inc GST, ex GST, or no GST at all. */
+    gstMode: 'exclusive' | 'inclusive' | 'none';
+  };
+}
+
+/**
+ * Open the phone's contact picker and put the pick on a quote, or hand it to
+ * Mate for the draft in hand. "Access contacts" said to voice Mate used to go
+ * nowhere — find_customer reads the phone book only when access is already
+ * on, and a phone-book hit could not be applied.
+ */
+export interface PickContactProposal extends BaseProposal {
+  type: 'propose_pick_contact';
+  /** The quote or invoice whose customer the pick becomes. Absent = for the draft Mate is building. */
+  quoteId?: string;
+  displayName?: string;
 }
 
 export interface DeleteLineItemProposal extends BaseProposal {
@@ -260,7 +323,9 @@ export type Proposal =
   | MarkPaidProposal
   | ImportSupplierListProposal
   | RememberPreferenceProposal
-  | SaveRateProposal;
+  | SaveRateProposal
+  | SetTotalProposal
+  | PickContactProposal;
 
 export type ProposalStatus = 'pending' | 'applied' | 'dismissed' | 'failed';
 

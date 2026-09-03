@@ -26,11 +26,53 @@ export interface AiValidationFlags {
   hasZeroPricedMaterial: boolean;
   hasAbsurdQuantity: boolean;
   hasLaunderedSection: boolean;
+  /** A name or searchTerm carried a word in a non-Latin script; the word was stripped. */
+  hasNonLatinText: boolean;
   invalidUnitCount: number;
   zeroLabourSections: string[];
   zeroPricedMaterialCount: number;
   absurdQuantityCount: number;
   launderedSections: string[];
+  nonLatinTokenCount: number;
+}
+
+// A whole word in another script. The generator has emitted Cyrillic
+// mid-name twice in 743 stored documents — "Consumer mains cable 16mm² двух
+// core and earth" reached a customer on an invoice, and "Builders String Line
+// ролик 100m" sat on a draft. A word is stripped only when it carries a
+// letter of another script and NO Latin letter or digit: "двух" goes,
+// "88-108µF", "5μF", "8Ω" and every real product name with ², °, é, Ø, ™
+// stay (units and ratings are Greek letters sitting inside Latin words).
+//
+// Written as \p{L} minus explicit Latin ranges rather than \p{Script=Latin}:
+// this file runs on the phone under Hermes as well as on the server, and
+// \p{L} with the u flag is the one Unicode property escape this codebase
+// already ships there (elevenLabsAgentConfig.ts). µ, μ and Ω are allowed
+// outright — they are units, not another language.
+const LATIN_LETTER = 'A-Za-z\u00AA\u00B5\u00BA\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u024F\u03A9\u03BC\u1E00-\u1EFF\u2126\u2C60-\u2C7F\uA720-\uA7FF\uFB00-\uFB06';
+const NON_LATIN_LETTER_RE = new RegExp(`(?![${LATIN_LETTER}])\\p{L}`, 'u');
+const LATIN_OR_DIGIT_RE = new RegExp(`[0-9${LATIN_LETTER}]`);
+
+/**
+ * The text with any foreign-script word removed. Returns the input untouched
+ * when every word is fine, and never empties a name: a name that is ALL
+ * foreign words is kept as-is (and still counted) rather than replaced with
+ * nothing.
+ */
+export function stripNonLatinWords(text: string): { text: string; stripped: number } {
+  const words = text.split(/(\s+)/);
+  let stripped = 0;
+  const kept = words.filter((w) => {
+    if (!w || /^\s+$/.test(w)) return true;
+    if (NON_LATIN_LETTER_RE.test(w) && !LATIN_OR_DIGIT_RE.test(w)) {
+      stripped++;
+      return false;
+    }
+    return true;
+  });
+  if (!stripped) return { text, stripped: 0 };
+  const cleaned = kept.join('').replace(/\s{2,}/g, ' ').trim();
+  return cleaned ? { text: cleaned, stripped } : { text, stripped };
 }
 
 const PIECE_GOOD_NAME_RE = /\b(pavers?|tiles?|decking boards?|plasterboards?|weatherboards?|downlights?|gpos?|hinges?|door handles?)\b/i;
@@ -200,10 +242,25 @@ export function validateAndRepairAiOutput(
   let invalidUnitCount = 0;
   let zeroPricedMaterialCount = 0;
   let absurdQuantityCount = 0;
+  let nonLatinTokenCount = 0;
   // Lowest sectionLaborHours seen per section name — flagged when zero/missing.
   const sectionHours = new Map<string, number>();
 
-  const repaired = materials.map((m) => {
+  const repaired = materials.map((raw) => {
+    let m = raw;
+    // Latin-script guard on the two strings that reach the customer and the
+    // supplier search. Stripping the foreign word keeps the line usable;
+    // the count is what makes the leak visible.
+    for (const field of ['name', 'searchTerm'] as const) {
+      const value = m?.[field];
+      if (typeof value !== 'string' || !value) continue;
+      const cleaned = stripNonLatinWords(value);
+      if (cleaned.stripped > 0) {
+        nonLatinTokenCount += cleaned.stripped;
+        log.warn('[ai-validate] non-Latin text in material', { field, value, cleaned: cleaned.text });
+        m = { ...m, [field]: cleaned.text };
+      }
+    }
     const name = typeof m?.name === 'string' ? m.name : '';
     const unit = typeof m?.unit === 'string' ? m.unit : '';
     let next = m;
@@ -308,11 +365,13 @@ export function validateAndRepairAiOutput(
       hasZeroPricedMaterial: zeroPricedMaterialCount > 0,
       hasAbsurdQuantity: absurdQuantityCount > 0,
       hasLaunderedSection: launderedSections.length > 0,
+      hasNonLatinText: nonLatinTokenCount > 0,
       invalidUnitCount,
       zeroLabourSections,
       zeroPricedMaterialCount,
       absurdQuantityCount,
       launderedSections,
+      nonLatinTokenCount,
     },
   };
 }

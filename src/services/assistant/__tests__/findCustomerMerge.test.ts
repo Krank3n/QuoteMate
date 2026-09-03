@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { scoreCustomerCandidates, CustomerCandidate } from '../readTools';
+import { beforeEach, describe, it, expect } from 'vitest';
+import { __resetCustomerDraftRefs, resolveCustomerDraftRef, scoreCustomerCandidates, CustomerCandidate } from '../readTools';
 
 describe('scoreCustomerCandidates', () => {
   const candidates: CustomerCandidate[] = [
@@ -51,5 +51,43 @@ describe('scoreCustomerCandidates', () => {
   it('respects totalScanned count', () => {
     const result = scoreCustomerCandidates('Bob', candidates);
     expect(result.totalScanned).toBe(candidates.length);
+  });
+});
+
+// A phone-book or recent-quote hit is not a saved contact: its contactId is a
+// throwaway, and every Apply on one failed with "Couldn't find that contact".
+// The match now says where it came from and carries a draftRef; the details
+// stay on the device (the tool response reaches the model and the admin log).
+describe('scoreCustomerCandidates — where a match lives', () => {
+  const candidates: CustomerCandidate[] = [
+    { id: 'saved-1', name: 'Bob Smith', phone: '0412345678', email: 'bob@example.com', source: 'saved' },
+    { id: 'doc-9', name: 'Sue Williamson', phone: '0428753564', source: 'recent' },
+    { id: 'tmp-3', name: 'Diane Bunk', phone: '+64 21 555 1234', email: 'di@example.com', source: 'phone' },
+  ];
+
+  beforeEach(() => __resetCustomerDraftRefs());
+
+  it('a saved contact carries its id and no draftRef', () => {
+    const [m] = scoreCustomerCandidates('Bob Smith', candidates).matches;
+    expect(m.source).toBe('saved');
+    expect(m.contactId).toBe('saved-1');
+    expect(m.draftRef).toBeUndefined();
+  });
+
+  it('a phone-book hit carries a draftRef, never the raw number or email', () => {
+    const [m] = scoreCustomerCandidates('Diane Bunk', candidates).matches;
+    expect(m.source).toBe('phone');
+    expect(m.draftRef).toMatch(/^draft_\d+$/);
+    expect(JSON.stringify(m)).not.toContain('555 1234');
+    expect(JSON.stringify(m)).not.toContain('di@example.com');
+    expect(resolveCustomerDraftRef(m.draftRef)).toEqual({ name: 'Diane Bunk', phone: '+64 21 555 1234', email: 'di@example.com' });
+  });
+
+  it('a recent-quote customer carries a draftRef too, and an unknown ref resolves to nothing', () => {
+    const [m] = scoreCustomerCandidates('Sue Williamson', candidates).matches;
+    expect(m.source).toBe('recent');
+    expect(resolveCustomerDraftRef(m.draftRef)).toEqual({ name: 'Sue Williamson', phone: '0428753564' });
+    expect(resolveCustomerDraftRef('draft_999')).toBeNull();
+    expect(resolveCustomerDraftRef(undefined)).toBeNull();
   });
 });

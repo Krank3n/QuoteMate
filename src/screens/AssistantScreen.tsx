@@ -45,7 +45,7 @@ import { useDemoPlayback } from '../demo/demoPlayback';
 import { sendAssistantTurn } from '../services/assistantService';
 import { openVoiceSession, VoiceSession } from '../services/assistant/voiceSession';
 import { LiveAuthError, LiveOfflineError, LiveQuotaError } from '../services/assistant/liveSession';
-import { rememberAppliedQuote } from '../services/assistant/quoteRefMap';
+import { rememberAppliedQuote, resolveQuoteId } from '../services/assistant/quoteRefMap';
 import { resumeUnfinishedPricingRuns } from '../services/assistant/pricingRunResume';
 import { defaultServerRunIo } from '../services/serverPricingRun';
 import { startMicCapture, MicCaptureHandle, MicUnavailableError, micPermissionGranted } from '../services/assistant/mic';
@@ -124,8 +124,17 @@ import {
   mostRecentUnconsumedAttachment,
 } from './assistant/chatAttachments';
 import { buildSupplierGapNote } from '../services/assistant/supplierGapNote';
-import { setUnconsumedAttachmentProbe } from '../services/assistant/proposalTools';
+import {
+  setAppliedDraftsProbe,
+  setContactPickerProbe,
+  setPendingScopeUpdateProbe,
+  setProposalDocumentProbe,
+  setUnconsumedAttachmentProbe,
+} from '../services/assistant/proposalTools';
+import { correctionsClause, createPricingCorrections } from './assistant/pricingCorrections';
 import { setRenderableQuoteProbe } from '../services/assistant/showQuoteGate';
+import { createBubbleContinuity, joinFragments } from './assistant/bubbleContinuity';
+import { formatCurrency } from '../utils/documentCalculator';
 import { setPendingProposalProbe } from '../services/assistant/pendingProposalGate';
 import { findSupersededProposals } from './assistant/proposalSupersede';
 import { findPendingProposal } from './assistant/pendingProposal';
@@ -594,6 +603,15 @@ export function AssistantScreen() {
   // part-written — generation ends seconds before the audio does.
   const pendingBubbleCloseRef = useRef(false);
   const pacedRenderRef = useRef('');
+  // A reopened bubble's earlier text. The pacer only ever paces the fragment
+  // in hand; what was already on screen is prepended at render.
+  const assistantBubblePrefixRef = useRef('');
+  // One bubble per reply, however many pieces the transport hands it over in
+  // — see screens/assistant/bubbleContinuity.ts.
+  const bubbleContinuityRef = useRef(createBubbleContinuity());
+  // What the tradie says while a pipeline apply runs — handed to Mate the
+  // moment pricing lands. See screens/assistant/pricingCorrections.ts.
+  const pricingCorrectionsRef = useRef(createPricingCorrections());
   const pacerTickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // Set when the tradie accepted/cancelled a card by voice this turn (Mate
   // called a control tool). We run the actual Apply / dismiss on turnComplete
@@ -821,6 +839,19 @@ export function AssistantScreen() {
     [appendMessage],
   );
 
+  // Give Mate a turn on something that just happened (a contact picked off the
+  // phone for the draft in hand). Voice: a user-text frame, so the agent
+  // replies. Text: the same hidden-note-plus-turn the send offer uses.
+  const continueMateTurn = useCallback((convoId: string, note: string) => {
+    const live = voiceSessionRef.current;
+    if (live?.isOpen()) {
+      bubbleContinuityRef.current.userTurn();
+      live.sendUserText(note);
+      return;
+    }
+    offerSendTurnRef.current(convoId, note);
+  }, []);
+
   const handleApply = useCallback(
     async (message: ChatMessage, proposal: Proposal) => {
       if (!conversation) return;
@@ -911,6 +942,7 @@ export function AssistantScreen() {
               // into answering in kind and leaked reasoning to a tradie in
               // August. One short reminder is the belt; the prompt is the
               // braces.
+              bubbleContinuityRef.current.userTurn();
               liveSessionForNarration.sendUserText(
                 `[narrate] ${intro} One short line, then stop. Never say the tag.`,
               );
@@ -927,6 +959,15 @@ export function AssistantScreen() {
           ? collectQuotePhotos(messagesForPhotos)
           : [];
 
+      // From here until the result, what the tradie says is a correction to
+      // the quote being priced — kept, and handed to Mate when pricing lands.
+      if (
+        proposal.type === 'propose_draft_quote' ||
+        proposal.type === 'propose_update_quote_scope' ||
+        proposal.type === 'propose_reprice'
+      ) {
+        pricingCorrectionsRef.current.start();
+      }
       const result = await applyProposal(
         proposal,
         (status) => {
@@ -968,6 +1009,11 @@ export function AssistantScreen() {
         : result.navigate.kind === 'open_invoice' ? result.navigate.invoiceId
         : undefined;
       if (mintedId) activeQuoteIdRef.current = mintedId;
+      // Whatever the tradie said while this ran. The quote they meant is the
+      // one just priced (a draft's minted id, or the quote a scope update /
+      // reprice was on).
+      const corrections = pricingCorrectionsRef.current.drain();
+      const correctionsQuoteId = mintedId ?? ('quoteId' in proposal ? (proposal as { quoteId?: string }).quoteId : undefined);
 
       // The supplier-book gap, if this run is worth mentioning at all. Text
       // chat never receives [pipeline-done] (that needs an open live session),
@@ -1018,8 +1064,11 @@ export function AssistantScreen() {
               : undefined,
           gapNote,
           sendOffer: offerFacts,
+          corrections,
+          quoteId: correctionsQuoteId,
         });
         if (liveSessionForNarration?.isOpen()) {
+          bubbleContinuityRef.current.userTurn();
           liveSessionForNarration.sendUserText(wrap);
         }
         // Disarm regardless of whether the socket survived the pipeline. This
@@ -1031,6 +1080,21 @@ export function AssistantScreen() {
         setTimeout(() => { narrationModeRef.current = false; }, 8000);
       }
 
+      if (!result.ok && (result.code === 'CANCELLED' || result.code === 'CONTACTS_DENIED')) {
+        // The tradie backed out of the picker, or hasn't given contacts
+        // access. Neither is a failure — the card reads Dismissed, and Mate
+        // is told what to do next (a retry after access is turned on is fine,
+        // unlike the generic "don't propose it again" that a failure carries).
+        updateProposalStatus(conversation.id, message.id, proposal.id, 'dismissed');
+        if (result.code === 'CONTACTS_DENIED') appendErrorMessage(conversation.id, result.error);
+        noteToMate(
+          conversation.id,
+          result.code === 'CANCELLED'
+            ? '[context] The tradie closed the contact picker without choosing anyone. Ask for the name instead, in one line.'
+            : "[context] The tradie hasn't given contacts access. Ask for the name instead, in one line. If they turn access on and ask again, propose_pick_contact is fine to retry.",
+        );
+        return;
+      }
       if (!result.ok) {
         updateProposalStatus(conversation.id, message.id, proposal.id, 'failed');
         // Settle the working card. The pipeline's own catch emits done:true,
@@ -1122,95 +1186,150 @@ export function AssistantScreen() {
       // right channel: the live socket in voice (logged as context without
       // speaking a reply), a hidden history message in text.
       const note = (text: string) => noteToMate(conversation.id, text);
-      // Most context notes need result.navigate (they reference the minted
-      // quote/invoice/contact id). propose_delete_quote is the exception —
-      // the doc is gone, so it never returns a navigate, but Mate still
-      // needs the heads-up that the id is dead.
-      if (proposal.type === 'propose_delete_quote') {
-        const label = proposal.displayName || proposal.displayCustomerName || proposal.quoteId;
-        note(
-          `[context] Deleted ${proposal.displayDocType || 'quote'} ${proposal.quoteId} ("${label}"). ` +
-            `It's gone — do NOT reference this id on follow-ups, and don't list it.`,
-        );
-      }
-      if (result.navigate) {
-        switch (proposal.type) {
-          case 'propose_draft_quote':
-            if (result.navigate.kind === 'job_preview' || result.navigate.kind === 'quote_materials_list') {
-              note(
-                `[context] Pricing finished for quote ${result.navigate.quoteId} ` +
-                `("${proposal.jobName}") — it's priced and on screen. Reference this id on follow-ups; ` +
-                `do not draft a new quote for the same job — a scope change goes through propose_update_quote_scope.` +
-                (chatPhotos.length
-                  ? ` Their site photos are on it — don't ask them to add photos again.`
-                  : '') +
-                (gapNote ? ` ${gapNote}` : ''),
-              );
-            }
-            break;
-          case 'propose_add_line_item':
-            note(
-              `[context] Added "${proposal.searchTerm}" (${proposal.qty} ${proposal.unit}) to quote ${proposal.quoteId}.`,
-            );
-            break;
-          case 'propose_delete_line_item':
-            note(
-              `[context] Removed material ${proposal.materialId} from quote ${proposal.quoteId}.`,
-            );
-            break;
-
-          case 'propose_send_quote':
-            note(
-              `[context] Sent quote ${proposal.quoteId} to the customer.`,
-            );
-            break;
-          case 'propose_convert_to_invoice':
-            if (result.navigate.kind === 'open_invoice') {
-              note(
-                `[context] Converted quote ${proposal.quoteId} to invoice ${result.navigate.invoiceId}.`,
-              );
-            }
-            break;
-          case 'propose_create_contact':
-            if (result.navigate.kind === 'open_contact') {
-              note(
-                `[context] Created new contact ${result.navigate.contactId} ("${proposal.name}").`,
-              );
-            }
-            break;
-          case 'propose_update_customer':
-            note(
-              `[context] Changed the customer on quote ${proposal.quoteId}` +
-              (proposal.customerName ? ` to "${proposal.customerName}".` : '.'),
-            );
-            break;
-          case 'propose_reprice':
-            note(
-              `[context] Re-priced quote ${proposal.quoteId}.` +
-              (result.review ? ` ${result.review.summary}` : '') +
-              (gapNote ? ` ${gapNote}` : ''),
-            );
-            break;
-          case 'propose_update_quote_scope':
-            note(
-              `[context] Updated the scope on quote ${proposal.quoteId} and re-ran materials + pricing — ` +
-              `same quote, no new one.` +
-              (result.review ? ` ${result.review.summary}` : '') +
-              (gapNote ? ` ${gapNote}` : ''),
-            );
-            break;
-          case 'propose_update_quote_rates': {
-            const parts: string[] = [];
-            if (typeof proposal.markup === 'number') parts.push(`markup ${proposal.markup}%`);
-            if (typeof proposal.laborMarkup === 'number') parts.push(`labour markup ${proposal.laborMarkup}%`);
-            if (typeof proposal.laborRate === 'number') parts.push(`labour rate $${proposal.laborRate}/h`);
-            if (typeof proposal.laborHours === 'number') parts.push(`labour hours ${proposal.laborHours}`);
-            note(
-              `[context] Updated rates on quote ${proposal.quoteId}: ${parts.join(', ')}.`,
-            );
-            break;
-          }
+      // One note per outcome. Anything that changed money carries the real
+      // total, whether or not the apply navigated — a line added on the
+      // unified Document path returns no navigate hint, and text-mode Mate
+      // never learned the line had landed at all. The cases that name a
+      // minted id guard on result.navigate themselves.
+      const totalClause =
+        typeof result.appliedTotal === 'number' ? ` The total is now ${formatCurrency(result.appliedTotal)}.` : '';
+      switch (proposal.type) {
+        case 'propose_delete_quote': {
+          // The doc is gone — no navigate, but Mate must know the id is dead.
+          const label = proposal.displayName || proposal.displayCustomerName || proposal.quoteId;
+          note(
+            `[context] Deleted ${proposal.displayDocType || 'quote'} ${proposal.quoteId} ("${label}"). ` +
+              `It's gone — do NOT reference this id on follow-ups, and don't list it.`,
+          );
+          break;
         }
+        case 'propose_draft_quote':
+          if (result.navigate?.kind === 'job_preview' || result.navigate?.kind === 'quote_materials_list') {
+            note(
+              `[context] Pricing finished for quote ${result.navigate.quoteId} ` +
+              `("${proposal.jobName}") — it's priced and on screen. Reference this id on follow-ups; ` +
+              `do not draft a new quote for the same job — a scope change goes through propose_update_quote_scope.` +
+              (chatPhotos.length
+                ? ` Their site photos are on it — don't ask them to add photos again.`
+                : '') +
+              (gapNote ? ` ${gapNote}` : '') +
+              // Voice gets these on [pipeline-done] and text on the send-offer
+              // turn; this note is the fallback that carries them when neither
+              // fires (no facts to offer a send with, a turn already running).
+              (offerFacts || (voiceSessionRef.current?.isOpen() && narrating) ? '' : correctionsClause(corrections, result.navigate.quoteId)),
+            );
+          }
+          break;
+        case 'propose_send_quote':
+          note(`[context] Sent quote ${proposal.quoteId} to the customer.`);
+          break;
+        case 'propose_convert_to_invoice':
+          if (result.navigate?.kind === 'open_invoice') {
+            note(`[context] Converted quote ${proposal.quoteId} to invoice ${result.navigate.invoiceId}.`);
+          }
+          break;
+        case 'propose_create_contact':
+          if (result.navigate?.kind === 'open_contact') {
+            note(`[context] Created new contact ${result.navigate.contactId} ("${proposal.name}").`);
+          }
+          break;
+        case 'propose_update_customer':
+          note(
+            `[context] Changed the customer on quote ${proposal.quoteId}` +
+            (proposal.customerName ? ` to "${proposal.customerName}".` : '.'),
+          );
+          break;
+        case 'propose_reprice':
+          note(
+            `[context] Re-priced quote ${proposal.quoteId}.` +
+            (result.review ? ` ${result.review.summary}` : '') +
+            (gapNote ? ` ${gapNote}` : '') +
+            // Nothing else gives text-mode Mate a turn after a reprice, so
+            // what the tradie said while it ran rides here.
+            (voiceSessionRef.current?.isOpen() && narrating ? '' : correctionsClause(corrections, proposal.quoteId)),
+          );
+          break;
+        case 'propose_update_quote_scope':
+          note(
+            `[context] Updated the scope on quote ${proposal.quoteId} and re-ran materials + pricing — ` +
+            `same quote, no new one.` +
+            (result.review ? ` ${result.review.summary}` : '') +
+            (gapNote ? ` ${gapNote}` : '') +
+            (offerFacts || (voiceSessionRef.current?.isOpen() && narrating) ? '' : correctionsClause(corrections, proposal.quoteId)),
+          );
+          break;
+        case 'propose_set_total':
+          // Leads with the total that was STORED, not the one asked for: a
+          // typed adjustment line can land a cent off the target, and a note
+          // carrying two figures is the read-back failure this card exists
+          // to end.
+          note(
+            `[context] Set the total on quote ${proposal.quoteId} to ${formatCurrency(result.appliedTotal ?? proposal.targetTotal)}` +
+              `${result.moved ? ` (${result.moved})` : ''}. Materials untouched. That figure is the total — read it from here, never from memory. ` +
+              `Tell the tradie in one short line — the card shows it.`,
+          );
+          break;
+        case 'propose_add_line_item':
+          note(
+            proposal.kind === 'work'
+              ? `[context] Added a lump-sum line "${proposal.searchTerm}" at ${formatCurrency(proposal.price ?? 0)} to quote ${proposal.quoteId}.${totalClause}`
+              : `[context] Added "${proposal.searchTerm}" (${proposal.qty} ${proposal.unit}) to quote ${proposal.quoteId}.${totalClause}`,
+          );
+          break;
+        case 'propose_delete_line_item':
+          note(`[context] Removed material ${proposal.materialId} from quote ${proposal.quoteId}.${totalClause}`);
+          break;
+        case 'propose_update_line_item': {
+          const changes: string[] = [];
+          if (typeof proposal.price === 'number') changes.push(`${proposal.lumpSum ? 'lump sum' : 'price'} ${formatCurrency(proposal.price)}`);
+          if (typeof proposal.quantity === 'number') changes.push(`quantity ${proposal.quantity}`);
+          if (proposal.name) changes.push(`renamed "${proposal.name}"`);
+          note(
+            `[context] Updated "${proposal.displayName || proposal.materialId}" on quote ${proposal.quoteId}` +
+              `${changes.length ? ` — ${changes.join(', ')}` : ''}.${totalClause}`,
+          );
+          break;
+        }
+        case 'propose_update_quote_rates': {
+          const parts: string[] = [];
+          if (typeof proposal.markup === 'number') parts.push(`markup ${proposal.markup}%`);
+          if (typeof proposal.laborMarkup === 'number') parts.push(`labour markup ${proposal.laborMarkup}%`);
+          if (typeof proposal.laborRate === 'number') parts.push(`labour rate $${proposal.laborRate}/h`);
+          if (typeof proposal.laborHours === 'number') parts.push(`labour hours ${proposal.laborHours}`);
+          note(`[context] Updated rates on quote ${proposal.quoteId}: ${parts.join(', ')}.${totalClause}`);
+          break;
+        }
+        case 'propose_pick_contact': {
+          const picked = result.pickedContact;
+          if (picked) {
+            const details = [picked.phone ? `phone ${picked.phone}` : 'no phone', picked.email ? `email ${picked.email}` : 'no email'].join(', ');
+            if (proposal.quoteId) {
+              note(
+                `[context] The tradie picked ${picked.name} (${details}) from their phone — saved as contact ${picked.id} and put on quote ${proposal.quoteId}. ` +
+                  `Confirm in one short line.`,
+              );
+            } else {
+              // No quote yet: this is the customer for the draft in hand.
+              // Say who was picked on screen (a dropped turn must not leave a
+              // bare "Applied"), then give Mate a turn to get on with it —
+              // the same turn-drive the send offer uses.
+              appendMessage(conversation.id, {
+                id: generateId(),
+                role: 'assistant',
+                text: `Got it — ${picked.name}${picked.phone ? ` (${picked.phone})` : ''}.`,
+                createdAt: new Date().toISOString(),
+              });
+              continueMateTurn(
+                conversation.id,
+                `[context] The tradie picked ${picked.name} (${details}) from their phone — saved as contact ${picked.id}. ` +
+                  `Use customerId ${picked.id} on the draft and carry on from where you were, in one short line. Never say the tag.`,
+              );
+            }
+          }
+          break;
+        }
+        default:
+          break;
       }
 
       // For draft + reprice + customer change, keep the user in chat. Render
@@ -1225,7 +1344,9 @@ export function AssistantScreen() {
         proposal.type === 'propose_reprice' ||
         proposal.type === 'propose_update_customer' ||
         proposal.type === 'propose_update_quote_rates' ||
-        proposal.type === 'propose_update_quote_scope'
+        proposal.type === 'propose_update_quote_scope' ||
+        proposal.type === 'propose_set_total' ||
+        (proposal.type === 'propose_pick_contact' && !!proposal.quoteId)
       ) {
         // Resolve the freshly-minted doc id regardless of whether the
         // pipeline landed on a quote (job_preview) or an auto-converted
@@ -1253,8 +1374,12 @@ export function AssistantScreen() {
                 : `Here's the ${docNoun} — have a squiz. Tell me what to tweak, or tap to open it.`
               : proposal.type === 'propose_update_customer'
                 ? `Done — this one's on ${proposal.customerName || 'the new contact'} now. Tap to open it.`
+                : proposal.type === 'propose_pick_contact'
+                  ? `Done — this one's on ${result.pickedContact?.name || 'the contact you picked'} now. Tap to open it.`
+                : proposal.type === 'propose_set_total'
+                  ? `Total's now ${formatCurrency(result.appliedTotal ?? proposal.targetTotal)}${result.moved ? `, ${result.moved}` : ''}. Tap to open it.`
                 : proposal.type === 'propose_update_quote_rates'
-                  ? "Rates updated and totals re-run. Tap to open it."
+                  ? `Rates updated and totals re-run${typeof result.appliedTotal === 'number' ? ` — ${formatCurrency(result.appliedTotal)}` : ''}. Tap to open it.`
                   : proposal.type === 'propose_update_quote_scope'
                     ? hasIssues
                       ? `Scope updated and re-priced — ${heads}. Tap to open it.`
@@ -1290,7 +1415,7 @@ export function AssistantScreen() {
               voiceOpen: !!voiceSessionRef.current?.isOpen(),
             })
           ) {
-            offerSendTurnRef.current(conversation.id, buildSendOfferNote(offerFacts));
+            offerSendTurnRef.current(conversation.id, buildSendOfferNote(offerFacts, corrections, correctionsQuoteId));
           }
         }
         return;
@@ -1319,6 +1444,7 @@ export function AssistantScreen() {
       appendMessage,
       appendErrorMessage,
       noteToMate,
+      continueMateTurn,
       updateMessage,
       updateProposalStatus,
       handleNavigate,
@@ -1372,6 +1498,75 @@ export function AssistantScreen() {
   useEffect(() => {
     setRenderableQuoteProbe(resolveRenderableQuoteId);
     return () => setRenderableQuoteProbe(null);
+  }, []);
+
+  // The document itself, for validators that plan against real figures:
+  // propose_set_total refuses a total under the materials inside the turn and
+  // puts the figure that will move on the card; a lump-sum row is recognised
+  // as one before its card goes up.
+  useEffect(() => {
+    setProposalDocumentProbe((quoteId) => {
+      const renderable = resolveRenderableQuoteId(quoteId);
+      if (!renderable) return null;
+      const state = useStore.getState();
+      return (
+        state.getDocumentById(renderable) ??
+        state.quotes.find((q) => q.id === renderable) ??
+        state.invoices.find((i) => i.id === renderable) ??
+        null
+      );
+    });
+    return () => setProposalDocumentProbe(null);
+  }, []);
+
+  // The web app has no contact picker; the validator refuses the card there
+  // so Mate asks for the name instead of putting up a button that can only fail.
+  useEffect(() => {
+    setContactPickerProbe(() => Platform.OS !== 'web');
+    return () => setContactPickerProbe(null);
+  }, []);
+
+  // One job, one quote: the drafts this conversation has applied (with the
+  // quote each one minted) and whether an Update-scope card is still waiting
+  // on one — so a repeat propose_draft_quote is refused inside the turn.
+  useEffect(() => {
+    const currentMessages = () => {
+      const state = useStore.getState();
+      return state.conversations.find((c) => c.id === state.currentConversationId)?.messages || [];
+    };
+    setAppliedDraftsProbe(() => {
+      const applied: Array<{ quoteId: string; jobName: string; customerId?: string; customerName?: string }> = [];
+      const state = useStore.getState();
+      for (const m of currentMessages()) {
+        for (const p of m.proposals || []) {
+          if (p.type !== 'propose_draft_quote' || m.proposalStatus?.[p.id] !== 'applied') continue;
+          const quoteId = resolveQuoteId(p.id);
+          if (!quoteId || quoteId === p.id) continue;
+          // The minted quote knows both handles — the contact it was linked
+          // to and the name on it — whichever way the model named the
+          // customer on this draft or names them on the next.
+          const minted = state.getDocumentById(quoteId) ?? state.quotes.find((q) => q.id === quoteId);
+          applied.push({
+            quoteId,
+            jobName: minted?.job?.name || p.jobName,
+            customerId: minted?.contactId ?? p.customerId,
+            customerName: minted?.customerName || p.customerDraft?.name,
+          });
+        }
+      }
+      return applied;
+    });
+    setPendingScopeUpdateProbe((quoteId) =>
+      currentMessages().some((m) =>
+        (m.proposals || []).some(
+          (p) => p.type === 'propose_update_quote_scope' && p.quoteId === quoteId && (m.proposalStatus?.[p.id] ?? 'pending') === 'pending',
+        ),
+      ),
+    );
+    return () => {
+      setAppliedDraftsProbe(null);
+      setPendingScopeUpdateProbe(null);
+    };
   }, []);
 
   // A typed "yes"/"nah" resolves the waiting card like a tap. The dispatcher
@@ -2152,6 +2347,7 @@ export function AssistantScreen() {
         ...(pending.length ? { attachments: pending } : {}),
       };
       appendMessage(convoId, userMsg);
+      pricingCorrectionsRef.current.note(text);
 
       // Mount an empty assistant bubble up-front so streaming text deltas
       // land in a stable target message id. If the turn errors out, the
@@ -2204,6 +2400,8 @@ export function AssistantScreen() {
     pacerRef.current = createPacerState();
     audioTimelineEndRef.current = 0;
     pacedRenderRef.current = '';
+    assistantBubblePrefixRef.current = '';
+    bubbleContinuityRef.current.userTurn();
     // Kill the idle watchdog so it can't fire after teardown.
     if (idleWatchdogRef.current) {
       clearInterval(idleWatchdogRef.current);
@@ -2342,6 +2540,28 @@ export function AssistantScreen() {
       // stopped the paced reveal dead, leaving "Good afternoon. I" on screen
       // for the rest of the reply. So when pacing, hand the close to the
       // ticker and let it fire once the words have caught up with the audio.
+      // Everything painted into the assistant bubble goes through here, so a
+      // reopened bubble's earlier words are prepended in exactly one place.
+      const paint = (bubbleId: string, text: string) =>
+        updateMessage(convoId!, bubbleId, { text: assistantBubblePrefixRef.current + text });
+
+      // Release the bubble. Remembered by the continuity rule: text that
+      // arrives next with no tradie speech in between continues it.
+      const releaseAssistantBubble = () => {
+        if (assistantBubbleIdRef.current) {
+          bubbleContinuityRef.current.closed({
+            id: assistantBubbleIdRef.current,
+            text: assistantBubblePrefixRef.current + assistantBubbleTextRef.current,
+          });
+        }
+        pendingBubbleCloseRef.current = false;
+        pacerRef.current = createPacerState();
+        pacedRenderRef.current = '';
+        assistantBubblePrefixRef.current = '';
+        assistantBubbleIdRef.current = null;
+        assistantBubbleTextRef.current = '';
+      };
+
       const finishAssistantBubble = () => {
         if (!assistantBubbleIdRef.current) {
           pendingBubbleCloseRef.current = false;
@@ -2357,15 +2577,40 @@ export function AssistantScreen() {
           // nothing will ever advance the reveal. Show the words rather than
           // leaving an empty bubble open forever.
           const full = pacerFlush(pacerRef.current);
-          if (full !== pacedRenderRef.current) {
-            updateMessage(convoId!, assistantBubbleIdRef.current, { text: full });
-          }
+          if (full !== pacedRenderRef.current) paint(assistantBubbleIdRef.current, full);
         }
-        pendingBubbleCloseRef.current = false;
-        pacerRef.current = createPacerState();
-        pacedRenderRef.current = '';
-        assistantBubbleIdRef.current = null;
-        assistantBubbleTextRef.current = '';
+        releaseAssistantBubble();
+      };
+
+      // Open the bubble the next piece of Mate's reply goes into: the one
+      // that just closed, when nothing from the tradie came between (a model
+      // ends a turn at every tool call, and a single sentence reached a
+      // tradie as three bubbles), otherwise a fresh one. `rendered` is the
+      // paced slice of `text`; the reopened bubble's earlier words become the
+      // prefix `paint` prepends, and assistantBubbleTextRef holds only this
+      // fragment. Returns the proposals the bubble already carries.
+      const startOrContinueBubble = (text: string, rendered: string | null): Proposal[] => {
+        const cont = bubbleContinuityRef.current.takeContinuation();
+        pacedRenderRef.current = rendered ?? text;
+        assistantBubbleTextRef.current = text;
+        if (cont) {
+          const joined = joinFragments(cont.text, text);
+          assistantBubbleIdRef.current = cont.id;
+          assistantBubblePrefixRef.current = joined.slice(0, joined.length - text.length);
+          paint(cont.id, rendered ?? text);
+          const live = useStore.getState().conversations.find((c) => c.id === convoId)?.messages || [];
+          return live.find((m) => m.id === cont.id)?.proposals ?? [];
+        }
+        const id = generateId();
+        assistantBubbleIdRef.current = id;
+        assistantBubblePrefixRef.current = '';
+        appendMessage(convoId!, {
+          id,
+          role: 'assistant',
+          text: rendered ?? text,
+          createdAt: new Date().toISOString(),
+        });
+        return [];
       };
 
       // The audio queue is single-use — stop() is terminal (no restart), so a
@@ -2391,6 +2636,8 @@ export function AssistantScreen() {
           userBubbleTextRef.current = '';
           assistantBubbleIdRef.current = null;
           assistantBubbleTextRef.current = '';
+          assistantBubblePrefixRef.current = '';
+          bubbleContinuityRef.current.userTurn();
           const staleQueue = audioQueueRef.current;
           audioQueueRef.current = null;
           matePlayingRef.current = false;
@@ -2408,6 +2655,7 @@ export function AssistantScreen() {
           if (!text) return;
           // Real speech detected by server VAD — keep the watchdog at bay.
           touchVoiceActivity();
+          bubbleContinuityRef.current.userTurn();
           if (!userBubbleIdRef.current) {
             const id = generateId();
             userBubbleIdRef.current = id;
@@ -2423,6 +2671,7 @@ export function AssistantScreen() {
             updateMessage(convoId!, userBubbleIdRef.current, { text: userBubbleTextRef.current });
           }
           if (finished) {
+            pricingCorrectionsRef.current.note(userBubbleTextRef.current);
             userBubbleIdRef.current = null;
             userBubbleTextRef.current = '';
             setVoiceState('thinking');
@@ -2454,14 +2703,8 @@ export function AssistantScreen() {
           // right?Drafted Karl Van Lishout's colorbond fence repair" happened.
           if (pendingBubbleCloseRef.current && assistantBubbleIdRef.current) {
             const full = pacerFlush(pacerRef.current);
-            if (full && full !== pacedRenderRef.current) {
-              updateMessage(convoId!, assistantBubbleIdRef.current, { text: full });
-            }
-            pendingBubbleCloseRef.current = false;
-            pacerRef.current = createPacerState();
-            pacedRenderRef.current = '';
-            assistantBubbleIdRef.current = null;
-            assistantBubbleTextRef.current = '';
+            if (full && full !== pacedRenderRef.current) paint(assistantBubbleIdRef.current, full);
+            releaseAssistantBubble();
           }
           // Hard guard: any transcript that leaks one of our bracketed
           // prompt tags is a prompt-format echo from the model, never
@@ -2474,7 +2717,10 @@ export function AssistantScreen() {
           // Test the ACCUMULATED transcript, not this chunk: "Thought to
           // self:" routinely arrives split across deltas, and once the turn
           // is known to be scaffolding every later chunk belongs to it too.
-          if (suppressLeakedTurnRef.current || isLeakedModelOutput(assistantBubbleTextRef.current + text)) {
+          if (
+            suppressLeakedTurnRef.current ||
+            isLeakedModelOutput(assistantBubblePrefixRef.current + assistantBubbleTextRef.current + text)
+          ) {
             suppressLeakedTurnRef.current = true;
             // Blank whatever already mounted. Hidden messages are filtered
             // out of the list, and the empty text keeps the leak out of the
@@ -2483,6 +2729,7 @@ export function AssistantScreen() {
               updateMessage(convoId!, assistantBubbleIdRef.current, { text: '', hidden: true });
               assistantBubbleIdRef.current = null;
               assistantBubbleTextRef.current = '';
+              assistantBubblePrefixRef.current = '';
             }
             if (finished) suppressLeakedTurnRef.current = false;
             return;
@@ -2492,32 +2739,23 @@ export function AssistantScreen() {
           // never sets this: the watchdog's re-send is what turns a filtered
           // chain-of-thought reply into a spoken greeting instead of silence.)
           greetHeardRef.current = true;
-          // assistantBubbleTextRef always holds the FULL text: the leak filter
-          // above tests it, and a reconnect seeds history from it. Only what
-          // is RENDERED is paced.
+          // assistantBubbleTextRef holds this fragment; a continued bubble's
+          // earlier words sit in assistantBubblePrefixRef, and the leak
+          // filter above tests the two together. Only what is RENDERED is
+          // paced.
           const pacing = pacingEnabledRef.current;
           if (pacing) pacerPushText(pacerRef.current, text);
           const rendered = pacing
             ? pacerVisibleText(pacerRef.current, Date.now())
             : null;
           if (!assistantBubbleIdRef.current) {
-            const id = generateId();
-            assistantBubbleIdRef.current = id;
-            assistantBubbleTextRef.current = text;
-            turnProposals = [];
-            pacedRenderRef.current = rendered ?? text;
-            appendMessage(convoId!, {
-              id,
-              role: 'assistant',
-              text: rendered ?? text,
-              createdAt: new Date().toISOString(),
-            });
+            turnProposals = startOrContinueBubble(text, rendered);
           } else {
             assistantBubbleTextRef.current += text;
             const next = rendered ?? assistantBubbleTextRef.current;
             if (next !== pacedRenderRef.current) {
               pacedRenderRef.current = next;
-              updateMessage(convoId!, assistantBubbleIdRef.current, { text: next });
+              paint(assistantBubbleIdRef.current, next);
             }
           }
           if (finished) finishAssistantBubble();
@@ -2530,32 +2768,25 @@ export function AssistantScreen() {
           if (!delta) return;
           touchVoiceActivity();
           if (narrationModeRef.current) return;
-          if (suppressLeakedTurnRef.current || isLeakedModelOutput(assistantBubbleTextRef.current + delta)) {
+          if (
+            suppressLeakedTurnRef.current ||
+            isLeakedModelOutput(assistantBubblePrefixRef.current + assistantBubbleTextRef.current + delta)
+          ) {
             suppressLeakedTurnRef.current = true;
             if (assistantBubbleIdRef.current) {
               updateMessage(convoId!, assistantBubbleIdRef.current, { text: '', hidden: true });
               assistantBubbleIdRef.current = null;
               assistantBubbleTextRef.current = '';
+              assistantBubblePrefixRef.current = '';
             }
             return;
           }
           flushUserBubbleIfOpen();
           if (!assistantBubbleIdRef.current) {
-            const id = generateId();
-            assistantBubbleIdRef.current = id;
-            assistantBubbleTextRef.current = delta;
-            turnProposals = [];
-            appendMessage(convoId!, {
-              id,
-              role: 'assistant',
-              text: delta,
-              createdAt: new Date().toISOString(),
-            });
+            turnProposals = startOrContinueBubble(delta, null);
           } else {
             assistantBubbleTextRef.current += delta;
-            updateMessage(convoId!, assistantBubbleIdRef.current, {
-              text: assistantBubbleTextRef.current,
-            });
+            paint(assistantBubbleIdRef.current, assistantBubbleTextRef.current);
           }
         },
         onAudioChunk: (b64) => {
@@ -2583,21 +2814,24 @@ export function AssistantScreen() {
           // call without speaking any words first.
           let bubbleId = assistantBubbleIdRef.current;
           if (!bubbleId) {
-            bubbleId = generateId();
-            assistantBubbleIdRef.current = bubbleId;
-            assistantBubbleTextRef.current = '';
-            appendMessage(convoId!, {
-              id: bubbleId,
-              role: 'assistant',
-              text: '',
-              createdAt: new Date().toISOString(),
-            });
+            // A tool call with no words first: continue the bubble that just
+            // closed if nothing from the tradie came between, else mint one.
+            // This turn's cards ride with whatever that bubble already held.
+            const carried = startOrContinueBubble('', null);
+            bubbleId = assistantBubbleIdRef.current!;
+            turnProposals = [...carried.filter((p) => !turnProposals.some((q) => q.id === p.id)), ...turnProposals];
           }
+          // Merge, never replace: a continued bubble can already hold an
+          // applied or dismissed card, and resetting it to pending would make
+          // it tappable again.
+          const priorStatus =
+            useStore.getState().conversations.find((c) => c.id === convoId)?.messages.find((m) => m.id === bubbleId)?.proposalStatus ?? {};
           updateMessage(convoId!, bubbleId, {
             proposals: turnProposals,
-            proposalStatus: Object.fromEntries(
-              turnProposals.map((p) => [p.id, 'pending' as ProposalStatus]),
-            ),
+            proposalStatus: {
+              ...priorStatus,
+              ...Object.fromEntries(turnProposals.filter((p) => !priorStatus[p.id]).map((p) => [p.id, 'pending' as ProposalStatus])),
+            },
           });
           // A re-proposed decision dismisses the stale pending card of the
           // same kind, so only the newest version of it can still be applied.
@@ -2763,6 +2997,8 @@ export function AssistantScreen() {
       pacerRef.current = createPacerState();
       audioTimelineEndRef.current = 0;
       pacedRenderRef.current = '';
+      assistantBubblePrefixRef.current = '';
+      bubbleContinuityRef.current.userTurn();
       // Deltas stop arriving as soon as the model finishes generating, but the
       // voice keeps talking for seconds afterwards. Without a ticker the
       // reveal would freeze wherever the last delta left it.
@@ -2775,7 +3011,7 @@ export function AssistantScreen() {
         const next = pacerVisibleText(pacerRef.current, Date.now());
         if (next !== pacedRenderRef.current) {
           pacedRenderRef.current = next;
-          updateMessage(convoId!, bubbleId, { text: next });
+          paint(bubbleId, next);
         }
         // Backstop: if playback under-ran or stalled, don't strand the rest
         // of the words behind a clock that has stopped advancing.
@@ -2789,16 +3025,12 @@ export function AssistantScreen() {
           const full = pacerFlush(p);
           if (full !== pacedRenderRef.current) {
             pacedRenderRef.current = full;
-            updateMessage(convoId!, bubbleId, { text: full });
+            paint(bubbleId, full);
           }
         }
         // The words have caught up with the voice — now the turn can close.
         if (pendingBubbleCloseRef.current && pacerIsSettled(pacerRef.current)) {
-          pendingBubbleCloseRef.current = false;
-          pacerRef.current = createPacerState();
-          pacedRenderRef.current = '';
-          assistantBubbleIdRef.current = null;
-          assistantBubbleTextRef.current = '';
+          releaseAssistantBubble();
         }
       }, PACER_TICK_MS);
 
@@ -2850,6 +3082,7 @@ export function AssistantScreen() {
       // [greet] as well produces two greetings back to back.
       if (mode === 'sticky' && isBlankSlate(seedHistory) && !session.ownsGreeting) {
         greetHeardRef.current = false;
+        bubbleContinuityRef.current.userTurn();
         session.sendUserText(buildGreetPrompt({ hour: new Date().getHours() }));
         // The session right after a mic-permission grant has twice connected
         // and never greeted (AppState churn / a filtered reply eating the
@@ -2867,6 +3100,7 @@ export function AssistantScreen() {
           if (retry) {
             // eslint-disable-next-line no-console
             console.log('[Mate voice] greet unheard after', GREET_RETRY_MS, 'ms — re-sending');
+            bubbleContinuityRef.current.userTurn();
             try { greetSession.sendUserText(buildGreetPrompt({ hour: new Date().getHours() })); } catch { /* session died — nothing to do */ }
           }
         }, GREET_RETRY_MS);

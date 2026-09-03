@@ -577,11 +577,17 @@ async function openGeminiVoiceSession(
 
         const toolCalls = msg?.toolCall?.functionCalls;
         if (Array.isArray(toolCalls) && toolCalls.length) {
-          try {
-            const results = await Promise.all(
-              toolCalls.map(async (call: any) => {
-                const name = String(call.name);
-                const id = String(call.id);
+          // One tool call that throws must not end the session. It used to:
+          // a rejection anywhere in the batch went to onError, the screen tore
+          // the session down, and the tradie was left with "drafting that…"
+          // and no card. Each call now answers for itself — a thrown handler
+          // becomes an { error } the model can act on, the same shape the
+          // text path and the ElevenLabs bridge already hand back.
+          const results = await Promise.all(
+            toolCalls.map(async (call: any) => {
+              const name = String(call.name);
+              const id = String(call.id);
+              try {
                 // Control tools (accept/cancel the on-screen card) don't hit the
                 // dispatcher — hand the decision to the screen and ack the model
                 // with whatever it reports back.
@@ -600,19 +606,28 @@ async function openGeminiVoiceSession(
                   return { name: r.name, id: r.id, response, proposal: undefined as Proposal | undefined };
                 }
                 return { name: r.name, id: r.id, response: r.response, proposal: r.proposal };
-              }),
-            );
-            for (const r of results) {
-              if (r.proposal) cb.onProposal?.(r.proposal);
+              } catch (err: any) {
+                // eslint-disable-next-line no-console
+                console.warn('[Mate voice] tool call failed', name, err?.message);
+                return {
+                  name,
+                  id,
+                  response: { error: `${name} failed: ${err?.message || 'unknown error'}. Tell the tradie in one line and try another way.` },
+                  proposal: undefined as Proposal | undefined,
+                };
+              }
+            }),
+          );
+          for (const r of results) {
+            if (r.proposal) {
+              try { cb.onProposal?.(r.proposal); } catch { /* the screen's problem, not the session's */ }
             }
-            safeSend({
-              toolResponse: {
-                functionResponses: results.map((r) => ({ name: r.name, id: r.id, response: r.response })),
-              },
-            });
-          } catch (err: any) {
-            cb.onError?.(new LiveOfflineError(err?.message || 'Tool dispatch failed.'));
           }
+          safeSend({
+            toolResponse: {
+              functionResponses: results.map((r) => ({ name: r.name, id: r.id, response: r.response })),
+            },
+          });
           return;
         }
 

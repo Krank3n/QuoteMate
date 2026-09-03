@@ -114,3 +114,24 @@ describe('buildSendOfferNote', () => {
     expect(buildSendOfferNote({ ...withContact, docType: 'invoice' })).toContain("Lee-Anne's invoice");
   });
 });
+
+
+describe('buildSendOfferNote with corrections said while pricing ran', () => {
+  it('puts the corrections before the send offer — never offer to send the wrong quote', () => {
+    const note = buildSendOfferNote(
+      { jobName: 'Install fire detectors', customerName: 'Diane Bunk', total: 797.04, hasContact: true, docType: 'quote' },
+      ['using red dot brand', "those detectors are pre-existing, I'm just replacing existing hardwire"],
+      'q-smoke-1',
+    );
+    expect(note).toContain('"using red dot brand"');
+    expect(note).toContain('propose_update_quote_scope on q-smoke-1');
+    expect(note).toContain('Do that BEFORE offering the send.');
+    expect(note).not.toContain('want me to send it?');
+  });
+
+  it('is the plain send offer when nothing was said', () => {
+    const note = buildSendOfferNote({ jobName: 'Deck', customerName: 'Katie', total: 1183, hasContact: true, docType: 'quote' });
+    expect(note).toContain('want me to send it?');
+    expect(note).not.toContain('While pricing ran');
+  });
+});

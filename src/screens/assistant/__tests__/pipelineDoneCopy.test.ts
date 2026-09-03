@@ -181,3 +181,23 @@ describe('buildPipelineDonePrompt — the send offer', () => {
     expect(prompt).not.toContain('want me to send it?');
   });
 });
+
+
+// Corrections said while pricing ran — the three lost on 3 Sep 2026.
+describe('buildPipelineDonePrompt with corrections', () => {
+  const corrections = ['using red dot brand', 'Change those numbers.', "Also those detectors are pre-existing. I'm just replacing existing hardwire."];
+
+  it('ends the clean-run line with the corrections and the tool to fold them in', () => {
+    const prompt = buildPipelineDonePrompt({ jobLabel: 'Install fire detectors', ok: true, corrections, quoteId: 'q-smoke-1' });
+    expect(prompt).toContain('"using red dot brand"');
+    expect(prompt).toContain('propose_update_quote_scope on q-smoke-1');
+    expect(prompt).toContain('Never draft a new quote for them.');
+  });
+
+  it('does not push corrections onto a run that failed or never priced', () => {
+    const degraded = buildPipelineDonePrompt({ jobLabel: 'x', ok: true, pipelineDegraded: true, corrections, quoteId: 'q1' });
+    expect(degraded).not.toContain('using red dot brand');
+    const failed = buildPipelineDonePrompt({ jobLabel: 'x', ok: false, error: 'boom', corrections, quoteId: 'q1' });
+    expect(failed).not.toContain('using red dot brand');
+  });
+});

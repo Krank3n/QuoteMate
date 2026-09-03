@@ -8,8 +8,9 @@ export function titleFor(p: Proposal): string {
   switch (p.type) {
     case 'propose_draft_quote':
       return p.documentType === 'invoice' ? 'Draft invoice' : 'Draft quote';
-    case 'propose_add_line_item': return 'Add line item';
+    case 'propose_add_line_item': return p.kind === 'work' ? 'Add lump sum' : 'Add line item';
     case 'propose_update_line_item':
+      if (p.lumpSum && p.price !== undefined && p.name === undefined) return 'Set lump sum';
       if (p.price !== undefined && p.quantity === undefined && p.name === undefined) return 'Set price';
       if (p.quantity !== undefined && p.price === undefined && p.name === undefined) return 'Change quantity';
       if (p.name !== undefined && p.price === undefined && p.quantity === undefined) return 'Rename line';
@@ -28,6 +29,8 @@ export function titleFor(p: Proposal): string {
     case 'propose_import_supplier_list': return 'Add supplier prices';
     case 'propose_remember_preference': return 'Remember how you quote';
     case 'propose_save_rate': return 'Save a rate';
+    case 'propose_set_total': return 'Set the total';
+    case 'propose_pick_contact': return 'Pick from your contacts';
   }
 }
 
@@ -49,6 +52,8 @@ export function iconFor(p: Proposal): string {
     case 'propose_import_supplier_list': return 'clipboard-list-outline';
     case 'propose_remember_preference': return 'lightbulb-on-outline';
     case 'propose_save_rate': return 'tag-outline';
+    case 'propose_set_total': return 'cash-check';
+    case 'propose_pick_contact': return 'card-account-phone-outline';
   }
 }
 
@@ -76,6 +81,8 @@ export function applyLabelFor(p: Proposal): string {
     case 'propose_import_supplier_list': return 'Read list';
     case 'propose_remember_preference': return 'Remember it';
     case 'propose_save_rate': return 'Save rate';
+    case 'propose_set_total': return 'Set it';
+    case 'propose_pick_contact': return 'Open contacts';
   }
 }
 
