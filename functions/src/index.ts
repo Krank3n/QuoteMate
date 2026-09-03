@@ -97,7 +97,20 @@ export {
 } from './assistantCosts';
 export { elevenLabsPostCallWebhook } from './elevenLabsWebhook';
 export { reportPriceFetchUsage } from './featureUsage';
-import { recordMaterialsRecommend } from './featureUsage';
+import { applyFeatureUsagePatch, buildPriceFetchPatch, recordMaterialsRecommend } from './featureUsage';
+import { firestorePricingRunStore, runPricingRun, PRICING_RUN_TIMEOUT_SECONDS } from './pricingRun';
+import type { PipelineDeps } from './shared/pricing/pipeline';
+import { normaliseAnalyzeResponse } from './shared/pricing/llmMaterials';
+import { normaliseEstimateResponse } from './shared/pricing/estimate';
+import {
+  rankCandidates,
+  type BatchSearchRequest,
+  type BatchSearchResponseItem,
+  type ScraperProduct,
+} from './shared/pricing/scraperCandidates';
+import { mapReeceSearchResponse } from './shared/pricing/reeceCandidates';
+import { withScraperRetry } from './shared/pricing/scraperRetry';
+import type { FavoriteProductMapping, SectionTemplate, SupplierGroup } from './shared/pricing/types';
 import {
   LlmAttachment,
   MAX_PDF_ATTACHMENT_BYTES,
@@ -551,6 +564,15 @@ async function assertCallableRateLimit(
 }
 
 // Input validation helpers
+/**
+ * A validation failure. The HTTP wrappers map it to a 400; the server-side
+ * pricing run, which calls the same cores directly, treats it as a plain
+ * failure of the run.
+ */
+class BadRequestError extends Error {
+  readonly status = 400;
+}
+
 function isNonEmptyString(val: unknown): val is string {
   return typeof val === 'string' && val.trim().length > 0;
 }
@@ -2107,6 +2129,380 @@ async function callClaudeForMaterials(
 // 512MB: up to ~14MB of raw attachments exist as Buffers AND base64 strings
 // at once while the provider payloads are built — the 256MB default was sized
 // for compressed photos only.
+/**
+ * The analyse pass: job description (+ photos, templates, saved rates, Reece
+ * catalogue slice) → materials, hours, quality tier and plan geometry. Shared
+ * by the HTTP handler below and the server-side pricing run (pricingRun.ts),
+ * so a run on the server generates exactly what a run on the phone would.
+ * Throws BadRequestError for a malformed request; anything else is a failed
+ * analyse and has already been recorded and emailed by the time it surfaces.
+ */
+async function analyzeJobDescriptionCore(uid: string, body: any): Promise<Record<string, any>> {
+  // Recommend-run telemetry clock — started after auth so it measures the
+  // actual analyse work, not the auth round-trip. See recordMaterialsRecommend.
+  const t0 = Date.now();
+
+  try {
+    const { jobDescription, tradeContext, photoBase64: photoBase64Input, photoUrls, existingMaterials, availableTemplates, userSavedRates } = body;
+
+    if (!isNonEmptyString(jobDescription)) {
+      throw new BadRequestError('Missing or invalid jobDescription');
+    }
+    if (jobDescription.length > 50000) {
+      throw new BadRequestError('jobDescription exceeds maximum length');
+    }
+
+    // Effective attachment set: any client-provided base64 (native local
+    // files) plus Storage URLs fetched server-side (the usual case, and what
+    // makes photo/floorplan analysis work on the web app without CORS).
+    // Every payload is typed from its magic bytes — Storage contentType has
+    // been wrong before (raw PDFs stored as .jpg) and a single mislabelled
+    // file used to 400 both providers and kill the whole analyze.
+    const photoBase64: string[] = Array.isArray(photoBase64Input)
+      ? photoBase64Input.filter((b: any) => typeof b === 'string')
+      : [];
+    if (Array.isArray(photoUrls) && photoUrls.length > 0) {
+      const fetched = await fetchStorageImagesAsBase64(photoUrls);
+      photoBase64.push(...fetched);
+    }
+    const { attachments, dropped } = normalizeLlmAttachments(photoBase64);
+    for (const d of dropped) {
+      // index is into the combined base64 list (fetch skips don't appear in
+      // it), so log the counts too or a prod incident can't be traced back.
+      console.warn('[analyze attachments] dropped attachment', {
+        uid,
+        index: d.index,
+        reason: d.reason,
+        inputCount: photoBase64.length,
+        requestedUrls: Array.isArray(photoUrls) ? photoUrls.length : 0,
+      });
+    }
+
+    // Get API keys from Firebase config.
+    // Claude Opus 5 is the PRIMARY model; Gemini 3 Pro is the FALLBACK.
+    // The reasoning for that order is recorded at the call site below.
+    const geminiApiKey = process.env.GEMINI_API_KEY;
+    const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
+
+    if (!geminiApiKey && !anthropicApiKey) {
+      throw new Error('No LLM API keys configured (GEMINI_API_KEY / ANTHROPIC_API_KEY)');
+    }
+
+    // Build trade context section
+    let contextSection = '';
+    if (tradeContext) {
+      contextSection = '\n\nTrade Context:';
+      if (tradeContext.categoryName) {
+        contextSection += `\n- Trade Category: ${tradeContext.categoryName}`;
+      }
+      if (tradeContext.nicheName) {
+        contextSection += `\n- Specialty/Niche: ${tradeContext.nicheName}`;
+      }
+      if (tradeContext.pricingMethod) {
+        contextSection += `\n- Typical Pricing Method: ${tradeContext.pricingMethod}`;
+      }
+      if (tradeContext.suggestedMaterials && tradeContext.suggestedMaterials.length > 0) {
+        contextSection += `\n- Common Materials for This Type of Job: ${tradeContext.suggestedMaterials.join(', ')}`;
+        contextSection += '\n  (Consider these materials, but also include any others that would be needed)';
+      }
+      contextSection += renderQuotingPreferences(tradeContext.quotingPreferences);
+    }
+
+    // Determine store name
+    const selectedStore = tradeContext?.selectedStore || 'bunnings';
+    let storeName = 'Bunnings';
+    if (selectedStore === 'mitre10') storeName = 'Mitre 10';
+    if (selectedStore === 'reece') storeName = 'Reece';
+
+    // Build existing materials section
+    let existingMaterialsSection = '';
+    if (existingMaterials && existingMaterials.length > 0) {
+      const materialsList = existingMaterials.map((m: any) =>
+        `- ${m.quantity} ${m.unit} of ${m.name}${m.section ? ` (${m.section})` : ''}`
+      ).join('\n');
+      existingMaterialsSection = `\n\nIMPORTANT - The following materials are ALREADY included in this quote (loaded from templates). Do NOT include these or similar items again. Only suggest ADDITIONAL materials that are missing:\n${materialsList}\n`;
+    }
+
+    // Build template reference section
+    let templateReferenceSection = '';
+    if (availableTemplates && availableTemplates.length > 0) {
+      const templateDescriptions = availableTemplates.map((t: any, i: number) => {
+        const matList = t.materials.slice(0, 8).map((m: any) => `${m.quantity}x ${m.name}`).join(', ');
+        return `${i + 1}. "${t.name}" — Materials: ${matList} | Labor: ${t.laborHours}hrs`;
+      }).join('\n');
+      templateReferenceSection = `\n\nSAVED TEMPLATES (use as reference for section names and materials when they match the job):\n${templateDescriptions}\n\nWhen a saved template closely matches a section of this job:\n- Use the template's exact name as the section name\n- Use the template's material names where applicable (you can adjust quantities)\n- Set the sectionMultiplier to match the job scope\n`;
+    }
+
+    // Build Reece catalogue slice section. We only inject it for users
+    // who've opted into price-file sync AND whose job description triggers
+    // a category match — outside those cases the slice would be either
+    // missing or too noisy to help the LLM.
+    let reeceCatalogueSection = '';
+    let reeceCatalogueGeneratedAt: number | null = null;
+    try {
+      const slice = await getRelevantCatalogueSlice(uid, jobDescription);
+      if (slice && slice.products.length > 0) {
+        reeceCatalogueGeneratedAt = slice.generatedAt;
+        reeceCatalogueSection = `\n\nREECE TRADE CATALOGUE (preferred for plumbing items)\nThe tradie has ${slice.products.length} Reece SKUs synced below at their negotiated trade pricing. When a Reece SKU is a clear, confident match for a plumbing material the job genuinely needs, return its integer "reeceProductId" — that gives the tradie their real trade price and skips a search round trip.\n\nIMPORTANT — only pick a Reece SKU when it's the right product for the job. Don't force-fit:\n- If the job calls for a generic item that doesn't match a specific SKU, leave reeceProductId empty and use a normal "searchTerm".\n- Don't pick obscure replacement parts (e.g. "Solus MK2 Replacement Bypass Tube") for a generic install job — those are repair-specific SKUs.\n- For non-plumbing items (timber, fasteners, paint, etc.) leave reeceProductId empty.\n- For bog-standard items where multiple Reece SKUs would all work (e.g. "PVC elbow 90°"), use a generic searchTerm — the per-material search will pick the cheapest fit.\n\nFormat: [productId] title (brand) · category/section · price/unit\n\n${formatCatalogueSliceForPrompt(slice)}\n`;
+      }
+    } catch (err: any) {
+      console.warn('[reece pricefile] slice build failed', { uid, message: err?.message });
+    }
+
+    // Build user's saved supplier rates section
+    let savedRatesSection = '';
+    if (Array.isArray(userSavedRates) && userSavedRates.length > 0) {
+      const lines = userSavedRates.map((r: any) => {
+        const coverage = r.coveragePerUnit
+          ? ` — covers ${r.coveragePerUnit} ${r.coverageUnit} per unit`
+          : '';
+        const keywords = r.keywords?.length ? ` [keywords: ${r.keywords.join(', ')}]` : '';
+        return `- "${r.name}" — ${r.price} per ${r.unit}${coverage}${keywords}`;
+      }).join('\n');
+      savedRatesSection = `\n\nUSER'S SAVED SUPPLIER RATES — PREFER THESE OVER RETAIL\nThe tradie has personal supplier rates below. If a required material semantically matches one of these (by name, keywords, or job context), you MUST use that rate's unit and price instead of generating a generic retail search term.\n\n${lines}\n\nMatching rules:\n1. Match by meaning, not exact name. "concrete" matches a saved rate keyworded ["concrete","slab","footing"].\n2. If a rate has coveragePerUnit, that means one purchasable unit covers that much work-volume or work-area. Compute quantity = ceil(jobAmount / coveragePerUnit) where jobAmount is measured in coverageUnit. Examples: a sheet that covers 13 m² and a 40 m² wall → ceil(40/13) = 4 sheets; a mulch bag containing 0.5 m³ and a 2 m³ bed → ceil(2/0.5) = 4 bags. Always round UP — the tradie can't buy a fraction of a packaged unit.\n3. If the job gives an area but the rate is per m³ (e.g. ready-mix concrete sold loose by the m³ with no coveragePerUnit), pick a sensible slab thickness from job context (driveway ~125mm, residential slab ~100mm, footpath ~75mm) and explain your assumption in "reasoning". Compute m³ = area × thickness.\n4. For matched items set "savedRateName" to the exact saved rate name and "pricingSource": "saved_rate". Do NOT generate a retail searchTerm for these — leave searchTerm empty.\n5. Items with no matching saved rate flow through the normal retail pricing path — generate generic searchTerms for them as usual.\n`;
+    }
+
+    const hasExisting = existingMaterials && existingMaterials.length > 0;
+    const prompt = buildMaterialsPrompt({
+      jobDescription,
+      hasExisting,
+      storeName,
+      contextSection,
+      existingMaterialsSection,
+      templateReferenceSection,
+      savedRatesSection,
+      reeceCatalogueSection,
+      tradeContext,
+    });
+
+    const finalPrompt = attachments.length > 0
+      ? `${prompt}\n\nI've attached ${attachments.length} file(s) — site photos and/or plan documents (a plan may arrive as a PDF). Examine each carefully. If a file is an ordinary site photo, use it to understand the scope and identify visible materials. If a file is an architectural plan, floorplan, or scaled drawing — including a PDF plan — ALSO follow the FLOORPLAN ANALYSIS instructions above — read the scale and extract areas/perimeter, and use them to ground your material quantities.`
+      : prompt;
+
+    // Claude Opus 5 is PRIMARY. Gemini 3 Pro held this slot for its image
+    // understanding, but a measured comparison on the identical prompt says
+    // otherwise — missing materials per job, blind-judged, real customer work:
+    //
+    //                          text scopes    site photos
+    //   gemini-3.1-pro             7.54          8.73
+    //   claude-opus-5              2.15          4.27
+    //   claude-sonnet-5              —           9.73
+    //   claude-fable-5               —           7.92
+    //
+    // Confirmed by a Gemini-judged cross-check, so it is not self-preference.
+    // Note the shape: Sonnet and Fable both land with Gemini, so this is not
+    // "Claude beats Gemini" — it is Opus-tier reasoning beating everything
+    // else at holding a multi-trade scope in view. There is no cheaper
+    // version of the win. See functions/scripts/bakeoff/imageModelAB.ts.
+    //
+    // Completeness is what the quote lives on: the pipeline already prices
+    // BETTER than an unguided model (0.88x of true cost vs 1.18x), and still
+    // lost every head-to-head because it left ~5 materials a job off the page.
+    //
+    // Floorplan measurement is NOT affected — callGeminiForBlindTakeoff is a
+    // separate pass and stays on Gemini, which is deliberate: plan drawings
+    // were only 4 of 63 photo-bearing quotes in the corpus, far too few to
+    // move that path on.
+    let parsed: any | null = null;
+    let primaryError: Error | null = null;
+
+    if (anthropicApiKey) {
+      try {
+        parsed = await callClaudeForMaterials(anthropicApiKey, finalPrompt, attachments);
+      } catch (err: any) {
+        primaryError = err;
+        console.warn('Claude primary call failed, falling back to Gemini:', err.message);
+      }
+    }
+
+    // Fallback to Gemini 3 Pro.
+    if (!parsed) {
+      if (!geminiApiKey) {
+        throw primaryError || new Error('Claude failed and no Gemini fallback key configured');
+      }
+      try {
+        parsed = await callGeminiForMaterials(geminiApiKey, finalPrompt, attachments);
+      } catch (fallbackErr: any) {
+        // Log full errors server-side; return short summary to client
+        console.error('Claude primary error:', primaryError?.message);
+        console.error('Gemini fallback error:', fallbackErr?.message);
+        const summarize = (msg: string): string => {
+          if (!msg) return 'unknown';
+          const m = msg.match(/returned (\d{3})/);
+          const status = m ? m[1] : '';
+          if (status === '429' || /quota|rate.?limit|RESOURCE_EXHAUSTED/i.test(msg)) return `${status || '429'} quota exceeded`;
+          if (status === '400' && /credit balance/i.test(msg)) return '400 out of credit';
+          if (status === '401' || status === '403') return `${status} auth denied`;
+          if (status === '500' || status === '503') return `${status} unavailable`;
+          return status ? `${status} error` : msg.slice(0, 60);
+        };
+        // Label each provider by the role it actually plays here. Claude is
+        // primary in THIS handler, so primaryError is Claude's — these were
+        // left pointing the other way when the order was inverted, which
+        // reported an outage against whichever provider was innocent.
+        const claudeShort = primaryError ? `Claude ${summarize(primaryError.message)}` : 'Claude not attempted';
+        const geminiShort = `Gemini ${summarize(fallbackErr.message)}`;
+        throw new Error(`Both LLM providers failed — ${claudeShort}; ${geminiShort}`);
+      }
+    }
+
+    // Quantity sanity-check pass — review the materials list against the
+    // job description and reduce any quantity that's clearly excessive
+    // (3-10× over for the job scope). Best-effort: if the call fails the
+    // materials list passes through unchanged.
+    const rawMaterials: any[] = Array.isArray(parsed.materials) ? parsed.materials : [];
+    let validatedMaterials = rawMaterials;
+    if (geminiApiKey && rawMaterials.length > 0) {
+      try {
+        validatedMaterials = await sanityCheckQuantities(
+          geminiApiKey,
+          jobDescription,
+          tradeContext,
+          rawMaterials,
+        );
+      } catch (err: any) {
+        console.warn('Quantity sanity-check failed, returning raw list:', err?.message);
+      }
+    }
+
+    // Phase 2 enrichment — when the LLM returned a reeceProductId, look it
+    // up in the cached catalogue and stamp price/source/itemNumber so the
+    // client's existing reecePass guard skips a redundant search. We also
+    // overwrite the AI's emitted name with the title-cased catalogue title
+    // because the LLM echoes the SAP-uppercase version straight from the
+    // prompt ("ISE SINK FLANGE MATTE BLACK"), which then ships into the
+    // quote as the displayed line item.
+    let reeceDirectMatchCount = 0;
+    if (reeceCatalogueGeneratedAt) {
+      for (const m of validatedMaterials) {
+        const id = Number(m.reeceProductId);
+        if (!Number.isFinite(id) || id <= 0) continue;
+        const cached = await getCachedReeceProductById(uid, id);
+        if (!cached) continue;
+        const price = cached.priceIncGst ?? cached.priceExGst;
+        if (price == null) continue;
+        m.reeceItemNumber = String(cached.productId);
+        m.pricingSource = 'api';
+        m.price = price;
+        m.unit = m.unit || cached.unit || 'each';
+        m.imageUrl = m.imageUrl || cached.imageUrl;
+        m.searchTerm = m.searchTerm || m.name;
+        // Replace the AI's title (likely uppercase echo from the prompt)
+        // with the cleanly-cased catalogue title.
+        m.name = cached.title;
+        reeceDirectMatchCount++;
+      }
+      console.log('[reece pricefile] direct LLM matches', {
+        uid,
+        materialCount: validatedMaterials.length,
+        directMatches: reeceDirectMatchCount,
+      });
+    }
+
+    const { materials: repairedMaterials, flags: aiFlags } = validateAndRepairAiOutput(validatedMaterials);
+
+    const jobQualityTier =
+      parsed.jobQualityTier === 'budget' ||
+      parsed.jobQualityTier === 'standard' ||
+      parsed.jobQualityTier === 'premium'
+        ? parsed.jobQualityTier
+        : undefined;
+
+    let floorplanAnalysis =
+      parsed.floorplanAnalysis &&
+      typeof parsed.floorplanAnalysis === 'object' &&
+      parsed.floorplanAnalysis.detected === true
+        ? (parsed.floorplanAnalysis as FloorplanAnalysis)
+        : undefined;
+    const originalTotalAreaM2 = floorplanAnalysis?.totalAreaM2;
+
+    // Anchor-laundering fix: when the model copied the tradie-stated length
+    // into its own footprint read (making the anchor a no-op), re-measure the
+    // plan blind — images only, no job text — and merge that independent
+    // geometry in. Failure of the blind pass keeps today's behaviour.
+    if (
+      floorplanAnalysis &&
+      isAnchorLaundered(floorplanAnalysis) &&
+      attachments.length > 0 &&
+      geminiApiKey
+    ) {
+      try {
+        const blind = await callGeminiForBlindTakeoff(geminiApiKey, attachments);
+        const merged = mergeBlindTakeoff(floorplanAnalysis, blind);
+        if (merged !== floorplanAnalysis) {
+          console.log('[floorplan anchor] blind re-measure applied', {
+            uid,
+            originalLengthM: floorplanAnalysis.footprintDims?.lengthM,
+            blindLengthM: merged.footprintDims?.lengthM,
+            originalAreaM2: floorplanAnalysis.totalAreaM2,
+            blindAreaM2: merged.totalAreaM2,
+          });
+          floorplanAnalysis = merged;
+        }
+      } catch (blindErr: any) {
+        console.warn('[floorplan anchor] blind re-measure failed', blindErr?.message);
+      }
+    }
+
+    if (floorplanAnalysis) {
+      floorplanAnalysis = applyAnchorScale(floorplanAnalysis);
+    }
+
+    // Phase 3 — reconcile material quantities (grounded on the FIRST pass's
+    // areas) with the final anchored takeoff, so the priced line items match
+    // the corrected areas. Only materials the model tagged with a geometry
+    // planBasis are touched.
+    const materialFactor = materialAnchorFactor(originalTotalAreaM2, floorplanAnalysis);
+    const anchoredMaterials =
+      typeof materialFactor === 'number'
+        ? scaleMaterialsToAnchor(repairedMaterials, materialFactor)
+        : repairedMaterials;
+    if (anchoredMaterials !== repairedMaterials) {
+      console.log('[floorplan anchor] scaled material quantities', {
+        uid,
+        factor: materialFactor,
+        materialCount: anchoredMaterials.length,
+      });
+    }
+
+    recordMaterialsRecommend({
+      uid,
+      success: true,
+      latencyMs: Date.now() - t0,
+    }).catch(() => {});
+
+    return {
+      materials: anchoredMaterials,
+      estimatedHours: parsed.estimatedHours || 8,
+      jobSummary: parsed.jobSummary || '',
+      flags: aiFlags,
+      ...(jobQualityTier && { jobQualityTier }),
+      ...(floorplanAnalysis && { floorplanAnalysis }),
+      // Surfaced so the client can tell a "plan too big / unreadable" run
+      // from a genuinely plan-less one instead of silently pricing blind.
+      ...(dropped.length > 0 && { droppedAttachments: dropped }),
+    };
+  } catch (error: any) {
+    // A rejected request isn't a failed analyse: no telemetry, no error email.
+    if (error instanceof BadRequestError) throw error;
+    recordMaterialsRecommend({
+      uid,
+      success: false,
+      latencyMs: Date.now() - t0,
+    }).catch(() => {});
+
+    const userEmail = await getUserEmail(uid);
+    sendMaterialListErrorEmail(
+      userEmail || '',
+      uid,
+      body.jobDescription || '',
+      error.message,
+    ).catch(() => {});
+
+    throw error;
+  }
+}
+
 export const analyzeJobDescription = functions.runWith({ timeoutSeconds: 420, memory: '512MB' }).https.onRequest((req, res) => {
   corsHandler(req, res, async () => {
     if (req.method !== 'POST') {
@@ -2122,369 +2518,10 @@ export const analyzeJobDescription = functions.runWith({ timeoutSeconds: 420, me
     );
     if (!decodedToken) return;
 
-    // Recommend-run telemetry clock — started after auth so it measures the
-    // actual analyse work, not the auth round-trip. See recordMaterialsRecommend.
-    const t0 = Date.now();
-
     try {
-      const { jobDescription, tradeContext, photoBase64: photoBase64Input, photoUrls, existingMaterials, availableTemplates, userSavedRates } = req.body;
-
-      if (!isNonEmptyString(jobDescription)) {
-        res.status(400).json({ error: 'Missing or invalid jobDescription' });
-        return;
-      }
-      if (jobDescription.length > 50000) {
-        res.status(400).json({ error: 'jobDescription exceeds maximum length' });
-        return;
-      }
-
-      // Effective attachment set: any client-provided base64 (native local
-      // files) plus Storage URLs fetched server-side (the usual case, and what
-      // makes photo/floorplan analysis work on the web app without CORS).
-      // Every payload is typed from its magic bytes — Storage contentType has
-      // been wrong before (raw PDFs stored as .jpg) and a single mislabelled
-      // file used to 400 both providers and kill the whole analyze.
-      const photoBase64: string[] = Array.isArray(photoBase64Input)
-        ? photoBase64Input.filter((b: any) => typeof b === 'string')
-        : [];
-      if (Array.isArray(photoUrls) && photoUrls.length > 0) {
-        const fetched = await fetchStorageImagesAsBase64(photoUrls);
-        photoBase64.push(...fetched);
-      }
-      const { attachments, dropped } = normalizeLlmAttachments(photoBase64);
-      for (const d of dropped) {
-        // index is into the combined base64 list (fetch skips don't appear in
-        // it), so log the counts too or a prod incident can't be traced back.
-        console.warn('[analyze attachments] dropped attachment', {
-          uid: decodedToken.uid,
-          index: d.index,
-          reason: d.reason,
-          inputCount: photoBase64.length,
-          requestedUrls: Array.isArray(photoUrls) ? photoUrls.length : 0,
-        });
-      }
-
-      // Get API keys from Firebase config.
-      // Claude Opus 5 is the PRIMARY model; Gemini 3 Pro is the FALLBACK.
-      // The reasoning for that order is recorded at the call site below.
-      const geminiApiKey = process.env.GEMINI_API_KEY;
-      const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
-
-      if (!geminiApiKey && !anthropicApiKey) {
-        res.status(500).json({ error: 'No LLM API keys configured (GEMINI_API_KEY / ANTHROPIC_API_KEY)' });
-        return;
-      }
-
-      // Build trade context section
-      let contextSection = '';
-      if (tradeContext) {
-        contextSection = '\n\nTrade Context:';
-        if (tradeContext.categoryName) {
-          contextSection += `\n- Trade Category: ${tradeContext.categoryName}`;
-        }
-        if (tradeContext.nicheName) {
-          contextSection += `\n- Specialty/Niche: ${tradeContext.nicheName}`;
-        }
-        if (tradeContext.pricingMethod) {
-          contextSection += `\n- Typical Pricing Method: ${tradeContext.pricingMethod}`;
-        }
-        if (tradeContext.suggestedMaterials && tradeContext.suggestedMaterials.length > 0) {
-          contextSection += `\n- Common Materials for This Type of Job: ${tradeContext.suggestedMaterials.join(', ')}`;
-          contextSection += '\n  (Consider these materials, but also include any others that would be needed)';
-        }
-        contextSection += renderQuotingPreferences(tradeContext.quotingPreferences);
-      }
-
-      // Determine store name
-      const selectedStore = tradeContext?.selectedStore || 'bunnings';
-      let storeName = 'Bunnings';
-      if (selectedStore === 'mitre10') storeName = 'Mitre 10';
-      if (selectedStore === 'reece') storeName = 'Reece';
-
-      // Build existing materials section
-      let existingMaterialsSection = '';
-      if (existingMaterials && existingMaterials.length > 0) {
-        const materialsList = existingMaterials.map((m: any) =>
-          `- ${m.quantity} ${m.unit} of ${m.name}${m.section ? ` (${m.section})` : ''}`
-        ).join('\n');
-        existingMaterialsSection = `\n\nIMPORTANT - The following materials are ALREADY included in this quote (loaded from templates). Do NOT include these or similar items again. Only suggest ADDITIONAL materials that are missing:\n${materialsList}\n`;
-      }
-
-      // Build template reference section
-      let templateReferenceSection = '';
-      if (availableTemplates && availableTemplates.length > 0) {
-        const templateDescriptions = availableTemplates.map((t: any, i: number) => {
-          const matList = t.materials.slice(0, 8).map((m: any) => `${m.quantity}x ${m.name}`).join(', ');
-          return `${i + 1}. "${t.name}" — Materials: ${matList} | Labor: ${t.laborHours}hrs`;
-        }).join('\n');
-        templateReferenceSection = `\n\nSAVED TEMPLATES (use as reference for section names and materials when they match the job):\n${templateDescriptions}\n\nWhen a saved template closely matches a section of this job:\n- Use the template's exact name as the section name\n- Use the template's material names where applicable (you can adjust quantities)\n- Set the sectionMultiplier to match the job scope\n`;
-      }
-
-      // Build Reece catalogue slice section. We only inject it for users
-      // who've opted into price-file sync AND whose job description triggers
-      // a category match — outside those cases the slice would be either
-      // missing or too noisy to help the LLM.
-      let reeceCatalogueSection = '';
-      let reeceCatalogueGeneratedAt: number | null = null;
-      try {
-        const slice = await getRelevantCatalogueSlice(decodedToken.uid, jobDescription);
-        if (slice && slice.products.length > 0) {
-          reeceCatalogueGeneratedAt = slice.generatedAt;
-          reeceCatalogueSection = `\n\nREECE TRADE CATALOGUE (preferred for plumbing items)\nThe tradie has ${slice.products.length} Reece SKUs synced below at their negotiated trade pricing. When a Reece SKU is a clear, confident match for a plumbing material the job genuinely needs, return its integer "reeceProductId" — that gives the tradie their real trade price and skips a search round trip.\n\nIMPORTANT — only pick a Reece SKU when it's the right product for the job. Don't force-fit:\n- If the job calls for a generic item that doesn't match a specific SKU, leave reeceProductId empty and use a normal "searchTerm".\n- Don't pick obscure replacement parts (e.g. "Solus MK2 Replacement Bypass Tube") for a generic install job — those are repair-specific SKUs.\n- For non-plumbing items (timber, fasteners, paint, etc.) leave reeceProductId empty.\n- For bog-standard items where multiple Reece SKUs would all work (e.g. "PVC elbow 90°"), use a generic searchTerm — the per-material search will pick the cheapest fit.\n\nFormat: [productId] title (brand) · category/section · price/unit\n\n${formatCatalogueSliceForPrompt(slice)}\n`;
-        }
-      } catch (err: any) {
-        console.warn('[reece pricefile] slice build failed', { uid: decodedToken.uid, message: err?.message });
-      }
-
-      // Build user's saved supplier rates section
-      let savedRatesSection = '';
-      if (Array.isArray(userSavedRates) && userSavedRates.length > 0) {
-        const lines = userSavedRates.map((r: any) => {
-          const coverage = r.coveragePerUnit
-            ? ` — covers ${r.coveragePerUnit} ${r.coverageUnit} per unit`
-            : '';
-          const keywords = r.keywords?.length ? ` [keywords: ${r.keywords.join(', ')}]` : '';
-          return `- "${r.name}" — $${r.price} per ${r.unit}${coverage}${keywords}`;
-        }).join('\n');
-        savedRatesSection = `\n\nUSER'S SAVED SUPPLIER RATES — PREFER THESE OVER RETAIL\nThe tradie has personal supplier rates below. If a required material semantically matches one of these (by name, keywords, or job context), you MUST use that rate's unit and price instead of generating a generic retail search term.\n\n${lines}\n\nMatching rules:\n1. Match by meaning, not exact name. "concrete" matches a saved rate keyworded ["concrete","slab","footing"].\n2. If a rate has coveragePerUnit, that means one purchasable unit covers that much work-volume or work-area. Compute quantity = ceil(jobAmount / coveragePerUnit) where jobAmount is measured in coverageUnit. Examples: a sheet that covers 13 m² and a 40 m² wall → ceil(40/13) = 4 sheets; a mulch bag containing 0.5 m³ and a 2 m³ bed → ceil(2/0.5) = 4 bags. Always round UP — the tradie can't buy a fraction of a packaged unit.\n3. If the job gives an area but the rate is per m³ (e.g. ready-mix concrete sold loose by the m³ with no coveragePerUnit), pick a sensible slab thickness from job context (driveway ~125mm, residential slab ~100mm, footpath ~75mm) and explain your assumption in "reasoning". Compute m³ = area × thickness.\n4. For matched items set "savedRateName" to the exact saved rate name and "pricingSource": "saved_rate". Do NOT generate a retail searchTerm for these — leave searchTerm empty.\n5. Items with no matching saved rate flow through the normal retail pricing path — generate generic searchTerms for them as usual.\n`;
-      }
-
-      const hasExisting = existingMaterials && existingMaterials.length > 0;
-      const prompt = buildMaterialsPrompt({
-        jobDescription,
-        hasExisting,
-        storeName,
-        contextSection,
-        existingMaterialsSection,
-        templateReferenceSection,
-        savedRatesSection,
-        reeceCatalogueSection,
-        tradeContext,
-      });
-
-      const finalPrompt = attachments.length > 0
-        ? `${prompt}\n\nI've attached ${attachments.length} file(s) — site photos and/or plan documents (a plan may arrive as a PDF). Examine each carefully. If a file is an ordinary site photo, use it to understand the scope and identify visible materials. If a file is an architectural plan, floorplan, or scaled drawing — including a PDF plan — ALSO follow the FLOORPLAN ANALYSIS instructions above — read the scale and extract areas/perimeter, and use them to ground your material quantities.`
-        : prompt;
-
-      // Claude Opus 5 is PRIMARY. Gemini 3 Pro held this slot for its image
-      // understanding, but a measured comparison on the identical prompt says
-      // otherwise — missing materials per job, blind-judged, real customer work:
-      //
-      //                          text scopes    site photos
-      //   gemini-3.1-pro             7.54          8.73
-      //   claude-opus-5              2.15          4.27
-      //   claude-sonnet-5              —           9.73
-      //   claude-fable-5               —           7.92
-      //
-      // Confirmed by a Gemini-judged cross-check, so it is not self-preference.
-      // Note the shape: Sonnet and Fable both land with Gemini, so this is not
-      // "Claude beats Gemini" — it is Opus-tier reasoning beating everything
-      // else at holding a multi-trade scope in view. There is no cheaper
-      // version of the win. See functions/scripts/bakeoff/imageModelAB.ts.
-      //
-      // Completeness is what the quote lives on: the pipeline already prices
-      // BETTER than an unguided model (0.88x of true cost vs 1.18x), and still
-      // lost every head-to-head because it left ~5 materials a job off the page.
-      //
-      // Floorplan measurement is NOT affected — callGeminiForBlindTakeoff is a
-      // separate pass and stays on Gemini, which is deliberate: plan drawings
-      // were only 4 of 63 photo-bearing quotes in the corpus, far too few to
-      // move that path on.
-      let parsed: any | null = null;
-      let primaryError: Error | null = null;
-
-      if (anthropicApiKey) {
-        try {
-          parsed = await callClaudeForMaterials(anthropicApiKey, finalPrompt, attachments);
-        } catch (err: any) {
-          primaryError = err;
-          console.warn('Claude primary call failed, falling back to Gemini:', err.message);
-        }
-      }
-
-      // Fallback to Gemini 3 Pro.
-      if (!parsed) {
-        if (!geminiApiKey) {
-          throw primaryError || new Error('Claude failed and no Gemini fallback key configured');
-        }
-        try {
-          parsed = await callGeminiForMaterials(geminiApiKey, finalPrompt, attachments);
-        } catch (fallbackErr: any) {
-          // Log full errors server-side; return short summary to client
-          console.error('Claude primary error:', primaryError?.message);
-          console.error('Gemini fallback error:', fallbackErr?.message);
-          const summarize = (msg: string): string => {
-            if (!msg) return 'unknown';
-            const m = msg.match(/returned (\d{3})/);
-            const status = m ? m[1] : '';
-            if (status === '429' || /quota|rate.?limit|RESOURCE_EXHAUSTED/i.test(msg)) return `${status || '429'} quota exceeded`;
-            if (status === '400' && /credit balance/i.test(msg)) return '400 out of credit';
-            if (status === '401' || status === '403') return `${status} auth denied`;
-            if (status === '500' || status === '503') return `${status} unavailable`;
-            return status ? `${status} error` : msg.slice(0, 60);
-          };
-          // Label each provider by the role it actually plays here. Claude is
-          // primary in THIS handler, so primaryError is Claude's — these were
-          // left pointing the other way when the order was inverted, which
-          // reported an outage against whichever provider was innocent.
-          const claudeShort = primaryError ? `Claude ${summarize(primaryError.message)}` : 'Claude not attempted';
-          const geminiShort = `Gemini ${summarize(fallbackErr.message)}`;
-          throw new Error(`Both LLM providers failed — ${claudeShort}; ${geminiShort}`);
-        }
-      }
-
-      // Quantity sanity-check pass — review the materials list against the
-      // job description and reduce any quantity that's clearly excessive
-      // (3-10× over for the job scope). Best-effort: if the call fails the
-      // materials list passes through unchanged.
-      const rawMaterials: any[] = Array.isArray(parsed.materials) ? parsed.materials : [];
-      let validatedMaterials = rawMaterials;
-      if (geminiApiKey && rawMaterials.length > 0) {
-        try {
-          validatedMaterials = await sanityCheckQuantities(
-            geminiApiKey,
-            jobDescription,
-            tradeContext,
-            rawMaterials,
-          );
-        } catch (err: any) {
-          console.warn('Quantity sanity-check failed, returning raw list:', err?.message);
-        }
-      }
-
-      // Phase 2 enrichment — when the LLM returned a reeceProductId, look it
-      // up in the cached catalogue and stamp price/source/itemNumber so the
-      // client's existing reecePass guard skips a redundant search. We also
-      // overwrite the AI's emitted name with the title-cased catalogue title
-      // because the LLM echoes the SAP-uppercase version straight from the
-      // prompt ("ISE SINK FLANGE MATTE BLACK"), which then ships into the
-      // quote as the displayed line item.
-      let reeceDirectMatchCount = 0;
-      if (reeceCatalogueGeneratedAt) {
-        for (const m of validatedMaterials) {
-          const id = Number(m.reeceProductId);
-          if (!Number.isFinite(id) || id <= 0) continue;
-          const cached = await getCachedReeceProductById(decodedToken.uid, id);
-          if (!cached) continue;
-          const price = cached.priceIncGst ?? cached.priceExGst;
-          if (price == null) continue;
-          m.reeceItemNumber = String(cached.productId);
-          m.pricingSource = 'api';
-          m.price = price;
-          m.unit = m.unit || cached.unit || 'each';
-          m.imageUrl = m.imageUrl || cached.imageUrl;
-          m.searchTerm = m.searchTerm || m.name;
-          // Replace the AI's title (likely uppercase echo from the prompt)
-          // with the cleanly-cased catalogue title.
-          m.name = cached.title;
-          reeceDirectMatchCount++;
-        }
-        console.log('[reece pricefile] direct LLM matches', {
-          uid: decodedToken.uid,
-          materialCount: validatedMaterials.length,
-          directMatches: reeceDirectMatchCount,
-        });
-      }
-
-      const { materials: repairedMaterials, flags: aiFlags } = validateAndRepairAiOutput(validatedMaterials);
-
-      const jobQualityTier =
-        parsed.jobQualityTier === 'budget' ||
-        parsed.jobQualityTier === 'standard' ||
-        parsed.jobQualityTier === 'premium'
-          ? parsed.jobQualityTier
-          : undefined;
-
-      let floorplanAnalysis =
-        parsed.floorplanAnalysis &&
-        typeof parsed.floorplanAnalysis === 'object' &&
-        parsed.floorplanAnalysis.detected === true
-          ? (parsed.floorplanAnalysis as FloorplanAnalysis)
-          : undefined;
-      const originalTotalAreaM2 = floorplanAnalysis?.totalAreaM2;
-
-      // Anchor-laundering fix: when the model copied the tradie-stated length
-      // into its own footprint read (making the anchor a no-op), re-measure the
-      // plan blind — images only, no job text — and merge that independent
-      // geometry in. Failure of the blind pass keeps today's behaviour.
-      if (
-        floorplanAnalysis &&
-        isAnchorLaundered(floorplanAnalysis) &&
-        attachments.length > 0 &&
-        geminiApiKey
-      ) {
-        try {
-          const blind = await callGeminiForBlindTakeoff(geminiApiKey, attachments);
-          const merged = mergeBlindTakeoff(floorplanAnalysis, blind);
-          if (merged !== floorplanAnalysis) {
-            console.log('[floorplan anchor] blind re-measure applied', {
-              uid: decodedToken.uid,
-              originalLengthM: floorplanAnalysis.footprintDims?.lengthM,
-              blindLengthM: merged.footprintDims?.lengthM,
-              originalAreaM2: floorplanAnalysis.totalAreaM2,
-              blindAreaM2: merged.totalAreaM2,
-            });
-            floorplanAnalysis = merged;
-          }
-        } catch (blindErr: any) {
-          console.warn('[floorplan anchor] blind re-measure failed', blindErr?.message);
-        }
-      }
-
-      if (floorplanAnalysis) {
-        floorplanAnalysis = applyAnchorScale(floorplanAnalysis);
-      }
-
-      // Phase 3 — reconcile material quantities (grounded on the FIRST pass's
-      // areas) with the final anchored takeoff, so the priced line items match
-      // the corrected areas. Only materials the model tagged with a geometry
-      // planBasis are touched.
-      const materialFactor = materialAnchorFactor(originalTotalAreaM2, floorplanAnalysis);
-      const anchoredMaterials =
-        typeof materialFactor === 'number'
-          ? scaleMaterialsToAnchor(repairedMaterials, materialFactor)
-          : repairedMaterials;
-      if (anchoredMaterials !== repairedMaterials) {
-        console.log('[floorplan anchor] scaled material quantities', {
-          uid: decodedToken.uid,
-          factor: materialFactor,
-          materialCount: anchoredMaterials.length,
-        });
-      }
-
-      recordMaterialsRecommend({
-        uid: decodedToken.uid,
-        success: true,
-        latencyMs: Date.now() - t0,
-      }).catch(() => {});
-
-      res.status(200).json({
-        materials: anchoredMaterials,
-        estimatedHours: parsed.estimatedHours || 8,
-        jobSummary: parsed.jobSummary || '',
-        flags: aiFlags,
-        ...(jobQualityTier && { jobQualityTier }),
-        ...(floorplanAnalysis && { floorplanAnalysis }),
-        // Surfaced so the client can tell a "plan too big / unreadable" run
-        // from a genuinely plan-less one instead of silently pricing blind.
-        ...(dropped.length > 0 && { droppedAttachments: dropped }),
-      });
+      res.status(200).json(await analyzeJobDescriptionCore(decodedToken.uid, req.body));
     } catch (error: any) {
-      recordMaterialsRecommend({
-        uid: decodedToken.uid,
-        success: false,
-        latencyMs: Date.now() - t0,
-      }).catch(() => {});
-
-      const userEmail = await getUserEmail(decodedToken.uid);
-      sendMaterialListErrorEmail(
-        userEmail || '',
-        decodedToken.uid,
-        req.body.jobDescription || '',
-        error.message,
-      ).catch(() => {});
-
-      res.status(500).json({ error: error.message });
+      res.status(error instanceof BadRequestError ? 400 : 500).json({ error: error.message });
     }
   });
 });
@@ -2602,6 +2639,98 @@ async function callClaudeLiteJson(apiKey: string, prompt: string): Promise<any> 
 }
 
 
+/**
+ * One reconcile batch (≤ 50 items). Shared by the HTTP handler and the
+ * server-side pricing run. The 50-item cap is mirrored by the client and the
+ * shared pipeline (RECONCILE_MAX_ITEMS_PER_REQUEST) — keep them in step.
+ */
+async function reconcilePricedMaterialsCore(input: unknown): Promise<any[]> {
+  const { items, jobName, jobDescription } = input as {
+    items: Array<{
+      id: string;
+      name: string;
+      requirement: number;
+      requirementUnit: string;
+      // Top-N ranked candidates from the price search. Reconciliation
+      // picks the best fit by chosenIndex (or rejects all of them).
+      candidates: Array<{
+        name?: string;
+        price: number;
+        url?: string;
+        description?: string;
+      }>;
+    }>;
+    jobName?: string;
+    jobDescription?: string;
+  };
+
+  if (!Array.isArray(items) || items.length === 0) {
+    throw new BadRequestError('Missing or empty items array');
+  }
+  if (items.length > 50) {
+    throw new BadRequestError('Too many items in single request (max 50)');
+  }
+
+  const geminiApiKey = process.env.GEMINI_API_KEY;
+  const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
+  if (!geminiApiKey && !anthropicApiKey) {
+    throw new Error('No LLM API keys configured (GEMINI_API_KEY / ANTHROPIC_API_KEY)');
+  }
+
+  const prompt = buildReconcilePrompt(items, jobName, jobDescription);
+
+  // Gemini Flash Lite primary, Claude Haiku fallback — same dual-provider
+  // pattern as analyzeJobDescription. When the QU-177971 incident hit
+  // (Gemini key revoked + model retired), this function returned 500 and
+  // the client fell back to leaving raw mass quantities in place,
+  // producing the "400 packs of concrete" bug. Having a second provider
+  // keeps the pricing pipeline working through single-vendor outages.
+  //
+  // An Opus-primary reconcile was BUILT and then not shipped (1 Sep 2026):
+  // three verification runs on the same five real quotes could not
+  // reproduce the harness result that motivated it — the claude-candidates
+  // arm itself swung 5/8 → 2/5 → 3/5 → 0/5 sendable across runs with
+  // unchanged code, so the apparent gain was judge/generation variance,
+  // not the model tier. Do not re-ship it without a paired measurement
+  // large enough to clear that noise floor (see scripts/bakeoff).
+  let parsed: any | null = null;
+  let primaryError: Error | null = null;
+  if (geminiApiKey) {
+    try {
+      parsed = await callGeminiLiteJson(geminiApiKey, prompt);
+    } catch (err: any) {
+      primaryError = err;
+      console.warn('Gemini Lite failed for reconcile, falling back to Claude Haiku:', err?.message);
+    }
+  }
+  if (!parsed) {
+    if (!anthropicApiKey) {
+      throw primaryError || new Error('Gemini failed and no Anthropic fallback key configured');
+    }
+    try {
+      parsed = await callClaudeLiteJson(anthropicApiKey, prompt);
+    } catch (fallbackErr: any) {
+      console.error('Gemini Lite primary error:', primaryError?.message);
+      console.error('Claude Haiku fallback error:', fallbackErr?.message);
+      const summarize = (msg: string): string => {
+        if (!msg) return 'unknown';
+        const m = msg.match(/returned (\d{3})/);
+        const status = m ? m[1] : '';
+        if (status === '429' || /quota|rate.?limit|RESOURCE_EXHAUSTED/i.test(msg)) return `${status || '429'} quota exceeded`;
+        if (status === '400' && /credit balance/i.test(msg)) return '400 out of credit';
+        if (status === '401' || status === '403') return `${status} auth denied`;
+        if (status === '500' || status === '503') return `${status} unavailable`;
+        return status ? `${status} error` : msg.slice(0, 60);
+      };
+      const geminiShort = primaryError ? `Gemini ${summarize(primaryError.message)}` : 'Gemini not attempted';
+      const claudeShort = `Claude ${summarize(fallbackErr.message)}`;
+      throw new Error(`Both LLM providers failed — ${geminiShort}; ${claudeShort}`);
+    }
+  }
+
+  return Array.isArray(parsed.results) ? parsed.results : [];
+}
+
 export const reconcilePricedMaterials = functions.runWith({ timeoutSeconds: 120 }).https.onRequest((req, res) => {
   corsHandler(req, res, async () => {
     if (req.method !== 'POST') {
@@ -2613,97 +2742,11 @@ export const reconcilePricedMaterials = functions.runWith({ timeoutSeconds: 120 
     if (!decodedToken) return;
 
     try {
-      const { items, jobName, jobDescription } = req.body as {
-        items: Array<{
-          id: string;
-          name: string;
-          requirement: number;
-          requirementUnit: string;
-          // Top-N ranked candidates from the price search. Reconciliation
-          // picks the best fit by chosenIndex (or rejects all of them).
-          candidates: Array<{
-            name?: string;
-            price: number;
-            url?: string;
-            description?: string;
-          }>;
-        }>;
-        jobName?: string;
-        jobDescription?: string;
-      };
-
-      if (!Array.isArray(items) || items.length === 0) {
-        res.status(400).json({ error: 'Missing or empty items array' });
-        return;
-      }
-      if (items.length > 50) {
-        res.status(400).json({ error: 'Too many items in single request (max 50)' });
-        return;
-      }
-
-      const geminiApiKey = process.env.GEMINI_API_KEY;
-      const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
-      if (!geminiApiKey && !anthropicApiKey) {
-        res.status(500).json({ error: 'No LLM API keys configured (GEMINI_API_KEY / ANTHROPIC_API_KEY)' });
-        return;
-      }
-
-      const prompt = buildReconcilePrompt(items, jobName, jobDescription);
-
-      // Gemini Flash Lite primary, Claude Haiku fallback — same dual-provider
-      // pattern as analyzeJobDescription. When the QU-177971 incident hit
-      // (Gemini key revoked + model retired), this function returned 500 and
-      // the client fell back to leaving raw mass quantities in place,
-      // producing the "400 packs of concrete" bug. Having a second provider
-      // keeps the pricing pipeline working through single-vendor outages.
-      //
-      // An Opus-primary reconcile was BUILT and then not shipped (1 Sep 2026):
-      // three verification runs on the same five real quotes could not
-      // reproduce the harness result that motivated it — the claude-candidates
-      // arm itself swung 5/8 → 2/5 → 3/5 → 0/5 sendable across runs with
-      // unchanged code, so the apparent gain was judge/generation variance,
-      // not the model tier. Do not re-ship it without a paired measurement
-      // large enough to clear that noise floor (see scripts/bakeoff).
-      let parsed: any | null = null;
-      let primaryError: Error | null = null;
-      if (geminiApiKey) {
-        try {
-          parsed = await callGeminiLiteJson(geminiApiKey, prompt);
-        } catch (err: any) {
-          primaryError = err;
-          console.warn('Gemini Lite failed for reconcile, falling back to Claude Haiku:', err?.message);
-        }
-      }
-      if (!parsed) {
-        if (!anthropicApiKey) {
-          throw primaryError || new Error('Gemini failed and no Anthropic fallback key configured');
-        }
-        try {
-          parsed = await callClaudeLiteJson(anthropicApiKey, prompt);
-        } catch (fallbackErr: any) {
-          console.error('Gemini Lite primary error:', primaryError?.message);
-          console.error('Claude Haiku fallback error:', fallbackErr?.message);
-          const summarize = (msg: string): string => {
-            if (!msg) return 'unknown';
-            const m = msg.match(/returned (\d{3})/);
-            const status = m ? m[1] : '';
-            if (status === '429' || /quota|rate.?limit|RESOURCE_EXHAUSTED/i.test(msg)) return `${status || '429'} quota exceeded`;
-            if (status === '400' && /credit balance/i.test(msg)) return '400 out of credit';
-            if (status === '401' || status === '403') return `${status} auth denied`;
-            if (status === '500' || status === '503') return `${status} unavailable`;
-            return status ? `${status} error` : msg.slice(0, 60);
-          };
-          const geminiShort = primaryError ? `Gemini ${summarize(primaryError.message)}` : 'Gemini not attempted';
-          const claudeShort = `Claude ${summarize(fallbackErr.message)}`;
-          throw new Error(`Both LLM providers failed — ${geminiShort}; ${claudeShort}`);
-        }
-      }
-
-      const results = Array.isArray(parsed.results) ? parsed.results : [];
+      const results = await reconcilePricedMaterialsCore(req.body);
       res.status(200).json({ results });
     } catch (error: any) {
       console.error('reconcilePricedMaterials error:', error?.message);
-      res.status(500).json({ error: error?.message || 'Reconciliation failed' });
+      res.status(error instanceof BadRequestError ? 400 : 500).json({ error: error?.message || 'Reconciliation failed' });
     }
   });
 });
@@ -3103,6 +3146,117 @@ function normaliseEstimatePackUnit(raw: string): string | undefined {
   return map[t];
 }
 
+/**
+ * The general-knowledge price estimator for one material. Shared by the HTTP
+ * handler and the server-side pricing run.
+ */
+async function estimateMaterialPriceCore(
+  materialName: unknown,
+  hardwareStoreUrls: unknown,
+): Promise<{ price: number | null; productName?: string; packSize?: number; packUnit?: string; store?: string; url?: string }> {
+  if (!isNonEmptyString(materialName)) {
+    throw new BadRequestError('Missing or invalid materialName');
+  }
+  if (materialName.length > 500) {
+    throw new BadRequestError('materialName exceeds maximum length');
+  }
+
+  // Get API key from Firebase config
+  const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
+
+  if (!anthropicApiKey) {
+    throw new Error('Anthropic API key not configured');
+  }
+
+  const storeList = (Array.isArray(hardwareStoreUrls) ? hardwareStoreUrls : []).join(', ');
+
+  const prompt = buildEstimatorPrompt(materialName, storeList);
+
+  // One retry on a transient failure. This estimator is the LAST real
+  // price source before the nominal placeholder, and it runs with no
+  // second provider — a single 429 or connection reset here is how a
+  // 14kW ducted system shipped at $25 in one run and $7,500 in the next.
+  let response: any;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': anthropicApiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        // Current model, not a year-old pin. max_tokens raised because
+        // Sonnet 5 thinks by default and 500 tokens truncated the answer
+        // after the thinking — the text-block parse below is already safe.
+        model: 'claude-sonnet-5',
+        max_tokens: 4000,
+        messages: [
+          {
+            role: 'user',
+            content: prompt,
+          },
+        ],
+      }),
+    });
+      if (response.status === 429 || response.status >= 500) {
+        if (attempt === 2) break;
+        await new Promise((r) => setTimeout(r, 3000));
+        continue;
+      }
+      break;
+    } catch (err: any) {
+      const connectionLevel = /ECONNRESET|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|socket hang up|network|fetch failed/i.test(
+        String(err?.message || err),
+      );
+      if (!connectionLevel || attempt === 2) throw err;
+      await new Promise((r) => setTimeout(r, 3000));
+    }
+  }
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`API returned ${response.status}: ${errorText}`);
+  }
+
+  const data = await response.json();
+
+  let textContent = '';
+  if (data.content && Array.isArray(data.content)) {
+    const textBlock = data.content.find((block: any) => block.type === 'text');
+    if (textBlock) {
+      textContent = textBlock.text;
+    }
+  }
+
+  if (!textContent) {
+    throw new Error('No text content in response');
+  }
+
+  let jsonStr = textContent.trim();
+  if (jsonStr.startsWith('```json')) {
+    jsonStr = jsonStr.replace(/```json\n?/, '').replace(/\n?```$/, '');
+  } else if (jsonStr.startsWith('```')) {
+    jsonStr = jsonStr.replace(/```\n?/, '').replace(/\n?```$/, '');
+  }
+
+  const result = JSON.parse(jsonStr);
+
+  // packSize/packUnit say what ONE purchase contains. Dropping them here
+  // left the client with a bare price and no way to tell a $45.90 BAG of
+  // adhesive from $45.90 per kg, so it multiplied by the requirement.
+  const packSize = Number(result.packSize);
+  return {
+    price: result.price || null,
+    productName: result.productName,
+    packSize: Number.isFinite(packSize) && packSize > 0 ? packSize : undefined,
+    packUnit: typeof result.packUnit === 'string' ? normaliseEstimatePackUnit(result.packUnit) : undefined,
+    store: result.store || 'Hardware Store (AI estimated)',
+    url: undefined,
+  };
+}
+
 export const searchMaterialPrice = functions.https.onRequest((req, res) => {
   corsHandler(req, res, async () => {
     if (req.method !== 'POST') {
@@ -3115,114 +3269,9 @@ export const searchMaterialPrice = functions.https.onRequest((req, res) => {
 
     try {
       const { materialName, hardwareStoreUrls } = req.body;
-
-      if (!isNonEmptyString(materialName)) {
-        res.status(400).json({ error: 'Missing or invalid materialName' });
-        return;
-      }
-      if (materialName.length > 500) {
-        res.status(400).json({ error: 'materialName exceeds maximum length' });
-        return;
-      }
-
-      // Get API key from Firebase config
-      const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
-
-      if (!anthropicApiKey) {
-        res.status(500).json({ error: 'Anthropic API key not configured' });
-        return;
-      }
-
-      const storeList = (hardwareStoreUrls || []).join(', ');
-
-      const prompt = buildEstimatorPrompt(materialName, storeList);
-
-      // One retry on a transient failure. This estimator is the LAST real
-      // price source before the nominal placeholder, and it runs with no
-      // second provider — a single 429 or connection reset here is how a
-      // 14kW ducted system shipped at $25 in one run and $7,500 in the next.
-      let response: any;
-      for (let attempt = 1; attempt <= 2; attempt++) {
-        try {
-    response = await fetch('https://api.anthropic.com/v1/messages', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-api-key': anthropicApiKey,
-            'anthropic-version': '2023-06-01',
-          },
-          body: JSON.stringify({
-            // Current model, not a year-old pin. max_tokens raised because
-            // Sonnet 5 thinks by default and 500 tokens truncated the answer
-            // after the thinking — the text-block parse below is already safe.
-            model: 'claude-sonnet-5',
-            max_tokens: 4000,
-            messages: [
-              {
-                role: 'user',
-                content: prompt,
-              },
-            ],
-          }),
-        });
-          if (response.status === 429 || response.status >= 500) {
-            if (attempt === 2) break;
-            await new Promise((r) => setTimeout(r, 3000));
-            continue;
-          }
-          break;
-        } catch (err: any) {
-          const connectionLevel = /ECONNRESET|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|socket hang up|network|fetch failed/i.test(
-            String(err?.message || err),
-          );
-          if (!connectionLevel || attempt === 2) throw err;
-          await new Promise((r) => setTimeout(r, 3000));
-        }
-      }
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`API returned ${response.status}: ${errorText}`);
-      }
-
-      const data = await response.json();
-
-      let textContent = '';
-      if (data.content && Array.isArray(data.content)) {
-        const textBlock = data.content.find((block: any) => block.type === 'text');
-        if (textBlock) {
-          textContent = textBlock.text;
-        }
-      }
-
-      if (!textContent) {
-        res.status(500).json({ error: 'No text content in response' });
-        return;
-      }
-
-      let jsonStr = textContent.trim();
-      if (jsonStr.startsWith('```json')) {
-        jsonStr = jsonStr.replace(/```json\n?/, '').replace(/\n?```$/, '');
-      } else if (jsonStr.startsWith('```')) {
-        jsonStr = jsonStr.replace(/```\n?/, '').replace(/\n?```$/, '');
-      }
-
-      const result = JSON.parse(jsonStr);
-
-      // packSize/packUnit say what ONE purchase contains. Dropping them here
-      // left the client with a bare price and no way to tell a $45.90 BAG of
-      // adhesive from $45.90 per kg, so it multiplied by the requirement.
-      const packSize = Number(result.packSize);
-      res.status(200).json({
-        price: result.price || null,
-        productName: result.productName,
-        packSize: Number.isFinite(packSize) && packSize > 0 ? packSize : undefined,
-        packUnit: typeof result.packUnit === 'string' ? normaliseEstimatePackUnit(result.packUnit) : undefined,
-        store: result.store || 'Hardware Store (AI estimated)',
-        url: undefined,
-      });
+      res.status(200).json(await estimateMaterialPriceCore(materialName, hardwareStoreUrls));
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(error instanceof BadRequestError ? 400 : 500).json({ error: error.message });
     }
   });
 });
@@ -4069,6 +4118,154 @@ function extractReeceImageUrl(product: any): string | null {
  * Search for a product in Reece catalog using the calling user's customer
  * token. Returns trade-discounted pricing inline in the product result.
  */
+/**
+ * Search Reece for one product name — the user's cached price file first,
+ * then the live product gateway with progressively looser phrasings. Returns
+ * the wire shape the app's reeceApi client expects (product/products, or an
+ * error marker). Shared by the HTTP handler and the server-side pricing run.
+ */
+async function searchReeceProductCore(uid: string, productName: string): Promise<any> {
+  try {
+    const token = await getReeceAuthToken();
+    if (!token) {
+      return { product: null };
+    }
+
+    const userToken = await getReeceCustomerToken(uid);
+    if (!userToken) {
+      return { product: null, error: 'reece_not_connected' };
+    }
+
+    // Fast path — search the user's cached price-file index instead of
+    // round-tripping to Reece. Hits return identical wire shape so the
+    // client can't tell the difference.
+    const local = await searchLocalCatalogue(uid, productName, 5);
+    if (local && local.products.length > 0) {
+      const _debug = {
+        query: productName,
+        source: 'local-cache' as const,
+        generatedAt: local.generatedAt,
+        productCount: local.productCount,
+        topTitle: local.product?.description ?? null,
+        topProductId: local.product?.itemNumber ?? null,
+        topUnitPriceIncGst: local.product?.unitPriceIncludingGst ?? null,
+        topUnitPriceExGst: local.product?.unitPriceExcludingGst ?? null,
+        imageUrl: local.product?.imageUrl ?? null,
+      };
+      console.log('[reece search]', JSON.stringify({ uid, ..._debug }));
+      return { product: local.product, products: local.products, _debug };
+    }
+
+    // Reece's search is strict token-AND, so a query whose noun-phrase is
+    // surrounded by brand prefix or trailing size/color descriptors
+    // ("Atomik Priming Fluid PVC Clear 500ml") returns 0 even when Reece
+    // sells the thing. Generate variants by trimming tokens from the
+    // front, back, and both ends, plus the existing last-N anchors. Try
+    // them in order, stop at the first variant that returns hits.
+    const tokens = productName.trim().split(/\s+/);
+    const n = tokens.length;
+    const candidates = [productName];
+    if (n >= 4) {
+      candidates.push(tokens.slice(0, -1).join(' ')); // drop trailing descriptor
+      candidates.push(tokens.slice(1).join(' '));      // drop leading brand prefix
+      candidates.push(tokens.slice(1, -1).join(' '));  // drop both ends
+    }
+    if (n >= 4) candidates.push(tokens.slice(-3).join(' ')); // noun-tail (3)
+    if (n >= 3) candidates.push(tokens.slice(-2).join(' ')); // noun-tail (2)
+    if (n >= 3) candidates.push(tokens.slice(0, 2).join(' ')); // noun-head (2)
+    const variants = Array.from(new Set(candidates));
+
+    const fetchVariant = (variant: string) =>
+      fetch(
+        `${REECE_API_BASE_URL}/${REECE_REGION}/product-gateway/search?searchPhrase=${encodeURIComponent(variant)}&pageNumber=1&pageSize=5`,
+        {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Accept': 'application/json',
+            'Customer-Token': userToken.customerToken,
+          },
+        },
+      );
+
+    let searchData: any = null;
+    let usedVariant = productName;
+    for (const variant of variants) {
+      const response = await fetchVariant(variant);
+      if (response.status === 401) {
+        await clearReeceConnection(uid, 'search_401');
+        return { product: null, error: 'reece_reauth_required' };
+      }
+      if (!response.ok) {
+        await response.text();
+        continue;
+      }
+      const data = await response.json();
+      if (data.products && data.products.length > 0) {
+        searchData = data;
+        usedVariant = variant;
+        break;
+      }
+      searchData = data; // keep last (empty) so _debug has a shape if every variant misses
+    }
+
+    // Temporary diagnostic returned inline in the response — Cloud Logging
+    // was swallowing console.log for this function, so we pass the shape
+    // through to the client where it can hit Metro. Drop once Reece
+    // coverage is dialed in.
+    const _debug = {
+      query: productName,
+      usedVariant,
+      retried: usedVariant !== productName,
+      productCount: searchData?.products?.length ?? 0,
+      topTitle: searchData?.products?.[0]?.productTitle ?? null,
+      topProductId: searchData?.products?.[0]?.productId ?? null,
+      topHasUom: !!searchData?.products?.[0]?.unitOfMeasures?.[0],
+      topUnitPriceIncGst: searchData?.products?.[0]?.unitOfMeasures?.[0]?.unitPriceIncludingGST ?? null,
+      topUnitPriceExGst: searchData?.products?.[0]?.unitOfMeasures?.[0]?.unitPriceExcludingGST ?? null,
+      topProductKeys: searchData?.products?.[0] ? Object.keys(searchData.products[0]) : null,
+      topProductImages: searchData?.products?.[0]?.productImages ?? null,
+    };
+
+    // Mirror the diagnostic into Cloud Logging too so we can audit a whole
+    // batch from the dashboard without round-tripping through Metro.
+    console.log('[reece search]', JSON.stringify({
+      uid,
+      ..._debug,
+    }));
+
+    if (searchData?.products && searchData.products.length > 0) {
+      // Return up to 5 candidates so the reconciliation pass has options
+      // to pick the best fit / reject category mismatches. The first
+      // candidate is also surfaced as `product` for backward compat with
+      // callers that just want the top hit.
+      const mapped = searchData.products.slice(0, 5).map((p: any) => {
+        const uom = p.unitOfMeasures?.[0];
+        return {
+          itemNumber: String(p.productId),
+          description: p.productTitle,
+          brand: p.brand,
+          category: p.category,
+          unitOfMeasure: uom?.pack || null,
+          unitPriceExcludingGst: uom?.unitPriceExcludingGST ?? null,
+          unitPriceIncludingGst: uom?.unitPriceIncludingGST ?? null,
+          imageUrl: extractReeceImageUrl(p),
+        };
+      });
+
+      return {
+        product: mapped[0],
+        products: mapped,
+        _debug: { ..._debug, imageExtracted: !!mapped[0].imageUrl, imageUrl: mapped[0].imageUrl },
+      };
+    } else {
+      return { product: null, products: [], _debug };
+    }
+  } catch (error: any) {
+    return { product: null };
+  }
+}
+
 export const searchReeceProduct = functions.https.onRequest((req, res) => {
   corsHandler(req, res, async () => {
     if (req.method !== 'POST') {
@@ -4079,156 +4276,12 @@ export const searchReeceProduct = functions.https.onRequest((req, res) => {
     const decodedToken = await verifyAuthWithRateLimit(req, res);
     if (!decodedToken) return;
 
-    try {
-      const { productName } = req.body;
-
-      if (!isNonEmptyString(productName)) {
-        res.status(400).json({ error: 'Missing or invalid productName' });
-        return;
-      }
-
-      const token = await getReeceAuthToken();
-      if (!token) {
-        res.status(200).json({ product: null });
-        return;
-      }
-
-      const userToken = await getReeceCustomerToken(decodedToken.uid);
-      if (!userToken) {
-        res.status(200).json({ product: null, error: 'reece_not_connected' });
-        return;
-      }
-
-      // Fast path — search the user's cached price-file index instead of
-      // round-tripping to Reece. Hits return identical wire shape so the
-      // client can't tell the difference.
-      const local = await searchLocalCatalogue(decodedToken.uid, productName, 5);
-      if (local && local.products.length > 0) {
-        const _debug = {
-          query: productName,
-          source: 'local-cache' as const,
-          generatedAt: local.generatedAt,
-          productCount: local.productCount,
-          topTitle: local.product?.description ?? null,
-          topProductId: local.product?.itemNumber ?? null,
-          topUnitPriceIncGst: local.product?.unitPriceIncludingGst ?? null,
-          topUnitPriceExGst: local.product?.unitPriceExcludingGst ?? null,
-          imageUrl: local.product?.imageUrl ?? null,
-        };
-        console.log('[reece search]', JSON.stringify({ uid: decodedToken.uid, ..._debug }));
-        res.status(200).json({ product: local.product, products: local.products, _debug });
-        return;
-      }
-
-      // Reece's search is strict token-AND, so a query whose noun-phrase is
-      // surrounded by brand prefix or trailing size/color descriptors
-      // ("Atomik Priming Fluid PVC Clear 500ml") returns 0 even when Reece
-      // sells the thing. Generate variants by trimming tokens from the
-      // front, back, and both ends, plus the existing last-N anchors. Try
-      // them in order, stop at the first variant that returns hits.
-      const tokens = productName.trim().split(/\s+/);
-      const n = tokens.length;
-      const candidates = [productName];
-      if (n >= 4) {
-        candidates.push(tokens.slice(0, -1).join(' ')); // drop trailing descriptor
-        candidates.push(tokens.slice(1).join(' '));      // drop leading brand prefix
-        candidates.push(tokens.slice(1, -1).join(' '));  // drop both ends
-      }
-      if (n >= 4) candidates.push(tokens.slice(-3).join(' ')); // noun-tail (3)
-      if (n >= 3) candidates.push(tokens.slice(-2).join(' ')); // noun-tail (2)
-      if (n >= 3) candidates.push(tokens.slice(0, 2).join(' ')); // noun-head (2)
-      const variants = Array.from(new Set(candidates));
-
-      const fetchVariant = (variant: string) =>
-        fetch(
-          `${REECE_API_BASE_URL}/${REECE_REGION}/product-gateway/search?searchPhrase=${encodeURIComponent(variant)}&pageNumber=1&pageSize=5`,
-          {
-            method: 'GET',
-            headers: {
-              'Authorization': `Bearer ${token}`,
-              'Accept': 'application/json',
-              'Customer-Token': userToken.customerToken,
-            },
-          },
-        );
-
-      let searchData: any = null;
-      let usedVariant = productName;
-      for (const variant of variants) {
-        const response = await fetchVariant(variant);
-        if (response.status === 401) {
-          await clearReeceConnection(decodedToken.uid, 'search_401');
-          res.status(200).json({ product: null, error: 'reece_reauth_required' });
-          return;
-        }
-        if (!response.ok) {
-          await response.text();
-          continue;
-        }
-        const data = await response.json();
-        if (data.products && data.products.length > 0) {
-          searchData = data;
-          usedVariant = variant;
-          break;
-        }
-        searchData = data; // keep last (empty) so _debug has a shape if every variant misses
-      }
-
-      // Temporary diagnostic returned inline in the response — Cloud Logging
-      // was swallowing console.log for this function, so we pass the shape
-      // through to the client where it can hit Metro. Drop once Reece
-      // coverage is dialed in.
-      const _debug = {
-        query: productName,
-        usedVariant,
-        retried: usedVariant !== productName,
-        productCount: searchData?.products?.length ?? 0,
-        topTitle: searchData?.products?.[0]?.productTitle ?? null,
-        topProductId: searchData?.products?.[0]?.productId ?? null,
-        topHasUom: !!searchData?.products?.[0]?.unitOfMeasures?.[0],
-        topUnitPriceIncGst: searchData?.products?.[0]?.unitOfMeasures?.[0]?.unitPriceIncludingGST ?? null,
-        topUnitPriceExGst: searchData?.products?.[0]?.unitOfMeasures?.[0]?.unitPriceExcludingGST ?? null,
-        topProductKeys: searchData?.products?.[0] ? Object.keys(searchData.products[0]) : null,
-        topProductImages: searchData?.products?.[0]?.productImages ?? null,
-      };
-
-      // Mirror the diagnostic into Cloud Logging too so we can audit a whole
-      // batch from the dashboard without round-tripping through Metro.
-      console.log('[reece search]', JSON.stringify({
-        uid: decodedToken.uid,
-        ..._debug,
-      }));
-
-      if (searchData?.products && searchData.products.length > 0) {
-        // Return up to 5 candidates so the reconciliation pass has options
-        // to pick the best fit / reject category mismatches. The first
-        // candidate is also surfaced as `product` for backward compat with
-        // callers that just want the top hit.
-        const mapped = searchData.products.slice(0, 5).map((p: any) => {
-          const uom = p.unitOfMeasures?.[0];
-          return {
-            itemNumber: String(p.productId),
-            description: p.productTitle,
-            brand: p.brand,
-            category: p.category,
-            unitOfMeasure: uom?.pack || null,
-            unitPriceExcludingGst: uom?.unitPriceExcludingGST ?? null,
-            unitPriceIncludingGst: uom?.unitPriceIncludingGST ?? null,
-            imageUrl: extractReeceImageUrl(p),
-          };
-        });
-
-        res.status(200).json({
-          product: mapped[0],
-          products: mapped,
-          _debug: { ..._debug, imageExtracted: !!mapped[0].imageUrl, imageUrl: mapped[0].imageUrl },
-        });
-      } else {
-        res.status(200).json({ product: null, products: [], _debug });
-      }
-    } catch (error: any) {
-      res.status(200).json({ product: null });
+    const { productName } = req.body;
+    if (!isNonEmptyString(productName)) {
+      res.status(400).json({ error: 'Missing or invalid productName' });
+      return;
     }
+    res.status(200).json(await searchReeceProductCore(decodedToken.uid, productName));
   });
 });
 
@@ -12454,6 +12507,47 @@ export const getXeroContacts = functions.https.onRequest((req, res) => {
 const SCRAPER_URL = process.env.BUNNINGS_SCRAPER_URL || '';
 const SCRAPER_API_KEY = process.env.BUNNINGS_SCRAPER_API_KEY || '';
 
+/**
+ * Direct scraper calls for the server-side pricing run. The HTTP proxies
+ * below serve the phone; the run is already inside the trust boundary, so it
+ * skips the proxy and talks to the scraper the same way the proxies do.
+ * Error messages carry the HTTP status so the shared retry helper can tell a
+ * transient 503 from a permanent 401.
+ */
+async function scraperBatchSearchDirect(searches: BatchSearchRequest[]): Promise<BatchSearchResponseItem[]> {
+  if (!SCRAPER_URL || !SCRAPER_API_KEY) throw new Error('Scraper not configured');
+  const response = await fetch(`${SCRAPER_URL}/api/batch-search`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-API-Key': SCRAPER_API_KEY },
+    body: JSON.stringify({ searches }),
+  });
+  if (!response.ok) {
+    await response.text();
+    throw new Error(`Batch scraper returned ${response.status}`);
+  }
+  const data: any = await response.json();
+  if (!data?.success || !Array.isArray(data.results)) {
+    throw new Error(data?.error || 'Batch search failed');
+  }
+  return data.results as BatchSearchResponseItem[];
+}
+
+async function scraperSearchDirect(searchTerm: string, limit: number): Promise<ScraperProduct[]> {
+  if (!SCRAPER_URL || !SCRAPER_API_KEY) throw new Error('Scraper not configured');
+  const response = await fetch(`${SCRAPER_URL}/api/search`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-API-Key': SCRAPER_API_KEY },
+    body: JSON.stringify({ searchTerm, limit, sortBy: 'relevance' }),
+  });
+  if (!response.ok) {
+    await response.text();
+    throw new Error(`Scraper returned ${response.status}`);
+  }
+  const data: any = await response.json();
+  if (!data?.success || !Array.isArray(data.results)) throw new Error(data?.error || 'Search failed');
+  return rankCandidates(data.results as ScraperProduct[]).slice(0, limit);
+}
+
 export const bunningsScraperSearch = functions.runWith({ timeoutSeconds: 120 }).https.onRequest((req, res) => {
   const corsHandler = cors({ origin: true });
   corsHandler(req, res, async () => {
@@ -15375,3 +15469,92 @@ export const requestPasswordReset = functions.https.onCall(async (data) => {
 
   return { ok: true };
 });
+
+// ============================================
+// Server-side pricing run (Mate's "Price it up")
+// ============================================
+// See pricingRun.ts. The pipeline is shared/pricing/pipeline.ts — the same
+// code the phone runs — and these are its server-side dependencies, wired to
+// the same internals the HTTP handlers above use. A run on the server prices
+// exactly as a run on the phone would; it just doesn't die when the phone
+// locks.
+
+function serverPipelineDeps(uid: string): PipelineDeps {
+  const loadFavorites = async (): Promise<Record<string, FavoriteProductMapping>> => {
+    const snap = await db.collection(`users/${uid}/materialFavorites`).get();
+    const out: Record<string, FavoriteProductMapping> = {};
+    for (const d of snap.docs) {
+      // `savedAt` is a write stamp, not part of the mapping — the app drops
+      // it on its own cloud pull too.
+      const { savedAt: _savedAt, ...mapping } = d.data() as FavoriteProductMapping & { savedAt?: string };
+      out[d.id] = mapping as FavoriteProductMapping;
+    }
+    return out;
+  };
+  return {
+    analyzeJobDescription: async (request) =>
+      normaliseAnalyzeResponse(await analyzeJobDescriptionCore(uid, request)),
+    reconcilePricedMaterials: (items, context) =>
+      reconcilePricedMaterialsCore({ items, jobName: context.jobName, jobDescription: context.jobDescription }),
+    estimateMaterialPrice: async (term, stores) => {
+      // The phone's client swallows estimator failures into { price: null }; match it.
+      try {
+        return normaliseEstimateResponse(await estimateMaterialPriceCore(term, stores));
+      } catch {
+        return { price: null };
+      }
+    },
+    searchBunningsCandidates: async (term) => {
+      try {
+        return await withScraperRetry(() => scraperSearchDirect(term, 5));
+      } catch {
+        return [];
+      }
+    },
+    batchSearchBunnings: (searches) => scraperBatchSearchDirect(searches),
+    searchReeceCandidates: async (term) => {
+      try {
+        return mapReeceSearchResponse(await searchReeceProductCore(uid, term));
+      } catch {
+        return [];
+      }
+    },
+    isReeceConnected: async () => (await db.doc(`users/${uid}/integrations/reece`).get()).exists,
+    loadSupplierGroups: async () => {
+      const snap = await db.collection(`users/${uid}/supplierGroups`).get();
+      return snap.docs
+        .map((d) => d.data() as SupplierGroup)
+        .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+    },
+    loadFavorites,
+    loadPersonalRates: async () =>
+      Object.values(await loadFavorites()).filter((f) => f.isPersonalRate === true),
+    loadTemplates: async () => {
+      const snap = await db.collection(`users/${uid}/sectionTemplates`).get();
+      return snap.docs.map((d) => d.data() as SectionTemplate);
+    },
+    reportPriceFetchUsage: (summary) => {
+      applyFeatureUsagePatch(uid, buildPriceFetchPatch(summary)).catch(() => {});
+    },
+  };
+}
+
+export const onPricingRunCreated = functions
+  .runWith({ timeoutSeconds: PRICING_RUN_TIMEOUT_SECONDS, memory: '1GB' })
+  .firestore.document('users/{userId}/pricingRuns/{runId}')
+  .onCreate(async (_snap, context) => {
+    const { userId, runId } = context.params as { userId: string; runId: string };
+    const outcome = await runPricingRun({
+      store: firestorePricingRunStore({
+        db,
+        uid: userId,
+        runId,
+        notify: async (event, vars, data) => {
+          await sendAussiePush(userId, event, vars, data);
+        },
+      }),
+      deps: serverPipelineDeps(userId),
+      log: functions.logger,
+    });
+    functions.logger.info('pricing_run', { userId, runId, outcome });
+  });

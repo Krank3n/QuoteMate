@@ -17,7 +17,11 @@ export type AussieEvent =
   | 'invoice_overdue'
   | 'milestone'
   | 'inactivity'
-  | 'draft_nudge';
+  | 'draft_nudge'
+  // Mate finished (or couldn't finish) pricing a quote while the phone was
+  // away — the one push a tradie has explicitly waited for.
+  | 'quote_priced'
+  | 'quote_pricing_snag';
 
 interface MessageVariant {
   title: string;
@@ -109,6 +113,22 @@ const MESSAGE_POOL: Record<AussieEvent, MessageVariant[]> = {
     {
       title: 'Still got quotes to send?',
       body: "Haven't seen ya in a bit, mate. Your drafts are waiting whenever you're ready.",
+    },
+  ],
+  quote_priced: [
+    {
+      title: 'Quote priced up ✅',
+      body: '{job} is priced and ready for a squiz — {count} on the list.',
+    },
+    {
+      title: 'Quote priced up ✅',
+      body: "Mate's done pricing {job}. Have a look before it goes out.",
+    },
+  ],
+  quote_pricing_snag: [
+    {
+      title: 'Pricing hit a snag',
+      body: "Couldn't finish pricing {job}. Open it and tap Fetch Prices to have another go.",
     },
   ],
 };

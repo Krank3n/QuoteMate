@@ -11,6 +11,8 @@ const ALL_EVENTS: AussieEvent[] = [
   'milestone',
   'inactivity',
   'draft_nudge',
+  'quote_priced',
+  'quote_pricing_snag',
 ];
 
 /** Run a message many times so a random variant choice can't hide a bad one. */
@@ -105,6 +107,25 @@ describe('notification copy', () => {
     for (const msg of everyVariant('quote_viewed', { customer: 'Dave', job: 'Deck', amount: '' })) {
       expect(msg.body).not.toMatch(/\s{2,}/);
       expect(msg.body).toContain('Dave');
+    }
+  });
+});
+
+describe('pricing-run pushes', () => {
+  it('names the job on every variant, with or without a count', () => {
+    for (const msg of everyVariant('quote_priced', { job: 'Deck rebuild' })) {
+      expect(msg.body).toContain('Deck rebuild');
+      expect(msg.body).not.toMatch(/\{[a-zA-Z0-9_]+\}/);
+    }
+    for (const msg of everyVariant('quote_priced', { job: 'Deck rebuild', count: '14 items' })) {
+      expect(msg.body).toContain('Deck rebuild');
+    }
+  });
+
+  it('tells the tradie how to recover from a snag', () => {
+    for (const msg of everyVariant('quote_pricing_snag', { job: 'Deck rebuild' })) {
+      expect(msg.body).toContain('Deck rebuild');
+      expect(msg.body).toMatch(/Fetch Prices/);
     }
   });
 });
