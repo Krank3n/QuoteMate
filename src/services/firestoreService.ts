@@ -988,6 +988,9 @@ class FirestoreService {
           messages: conversation.messages,
           messageCount: conversation.messages.length,
           platform: require('react-native').Platform.OS,
+          // Which build the tradie was on — the store version can't say on its
+          // own once an OTA has changed the JavaScript underneath it.
+          app: require('./appIdentity').currentAppBuild(),
           syncedAt: new Date().toISOString(),
         }),
         { merge: true },
