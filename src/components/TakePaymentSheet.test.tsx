@@ -560,7 +560,7 @@ describe('TakePaymentSheet surfaces Tap to Pay configuration progress', () => {
     const { getByText } = renderSheet({ ensureSquareConnected: vi.fn(async () => true) });
 
     expect(
-      getByText('Getting Tap to Pay ready — not ready to take a card yet.'),
+      getByText('Getting Tap to Pay on iPhone ready — not ready to take a card yet.'),
     ).toBeTruthy();
   });
 
@@ -572,7 +572,7 @@ describe('TakePaymentSheet surfaces Tap to Pay configuration progress', () => {
       ensureSquareConnected: vi.fn(async () => true),
     });
 
-    expect(queryByText('Getting Tap to Pay ready — not ready to take a card yet.')).toBeNull();
+    expect(queryByText('Getting Tap to Pay on iPhone ready — not ready to take a card yet.')).toBeNull();
     expect(getByText('Tap a card or phone, or key in details.')).toBeTruthy();
   });
 

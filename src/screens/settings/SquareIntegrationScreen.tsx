@@ -143,7 +143,7 @@ export function SquareIntegrationScreen() {
         'error',
         'Setup Failed',
         error.message ||
-          'Could not open Tap to Pay setup. You can try again from this screen any time.',
+          'Could not open Tap to Pay on iPhone setup. You can try again from this screen any time.',
       );
     } finally {
       setPrimingTapToPay(false);
@@ -163,10 +163,10 @@ export function SquareIntegrationScreen() {
       'error',
       'Could not open',
       result.reason === 'offline'
-        ? 'Connect to the internet to see how Tap to Pay works.'
+        ? 'Connect to the internet to see how Tap to Pay on iPhone works.'
         : result.reason === 'busy'
           ? 'Your iPhone is busy. Try again in a moment.'
-          : 'Could not open Tap to Pay education. Try again.',
+          : 'Could not open Tap to Pay on iPhone education. Try again.',
     );
   };
 
@@ -291,7 +291,7 @@ export function SquareIntegrationScreen() {
                   buttonColor={themeColors.accent}
                   style={styles.tapToPayButton}
                 >
-                  Set up Tap to Pay on this device
+                  Set up Tap to Pay on iPhone
                 </Button>
 
                 {/* Apple req 4.3 — education stays reachable after setup.
@@ -304,7 +304,7 @@ export function SquareIntegrationScreen() {
                     textColor={themeColors.accentText}
                     style={styles.tapToPayButton}
                   >
-                    How Tap to Pay works
+                    How Tap to Pay on iPhone works
                   </Button>
                 )}
 
@@ -402,8 +402,8 @@ export function SquareIntegrationScreen() {
         onDismiss={() => setTapToPaySetupVisible(false)}
         type="info"
         icon="cellphone-nfc"
-        title="Set up Tap to Pay"
-        message="Square needs to pair Tap to Pay with this phone — one-time, about 30 seconds. Do it now so your first customer doesn't have to wait."
+        title="Set up Tap to Pay on iPhone"
+        message="Square needs to pair Tap to Pay on iPhone with this phone — one-time, about 30 seconds. Do it now so your first customer doesn't have to wait."
         primaryButtonText="Set up now"
         primaryButtonAction={handlePrimeTapToPay}
         secondaryButtonText="Later"

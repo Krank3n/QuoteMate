@@ -1121,7 +1121,7 @@ export function NewOnboardingScreen() {
                 />
                 <Title style={styles.stepTitle}>Get paid faster</Title>
                 <Paragraph style={styles.stepDescription}>
-                    Customers tap to pay or scan a QR code right on your quote. Funds settle to your Square account in 1-2 days.
+                    Customers pay by card or scan a QR code right on your quote. Funds settle to your Square account in 1-2 days.
                 </Paragraph>
             </View>
 
@@ -1145,7 +1145,7 @@ export function NewOnboardingScreen() {
                         {tapToPay.enabled && (
                             tapToPaySetup === 'done' ? (
                                 <Text style={styles.squareConnectedSubtitle}>
-                                    Tap to Pay is set up on this phone.
+                                    Tap to Pay on iPhone is set up on this phone.
                                 </Text>
                             ) : (
                                 <Button
@@ -1157,7 +1157,7 @@ export function NewOnboardingScreen() {
                                     disabled={tapToPaySetup === 'busy'}
                                     style={styles.connectSquareButton}
                                 >
-                                    Set up Tap to Pay on this phone
+                                    Set up Tap to Pay on iPhone
                                 </Button>
                             )
                         )}
@@ -1166,7 +1166,7 @@ export function NewOnboardingScreen() {
                     <>
                         <View style={styles.squareFeatureRow}>
                             <MaterialCommunityIcons name="credit-card-check-outline" size={22} color={themeColors.accentText} />
-                            <Text style={styles.squareFeatureText}>Customers tap-to-pay or scan a QR on your quote</Text>
+                            <Text style={styles.squareFeatureText}>Customers pay by card or scan a QR on your quote</Text>
                         </View>
                         <View style={styles.squareFeatureRow}>
                             <MaterialCommunityIcons name="bank-outline" size={22} color={themeColors.accentText} />

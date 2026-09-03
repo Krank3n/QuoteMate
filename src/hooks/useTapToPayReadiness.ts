@@ -40,7 +40,7 @@ export function useTapToPayReadiness(active: boolean): TapToPayReadinessState {
     readiness,
     label:
       readiness === 'preparing'
-        ? 'Getting Tap to Pay ready — not ready to take a card yet.'
+        ? 'Getting Tap to Pay on iPhone ready — not ready to take a card yet.'
         : null,
   };
 }

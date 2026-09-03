@@ -287,6 +287,9 @@ to be true *before* the videos are shot, because the videos are the evidence.
 | 3.2 | Full-screen splash modal | **Recommended only** in v1.7. The equivalent is Required via 6.2, which needs Toolkit assets |
 | 3.3 | Communicate to all eligible users at least once | ✅ same banner — shown until they accept the terms or dismiss it. v1.7 says a push "can" be used, not must |
 | 6.1 / 6.2 / 6.3 | Launch email, in-app splash, launch push | **blocked** — all three explicitly require Marketing Guide assets |
+| 2.1 | New user can discover account creation and how to access Tap to Pay on iPhone | ✅ sign-up → onboarding → Payments step (always last) → setup button |
+| 2.2 | Fully digital onboarding, in-app, completed on iPhone | ✅ every step in-app; Square OAuth opens in `SFSafariViewController` via `WebBrowser.openBrowserAsync`, not a kick-out to Safari |
+| 2.3 | Onboarding under 15 minutes for most users | ⚠️ **unverified** — 7–8 steps, every one skippable. Needs timing on a real device, not a code read |
 | 3.4 | Show how to enable at the end of onboarding | ✅ on the Payments step once Square connects |
 | 3.5 | A clear action to accept the Tap to Pay T&Cs | ✅ `linkAppleAccountIfNeeded()` wired into all three paths |
 | 3.7 / 5.3 | Button never greyed out; pressing it opens T&C acceptance | ✅ terms gate moved to press; row never disabled |

@@ -606,9 +606,9 @@ export function TakePaymentSheet({
                 // "initializing" if the tradie presses during setup.
                 (tapToPayReadiness.label ?? 'Tap a card or phone, or key in details.')
               : tapToPay.reason === 'os_too_old'
-                ? `Update to iOS ${MIN_TAP_TO_PAY_IOS_VERSION} or later to use Tap to Pay.`
+                ? `Update to iOS ${MIN_TAP_TO_PAY_IOS_VERSION} or later to use Tap to Pay on iPhone.`
                 : tapToPay.reason === 'unsupported_device'
-                  ? 'This device does not support Tap to Pay.'
+                  ? 'This device does not support Tap to Pay on iPhone.'
                   : tapToPay.reason === 'loading'
                     ? 'Checking device…'
                     : 'Not enabled for your account yet.'
