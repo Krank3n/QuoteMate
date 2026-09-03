@@ -96,15 +96,41 @@ v1.6, refreshed 26 Aug 2026. Pull the live copy; don't work from a download.
 Only after the publishing entitlement lands do you submit to App Review — which is itself a
 special review for entitlement-bearing apps.
 
-### One assumption to check before submitting
+### Both Apple documents are PUBLIC — read them, don't guess
 
-Requirement 5.10 is implemented from the summary in this file, not from the live
-checklist — apple.box.com needs a login this repo has no access to. The reading taken
-is: *a declined payment must still offer the customer a digital record*. That ships as
-an offer (not an automatic send) carrying the business name, the amount attempted, the
-time, and a plain statement that no money was taken — deliberately no decline reason,
-because the app is never told one. If the live v1.6 wording asks for something stronger
-(a receipt Square itself issues, say), this is the requirement to re-read first.
+Earlier notes in this file claimed the requirement documents needed an Apple sign-in.
+They do not. Both are marked **TIER 4 - PUBLIC** on Box and open in any browser:
+
+- App Requirements and Review — <https://apple.box.com/v/ttpoiappreviewpdf>
+- App Review Requirements Checklist — <https://apple.box.com/v/ttpoichecklist>
+
+The trap is that Box renders client-side, so anything that fetches HTML without running
+JavaScript sees an empty shell and looks like a login wall. Open them in a real browser.
+
+**Current version is v1.7 (August 2026)**, which supersedes the v1.6 an earlier pass in
+this file was written against. Differences worth knowing:
+
+- There is a whole **section 2 (Onboarding Merchants)**, 2.1–2.3, all Required —
+  including "digital onboarding should take less than 15 minutes".
+- **3.2 (splash screen) is Recommended**, not Required — but **6.2 makes an equivalent
+  splash Required at launch**, so it lands as mandatory anyway.
+- **5.5 is Conditional** ("when using iconography"), and either `wave.3.right.circle`
+  or `wave.3.right.circle.fill` is acceptable.
+- **Screen recording is acceptable for all three videos.** Apple: "a video recording
+  from another iPhone is best… Otherwise, screen recording from the same device will
+  suffice." A second device is preferred for Checkout, not mandated.
+- There is an official way to **unlink your Apple Account to re-accept the T&Cs** for
+  re-recording, linked from the checklist. Useful for reshoots.
+
+Still open on the checklist, needing an answer rather than code:
+
+- **3.8 / 3.8.1** — the T&Cs may only be accepted by an admin or otherwise authorised
+  party, and an unauthorised user must be told to contact an admin. QuoteMate is
+  single-user per account, so this is arguably satisfied inherently — but it needs a
+  stated answer, not silence.
+- **Section 6 (6.1, 6.2, 6.3)** — launch email, in-app splash and push, all Required
+  and all explicitly requiring Marketing Guide assets. This is the real toolkit
+  dependency; it is not 3.1–3.3 as earlier notes claimed.
 
 ### Shooting them: `scripts/record-tap-to-pay.sh`
 
@@ -266,7 +292,8 @@ to be true *before* the videos are shot, because the videos are the evidence.
 | 4.2 / 4.3 | Education after T&Cs, findable again in Settings | ✅ on fresh acceptance; "How Tap to Pay works" row in Square settings |
 | 5.2 | Button reachable without scrolling, top of the list | ✅ already |
 | 5.4 / 5.5 | Approved copy; SF Symbol `wave.3.right.circle` | ✅ copy via `tapToPayRowTitle`; icon via `expo-symbols` `SymbolView`, whose own `fallback` covers Android/web |
-| 5.10 | Digital receipt on approve *and* decline | ✅ approve is Square's own receipt screen; decline offers a shareable record (`buildDeclineRecord`) through the native share sheet |
+| 5.10 | Digital receipt on approve *and* decline | ✅ approve is Square's own receipt screen; decline offers a shareable record (`buildDeclineRecord`) via the native share sheet — v1.7 names "Activity views" as an accepted method, which is exactly that |
+| 5.12 | Notify the user when a transaction isn't approved and they closed the app first | ✅ `tapToPayOutcomeNotice` — a local notification armed before the tap (survives app termination) plus an immediate one when the outcome is known and the app is backgrounded |
 
 ### Australia-specific
 

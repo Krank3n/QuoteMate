@@ -34,6 +34,11 @@ import {
   classifyPaymentFailure,
   MIN_TAP_TO_PAY_IOS_VERSION,
 } from '../services/tapToPayErrors';
+import {
+  armUnseenOutcomeNotice,
+  disarmUnseenOutcomeNotice,
+  notifyUnapprovedOutcomeIfAway,
+} from '../services/tapToPayOutcomeNotice';
 import { useTapToPayEnabled } from '../hooks/useTapToPayEnabled';
 import { useTapToPayReadiness } from '../hooks/useTapToPayReadiness';
 import { dollarsToCents, centsToDollars } from '../../shared/pdf/money';
@@ -344,6 +349,11 @@ export function TakePaymentSheet({
     // Declared out here so a decline can tell the customer what was attempted
     // (Apple req 5.10) — the figure is only computed once we're inside the try.
     let chargedCents = 0;
+    // Apple req 5.12. Armed BEFORE the tap, because if the tradie kills the app
+    // mid-transaction no callback below will ever run — a scheduled local
+    // notification is the only thing that outlives the process. Cancelled on
+    // every outcome in the finally, approved ones included.
+    const unseenNoticeId = await armUnseenOutcomeNotice();
     try {
       // An in-flight deposit edit has to land first — otherwise we'd charge a
       // figure the quote doesn't know about.
@@ -392,7 +402,12 @@ export function TakePaymentSheet({
       // The three outcomes Apple treats differently. A tradie who backed out
       // wants no message at all; a declined card owes the customer a record
       // (req 5.10); an OS below the floor needs "update", not "failed" (1.4).
-      switch (classifyPaymentFailure(error)) {
+      const kind = classifyPaymentFailure(error);
+      // Req 5.12 again, for the softer case: the app is backgrounded rather
+      // than killed, so we DO know the outcome. Tell them in the notification
+      // centre, because nobody is looking at the sheet.
+      void notifyUnapprovedOutcomeIfAway(kind);
+      switch (kind) {
         case 'cancelled':
           break;
         case 'declined':
@@ -407,6 +422,7 @@ export function TakePaymentSheet({
           onError(String(error?.message || '') || 'Payment failed. Please try again.');
       }
     } finally {
+      await disarmUnseenOutcomeNotice(unseenNoticeId);
       setChargingCard(false);
     }
   };

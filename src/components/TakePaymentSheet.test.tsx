@@ -62,6 +62,26 @@ vi.mock('expo-symbols', () => ({
     return fallback ?? null;
   },
 }));
+// Apple req 5.12 — the sheet's job is to arm before the tap and disarm on every
+// outcome. What the notice itself says is covered in its own unit test.
+const notice = vi.hoisted(() => ({
+  armed: 0,
+  disarmed: [] as (string | null)[],
+  away: [] as string[],
+}));
+vi.mock('../services/tapToPayOutcomeNotice', () => ({
+  armUnseenOutcomeNotice: vi.fn(async () => {
+    notice.armed += 1;
+    return 'notice-1';
+  }),
+  disarmUnseenOutcomeNotice: vi.fn(async (id: string | null) => {
+    notice.disarmed.push(id);
+  }),
+  notifyUnapprovedOutcomeIfAway: vi.fn(async (kind: string) => {
+    notice.away.push(kind);
+    return true;
+  }),
+}));
 vi.mock('../services/storeReviewService', () => ({
   maybeRequestReview: vi.fn(async () => {}),
 }));
@@ -141,6 +161,9 @@ function renderSheet(overrides: Partial<React.ComponentProps<typeof TakePaymentS
 beforeEach(() => {
   vi.clearAllMocks();
   symbols.rendered = [];
+  notice.armed = 0;
+  notice.disarmed = [];
+  notice.away = [];
   readiness.state = 'ready';
   tapToPay.state = { enabled: false, reason: 'pending_apple' };
   store.getDocumentById.mockImplementation((id: string) => ({
@@ -679,5 +702,62 @@ describe('req 5.5 — the Tap to Pay icon', () => {
     // The mock returns `fallback`, standing in for Android/web and any iOS
     // that lacks the symbol. The row must remain usable either way.
     expect(getByText('Tap to Pay / Card Entry')).toBeTruthy();
+  });
+});
+
+describe('req 5.12 — finding out about a payment you did not see', () => {
+  it('arms the notice before the tap, so it survives the app being killed', async () => {
+    tapToPay.state = { enabled: true };
+    const { getByText } = renderSheet({ ensureSquareConnected: vi.fn(async () => true) });
+
+    fireEvent.click(getByText('Tap to Pay / Card Entry'));
+
+    await waitFor(() => expect(squarePayments.takeInAppPayment).toHaveBeenCalled());
+    expect(notice.armed).toBe(1);
+  });
+
+  it('disarms it after an APPROVED payment — the notice is about not seeing a result', async () => {
+    tapToPay.state = { enabled: true };
+    const { getByText } = renderSheet({ ensureSquareConnected: vi.fn(async () => true) });
+
+    fireEvent.click(getByText('Tap to Pay / Card Entry'));
+
+    await waitFor(() => expect(notice.disarmed).toEqual(['notice-1']));
+  });
+
+  it('disarms it after a decline too', async () => {
+    tapToPay.state = { enabled: true };
+    (squarePayments.takeInAppPayment as any).mockRejectedValueOnce(
+      new Error('Card declined'),
+    );
+    const { getByText } = renderSheet({ ensureSquareConnected: vi.fn(async () => true) });
+
+    fireEvent.click(getByText('Tap to Pay / Card Entry'));
+
+    await waitFor(() => expect(notice.disarmed).toEqual(['notice-1']));
+  });
+
+  it('tells the tradie the outcome when they are not watching', async () => {
+    tapToPay.state = { enabled: true };
+    (squarePayments.takeInAppPayment as any).mockRejectedValueOnce(
+      new Error('Card declined'),
+    );
+    const { getByText } = renderSheet({ ensureSquareConnected: vi.fn(async () => true) });
+
+    fireEvent.click(getByText('Tap to Pay / Card Entry'));
+
+    await waitFor(() => expect(notice.away).toEqual(['declined']));
+  });
+
+  it('a cancellation is still routed, so the notice layer decides to stay quiet', async () => {
+    tapToPay.state = { enabled: true };
+    (squarePayments.takeInAppPayment as any).mockRejectedValueOnce(
+      new Error('Payment canceled by user'),
+    );
+    const { getByText } = renderSheet({ ensureSquareConnected: vi.fn(async () => true) });
+
+    fireEvent.click(getByText('Tap to Pay / Card Entry'));
+
+    await waitFor(() => expect(notice.away).toEqual(['cancelled']));
   });
 });

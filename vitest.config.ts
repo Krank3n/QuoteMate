@@ -41,6 +41,14 @@ export default defineConfig({
       // Image files, same story as the fonts above (SplashOverlay requires
       // the splash logo PNG).
       { find: /^.*\.png$/, replacement: resolve(__dirname, 'src/test/stubs/imageAsset.ts') },
+      // expo-notifications is ESM-only internally ('./ImportMetaRegistry') and
+      // vite cannot resolve it under jsdom. tapToPayOutcomeNotice imports it
+      // statically for Apple req 5.12, which drags it into TakePaymentSheet's
+      // graph and every suite that renders one.
+      {
+        find: /^expo-notifications$/,
+        replacement: resolve(__dirname, 'src/test/stubs/expoNotifications.ts'),
+      },
       // nativeGoogleSignIn ships only platform variants (.native.ts/.web.ts),
       // which Metro resolves but vite cannot. Tests run under react-native-web,
       // so point at the web stub — it's native-dependency-free by design.
