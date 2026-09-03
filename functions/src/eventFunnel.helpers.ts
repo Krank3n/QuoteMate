@@ -207,7 +207,18 @@ export interface EventFunnelPayload {
    * least once. Before the app_opened instrumentation shipped every user
    * reads as zero here — that is missing data, not a retention verdict.
    */
-  returns: { opened: number; returnedLater: number; viaPush: number };
+  returns: {
+    opened: number;
+    returnedLater: number;
+    viaPush: number;
+    /** Users brought back by each push type — which notifications actually work. */
+    byPushType: Record<string, number>;
+  };
+  /**
+   * What the customer did with the quote, per sender and per quote — the
+   * exclusive companion to the cumulative ladder above. See rollupOutcomes.
+   */
+  outcomes: OutcomeBreakdown;
   /**
    * Per-user furthest-stage histograms — where people STALL. pathA/pathB
    * count only users who entered the path; shared counts everyone.
@@ -229,7 +240,8 @@ export interface EventFunnelPayload {
 export function rollupEventFunnel(
   inputs: EventFunnelUserInput[],
   now: number,
-  eventWindowDays: number
+  eventWindowDays: number,
+  outcomeDocs: OutcomeDocInput[] = []
 ): EventFunnelPayload {
   const emptyShared = (): Record<SharedStage, number> => ({
     signup: 0,
@@ -245,7 +257,7 @@ export function rollupEventFunnel(
   };
 
   const monetizedByStage = emptyShared();
-  const returns = { opened: 0, returnedLater: 0, viaPush: 0 };
+  const returns = { opened: 0, returnedLater: 0, viaPush: 0, byPushType: {} as Record<string, number> };
 
   let quoteDraft = 0;
   let quoteSent = 0;
@@ -278,6 +290,9 @@ export function rollupEventFunnel(
     if (input.opens?.openedApp) returns.opened++;
     if (input.opens?.returnedLater) returns.returnedLater++;
     if (input.opens?.returnedViaPush) returns.viaPush++;
+    for (const type of input.opens?.pushTypes ?? []) {
+      returns.byPushType[type] = (returns.byPushType[type] ?? 0) + 1;
+    }
 
     if (stages.pathA) paywallViewed++;
     if (stages.pathA === 'checkout_started' || stages.pathA === 'pro_paid') checkoutStarted++;
@@ -320,6 +335,7 @@ export function rollupEventFunnel(
     trialStarted,
     monetizedByStage,
     returns,
+    outcomes: rollupOutcomes(outcomeDocs, inputs),
     histogram,
     sendFlow: rollupSendFlow(inputs),
     asOf: now,
@@ -344,10 +360,12 @@ export interface AppOpenFlags {
   returnedLater: boolean;
   /** At least one open attributed to a notification tap (source 'push'). */
   returnedViaPush: boolean;
+  /** Which pushes brought this user back — one entry per push_type seen. */
+  pushTypes: string[];
 }
 
 export function emptyAppOpenFlags(): AppOpenFlags {
-  return { openedApp: false, returnedLater: false, returnedViaPush: false };
+  return { openedApp: false, returnedLater: false, returnedViaPush: false, pushTypes: [] };
 }
 
 /**
@@ -362,7 +380,11 @@ export function foldAppOpenEvent(flags: AppOpenFlags, event: unknown, props?: un
   flags.openedApp = true;
   const gap = typeof p.hours_since_last_open === 'number' ? p.hours_since_last_open : NaN;
   if (Number.isFinite(gap) && gap >= RETURN_GAP_HOURS) flags.returnedLater = true;
-  if (p.source === 'push') flags.returnedViaPush = true;
+  if (p.source === 'push') {
+    flags.returnedViaPush = true;
+    const type = typeof p.push_type === 'string' ? p.push_type.trim() : '';
+    if (type && !flags.pushTypes.includes(type)) flags.pushTypes.push(type);
+  }
 }
 
 export interface UserEventFlags extends SendFlowFlags, AppOpenFlags {
@@ -440,6 +462,167 @@ export function isAcceptedDoc(
   // invoice_sent / paid as the job progresses), so the stage alone can't be
   // relied on to still say "accepted" by the time the cron reads it.
   return doc.respondedAt != null;
+}
+
+/**
+ * Milliseconds from any of the timestamp shapes the two collections hold:
+ * a number (documents), a Firestore Timestamp (quotes' server stamps), a
+ * Date, or an ISO string (older client writes). Null for anything else.
+ */
+export function toMillis(value: unknown): number | null {
+  if (value == null) return null;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (value instanceof Date) return Number.isFinite(value.getTime()) ? value.getTime() : null;
+  if (typeof value === 'object' && typeof (value as { toMillis?: unknown }).toMillis === 'function') {
+    const ms = (value as { toMillis: () => number }).toMillis();
+    return Number.isFinite(ms) ? ms : null;
+  }
+  if (typeof value === 'string') {
+    const ms = Date.parse(value);
+    return Number.isFinite(ms) ? ms : null;
+  }
+  return null;
+}
+
+// ===========================================================================
+// CUSTOMER OUTCOMES — what happened to each sent quote
+// ===========================================================================
+//
+// The shared ladder above is cumulative (an acceptance implies a view), which
+// is right for reach but hides two things a reader wants: how many quotes a
+// customer ACTUALLY opened, and how each sender's story ended. This section
+// is exclusive — every sender lands in exactly one bucket, by the best thing
+// any customer did with any of their quotes — and per quote it measures how
+// long the customer took and which channel got the quote opened at all.
+
+/** A sender's best outcome, worst to best. Rejected outranks silence: the customer engaged and answered. */
+export type OutcomeBucket = 'never_opened' | 'opened_no_answer' | 'rejected' | 'accepted';
+
+export const OUTCOME_BUCKETS: OutcomeBucket[] = [
+  'never_opened',
+  'opened_no_answer',
+  'rejected',
+  'accepted',
+];
+
+/** One SENT quote's outcome facts, joined across its documents twin and legacy quote. */
+export interface OutcomeDocInput {
+  uid: string;
+  /** When it went out (documents.sentAt), ms. */
+  sentAt: number | null;
+  /** First customer open of the acceptance link (legacy quote's firstViewedAt), ms. */
+  firstViewedAt: number | null;
+  /** When it was accepted (acceptedAt, or the customer's respondedAt on an accept), ms. */
+  acceptedAt: number | null;
+  accepted: boolean;
+  rejected: boolean;
+  /** email | sms | share | export_pdf | manual, or null when the first send predates the field. */
+  sendMethod: string | null;
+}
+
+export interface OutcomeBreakdown {
+  /** Users with at least one sent quote. Every bucket below sums to this. */
+  senders: number;
+  /** Senders by best outcome — exclusive. */
+  buckets: Record<OutcomeBucket, number>;
+  /** Of each bucket, how many are monetised (billed Pro or collecting via Square). */
+  monetized: Record<OutcomeBucket, number>;
+  /** Raw, not implied: senders with ≥1 quote a customer actually opened. */
+  openedLink: number;
+  /** Quotes, not users. `opened` is the raw link-open count. */
+  quotes: { sent: number; opened: number; accepted: number; rejected: number };
+  /** Hours from send to the customer's first open, per quote that was opened. One decimal. */
+  hoursToOpen: WaitSummary;
+  /** Hours from send to acceptance, per accepted quote with a known accept time. One decimal. */
+  hoursToAccept: WaitSummary;
+  /** Per send channel: quotes sent, and how many a customer opened / accepted. */
+  bySendMethod: Record<string, { sent: number; opened: number; accepted: number }>;
+}
+
+const HOUR_MS = 60 * 60 * 1000;
+
+function emptyBuckets(): Record<OutcomeBucket, number> {
+  return { never_opened: 0, opened_no_answer: 0, rejected: 0, accepted: 0 };
+}
+
+/** The best outcome a sender saw, over all their sent quotes. */
+export function bestOutcome(docs: Pick<OutcomeDocInput, 'accepted' | 'rejected' | 'firstViewedAt'>[]): OutcomeBucket {
+  let best = 0;
+  for (const d of docs) {
+    const rank = d.accepted ? 3 : d.rejected ? 2 : d.firstViewedAt !== null ? 1 : 0;
+    if (rank > best) best = rank;
+  }
+  return OUTCOME_BUCKETS[best];
+}
+
+/**
+ * Roll sent quotes up into the outcome breakdown. `inputs` supplies the sender
+ * population (hasSentDoc) and who is monetised; docs whose uid is not in it
+ * (test accounts, deleted users) are ignored. A sender with no doc rows —
+ * possible when their only sent document is invoice-shaped — lands in
+ * never_opened, so the buckets always sum to senders.
+ */
+export function rollupOutcomes(
+  docs: OutcomeDocInput[],
+  inputs: EventFunnelUserInput[]
+): OutcomeBreakdown {
+  const senders = inputs.filter((u) => u.hasSentDoc);
+  const senderIds = new Set(senders.map((u) => u.uid));
+  const byUid = new Map<string, OutcomeDocInput[]>();
+  for (const d of docs) {
+    if (!senderIds.has(d.uid)) continue;
+    const list = byUid.get(d.uid);
+    if (list) list.push(d);
+    else byUid.set(d.uid, [d]);
+  }
+
+  const buckets = emptyBuckets();
+  const monetized = emptyBuckets();
+  let openedLink = 0;
+  for (const u of senders) {
+    const mine = byUid.get(u.uid) ?? [];
+    const bucket = bestOutcome(mine);
+    buckets[bucket]++;
+    if (isMonetized(u)) monetized[bucket]++;
+    if (mine.some((d) => d.firstViewedAt !== null)) openedLink++;
+  }
+
+  const quotes = { sent: 0, opened: 0, accepted: 0, rejected: 0 };
+  const toOpen: number[] = [];
+  const toAccept: number[] = [];
+  const bySendMethod: Record<string, { sent: number; opened: number; accepted: number }> = {};
+  for (const d of docs) {
+    if (!senderIds.has(d.uid)) continue;
+    quotes.sent++;
+    const opened = d.firstViewedAt !== null;
+    if (opened) quotes.opened++;
+    if (d.accepted) quotes.accepted++;
+    if (d.rejected) quotes.rejected++;
+
+    const method = d.sendMethod || 'unknown';
+    const row = bySendMethod[method] ?? (bySendMethod[method] = { sent: 0, opened: 0, accepted: 0 });
+    row.sent++;
+    if (opened) row.opened++;
+    if (d.accepted) row.accepted++;
+
+    // A view or accept stamped before the send is clock skew or a re-send;
+    // summariseWaits drops negatives, so hand them through unfiltered.
+    if (d.sentAt !== null && d.firstViewedAt !== null) toOpen.push((d.firstViewedAt - d.sentAt) / HOUR_MS);
+    if (d.sentAt !== null && d.accepted && d.acceptedAt !== null) {
+      toAccept.push((d.acceptedAt - d.sentAt) / HOUR_MS);
+    }
+  }
+
+  return {
+    senders: senders.length,
+    buckets,
+    monetized,
+    openedLink,
+    quotes,
+    hoursToOpen: summariseWaits(toOpen, 1),
+    hoursToAccept: summariseWaits(toAccept, 1),
+    bySendMethod,
+  };
 }
 
 /**
@@ -602,9 +785,11 @@ export interface WaitSummary {
  * 100ms. Median and p90 stay meaningful even with a backgrounded-app outlier
  * in the tail, which is exactly why `max` is reported beside them.
  */
-export function summariseWaits(samples: number[]): WaitSummary {
+export function summariseWaits(samples: number[], decimals = 0): WaitSummary {
   const usable = samples.filter((v) => Number.isFinite(v) && v >= 0).sort((a, b) => a - b);
   if (usable.length === 0) return { samples: 0, median: 0, p90: 0, max: 0 };
+  const scale = 10 ** decimals;
+  const round = (v: number) => Math.round(v * scale) / scale;
 
   const mid = Math.floor(usable.length / 2);
   const median =
@@ -613,9 +798,9 @@ export function summariseWaits(samples: number[]): WaitSummary {
 
   return {
     samples: usable.length,
-    median: Math.round(median),
-    p90: Math.round(usable[p90Index]),
-    max: Math.round(usable[usable.length - 1]),
+    median: round(median),
+    p90: round(usable[p90Index]),
+    max: round(usable[usable.length - 1]),
   };
 }
 

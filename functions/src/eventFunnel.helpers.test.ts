@@ -3,7 +3,9 @@ import {
   EventFunnelUserInput,
   SendFlowFlags,
   SendFlowUserInput,
+  OutcomeDocInput,
   RETURN_GAP_HOURS,
+  bestOutcome,
   docHasSquarePayment,
   emptyAppOpenFlags,
   emptySendFlowFlags,
@@ -14,6 +16,8 @@ import {
   isMonetized,
   isViewedDoc,
   parseSendMethod,
+  rollupOutcomes,
+  toMillis,
   sumSquarePayments,
   rollupEventFunnel,
   rollupSendFlow,
@@ -239,18 +243,29 @@ describe('rollupEventFunnel', () => {
     const inputs = [
       user({
         uid: 'came-back-from-push',
-        opens: { openedApp: true, returnedLater: true, returnedViaPush: true },
+        opens: { openedApp: true, returnedLater: true, returnedViaPush: true, pushTypes: ['quote_viewed'] },
+      }),
+      user({
+        uid: 'two-pushes',
+        opens: {
+          openedApp: true,
+          returnedLater: false,
+          returnedViaPush: true,
+          pushTypes: ['quote_viewed', 'invoice_paid'],
+        },
       }),
       user({
         uid: 'same-sitting-only',
-        opens: { openedApp: true, returnedLater: false, returnedViaPush: false },
+        opens: { openedApp: true, returnedLater: false, returnedViaPush: false, pushTypes: [] },
       }),
       user({ uid: 'no-events' }),
     ];
     expect(rollupEventFunnel(inputs, NOW, 30).returns).toEqual({
-      opened: 2,
+      opened: 3,
       returnedLater: 1,
-      viaPush: 1,
+      viaPush: 2,
+      // Users per push type, so one user tapping two kinds counts in both.
+      byPushType: { quote_viewed: 2, invoice_paid: 1 },
     });
   });
 });
@@ -273,14 +288,18 @@ describe('foldAppOpenEvent (via foldEvent)', () => {
     expect(later.returnedLater).toBe(true);
   });
 
-  it('attributes a push-sourced open regardless of the gap', () => {
-    const flags = foldEvent(undefined, 'app_opened', {
+  it('attributes a push-sourced open regardless of the gap, and remembers which push', () => {
+    let flags = foldEvent(undefined, 'app_opened', {
       source: 'push',
       push_type: 'quote_viewed',
       hours_since_last_open: 0.1,
     });
     expect(flags.returnedViaPush).toBe(true);
     expect(flags.returnedLater).toBe(false);
+    flags = foldEvent(flags, 'app_opened', { source: 'push', push_type: 'quote_viewed' });
+    flags = foldEvent(flags, 'app_opened', { source: 'push', push_type: ' invoice_paid ' });
+    flags = foldEvent(flags, 'app_opened', { source: 'push' }); // untyped push: attributed, unnamed
+    expect(flags.pushTypes).toEqual(['quote_viewed', 'invoice_paid']);
   });
 
   it('degrades malformed props to "opened, details unknown"', () => {
@@ -678,5 +697,132 @@ describe('sumSquarePayments', () => {
     expect(sumSquarePayments({})).toBe(0);
     expect(sumSquarePayments(null)).toBe(0);
     expect(sumSquarePayments({ payments: [{ method: 'square', amount: 'oops' }] })).toBe(0);
+  });
+});
+
+describe('summariseWaits with decimals', () => {
+  it('keeps one decimal when asked, so sub-hour medians survive', () => {
+    expect(summariseWaits([0.25, 0.4, 1.75], 1)).toEqual({ samples: 3, median: 0.4, p90: 1.8, max: 1.8 });
+    // Default is still whole numbers (the ms callers).
+    expect(summariseWaits([0.25, 0.4, 1.75]).median).toBe(0);
+  });
+});
+
+describe('toMillis', () => {
+  it('reads every timestamp shape the two collections hold', () => {
+    expect(toMillis(NOW)).toBe(NOW);
+    expect(toMillis({ toMillis: () => NOW })).toBe(NOW);
+    expect(toMillis(new Date(NOW))).toBe(NOW);
+    expect(toMillis('2026-07-16T00:00:00.000Z')).toBe(NOW);
+  });
+
+  it('is null for missing, malformed and non-finite values', () => {
+    expect(toMillis(undefined)).toBeNull();
+    expect(toMillis(null)).toBeNull();
+    expect(toMillis('yesterday')).toBeNull();
+    expect(toMillis(NaN)).toBeNull();
+    expect(toMillis({})).toBeNull();
+  });
+});
+
+describe('bestOutcome', () => {
+  it('ranks accepted > rejected > opened > never, over all of a sender\'s quotes', () => {
+    const never = { accepted: false, rejected: false, firstViewedAt: null };
+    const opened = { accepted: false, rejected: false, firstViewedAt: NOW };
+    const rejected = { accepted: false, rejected: true, firstViewedAt: NOW };
+    const accepted = { accepted: true, rejected: false, firstViewedAt: null };
+    expect(bestOutcome([])).toBe('never_opened');
+    expect(bestOutcome([never])).toBe('never_opened');
+    expect(bestOutcome([never, opened])).toBe('opened_no_answer');
+    expect(bestOutcome([opened, rejected])).toBe('rejected');
+    // A hand-marked acceptance with no view stamp still outranks a rejection.
+    expect(bestOutcome([rejected, accepted])).toBe('accepted');
+  });
+});
+
+describe('rollupOutcomes', () => {
+  const H = 60 * 60 * 1000;
+  const doc = (over: Partial<OutcomeDocInput>): OutcomeDocInput => ({
+    uid: 'u',
+    sentAt: NOW,
+    firstViewedAt: null,
+    acceptedAt: null,
+    accepted: false,
+    rejected: false,
+    sendMethod: 'email',
+    ...over,
+  });
+  const paidSub = { ...billedSub, trialStartedAt: trialSub.trialStartedAt };
+
+  it('buckets every sender exactly once, with the monetised count per bucket', () => {
+    const inputs = [
+      user({ uid: 'never', sub: paidSub, hasSentDoc: true }),
+      user({ uid: 'opened', sub: trialSub, hasSentDoc: true }),
+      user({ uid: 'rejected', sub: trialSub, hasSentDoc: true }),
+      user({ uid: 'won', sub: paidSub, hasSentDoc: true }),
+      user({ uid: 'won-by-hand', sub: trialSub, hasSentDoc: true, hasSquarePayment: true }),
+      // Sent an invoice only — no quote rows — still a sender, lands in never_opened.
+      user({ uid: 'invoice-only', sub: trialSub, hasSentDoc: true }),
+      user({ uid: 'drafter', sub: trialSub, hasQuoteDraft: true }),
+    ];
+    const docs = [
+      doc({ uid: 'never' }),
+      doc({ uid: 'opened', firstViewedAt: NOW + 2 * H }),
+      doc({ uid: 'rejected', firstViewedAt: NOW + H, rejected: true }),
+      doc({ uid: 'won', firstViewedAt: NOW + 0.5 * H, accepted: true, acceptedAt: NOW + 3 * H }),
+      doc({ uid: 'won', firstViewedAt: null }), // their second quote, never opened
+      doc({ uid: 'won-by-hand', accepted: true, acceptedAt: NOW + 48 * H }),
+      // Not a sender in the population (test account filtered upstream) — ignored.
+      doc({ uid: 'ghost', firstViewedAt: NOW, accepted: true }),
+    ];
+
+    const o = rollupOutcomes(docs, inputs);
+
+    expect(o.senders).toBe(6);
+    expect(o.buckets).toEqual({ never_opened: 2, opened_no_answer: 1, rejected: 1, accepted: 2 });
+    expect(o.monetized).toEqual({ never_opened: 1, opened_no_answer: 0, rejected: 0, accepted: 2 });
+    // Raw opens: the hand-marked acceptance never had its link opened.
+    expect(o.openedLink).toBe(3);
+    expect(o.quotes).toEqual({ sent: 6, opened: 3, accepted: 2, rejected: 1 });
+  });
+
+  it('measures time to open and time to accept per quote, in hours to one decimal', () => {
+    const inputs = [user({ uid: 'u', hasSentDoc: true })];
+    const docs = [
+      doc({ firstViewedAt: NOW + 0.25 * H }),
+      doc({ firstViewedAt: NOW + 6 * H, accepted: true, acceptedAt: NOW + 30 * H }),
+      doc({ firstViewedAt: NOW + 72 * H, accepted: true, acceptedAt: NOW + 100 * H }),
+      // Accepted with no known accept time contributes to counts, not timing.
+      doc({ accepted: true }),
+      // Sent time unknown — no interval can be measured.
+      doc({ sentAt: null, firstViewedAt: NOW + H }),
+      // Viewed "before" it was sent (re-sent later): dropped, not negative.
+      doc({ firstViewedAt: NOW - H }),
+    ];
+    const o = rollupOutcomes(docs, inputs);
+    expect(o.hoursToOpen).toEqual({ samples: 3, median: 6, p90: 72, max: 72 });
+    expect(o.hoursToAccept).toEqual({ samples: 2, median: 65, p90: 100, max: 100 });
+  });
+
+  it('splits sent / opened / accepted by the channel the quote went out on', () => {
+    const inputs = [user({ uid: 'u', hasSentDoc: true })];
+    const docs = [
+      doc({ sendMethod: 'email' }),
+      doc({ sendMethod: 'email', firstViewedAt: NOW }),
+      doc({ sendMethod: 'sms', firstViewedAt: NOW, accepted: true }),
+      doc({ sendMethod: null }),
+    ];
+    expect(rollupOutcomes(docs, inputs).bySendMethod).toEqual({
+      email: { sent: 2, opened: 1, accepted: 0 },
+      sms: { sent: 1, opened: 1, accepted: 1 },
+      unknown: { sent: 1, opened: 0, accepted: 0 },
+    });
+  });
+
+  it('is all zeros with no senders, and rides on the main payload', () => {
+    const empty = rollupOutcomes([], []);
+    expect(empty.senders).toBe(0);
+    expect(empty.hoursToOpen.samples).toBe(0);
+    expect(rollupEventFunnel([], NOW, 30).outcomes).toEqual(empty);
   });
 });

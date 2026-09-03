@@ -49,6 +49,8 @@ import {
   type EventFunnelUserInput,
   isAcceptedDoc,
   isViewedDoc,
+  toMillis,
+  type OutcomeDocInput,
   type EventFunnelPayload,
   type UserEventFlags,
 } from './eventFunnel.helpers';
@@ -1998,14 +2000,29 @@ export async function computeEventFunnelPayload(): Promise<
       fetchAllAttribution(),
     ]);
 
+  // Legacy quotes contribute the customer-view stamps only; draft / sent /
+  // accepted are answered by their documents twin (same id), and recovered
+  // ids are skipped for the same reason as below. Keyed by uid/id so the
+  // per-quote outcome rows can pick up their first-open time.
+  const viewedUids = new Set<string>();
+  const firstViewedByKey = new Map<string, number | null>();
+  for (const d of quotesSnap.docs) {
+    const uid = d.ref.parent.parent?.id;
+    if (!uid || isRecoveredDocId(d.id)) continue;
+    const q = d.data() as any;
+    if (!isViewedDoc(q)) continue;
+    viewedUids.add(uid);
+    firstViewedByKey.set(`${uid}/${d.id}`, toMillis(q.firstViewedAt) ?? toMillis(q.lastViewedAt));
+  }
+
   // One pass over every document: draft / activated / viewed / accepted /
-  // square-paid per uid. Reconstructed `recovered-` docs are skipped outright
-  // — see the header.
+  // square-paid per uid, plus one outcome row per sent quote. Reconstructed
+  // `recovered-` docs are skipped outright — see the header.
   const draftUids = new Set<string>();
   const activatedUids = new Set<string>();
-  const viewedUids = new Set<string>();
   const acceptedUids = new Set<string>();
   const squarePaidUids = new Set<string>();
+  const outcomeDocs: OutcomeDocInput[] = [];
   let recoveredDocs = 0;
   for (const d of docsSnap.docs) {
     const uid = d.ref.parent.parent?.id;
@@ -2016,18 +2033,29 @@ export async function computeEventFunnelPayload(): Promise<
     }
     const data = d.data() as any;
     draftUids.add(uid);
-    if (isActivatingDoc(data)) activatedUids.add(uid);
+    const activating = isActivatingDoc(data);
+    const accepted = isAcceptedDoc(data);
+    if (activating) activatedUids.add(uid);
     if (isViewedDoc(data)) viewedUids.add(uid);
-    if (isAcceptedDoc(data)) acceptedUids.add(uid);
+    if (accepted) acceptedUids.add(uid);
     if (docHasSquarePayment(data)) squarePaidUids.add(uid);
-  }
-  // Legacy quotes contribute the view stamps only; draft/sent/accepted are
-  // already answered by their documents twin, and recovered ids are skipped
-  // for the same reason as above (their count is reported once, from docs).
-  for (const d of quotesSnap.docs) {
-    const uid = d.ref.parent.parent?.id;
-    if (!uid || isRecoveredDocId(d.id)) continue;
-    if (isViewedDoc(d.data() as any)) viewedUids.add(uid);
+
+    // Outcome rows are quotes only: a document that is (or was) a quote —
+    // typed so, converted to an invoice, or with a legacy quote twin. An
+    // invoice-only document has no acceptance link for a customer to open.
+    const key = `${uid}/${d.id}`;
+    const wasQuote = data.type === 'quote' || data.invoicedAt != null || firstViewedByKey.has(key);
+    if (activating && wasQuote) {
+      outcomeDocs.push({
+        uid,
+        sentAt: toMillis(data.sentAt),
+        firstViewedAt: firstViewedByKey.get(key) ?? toMillis(data.firstViewedAt),
+        acceptedAt: toMillis(data.acceptedAt) ?? (accepted ? toMillis(data.respondedAt) : null),
+        accepted,
+        rejected: data.stage === 'quote_rejected',
+        sendMethod: typeof data.sendMethod === 'string' && data.sendMethod ? data.sendMethod : null,
+      });
+    }
   }
 
   // Bucket events by parent uid into de-duped per-user flags. `props` carries
@@ -2082,7 +2110,7 @@ export async function computeEventFunnelPayload(): Promise<
   );
 
   return {
-    ...rollupEventFunnel(inputs, now, EVENT_WINDOW_DAYS),
+    ...rollupEventFunnel(inputs, now, EVENT_WINDOW_DAYS, outcomeDocs),
     foundingTaken,
     attribution,
     excluded: { testAccounts, recoveredDocs },
@@ -2115,7 +2143,14 @@ export const aggregateEventFunnel = functions
         `accepted=${payload.shared.quoteAccepted}, monetizedByStage=` +
         `${JSON.stringify(payload.monetizedByStage)}; ` +
         `returns: opened=${payload.returns.opened} later=${payload.returns.returnedLater} ` +
-        `viaPush=${payload.returns.viaPush}; ` +
+        `viaPush=${payload.returns.viaPush} byType=${JSON.stringify(payload.returns.byPushType)}; ` +
+        `outcomes: senders=${payload.outcomes.senders} buckets=${JSON.stringify(payload.outcomes.buckets)} ` +
+        `monetized=${JSON.stringify(payload.outcomes.monetized)} openedLink=${payload.outcomes.openedLink} ` +
+        `quotes=${JSON.stringify(payload.outcomes.quotes)} ` +
+        `hoursToOpen(median/p90)=${payload.outcomes.hoursToOpen.median}/${payload.outcomes.hoursToOpen.p90} ` +
+        `over ${payload.outcomes.hoursToOpen.samples}, hoursToAccept=${payload.outcomes.hoursToAccept.median}/` +
+        `${payload.outcomes.hoursToAccept.p90} over ${payload.outcomes.hoursToAccept.samples}, ` +
+        `bySendMethod=${JSON.stringify(payload.outcomes.bySendMethod)}; ` +
         `sendFlow: sheet=${send.sheetOpened} method=${send.methodChosen} sent=${send.sent} ` +
         `(durableOnly=${send.durableOnlySends}), preview=${send.email.previewOpened} ` +
         `abandoned=${send.email.previewAbandoned}, waitMedian=${send.email.waitMs.median}ms ` +
