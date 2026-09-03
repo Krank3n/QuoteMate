@@ -147,6 +147,7 @@ export default {
       // onBackPressed — and so React Native's BackHandler — ever firing: back
       // exits the app from any screen. See the plugin.
       "./plugins/withPredictiveBackOptOut",
+      "./plugins/withReleaseSigning",
       ["./plugins/withKotlinVersion", "2.2.0"],
       // GoogleSignIn iOS SDK (native Google sign-in) pulls Swift pod
       // AppCheckCore whose ObjC deps need module maps — see the plugin.
@@ -192,7 +193,7 @@ export default {
         backgroundColor: "#0A0E16"  // Dark blue-gray to match app theme
       },
       package: "com.quotemate.app",
-      versionCode: 171,
+      versionCode: 172,
       // Android 16 (targetSdk 36) enforces edge-to-edge and ignores the
       // opt-out flag. Declaring it here makes Expo theme for it deliberately
       // rather than emitting an opt-out Android no longer honours.
