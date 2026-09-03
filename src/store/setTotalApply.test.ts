@@ -425,6 +425,16 @@ describe('propose_pick_contact', () => {
     expect(contactsMock.presentContactPickerAsync).not.toHaveBeenCalled();
   });
 
+  it('a picker that throws is a plain failure with a usable line, and saves nothing', async () => {
+    contactsMock.presentContactPickerAsync.mockImplementationOnce(() => {
+      throw new Error("Cannot find native module 'ExpoContacts'");
+    });
+    const result = await useStore.getState().applyProposal({ ...base, type: 'propose_pick_contact', quoteId: DOC_ID });
+    expect(!result.ok && result.error).toContain("Couldn't open the phone's contacts");
+    expect(!result.ok && result.code).toBeUndefined();
+    expect(useStore.getState().contacts).toHaveLength(0);
+  });
+
   it('has no picker on the web', async () => {
     platform.OS = 'web';
     const result = await useStore.getState().applyProposal({ ...base, type: 'propose_pick_contact' });

@@ -4,6 +4,7 @@
  */
 
 import { create } from 'zustand';
+import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { generateId } from '../utils/generateId';
 import { withOrigin } from '../utils/materialOrigin';
@@ -398,8 +399,8 @@ export type ApplyProposalResult =
       pickedContact?: { id: string; name: string; phone?: string; email?: string };
     }
   // `code` names machine-readable failures the screen branches on
-  // (currently only 'PLAN_GATED' → Paywall); `error` stays the line shown
-  // to the tradie.
+  // ('PLAN_GATED' → Paywall; 'CANCELLED' / 'CONTACTS_DENIED' → a dismissed
+  // picker card); `error` stays the line shown to the tradie.
   | { ok: false; error: string; code?: string };
 
 /**
@@ -4055,22 +4056,30 @@ export const useStore = create<AppState>((set, get) => ({
           // The phone's own contact picker. iOS needs no permission for it;
           // Android needs READ_CONTACTS, asked for here rather than at import.
           // Web has no picker — Mate is told, and asks for the name instead.
-          const { Platform } = await import('react-native');
+          // (Platform is a static import on purpose — see
+          // src/test/noDynamicReactNativeImport.test.ts.)
           if (Platform.OS === 'web') {
             return { ok: false, error: "Can't open the phone's contacts from the web app — tell me the name and I'll look them up." };
           }
-          const expoContacts = await import('expo-contacts');
-          if (Platform.OS === 'android') {
-            const perm = await expoContacts.requestPermissionsAsync();
-            if (perm.status !== 'granted') {
-              return {
-                ok: false,
-                code: 'CONTACTS_DENIED',
-                error: "Contacts access is off for QuoteMate — turn it on under the phone's Settings, then say the word and I'll open them.",
-              };
+          // A throw here (module missing, nothing to present on) is a plain
+          // failure: the card reads Failed and Mate is told not to retry.
+          let picked: import('expo-contacts').Contact | null;
+          try {
+            const expoContacts = await import('expo-contacts');
+            if (Platform.OS === 'android') {
+              const perm = await expoContacts.requestPermissionsAsync();
+              if (perm.status !== 'granted') {
+                return {
+                  ok: false,
+                  code: 'CONTACTS_DENIED',
+                  error: "Contacts access is off for QuoteMate — turn it on under the phone's Settings, then say the word and I'll open them.",
+                };
+              }
             }
+            picked = await expoContacts.presentContactPickerAsync();
+          } catch {
+            return { ok: false, error: "Couldn't open the phone's contacts — tell me the name and I'll look them up." };
           }
-          const picked = await expoContacts.presentContactPickerAsync();
           if (!picked) return { ok: false, error: 'No contact picked.', code: 'CANCELLED' };
           const { phoneContactToContact } = await import('../services/contactService');
           const fresh = phoneContactToContact(picked);
