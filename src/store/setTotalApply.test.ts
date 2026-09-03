@@ -425,6 +425,16 @@ describe('propose_pick_contact', () => {
     expect(contactsMock.presentContactPickerAsync).not.toHaveBeenCalled();
   });
 
+  it('a build without the native module says so plainly instead of surfacing a module error', async () => {
+    contactsMock.presentContactPickerAsync.mockImplementationOnce(() => {
+      throw new Error('`new NativeEventEmitter()` requires a non-null argument.');
+    });
+    const result = await useStore.getState().applyProposal({ ...base, type: 'propose_pick_contact', quoteId: DOC_ID });
+    expect(!result.ok && result.code).toBe('CONTACTS_UNAVAILABLE');
+    expect(!result.ok && result.error).toContain("aren't available in this build");
+    expect(useStore.getState().contacts).toHaveLength(0);
+  });
+
   it('has no picker on the web', async () => {
     platform.OS = 'web';
     const result = await useStore.getState().applyProposal({ ...base, type: 'propose_pick_contact' });

@@ -1080,18 +1080,20 @@ export function AssistantScreen() {
         setTimeout(() => { narrationModeRef.current = false; }, 8000);
       }
 
-      if (!result.ok && (result.code === 'CANCELLED' || result.code === 'CONTACTS_DENIED')) {
+      if (!result.ok && (result.code === 'CANCELLED' || result.code === 'CONTACTS_DENIED' || result.code === 'CONTACTS_UNAVAILABLE')) {
         // The tradie backed out of the picker, or hasn't given contacts
         // access. Neither is a failure — the card reads Dismissed, and Mate
         // is told what to do next (a retry after access is turned on is fine,
         // unlike the generic "don't propose it again" that a failure carries).
         updateProposalStatus(conversation.id, message.id, proposal.id, 'dismissed');
-        if (result.code === 'CONTACTS_DENIED') appendErrorMessage(conversation.id, result.error);
+        if (result.code !== 'CANCELLED') appendErrorMessage(conversation.id, result.error);
         noteToMate(
           conversation.id,
           result.code === 'CANCELLED'
             ? '[context] The tradie closed the contact picker without choosing anyone. Ask for the name instead, in one line.'
-            : "[context] The tradie hasn't given contacts access. Ask for the name instead, in one line. If they turn access on and ask again, propose_pick_contact is fine to retry.",
+            : result.code === 'CONTACTS_DENIED'
+              ? "[context] The tradie hasn't given contacts access. Ask for the name instead, in one line. If they turn access on and ask again, propose_pick_contact is fine to retry."
+              : "[context] This build of the app has no contact picker. Ask for the name instead, in one line, and don't propose propose_pick_contact again in this chat.",
         );
         return;
       }

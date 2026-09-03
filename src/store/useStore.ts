@@ -4059,18 +4059,34 @@ export const useStore = create<AppState>((set, get) => ({
           if (Platform.OS === 'web') {
             return { ok: false, error: "Can't open the phone's contacts from the web app — tell me the name and I'll look them up." };
           }
-          const expoContacts = await import('expo-contacts');
-          if (Platform.OS === 'android') {
-            const perm = await expoContacts.requestPermissionsAsync();
-            if (perm.status !== 'granted') {
-              return {
-                ok: false,
-                code: 'CONTACTS_DENIED',
-                error: "Contacts access is off for QuoteMate — turn it on under the phone's Settings, then say the word and I'll open them.",
-              };
+          // A build without the native module throws at import ("new
+          // NativeEventEmitter() requires a non-null argument") — seen on a
+          // dev client built from a thin worktree (3 Sep 2026). Say so
+          // plainly rather than surfacing Metro's "Cannot read property
+          // 'default' of undefined".
+          let picked: import('expo-contacts').Contact | null;
+          try {
+            const expoContacts = await import('expo-contacts');
+            if (Platform.OS === 'android') {
+              const perm = await expoContacts.requestPermissionsAsync();
+              if (perm.status !== 'granted') {
+                return {
+                  ok: false,
+                  code: 'CONTACTS_DENIED',
+                  error: "Contacts access is off for QuoteMate — turn it on under the phone's Settings, then say the word and I'll open them.",
+                };
+              }
             }
+            picked = await expoContacts.presentContactPickerAsync();
+          } catch (err: any) {
+            // eslint-disable-next-line no-console
+            console.warn('[Mate] contact picker unavailable', err?.message);
+            return {
+              ok: false,
+              code: 'CONTACTS_UNAVAILABLE',
+              error: "Contacts aren't available in this build of the app — tell me the name and I'll look them up.",
+            };
           }
-          const picked = await expoContacts.presentContactPickerAsync();
           if (!picked) return { ok: false, error: 'No contact picked.', code: 'CANCELLED' };
           const { phoneContactToContact } = await import('../services/contactService');
           const fresh = phoneContactToContact(picked);
