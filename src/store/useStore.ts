@@ -401,7 +401,7 @@ export type ApplyProposalResult =
   // `code` names machine-readable failures the screen branches on
   // ('PLAN_GATED' → Paywall; 'CANCELLED' / 'CONTACTS_DENIED' → a dismissed
   // picker card); `error` stays the line shown to the tradie.
-  | { ok: false; error: string; code?: string };
+  | { ok: false; error: string; code?: string; canAskAgain?: boolean };
 
 /**
  * Something the chat screen opens ON TOP of the conversation. Kept apart from
@@ -4067,12 +4067,24 @@ export const useStore = create<AppState>((set, get) => ({
           try {
             const expoContacts = await import('expo-contacts');
             if (Platform.OS === 'android') {
-              const perm = await expoContacts.requestPermissionsAsync();
+              // Ask only when not already granted. Requesting a permission the
+              // app already holds never resolves on Android: Expo hands it to
+              // the activity without a granted check, no dialog means no
+              // pause/resume, and React Native only delivers the result on
+              // resume — the second pick on a phone hung forever (API 36
+              // emulator, 3 Sep 2026).
+              let perm = await expoContacts.getPermissionsAsync();
+              if (perm.status !== 'granted') perm = await expoContacts.requestPermissionsAsync();
               if (perm.status !== 'granted') {
+                // A first "Don't allow" on Android can be asked again; only a
+                // repeat denial needs the trip to Settings.
                 return {
                   ok: false,
                   code: 'CONTACTS_DENIED',
-                  error: "Contacts access is off for QuoteMate — turn it on under the phone's Settings, then say the word and I'll open them.",
+                  canAskAgain: perm.canAskAgain === true,
+                  error: perm.canAskAgain
+                    ? "No worries — say the word and I'll ask for contacts access again, or just tell me the name."
+                    : "Contacts access is off for QuoteMate — turn it on under the phone's Settings, then say the word and I'll open them.",
                 };
               }
             }

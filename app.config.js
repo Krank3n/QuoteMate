@@ -31,7 +31,12 @@ export default {
     // appVersion means an OTA only lands on a build of the SAME app version,
     // so native changes still require a fresh build + store submit.
     updates: {
-      url: "https://u.expo.dev/b164d7f8-b04e-4960-a962-ebc74fe65bce"
+      url: "https://u.expo.dev/b164d7f8-b04e-4960-a962-ebc74fe65bce",
+      // The update server refuses a request without a channel (HTTP 400).
+      // EAS builds inject this header themselves; Android releases here are
+      // plain gradle builds on the prebuilt tree, so it has to come from the
+      // config — without it no Android build has ever received an OTA.
+      requestHeaders: { "expo-channel-name": "production" },
     },
     runtimeVersion: {
       policy: "appVersion"
