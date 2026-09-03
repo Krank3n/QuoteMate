@@ -2118,6 +2118,32 @@ export const adminEventFunnelStats = functions
 // (get) so we can review what Mate proposed, what got applied, and where it
 // errored — the signal for improving accuracy over time.
 
+/** Which build the app was on when the chat synced — see the app's services/appIdentity. */
+interface ConversationAppBuild {
+  version: string | null;
+  build: string | null;
+  platform: string | null;
+  updateId: string | null;
+  runtimeVersion: string | null;
+  channel: string | null;
+  updatedAt: string | null;
+}
+
+function appBuildOf(c: any): ConversationAppBuild | null {
+  const a = c?.app;
+  if (!a || typeof a !== 'object') return null;
+  const str = (v: unknown) => (typeof v === 'string' && v ? v : null);
+  return {
+    version: str(a.version),
+    build: str(a.build),
+    platform: str(a.platform),
+    updateId: str(a.updateId),
+    runtimeVersion: str(a.runtimeVersion),
+    channel: str(a.channel),
+    updatedAt: str(a.updatedAt),
+  };
+}
+
 interface ConversationSummary {
   userMessages: number;
   assistantMessages: number;
@@ -2221,6 +2247,7 @@ export const adminListAssistantConversations = functions
           userEmail: authRec?.email || biz.email || null,
           userBusinessName: biz.businessName || authRec?.displayName || null,
           platform: c.platform || null,
+          app: appBuildOf(c),
           createdAt: tsMs(c.createdAt),
           updatedAt: tsMs(c.updatedAt),
           syncedAt: tsMs(c.syncedAt),
@@ -2299,6 +2326,7 @@ export const adminGetAssistantConversation = functions.https.onCall(async (data,
     conversation: {
       id,
       platform: c.platform || null,
+      app: appBuildOf(c),
       createdAt: tsMs(c.createdAt),
       updatedAt: tsMs(c.updatedAt),
       syncedAt: tsMs(c.syncedAt),
