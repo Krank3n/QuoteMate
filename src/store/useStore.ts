@@ -4,6 +4,7 @@
  */
 
 import { create } from 'zustand';
+import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { generateId } from '../utils/generateId';
 import { withOrigin } from '../utils/materialOrigin';
@@ -4055,7 +4056,10 @@ export const useStore = create<AppState>((set, get) => ({
           // The phone's own contact picker. iOS needs no permission for it;
           // Android needs READ_CONTACTS, asked for here rather than at import.
           // Web has no picker — Mate is told, and asks for the name instead.
-          const { Platform } = await import('react-native');
+          // Platform is imported statically: a dynamic import('react-native')
+          // makes Metro's interop enumerate every lazy getter on the RN index,
+          // and the deprecated PushNotificationIOS getter throws "new
+          // NativeEventEmitter() requires a non-null argument" (sim, 3 Sep 2026).
           if (Platform.OS === 'web') {
             return { ok: false, error: "Can't open the phone's contacts from the web app — tell me the name and I'll look them up." };
           }
