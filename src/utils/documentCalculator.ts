@@ -139,7 +139,7 @@ export function calculateDocumentTotals(
  * silently, which used to surface as orphan Jobs created without their
  * matching Quote when this function returned NaN for `estimatedHours`.
  */
-function finiteNumber(value: unknown): number {
+export function finiteNumber(value: unknown): number {
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
 }
@@ -230,13 +230,23 @@ export function updateDocumentCalculations(doc: Document): Document {
     ...m,
     totalPrice: roundToTwoDecimals(finiteNumber(m.quantity) * finiteNumber(m.price)),
   }));
+  // Sections are summed raw by the calculator; one missing laborTotal is a NaN total.
+  const sections = Array.isArray(doc.sections)
+    ? doc.sections.map((s) => ({
+        ...s,
+        laborHours: finiteNumber(s.laborHours),
+        laborRate: finiteNumber(s.laborRate),
+        laborTotal: finiteNumber(s.laborTotal),
+        multiplier: finiteNumber(s.multiplier) || 1,
+      }))
+    : doc.sections;
   const calc = calculateDocumentTotals(
     materials,
     finiteNumber(doc.laborRate),
     finiteNumber(doc.laborHours),
     finiteNumber(doc.markup),
     finiteNumber(doc.travelAdjustment),
-    doc.sections,
+    sections,
     finiteNumber(doc.laborMarkup ?? doc.markup),
     finiteNumber(doc.laborExtraHours),
     doc.pricesIncludeGst === true,
@@ -245,6 +255,7 @@ export function updateDocumentCalculations(doc: Document): Document {
   return {
     ...doc,
     materials,
+    ...(sections ? { sections } : {}),
     ...(doc.job ? { job: syncJobEstimatedHours(doc) } : {}),
     materialsSubtotal: calc.materialsSubtotal,
     laborTotal: calc.laborTotal,

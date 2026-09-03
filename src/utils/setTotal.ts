@@ -33,14 +33,23 @@
  * Pure. The store applies the returned patch and recalculates.
  */
 import type { Material, QuoteSection } from '../types';
-import { calculateDocumentTotals, roundToTwoDecimals } from './documentCalculator';
-import { resolveGstMode } from '../../shared/document/gstMode';
-import { isLumpSumSection, isWorkItem, lumpSumLabourTotal } from '../../shared/document/lumpSum';
+import type { Document } from '../types/document';
+import { finiteNumber as num, formatCurrency, roundToTwoDecimals, updateDocumentCalculations } from './documentCalculator';
+import { resolveGstMode, type GstMode } from '../../shared/document/gstMode';
+import { isLumpSumSection, isWorkItem, lumpSumLabourTotal, markupableMaterialsTotal } from '../../shared/document/lumpSum';
 import { generateId } from './generateId';
 import { withOrigin } from './materialOrigin';
-import { formatCurrency } from './documentCalculator';
 
+/**
+ * The customer reads the line, so it is named for what it is to them: money
+ * off is a "Discount"; money on is a "Price adjustment" (the tradie can rename
+ * it once they say what it's for). Both names are recognised as THE
+ * adjustment line, so a second set-total moves it rather than stacking one.
+ */
 export const PRICE_ADJUSTMENT_NAME = 'Price adjustment';
+export const DISCOUNT_NAME = 'Discount';
+const ADJUSTMENT_NAMES: ReadonlySet<string> = new Set([PRICE_ADJUSTMENT_NAME, DISCOUNT_NAME]);
+export const adjustmentLineName = (amount: number): string => (amount < 0 ? DISCOUNT_NAME : PRICE_ADJUSTMENT_NAME);
 
 /** Loose on purpose: a legacy Quote, an Invoice and a unified Document all fit. */
 export interface SetTotalSource {
@@ -62,9 +71,11 @@ export type SetTotalPlan =
       mechanism: 'labour';
       currentTotal: number;
       targetTotal: number;
-      /** The document's labour subtotal before and after, in its own GST basis. */
+      /** The document's labour subtotal before and after, in its own GST basis — rounded, for display. */
       labourBefore: number;
       labourAfter: number;
+      /** The exact dollars to move, unrounded — the patch is derived from this, never from the display figures. */
+      deltaLabour: number;
       via: 'extraHours' | 'hours' | 'lumpSum';
       sectionId?: string;
     }
@@ -74,7 +85,7 @@ export type SetTotalPlan =
       targetTotal: number;
       /** The adjustment line's price after the move, in the document's GST basis. */
       amount: number;
-      /** True when a "Price adjustment" line already exists and is being moved. */
+      /** True when an adjustment line already exists and is being moved. */
       existing: boolean;
     };
 
@@ -90,36 +101,18 @@ export interface SetTotalPatch {
   materials?: Material[];
 }
 
-const num = (v: unknown): number => (Number.isFinite(Number(v)) ? Number(v) : 0);
 const CENT = 0.005;
 
-function totalsOf(source: SetTotalSource) {
-  return calculateDocumentTotals(
-    (source.materials ?? []) as Material[],
-    num(source.laborRate),
-    num(source.laborHours),
-    num(source.markup),
-    num(source.travelAdjustment),
-    (source.sections ?? undefined) as QuoteSection[] | undefined,
-    num(source.laborMarkup ?? source.markup),
-    num(source.laborExtraHours),
-    source.pricesIncludeGst === true,
-    source.gstRegistered !== false,
-  );
-}
+/** The totals exactly as the store will persist them — the same function, so plan and verify can't drift from the save. */
+const totalsOf = (source: SetTotalSource) => updateDocumentCalculations(source as unknown as Document);
 
 /** ×1.1 between the document's own basis and what the customer reads, or ×1. */
 function gstFactor(source: SetTotalSource): number {
   return resolveGstMode(source) === 'exclusive' ? 1.1 : 1;
 }
 
-/** Σ real materials (not work items, not a previous adjustment) — what the gear costs. */
-function materialsCost(materials: Material[]): number {
-  return materials.reduce((sum, m) => (isWorkItem(m) ? sum : sum + num(m.totalPrice)), 0);
-}
-
 function findAdjustment(materials: Material[]): Material | undefined {
-  return materials.find((m) => isWorkItem(m) && m.name === PRICE_ADJUSTMENT_NAME);
+  return materials.find((m) => isWorkItem(m) && ADJUSTMENT_NAMES.has(m.name));
 }
 
 /**
@@ -138,7 +131,8 @@ export function planSetTotal(source: SetTotalSource, targetTotal: number): SetTo
   const currentTotal = totals.total;
   const targetRounded = roundToTwoDecimals(target);
 
-  const floor = roundToTwoDecimals(materialsCost(materials) * factor);
+  // Σ real materials — work items (and a previous adjustment) are not gear.
+  const floor = roundToTwoDecimals(markupableMaterialsTotal(totals.materialsSubtotal, materials) * factor);
   if (targetRounded < floor - CENT) {
     return {
       ok: false,
@@ -172,6 +166,7 @@ export function planSetTotal(source: SetTotalSource, targetTotal: number): SetTo
           targetTotal: targetRounded,
           labourBefore: roundToTwoDecimals(labourTotal),
           labourAfter: roundToTwoDecimals(labourTotal + deltaLabour),
+          deltaLabour,
           via: sections.length > 0 ? 'extraHours' : 'hours',
         },
       };
@@ -193,6 +188,7 @@ export function planSetTotal(source: SetTotalSource, targetTotal: number): SetTo
           targetTotal: targetRounded,
           labourBefore: roundToTwoDecimals(labourTotal),
           labourAfter: roundToTwoDecimals(labourTotal + deltaLump),
+          deltaLabour: deltaLump,
           via: 'lumpSum',
           sectionId: biggest.id,
         },
@@ -210,11 +206,11 @@ export function planSetTotal(source: SetTotalSource, targetTotal: number): SetTo
 }
 
 function adjustmentLine(price: number, existing: Material | undefined): Material {
-  if (existing) return { ...existing, price, totalPrice: price, quantity: 1, unit: 'each' };
+  if (existing) return { ...existing, name: adjustmentLineName(price), price, totalPrice: price, quantity: 1, unit: 'each' };
   return withOrigin(
     {
       id: generateId(),
-      name: PRICE_ADJUSTMENT_NAME,
+      name: adjustmentLineName(price),
       kind: 'work',
       quantity: 1,
       unit: 'each',
@@ -227,13 +223,18 @@ function adjustmentLine(price: number, existing: Material | undefined): Material
   );
 }
 
-function patchFor(source: SetTotalSource, plan: SetTotalPlan, typedFigure: number): SetTotalPatch {
+/**
+ * The patch for a plan. `figure` is the typed 2-dp dollar figure for the
+ * lump-sum and adjustment paths, or the exact (unrounded) labour delta for
+ * the hourly paths — those are continuous, so nothing is rounded on the way.
+ */
+function patchFor(source: SetTotalSource, plan: SetTotalPlan, figure: number): SetTotalPatch {
   const materials = (source.materials ?? []) as Material[];
   const sections = (source.sections ?? []) as QuoteSection[];
   if (plan.mechanism === 'none') return {};
   if (plan.mechanism === 'adjustment') {
     const existing = findAdjustment(materials);
-    const line = adjustmentLine(typedFigure, existing);
+    const line = adjustmentLine(figure, existing);
     return {
       materials: existing ? materials.map((m) => (m.id === existing.id ? line : m)) : [...materials, line],
     };
@@ -241,27 +242,37 @@ function patchFor(source: SetTotalSource, plan: SetTotalPlan, typedFigure: numbe
   if (plan.via === 'lumpSum') {
     return {
       sections: sections.map((s) =>
-        s.id === plan.sectionId ? { ...s, laborTotal: typedFigure, laborHours: 0, laborHoursTotal: 0, laborRate: 0 } : s,
+        s.id === plan.sectionId ? { ...s, laborTotal: figure, laborHours: 0, laborHoursTotal: 0, laborRate: 0 } : s,
       ),
     };
   }
   const rate = num(source.laborRate);
-  const deltaLabour = plan.labourAfter - plan.labourBefore;
   if (plan.via === 'extraHours') {
-    return { laborExtraHours: num(source.laborExtraHours) + deltaLabour / rate };
+    return { laborExtraHours: num(source.laborExtraHours) + figure / rate };
   }
-  return { laborHours: Math.max(0, num(source.laborHours) + deltaLabour / rate) };
+  return { laborHours: Math.max(0, num(source.laborHours) + figure / rate) };
 }
 
-/** One clause for the "[context]" line and the voice read-back: what moved. */
+/**
+ * One clause for the "[context]" line and the voice read-back: what moved.
+ * Labour is named, never quantified — the labour figure the tradie and the
+ * customer see rolls the labour markup in, so a base-labour number here
+ * would be a third figure nobody can find on the screen.
+ */
 export function describeSetTotalPlan(plan: SetTotalPlan): string {
   if (plan.mechanism === 'labour') {
-    return `labour ${formatCurrency(plan.labourBefore)} → ${formatCurrency(plan.labourAfter)}`;
+    return plan.labourAfter < plan.labourBefore ? 'off the labour' : 'onto the labour';
   }
   if (plan.mechanism === 'adjustment') {
-    return `${plan.existing ? 'the' : 'a new'} "${PRICE_ADJUSTMENT_NAME}" line at ${formatCurrency(plan.amount)}`;
+    const name = adjustmentLineName(plan.amount);
+    return `${plan.existing ? 'the' : 'a new'} "${name}" line at ${formatCurrency(plan.amount)}`;
   }
   return 'nothing — it was already there';
+}
+
+/** The GST basis the target is read in, for the card. */
+export function setTotalGstMode(source: SetTotalSource): GstMode {
+  return resolveGstMode(source);
 }
 
 export type SetTotalApplyResult =
@@ -269,10 +280,20 @@ export type SetTotalApplyResult =
   | { ok: false; reason: 'bad_target' | 'below_materials'; message: string; floor?: number };
 
 /**
- * Plan, apply and verify. The typed figures (a lump sum, an adjustment line)
- * are rounded to cents, so the naive solution can land a cent off the target
- * after GST and travel — the candidates a cent either side are tried and the
- * one that reproduces the target exactly wins.
+ * Plan, apply and verify.
+ *
+ * Hourly labour is continuous, so the move is refined against the very
+ * totals the store will persist until the stored total equals the target:
+ * the first solve works from the ROUNDED current total and lands a cent off
+ * whenever labour markup, travel or exclusive GST scale the move, so each
+ * pass feeds the residual back through the same factors (three passes cover
+ * every case tried; a fourth is a guard).
+ *
+ * A lump sum and an adjustment line are typed 2-dp figures, so a target can
+ * sit between two reachable totals (in exclusive mode a cent on the line is
+ * 1.1c at the bottom); the candidates a cent or two either side are tried
+ * and the nearest wins. `total` is what will actually be stored — the caller
+ * reports that, never the target.
  */
 export function applySetTotal(source: SetTotalSource, targetTotal: number): SetTotalApplyResult {
   const planned = planSetTotal(source, targetTotal);
@@ -280,25 +301,34 @@ export function applySetTotal(source: SetTotalSource, targetTotal: number): SetT
   const { plan } = planned;
   if (plan.mechanism === 'none') return { ok: true, plan, patch: {}, total: plan.currentTotal };
 
+  const settle = (figure: number) => {
+    const patch = patchFor(source, plan, figure);
+    const total = totalsOf({ ...source, ...patch }).total;
+    return { patch, total, miss: Math.abs(total - plan.targetTotal) };
+  };
+
+  if (plan.mechanism === 'labour' && plan.via !== 'lumpSum') {
+    const factor = gstFactor(source);
+    const scale = 1 + num(source.laborMarkup ?? source.markup) / 100 + num(source.travelAdjustment) / 100;
+    let figure = plan.deltaLabour;
+    let best = settle(figure);
+    for (let pass = 0; pass < 4 && best.miss >= CENT; pass++) {
+      figure += (plan.targetTotal - best.total) / factor / scale;
+      const next = settle(figure);
+      if (next.miss < best.miss) best = next;
+    }
+    return { ok: true, plan, patch: best.patch, total: best.total };
+  }
+
   const base =
     plan.mechanism === 'adjustment'
       ? plan.amount
-      : plan.via === 'lumpSum'
-        ? roundToTwoDecimals(
-            num((source.sections ?? []).find((s) => s.id === plan.sectionId)?.laborTotal) + (plan.labourAfter - plan.labourBefore),
-          )
-        : plan.labourAfter;
-  const typed = plan.mechanism === 'labour' && plan.via !== 'lumpSum';
-  const candidates = typed ? [base] : [base, base - 0.01, base + 0.01, base - 0.02, base + 0.02];
-
-  let best: { patch: SetTotalPatch; total: number; miss: number } | undefined;
-  for (const candidate of candidates) {
-    const figure = roundToTwoDecimals(candidate);
-    const patch = patchFor(source, plan, figure);
-    const total = totalsOf({ ...source, ...patch }).total;
-    const miss = Math.abs(total - plan.targetTotal);
-    if (!best || miss < best.miss) best = { patch, total, miss };
-    if (miss < CENT) break;
+      : roundToTwoDecimals(num((source.sections ?? []).find((s) => s.id === plan.sectionId)?.laborTotal) + plan.deltaLabour);
+  let best: ReturnType<typeof settle> | undefined;
+  for (const candidate of [base, base - 0.01, base + 0.01, base - 0.02, base + 0.02]) {
+    const next = settle(roundToTwoDecimals(candidate));
+    if (!best || next.miss < best.miss) best = next;
+    if (best.miss < CENT) break;
   }
   return { ok: true, plan, patch: best!.patch, total: best!.total };
 }

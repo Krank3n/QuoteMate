@@ -16,9 +16,9 @@ describe('setting the total', () => {
   const section = promptSection('Reading out a total');
 
   it('names propose_set_total as THE tool for a total and bans the markup detour', () => {
-    expect(MATE_SYSTEM_PROMPT).toContain('propose_set_total — set the TOTAL the customer will see');
-    expect(MATE_SYSTEM_PROMPT).toContain('This is THE tool for a total. Never steer them to markup or a labour rate instead, and never say you can\'t set the final price — you can.');
-    expect(section).toContain("Don't offer markup, rates or line prices as a way to get there.");
+    expect(MATE_SYSTEM_PROMPT).toContain('propose_set_total — set the customer-facing total to a figure the tradie said.');
+    expect(MATE_SYSTEM_PROMPT).toContain('never steer them to markup or a labour rate instead, and never say you can\'t set the final price — you can.');
+    expect(section).toContain('Setting the total is one card and one line');
   });
 
   it('makes every total a looked-up fact — the context line or get_quote, never memory', () => {
@@ -28,18 +28,19 @@ describe('setting the total', () => {
     expectHouseTone(section);
   });
 
-  it('the tool description says where the applied total comes from', () => {
+  it('the tool description carries the mechanism and the refusal, once', () => {
     const tool = TOOL_DECLARATIONS.find((t) => t.name === 'propose_set_total')!;
-    expect(tool.description).toContain('read totals from there or from get_quote, never from memory');
+    expect(tool.description).toContain('never steer them to markup or a labour rate instead');
+    expect(tool.description).toContain('A total under the materials alone is refused.');
     expect(tool.parameters.required).toEqual(['quoteId', 'targetTotal']);
   });
 });
 
 describe('lump sums from chat', () => {
   it('propose_add_line_item carries the lump-sum form and forbids inventing a price', () => {
-    expect(MATE_SYSTEM_PROMPT).toContain('A lump sum at a price the tradie SAID ("add a $180 callout", "$450 for the disposal", "chuck $300 on for the skip"): label + price');
-    expect(MATE_SYSTEM_PROMPT).toContain('A price the tradie states is never a material search, and you never invent a price to make one.');
+    expect(MATE_SYSTEM_PROMPT).toContain('or a lump sum at a price the tradie SAID (label + price; lands at exactly that figure, no search, no markup)');
     const tool = TOOL_DECLARATIONS.find((t) => t.name === 'propose_add_line_item')!;
+    expect(tool.description).toContain('never invent a price to make a lump sum');
     expect(Object.keys(tool.parameters.properties ?? {})).toEqual(expect.arrayContaining(['label', 'price', 'scope', 'pricesIncludeGst']));
     expect(tool.parameters.required).toEqual(['quoteId']);
   });
@@ -62,8 +63,7 @@ describe('contacts off the phone', () => {
   const section = promptSection('Customer');
 
   it('routes "access my contacts" to the picker and never to a read-out', () => {
-    expect(section).toContain('"Access my contacts", "open contacts", "it\'s in my phone", "pick them from my phone" → propose_pick_contact, straight away.');
-    expect(section).toContain('Never answer that by asking them to read the number out instead.');
+    expect(section).toContain('"Access my contacts", "open contacts", "it\'s in my phone" → propose_pick_contact, straight away — never a request to read the number out instead.');
   });
 
   it('a phone-book or recent hit goes on as customerDraft, never as customerId', () => {
@@ -78,6 +78,7 @@ describe('phone numbers and emails by voice', () => {
   it('collects chunks, reads back once, never asks for the rest twice, never pads', () => {
     expect(section).toContain('Keep collecting the digits across turns without comment.');
     expect(section).toContain('read the whole number back once');
+    expect(section).toContain('Exactly eight digits is a landline missing its area code — ask for that once.');
     expect(section).toContain('Never say "what\'s the rest?" twice');
     expect(section).toContain('draft without it and say so in the same line');
     expect(section).toContain('Never pad a number.');

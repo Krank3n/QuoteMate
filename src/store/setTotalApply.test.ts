@@ -53,7 +53,7 @@ const remember = vi.hoisted(() => ({ rememberMaterialPrice: vi.fn(async () => tr
 vi.mock('../services/priceMemory', () => ({ rememberMaterialPrice: remember.rememberMaterialPrice }));
 
 import { useStore } from './useStore';
-import { PRICE_ADJUSTMENT_NAME } from '../utils/setTotal';
+import { DISCOUNT_NAME } from '../utils/setTotal';
 import type { Document } from '../types/document';
 import type { Contact, Material, QuoteSection } from '../types';
 
@@ -137,7 +137,7 @@ describe('propose_set_total', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.appliedTotal).toBe(1232);
-    expect(result.moved).toBe('labour $702.00 → $518.30');
+    expect(result.moved).toBe('off the labour');
     expect(result.navigate).toEqual({ kind: 'job_preview', quoteId: DOC_ID });
     const doc = stored();
     expect(doc.total).toBe(1232);
@@ -147,24 +147,31 @@ describe('propose_set_total', () => {
     expect(doc.sections!.map((s) => s.laborTotal)).toEqual([405, 180, 117]);
   });
 
-  it('refuses a total under the materials with the plain sentence and changes nothing', async () => {
+  it('refuses a total under the materials and changes nothing', async () => {
     const result = await useStore.getState().applyProposal({ ...base, type: 'propose_set_total', quoteId: DOC_ID, targetTotal: 400 });
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.error).toBe("That's under the materials — they come to $549.00 on their own, so $549.00 is as low as this one goes.");
+    expect(!result.ok && result.error).toContain('under the materials');
     expect(stored().total).toBe(1415.7);
   });
 
-  it('falls back to one "Price adjustment" line when there is no labour to absorb it', async () => {
+  it('refuses on a paid or part-paid invoice — the balance would not follow', async () => {
+    for (const stage of ['paid', 'partially_paid']) {
+      useStore.setState({ documents: [inv004({ stage } as any)] } as any);
+      const result = await useStore.getState().applyProposal({ ...base, type: 'propose_set_total', quoteId: DOC_ID, targetTotal: 1232 });
+      expect(!result.ok && result.error, stage).toContain('money paid against it');
+      expect(stored().total).toBe(1415.7);
+      const lump = await useStore.getState().applyProposal({ ...base, type: 'propose_add_line_item', quoteId: DOC_ID, searchTerm: 'Callout', qty: 1, unit: 'each', kind: 'work', price: 180 });
+      expect(lump.ok, stage).toBe(false);
+    }
+  });
+
+  it('reports the discount line it fell back to, and moves it rather than stacking a second', async () => {
     useStore.setState({ documents: [inv004({ sections: [], laborHours: 0, laborTotal: 0, subtotal: 549, total: 713.7 })] } as any);
     const first = await useStore.getState().applyProposal({ ...base, type: 'propose_set_total', quoteId: DOC_ID, targetTotal: 650 });
-    expect(first.ok && first.moved).toBe(`a new "${PRICE_ADJUSTMENT_NAME}" line at -$63.70`);
+    expect(first.ok && first.moved).toBe(`a new "${DISCOUNT_NAME}" line at -$63.70`);
     const second = await useStore.getState().applyProposal({ ...base, type: 'propose_set_total', quoteId: DOC_ID, targetTotal: 700 });
-    expect(second.ok && second.moved).toBe(`the "${PRICE_ADJUSTMENT_NAME}" line at -$13.70`);
-    const doc = stored();
-    expect(doc.total).toBe(700);
-    expect(doc.materials.filter((m) => m.name === PRICE_ADJUSTMENT_NAME)).toHaveLength(1);
-    expect(doc.markupAmount).toBe(164.7);
+    expect(second.ok && second.moved).toBe(`the "${DISCOUNT_NAME}" line at -$13.70`);
+    expect(stored().total).toBe(700);
+    expect(stored().materials.filter((m) => m.kind === 'work')).toHaveLength(1);
   });
 
   it('works on a legacy quote that is not in the documents cache yet', async () => {
@@ -269,6 +276,18 @@ describe('stored totals follow every line edit on the Document path', () => {
   });
 });
 
+describe('a legacy quote (not yet mirrored into documents)', () => {
+  it('delete-line recalculates and reports the total there too', async () => {
+    const quote = { ...inv004(), materials: [gear(), gear({ id: 'm2', price: 100, totalPrice: 100 })], createdAt: new Date(), updatedAt: new Date(), status: 'draft' } as any;
+    const saveQuote = vi.fn(async () => {});
+    useStore.setState({ documents: [], quotes: [quote], saveQuote } as any);
+    const result = await useStore.getState().applyProposal({ ...base, type: 'propose_delete_line_item', quoteId: DOC_ID, materialId: 'm2' });
+    // 549 + 702 + 164.7
+    expect(result.ok && result.appliedTotal).toBe(1415.7);
+    expect((saveQuote.mock.calls[0] as any)[0].total).toBe(1415.7);
+  });
+});
+
 describe('propose_update_quote_rates on a sectioned document', () => {
   it('labour hours move the money through extra hours instead of a display field', async () => {
     const two = await useStore.getState().applyProposal({ ...base, type: 'propose_update_quote_rates', quoteId: DOC_ID, laborHours: 2 });
@@ -331,6 +350,15 @@ describe('propose_pick_contact', () => {
     expect(stored().customerName).toBe('Sue and Peter Williamson');
   });
 
+  it('a phone-book entry with no number or email links the saved contact of the same name', async () => {
+    const existing: Contact = { id: 'saved-2', name: 'Diane Bunk', source: 'manual', createdAt: '', updatedAt: '' };
+    useStore.setState({ contacts: [existing] } as any);
+    contactsMock.presentContactPickerAsync.mockResolvedValueOnce({ id: 'phone-2', firstName: 'Diane', lastName: 'Bunk' });
+    const result = await useStore.getState().applyProposal({ ...base, type: 'propose_pick_contact' });
+    expect(result.ok && result.pickedContact?.id).toBe('saved-2');
+    expect(useStore.getState().contacts).toHaveLength(1);
+  });
+
   it('a closed picker is a cancel, not a failure', async () => {
     contactsMock.presentContactPickerAsync.mockResolvedValueOnce(null);
     const result = await useStore.getState().applyProposal({ ...base, type: 'propose_pick_contact', quoteId: DOC_ID });
@@ -344,6 +372,7 @@ describe('propose_pick_contact', () => {
     contactsMock.requestPermissionsAsync.mockResolvedValueOnce({ status: 'denied', canAskAgain: false } as any);
     const result = await useStore.getState().applyProposal({ ...base, type: 'propose_pick_contact', quoteId: DOC_ID });
     expect(!result.ok && result.error).toContain('Contacts access is off');
+    expect(!result.ok && result.code).toBe('CONTACTS_DENIED');
     expect(contactsMock.presentContactPickerAsync).not.toHaveBeenCalled();
   });
 

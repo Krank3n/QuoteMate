@@ -36,32 +36,35 @@ export interface AiValidationFlags {
   nonLatinTokenCount: number;
 }
 
-// A letter from any script but Latin. The generator has emitted Cyrillic
+// A whole word in another script. The generator has emitted Cyrillic
 // mid-name twice in 743 stored documents — "Consumer mains cable 16mm² двух
 // core and earth" reached a customer on an invoice, and "Builders String Line
-// ролик 100m" sat on a draft. Symbols, digits and the Latin-1 / Latin Extended
-// letters in real product names (², °, é, ø, Ø) all pass; only a letter of
-// another script fails the word it sits in.
+// ролик 100m" sat on a draft. A word is stripped only when it carries a
+// letter of another script and NO Latin letter or digit: "двух" goes,
+// "88-108µF", "5μF", "8Ω" and every real product name with ², °, é, Ø, ™
+// stay (units and ratings are Greek letters sitting inside Latin words).
 //
 // Written as \p{L} minus explicit Latin ranges rather than \p{Script=Latin}:
 // this file runs on the phone under Hermes as well as on the server, and
 // \p{L} with the u flag is the one Unicode property escape this codebase
-// already ships there (elevenLabsAgentConfig.ts).
-const LATIN_LETTER = 'A-Za-z\u00AA\u00BA\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u024F\u1E00-\u1EFF\u2C60-\u2C7F\uA720-\uA7FF\uFB00-\uFB06';
+// already ships there (elevenLabsAgentConfig.ts). µ, μ and Ω are allowed
+// outright — they are units, not another language.
+const LATIN_LETTER = 'A-Za-z\u00AA\u00B5\u00BA\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u024F\u03A9\u03BC\u1E00-\u1EFF\u2126\u2C60-\u2C7F\uA720-\uA7FF\uFB00-\uFB06';
 const NON_LATIN_LETTER_RE = new RegExp(`(?![${LATIN_LETTER}])\\p{L}`, 'u');
+const LATIN_OR_DIGIT_RE = new RegExp(`[0-9${LATIN_LETTER}]`);
 
 /**
- * The text with any non-Latin-script word removed. Returns the input
- * untouched when every word is fine, and never empties a name: a name that is
- * ALL foreign words is kept as-is (and still counted) rather than replaced
- * with nothing.
+ * The text with any foreign-script word removed. Returns the input untouched
+ * when every word is fine, and never empties a name: a name that is ALL
+ * foreign words is kept as-is (and still counted) rather than replaced with
+ * nothing.
  */
 export function stripNonLatinWords(text: string): { text: string; stripped: number } {
   const words = text.split(/(\s+)/);
   let stripped = 0;
   const kept = words.filter((w) => {
     if (!w || /^\s+$/.test(w)) return true;
-    if (NON_LATIN_LETTER_RE.test(w)) {
+    if (NON_LATIN_LETTER_RE.test(w) && !LATIN_OR_DIGIT_RE.test(w)) {
       stripped++;
       return false;
     }

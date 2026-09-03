@@ -129,3 +129,17 @@ describe('findSupersededProposals — scope updates', () => {
     expect(findSupersededProposals([other, fresh], [incoming], fresh.id)).toEqual([]);
   });
 });
+
+// One bubble per reply (bubbleContinuity): a re-proposal after a tool-call
+// turn boundary lands in the SAME message as the stale card. Excluding the
+// whole message would leave that stale card tappable — the birdhouse
+// regression by another route.
+describe('findSupersededProposals on a continued bubble', () => {
+  it('dismisses the stale pending card in the very message the new one lands in', () => {
+    const stale = updateCustomer('p1', 'q1', 'Kyle Van Lishout');
+    const incoming = updateCustomer('p2', 'q1', 'Karl');
+    const bubble = msg([stale, incoming]);
+    const refs = findSupersededProposals([bubble], [incoming], bubble.id);
+    expect(refs).toEqual([{ messageId: bubble.id, proposalId: 'p1' }]);
+  });
+});

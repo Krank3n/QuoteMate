@@ -6,7 +6,10 @@ import { Proposal, ProposalStatus } from '../../types/assistant';
 import { applyLabelFor, iconFor, titleFor } from './proposalCardCopy';
 import { rateLineUnitPrice, rateLinesCoverMaterials, rateSummary, rateUnitLabel } from '../../services/quotingProfile';
 import { registeredBusinessSettings } from '../../services/assistant/quotingProfileContext';
-import { resolveGstMode } from '../../../shared/document/gstMode';
+import { resolveGstMode, type GstMode } from '../../../shared/document/gstMode';
+import { DISCOUNT_NAME, PRICE_ADJUSTMENT_NAME } from '../../utils/setTotal';
+// The Intl formatter: a negative figure prints as -$183.70, not $-183.70.
+import { formatCurrency } from '../../utils/documentCalculator';
 
 interface Props {
   proposal: Proposal;
@@ -15,9 +18,8 @@ interface Props {
   onDismiss: () => void;
 }
 
-function formatCurrency(n: number): string {
-  return `$${n.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
+/** " inc GST" / " ex GST" / nothing — the same suffix the draft card's rate lines carry. */
+const gstSuffix = (mode: GstMode): string => (mode === 'inclusive' ? ' inc GST' : mode === 'exclusive' ? ' ex GST' : '');
 
 function ProposalCardImpl({ proposal, status, onApply, onDismiss }: Props) {
   const styles = useStyles();
@@ -48,13 +50,19 @@ function ProposalCardImpl({ proposal, status, onApply, onDismiss }: Props) {
 
       {status === 'pending' ? (
         <View style={styles.actions}>
-          <TouchableOpacity style={styles.dismissBtn} onPress={onDismiss} accessibilityRole="button">
+          <TouchableOpacity
+            style={styles.dismissBtn}
+            onPress={onDismiss}
+            accessibilityRole="button"
+            accessibilityLabel={`Dismiss — ${titleFor(proposal)}`}
+          >
             <Text style={styles.dismissText}>Dismiss</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.applyBtn, { backgroundColor: applyColor }]}
             onPress={onApply}
             accessibilityRole="button"
+            accessibilityLabel={`${applyLabel} — ${titleFor(proposal)}`}
           >
             <Text style={styles.applyText}>{applyLabel}</Text>
           </TouchableOpacity>
@@ -136,8 +144,10 @@ function Body({ proposal }: { proposal: Proposal }) {
       );
     case 'propose_add_line_item':
       if (proposal.kind === 'work') {
+        // The basis the tradie named, else the document's own — the figure on
+        // the card is the figure that lands.
         const gst =
-          proposal.pricesIncludeGst === true ? ' inc GST' : proposal.pricesIncludeGst === false ? ' ex GST' : '';
+          proposal.pricesIncludeGst === true ? ' inc GST' : proposal.pricesIncludeGst === false ? ' ex GST' : gstSuffix(docMode);
         return (
           <View>
             <Text style={styles.summary}>{proposal.searchTerm} · {formatCurrency(proposal.price ?? 0)}{gst}</Text>
@@ -191,21 +201,27 @@ function Body({ proposal }: { proposal: Proposal }) {
     }
     case 'propose_set_total': {
       const p = proposal.preview;
+      // Labour is named, never quantified: the labour figure on the quote
+      // rolls the labour markup in, so a number here would be a third figure.
       const moved =
-        p?.mechanism === 'labour' && p.labourBefore != null && p.labourAfter != null
-          ? `Labour ${formatCurrency(p.labourBefore)} → ${formatCurrency(p.labourAfter)}. Materials stay as they are.`
+        p?.mechanism === 'labour'
+          ? 'Comes out of the labour.'
           : p?.mechanism === 'adjustment' && p.adjustment != null
-            ? `A "Price adjustment" line of ${formatCurrency(p.adjustment)} carries it. Materials and labour stay as they are.`
-            : 'Labour takes up the difference if there is any; otherwise a "Price adjustment" line carries it. Materials stay as they are.';
+            ? p.adjustment < 0
+              ? `Takes ${formatCurrency(Math.abs(p.adjustment))} off with a "${DISCOUNT_NAME}" line.`
+              : `Adds ${formatCurrency(p.adjustment)} as a "${PRICE_ADJUSTMENT_NAME}" line.`
+            : `Labour takes the difference, or a "${PRICE_ADJUSTMENT_NAME}" line does.`;
       return (
         <View>
           {proposal.displayName ? (
             <Text style={styles.summary} numberOfLines={2}>{proposal.displayName}</Text>
           ) : null}
           <Text style={styles.summary}>
-            {p ? `${formatCurrency(p.currentTotal)} → ` : 'Total → '}{formatCurrency(proposal.targetTotal)}
+            {p ? `${formatCurrency(p.currentTotal)} → ` : 'New total '}
+            {formatCurrency(proposal.targetTotal)}
+            {p ? gstSuffix(p.gstMode) : gstSuffix(docMode)}
           </Text>
-          <Text style={styles.dim}>{moved}</Text>
+          <Text style={styles.dim}>{moved} Materials stay as they are.</Text>
         </View>
       );
     }
@@ -215,11 +231,7 @@ function Body({ proposal }: { proposal: Proposal }) {
           {proposal.displayName ? (
             <Text style={styles.summary} numberOfLines={2}>{proposal.displayName}</Text>
           ) : null}
-          <Text style={styles.dim}>
-            {proposal.quoteId
-              ? "Opens your phone's contacts — the one you pick goes on this one and into your QuoteMate contacts."
-              : "Opens your phone's contacts — the one you pick goes into your QuoteMate contacts and onto the draft."}
-          </Text>
+          <Text style={styles.dim}>Opens your phone's contacts — whoever you pick gets saved here and goes on this job.</Text>
         </View>
       );
     case 'propose_delete_line_item':

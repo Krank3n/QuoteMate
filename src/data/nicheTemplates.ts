@@ -522,6 +522,34 @@ export const NICHE_TEMPLATES: NicheJobTemplate[] = [
     voicePromptHint: 'Tell me about the points — number, location, circuit',
   },
   {
+    id: 'smoke_alarm_install',
+    categoryId: 'electrical',
+    nicheId: 'smoke_alarms',
+    name: 'Smoke Alarms',
+    description: 'Install or replace smoke alarms',
+    icon: 'smoke-detector',
+    pricingMethod: 'per_point',
+    requiredParams: [
+      { key: 'hardwired', label: 'Hardwired 240V alarms', unit: '', defaultValue: 2 },
+      { key: 'battery', label: 'Battery alarms', unit: '', defaultValue: 2 },
+    ],
+    defaultMaterials: [
+      { name: 'Hardwired Smoke Alarm', searchTerm: '240V hardwired photoelectric smoke alarm 10 year lithium backup wireless interconnect', quantityFormula: 'hardwired', unit: 'each' },
+      { name: 'Battery Smoke Alarm', searchTerm: '10 year lithium battery photoelectric smoke alarm wireless interconnect', quantityFormula: 'battery', unit: 'each' },
+      { name: 'Electrical Cable', searchTerm: 'Twin and earth cable 1.5mm 100m', quantityFormula: 'Math.ceil(hardwired / 4)', unit: 'each' },
+      { name: 'Junction Boxes', searchTerm: 'Electrical junction box round 70mm', quantityFormula: 'hardwired', unit: 'each' },
+    ],
+    estimatedHoursFormula: 'hardwired * 0.5 + battery * 0.25',
+    estimatedHoursRange: { min: 1, max: 4 },
+    suggestedMaterials: ['Hardwired smoke alarm', 'Battery smoke alarm', 'Electrical cable', 'Junction boxes'],
+    // One smoke-alarm job (3 Sep 2026) was forced onto Power Points and asked
+    // about singles-or-doubles and USB. Supply vs replace moved that quote by a
+    // third: the customer already owned the four battery alarms.
+    questionsLine: 'How many alarms, and how many are hardwired 240V versus battery? Interconnected — wired or wireless? New install, or replacing existing units (any of them customer-supplied)? Any brand?',
+    exampleLines: 'Replace two existing hardwired 240V alarms in the hallway and landing with Red Dot photoelectric units, wireless interconnect. Customer has four battery alarms already — just pair them.',
+    voicePromptHint: 'Tell me the alarms — how many, hardwired or battery, new or replacing',
+  },
+  {
     id: 'led_downlight_pack',
     categoryId: 'electrical',
     nicheId: 'power_lighting',

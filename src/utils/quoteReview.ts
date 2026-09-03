@@ -431,9 +431,23 @@ export function topLinesSummary(
     .slice(0, count);
   if (!rows.length) return '';
   const parts = rows.map(
-    (m) => `${m.name} $${lineTotal(m).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+    (m) => `${m.name}${packClause(m)} $${lineTotal(m).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
   );
   return `Biggest lines: ${parts.join(', ')}.`;
+}
+
+/**
+ * " · 1 pack of 4" when the priced product is a multi-unit pack. Four smoke
+ * alarms priced as one $229 four-pack read as "$229 an alarm" until the pack
+ * is named (3 Sep 2026).
+ */
+function packClause(m: Material): string {
+  const size = Number(m.packSize);
+  const qty = Number(m.quantity);
+  if (!Number.isFinite(size) || size <= 1 || !Number.isFinite(qty) || qty <= 0) return '';
+  const packs = Number.isInteger(qty) ? String(qty) : qty.toFixed(1);
+  const unit = m.packUnit && m.packUnit !== 'each' ? ` ${m.packUnit}` : '';
+  return ` · ${packs} pack${qty === 1 ? '' : 's'} of ${Number.isInteger(size) ? size : size.toFixed(1)}${unit}`;
 }
 
 /**

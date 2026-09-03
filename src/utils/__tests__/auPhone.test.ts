@@ -29,14 +29,14 @@ describe('normaliseAuPhone', () => {
     expect(normaliseAuPhone('04').valid).toBe(false);
     expect(normaliseAuPhone('two eight seven five').valid).toBe(false);
     expect(normaliseAuPhone('seven seven five three five four two').valid).toBe(false);
-    expect(normaliseAuPhone('A47528759')).toMatchObject({ digits: '47528759', valid: false });
+    expect(normaliseAuPhone('A47528759')).toMatchObject({ formatted: '47528759', valid: false });
   });
 
   it('rejects the wrong number of digits and non-AU prefixes', () => {
     expect(normaliseAuPhone('04268753564').valid).toBe(false); // 11 digits — the real over-long save
     expect(normaliseAuPhone('1412345678').valid).toBe(false);
     expect(normaliseAuPhone('').valid).toBe(false);
-    expect(normaliseAuPhone(undefined).digits).toBe('');
+    expect(normaliseAuPhone(undefined).formatted).toBe('');
   });
 });
 

@@ -30,12 +30,9 @@ describe('createBubbleContinuity', () => {
     expect(c.takeContinuation()).toEqual({ id: 'b1', text: 'first second' });
   });
 
-  it('never continues an empty bubble, and forgets everything on reset', () => {
+  it('never continues an empty bubble', () => {
     const c = createBubbleContinuity();
     c.closed({ id: 'b1', text: '' });
-    expect(c.takeContinuation()).toBeNull();
-    c.closed({ id: 'b2', text: 'hello' });
-    c.reset();
     expect(c.takeContinuation()).toBeNull();
   });
 });

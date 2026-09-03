@@ -5,9 +5,10 @@
  * details written into a scope, a "$X" left in a customer email).
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { buildProposal, setProposalDocumentProbe } from '../proposalTools';
+import { buildProposal, setContactPickerProbe, setProposalDocumentProbe } from '../proposalTools';
 import { dispatchToolCall } from '../toolDispatcher';
 import { setRenderableQuoteProbe } from '../showQuoteGate';
+import { __resetCustomerDraftRefs, scoreCustomerCandidates } from '../readTools';
 import { markPricingStarted, __resetPricingInFlight } from '../pricingInFlight';
 import type {
   AddLineItemProposal,
@@ -45,6 +46,7 @@ beforeEach(() => {
 afterEach(() => {
   setRenderableQuoteProbe(null);
   setProposalDocumentProbe(null);
+  setContactPickerProbe(null);
   __resetPricingInFlight();
 });
 
@@ -54,15 +56,24 @@ describe('propose_set_total', () => {
     expect(error).toBeUndefined();
     const p = proposal as SetTotalProposal;
     expect(p).toMatchObject({ type: 'propose_set_total', quoteId: 'inv-004', targetTotal: 1232, displayName: 'Switchboard install' });
-    // 549 + 180 + 702 + 164.7 = 1595.7 → labour takes the 363.70 cut.
-    expect(p.preview).toEqual({ currentTotal: 1595.7, mechanism: 'labour', labourBefore: 702, labourAfter: 338.3 });
+    // 549 + 180 + 702 + 164.7 = 1595.7 → labour takes the 363.70 cut. No labour figures on the card.
+    expect(p.preview).toEqual({ currentTotal: 1595.7, mechanism: 'labour', gstMode: 'none' });
   });
 
-  it('refuses a total under the materials with the plain sentence, before any card goes up', () => {
+  it('refuses a total under the materials before any card goes up', () => {
     const { proposal, error } = buildProposal('propose_set_total', 't', { quoteId: 'inv-004', targetTotal: 400 });
     expect(proposal).toBeUndefined();
-    expect(error).toContain("That's under the materials — they come to $549.00 on their own, so $549.00 is as low as this one goes.");
+    expect(error).toContain('under the materials');
     expect(error).toContain("don't put a card up");
+  });
+
+  it('previews the discount line, with the GST basis the figures are read in', () => {
+    setProposalDocumentProbe(() => ({ ...INV_004, sections: [], laborHours: 0, gstRegistered: true, pricesIncludeGst: false }));
+    const { proposal } = buildProposal('propose_set_total', 't', { quoteId: 'inv-004', targetTotal: 800 });
+    const preview = (proposal as SetTotalProposal).preview!;
+    expect(preview.mechanism).toBe('adjustment');
+    expect(preview.gstMode).toBe('exclusive');
+    expect(preview.adjustment).toBeLessThan(0);
   });
 
   it('tells the model when the total is already there', () => {
@@ -115,13 +126,15 @@ describe('propose_add_line_item — lump-sum form', () => {
     });
   });
 
-  it('falls back to searchTerm as the label, and leaves the GST basis off when unsaid', () => {
-    const { proposal } = buildProposal('propose_add_line_item', 't', { quoteId: 'inv-004', searchTerm: 'Callout', price: 180 });
+  it('leaves the GST basis and scope off when unsaid, and never mints a lump sum from a material search', () => {
+    const { proposal } = buildProposal('propose_add_line_item', 't', { quoteId: 'inv-004', label: 'Callout', price: 180 });
     const p = proposal as AddLineItemProposal;
-    expect(p.searchTerm).toBe('Callout');
     expect(p.kind).toBe('work');
     expect(p.pricesIncludeGst).toBeUndefined();
     expect(p.scope).toBeUndefined();
+    // A price beside a material search is the two forms mixed up — a $0
+    // lump sum minted from it would be a $0 row on the customer's document.
+    expect(buildProposal('propose_add_line_item', 't', { quoteId: 'inv-004', searchTerm: '90x45 treated pine', qty: 4, unit: 'each', price: 0 }).error).toContain('label + price');
   });
 
   it('a $0 line is a legitimate lump sum ("included"); a negative one is not', () => {
@@ -130,7 +143,7 @@ describe('propose_add_line_item — lump-sum form', () => {
   });
 
   it('names what a lump sum is missing, and keeps the material form as it was', () => {
-    expect(buildProposal('propose_add_line_item', 't', { quoteId: 'inv-004', price: 180 }).error).toContain('label');
+    expect(buildProposal('propose_add_line_item', 't', { quoteId: 'inv-004', price: 180 }).error).toContain('label + price');
     expect(buildProposal('propose_add_line_item', 't', { quoteId: 'inv-004', label: 'x', price: 'heaps' }).error).toContain('number');
     expect(buildProposal('propose_add_line_item', 't', { quoteId: 'inv-004' }).error).toContain('label + price');
     const material = buildProposal('propose_add_line_item', 't', { quoteId: 'inv-004', searchTerm: '90x45 treated pine', qty: 4, unit: 'each' }).proposal as AddLineItemProposal;
@@ -173,6 +186,14 @@ describe('propose_pick_contact', () => {
   it('refuses an invented quote id', () => {
     expect(buildProposal('propose_pick_contact', 't', { quoteId: 'quote_pending_1' }).error).toContain('never invent a quoteId');
   });
+
+  it('refuses outright where there is no picker (the web app), so no dead button goes up', () => {
+    setContactPickerProbe(() => false);
+    const { proposal, error } = buildProposal('propose_pick_contact', 't', {});
+    expect(proposal).toBeUndefined();
+    expect(error).toContain('no contact picker in the web app');
+    expect(error).toContain('find_customer');
+  });
 });
 
 describe('phone numbers the model glued together', () => {
@@ -208,6 +229,42 @@ describe('phone numbers the model glued together', () => {
     const update = buildProposal('propose_update_customer', 't', { quoteId: 'inv-004', customerDraft: { name: 'Sue', phone: '04268753564' } });
     expect((update.proposal as UpdateCustomerProposal).customerDraft?.phone).toBeUndefined();
     expect(update.note).toContain('left off');
+  });
+});
+
+describe('a draftRef from find_customer', () => {
+  beforeEach(() => __resetCustomerDraftRefs());
+
+  it('resolves to the details held on the device, phone kept as the phone book has it', () => {
+    const [m] = scoreCustomerCandidates('Diane', [{ id: 'tmp', name: 'Diane Bunk', phone: '+64 21 555 1234', email: 'di@example.com', source: 'phone' }]).matches;
+    const { proposal, error } = buildProposal('propose_draft_quote', 't', {
+      jobName: 'Smoke alarms',
+      jobDescription: 'Replace two hardwired smoke alarms and fit four battery alarms.',
+      customerDraftRef: m.draftRef,
+      customerDraft: { address: '1186 Mt Larcom Bracewell Road' },
+    });
+    expect(error).toBeUndefined();
+    expect((proposal as DraftQuoteProposal).customerDraft).toEqual({ name: 'Diane Bunk', phone: '+64 21 555 1234', email: 'di@example.com', address: '1186 Mt Larcom Bracewell Road' });
+    expect((proposal as DraftQuoteProposal).customerId).toBeUndefined();
+    const update = buildProposal('propose_update_customer', 't', { quoteId: 'inv-004', customerDraftRef: m.draftRef });
+    expect((update.proposal as UpdateCustomerProposal).customerDraft?.name).toBe('Diane Bunk');
+    expect((update.proposal as UpdateCustomerProposal).customerName).toBe('Diane Bunk');
+  });
+
+  it('refuses a ref find_customer never handed out', () => {
+    const { error } = buildProposal('propose_draft_quote', 't', { jobName: 'x', jobDescription: 'Replace two hardwired smoke alarms.', customerDraftRef: 'draft_42' });
+    expect(error).toContain('call find_customer again');
+  });
+});
+
+describe('a name that is only whitespace', () => {
+  it('is refused everywhere a contact can be created, instead of throwing', async () => {
+    expect(buildProposal('propose_create_contact', 't', { name: '   ' }).error).toContain('requires name');
+    expect(buildProposal('propose_update_customer', 't', { quoteId: 'inv-004', customerDraft: { name: '  ' } }).error).toContain('customerDraft.name');
+    expect(buildProposal('propose_draft_quote', 't', { jobName: 'x', jobDescription: 'Replace two hardwired smoke alarms.', customerDraft: { name: ' ' } }).error).toContain('customerDraft.name');
+    // And a validator that does throw still answers the model.
+    const out = await dispatchToolCall({ name: 'propose_create_contact', id: 'x', args: { name: { not: 'a string' } } });
+    expect(out.response.error).toBeTruthy();
   });
 });
 

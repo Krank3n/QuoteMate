@@ -147,11 +147,12 @@ export interface SetTotalProposal extends BaseProposal {
   displayName?: string;
   preview?: {
     currentTotal: number;
-    mechanism: 'labour' | 'adjustment' | 'none';
-    labourBefore?: number;
-    labourAfter?: number;
-    /** The adjustment line's price after the move. */
+    /** 'labour': the labour takes the difference. 'adjustment': a lump-sum line carries it. */
+    mechanism: 'labour' | 'adjustment';
+    /** The adjustment line's price after the move — negative is a discount. */
     adjustment?: number;
+    /** How the customer reads the figures: inc GST, ex GST, or no GST at all. */
+    gstMode: 'exclusive' | 'inclusive' | 'none';
   };
 }
 

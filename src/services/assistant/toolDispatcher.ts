@@ -132,7 +132,15 @@ export async function dispatchToolCall(call: ToolCallInput): Promise<ToolCallOut
   }
 
   if (isProposalTool(name)) {
-    const { proposal, error, note } = buildProposal(name, id, input);
+    // A validator that throws must answer the model, not kill the turn: the
+    // text path runs these inside a bare Promise.all.
+    let built: ReturnType<typeof buildProposal>;
+    try {
+      built = buildProposal(name, id, input);
+    } catch (err: any) {
+      return { name, id, response: { error: err?.message || 'Proposal validation failed.' } };
+    }
+    const { proposal, error, note } = built;
     if (proposal) {
       const response: Record<string, unknown> = { ok: true, proposalId: proposal.id };
       const notes: string[] = [];

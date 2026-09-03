@@ -45,7 +45,7 @@ import { useDemoPlayback } from '../demo/demoPlayback';
 import { sendAssistantTurn } from '../services/assistantService';
 import { openVoiceSession, VoiceSession } from '../services/assistant/voiceSession';
 import { LiveAuthError, LiveOfflineError, LiveQuotaError } from '../services/assistant/liveSession';
-import { rememberAppliedQuote } from '../services/assistant/quoteRefMap';
+import { rememberAppliedQuote, resolveQuoteId } from '../services/assistant/quoteRefMap';
 import { startMicCapture, MicCaptureHandle, MicUnavailableError, micPermissionGranted } from '../services/assistant/mic';
 import { AudioQueue, createAudioQueue, ensureAudioMode } from '../services/assistant/audioPlayer';
 import { nextMatePlaying } from '../services/assistant/micGate';
@@ -122,7 +122,14 @@ import {
   mostRecentUnconsumedAttachment,
 } from './assistant/chatAttachments';
 import { buildSupplierGapNote } from '../services/assistant/supplierGapNote';
-import { setProposalDocumentProbe, setUnconsumedAttachmentProbe } from '../services/assistant/proposalTools';
+import {
+  setAppliedDraftsProbe,
+  setContactPickerProbe,
+  setPendingScopeUpdateProbe,
+  setProposalDocumentProbe,
+  setUnconsumedAttachmentProbe,
+} from '../services/assistant/proposalTools';
+import { correctionsClause, createPricingCorrections } from './assistant/pricingCorrections';
 import { setRenderableQuoteProbe } from '../services/assistant/showQuoteGate';
 import { createBubbleContinuity, joinFragments } from './assistant/bubbleContinuity';
 import { formatCurrency } from '../utils/documentCalculator';
@@ -600,6 +607,9 @@ export function AssistantScreen() {
   // One bubble per reply, however many pieces the transport hands it over in
   // — see screens/assistant/bubbleContinuity.ts.
   const bubbleContinuityRef = useRef(createBubbleContinuity());
+  // What the tradie says while a pipeline apply runs — handed to Mate the
+  // moment pricing lands. See screens/assistant/pricingCorrections.ts.
+  const pricingCorrectionsRef = useRef(createPricingCorrections());
   const pacerTickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // Set when the tradie accepted/cancelled a card by voice this turn (Mate
   // called a control tool). We run the actual Apply / dismiss on turnComplete
@@ -930,6 +940,15 @@ export function AssistantScreen() {
           ? collectQuotePhotos(messagesForPhotos)
           : [];
 
+      // From here until the result, what the tradie says is a correction to
+      // the quote being priced — kept, and handed to Mate when pricing lands.
+      if (
+        proposal.type === 'propose_draft_quote' ||
+        proposal.type === 'propose_update_quote_scope' ||
+        proposal.type === 'propose_reprice'
+      ) {
+        pricingCorrectionsRef.current.start();
+      }
       const result = await applyProposal(
         proposal,
         (status) => {
@@ -971,6 +990,11 @@ export function AssistantScreen() {
         : result.navigate.kind === 'open_invoice' ? result.navigate.invoiceId
         : undefined;
       if (mintedId) activeQuoteIdRef.current = mintedId;
+      // Whatever the tradie said while this ran. The quote they meant is the
+      // one just priced (a draft's minted id, or the quote a scope update /
+      // reprice was on).
+      const corrections = pricingCorrectionsRef.current.drain();
+      const correctionsQuoteId = mintedId ?? ('quoteId' in proposal ? (proposal as { quoteId?: string }).quoteId : undefined);
 
       // The supplier-book gap, if this run is worth mentioning at all. Text
       // chat never receives [pipeline-done] (that needs an open live session),
@@ -1021,6 +1045,8 @@ export function AssistantScreen() {
               : undefined,
           gapNote,
           sendOffer: offerFacts,
+          corrections,
+          quoteId: correctionsQuoteId,
         });
         if (liveSessionForNarration?.isOpen()) {
           bubbleContinuityRef.current.userTurn();
@@ -1035,11 +1061,19 @@ export function AssistantScreen() {
         setTimeout(() => { narrationModeRef.current = false; }, 8000);
       }
 
-      if (!result.ok && result.code === 'CANCELLED') {
-        // The tradie backed out of a picker the card opened. Not a failure —
-        // the card reads Dismissed and Mate is told nothing happened.
+      if (!result.ok && (result.code === 'CANCELLED' || result.code === 'CONTACTS_DENIED')) {
+        // The tradie backed out of the picker, or hasn't given contacts
+        // access. Neither is a failure — the card reads Dismissed, and Mate
+        // is told what to do next (a retry after access is turned on is fine,
+        // unlike the generic "don't propose it again" that a failure carries).
         updateProposalStatus(conversation.id, message.id, proposal.id, 'dismissed');
-        noteToMate(conversation.id, `[context] The tradie closed the contact picker without choosing anyone. Ask for the name instead, in one line.`);
+        if (result.code === 'CONTACTS_DENIED') appendErrorMessage(conversation.id, result.error);
+        noteToMate(
+          conversation.id,
+          result.code === 'CANCELLED'
+            ? '[context] The tradie closed the contact picker without choosing anyone. Ask for the name instead, in one line.'
+            : "[context] The tradie hasn't given contacts access. Ask for the name instead, in one line. If they turn access on and ask again, propose_pick_contact is fine to retry.",
+        );
         return;
       }
       if (!result.ok) {
@@ -1133,26 +1167,74 @@ export function AssistantScreen() {
       // right channel: the live socket in voice (logged as context without
       // speaking a reply), a hidden history message in text.
       const note = (text: string) => noteToMate(conversation.id, text);
-      // Most context notes need result.navigate (they reference the minted
-      // quote/invoice/contact id). propose_delete_quote is the exception —
-      // the doc is gone, so it never returns a navigate, but Mate still
-      // needs the heads-up that the id is dead.
-      if (proposal.type === 'propose_delete_quote') {
-        const label = proposal.displayName || proposal.displayCustomerName || proposal.quoteId;
-        note(
-          `[context] Deleted ${proposal.displayDocType || 'quote'} ${proposal.quoteId} ("${label}"). ` +
-            `It's gone — do NOT reference this id on follow-ups, and don't list it.`,
-        );
-      }
-      // Anything that changed money carries the real total. These land
-      // whether or not the apply navigated: a line added on the unified
-      // Document path returns no navigate hint, and text-mode Mate never
-      // learned the line had landed at all.
+      // One note per outcome. Anything that changed money carries the real
+      // total, whether or not the apply navigated — a line added on the
+      // unified Document path returns no navigate hint, and text-mode Mate
+      // never learned the line had landed at all. The cases that name a
+      // minted id guard on result.navigate themselves.
       const totalClause =
-        typeof result.appliedTotal === 'number'
-          ? ` The total is now ${formatCurrency(result.appliedTotal)} — read it from here or get_quote, never from memory.`
-          : '';
+        typeof result.appliedTotal === 'number' ? ` The total is now ${formatCurrency(result.appliedTotal)}.` : '';
       switch (proposal.type) {
+        case 'propose_delete_quote': {
+          // The doc is gone — no navigate, but Mate must know the id is dead.
+          const label = proposal.displayName || proposal.displayCustomerName || proposal.quoteId;
+          note(
+            `[context] Deleted ${proposal.displayDocType || 'quote'} ${proposal.quoteId} ("${label}"). ` +
+              `It's gone — do NOT reference this id on follow-ups, and don't list it.`,
+          );
+          break;
+        }
+        case 'propose_draft_quote':
+          if (result.navigate?.kind === 'job_preview' || result.navigate?.kind === 'quote_materials_list') {
+            note(
+              `[context] Pricing finished for quote ${result.navigate.quoteId} ` +
+              `("${proposal.jobName}") — it's priced and on screen. Reference this id on follow-ups; ` +
+              `do not draft a new quote for the same job — a scope change goes through propose_update_quote_scope.` +
+              (chatPhotos.length
+                ? ` Their site photos are on it — don't ask them to add photos again.`
+                : '') +
+              (gapNote ? ` ${gapNote}` : '') +
+              // Voice gets these on [pipeline-done] and text on the send-offer
+              // turn; this note is the fallback that carries them when neither
+              // fires (no facts to offer a send with, a turn already running).
+              (offerFacts || (voiceSessionRef.current?.isOpen() && narrating) ? '' : correctionsClause(corrections, result.navigate.quoteId)),
+            );
+          }
+          break;
+        case 'propose_send_quote':
+          note(`[context] Sent quote ${proposal.quoteId} to the customer.`);
+          break;
+        case 'propose_convert_to_invoice':
+          if (result.navigate?.kind === 'open_invoice') {
+            note(`[context] Converted quote ${proposal.quoteId} to invoice ${result.navigate.invoiceId}.`);
+          }
+          break;
+        case 'propose_create_contact':
+          if (result.navigate?.kind === 'open_contact') {
+            note(`[context] Created new contact ${result.navigate.contactId} ("${proposal.name}").`);
+          }
+          break;
+        case 'propose_update_customer':
+          note(
+            `[context] Changed the customer on quote ${proposal.quoteId}` +
+            (proposal.customerName ? ` to "${proposal.customerName}".` : '.'),
+          );
+          break;
+        case 'propose_reprice':
+          note(
+            `[context] Re-priced quote ${proposal.quoteId}.` +
+            (result.review ? ` ${result.review.summary}` : '') +
+            (gapNote ? ` ${gapNote}` : ''),
+          );
+          break;
+        case 'propose_update_quote_scope':
+          note(
+            `[context] Updated the scope on quote ${proposal.quoteId} and re-ran materials + pricing — ` +
+            `same quote, no new one.` +
+            (result.review ? ` ${result.review.summary}` : '') +
+            (gapNote ? ` ${gapNote}` : ''),
+          );
+          break;
         case 'propose_set_total':
           note(
             `[context] Set the total on quote ${proposal.quoteId} to ${formatCurrency(proposal.targetTotal)}` +
@@ -1200,9 +1282,16 @@ export function AssistantScreen() {
                   `Confirm in one short line.`,
               );
             } else {
-              // No quote yet: this is the customer for the draft in hand, and
-              // Mate needs a turn to get on with it — the same turn-drive the
-              // send offer uses.
+              // No quote yet: this is the customer for the draft in hand.
+              // Say who was picked on screen (a dropped turn must not leave a
+              // bare "Applied"), then give Mate a turn to get on with it —
+              // the same turn-drive the send offer uses.
+              appendMessage(conversation.id, {
+                id: generateId(),
+                role: 'assistant',
+                text: `Got it — ${picked.name}${picked.phone ? ` (${picked.phone})` : ''}.`,
+                createdAt: new Date().toISOString(),
+              });
               continueMateTurn(
                 conversation.id,
                 `[context] The tradie picked ${picked.name} (${details}) from their phone — saved as contact ${picked.id}. ` +
@@ -1214,63 +1303,6 @@ export function AssistantScreen() {
         }
         default:
           break;
-      }
-      if (result.navigate) {
-        switch (proposal.type) {
-          case 'propose_draft_quote':
-            if (result.navigate.kind === 'job_preview' || result.navigate.kind === 'quote_materials_list') {
-              note(
-                `[context] Pricing finished for quote ${result.navigate.quoteId} ` +
-                `("${proposal.jobName}") — it's priced and on screen. Reference this id on follow-ups; ` +
-                `do not draft a new quote for the same job — a scope change goes through propose_update_quote_scope.` +
-                (chatPhotos.length
-                  ? ` Their site photos are on it — don't ask them to add photos again.`
-                  : '') +
-                (gapNote ? ` ${gapNote}` : ''),
-              );
-            }
-            break;
-          case 'propose_send_quote':
-            note(
-              `[context] Sent quote ${proposal.quoteId} to the customer.`,
-            );
-            break;
-          case 'propose_convert_to_invoice':
-            if (result.navigate.kind === 'open_invoice') {
-              note(
-                `[context] Converted quote ${proposal.quoteId} to invoice ${result.navigate.invoiceId}.`,
-              );
-            }
-            break;
-          case 'propose_create_contact':
-            if (result.navigate.kind === 'open_contact') {
-              note(
-                `[context] Created new contact ${result.navigate.contactId} ("${proposal.name}").`,
-              );
-            }
-            break;
-          case 'propose_update_customer':
-            note(
-              `[context] Changed the customer on quote ${proposal.quoteId}` +
-              (proposal.customerName ? ` to "${proposal.customerName}".` : '.'),
-            );
-            break;
-          case 'propose_reprice':
-            note(
-              `[context] Re-priced quote ${proposal.quoteId}.` +
-              (result.review ? ` ${result.review.summary}` : '') +
-              (gapNote ? ` ${gapNote}` : ''),
-            );
-            break;
-          case 'propose_update_quote_scope':
-            note(
-              `[context] Updated the scope on quote ${proposal.quoteId} and re-ran materials + pricing — ` +
-              `same quote, no new one.` +
-              (result.review ? ` ${result.review.summary}` : '') +
-              (gapNote ? ` ${gapNote}` : ''),
-            );
-            break;
-        }
       }
 
       // For draft + reprice + customer change, keep the user in chat. Render
@@ -1318,7 +1350,7 @@ export function AssistantScreen() {
                 : proposal.type === 'propose_pick_contact'
                   ? `Done — this one's on ${result.pickedContact?.name || 'the contact you picked'} now. Tap to open it.`
                 : proposal.type === 'propose_set_total'
-                  ? `Total's now ${formatCurrency(result.appliedTotal ?? proposal.targetTotal)}${result.moved ? ` — ${result.moved}` : ''}. Tap to open it.`
+                  ? `Total's now ${formatCurrency(result.appliedTotal ?? proposal.targetTotal)}${result.moved ? `, ${result.moved}` : ''}. Tap to open it.`
                 : proposal.type === 'propose_update_quote_rates'
                   ? `Rates updated and totals re-run${typeof result.appliedTotal === 'number' ? ` — ${formatCurrency(result.appliedTotal)}` : ''}. Tap to open it.`
                   : proposal.type === 'propose_update_quote_scope'
@@ -1356,7 +1388,7 @@ export function AssistantScreen() {
               voiceOpen: !!voiceSessionRef.current?.isOpen(),
             })
           ) {
-            offerSendTurnRef.current(conversation.id, buildSendOfferNote(offerFacts));
+            offerSendTurnRef.current(conversation.id, buildSendOfferNote(offerFacts, corrections, correctionsQuoteId));
           }
         }
         return;
@@ -1458,6 +1490,46 @@ export function AssistantScreen() {
       );
     });
     return () => setProposalDocumentProbe(null);
+  }, []);
+
+  // The web app has no contact picker; the validator refuses the card there
+  // so Mate asks for the name instead of putting up a button that can only fail.
+  useEffect(() => {
+    setContactPickerProbe(() => Platform.OS !== 'web');
+    return () => setContactPickerProbe(null);
+  }, []);
+
+  // One job, one quote: the drafts this conversation has applied (with the
+  // quote each one minted) and whether an Update-scope card is still waiting
+  // on one — so a repeat propose_draft_quote is refused inside the turn.
+  useEffect(() => {
+    const currentMessages = () => {
+      const state = useStore.getState();
+      return state.conversations.find((c) => c.id === state.currentConversationId)?.messages || [];
+    };
+    setAppliedDraftsProbe(() => {
+      const applied: Array<{ quoteId: string; jobName: string; customerId?: string; customerName?: string }> = [];
+      for (const m of currentMessages()) {
+        for (const p of m.proposals || []) {
+          if (p.type !== 'propose_draft_quote' || m.proposalStatus?.[p.id] !== 'applied') continue;
+          const quoteId = resolveQuoteId(p.id);
+          if (!quoteId || quoteId === p.id) continue;
+          applied.push({ quoteId, jobName: p.jobName, customerId: p.customerId, customerName: p.customerDraft?.name });
+        }
+      }
+      return applied;
+    });
+    setPendingScopeUpdateProbe((quoteId) =>
+      currentMessages().some((m) =>
+        (m.proposals || []).some(
+          (p) => p.type === 'propose_update_quote_scope' && p.quoteId === quoteId && (m.proposalStatus?.[p.id] ?? 'pending') === 'pending',
+        ),
+      ),
+    );
+    return () => {
+      setAppliedDraftsProbe(null);
+      setPendingScopeUpdateProbe(null);
+    };
   }, []);
 
   // A typed "yes"/"nah" resolves the waiting card like a tap. The dispatcher
@@ -2238,6 +2310,7 @@ export function AssistantScreen() {
         ...(pending.length ? { attachments: pending } : {}),
       };
       appendMessage(convoId, userMsg);
+      pricingCorrectionsRef.current.note(text);
 
       // Mount an empty assistant bubble up-front so streaming text deltas
       // land in a stable target message id. If the turn errors out, the
@@ -2291,7 +2364,7 @@ export function AssistantScreen() {
     audioTimelineEndRef.current = 0;
     pacedRenderRef.current = '';
     assistantBubblePrefixRef.current = '';
-    bubbleContinuityRef.current.reset();
+    bubbleContinuityRef.current.userTurn();
     // Kill the idle watchdog so it can't fire after teardown.
     if (idleWatchdogRef.current) {
       clearInterval(idleWatchdogRef.current);
@@ -2430,11 +2503,19 @@ export function AssistantScreen() {
       // stopped the paced reveal dead, leaving "Good afternoon. I" on screen
       // for the rest of the reply. So when pacing, hand the close to the
       // ticker and let it fire once the words have caught up with the audio.
+      // Everything painted into the assistant bubble goes through here, so a
+      // reopened bubble's earlier words are prepended in exactly one place.
+      const paint = (bubbleId: string, text: string) =>
+        updateMessage(convoId!, bubbleId, { text: assistantBubblePrefixRef.current + text });
+
       // Release the bubble. Remembered by the continuity rule: text that
       // arrives next with no tradie speech in between continues it.
       const releaseAssistantBubble = () => {
         if (assistantBubbleIdRef.current) {
-          bubbleContinuityRef.current.closed({ id: assistantBubbleIdRef.current, text: assistantBubbleTextRef.current });
+          bubbleContinuityRef.current.closed({
+            id: assistantBubbleIdRef.current,
+            text: assistantBubblePrefixRef.current + assistantBubbleTextRef.current,
+          });
         }
         pendingBubbleCloseRef.current = false;
         pacerRef.current = createPacerState();
@@ -2459,9 +2540,7 @@ export function AssistantScreen() {
           // nothing will ever advance the reveal. Show the words rather than
           // leaving an empty bubble open forever.
           const full = pacerFlush(pacerRef.current);
-          if (full !== pacedRenderRef.current) {
-            updateMessage(convoId!, assistantBubbleIdRef.current, { text: assistantBubblePrefixRef.current + full });
-          }
+          if (full !== pacedRenderRef.current) paint(assistantBubbleIdRef.current, full);
         }
         releaseAssistantBubble();
       };
@@ -2470,34 +2549,31 @@ export function AssistantScreen() {
       // that just closed, when nothing from the tradie came between (a model
       // ends a turn at every tool call, and a single sentence reached a
       // tradie as three bubbles), otherwise a fresh one. `rendered` is the
-      // paced slice of `text`; the reopened bubble's earlier words are the
-      // prefix every later render prepends.
-      const startOrContinueBubble = (text: string, rendered: string | null) => {
+      // paced slice of `text`; the reopened bubble's earlier words become the
+      // prefix `paint` prepends, and assistantBubbleTextRef holds only this
+      // fragment. Returns the proposals the bubble already carries.
+      const startOrContinueBubble = (text: string, rendered: string | null): Proposal[] => {
         const cont = bubbleContinuityRef.current.takeContinuation();
+        pacedRenderRef.current = rendered ?? text;
+        assistantBubbleTextRef.current = text;
         if (cont) {
           const joined = joinFragments(cont.text, text);
-          const prefix = joined.slice(0, joined.length - text.length);
           assistantBubbleIdRef.current = cont.id;
-          assistantBubblePrefixRef.current = prefix;
-          assistantBubbleTextRef.current = joined;
+          assistantBubblePrefixRef.current = joined.slice(0, joined.length - text.length);
+          paint(cont.id, rendered ?? text);
           const live = useStore.getState().conversations.find((c) => c.id === convoId)?.messages || [];
-          turnProposals = live.find((m) => m.id === cont.id)?.proposals ?? [];
-          pacedRenderRef.current = rendered ?? text;
-          updateMessage(convoId!, cont.id, { text: prefix + (rendered ?? text) });
-          return;
+          return live.find((m) => m.id === cont.id)?.proposals ?? [];
         }
         const id = generateId();
         assistantBubbleIdRef.current = id;
         assistantBubblePrefixRef.current = '';
-        assistantBubbleTextRef.current = text;
-        turnProposals = [];
-        pacedRenderRef.current = rendered ?? text;
         appendMessage(convoId!, {
           id,
           role: 'assistant',
           text: rendered ?? text,
           createdAt: new Date().toISOString(),
         });
+        return [];
       };
 
       // The audio queue is single-use — stop() is terminal (no restart), so a
@@ -2524,7 +2600,7 @@ export function AssistantScreen() {
           assistantBubbleIdRef.current = null;
           assistantBubbleTextRef.current = '';
           assistantBubblePrefixRef.current = '';
-          bubbleContinuityRef.current.reset();
+          bubbleContinuityRef.current.userTurn();
           const staleQueue = audioQueueRef.current;
           audioQueueRef.current = null;
           matePlayingRef.current = false;
@@ -2558,6 +2634,7 @@ export function AssistantScreen() {
             updateMessage(convoId!, userBubbleIdRef.current, { text: userBubbleTextRef.current });
           }
           if (finished) {
+            pricingCorrectionsRef.current.note(userBubbleTextRef.current);
             userBubbleIdRef.current = null;
             userBubbleTextRef.current = '';
             setVoiceState('thinking');
@@ -2589,9 +2666,7 @@ export function AssistantScreen() {
           // right?Drafted Karl Van Lishout's colorbond fence repair" happened.
           if (pendingBubbleCloseRef.current && assistantBubbleIdRef.current) {
             const full = pacerFlush(pacerRef.current);
-            if (full && full !== pacedRenderRef.current) {
-              updateMessage(convoId!, assistantBubbleIdRef.current, { text: assistantBubblePrefixRef.current + full });
-            }
+            if (full && full !== pacedRenderRef.current) paint(assistantBubbleIdRef.current, full);
             releaseAssistantBubble();
           }
           // Hard guard: any transcript that leaks one of our bracketed
@@ -2632,13 +2707,13 @@ export function AssistantScreen() {
             ? pacerVisibleText(pacerRef.current, Date.now())
             : null;
           if (!assistantBubbleIdRef.current) {
-            startOrContinueBubble(text, rendered);
+            turnProposals = startOrContinueBubble(text, rendered);
           } else {
             assistantBubbleTextRef.current += text;
-            const next = rendered ?? assistantBubbleTextRef.current.slice(assistantBubblePrefixRef.current.length);
+            const next = rendered ?? assistantBubbleTextRef.current;
             if (next !== pacedRenderRef.current) {
               pacedRenderRef.current = next;
-              updateMessage(convoId!, assistantBubbleIdRef.current, { text: assistantBubblePrefixRef.current + next });
+              paint(assistantBubbleIdRef.current, next);
             }
           }
           if (finished) finishAssistantBubble();
@@ -2662,12 +2737,10 @@ export function AssistantScreen() {
           }
           flushUserBubbleIfOpen();
           if (!assistantBubbleIdRef.current) {
-            startOrContinueBubble(delta, null);
+            turnProposals = startOrContinueBubble(delta, null);
           } else {
             assistantBubbleTextRef.current += delta;
-            updateMessage(convoId!, assistantBubbleIdRef.current, {
-              text: assistantBubbleTextRef.current,
-            });
+            paint(assistantBubbleIdRef.current, assistantBubbleTextRef.current);
           }
         },
         onAudioChunk: (b64) => {
@@ -2697,18 +2770,22 @@ export function AssistantScreen() {
           if (!bubbleId) {
             // A tool call with no words first: continue the bubble that just
             // closed if nothing from the tradie came between, else mint one.
-            // The card the tool made rides with whatever proposals that
-            // bubble already carried.
-            const pending = turnProposals;
-            startOrContinueBubble('', null);
+            // This turn's cards ride with whatever that bubble already held.
+            const carried = startOrContinueBubble('', null);
             bubbleId = assistantBubbleIdRef.current!;
-            turnProposals = [...turnProposals, ...pending.filter((p) => !turnProposals.some((q) => q.id === p.id))];
+            turnProposals = [...carried.filter((p) => !turnProposals.some((q) => q.id === p.id)), ...turnProposals];
           }
+          // Merge, never replace: a continued bubble can already hold an
+          // applied or dismissed card, and resetting it to pending would make
+          // it tappable again.
+          const priorStatus =
+            useStore.getState().conversations.find((c) => c.id === convoId)?.messages.find((m) => m.id === bubbleId)?.proposalStatus ?? {};
           updateMessage(convoId!, bubbleId, {
             proposals: turnProposals,
-            proposalStatus: Object.fromEntries(
-              turnProposals.map((p) => [p.id, 'pending' as ProposalStatus]),
-            ),
+            proposalStatus: {
+              ...priorStatus,
+              ...Object.fromEntries(turnProposals.filter((p) => !priorStatus[p.id]).map((p) => [p.id, 'pending' as ProposalStatus])),
+            },
           });
           // A re-proposed decision dismisses the stale pending card of the
           // same kind, so only the newest version of it can still be applied.
@@ -2875,7 +2952,7 @@ export function AssistantScreen() {
       audioTimelineEndRef.current = 0;
       pacedRenderRef.current = '';
       assistantBubblePrefixRef.current = '';
-      bubbleContinuityRef.current.reset();
+      bubbleContinuityRef.current.userTurn();
       // Deltas stop arriving as soon as the model finishes generating, but the
       // voice keeps talking for seconds afterwards. Without a ticker the
       // reveal would freeze wherever the last delta left it.
@@ -2888,7 +2965,7 @@ export function AssistantScreen() {
         const next = pacerVisibleText(pacerRef.current, Date.now());
         if (next !== pacedRenderRef.current) {
           pacedRenderRef.current = next;
-          updateMessage(convoId!, bubbleId, { text: assistantBubblePrefixRef.current + next });
+          paint(bubbleId, next);
         }
         // Backstop: if playback under-ran or stalled, don't strand the rest
         // of the words behind a clock that has stopped advancing.
@@ -2902,7 +2979,7 @@ export function AssistantScreen() {
           const full = pacerFlush(p);
           if (full !== pacedRenderRef.current) {
             pacedRenderRef.current = full;
-            updateMessage(convoId!, bubbleId, { text: assistantBubblePrefixRef.current + full });
+            paint(bubbleId, full);
           }
         }
         // The words have caught up with the voice — now the turn can close.

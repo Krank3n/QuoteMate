@@ -13,6 +13,8 @@
 // screen: what facts the offer needs, whether this Apply earns a turn, and the
 // hidden note that drives the text-mode turn.
 
+import { correctionsClause } from './pricingCorrections';
+
 export interface SendOfferFacts {
   jobName: string;
   customerName?: string;
@@ -82,16 +84,19 @@ export function sendOfferLine(facts: SendOfferFacts): string {
  * the "Here's the draft" line and the inline card so the history ends on a
  * user turn, then the model replies into a fresh bubble.
  */
-export function buildSendOfferNote(facts: SendOfferFacts): string {
+export function buildSendOfferNote(facts: SendOfferFacts, corrections: string[] = [], quoteId?: string): string {
   const total = typeof facts.total === 'number' ? ` — total ${formatAudRounded(facts.total)}` : '';
   const customer = facts.customerName ? `, customer ${facts.customerName}` : '';
   const contact = facts.hasContact ? 'contact details are on file' : 'NO email or mobile on file';
   const ask = facts.hasContact
     ? `Offer to send it: "${sendOfferLine(facts)}"`
     : `There's nobody to send it to yet, so ask for the customer's email or mobile in that one line instead of offering the send.`;
+  // Corrections said while pricing ran come first: a send offer on a quote
+  // the tradie has already corrected is an offer to send the wrong quote.
+  const fix = correctionsClause(corrections, quoteId);
   return (
     `[context] The ${facts.docType} for "${facts.jobName}" is priced and on screen as a card${total}${customer}, ${contact}. ` +
-    `Your turn: ONE short line. ${ask} ` +
+    (fix ? `${fix.trim()} Do that BEFORE offering the send. ` : `Your turn: ONE short line. ${ask} `) +
     `Don't repeat the row summary — the card shows it. Never say the tag.`
   );
 }

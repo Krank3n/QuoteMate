@@ -7,7 +7,7 @@
  * wanted $1,232, and the invoice went out at $1,360.80 by hand.
  */
 import { describe, it, expect } from 'vitest';
-import { applySetTotal, planSetTotal, PRICE_ADJUSTMENT_NAME } from '../setTotal';
+import { applySetTotal, describeSetTotalPlan, planSetTotal, DISCOUNT_NAME, PRICE_ADJUSTMENT_NAME } from '../setTotal';
 import { updateDocumentCalculations } from '../documentCalculator';
 import { checkDocumentIntegrity } from '../../../shared/document/integrityCheck';
 import type { Material, QuoteSection } from '../../types';
@@ -168,8 +168,10 @@ describe('applySetTotal — hourly labour', () => {
     expect(result.plan).toMatchObject({ mechanism: 'adjustment', existing: false, amount: -203.7 });
     expect(next.total).toBe(600);
     expect(next.laborTotal).toBe(90);
-    const line = next.materials.find((m) => m.name === PRICE_ADJUSTMENT_NAME)!;
+    // Money off is a "Discount" on the customer's copy, not a "Price adjustment".
+    const line = next.materials.find((m) => m.name === DISCOUNT_NAME)!;
     expect(line).toMatchObject({ kind: 'work', quantity: 1, unit: 'each', price: -203.7, totalPrice: -203.7, manualPriceOverride: true, pricingSource: 'manual' });
+    expect(next.materials.find((m) => m.name === PRICE_ADJUSTMENT_NAME)).toBeUndefined();
   });
 });
 
@@ -184,15 +186,25 @@ describe('applySetTotal — lump sums and the adjustment line', () => {
     expect(next.sections!.find((s) => s.id === 'x')!.laborTotal).toBe(300);
   });
 
-  it('adds one "Price adjustment" work item when there is no labour to absorb it', () => {
+  it('adds one lump-sum line when there is no labour to absorb it — a "Discount" for money off', () => {
     const doc = inv004({ sections: [], laborHours: 0 }); // 549 + 164.7 = 713.7
     expect(doc.total).toBe(713.7);
     const { result, next } = settle(doc, 650);
     expect(result.plan).toMatchObject({ mechanism: 'adjustment', existing: false, amount: -63.7 });
     expect(next.total).toBe(650);
-    expect(next.materials.filter((m) => m.name === PRICE_ADJUSTMENT_NAME)).toHaveLength(1);
+    expect(next.materials.filter((m) => m.name === DISCOUNT_NAME)).toHaveLength(1);
     // Markup must not apply to the adjustment: 549 × 30% is still the whole markup.
     expect(next.markupAmount).toBe(164.7);
+  });
+
+  it('a "Price adjustment" for money on, renamed to "Discount" if a later set-total takes it below zero', () => {
+    const doc = inv004({ sections: [], laborHours: 0 });
+    const up = settle(doc, 800).next;
+    expect(up.materials.find((m) => m.name === PRICE_ADJUSTMENT_NAME)).toMatchObject({ price: 86.3 });
+    const down = settle(up, 650).next;
+    expect(down.materials.filter((m) => m.kind === 'work')).toHaveLength(1);
+    expect(down.materials.find((m) => m.name === DISCOUNT_NAME)).toMatchObject({ price: -63.7 });
+    expect(down.total).toBe(650);
   });
 
   it('moves the existing adjustment line on a second set-total instead of stacking another', () => {
@@ -201,7 +213,7 @@ describe('applySetTotal — lump sums and the adjustment line', () => {
     const { result, next } = settle(first, 700);
     expect(result.plan).toMatchObject({ mechanism: 'adjustment', existing: true, amount: -13.7 });
     expect(next.total).toBe(700);
-    expect(next.materials.filter((m) => m.name === PRICE_ADJUSTMENT_NAME)).toHaveLength(1);
+    expect(next.materials.filter((m) => m.kind === 'work')).toHaveLength(1);
   });
 
   it('hits an awkward exclusive-GST target to the cent through a typed adjustment', () => {
@@ -217,6 +229,23 @@ describe('applySetTotal — lump sums and the adjustment line', () => {
     const doc = inv004({ materials: [], sections: [lump('x', 800)], laborHours: 0, travelAdjustment: 7, gstRegistered: true, pricesIncludeGst: false });
     const { next } = settle(doc, 1001.01);
     expect(next.total).toBe(1001.01);
+  });
+});
+
+describe('describeSetTotalPlan', () => {
+  it('names the labour without quantifying it — the figure on the quote rolls markup in', () => {
+    const down = planSetTotal(inv004(), 1232);
+    const up = planSetTotal(inv004(), 1600);
+    expect(down.ok && describeSetTotalPlan(down.plan)).toBe('off the labour');
+    expect(up.ok && describeSetTotalPlan(up.plan)).toBe('onto the labour');
+  });
+
+  it('names the adjustment line by its sign', () => {
+    const doc = inv004({ sections: [], laborHours: 0 });
+    const off = planSetTotal(doc, 650);
+    const on = planSetTotal(doc, 800);
+    expect(off.ok && describeSetTotalPlan(off.plan)).toBe(`a new "${DISCOUNT_NAME}" line at -$63.70`);
+    expect(on.ok && describeSetTotalPlan(on.plan)).toBe(`a new "${PRICE_ADJUSTMENT_NAME}" line at $86.30`);
   });
 });
 
@@ -236,5 +265,61 @@ describe('applySetTotal keeps the integrity check quiet', () => {
   it('after an adjustment line', () => {
     const doc = inv004({ sections: [], laborHours: 0 });
     expect(quiet(settle(doc, 650).next)).toEqual([]);
+  });
+});
+
+// The bug audit's repro: the first solve works from the ROUNDED current total
+// and the rounded labour delta, so labour markup, travel or exclusive GST
+// scaled the move a cent off. 1,575 misses in a 5,856-cell sweep before the
+// residual passes; the hourly path is continuous, so it must be exact.
+describe('applySetTotal lands to the cent through every scaling factor', () => {
+  it('the audit repro: $549.37 gear, 7.5% travel, no GST, target $1,233.33', () => {
+    const doc = inv004({ materials: [material({ price: 549.37, totalPrice: 549.37 })], markup: 0, laborMarkup: 0, travelAdjustment: 7.5 });
+    expect(doc.total).toBe(1345.22);
+    const { result, next } = settle(doc, 1233.33);
+    expect(result.total).toBe(1233.33);
+    expect(next.total).toBe(1233.33);
+  });
+
+  it('sweeps GST modes × markup × labour markup × travel × awkward targets — hourly labour is always exact', () => {
+    const modes = [
+      { gstRegistered: false, pricesIncludeGst: false },
+      { gstRegistered: true, pricesIncludeGst: false },
+      { gstRegistered: true, pricesIncludeGst: true },
+    ];
+    let cells = 0;
+    for (const mode of modes) {
+      for (const markup of [0, 30]) {
+        for (const laborMarkup of [0, 20]) {
+          for (const travelAdjustment of [0, 7.5]) {
+            const doc = inv004({ ...mode, markup, laborMarkup, travelAdjustment, materials: [material({ price: 549.37, totalPrice: 549.37 })] });
+            for (const target of [1233.33, 1234.01, 1250, 1299.99, 1301.07, 1400.5, 1555.55, 1600]) {
+              // Only hourly-labour moves are tested here; a target the labour can't
+              // reach (below zero) falls to the typed adjustment line by design.
+              const plan = planSetTotal(doc, target);
+              if (!plan.ok || plan.plan.mechanism !== 'labour') continue;
+              const { next } = settle(doc, target);
+              expect(next.total, `${JSON.stringify(mode)} mk${markup} lm${laborMarkup} tv${travelAdjustment} → ${target}`).toBe(target);
+              cells++;
+            }
+          }
+        }
+      }
+    }
+    expect(cells).toBeGreaterThan(150);
+  });
+
+  it('reports the total it actually stored when a typed adjustment line cannot reach the target', () => {
+    // Exclusive GST: a cent on a typed line is 1.1c at the bottom, so some
+    // targets sit between two reachable totals. `total` is the truth then.
+    const doc = inv004({ sections: [], laborHours: 0, gstRegistered: true, pricesIncludeGst: false });
+    let nearest = 0;
+    for (const target of [786.01, 786.02, 786.03, 786.04, 786.05, 786.06, 786.07, 786.08, 786.09]) {
+      const { result, next } = settle(doc, target);
+      expect(next.total).toBe(result.total);
+      expect(Math.abs(next.total - target)).toBeLessThan(0.02);
+      if (next.total !== target) nearest++;
+    }
+    expect(nearest).toBeLessThanOrEqual(3);
   });
 });

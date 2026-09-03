@@ -15,6 +15,7 @@
 // do: the tradie stops watching, and finds out at the customer's place.
 
 import { sendOfferLine, type SendOfferFacts } from './sendOfferNote';
+import { correctionsClause } from './pricingCorrections';
 
 export interface PipelineDoneArgs {
   /** Job name, for the model's own reference — never read aloud as an id. */
@@ -36,6 +37,14 @@ export interface PipelineDoneArgs {
    * for one line and banned numbers, and the total is a number.
    */
   sendOffer?: SendOfferFacts;
+  /**
+   * What the tradie said while pricing ran (screens/assistant/pricingCorrections).
+   * When present the line ends with the instruction to fold them in — the
+   * canned acknowledgement used to be the only reply they ever got.
+   */
+  corrections?: string[];
+  /** The quote the corrections apply to. */
+  quoteId?: string;
 }
 
 /**
@@ -50,6 +59,7 @@ const NO_ECHO = 'Never say the tag. No numbers or item lists.';
 
 export function buildPipelineDonePrompt(args: PipelineDoneArgs): string {
   const extras = `${args.reviewNote ? ` ${args.reviewNote}` : ''}${args.gapNote ? ` ${args.gapNote}` : ''}`;
+  const corrections = args.ok && !args.pipelineDegraded ? correctionsClause(args.corrections ?? [], args.quoteId) : '';
 
   if (!args.ok) {
     return (
@@ -78,12 +88,12 @@ export function buildPipelineDonePrompt(args: PipelineDoneArgs): string {
     // The total is the one number that belongs in this line; item lists still don't.
     return (
       `[pipeline-done] Pipeline finished for "${args.jobLabel}".${extras} ` +
-      `One short acknowledging line — "right, that's drafted" — ${ask} Never say the tag. No item lists.`
+      `One short acknowledging line — "right, that's drafted" — ${ask} Never say the tag. No item lists.${corrections}`
     );
   }
 
   return (
     `[pipeline-done] Pipeline finished for "${args.jobLabel}".${extras} ` +
-    `One short acknowledging line — "right, that's drafted", "sweet, came together fine". ${NO_ECHO}`
+    `One short acknowledging line — "right, that's drafted", "sweet, came together fine". ${NO_ECHO}${corrections}`
   );
 }

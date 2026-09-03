@@ -100,6 +100,38 @@ export interface CustomerCandidate {
   source: 'saved' | 'recent' | 'phone';
 }
 
+// A phone-book or recent-quote hit is not a saved contact, so its details
+// have to travel to Apply somehow — but never through the model: every
+// match already masks the phone, and the tool response is logged to
+// Firestore and read at /admin/conversations. The details stay here, on the
+// device, behind an opaque ref the model passes back as customerDraftRef.
+// Bounded; the oldest ref is forgotten first.
+const MAX_DRAFT_REFS = 50;
+const draftRefs = new Map<string, { name: string; phone?: string; email?: string }>();
+let draftRefSeq = 0;
+
+function rememberCustomerDraft(c: CustomerCandidate): string {
+  const ref = `draft_${++draftRefSeq}`;
+  draftRefs.set(ref, { name: c.name, ...(c.phone ? { phone: c.phone } : {}), ...(c.email ? { email: c.email } : {}) });
+  while (draftRefs.size > MAX_DRAFT_REFS) {
+    const oldest = draftRefs.keys().next().value;
+    if (oldest === undefined) break;
+    draftRefs.delete(oldest);
+  }
+  return ref;
+}
+
+/** The details behind a customerDraftRef from find_customer, or null when the ref is unknown. */
+export function resolveCustomerDraftRef(ref: unknown): { name: string; phone?: string; email?: string } | null {
+  return typeof ref === 'string' ? draftRefs.get(ref) ?? null : null;
+}
+
+/** Test seam. */
+export function __resetCustomerDraftRefs(): void {
+  draftRefs.clear();
+  draftRefSeq = 0;
+}
+
 // Pure scoring/merge core shared by findCustomer (extracted so it's testable
 // without Firestore). Preserves the exact matchType/confidence/needsConfirmation
 // /ambiguous contract the system prompt reasons over — do not change the
@@ -118,12 +150,13 @@ export function scoreCustomerCandidates(
     /**
      * Where the person lives. Only 'saved' is a QuoteMate contact whose
      * contactId can go on a quote; a 'phone' (address book) or 'recent'
-     * (an earlier quote's customer) hit carries `draft` instead — pass it as
-     * customerDraft and Apply saves the contact. Before this, a phone-book
-     * hit's contactId was a throwaway id and every Apply on it failed.
+     * (an earlier quote's customer) hit carries `draftRef` instead — pass it
+     * as customerDraftRef and Apply saves the contact with the details held
+     * on this device. Before this, a phone-book hit's contactId was a
+     * throwaway id and every Apply on it failed.
      */
     source: 'saved' | 'recent' | 'phone';
-    draft?: { name: string; phone?: string; email?: string };
+    draftRef?: string;
   }>;
   confidence: number;
   ambiguous: boolean;
@@ -221,15 +254,7 @@ export function scoreCustomerCandidates(
     matchType: matchType as 'phone' | 'exact' | 'close' | 'fuzzy' | 'sounds_like',
     confidence: Math.round(conf * 100) / 100,
     source: candidate.source,
-    ...(candidate.source === 'saved'
-      ? {}
-      : {
-          draft: {
-            name: candidate.name,
-            ...(candidate.phone ? { phone: candidate.phone } : {}),
-            ...(candidate.email ? { email: candidate.email } : {}),
-          },
-        }),
+    ...(candidate.source === 'saved' ? {} : { draftRef: rememberCustomerDraft(candidate) }),
   }));
 
   return {
@@ -571,12 +596,6 @@ export interface JobRequirementsInput {
   documentType?: 'quote' | 'invoice';
 }
 
-/** What an invoice needs asked: the work is done, so only these two. */
-export const INVOICE_QUESTIONS: string[] = [
-  'What work was done — enough for a line or two the customer will recognise',
-  'Who it is for',
-];
-
 export interface JobRequirementsResult {
   matched: { categoryId?: string; nicheId?: string; templateName?: string };
   mustAskQuestions: string[];
@@ -621,6 +640,19 @@ export const GENERIC_SCOPE_QUESTIONS: string[] = [
 ];
 
 const MEASUREMENT_DRIVEN_METHODS = new Set(['per_sqm', 'per_linear_m', 'per_cubic_m']);
+
+/** The supply question every install-type job carries. */
+export const SUPPLY_OR_REPLACE_QUESTION =
+  'Supplying the gear new, or replacing existing units — and is any of it customer-supplied?';
+const INSTALL_TYPE_RE = /\b(install|installation|fit|fit-?out|replace|replacement|supply)\b/i;
+// "Off existing" (a circuit) is not the same question; the niche has to ask
+// about replacing or customer-supplied gear outright to be counted as covered.
+const SUPPLY_COVERED_RE = /\b(replac\w*|customer[- ]supplied|supplied by|new or replac\w*|existing units?)\b/i;
+
+/** A template for putting gear in, as opposed to a service, a repair or a clean. */
+function isInstallType(t: { name: string; description: string }): boolean {
+  return INSTALL_TYPE_RE.test(`${t.name} ${t.description}`);
+}
 
 /**
  * Every job type Mate knows, by name.
@@ -773,6 +805,14 @@ function buildRequirements(
     genericScope = true;
   }
 
+  // Every install-type job asks whether the gear is being supplied new or
+  // whether existing / customer-supplied units are being replaced. A
+  // smoke-alarm quote (3 Sep 2026) supplied four battery alarms the customer
+  // already owned — a third of the price — because nothing ever asked.
+  if (template && isInstallType(template) && !template.questionsLine?.match(SUPPLY_COVERED_RE)) {
+    mustAskQuestions.push(SUPPLY_OR_REPLACE_QUESTION);
+  }
+
   const pricingMethod = template?.pricingMethod || undefined;
   const measurementDriven = !!pricingMethod && MEASUREMENT_DRIVEN_METHODS.has(pricingMethod);
 
@@ -782,7 +822,8 @@ function buildRequirements(
   if (input.documentType === 'invoice') {
     return {
       matched: { categoryId: resolvedCategoryId, nicheId: resolvedNicheId, templateName: template?.name },
-      mustAskQuestions: [...INVOICE_QUESTIONS],
+      // The work is done, so only these two.
+      mustAskQuestions: ['What work was done — enough for a line or two the customer will recognise', 'Who it is for'],
       invoiceFastPath: true,
       genericScope: false,
       pricingMethod,

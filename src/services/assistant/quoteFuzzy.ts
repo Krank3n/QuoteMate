@@ -48,7 +48,7 @@ function tokenCloseMatch(needle: string, haystack: string): boolean {
  * "004", "inv 4", "invoice 004", "QU-178840" all reduce to the digit run.
  * Only the numeric part is compared — the prefix is the app's, not theirs.
  */
-export function documentNumberKey(text: string | undefined): string {
+function documentNumberKey(text: string | undefined): string {
   const m = /\d+/.exec(text || '');
   return m ? m[0].replace(/^0+(?=\d)/, '') : '';
 }

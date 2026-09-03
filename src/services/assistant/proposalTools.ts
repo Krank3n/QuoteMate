@@ -30,10 +30,12 @@ import { resolveKnownQuoteId } from './showQuoteGate';
 import { isPricingInFlight } from './pricingInFlight';
 import { sanitizeJobDescription } from '../../utils/sanitizeJobDescription';
 import { MAX_LABEL_CHARS, RATE_CARD_UNITS, normalisePreference, normaliseRateUnit } from '../quotingProfile';
-import { planSetTotal, type SetTotalSource } from '../../utils/setTotal';
+import { planSetTotal, setTotalGstMode, type SetTotalSource } from '../../utils/setTotal';
 import { phoneForRecord } from '../../utils/auPhone';
 import { formatCurrency, roundToTwoDecimals } from '../../utils/documentCalculator';
 import { isWorkItem } from '../../../shared/document/lumpSum';
+import { resolveCustomerDraftRef } from './readTools';
+import { fuzzyScoreQuote } from './quoteFuzzy';
 
 /** Whitespace-folded, trimmed, capped — for text that lands in the prompt on every turn. */
 const shortText = (v: unknown): string =>
@@ -111,14 +113,78 @@ export function setProposalDocumentProbe(probe: ((quoteId: string) => ProposalDo
 }
 
 /**
+ * Whether this device can open a contact picker at all. The web app can't,
+ * and a card whose only button can fail is worse than no card — refused here
+ * so Mate asks for the name instead. No probe registered = available.
+ */
+let contactPickerProbe: (() => boolean) | null = null;
+
+export function setContactPickerProbe(probe: (() => boolean) | null): void {
+  contactPickerProbe = probe;
+}
+
+/**
+ * One job, one quote. The drafts this conversation has already applied, and
+ * whether a scope-update card is still waiting on one of them. Registered by
+ * the screen (it holds the messages and the proposal → quote map). One
+ * smoke-alarm job became THREE applied drafts (3 Sep 2026): the model
+ * re-drafted for a brand and again for a phone number, despite
+ * propose_update_quote_scope — its one scope card sat pending, untapped.
+ * The validator refuses the repeat inside the turn and says which tool to use.
+ */
+export interface AppliedDraft {
+  quoteId: string;
+  jobName: string;
+  customerId?: string;
+  customerName?: string;
+}
+let appliedDraftsProbe: (() => AppliedDraft[]) | null = null;
+let pendingScopeUpdateProbe: ((quoteId: string) => boolean) | null = null;
+
+export function setAppliedDraftsProbe(probe: (() => AppliedDraft[]) | null): void {
+  appliedDraftsProbe = probe;
+}
+
+export function setPendingScopeUpdateProbe(probe: ((quoteId: string) => boolean) | null): void {
+  pendingScopeUpdateProbe = probe;
+}
+
+const nameKey = (v: unknown): string => String(v ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
+
+/**
+ * The applied draft a new propose_draft_quote is really a correction of:
+ * same customer (id, or name) and a job name that shares its words. A second,
+ * different job for the same customer ("and her fence") does not match.
+ */
+export function findRepeatedDraft(
+  applied: AppliedDraft[],
+  next: { customerId?: string; customerName?: string; jobName: string },
+): AppliedDraft | undefined {
+  const nextName = nameKey(next.customerName);
+  return applied.find((prior) => {
+    const sameCustomer =
+      (next.customerId && prior.customerId && next.customerId === prior.customerId) ||
+      (!!nextName && nameKey(prior.customerName) === nextName);
+    if (!sameCustomer) return false;
+    return fuzzyScoreQuote(next.jobName, prior.jobName, undefined) > 0 || fuzzyScoreQuote(prior.jobName, next.jobName, undefined) > 0;
+  });
+}
+
+type CustomerDraft = { name: string; phone?: string; email?: string; address?: string };
+
+/**
  * A customer draft the model built, with the phone kept only when it is a
  * whole Australian number. Voice hands numbers over in chunks and the model
  * pads what is missing; a padded number on the contact is worse than none.
+ * A draft resolved from a find_customer draftRef is the phone book's own
+ * record — its number is a fact, not something the model heard, so it is
+ * kept as-is (an international number or an extension is fine there).
  */
-function cleanCustomerDraft(raw: any): { draft?: { name: string; phone?: string; email?: string; address?: string }; note?: string } {
+function cleanCustomerDraft(raw: any, opts: { trustPhone?: boolean } = {}): { draft?: CustomerDraft; note?: string } {
   const name = typeof raw?.name === 'string' ? raw.name.trim() : '';
   if (!name) return {};
-  const { phone, dropped } = phoneForRecord(raw.phone);
+  const rawPhone = typeof raw.phone === 'string' ? raw.phone.trim() : '';
+  const { phone, dropped } = opts.trustPhone ? { phone: rawPhone || undefined, dropped: undefined } : phoneForRecord(rawPhone);
   const email = typeof raw.email === 'string' && raw.email.trim() ? raw.email.trim() : undefined;
   const address = typeof raw.address === 'string' && raw.address.trim() ? raw.address.trim() : undefined;
   return {
@@ -127,6 +193,25 @@ function cleanCustomerDraft(raw: any): { draft?: { name: string; phone?: string;
       ? `The phone "${dropped}" was left off — it isn't a whole Australian number. Tell the tradie in one line that you couldn't get a whole number and left it off; do NOT ask for the rest again.`
       : undefined,
   };
+}
+
+/**
+ * The customer for a draft or a re-point: a saved contact id, a draftRef from
+ * find_customer (details held on the device), or a draft the model wrote.
+ */
+function resolveCustomer(input: any): { customerId?: string; draft?: CustomerDraft; note?: string; error?: string } {
+  if (input?.customerId) return { customerId: String(input.customerId) };
+  if (input?.customerDraftRef) {
+    const held = resolveCustomerDraftRef(input.customerDraftRef);
+    if (!held) {
+      return { error: `customerDraftRef "${input.customerDraftRef}" is not one find_customer returned in this session — call find_customer again and use the draftRef it gives you, or pass customerDraft.` };
+    }
+    const address = typeof input.customerDraft?.address === 'string' ? input.customerDraft.address : undefined;
+    return cleanCustomerDraft({ ...held, ...(address ? { address } : {}) }, { trustPhone: true });
+  }
+  const cleaned = cleanCustomerDraft(input?.customerDraft);
+  if (!cleaned.draft) return { error: 'Provide customerId (from find_customer), customerDraftRef (from a phone or recent hit), or customerDraft.name.' };
+  return cleaned;
 }
 
 // Customer details are not scope: the jobDescription prints on the customer's
@@ -189,22 +274,40 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
             'propose_draft_quote requires a real jobDescription — the pipeline needs the scope to generate materials.',
         };
       }
-      if (!input.customerId && !input.customerDraft?.name) {
-        return { error: 'Provide customerId (from find_customer) or customerDraft.name.' };
-      }
+      const customer = resolveCustomer(input);
+      if (customer.error) return { error: customer.error };
       if (CONTACT_DETAILS_IN_SCOPE.test(String(input.jobDescription))) {
         return { error: "jobDescription is the work, and it prints on the customer's document — customer details go in customerDraft, never in the scope." };
       }
+      const repeated = findRepeatedDraft(appliedDraftsProbe?.() ?? [], {
+        customerId: customer.customerId,
+        customerName: customer.draft?.name,
+        jobName: String(input.jobName),
+      });
+      if (repeated) {
+        if (pendingScopeUpdateProbe?.(repeated.quoteId)) {
+          return {
+            error:
+              `Quote ${repeated.quoteId} ("${repeated.jobName}") already exists for this job and an "Update scope" card for it is still waiting. ` +
+              `Don't draft again: tell the tradie to tap "Update it" on that card (or call apply_pending_proposal on a yes), then fold any further change into it with propose_update_quote_scope.`,
+          };
+        }
+        return {
+          error:
+            `Quote ${repeated.quoteId} ("${repeated.jobName}") already exists for this customer in this conversation — drafting again mints a second quote for the same job. ` +
+            `Put the change on it with propose_update_quote_scope (the full corrected description) or propose_update_customer. ` +
+            `Only if this is genuinely a different job, give it a different jobName and call propose_draft_quote again.`,
+        };
+      }
       const rateLines = parseRateLines(input.rateLines);
       if (rateLines.error) return { error: rateLines.error };
-      const customer = input.customerId ? {} : cleanCustomerDraft(input.customerDraft);
       const proposal: DraftQuoteProposal = {
         id,
         toolUseId,
         createdAt: now,
         type: 'propose_draft_quote',
-        customerId: input.customerId,
-        customerDraft: input.customerId ? undefined : customer.draft,
+        customerId: customer.customerId,
+        customerDraft: customer.draft,
         jobName: String(input.jobName),
         // The description prints on the customer's quote — strip any Mate
         // conversation the model concatenated onto the scope ("what's their
@@ -346,8 +449,13 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
         const price = Number(input.price);
         if (!Number.isFinite(price)) return { error: 'price must be the line in dollars, as a number.' };
         if (price < 0) return { error: 'A lump sum can\'t be negative — to bring the total down, use propose_set_total.' };
-        const label = shortText(input.label) || shortText(input.searchTerm);
-        if (!label) return { error: 'A lump-sum line needs a label — what the line is for, as the tradie names it.' };
+        // No falling back to searchTerm: a price beside a material search is
+        // the model mixing the two forms, and a $0 lump sum minted from a
+        // material would be a $0 row on the customer's document.
+        const label = shortText(input.label);
+        if (!label) {
+          return { error: 'A lump-sum line needs label + price. A material takes searchTerm + qty + unit and no price — the pricing engine prices it.' };
+        }
         const scope = shortText(input.scope);
         const proposal: AddLineItemProposal = {
           id,
@@ -411,10 +519,11 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
         if (plan.mechanism === 'none') {
           return { error: `The total is already ${formatCurrency(plan.currentTotal)} — say so in one line, there's nothing to change.` };
         }
+        const gstMode = setTotalGstMode(snapshot);
         preview =
           plan.mechanism === 'labour'
-            ? { currentTotal: plan.currentTotal, mechanism: 'labour', labourBefore: plan.labourBefore, labourAfter: plan.labourAfter }
-            : { currentTotal: plan.currentTotal, mechanism: 'adjustment', adjustment: plan.amount };
+            ? { currentTotal: plan.currentTotal, mechanism: 'labour', gstMode }
+            : { currentTotal: plan.currentTotal, mechanism: 'adjustment', adjustment: plan.amount, gstMode };
       }
       const proposal: SetTotalProposal = {
         id,
@@ -430,6 +539,11 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
     }
 
     case 'propose_pick_contact': {
+      if (contactPickerProbe && !contactPickerProbe()) {
+        return {
+          error: "There's no contact picker in the web app. Ask the tradie for the customer's name and use find_customer — don't put a card up.",
+        };
+      }
       let quoteId: string | undefined;
       if (input?.quoteId) {
         const known = requireKnownQuote('propose_pick_contact', input);
@@ -532,8 +646,8 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
     }
 
     case 'propose_create_contact': {
-      if (!input?.name) return { error: 'propose_create_contact requires name.' };
       const cleaned = cleanCustomerDraft(input);
+      if (!cleaned.draft) return { error: 'propose_create_contact requires name.' };
       const proposal: CreateContactProposal = {
         id,
         toolUseId,
@@ -550,23 +664,18 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
     case 'propose_update_customer': {
       const known = requireKnownQuote('propose_update_customer', input);
       if (known.error) return { error: known.error };
-      if (!input.customerId && !input.customerDraft?.name) {
-        return { error: 'Provide customerId (from find_customer) or customerDraft.name.' };
-      }
-      const customer = input.customerId ? {} : cleanCustomerDraft(input.customerDraft);
+      const customer = resolveCustomer(input);
+      if (customer.error) return { error: customer.error };
+      const customerName = typeof input.customerName === 'string' && input.customerName.trim() ? input.customerName.trim() : customer.draft?.name;
       const proposal: UpdateCustomerProposal = {
         id,
         toolUseId,
         createdAt: now,
         type: 'propose_update_customer',
         quoteId: known.quoteId!,
-        customerId: input.customerId ? String(input.customerId) : undefined,
-        customerDraft: input.customerId ? undefined : customer.draft,
-        customerName: input.customerName
-          ? String(input.customerName)
-          : input.customerDraft?.name
-            ? String(input.customerDraft.name)
-            : undefined,
+        customerId: customer.customerId,
+        customerDraft: customer.draft,
+        customerName,
       };
       return { proposal, note: customer.note };
     }

@@ -23,20 +23,6 @@ export interface ClosedBubble {
   text: string;
 }
 
-export interface BubbleContinuity {
-  /** The screen just closed an assistant bubble; remember it in case the reply continues. */
-  closed(bubble: ClosedBubble): void;
-  /** The tradie spoke, typed, or a scripted user turn went out — the next reply is new. */
-  userTurn(): void;
-  /**
-   * New assistant text is about to open a bubble. Returns the bubble to
-   * continue (and forgets it — a continuation closes again through `closed`),
-   * or null when a fresh bubble is right.
-   */
-  takeContinuation(): ClosedBubble | null;
-  /** Drop everything — a reconnect or a session end. */
-  reset(): void;
-}
 
 /** Fragments are appended with one space unless the seam already has whitespace or the new text starts with punctuation. */
 export function joinFragments(previous: string, next: string): string {
@@ -46,22 +32,26 @@ export function joinFragments(previous: string, next: string): string {
   return `${previous} ${next}`;
 }
 
-export function createBubbleContinuity(): BubbleContinuity {
+export function createBubbleContinuity() {
   let last: ClosedBubble | null = null;
   return {
-    closed(bubble) {
+    /** The screen just closed an assistant bubble; remember it in case the reply continues. */
+    closed(bubble: ClosedBubble): void {
       last = bubble.text ? bubble : null;
     },
-    userTurn() {
+    /** The tradie spoke, typed, a scripted user turn went out, or the session reset — the next reply is new. */
+    userTurn(): void {
       last = null;
     },
-    takeContinuation() {
+    /**
+     * New assistant text is about to open a bubble. Returns the bubble to
+     * continue (and forgets it — a continuation closes again through `closed`),
+     * or null when a fresh bubble is right.
+     */
+    takeContinuation(): ClosedBubble | null {
       const found = last;
       last = null;
       return found;
-    },
-    reset() {
-      last = null;
     },
   };
 }

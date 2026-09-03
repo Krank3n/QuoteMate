@@ -93,7 +93,7 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
   {
     name: 'find_customer',
     description:
-      "Search the tradie's saved contacts by name or phone. Fuzzy + phonetic: handles typos (Smyth/Smith), spelling variants (Catherine/Kathryn), and partial names (\"sar\" → Sarah Wilson). Phone search uses the last 8 digits. Returns up to 5 matches, each with contactId, name, phoneMasked (last 4), hasEmail, lastJob, matchType ('phone' | 'exact' | 'close' | 'fuzzy' | 'sounds_like'), and confidence (0–1). Top-level: confidence (best hit), ambiguous (top 2 are too close to call), needsConfirmation (true unless it's a clean phone/exact hit). When needsConfirmation is true you MUST read the match back to the tradie (name + ...last4 + last job) and wait for a yes before using its contactId — a wrong contact on a quote is worse than asking.",
+      "Search the tradie's saved contacts, their phone's address book and recent quotes by name or phone. Fuzzy + phonetic: handles typos (Smyth/Smith), spelling variants (Catherine/Kathryn), and partial names (\"sar\" → Sarah Wilson). Phone search uses the last 8 digits. Returns up to 5 matches, each with contactId, name, phoneMasked (last 4), hasEmail, lastJob, matchType ('phone' | 'exact' | 'close' | 'fuzzy' | 'sounds_like'), confidence (0–1) and source. Only source 'saved' is a contact whose contactId goes on a quote; a 'phone' or 'recent' hit carries draftRef instead — pass that as customerDraftRef on propose_draft_quote / propose_update_customer and Apply saves the contact. Top-level: confidence (best hit), ambiguous (top 2 are too close to call), needsConfirmation (true unless it's a clean phone/exact hit). When needsConfirmation is true you MUST read the match back to the tradie (name + ...last4 + last job) and wait for a yes before using its contactId — a wrong contact on a quote is worse than asking.",
     parameters: {
       type: 'object',
       properties: {
@@ -242,6 +242,10 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
             address: { type: 'string' },
           },
           required: ['name'],
+        },
+        customerDraftRef: {
+          type: 'string',
+          description: "The draftRef from a find_customer match whose source is 'phone' or 'recent'. The contact's details stay on the device; Apply saves them. Use this instead of customerDraft for such a hit.",
         },
         jobName: { type: 'string', description: 'Short title — appears on the proposal card and the quote header.' },
         jobDescription: {
@@ -432,6 +436,7 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
           },
           required: ['name'],
         },
+        customerDraftRef: { type: 'string', description: "The draftRef from a find_customer 'phone' or 'recent' hit — the contact's details stay on the device and Apply saves them." },
         customerName: { type: 'string', description: 'The new customer name to show on the card (for display).' },
       },
       required: ['quoteId'],
@@ -577,7 +582,7 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
   {
     name: 'propose_set_total',
     description:
-      "Set the customer-facing TOTAL of an existing quote or invoice to the figure the tradie said: \"make the total $1,232\", \"call it twelve hundred\", \"bring it down to fifteen hundred all up\", \"round it to $2,000\". This is the tool for a total — never steer them to markup or a labour rate instead, and never say you can't set the final price. Apply moves the labour to land on that figure when the document has labour (what a tradie does themselves), otherwise it puts a lump-sum 'Price adjustment' line on; materials and their prices are never touched. The target is what the customer reads at the bottom, GST included where it applies. A total under the materials alone is refused. Needs the real quote id (a \"[context]\" line, list_recent_quotes or get_quote). Pass displayName so the card names the document. After it applies, the new total arrives in a \"[context]\" line — read totals from there or from get_quote, never from memory.",
+      "Set the customer-facing TOTAL of an existing quote or invoice to the figure the tradie said: \"make the total $1,232\", \"call it twelve hundred\", \"bring it down to fifteen hundred all up\", \"round it to $2,000\". This is the tool for a total — never steer them to markup or a labour rate instead, and never say you can't set the final price. Apply moves the labour to land on that figure when the document has labour (what a tradie does themselves), otherwise it puts a lump-sum 'Price adjustment' line on; materials and their prices are never touched. The target is what the customer reads at the bottom, GST included where it applies. A total under the materials alone is refused. Needs the real quote id (a \"[context]\" line, list_recent_quotes or get_quote). Pass displayName so the card names the document.",
     parameters: {
       type: 'object',
       properties: {
@@ -591,7 +596,7 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
   {
     name: 'propose_pick_contact',
     description:
-      "Open the phone's own contact picker so the tradie can choose the customer from their address book. Use it whenever they say the customer is in their phone — \"access my contacts\", \"open contacts\", \"it's in my phone\", \"pick them from my contacts\" — or when find_customer found nobody and they say the person is on their phone. Apply opens the picker; the pick is saved as a contact and goes on the quote you pass in quoteId, or, with no quoteId, comes back to you in a \"[context]\" line with a contact id to put on the draft. Never ask them to read a number out instead when they have offered their contacts.",
+      "Open the phone's own contact picker so the tradie can choose the customer from their address book. Use it whenever they say the customer is in their phone — \"access my contacts\", \"open contacts\", \"it's in my phone\", \"pick them from my contacts\" — or when find_customer found nobody and they say the person is on their phone. Apply opens the picker; the pick is saved as a contact and goes on the quote you pass in quoteId, or, with no quoteId, comes back to you in a \"[context]\" line with a contact id to put on the draft.",
     parameters: {
       type: 'object',
       properties: {

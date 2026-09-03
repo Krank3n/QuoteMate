@@ -820,8 +820,19 @@ describe('validateAndRepairAiOutput — Latin-script guard', () => {
     expect(flags.nonLatinTokenCount).toBe(3);
   });
 
-  it('leaves real product names alone — symbols, degrees, accents and units are not another script', () => {
-    const names = ['Colorbond® sheet 0.42 BMT', '90° elbow 15mm', 'Sikaflex-11FC 310mL', 'Café blend (½ pack)', 'R2.5 batts 1160×430', 'Ø16 rebar'];
+  it('leaves real product names alone — symbols, degrees, accents, units and ratings are not another script', () => {
+    const names = [
+      'Colorbond® sheet 0.42 BMT',
+      '90° elbow 15mm',
+      'Sikaflex-11FC 310mL',
+      'Café blend (½ pack)',
+      'R2.5 batts 1160×430',
+      'Ø16 rebar',
+      'Start capacitor 88-108µF',
+      'Motor run capacitor 5μF 440V',
+      '8Ω speaker cable 100m',
+      'Cable 2.5mm² ~ 100m',
+    ];
     const { materials, flags } = validateAndRepairAiOutput(names.map((name) => ({ name, quantity: 1, unit: 'each', price: 5 })), silentLog);
     expect(materials.map((m) => m.name)).toEqual(names);
     expect(flags.hasNonLatinText).toBe(false);
