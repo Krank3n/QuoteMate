@@ -81,13 +81,28 @@ const squareService = vi.hoisted(() => ({
 }));
 vi.mock('../squareService', () => squareService);
 
+// Mutable so req 1.4's OS floor can be exercised on both sides of the line
+// without a second mock factory.
+const platform = vi.hoisted(() => ({
+  os: 'ios' as string,
+  version: '18.6.2' as string | number,
+}));
+
 // The service branches on Platform.OS; react-native-web reports 'web', which
 // would skip every iOS-only path under test.
 vi.mock('react-native', async () => {
   const actual = await vi.importActual<any>('react-native');
   return {
     ...actual,
-    Platform: { ...actual.Platform, OS: 'ios' },
+    Platform: {
+      ...actual.Platform,
+      get OS() {
+        return platform.os;
+      },
+      get Version() {
+        return platform.version;
+      },
+    },
     PermissionsAndroid: {
       request: vi.fn(async () => 'granted'),
       PERMISSIONS: { ACCESS_FINE_LOCATION: 'loc' },

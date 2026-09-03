@@ -384,3 +384,4 @@ export async function acceptTapToPayTermsAndEducate(): Promise<AppleAccountLinkR
   }
   return result;
 }
+

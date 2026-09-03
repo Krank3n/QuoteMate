@@ -30,6 +30,10 @@ import { makeStyles, useThemeColors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
 import * as squareService from '../services/squareService';
 import { takeInAppPayment } from '../services/squarePayments';
+import {
+  classifyPaymentFailure,
+  MIN_TAP_TO_PAY_IOS_VERSION,
+} from '../services/tapToPayErrors';
 import { useTapToPayEnabled } from '../hooks/useTapToPayEnabled';
 import { useTapToPayReadiness } from '../hooks/useTapToPayReadiness';
 import { dollarsToCents, centsToDollars } from '../../shared/pdf/money';
@@ -38,6 +42,10 @@ import {
   PASSTHROUGH_SURCHARGE_PCT,
 } from '../../shared/pdf/squareFees';
 import { useStore } from '../store/useStore';
+import { useAlertModal } from '../hooks/useAlertModal';
+import { buildDeclineRecord } from '../utils/paymentDeclineRecord';
+import { SymbolView } from 'expo-symbols';
+import type { SFSymbol } from 'sf-symbols-typescript';
 import { BottomSheet } from './BottomSheet';
 import { PillToggle } from './PillToggle';
 import { CurrencyInput } from './CurrencyInput';
@@ -170,6 +178,7 @@ export function TakePaymentSheet({
   const [termsAcknowledged, setTermsAcknowledged] = useState(false);
   const [termsModalVisible, setTermsModalVisible] = useState(false);
   const tapToPay = useTapToPayEnabled();
+  const { showAlert, alertNode } = useAlertModal();
   // Apple req 3.9.1 / 5.7 — only subscribed while the sheet is open.
   const tapToPayReadiness = useTapToPayReadiness(visible && tapToPay.enabled);
   const { businessSettings, getDocumentById, saveDocument } = useStore();
@@ -284,6 +293,44 @@ export function TakePaymentSheet({
     return depositSave.current;
   };
 
+  /**
+   * Apple req 5.10. A decline is the moment a customer most needs something in
+   * writing: their bank may show a pending authorisation that later vanishes,
+   * and this is the only thing telling them no money moved. Offered, not sent —
+   * the customer may not want it, and the tradie is the one holding the phone.
+   *
+   * Carried by the native share sheet the pay-link flow already uses, so it
+   * reaches SMS, email or WhatsApp with no new backend, screen or setting.
+   */
+  const offerDeclineRecord = (attemptedDollars: number) => {
+    showAlert({
+      type: 'error',
+      title: 'Card declined',
+      message: 'No money was taken. Send the customer a record of the attempt?',
+      primaryButtonText: 'Send record',
+      primaryButtonAction: async () => {
+        try {
+          await Share.share({
+            message: buildDeclineRecord({
+              businessName: businessSettings?.businessName,
+              reference:
+                activeTarget.kind === 'invoice'
+                  ? activeTarget.invoiceNumber
+                    ? `Invoice ${activeTarget.invoiceNumber}`
+                    : activeTarget.jobName
+                  : activeTarget.jobName,
+              amount: attemptedDollars,
+            }),
+          });
+        } catch {
+          // Dismissing the share sheet throws on some platforms. Nothing was
+          // owed to the customer beyond the offer, so this stays silent.
+        }
+      },
+      secondaryButtonText: 'Not now',
+    });
+  };
+
   const handleTakeCardPayment = async () => {
     if (chargingCard || amounts.remaining <= 0) return;
     // Apple req 5.3 forbids greying this button out, so the terms gate is
@@ -294,6 +341,9 @@ export function TakePaymentSheet({
       return;
     }
     setChargingCard(true);
+    // Declared out here so a decline can tell the customer what was attempted
+    // (Apple req 5.10) — the figure is only computed once we're inside the try.
+    let chargedCents = 0;
     try {
       // An in-flight deposit edit has to land first — otherwise we'd charge a
       // figure the quote doesn't know about.
@@ -316,6 +366,7 @@ export function TakePaymentSheet({
           )
         : 0;
       const amountCents = baseCents + surchargeCents;
+      chargedCents = amountCents;
       const appFeeCents = dollarsToCents(
         centsToDollars(amountCents) * (QM_APP_FEE_PCT_IN_PERSON / 100),
       );
@@ -338,13 +389,22 @@ export function TakePaymentSheet({
       onDismiss();
       onSuccess?.({ kind: 'card_charge', amount: centsToDollars(amountCents) });
     } catch (error: any) {
-      // User-cancelled flows surface as errors from the SDK; surface a
-      // friendlier message in that case.
-      const message = String(error?.message || '');
-      if (/cancel/i.test(message)) {
-        // Silent — user backed out of payment sheet.
-      } else {
-        onError(message || 'Payment failed. Please try again.');
+      // The three outcomes Apple treats differently. A tradie who backed out
+      // wants no message at all; a declined card owes the customer a record
+      // (req 5.10); an OS below the floor needs "update", not "failed" (1.4).
+      switch (classifyPaymentFailure(error)) {
+        case 'cancelled':
+          break;
+        case 'declined':
+          offerDeclineRecord(centsToDollars(chargedCents || dollarsToCents(amounts.remaining)));
+          break;
+        case 'os_too_old':
+          onError(
+            `Update this iPhone to iOS ${MIN_TAP_TO_PAY_IOS_VERSION} or later to take card payments.`,
+          );
+          break;
+        default:
+          onError(String(error?.message || '') || 'Payment failed. Please try again.');
       }
     } finally {
       setChargingCard(false);
@@ -517,10 +577,10 @@ export function TakePaymentSheet({
             handleTakeCardPayment. Copy is Apple's approved English long form
             (req 5.4) on iOS; Android is Square's contactless reader, not Tap to
             Pay on iPhone, so it keeps its own wording.
-            TODO(req 5.5): the icon must be the SF Symbol wave.3.right.circle —
-            needs expo-symbols, which is a native dep + rebuild. */}
+            Req 5.5: the icon must be the SF Symbol wave.3.right.circle. */}
         <MethodRow
           icon="cellphone-nfc"
+          sfSymbol="wave.3.right.circle"
           title={tapToPayRowTitle(Platform.OS)}
           subtitle={
             tapToPay.enabled
@@ -529,11 +589,13 @@ export function TakePaymentSheet({
                 // taken right now. Req 5.7 wants the same state to read as
                 // "initializing" if the tradie presses during setup.
                 (tapToPayReadiness.label ?? 'Tap a card or phone, or key in details.')
-              : tapToPay.reason === 'unsupported_device'
-                ? 'This device does not support Tap to Pay.'
-                : tapToPay.reason === 'loading'
-                  ? 'Checking device…'
-                  : 'Not enabled for your account yet.'
+              : tapToPay.reason === 'os_too_old'
+                ? `Update to iOS ${MIN_TAP_TO_PAY_IOS_VERSION} or later to use Tap to Pay.`
+                : tapToPay.reason === 'unsupported_device'
+                  ? 'This device does not support Tap to Pay.'
+                  : tapToPay.reason === 'loading'
+                    ? 'Checking device…'
+                    : 'Not enabled for your account yet.'
           }
           onPress={tapToPay.enabled ? handleTakeCardPayment : undefined}
           disabled={!tapToPay.enabled}
@@ -587,6 +649,8 @@ export function TakePaymentSheet({
           alreadyAccepted={termsAcknowledged}
         />
       )}
+
+      {alertNode}
     </>
   );
 }
@@ -656,6 +720,12 @@ function TermsPreviewModal({
 
 interface MethodRowProps {
   icon: string;
+  /**
+   * Apple review req 5.5: the Tap to Pay control must carry the SF Symbol
+   * `wave.3.right.circle`. Only that row sets this — every other row keeps the
+   * app's own icon set.
+   */
+  sfSymbol?: SFSymbol;
   title: string;
   subtitle: string;
   onPress?: () => void;
@@ -665,6 +735,7 @@ interface MethodRowProps {
 
 function MethodRow({
   icon,
+  sfSymbol,
   title,
   subtitle,
   onPress,
@@ -673,6 +744,10 @@ function MethodRow({
 }: MethodRowProps) {
   const styles = useStyles();
   const themeColors = useThemeColors();
+  const iconColor = disabled ? themeColors.textMuted : themeColors.accent;
+  const fallbackIcon = (
+    <MaterialCommunityIcons name={icon as any} size={24} color={iconColor} />
+  );
   return (
     <TouchableOpacity
       style={[styles.methodRow, disabled && styles.methodRowDisabled]}
@@ -680,11 +755,20 @@ function MethodRow({
       activeOpacity={disabled ? 1 : 0.7}
     >
       <View style={[styles.methodIcon, disabled && styles.methodIconDisabled]}>
-        <MaterialCommunityIcons
-          name={icon as any}
-          size={24}
-          color={disabled ? themeColors.textMuted : themeColors.accent}
-        />
+        {/* SymbolView renders `fallback` on Android and web itself, so no
+            Platform branch here — and that fallback is the right answer on
+            Android anyway, where the row is Square's contactless reader rather
+            than Tap to Pay on iPhone. Same reasoning as tapToPayRowTitle. */}
+        {sfSymbol ? (
+          <SymbolView
+            name={sfSymbol}
+            size={24}
+            tintColor={iconColor}
+            fallback={fallbackIcon}
+          />
+        ) : (
+          fallbackIcon
+        )}
       </View>
       <View style={styles.methodText}>
         <Text

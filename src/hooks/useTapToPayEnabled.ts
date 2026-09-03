@@ -28,6 +28,7 @@ import { doc, getDoc } from 'firebase/firestore';
 
 import { db } from '../config/firebase';
 import { isTapToPayCapable } from '../services/squarePayments';
+import { isTapToPayOsSupported } from '../services/tapToPayErrors';
 
 interface TapToPayFlag {
   ios?: boolean;
@@ -36,8 +37,16 @@ interface TapToPayFlag {
 
 export interface TapToPayState {
   enabled: boolean;       // true ⇒ show the active row
-  reason: 'ready' | 'pending_apple' | 'unsupported_device' | 'flag_off' | 'loading';
+  reason:
+    | 'ready'
+    | 'pending_apple'
+    | 'unsupported_device'
+    /** Apple req 1.4 — capable hardware, but the OS is below the floor. */
+    | 'os_too_old'
+    | 'flag_off'
+    | 'loading';
 }
+
 
 export function useTapToPayEnabled(): TapToPayState {
   const [state, setState] = useState<TapToPayState>({
@@ -63,6 +72,15 @@ export function useTapToPayEnabled(): TapToPayState {
               reason: Platform.OS === 'ios' ? 'pending_apple' : 'flag_off',
             });
           }
+          return;
+        }
+
+        // Apple req 1.4: an OS below the floor is a distinct state from
+        // incapable hardware. Checked BEFORE the SDK probe, because
+        // isDeviceCapable() answers about the Secure Element and would happily
+        // say "yes" on an iPhone that then fails at authorize().
+        if (!isTapToPayOsSupported()) {
+          if (!cancelled) setState({ enabled: false, reason: 'os_too_old' });
           return;
         }
 

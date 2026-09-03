@@ -12,6 +12,7 @@
 import React from 'react';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, fireEvent, waitFor } from '@testing-library/react';
+import { Share } from 'react-native';
 
 // Heavy native/expo dependency graphs irrelevant to the sheet's row logic —
 // same approach as StickyJobActionBar.test.tsx / JobCard.ghost.test.tsx.
@@ -22,6 +23,14 @@ vi.mock('react-native-paper', () => ({
   Text: ({ children }: any) => React.createElement('span', null, children),
   Button: ({ children, onPress }: any) =>
     React.createElement('button', { onClick: onPress }, children),
+  // The decline offer (req 5.10) goes through the shared AlertModal, which
+  // mounts in a Portal. Render children inline — the real Portal needs a
+  // provider this file deliberately stays out of.
+  Portal: ({ children }: any) => React.createElement(React.Fragment, null, children),
+  Modal: ({ visible, children }: any) =>
+    visible ? React.createElement('div', null, children) : null,
+  IconButton: ({ onPress, icon }: any) =>
+    React.createElement('button', { onClick: onPress }, icon),
 }));
 // The shared sheet chassis has its own lifecycle tests; a shim keeps this
 // file on the payment logic (and out of Portal/safe-area dependency graphs).
@@ -37,7 +46,22 @@ vi.mock('./BottomSheet', () => ({
         )
       : null,
 }));
-vi.mock('../utils/haptics', () => ({ selectionTap: () => {} }));
+// successTap/errorTap arrive via the AlertModal the decline offer (req 5.10)
+// mounts, not the sheet itself.
+vi.mock('../utils/haptics', () => ({
+  selectionTap: () => {},
+  successTap: () => {},
+  errorTap: () => {},
+}));
+// Under jsdom expo-symbols resolves to its web build, which renders the
+// fallback — so the SF Symbol name (Apple req 5.5) is only observable here.
+const symbols = vi.hoisted(() => ({ rendered: [] as string[] }));
+vi.mock('expo-symbols', () => ({
+  SymbolView: ({ name, fallback }: any) => {
+    symbols.rendered.push(name);
+    return fallback ?? null;
+  },
+}));
 vi.mock('../services/storeReviewService', () => ({
   maybeRequestReview: vi.fn(async () => {}),
 }));
@@ -116,6 +140,7 @@ function renderSheet(overrides: Partial<React.ComponentProps<typeof TakePaymentS
 
 beforeEach(() => {
   vi.clearAllMocks();
+  symbols.rendered = [];
   readiness.state = 'ready';
   tapToPay.state = { enabled: false, reason: 'pending_apple' };
   store.getDocumentById.mockImplementation((id: string) => ({
@@ -537,5 +562,122 @@ describe('TakePaymentSheet surfaces Tap to Pay configuration progress', () => {
 
     // Pressing mid-configuration is accepted, not swallowed by a disabled row.
     await waitFor(() => expect(squarePayments.takeInAppPayment).toHaveBeenCalled());
+  });
+});
+
+/**
+ * Apple reqs 1.4 and 5.10. Both are about what the tradie and the customer are
+ * told when no money moves — the cases that only show up in front of a paying
+ * customer, which is exactly why they need covering here.
+ */
+describe('failed card payments', () => {
+  it('offers the customer a record when the card is declined (req 5.10)', async () => {
+    tapToPay.state = { enabled: true };
+    store.businessSettings = { businessName: 'Hansen Plumbing' };
+    (squarePayments.takeInAppPayment as any).mockRejectedValueOnce(
+      new Error('Card declined'),
+    );
+    const { getByText, props } = renderSheet({
+      ensureSquareConnected: vi.fn(async () => true),
+    });
+
+    fireEvent.click(getByText('Tap to Pay / Card Entry'));
+
+    await waitFor(() => expect(getByText('Card declined')).toBeTruthy());
+    expect(getByText(/Send the customer a record/i)).toBeTruthy();
+    // A decline is not a generic error — it must not surface as raw SDK text.
+    expect(props.onError).not.toHaveBeenCalled();
+  });
+
+  it('the record it sends says no money was taken, under the tradie business name', async () => {
+    tapToPay.state = { enabled: true };
+    store.businessSettings = { businessName: 'Hansen Plumbing' };
+    const share = vi.spyOn(Share, 'share').mockResolvedValue({ action: 'sharedAction' } as any);
+    (squarePayments.takeInAppPayment as any).mockRejectedValueOnce(
+      new Error('Card declined'),
+    );
+    const { getByText } = renderSheet({
+      ensureSquareConnected: vi.fn(async () => true),
+    });
+
+    fireEvent.click(getByText('Tap to Pay / Card Entry'));
+    await waitFor(() => expect(getByText('Send record')).toBeTruthy());
+    fireEvent.click(getByText('Send record'));
+
+    await waitFor(() => expect(share).toHaveBeenCalled());
+    const message = (share.mock.calls[0][0] as any).message as string;
+    expect(message).toMatch(/Hansen Plumbing/);
+    expect(message).toMatch(/no money was taken/i);
+    expect(message).toMatch(/Invoice INV-0042/);
+    // Customer-facing: the app never appears on it.
+    expect(message).not.toMatch(/quotemate/i);
+    share.mockRestore();
+  });
+
+  it('a cancellation still offers nothing and says nothing', async () => {
+    tapToPay.state = { enabled: true };
+    (squarePayments.takeInAppPayment as any).mockRejectedValueOnce(
+      new Error('Payment canceled by user'),
+    );
+    const { queryByText, props } = renderSheet({
+      ensureSquareConnected: vi.fn(async () => true),
+    });
+
+    fireEvent.click(queryByText('Tap to Pay / Card Entry')!);
+
+    await waitFor(() => expect(squarePayments.takeInAppPayment).toHaveBeenCalled());
+    expect(queryByText('Card declined')).toBeNull();
+    expect(props.onError).not.toHaveBeenCalled();
+  });
+
+  it('tells the tradie to update iOS rather than "payment failed" (req 1.4)', async () => {
+    tapToPay.state = { enabled: true };
+    (squarePayments.takeInAppPayment as any).mockRejectedValueOnce(
+      Object.assign(new Error('unsupported'), { code: 'osVersionNotSupported' }),
+    );
+    const { getByText, props } = renderSheet({
+      ensureSquareConnected: vi.fn(async () => true),
+    });
+
+    fireEvent.click(getByText('Tap to Pay / Card Entry'));
+
+    await waitFor(() => expect(props.onError).toHaveBeenCalled());
+    expect(props.onError.mock.calls[0][0]).toMatch(/iOS 17\.6/);
+    expect(props.onError.mock.calls[0][0]).not.toMatch(/payment failed/i);
+  });
+
+  it('an OS below the floor explains itself on the row instead of going quiet', () => {
+    tapToPay.state = { enabled: false, reason: 'os_too_old' };
+    const { getByText } = renderSheet();
+
+    expect(getByText(/Update to iOS 17\.6 or later/)).toBeTruthy();
+  });
+});
+
+describe('req 5.5 — the Tap to Pay icon', () => {
+  it("uses Apple's wave.3.right.circle symbol on the Tap to Pay row", () => {
+    tapToPay.state = { enabled: true };
+    renderSheet();
+
+    expect(symbols.rendered).toContain('wave.3.right.circle');
+  });
+
+  it('claims no SF Symbol for the rows Apple does not govern', () => {
+    tapToPay.state = { enabled: true };
+    renderSheet();
+
+    // Share Pay Link and Record Payment are ours, not Apple's. Asserted on the
+    // distinct set, not the call list — a re-render legitimately repeats a
+    // name, and counting renders would make this fail for the wrong reason.
+    expect([...new Set(symbols.rendered)]).toEqual(['wave.3.right.circle']);
+  });
+
+  it('still shows the row when the symbol is unavailable, via the fallback icon', () => {
+    tapToPay.state = { enabled: true };
+    const { getByText } = renderSheet();
+
+    // The mock returns `fallback`, standing in for Android/web and any iOS
+    // that lacks the symbol. The row must remain usable either way.
+    expect(getByText('Tap to Pay / Card Entry')).toBeTruthy();
   });
 });
