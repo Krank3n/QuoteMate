@@ -22,7 +22,7 @@ import {
   PipelineCancelled,
   LAST_RESORT_GUESS_PREFIX,
 } from '../services/materialsPipeline';
-import { pricingEventToProgress } from './pricingProgress';
+import { pricingEventToProgress, summarisePriceCounts } from '../../shared/pricing/progress';
 import type { SupplierGapSummary } from '../services/assistant/supplierGapNote';
 import { reviewQuoteMaterials, isFlaggedRow, priceResettableIds, topLinesSummary, wipeStillImplausibleRows, withIntegrityIssues, QuoteReview } from '../utils/quoteReview';
 import { checkDocumentIntegrity } from '../../shared/document/integrityCheck';
@@ -62,6 +62,19 @@ import { ensureJobForDocument, ensureJobForQuote, useJobStore } from './useJobSt
 import { canAnalysePhotos, canRunMatePipeline } from './planGates';
 import { markPricingStarted, markPricingFinished, isPricingInFlight } from '../services/assistant/pricingInFlight';
 import { runPipelineOnServer } from '../services/serverPricingRun';
+
+/**
+ * A run the server owned failed (or went quiet). The server has already
+ * parked the draft and may hold analysed rows the phone never saw, so the
+ * recovery path must read the quote back rather than write the phone's copy
+ * over it — see runScopePipeline's catch.
+ */
+class ServerRunFailed extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ServerRunFailed';
+  }
+}
 import { resetGeneratedScope } from '../utils/scopeReset';
 import { headlineFor } from '../utils/reviewChatFormat';
 import type { CustomerEditPlan } from '../utils/customerEdit';
@@ -3284,11 +3297,7 @@ export const useStore = create<AppState>((set, get) => ({
             priced.materials,
           );
 
-          const parts: string[] = [];
-          if (counts.fetchedCount > 0) parts.push(`${counts.fetchedCount} priced`);
-          if (counts.failedCount > 0) parts.push(`${counts.failedCount} need pricing`);
-          if (counts.skippedCount > 0) parts.push(`${counts.skippedCount} already priced`);
-          let pricingSummary = parts.join(' · ') || 'Nothing to price.';
+          let pricingSummary = summarisePriceCounts(counts);
           const topLines = topLinesSummary(priced.materials);
           if (topLines) pricingSummary = `${pricingSummary}\n${topLines}`;
 
@@ -3315,7 +3324,7 @@ export const useStore = create<AppState>((set, get) => ({
           },
           { onProgress: (status) => reportProgress(status) },
         );
-        if (serverRun.kind === 'failed') throw new Error(serverRun.error);
+        if (serverRun.kind === 'failed') throw new ServerRunFailed(serverRun.error);
         if (serverRun.kind === 'done') {
           materialCount = serverRun.result.generatedMaterialCount;
           missedSupplierTerms.push(...serverRun.result.missedSupplierTerms);
@@ -3324,7 +3333,14 @@ export const useStore = create<AppState>((set, get) => ({
         }
         // eslint-disable-next-line no-console
         console.log('[Mate] pricing on the phone —', serverRun.reason);
-        reportProgress({ phase: 'preflight', status: 'Getting ready…', runsOnServer: false });
+        // Said out loud: the card may have spent 25 s on "lining up a spot", and
+        // a phone-side run does need the app kept open.
+        reportProgress({
+          phase: 'preflight',
+          status: 'Doing this one on your phone — keep the app open a tick.',
+          detail: undefined,
+          runsOnServer: false,
+        });
 
         const templates = await loadTemplates().catch(() => []);
 
@@ -3395,12 +3411,32 @@ export const useStore = create<AppState>((set, get) => ({
       } catch (err: any) {
         // eslint-disable-next-line no-console
         console.warn('[Mate] pipeline failed', err);
+        const serverSide = err instanceof ServerRunFailed;
         onProgress?.({
           phase: 'failed',
           status: "Couldn't finish pricing that one.",
-          detail: err?.message,
+          // The server's reasons are engineer-speak ("stopped reporting
+          // progress"); the tradie needs to know the draft survived.
+          detail: serverSide ? "Couldn't get prices back just now — your gear list is saved." : err?.message,
           done: true,
         });
+        if (serverSide) {
+          // The server owns the quote: it has parked the draft itself and may
+          // hold analysed rows this phone never received. Read it back rather
+          // than writing the stale local copy over it — a flaky read-back
+          // after a finished run must not turn a priced quote into an empty
+          // one. If the read fails too, only the local state moves; the
+          // realtime listener brings the server's copy down when it can.
+          const remote = await firestoreService.getQuote(quoteId).catch(() => null);
+          if (remote) {
+            get().updateQuote({ ...remote, draftStep: remote.draftStep ?? 'MaterialsList' });
+            await get().saveDraft(get().currentQuote!).catch(() => {});
+          } else {
+            const parked = get().currentQuote;
+            if (parked && parked.id === quoteId) get().updateQuote({ ...parked, draftStep: 'MaterialsList' });
+          }
+          return { kind: 'degraded', error: err?.message || 'unknown' };
+        }
         // The draft exists but its prices don't. Park it on the wizard step
         // that carries Fetch Prices so the dashboard banner can resume it.
         const parked = get().currentQuote;

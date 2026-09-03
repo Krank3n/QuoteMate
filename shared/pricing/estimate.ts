@@ -1,10 +1,9 @@
 /**
- * The general-knowledge price estimator's answer, normalised.
- *
- * The app's src/services/webSearchPricing.ts keeps its own copy of these two
- * coercions (a cross-package guard test pins them there); this module gives
- * the server-side pricing run the same treatment of the searchMaterialPrice
- * payload. Keep the three in step.
+ * The general-knowledge price estimator's answer, normalised. Used by the
+ * app's webSearchPricing client and by the server-side pricing run, so both
+ * read the searchMaterialPrice payload identically. The functions handler
+ * keeps its own copy of the pack-unit map (a cross-package guard pins the two
+ * together).
  */
 
 export interface EstimateResult {

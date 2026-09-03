@@ -49,6 +49,28 @@ import type { FavoriteProductMapping, SectionTemplate, SupplierGroup } from './t
 
 export type LocalSourceKind = 'template' | 'favorite';
 
+/**
+ * The tradie's own templates and supplier book, ranked templates-first, then
+ * by supplier priority, then by match score. Pure: the caller loads the
+ * sources (the app per call, the pricing pipeline once per run).
+ */
+export function rankLocalHits(
+  query: string,
+  sources: {
+    templates: SectionTemplate[];
+    favorites: FavoriteProductMapping[];
+    suppliers: SupplierGroup[];
+    priorityOrder?: string[];
+    includeTemplates?: boolean;
+  },
+): LocalSearchResult[] {
+  if (!query.trim()) return [];
+  const includeTemplates = sources.includeTemplates ?? true;
+  const templateHits = includeTemplates ? searchTemplates(query, sources.templates) : [];
+  const favoriteHits = searchFavorites(query, sources.favorites, sources.suppliers, sources.priorityOrder);
+  return [...templateHits, ...favoriteHits].sort((a, b) => a._sortHint - b._sortHint);
+}
+
 export interface LocalSearchResult {
   productName: string;
   description: string;

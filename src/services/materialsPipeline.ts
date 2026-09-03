@@ -95,15 +95,4 @@ export {
   PipelineCancelled,
   summarizePriceFetchOutcome,
 } from '../../shared/pricing/pipeline';
-export type {
-  PipelineEvent,
-  PipelineDeps,
-  GenerateMaterialsArgs,
-  GenerateMaterialsCallbacks,
-  GenerateMaterialsResult,
-  PricingPhase,
-  PricingEvent,
-  FetchPricesArgs,
-  FetchPricesCallbacks,
-  FetchPricesResult,
-} from '../../shared/pricing/pipeline';
+export type { PricingEvent } from '../../shared/pricing/pipeline';

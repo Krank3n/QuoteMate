@@ -5,7 +5,7 @@ import {
   parseBoardLengthM,
   geometricSanePieceCount,
   geometricMinimumPieceCount,
-} from './geometricCoverage';
+} from '../../shared/pricing/geometricCoverage';
 
 describe('parseJobAreaM2', () => {
   it('parses "15 metre by 2 metre" (the QU-178020 deck)', () => {

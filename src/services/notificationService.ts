@@ -115,17 +115,6 @@ class NotificationService {
       importance: Notifications.AndroidImportance.DEFAULT,
       lightColor: '#f97316',
     });
-
-    // The one push a tradie explicitly waits for: Mate finished pricing the
-    // quote they locked the phone on. Its own channel so muting reminders
-    // never mutes it.
-    await Notifications.setNotificationChannelAsync('quote-ready', {
-      name: 'Quotes ready to send',
-      description: 'Mate finished pricing a quote you were waiting on.',
-      importance: Notifications.AndroidImportance.HIGH,
-      vibrationPattern: [0, 250, 250, 250],
-      lightColor: '#f97316',
-    });
   }
 
   /** Whether the OS has already granted notification permission. */

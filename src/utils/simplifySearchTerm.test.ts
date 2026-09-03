@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { simplifySearchTerm } from './simplifySearchTerm';
+import { simplifySearchTerm } from '../../shared/pricing/simplifySearchTerm';
 
 describe('simplifySearchTerm', () => {
   it('strips dimensions, treatment grades, and parentheticals from real audit failures', () => {

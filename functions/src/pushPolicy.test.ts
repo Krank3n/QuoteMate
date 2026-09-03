@@ -68,7 +68,7 @@ describe('event-class pushes', () => {
       nudgesSentToday: 5,
     });
     expect(lateNight.send).toBe(true);
-    expect(lateNight.channelId).toBe('quote-ready');
+    expect(lateNight.channelId).toBe('quote-responses');
   });
 
   it('delivers at any hour — money landing at 10pm is still worth knowing', () => {
@@ -117,7 +117,7 @@ describe('event-class pushes', () => {
     // Reminders must not share the money channel, or muting one mutes both.
     expect(ANDROID_CHANNEL.invoice_overdue).not.toBe(ANDROID_CHANNEL.invoice_paid);
     // A pricing-run push is one the tradie asked for; muting reminders must not mute it.
-    expect(ANDROID_CHANNEL.quote_priced).toBe('quote-ready');
+    expect(ANDROID_CHANNEL.quote_priced).toBe('quote-responses');
     expect(ANDROID_CHANNEL.quote_priced).not.toBe(ANDROID_CHANNEL.draft_nudge);
   });
 });

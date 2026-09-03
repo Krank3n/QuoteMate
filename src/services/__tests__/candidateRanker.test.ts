@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { pickBestCandidate, type RankableCandidate } from '../candidateRanker';
+import { pickBestCandidate, type RankableCandidate } from '../../../shared/pricing/candidateRanker';
 
 const c = (
   price: number,

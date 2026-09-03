@@ -12514,37 +12514,33 @@ const SCRAPER_API_KEY = process.env.BUNNINGS_SCRAPER_API_KEY || '';
  * Error messages carry the HTTP status so the shared retry helper can tell a
  * transient 503 from a permanent 401.
  */
-async function scraperBatchSearchDirect(searches: BatchSearchRequest[]): Promise<BatchSearchResponseItem[]> {
-  if (!SCRAPER_URL || !SCRAPER_API_KEY) throw new Error('Scraper not configured');
-  const response = await fetch(`${SCRAPER_URL}/api/batch-search`, {
+/** One POST to the scraper. `data` is null when the scraper answered with an error status. */
+async function scraperPost(path: string, body: unknown): Promise<{ status: number; data: any | null }> {
+  const response = await fetch(`${SCRAPER_URL}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-API-Key': SCRAPER_API_KEY },
-    body: JSON.stringify({ searches }),
+    body: JSON.stringify(body),
   });
   if (!response.ok) {
     await response.text();
-    throw new Error(`Batch scraper returned ${response.status}`);
+    return { status: response.status, data: null };
   }
-  const data: any = await response.json();
-  if (!data?.success || !Array.isArray(data.results)) {
-    throw new Error(data?.error || 'Batch search failed');
-  }
+  return { status: response.status, data: await response.json() };
+}
+
+async function scraperBatchSearchDirect(searches: BatchSearchRequest[]): Promise<BatchSearchResponseItem[]> {
+  if (!SCRAPER_URL || !SCRAPER_API_KEY) throw new Error('Scraper not configured');
+  const { status, data } = await scraperPost('/api/batch-search', { searches });
+  if (!data) throw new Error(`Batch scraper returned ${status}`);
+  if (!data.success || !Array.isArray(data.results)) throw new Error(data.error || 'Batch search failed');
   return data.results as BatchSearchResponseItem[];
 }
 
 async function scraperSearchDirect(searchTerm: string, limit: number): Promise<ScraperProduct[]> {
   if (!SCRAPER_URL || !SCRAPER_API_KEY) throw new Error('Scraper not configured');
-  const response = await fetch(`${SCRAPER_URL}/api/search`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-API-Key': SCRAPER_API_KEY },
-    body: JSON.stringify({ searchTerm, limit, sortBy: 'relevance' }),
-  });
-  if (!response.ok) {
-    await response.text();
-    throw new Error(`Scraper returned ${response.status}`);
-  }
-  const data: any = await response.json();
-  if (!data?.success || !Array.isArray(data.results)) throw new Error(data?.error || 'Search failed');
+  const { status, data } = await scraperPost('/api/search', { searchTerm, limit, sortBy: 'relevance' });
+  if (!data) throw new Error(`Scraper returned ${status}`);
+  if (!data.success || !Array.isArray(data.results)) throw new Error(data.error || 'Search failed');
   return rankCandidates(data.results as ScraperProduct[]).slice(0, limit);
 }
 
@@ -12574,22 +12570,11 @@ export const bunningsScraperSearch = functions.runWith({ timeoutSeconds: 120 }).
         return;
       }
 
-      const response = await fetch(`${SCRAPER_URL}/api/search`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-API-Key': SCRAPER_API_KEY,
-        },
-        body: JSON.stringify({ searchTerm, limit, sortBy }),
-      });
-
-      if (!response.ok) {
-        await response.text();
-        res.status(response.status).json({ success: false, error: `Scraper returned ${response.status}` });
+      const { status, data } = await scraperPost('/api/search', { searchTerm, limit, sortBy });
+      if (!data) {
+        res.status(status).json({ success: false, error: `Scraper returned ${status}` });
         return;
       }
-
-      const data = await response.json();
       res.status(200).json(data);
     } catch (error: any) {
       res.status(500).json({ success: false, error: error.message || 'Proxy error' });
@@ -12623,22 +12608,11 @@ export const bunningsScraperBatchSearch = functions.runWith({ timeoutSeconds: 54
         return;
       }
 
-      const response = await fetch(`${SCRAPER_URL}/api/batch-search`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-API-Key': SCRAPER_API_KEY,
-        },
-        body: JSON.stringify({ searches }),
-      });
-
-      if (!response.ok) {
-        await response.text();
-        res.status(response.status).json({ success: false, error: `Scraper returned ${response.status}` });
+      const { status, data } = await scraperPost('/api/batch-search', { searches });
+      if (!data) {
+        res.status(status).json({ success: false, error: `Scraper returned ${status}` });
         return;
       }
-
-      const data = await response.json();
       res.status(200).json(data);
     } catch (error: any) {
       res.status(500).json({ success: false, error: error.message || 'Proxy error' });
@@ -15556,5 +15530,5 @@ export const onPricingRunCreated = functions
       deps: serverPipelineDeps(userId),
       log: functions.logger,
     });
-    functions.logger.info('pricing_run', { userId, runId, outcome });
+    functions.logger.info('pricing_run', { userId, runId, kind: (_snap.data() as { kind?: string })?.kind, outcome });
   });

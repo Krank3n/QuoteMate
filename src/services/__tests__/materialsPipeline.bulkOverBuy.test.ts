@@ -16,27 +16,10 @@
  * same family as the tile-adhesive and footings blow-ups: the per-unit price is
  * fine, the COUNT is wild.
  */
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 
-// materialsPipeline drags in the Expo/RN module graph at import time;
-// applyReconcileResult itself is pure. Same stubs as the sibling suites.
-vi.mock('expo-modules-core', () => ({
-  default: {},
-  NativeModule: class {},
-  SharedObject: class {},
-  SharedRef: class {},
-  EventEmitter: class {},
-  NativeModulesProxy: {},
-  requireNativeModule: () => ({}),
-  requireOptionalNativeModule: () => null,
-  registerWebModule: (m: unknown) => m,
-  Platform: { OS: 'ios' },
-  uuid: { v4: () => 'test-uuid' },
-}));
-vi.mock('expo-constants', () => ({ default: { expoConfig: { extra: {} } } }));
-vi.mock('expo-keep-awake', () => ({ activateKeepAwakeAsync: vi.fn(), deactivateKeepAwake: vi.fn() }));
 
-import { applyReconcileResult } from '../materialsPipeline';
+import { applyReconcileResult } from '../../../shared/pricing/pipeline';
 import type { Material } from '../../types';
 
 function batts(overrides: Partial<Material> = {}): Material {

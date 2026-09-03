@@ -40,9 +40,18 @@ describe('PricingNotifyLine', () => {
     expect(screen.queryByText(NOTIFY_LINE_COPY.offer)).toBeNull();
   });
 
-  it('renders nothing when the prompt can no longer be shown', async () => {
-    const { container } = render(<PricingNotifyLine io={io({ has: false, canAsk: false })} />);
-    await new Promise((r) => setTimeout(r, 10));
-    expect(container.textContent).toBe('');
+  it('still says the phone can be locked when the prompt can no longer be shown', async () => {
+    render(<PricingNotifyLine io={io({ has: false, canAsk: false })} />);
+    await waitFor(() => expect(screen.getByText(NOTIFY_LINE_COPY.plain)).toBeTruthy());
+  });
+
+  it('holds the row while the OS dialog is up instead of collapsing the card', async () => {
+    let release: (token: string | null) => void = () => {};
+    const deps = { ...io({ has: false, canAsk: true }), register: () => new Promise<string | null>((r) => { release = r; }) };
+    render(<PricingNotifyLine io={deps} />);
+    fireEvent.click(await waitFor(() => screen.getByText(NOTIFY_LINE_COPY.offer)));
+    await waitFor(() => expect(screen.getByText(NOTIFY_LINE_COPY.asking)).toBeTruthy());
+    release('ExponentPushToken[x]');
+    await waitFor(() => expect(screen.getByText(NOTIFY_LINE_COPY.ready)).toBeTruthy());
   });
 });

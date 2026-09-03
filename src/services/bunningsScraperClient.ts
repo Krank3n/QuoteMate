@@ -7,7 +7,7 @@
  */
 
 import { auth } from '../config/firebase';
-import { withScraperRetry } from '../utils/scraperRetry';
+import { withScraperRetry } from '../../shared/pricing/scraperRetry';
 // The wire shape, result normalisation and batch chunking live in
 // shared/pricing so the server-side pricing run ranks candidates identically.
 import {

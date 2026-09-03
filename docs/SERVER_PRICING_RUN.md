@@ -12,6 +12,7 @@ ready.
 | Pipeline | `shared/pricing/pipeline.ts` | The one implementation: analyse → supplier book → Reece → Bunnings → estimate → reconcile → coverage sweeps. Takes its network and storage through `PipelineDeps`. |
 | Phone binding | `src/services/materialsPipeline.ts` | Supplies React Native services, holds the screen awake. Still used by the wizard's Get Recommended Gear / Fetch Prices and by Mate's reprice, and as the fallback below. |
 | Server binding | `functions/src/index.ts` (`serverPipelineDeps`, `onPricingRunCreated`) | Wires the same cores the HTTP handlers use (`analyzeJobDescriptionCore`, `reconcilePricedMaterialsCore`, `estimateMaterialPriceCore`, `searchReeceProductCore`, direct scraper calls). |
+| Run document types | `shared/pricing/pricingRunDoc.ts` | The wire contract both sides import. |
 | Run orchestration | `functions/src/pricingRun.ts` | Claims the run, streams progress, writes the quote with recomputed totals, decides whether to push. Pure apart from `firestorePricingRunStore`. |
 | Phone watcher | `src/services/serverPricingRun.ts` | Creates the run document, mirrors progress into the working card, keeps the `foreground` flag honest, resolves with the priced quote. |
 | Store | `src/store/useStore.ts` (`runScopePipeline`) | Tries the server first; prices on the phone when the server never claims the run. |
@@ -44,9 +45,11 @@ listener and the document mirror pick it up as they would any app write.
 
 Sent through `sendAussiePush` as `quote_priced` (or `quote_pricing_snag`),
 event-class so quiet hours and the daily nudge cap never hold it, on the
-`quote-ready` Android channel. It goes out only when the run document's
-`foreground` is `false` at completion — a tradie watching the card gets
-nothing. Tapping it opens the job (`jobId` rides in the payload).
+existing `quote-responses` Android channel. It goes out only when the phone
+is away at completion: the run document's `foreground` is `false`, or its
+`foregroundAt` stamp (re-written every 20 s while the app is in front) is
+older than 45 s — so a lost "I'm away" write means a push, never silence.
+Tapping it opens the job (`jobId` rides in the payload).
 
 Permission is only ever requested from the card's "Tell me when it's done"
 line, where the tap itself is the consent; it does not touch the send-time
@@ -68,7 +71,8 @@ A claimed run that stops writing progress for 6 minutes, or runs past 10
 minutes, is reported as failed; the draft is parked on the Fetch Prices step
 either way.
 
-Each user is limited to 8 runs per 10 minutes on the server; the HTTP
+Each user is limited to 8 claimed runs per 10 minutes on the server (runs
+the phone cancelled unclaimed cost nothing and don't count); the HTTP
 handlers keep their own per-user rate limits for the phone path.
 
 ## Deploying
@@ -76,8 +80,7 @@ handlers keep their own per-user rate limits for the phone path.
 1. `firebase deploy --only functions` — the trigger must exist before clients
    start writing run documents (they'd fall back after 25 s otherwise, which
    works but wastes the wait).
-2. Ship the client (OTA is enough; no native change beyond a new Android
-   notification channel, which older builds simply don't have).
+2. Ship the client (OTA is enough; there is no native change).
 3. To back out without a client release: set `config/pipeline.serverRuns`
    to `false`.
 

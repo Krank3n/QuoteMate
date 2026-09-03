@@ -58,7 +58,8 @@ describe('estimated-price pack info (src/services/webSearchPricing.ts)', () => {
     path.join(__dirname, '..', '..', 'src', 'services', 'webSearchPricing.ts'),
     'utf8',
   );
-  // The server-side pricing run reads the same payload through shared/pricing.
+  // The app's client and the server-side pricing run both coerce the answer
+  // through shared/pricing/estimate.ts; the prompt lives in the client file.
   const shared = fs.readFileSync(path.join(__dirname, 'shared', 'pricing', 'estimate.ts'), 'utf8');
 
   it('asks the estimator what one purchase contains, on both sides', () => {
@@ -73,13 +74,14 @@ describe('estimated-price pack info (src/services/webSearchPricing.ts)', () => {
 
   it('returns the pack info to the caller', () => {
     expect(handler).toMatch(/packSize:\s*Number\.isFinite/);
-    expect(client).toMatch(/packSize:\s*positivePack/);
+    expect(shared).toMatch(/packSize:\s*positivePack/);
+    expect(client).toMatch(/normaliseEstimateResponse\(/);
   });
 
   it('normalises ASCII m2 to canonical m² on every side', () => {
     // The prompt asks for 'm2'; every guard downstream compares against 'm²'.
     // An unnormalised unit silently discards the pack size.
-    for (const src of [handler, client, shared]) {
+    for (const src of [handler, shared]) {
       expect(src).toMatch(/m2:\s*'m²'/);
       expect(src).toMatch(/m3:\s*'m³'/);
     }

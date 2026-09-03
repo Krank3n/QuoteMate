@@ -14,11 +14,7 @@
 import { loadTemplatesFromLocal } from './sectionTemplateService';
 import { loadFavoritesFromLocal } from './materialFavorites';
 import type { SupplierGroup } from '../types';
-import {
-  searchTemplates,
-  searchFavorites,
-  type LocalSearchResult,
-} from './localMaterialMatcher';
+import { rankLocalHits, type LocalSearchResult } from './localMaterialMatcher';
 
 // Re-export the matcher's surface so existing callers don't need to update
 // their imports.
@@ -59,10 +55,11 @@ export async function searchLocalSources(
     includeTemplates ? loadTemplatesFromLocal() : Promise.resolve([]),
     loadFavoritesFromLocal(),
   ]);
-  const favorites = Object.values(favoritesMap);
-
-  const templateHits = includeTemplates ? searchTemplates(query, templates) : [];
-  const favoriteHits = searchFavorites(query, favorites, suppliers, options.priorityOrder);
-
-  return [...templateHits, ...favoriteHits].sort((a, b) => a._sortHint - b._sortHint);
+  return rankLocalHits(query, {
+    templates,
+    favorites: Object.values(favoritesMap),
+    suppliers,
+    priorityOrder: options.priorityOrder,
+    includeTemplates,
+  });
 }

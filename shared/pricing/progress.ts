@@ -11,6 +11,19 @@
 
 import type { PricingEvent } from './pipeline';
 
+/** The one-line outcome the working card shows: "12 priced · 1 need pricing". */
+export function summarisePriceCounts(counts: {
+  fetchedCount: number;
+  failedCount: number;
+  skippedCount: number;
+}): string {
+  const parts: string[] = [];
+  if (counts.fetchedCount > 0) parts.push(`${counts.fetchedCount} priced`);
+  if (counts.failedCount > 0) parts.push(`${counts.failedCount} need pricing`);
+  if (counts.skippedCount > 0) parts.push(`${counts.skippedCount} already priced`);
+  return parts.join(' · ') || 'Nothing to price.';
+}
+
 export interface WorkingStatus {
   /** Pipeline phase identifier — drives icon + style. */
   phase: 'preflight' | 'analyzing' | 'building' | 'pricing' | 'done' | 'failed';

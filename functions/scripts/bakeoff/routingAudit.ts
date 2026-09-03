@@ -10,7 +10,7 @@
  * quotes during the bake-off.
  */
 import './preload';
-import { isNonRetailTradeRow, tradeFallbackUnitPriceWithUnit } from '../../../src/utils/tradeFallback';
+import { isNonRetailTradeRow, tradeFallbackUnitPriceWithUnit } from '../../../shared/pricing/tradeFallback';
 
 const STOCKED: Array<[string, string]> = [
   ['rubber grout float', 'each'],

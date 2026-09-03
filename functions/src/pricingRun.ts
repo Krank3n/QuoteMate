@@ -34,6 +34,11 @@ import {
   type RecalculableQuote,
 } from './shared/pricing/documentTotals';
 import type { PricingBusinessSettings, PricingQuote } from './shared/pricing/types';
+import type { PricingRunRecord, PricingRunResult } from './shared/pricing/pricingRunDoc';
+import { summarisePriceCounts } from './shared/pricing/progress';
+import { stripUndefined } from './documentMirror';
+
+export type { PricingRunRecord, PricingRunResult } from './shared/pricing/pricingRunDoc';
 
 /** Gen1 Firestore triggers cap at nine minutes; a normal run is 15–60 s. */
 export const PRICING_RUN_TIMEOUT_SECONDS = 540;
@@ -42,51 +47,14 @@ export const MAX_RUNS_PER_WINDOW = 8;
 export const RATE_WINDOW_MS = 10 * 60 * 1000;
 /** Progress writes are coalesced to at most one per this many milliseconds. */
 export const PROGRESS_WRITE_INTERVAL_MS = 600;
+/**
+ * The phone re-stamps foregroundAt every 20 s while it is in front. A stamp
+ * older than this means the phone went away (or its "I'm away" write never
+ * left it), and either way the tradie isn't watching the card.
+ */
+export const FOREGROUND_STALE_MS = 45_000;
 
-export type PricingRunStatus = 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
-export type PricingRunKind = 'draft' | 'scope';
 export type PricingRunNotifyEvent = 'quote_priced' | 'quote_pricing_snag';
-
-export interface PricingRunOptions {
-  /** Pro plans get photo/plan vision in the analyse pass. */
-  isPro: boolean;
-  /** Labour is charged through rate lines, so the analysis's hours come off. */
-  stripLabour: boolean;
-  /** Keep hours + sections, drop the gear list and skip pricing. */
-  labourOnly: boolean;
-}
-
-export interface PricingRunResult {
-  generatedMaterialCount: number;
-  fetchedCount: number;
-  failedCount: number;
-  skippedCount: number;
-  /** Terms a local supplier ranked above Bunnings could not cover. */
-  missedSupplierTerms: string[];
-  reeceReauthNeeded: boolean;
-}
-
-/** The run document as the phone creates it and the server advances it. */
-export interface PricingRunRecord {
-  quoteId: string;
-  kind: PricingRunKind;
-  options: PricingRunOptions;
-  status: PricingRunStatus;
-  /** Live working-card state, in the shape the chat renders. */
-  progress?: WorkingStatus;
-  /**
-   * Maintained by the phone: false while the app is backgrounded or the
-   * phone is locked. Read once at the end to decide whether a push is worth
-   * sending — a tradie watching the card doesn't need one.
-   */
-  foreground?: boolean;
-  createdAt: string;
-  startedAt?: string;
-  updatedAt?: string;
-  finishedAt?: string;
-  result?: PricingRunResult;
-  error?: string;
-}
 
 /** A quote as stored under users/{uid}/quotes — the pipeline's slice plus whatever else is on it. */
 export type StoredQuote = PricingQuote &
@@ -103,7 +71,7 @@ export interface PricingRunStore {
   update(patch: Record<string, unknown>): Promise<void>;
   /** A fresh read of the run document. */
   read(): Promise<PricingRunRecord | null>;
-  /** How many runs this user created at or after the given time. */
+  /** How many of this user's runs the server claimed at or after the given time. */
   runsStartedSince(sinceMs: number): Promise<number>;
   loadQuote(quoteId: string): Promise<StoredQuote | null>;
   /** Merge fields onto the quote document. */
@@ -127,22 +95,10 @@ export interface PricingRunLogger {
 // Pure helpers (exported for tests)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Firestore rejects `undefined`; the app strips it on every write, so does this. */
-export function stripUndefined<T>(value: T): T {
-  if (value === null || value === undefined || typeof value !== 'object') return value;
-  if (Array.isArray(value)) return value.map(stripUndefined) as unknown as T;
-  const out: Record<string, unknown> = {};
-  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
-    if (entry === undefined) continue;
-    out[key] = typeof entry === 'object' && entry !== null ? stripUndefined(entry) : entry;
-  }
-  return out as T;
-}
-
 /**
- * NaN/Infinity become 0 so they never reach the document. The app does the
- * same before its writes — a single non-finite section value once poisoned a
- * whole quote's totals.
+ * NaN/Infinity become 0 so they never reach the document — the same walk the
+ * app's saveDraft does (sanitizeNonFiniteNumbers in src/store/useStore.ts),
+ * after a single non-finite section value once poisoned a whole quote's totals.
  */
 export function scrubNonFinite<T>(value: T): T {
   if (typeof value === 'number') return (Number.isFinite(value) ? value : 0) as unknown as T;
@@ -181,18 +137,28 @@ export function quotePatch(quote: StoredQuote, nowMs: number): Record<string, un
   );
 }
 
-/** The one-line outcome the working card shows, in the app's words. */
-export function summariseRun(result: PricingRunResult): string {
-  const parts: string[] = [];
-  if (result.fetchedCount > 0) parts.push(`${result.fetchedCount} priced`);
-  if (result.failedCount > 0) parts.push(`${result.failedCount} need pricing`);
-  if (result.skippedCount > 0) parts.push(`${result.skippedCount} already priced`);
-  return parts.join(' · ') || 'Nothing to price.';
+/**
+ * A push is only worth sending to a tradie who isn't looking at the card.
+ * "Away" is the phone saying so, OR the phone having gone quiet: its
+ * "I'm away" write is fired as iOS suspends it and can be lost, and the safe
+ * failure is a redundant banner, never silence for the one push the tradie
+ * explicitly asked for.
+ */
+export function shouldNotify(record: PricingRunRecord | null, nowMs: number): boolean {
+  if (!record) return false;
+  if (record.foreground === false) return true;
+  const stampedAt = record.foregroundAt ? Date.parse(record.foregroundAt) : Number.NaN;
+  if (!Number.isFinite(stampedAt)) return true;
+  return nowMs - stampedAt > FOREGROUND_STALE_MS;
 }
 
-/** A push is only worth sending to a tradie who isn't looking at the card. */
-export function shouldNotify(record: PricingRunRecord | null): boolean {
-  return !!record && record.foreground === false;
+/** AUD, whole dollars for a push body. */
+export function formatAud(amount: number): string {
+  return new Intl.NumberFormat('en-AU', {
+    style: 'currency',
+    currency: 'AUD',
+    maximumFractionDigits: 0,
+  }).format(Number.isFinite(amount) ? amount : 0);
 }
 
 /**
@@ -275,7 +241,7 @@ export async function runPricingRun(args: {
   ): Promise<void> => {
     try {
       const latest = await store.read();
-      if (!shouldNotify(latest)) return;
+      if (!shouldNotify(latest, store.now())) return;
       await store.notify(event, vars, {
         quoteId: run.quoteId,
         ...(jobId ? { jobId } : {}),
@@ -288,7 +254,8 @@ export async function runPricingRun(args: {
   try {
     // A phone can create run documents as fast as it likes; each one costs
     // LLM and scraper calls. The HTTP handlers rate-limit per user, so this
-    // path needs a ceiling too.
+    // path needs a ceiling too. Only claimed runs count — one the phone
+    // cancelled at the queue timeout cost nothing.
     const recent = await store.runsStartedSince(store.now() - RATE_WINDOW_MS);
     if (recent > MAX_RUNS_PER_WINDOW) {
       throw new Error('Too many pricing runs in a short time — give it a few minutes and try again.');
@@ -338,7 +305,7 @@ export async function runPricingRun(args: {
         },
         { status: 'done', result, finishedAt: iso() },
       );
-      await notifyIfAway('quote_priced', { job: jobName });
+      await notifyIfAway('quote_priced', { job: jobName, amount: formatAud(Number(next.total) || 0) });
       return 'done';
     }
 
@@ -387,14 +354,15 @@ export async function runPricingRun(args: {
         detail: undefined,
         items: undefined,
         done: true,
-        summary: summariseRun(result),
+        summary: summarisePriceCounts(result),
       },
       { status: 'done', result, finishedAt: iso() },
     );
     log.info('[pricingRun] done', { quoteId: run.quoteId, ...result, missedSupplierTerms: missedSupplierTerms.length });
     await notifyIfAway('quote_priced', {
       job: jobName,
-      count: `${final.materials.length} item${final.materials.length === 1 ? '' : 's'}`,
+      amount: formatAud(Number(recalculateQuoteTotals(final).total) || 0),
+      count: `${generatedMaterialCount} item${generatedMaterialCount === 1 ? '' : 's'}`,
     });
     return 'done';
   } catch (err) {
@@ -456,9 +424,11 @@ export function firestorePricingRunStore(args: {
       return snap.exists ? (snap.data() as PricingRunRecord) : null;
     },
     runsStartedSince: async (sinceMs) => {
+      // startedAt is only ever written by claim(), so this counts runs the
+      // server actually took, not ones the phone cancelled unclaimed.
       const snap = await db
         .collection(`users/${uid}/pricingRuns`)
-        .where('createdAt', '>=', new Date(sinceMs).toISOString())
+        .where('startedAt', '>=', new Date(sinceMs).toISOString())
         .count()
         .get();
       return snap.data().count;

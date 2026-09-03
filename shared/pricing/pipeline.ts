@@ -47,7 +47,7 @@ import { simplifySearchTerm } from './simplifySearchTerm';
 import { withPreservedCorrections } from './floorplanTakeoff';
 import { stampAsPriced } from './asPriced';
 import { isNonRetailTradeRow, tradeFallbackUnitPriceWithUnit } from './tradeFallback';
-import { searchFavorites, searchTemplates, type LocalSearchResult } from './localMaterialMatcher';
+import { rankLocalHits, type LocalSearchResult } from './localMaterialMatcher';
 import { shouldRunReeceFirst } from './supplierPriority';
 import { batchSearchProgressive, type BatchChunkFetcher, type ScraperProduct } from './scraperCandidates';
 import { pickBestCandidate, isSemanticallyCompatible, type RankableCandidate } from './candidateRanker';
@@ -112,25 +112,6 @@ async function reconcileInBatches(
   return results;
 }
 
-/**
- * The local pre-pricing pass: the tradie's own templates and supplier book,
- * ranked templates-first, then by supplier priority, then by match score.
- * The sources are loaded once per run and handed in — the matcher is pure.
- */
-function searchLocalHits(
-  query: string,
-  sources: {
-    templates: SectionTemplate[];
-    favorites: FavoriteProductMapping[];
-    suppliers: SupplierGroup[];
-    priorityOrder?: string[];
-  },
-): LocalSearchResult[] {
-  if (!query.trim()) return [];
-  const templateHits = searchTemplates(query, sources.templates);
-  const favoriteHits = searchFavorites(query, sources.favorites, sources.suppliers, sources.priorityOrder);
-  return [...templateHits, ...favoriteHits].sort((a, b) => a._sortHint - b._sortHint);
-}
 
 // Identities this row must never match again (see Material.excludedProducts —
 // written by the reprice wipe when a match kept returning implausible money).
@@ -942,7 +923,7 @@ export async function fetchPricesForQuote<Q extends PricingQuote>(
       const term = m.searchTerm || m.name;
       let hits: LocalSearchResult[] = [];
       try {
-        hits = searchLocalHits(term, {
+        hits = rankLocalHits(term, {
           templates: localTemplates,
           favorites: localFavorites,
           suppliers: supplierList,

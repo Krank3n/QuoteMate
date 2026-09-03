@@ -16,12 +16,14 @@ vi.mock('./firestoreService', () => ({ firestoreService: { getQuote: async () =>
 
 import {
   CREATE_TIMEOUT_MS,
+  HEARTBEAT_MS,
+  QUEUE_NUDGE_MS,
   QUEUE_TIMEOUT_MS,
   STALE_TIMEOUT_MS,
   runPipelineOnServer,
-  type PricingRunRecord,
   type ServerRunIo,
 } from './serverPricingRun';
+import type { PricingRunRecord } from '../../shared/pricing/pricingRunDoc';
 import type { Quote } from '../types';
 
 /**
@@ -73,7 +75,6 @@ function fakeIo(overrides: Partial<ServerRunIo> = {}) {
       };
     },
     now: () => Date.now(),
-    platform: 'ios',
     ...overrides,
   };
   const server = {
@@ -114,12 +115,19 @@ describe('runPipelineOnServer', () => {
 
   it('streams the server progress into the card and resolves with the priced quote', async () => {
     const { io, server } = fakeIo();
-    const seen: string[] = [];
-    const pending = runPipelineOnServer(request, { onProgress: (s) => seen.push(s.status) }, io);
+    const seen: Array<{ status: string; runsOnServer?: boolean }> = [];
+    const pending = runPipelineOnServer(
+      request,
+      { onProgress: (s) => seen.push({ status: s.status, runsOnServer: s.runsOnServer }) },
+      io,
+    );
     await vi.advanceTimersByTimeAsync(10);
 
     expect(server.record?.status).toBe('queued');
     expect(server.record?.foreground).toBe(true);
+    expect(server.record?.foregroundAt).toBeTruthy();
+    // Queued is not "on the server" yet — the card must not say lock the phone.
+    expect(seen[0]).toEqual({ status: 'Getting ready…', runsOnServer: false });
     server.advance({ status: 'running', progress: { phase: 'analyzing', status: 'Reading the scope…', done: false } });
     server.advance({ progress: { phase: 'pricing', status: 'Pricing 4 items…', done: false } });
     server.advance({
@@ -134,7 +142,21 @@ describe('runPipelineOnServer', () => {
     if (outcome.kind !== 'done') throw new Error('unreachable');
     expect(outcome.result.fetchedCount).toBe(4);
     expect(outcome.quote.id).toBe('q1');
-    expect(seen).toEqual(['Getting ready…', 'Reading the scope…', 'Pricing 4 items…', 'Drafted 4 items.']);
+    expect(seen.map((s) => s.status)).toEqual(['Getting ready…', 'Reading the scope…', 'Pricing 4 items…', 'Drafted 4 items.']);
+    expect(seen.slice(1).every((s) => s.runsOnServer === true)).toBe(true);
+  });
+
+  it('admits a slow queue after a few seconds, and re-stamps the foreground while watching', async () => {
+    const { io, server } = fakeIo();
+    const seen: string[] = [];
+    const pending = runPipelineOnServer(request, { onProgress: (s) => seen.push(s.status) }, io);
+    await vi.advanceTimersByTimeAsync(QUEUE_NUDGE_MS + 50);
+    expect(seen).toContain('Still lining up a spot — hang tight.');
+    await vi.advanceTimersByTimeAsync(HEARTBEAT_MS);
+    expect(server.foregroundWrites).toEqual([true]);
+    server.advance({ status: 'running' });
+    server.advance({ status: 'failed', error: 'x' });
+    await pending;
   });
 
   it('marks the phone away when the app is backgrounded and back when it returns', async () => {

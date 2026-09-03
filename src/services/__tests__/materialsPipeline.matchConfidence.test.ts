@@ -1,26 +1,11 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 
 // materialsPipeline pulls in the Expo/React Native module graph at import
 // time (keep-awake, constants, notifications). None of it runs in this test —
 // applyReconcileResult is pure — so stub the native edges out.
-vi.mock('expo-modules-core', () => ({
-  default: {},
-  NativeModule: class {},
-  SharedObject: class {},
-  SharedRef: class {},
-  EventEmitter: class {},
-  NativeModulesProxy: {},
-  requireNativeModule: () => ({}),
-  requireOptionalNativeModule: () => null,
-  registerWebModule: (m: unknown) => m,
-  Platform: { OS: 'ios' },
-  uuid: { v4: () => 'test-uuid' },
-}));
-vi.mock('expo-constants', () => ({ default: { expoConfig: { extra: {} } } }));
-vi.mock('expo-keep-awake', () => ({ activateKeepAwakeAsync: vi.fn(), deactivateKeepAwake: vi.fn() }));
 
-import { applyReconcileResult } from '../materialsPipeline';
-import { WEAK_MATCH_NOTE } from '../../utils/matchEvidence';
+import { applyReconcileResult } from '../../../shared/pricing/pipeline';
+import { WEAK_MATCH_NOTE } from '../../../shared/pricing/matchEvidence';
 import type { Material } from '../../types';
 
 function mat(overrides: Partial<Material> = {}): Material {

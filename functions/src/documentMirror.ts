@@ -38,7 +38,7 @@ type AnyData = LegacyDocumentRecord;
 const db = () => admin.firestore();
 
 // Firestore rejects undefined values; strip them recursively before write.
-function stripUndefined(value: any): any {
+export function stripUndefined(value: any): any {
   if (Array.isArray(value)) {
     return value.map(stripUndefined).filter((v) => v !== undefined);
   }

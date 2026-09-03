@@ -112,20 +112,21 @@ describe('notification copy', () => {
 });
 
 describe('pricing-run pushes', () => {
-  it('names the job on every variant, with or without a count', () => {
-    for (const msg of everyVariant('quote_priced', { job: 'Deck rebuild' })) {
+  it('carries the job and the money, and reads cleanly without a count', () => {
+    for (const msg of everyVariant('quote_priced', { job: 'Deck rebuild', amount: '$4,120', count: '14 items' })) {
       expect(msg.body).toContain('Deck rebuild');
-      expect(msg.body).not.toMatch(/\{[a-zA-Z0-9_]+\}/);
+      expect(msg.body).toContain('$4,120');
     }
-    for (const msg of everyVariant('quote_priced', { job: 'Deck rebuild', count: '14 items' })) {
-      expect(msg.body).toContain('Deck rebuild');
+    for (const msg of everyVariant('quote_priced', { job: 'Deck rebuild', amount: '$4,120' })) {
+      expect(msg.body).toContain('$4,120');
+      expect(msg.body).not.toMatch(/\{[a-zA-Z0-9_]+\}/);
     }
   });
 
-  it('tells the tradie how to recover from a snag', () => {
+  it('points a snag at the button that is actually on the screen the tap opens', () => {
     for (const msg of everyVariant('quote_pricing_snag', { job: 'Deck rebuild' })) {
       expect(msg.body).toContain('Deck rebuild');
-      expect(msg.body).toMatch(/Fetch Prices/);
+      expect(msg.body).toMatch(/Continue Quote/);
     }
   });
 });

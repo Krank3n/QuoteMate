@@ -118,17 +118,18 @@ const MESSAGE_POOL: Record<AussieEvent, MessageVariant[]> = {
   quote_priced: [
     {
       title: 'Quote priced up ✅',
-      body: '{job} is priced and ready for a squiz — {count} on the list.',
+      body: "{job}'s priced — {amount} across {count}. Have a squiz before it goes out.",
     },
     {
       title: 'Quote priced up ✅',
-      body: "Mate's done pricing {job}. Have a look before it goes out.",
+      body: "Mate's done pricing {job} — {amount} all up. Have a look before it goes out.",
     },
   ],
   quote_pricing_snag: [
     {
+      // The tap opens the job, where the draft's button reads Continue Quote.
       title: 'Pricing hit a snag',
-      body: "Couldn't finish pricing {job}. Open it and tap Fetch Prices to have another go.",
+      body: "Couldn't finish pricing {job}. Tap to open it and hit Continue Quote to have another crack at the prices.",
     },
   ],
 };

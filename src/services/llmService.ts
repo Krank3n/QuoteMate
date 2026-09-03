@@ -4,14 +4,12 @@
  */
 
 import { ANTHROPIC_API_KEY, GEMINI_API_KEY } from '@env';
-import { FloorplanAnalysis } from '../types';
-import { normaliseFloorplanAnalysis } from './floorplanNormalise';
+import { normaliseFloorplanAnalysis } from '../../shared/pricing/floorplanNormalise';
 // The wire shape and its validation live in shared/pricing so the server-side
 // pricing run and the app read an analyse payload identically.
 import {
   normaliseAnalyzeResponse,
   validateMaterials,
-  type LLMMaterial,
   type LLMResponse,
 } from '../../shared/pricing/llmMaterials';
 export { convertLLMMaterialsToMaterials } from '../../shared/pricing/llmMaterials';

@@ -1,6 +1,6 @@
 /**
- * "Lock your phone if you like" / "Tell me when it's done" — the line under
- * Mate's working card while a quote prices on the server. See
+ * The line under Mate's working card while a quote prices on the server:
+ * "Lock your phone if you like…", or a "Tell me when it's done" button. See
  * services/pricingNotifyLine for the decision logic and why the tap goes
  * straight to the OS prompt.
  */
@@ -11,33 +11,26 @@ import { useThemeColors } from '../../theme';
 import {
   acceptNotifyOffer,
   NOTIFY_LINE_COPY,
+  plainLineCopy,
   resolveNotifyLineState,
   type NotifyLineIo,
   type NotifyLineState,
 } from '../../services/pricingNotifyLine';
+import { pushDeviceIo } from '../../services/pushPermissionPrompt';
 
-/**
- * Production wiring. The notification module is required lazily so a screen
- * that merely renders a working card never drags expo-notifications into a
- * test runner (the same trick pushPermissionPrompt uses).
- */
+/** Production wiring, on the same device surface the send-time prompt uses. */
 function deviceIo(): NotifyLineIo {
-  let service: any = null;
-  try {
-    ({ notificationService: service } = require('../../services/notificationService'));
-  } catch {
-    service = null;
-  }
+  const device = pushDeviceIo();
   return {
     isWeb: Platform.OS === 'web',
-    available: () => !!service?.isAvailable?.(),
-    hasPermission: () => service.hasPermission(),
-    canAskPermission: () => service.canAskPermission(),
-    register: () => service.registerForPushNotifications({ promptIfNeeded: true }),
+    available: () => !!device,
+    hasPermission: () => (device ? device.hasPermission() : Promise.resolve(false)),
+    canAskPermission: () => (device ? device.canAskPermission() : Promise.resolve(false)),
+    register: () => (device ? device.register() : Promise.resolve(null)),
   };
 }
 
-type LineState = 'loading' | NotifyLineState | 'declined';
+type LineState = 'loading' | NotifyLineState | 'asking' | 'declined';
 
 export function PricingNotifyLine({ io }: { io?: NotifyLineIo }) {
   const colors = useThemeColors();
@@ -51,7 +44,7 @@ export function PricingNotifyLine({ io }: { io?: NotifyLineIo }) {
         if (alive) setState(next);
       })
       .catch(() => {
-        if (alive) setState('hidden');
+        if (alive) setState('plain');
       });
     return () => {
       alive = false;
@@ -59,31 +52,57 @@ export function PricingNotifyLine({ io }: { io?: NotifyLineIo }) {
   }, [resolvedIo]);
 
   const onAccept = useCallback(async () => {
-    setState('loading');
+    // Keep the row while the OS dialog is up so the card doesn't reflow
+    // underneath it.
+    setState('asking');
     setState(await acceptNotifyOffer(resolvedIo));
   }, [resolvedIo]);
 
-  if (state === 'loading' || state === 'hidden') return null;
-  if (state === 'offer') {
+  if (state === 'loading') return null;
+  if (state === 'offer' || state === 'asking') {
+    const asking = state === 'asking';
     return (
-      <Pressable onPress={onAccept} accessibilityRole="button" hitSlop={8} style={styles.wrap}>
-        <Text style={[styles.text, { color: colors.accentText }]}>{NOTIFY_LINE_COPY.offer}</Text>
+      <Pressable
+        onPress={asking ? undefined : onAccept}
+        disabled={asking}
+        accessibilityRole="button"
+        accessibilityHint="Turns on notifications so Mate can tell you when the quote is priced"
+        testID="pricing-notify-offer"
+        style={[styles.button, { borderColor: colors.accentText, opacity: asking ? 0.6 : 1 }]}
+      >
+        <Text style={[styles.buttonText, { color: colors.accentText }]}>
+          {asking ? NOTIFY_LINE_COPY.asking : NOTIFY_LINE_COPY.offer}
+        </Text>
       </Pressable>
     );
   }
-  return (
-    <Text style={[styles.wrap, styles.text, { color: colors.textMuted }]}>
-      {state === 'ready' ? NOTIFY_LINE_COPY.ready : NOTIFY_LINE_COPY.declined}
-    </Text>
-  );
+  const copy =
+    state === 'ready'
+      ? NOTIFY_LINE_COPY.ready
+      : state === 'declined'
+        ? NOTIFY_LINE_COPY.declined
+        : plainLineCopy(resolvedIo.isWeb);
+  return <Text style={[styles.note, { color: colors.textMuted }]}>{copy}</Text>;
 }
 
 const styles = StyleSheet.create({
-  wrap: {
+  note: {
     marginTop: 6,
-  },
-  text: {
     fontSize: 12,
     fontStyle: 'italic',
+  },
+  button: {
+    marginTop: 8,
+    minHeight: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  buttonText: {
+    fontSize: 14,
+    fontWeight: '600',
   },
 });

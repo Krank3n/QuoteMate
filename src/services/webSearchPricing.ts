@@ -6,6 +6,7 @@
 import { ANTHROPIC_API_KEY } from '@env';
 import { Platform } from 'react-native';
 import { auth } from '../config/firebase';
+import { normaliseEstimateResponse, type EstimateResult } from '../../shared/pricing/estimate';
 
 const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
 
@@ -17,43 +18,9 @@ const FIREBASE_FUNCTIONS_URL = USE_EMULATOR
   : 'https://us-central1-hansendev.cloudfunctions.net';
 
 
-interface PriceSearchResult {
-  price: number | null;
-  productName?: string;
-  /** What ONE purchase at this price contains (a 90 m roll, a 20 kg bag).
-   *  Without it the pricing pipeline cannot tell a bag price from a per-kg
-   *  rate, and multiplies the purchase price by the job's whole requirement. */
-  packSize?: number;
-  packUnit?: string;
-  store?: string;
-  url?: string;
-  confidence?: 'high' | 'medium' | 'low';
-}
-
-/** A pack size is only usable if it is a real positive number. */
-function positivePack(raw: unknown): number | undefined {
-  const n = Number(raw);
-  return Number.isFinite(n) && n > 0 ? n : undefined;
-}
-
-/**
- * The model is asked for ASCII 'm2'/'m3' (a JSON prompt is a poor place to
- * demand superscripts) but every guard downstream compares against the app's
- * canonical 'm²'/'m³'. Unmapped spellings return undefined rather than a
- * lookalike, because a wrong unit is worse than no unit: it lets a pack size
- * divide a requirement it does not measure.
- */
-function normalisePackUnit(raw: unknown): string | undefined {
-  if (typeof raw !== 'string') return undefined;
-  const map: Record<string, string> = {
-    each: 'each', ea: 'each', unit: 'each', pack: 'pack', box: 'box',
-    m: 'm', lm: 'm', metre: 'm', meter: 'm', metres: 'm', meters: 'm',
-    m2: 'm²', 'm²': 'm²', sqm: 'm²', m3: 'm³', 'm³': 'm³',
-    kg: 'kg', l: 'L', litre: 'L', litres: 'L', liter: 'L', liters: 'L',
-  };
-  return map[raw.trim().toLowerCase()];
-}
-
+// The answer shape and its coercions live in shared/pricing/estimate so the
+// server-side pricing run reads an estimate exactly as the app does.
+type PriceSearchResult = EstimateResult;
 /**
  * Search for material price using Claude AI WITHOUT web search
  * This uses Claude's training data to estimate prices - not real-time web search
@@ -173,15 +140,7 @@ Example:
     } else {
     }
 
-    return {
-      price: result.price || null,
-      productName: result.productName,
-      packSize: positivePack(result.packSize),
-      packUnit: normalisePackUnit(result.packUnit),
-      store: result.store || 'Hardware Store (AI estimate)',
-      url: undefined,
-      confidence: result.confidence || 'medium',
-    };
+    return normaliseEstimateResponse(result);
   } catch (error) {
     if (error instanceof Error) {
     }
@@ -222,15 +181,7 @@ async function searchPriceViaFirebaseFunction(
     } else {
     }
 
-    return {
-      price: data.price || null,
-      productName: data.productName,
-      packSize: positivePack(data.packSize),
-      packUnit: normalisePackUnit(data.packUnit),
-      store: data.store || 'Hardware Store (AI estimate)',
-      url: data.url,
-      confidence: data.confidence || 'medium',
-    };
+    return normaliseEstimateResponse(data);
   } catch (error) {
     if (error instanceof Error) {
     }

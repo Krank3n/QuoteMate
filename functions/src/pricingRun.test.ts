@@ -2,12 +2,11 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   MAX_RUNS_PER_WINDOW,
   ProgressWriter,
+  formatAud,
   quotePatch,
   runPricingRun,
   scrubNonFinite,
   shouldNotify,
-  stripUndefined,
-  summariseRun,
   type PricingRunRecord,
   type PricingRunStore,
   type StoredQuote,
@@ -44,6 +43,8 @@ function run(overrides: Partial<PricingRunRecord> = {}): PricingRunRecord {
     options: { isPro: false, stripLabour: false, labourOnly: false },
     status: 'queued',
     foreground: true,
+    // The fake clock starts at 1,000,000 ms; a fresh stamp means "watching".
+    foregroundAt: new Date(1_000_000).toISOString(),
     createdAt: '2026-09-03T02:00:00.000Z',
     ...overrides,
   };
@@ -175,9 +176,16 @@ describe('runPricingRun', () => {
     expect(away.pushes).toHaveLength(1);
     expect(away.pushes[0]).toMatchObject({
       event: 'quote_priced',
-      vars: { job: 'Deck rebuild' },
+      vars: { job: 'Deck rebuild', count: '1 item' },
       data: { quoteId: 'q1', jobId: 'job1' },
     });
+    expect(away.pushes[0].vars.amount).toMatch(/^\$\d/);
+  });
+
+  it('pushes when the phone has gone quiet even if its "away" write never landed', async () => {
+    const quiet = fakeStore(run({ foreground: true, foregroundAt: new Date(1_000_000 - 60_000).toISOString() }), { q1: quote() });
+    await runPricingRun({ store: quiet, deps: fakeDeps(), log: silent });
+    expect(quiet.pushes).toHaveLength(1);
   });
 
   it('parks a failed run on the Fetch Prices step and tells a backgrounded tradie about the snag', async () => {
@@ -291,20 +299,23 @@ describe('helpers', () => {
     expect(Number.isFinite(section.laborHours)).toBe(true);
   });
 
-  it('summariseRun reads like the chat card', () => {
-    expect(summariseRun({ generatedMaterialCount: 3, fetchedCount: 2, failedCount: 1, skippedCount: 0, missedSupplierTerms: [], reeceReauthNeeded: false })).toBe('2 priced · 1 need pricing');
-    expect(summariseRun({ generatedMaterialCount: 0, fetchedCount: 0, failedCount: 0, skippedCount: 0, missedSupplierTerms: [], reeceReauthNeeded: false })).toBe('Nothing to price.');
+  it('shouldNotify: away flag, stale or missing stamp → push; fresh stamp → no push; no record → no push', () => {
+    const now = Date.UTC(2026, 8, 3, 2, 0, 0);
+    const fresh = new Date(now - 10_000).toISOString();
+    const stale = new Date(now - 60_000).toISOString();
+    expect(shouldNotify(run({ foreground: false, foregroundAt: fresh }), now)).toBe(true);
+    expect(shouldNotify(run({ foreground: true, foregroundAt: fresh }), now)).toBe(false);
+    expect(shouldNotify(run({ foreground: true, foregroundAt: stale }), now)).toBe(true);
+    expect(shouldNotify(run({ foreground: true, foregroundAt: undefined }), now)).toBe(true);
+    expect(shouldNotify(null, now)).toBe(false);
   });
 
-  it('shouldNotify is false for a watching phone, a missing record, and an unknown state', () => {
-    expect(shouldNotify(run({ foreground: false }))).toBe(true);
-    expect(shouldNotify(run({ foreground: true }))).toBe(false);
-    expect(shouldNotify(run({ foreground: undefined }))).toBe(false);
-    expect(shouldNotify(null)).toBe(false);
+  it('formats push money as whole Australian dollars', () => {
+    expect(formatAud(4123.4)).toBe('$4,123');
+    expect(formatAud(Number.NaN)).toBe('$0');
   });
 
-  it('stripUndefined and scrubNonFinite recurse through arrays', () => {
-    expect(stripUndefined({ a: [{ b: undefined, c: 1 }], d: undefined })).toEqual({ a: [{ c: 1 }] });
+  it('scrubNonFinite recurses through arrays', () => {
     expect(scrubNonFinite({ a: [Number.POSITIVE_INFINITY, 2], b: { c: Number.NaN } })).toEqual({ a: [0, 2], b: { c: 0 } });
   });
 });

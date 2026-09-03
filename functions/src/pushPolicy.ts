@@ -48,8 +48,8 @@ export const ANDROID_CHANNEL: Record<AussieEvent, string> = {
   milestone: 'reminders',
   inactivity: 'reminders',
   draft_nudge: 'reminders',
-  quote_priced: 'quote-ready',
-  quote_pricing_snag: 'quote-ready',
+  quote_priced: 'quote-responses',
+  quote_pricing_snag: 'quote-responses',
 };
 
 /** Which notificationPreferences toggle governs each event. */

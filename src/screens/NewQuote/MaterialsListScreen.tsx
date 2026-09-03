@@ -33,7 +33,7 @@ import { useNavigation, useIsFocused, useRoute } from '@react-navigation/native'
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import LottieView from 'lottie-react-native';
 import { generateId } from '../../utils/generateId';
-import { needsPriceFetch } from '../../utils/priceFetchGate';
+import { needsPriceFetch } from '../../../shared/pricing/priceFetchGate';
 import { initialFetchEstimateSeconds, reestimateFetchSeconds, applyPricedRow, mergePipelineMaterials } from '../../utils/priceFetchProgress';
 import { withOrigin } from '../../utils/materialOrigin';
 import { lightTap } from '../../utils/haptics';

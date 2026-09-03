@@ -21,7 +21,7 @@
  * without Firestore or a device.
  */
 
-import { AppState, Platform } from 'react-native';
+import { AppState } from 'react-native';
 import {
   doc,
   deleteDoc,
@@ -33,42 +33,14 @@ import {
 import { auth, db } from '../config/firebase';
 import type { Quote } from '../types';
 import type { WorkingStatus } from '../../shared/pricing/progress';
+import type {
+  PricingRunKind,
+  PricingRunOptions,
+  PricingRunRecord,
+  PricingRunResult,
+} from '../../shared/pricing/pricingRunDoc';
 import { generateId } from '../utils/generateId';
 import { firestoreService } from './firestoreService';
-
-export type PricingRunKind = 'draft' | 'scope';
-
-export interface PricingRunOptions {
-  isPro: boolean;
-  stripLabour: boolean;
-  labourOnly: boolean;
-}
-
-export interface PricingRunResult {
-  generatedMaterialCount: number;
-  fetchedCount: number;
-  failedCount: number;
-  skippedCount: number;
-  missedSupplierTerms: string[];
-  reeceReauthNeeded: boolean;
-}
-
-/** The run document, as this phone creates it and the server advances it. */
-export interface PricingRunRecord {
-  quoteId: string;
-  kind: PricingRunKind;
-  options: PricingRunOptions;
-  status: 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
-  progress?: WorkingStatus;
-  foreground?: boolean;
-  createdAt: string;
-  updatedAt?: string;
-  startedAt?: string;
-  finishedAt?: string;
-  result?: PricingRunResult;
-  error?: string;
-  clientPlatform?: string;
-}
 
 export interface ServerRunRequest {
   quoteId: string;
@@ -99,43 +71,38 @@ export interface ServerRunIo {
   fetchQuote(quoteId: string): Promise<Quote | null>;
   subscribeAppState(listener: (state: string) => void): () => void;
   now(): number;
-  platform: string;
 }
 
 /** How long a Firestore write may take before the phone decides it's offline. */
 export const CREATE_TIMEOUT_MS = 8_000;
 /** How long the run may sit unclaimed before the phone prices it itself. */
 export const QUEUE_TIMEOUT_MS = 25_000;
+/** When the card admits the queue is slow, so the wait doesn't read as frozen. */
+export const QUEUE_NUDGE_MS = 8_000;
+/**
+ * While the app is in front it re-stamps foregroundAt this often. The server
+ * treats a stale stamp as "away", so a lost background write means a push,
+ * not silence — see shouldNotify in functions/src/pricingRun.ts.
+ */
+export const HEARTBEAT_MS = 20_000;
 /** A running run with no progress write for this long is presumed dead. */
 export const STALE_TIMEOUT_MS = 6 * 60 * 1000;
 /** Nothing legitimately runs longer than the function's own timeout. */
 export const HARD_TIMEOUT_MS = 10 * 60 * 1000;
-
-const FLAG_CACHE_MS = 5 * 60 * 1000;
-let flagCache: { value: boolean; readAt: number } | null = null;
 
 /**
  * config/pipeline { serverRuns: boolean }. Missing document or a failed read
  * both mean ON — the queue timeout is the real safety net, and a flag that
  * fails closed would silently put every run back on the phone.
  */
-export async function readServerRunsFlag(now: number = Date.now()): Promise<boolean> {
-  if (flagCache && now - flagCache.readAt < FLAG_CACHE_MS) return flagCache.value;
-  let value = true;
+export async function readServerRunsFlag(): Promise<boolean> {
   try {
     const snap = await getDoc(doc(db, 'config', 'pipeline'));
     const raw = snap.exists() ? (snap.data() as { serverRuns?: unknown }).serverRuns : undefined;
-    if (raw === false) value = false;
+    return raw !== false;
   } catch {
-    value = true;
+    return true;
   }
-  flagCache = { value, readAt: now };
-  return value;
-}
-
-/** Test seam. */
-export function __resetServerRunsFlagCache(): void {
-  flagCache = null;
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
@@ -193,9 +160,10 @@ export const defaultServerRunIo: ServerRunIo = {
   setForeground: async (runId, foreground) => {
     const uid = auth.currentUser?.uid;
     if (!uid) return;
+    const now = new Date().toISOString();
     await setDoc(
       doc(db, 'users', uid, 'pricingRuns', runId),
-      { foreground, updatedAt: new Date().toISOString() },
+      { foreground, updatedAt: now, ...(foreground ? { foregroundAt: now } : {}) },
       { merge: true },
     );
   },
@@ -205,7 +173,6 @@ export const defaultServerRunIo: ServerRunIo = {
     return () => sub.remove();
   },
   now: () => Date.now(),
-  platform: Platform.OS,
 };
 
 /**
@@ -230,10 +197,12 @@ export async function runPipelineOnServer(
     options: request.options,
     status: 'queued',
     foreground: true,
+    foregroundAt: createdAt,
     createdAt,
     updatedAt: createdAt,
-    progress: { phase: 'preflight', status: 'Getting ready…', done: false, runsOnServer: true },
-    clientPlatform: io.platform,
+    // Not runsOnServer yet: nothing has claimed it, and the card must not tell
+    // the tradie to lock the phone while the run could still fall back here.
+    progress: { phase: 'preflight', status: 'Getting ready…', done: false, runsOnServer: false },
   };
 
   try {
@@ -284,6 +253,18 @@ export async function runPipelineOnServer(
     // The queue watchdog: nothing has claimed the run.
     timers.push(
       setTimeout(() => {
+        if (!claimed) {
+          callbacks.onProgress?.({
+            phase: 'preflight',
+            status: 'Still lining up a spot — hang tight.',
+            done: false,
+            runsOnServer: false,
+          });
+        }
+      }, QUEUE_NUDGE_MS),
+    );
+    timers.push(
+      setTimeout(() => {
         if (!claimed) void fallBack('no server pickup');
       }, QUEUE_TIMEOUT_MS),
     );
@@ -301,12 +282,22 @@ export async function runPipelineOnServer(
       setTimeout(() => finish({ kind: 'failed', error: 'Pricing timed out.' }), HARD_TIMEOUT_MS),
     );
 
+    // The foreground heartbeat: while the app is in front, keep the stamp
+    // fresh so the server knows a watching tradie needs no push.
+    let inFront = true;
+    const heartbeat = () => {
+      if (settled) return;
+      if (inFront) io.setForeground(runId, true).catch(() => {});
+      timers.push(setTimeout(heartbeat, HEARTBEAT_MS));
+    };
+    timers.push(setTimeout(heartbeat, HEARTBEAT_MS));
+
     unsubscribeAppState = io.subscribeAppState((state) => {
       if (settled) return;
       // 'inactive' precedes 'background' on an iOS lock and gives the write
       // the most time to leave the phone before JavaScript is frozen.
-      const foreground = state === 'active';
-      io.setForeground(runId, foreground).catch(() => {});
+      inFront = state === 'active';
+      io.setForeground(runId, inFront).catch(() => {});
     });
 
     unsubscribeWatch = io.watchRun(
@@ -319,7 +310,8 @@ export async function runPipelineOnServer(
           lastProgressAt = io.now();
         }
         if (latest.progress) {
-          callbacks.onProgress?.({ ...latest.progress, runsOnServer: true });
+          // Only a claimed run is safe to lock the phone on.
+          callbacks.onProgress?.({ ...latest.progress, runsOnServer: latest.status !== 'queued' });
         }
         if (latest.status === 'done') {
           const result = latest.result;

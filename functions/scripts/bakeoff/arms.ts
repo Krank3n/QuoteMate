@@ -21,18 +21,18 @@ import { ArmResult, CorpusJob, QuoteLine, ScraperProduct, Unit } from './types';
 
 // Real production logic — not reimplementations.
 import { convertLLMMaterialsToMaterials } from '../../../src/services/llmService';
-import { applyPackAwarePricing } from '../../../src/utils/packAwarePricing';
-import { pickBestCandidate, isSemanticallyCompatible, type RankableCandidate } from '../../../src/services/candidateRanker';
-import { matchEvidence, stampMatchConfidence } from '../../../src/utils/matchEvidence';
-import { isNonRetailTradeRow, tradeFallbackUnitPriceWithUnit } from '../../../src/utils/tradeFallback';
-import { applyReconcileResult, applyLastResortGuess } from '../../../src/services/materialsPipeline';
-import { simplifySearchTerm } from '../../../src/utils/simplifySearchTerm';
-import { coverageSanePurchaseCount } from '../../../src/utils/purchaseCoverage';
+import { applyPackAwarePricing } from '../../../shared/pricing/packAwarePricing';
+import { pickBestCandidate, isSemanticallyCompatible, type RankableCandidate } from '../../../shared/pricing/candidateRanker';
+import { matchEvidence, stampMatchConfidence } from '../../../shared/pricing/matchEvidence';
+import { isNonRetailTradeRow, tradeFallbackUnitPriceWithUnit } from '../../../shared/pricing/tradeFallback';
+import { applyReconcileResult, applyLastResortGuess } from '../../../shared/pricing/pipeline';
+import { simplifySearchTerm } from '../../../shared/pricing/simplifySearchTerm';
+import { coverageSanePurchaseCount } from '../../../shared/pricing/purchaseCoverage';
 import {
   parseJobAreaM2,
   geometricSanePieceCount,
   geometricMinimumPieceCount,
-} from '../../../src/utils/geometricCoverage';
+} from '../../../shared/pricing/geometricCoverage';
 import type { ReconcileItem } from '../../src/reconcile.helpers';
 
 const UNITS: Unit[] = ['each', 'pack', 'box', 'm', 'm²', 'm³', 'kg', 'L'];
