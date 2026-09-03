@@ -377,6 +377,23 @@ export async function linkAppleAccountIfNeeded(): Promise<AppleAccountLinkResult
  * Education failure is swallowed by presentTapToPayEducation, so a flaky
  * content fetch can never block a payment the merchant already consented to.
  */
+/**
+ * Whether the merchant has already accepted Apple's Tap to Pay Terms and
+ * Conditions, read from Apple rather than a local flag (Apple req 1.6).
+ *
+ * Used by the awareness banner (reqs 3.1 / 3.3) to retire itself once the
+ * tradie has acted. Fails closed — an unknown answer is treated as "not
+ * accepted", which at worst shows a dismissible banner one more time.
+ */
+export async function isTapToPayTermsAccepted(): Promise<boolean> {
+  if (Platform.OS !== 'ios') return false;
+  try {
+    return Boolean(await TapToPaySettings.isAppleAccountLinked());
+  } catch {
+    return false;
+  }
+}
+
 export async function acceptTapToPayTermsAndEducate(): Promise<AppleAccountLinkResult> {
   const result = await linkAppleAccountIfNeeded();
   if (result === 'just_linked') {

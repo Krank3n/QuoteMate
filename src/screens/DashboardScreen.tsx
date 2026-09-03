@@ -57,6 +57,8 @@ import { TrialBanner } from '../components/TrialBanner';
 import { LeadsPromoCard } from '../components/LeadsPromoCard';
 import { TRIAL_MS } from '../utils/trialConfig';
 import { SyncErrorBanner } from '../components/SyncErrorBanner';
+import { TapToPayAwarenessBanner } from '../components/TapToPayAwarenessBanner';
+import { useTapToPayAwareness } from '../hooks/useTapToPayAwareness';
 import { ShimmerOverlay } from '../components/ShimmerOverlay';
 import { TapRipple } from '../components/TapRipple';
 import { GrainOverlay } from '../components/GrainOverlay';
@@ -283,6 +285,7 @@ export function DashboardScreen() {
   const invoices = useStore((s) => s.invoices);
   const businessSettings = useStore((s) => s.businessSettings);
   const subscriptionStatus = useStore((s) => s.subscriptionStatus);
+  const tapToPayAwareness = useTapToPayAwareness();
   // Action handles are stable Zustand fn refs — subscribing is a no-op
   // re-render-wise but keeps the call sites unchanged.
   const createNewQuote = useStore((s) => s.createNewQuote);
@@ -758,6 +761,16 @@ export function DashboardScreen() {
 
       {/* Sync Error Banner — warns if the latest quote/invoice didn't sync to cloud */}
       <SyncErrorBanner />
+
+      {/* Apple reqs 3.1 / 3.3 — the one-time awareness moment for an existing
+          merchant who has not enabled Tap to Pay on iPhone yet. Retires itself
+          once they accept Apple's terms, and honours a dismissal for good. */}
+      {tapToPayAwareness.visible && (
+        <TapToPayAwarenessBanner
+          onDismiss={tapToPayAwareness.dismiss}
+          onSetUp={tapToPayAwareness.dismiss}
+        />
+      )}
 
       {/* Trial Status — shown only in the final 3 days of an active trial
           (days 1-3). Earlier in the trial, suppressing the countdown lets

@@ -283,7 +283,10 @@ to be true *before* the videos are shot, because the videos are the evidence.
 | 1.4 | Handle `osVersionNotSupported` below iOS 17.6 | ✅ `isTapToPayOsSupported()` gates the row up front; `classifyPaymentFailure` maps the SDK error to "update iOS" rather than "payment failed" |
 | 1.5 | Warm up the reader on launch and on foreground | ✅ `warmUpTapToPay()` on launch + AppState active (`App.tsx`) |
 | 1.6 | Read T&C acceptance from Apple, not a local variable | ✅ every path reads `isAppleAccountLinked()` live |
-| 3.1–3.3 | Awareness moment, splash modal, one push to all eligible users | **blocked** — must use Apple Marketing Toolkit assets/copy, which we don't have yet |
+| 3.1 | Highly visible, discoverable communication for Tap to Pay on iPhone | ✅ `TapToPayAwarenessBanner` on the dashboard — plain text plus Apple's own SF Symbol, no custom artwork |
+| 3.2 | Full-screen splash modal | **Recommended only** in v1.7. The equivalent is Required via 6.2, which needs Toolkit assets |
+| 3.3 | Communicate to all eligible users at least once | ✅ same banner — shown until they accept the terms or dismiss it. v1.7 says a push "can" be used, not must |
+| 6.1 / 6.2 / 6.3 | Launch email, in-app splash, launch push | **blocked** — all three explicitly require Marketing Guide assets |
 | 3.4 | Show how to enable at the end of onboarding | ✅ on the Payments step once Square connects |
 | 3.5 | A clear action to accept the Tap to Pay T&Cs | ✅ `linkAppleAccountIfNeeded()` wired into all three paths |
 | 3.7 / 5.3 | Button never greyed out; pressing it opens T&C acceptance | ✅ terms gate moved to press; row never disabled |
