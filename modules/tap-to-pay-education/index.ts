@@ -14,9 +14,15 @@
  */
 import { requireOptionalNativeModule } from 'expo-modules-core';
 
+export interface TapToPayEducationContent {
+  id: string;
+  description: string;
+}
+
 interface TapToPayEducationNativeModule {
   isAvailable(): boolean;
   presentHowToTap(): Promise<boolean>;
+  listContent(): Promise<TapToPayEducationContent[]>;
 }
 
 const native = requireOptionalNativeModule<TapToPayEducationNativeModule>(
@@ -66,5 +72,23 @@ export async function presentTapToPayEducation(): Promise<TapToPayEducationResul
       return { shown: false, reason: 'unavailable' };
     }
     return { shown: false, reason: 'failed' };
+  }
+}
+
+/**
+ * Every content item Apple currently serves for Tap to Pay on iPhone.
+ *
+ * `presentTapToPayEducation` shows the one topic the SDK names. This asks Apple
+ * what else exists — the answer is not in the headers, only on the server.
+ * Returns an empty array rather than throwing when unavailable.
+ */
+export async function listTapToPayEducationContent(): Promise<
+  TapToPayEducationContent[]
+> {
+  if (!native?.listContent) return [];
+  try {
+    return (await native.listContent()) ?? [];
+  } catch {
+    return [];
   }
 }

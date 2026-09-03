@@ -28,6 +28,48 @@ beforeEach(() => {
   mod.native = null;
 });
 
+describe('listTapToPayEducationContent', () => {
+  it('returns what Apple serves', async () => {
+    mod.native = {
+      isAvailable: () => true,
+      presentHowToTap: vi.fn(),
+      listContent: vi.fn(async () => [
+        { id: 'howToTap', description: 'How to take a contactless payment' },
+      ]),
+    };
+    const { listTapToPayEducationContent } = await load();
+    await expect(listTapToPayEducationContent()).resolves.toEqual([
+      { id: 'howToTap', description: 'How to take a contactless payment' },
+    ]);
+  });
+
+  it('is empty rather than throwing with no native module', async () => {
+    const { listTapToPayEducationContent } = await load();
+    await expect(listTapToPayEducationContent()).resolves.toEqual([]);
+  });
+
+  it('is empty rather than throwing when Apple is unreachable', async () => {
+    mod.native = {
+      isAvailable: () => true,
+      presentHowToTap: vi.fn(),
+      listContent: vi.fn(async () => {
+        throw Object.assign(new Error('offline'), {
+          code: 'ERR_TTP_EDUCATION_OFFLINE',
+        });
+      }),
+    };
+    const { listTapToPayEducationContent } = await load();
+    await expect(listTapToPayEducationContent()).resolves.toEqual([]);
+  });
+
+  it('tolerates an older native build that predates listContent', async () => {
+    // The device may be running a build made before this function existed.
+    mod.native = { isAvailable: () => true, presentHowToTap: vi.fn() };
+    const { listTapToPayEducationContent } = await load();
+    await expect(listTapToPayEducationContent()).resolves.toEqual([]);
+  });
+});
+
 describe('isTapToPayEducationAvailable', () => {
   it('is false where the native module does not exist (Android, web, tests)', async () => {
     const { isTapToPayEducationAvailable } = await load();

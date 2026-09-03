@@ -31,6 +31,36 @@ public class TapToPayEducationModule: Module {
     }
 
     /**
+     * Everything Apple currently offers, not just what the `Topic` enum names.
+     *
+     * `Topic` has exactly one case (`payment(.howToTap)`), but `contentList` is
+     * a server call and is not bound to that enum — so this is the only way to
+     * find out whether Apple serves anything else, such as awareness material
+     * that would satisfy the "existing merchant discovers Tap to Pay" moment
+     * without hand-built marketing assets.
+     */
+    AsyncFunction("listContent") { (promise: Promise) in
+      guard #available(iOS 18.0, *) else {
+        promise.reject(
+          "ERR_TTP_EDUCATION_UNSUPPORTED",
+          "Apple's Tap to Pay education needs iOS 18 or later."
+        )
+        return
+      }
+
+      Task {
+        do {
+          let items = try await ProximityReaderDiscovery().contentList
+          promise.resolve(items.map { ["id": $0.id, "description": $0.description] })
+        } catch let error as ProximityReaderDiscovery.ContentError {
+          promise.reject(Self.code(for: error), Self.message(for: error))
+        } catch {
+          promise.reject("ERR_TTP_EDUCATION_FAILED", error.localizedDescription)
+        }
+      }
+    }
+
+    /**
      * Present Apple's "How to Tap" education. Resolves once the merchant
      * dismisses it; rejects with a stable code the JS layer can branch on.
      *
