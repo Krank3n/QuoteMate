@@ -399,8 +399,8 @@ export type ApplyProposalResult =
       pickedContact?: { id: string; name: string; phone?: string; email?: string };
     }
   // `code` names machine-readable failures the screen branches on
-  // (currently only 'PLAN_GATED' → Paywall); `error` stays the line shown
-  // to the tradie.
+  // ('PLAN_GATED' → Paywall; 'CANCELLED' / 'CONTACTS_DENIED' → a dismissed
+  // picker card); `error` stays the line shown to the tradie.
   | { ok: false; error: string; code?: string };
 
 /**
@@ -4056,18 +4056,13 @@ export const useStore = create<AppState>((set, get) => ({
           // The phone's own contact picker. iOS needs no permission for it;
           // Android needs READ_CONTACTS, asked for here rather than at import.
           // Web has no picker — Mate is told, and asks for the name instead.
-          // Platform is imported statically: a dynamic import('react-native')
-          // makes Metro's interop enumerate every lazy getter on the RN index,
-          // and the deprecated PushNotificationIOS getter throws "new
-          // NativeEventEmitter() requires a non-null argument" (sim, 3 Sep 2026).
+          // (Platform is a static import on purpose — see
+          // src/test/noDynamicReactNativeImport.test.ts.)
           if (Platform.OS === 'web') {
             return { ok: false, error: "Can't open the phone's contacts from the web app — tell me the name and I'll look them up." };
           }
-          // A build without the native module throws at import ("new
-          // NativeEventEmitter() requires a non-null argument") — seen on a
-          // dev client built from a thin worktree (3 Sep 2026). Say so
-          // plainly rather than surfacing Metro's "Cannot read property
-          // 'default' of undefined".
+          // A throw here (module missing, nothing to present on) is a plain
+          // failure: the card reads Failed and Mate is told not to retry.
           let picked: import('expo-contacts').Contact | null;
           try {
             const expoContacts = await import('expo-contacts');
@@ -4082,14 +4077,8 @@ export const useStore = create<AppState>((set, get) => ({
               }
             }
             picked = await expoContacts.presentContactPickerAsync();
-          } catch (err: any) {
-            // eslint-disable-next-line no-console
-            console.warn('[Mate] contact picker unavailable', err?.message);
-            return {
-              ok: false,
-              code: 'CONTACTS_UNAVAILABLE',
-              error: "Contacts aren't available in this build of the app — tell me the name and I'll look them up.",
-            };
+          } catch {
+            return { ok: false, error: "Couldn't open the phone's contacts — tell me the name and I'll look them up." };
           }
           if (!picked) return { ok: false, error: 'No contact picked.', code: 'CANCELLED' };
           const { phoneContactToContact } = await import('../services/contactService');

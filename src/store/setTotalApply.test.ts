@@ -425,13 +425,13 @@ describe('propose_pick_contact', () => {
     expect(contactsMock.presentContactPickerAsync).not.toHaveBeenCalled();
   });
 
-  it('a build without the native module says so plainly instead of surfacing a module error', async () => {
+  it('a picker that throws is a plain failure with a usable line, and saves nothing', async () => {
     contactsMock.presentContactPickerAsync.mockImplementationOnce(() => {
-      throw new Error('`new NativeEventEmitter()` requires a non-null argument.');
+      throw new Error("Cannot find native module 'ExpoContacts'");
     });
     const result = await useStore.getState().applyProposal({ ...base, type: 'propose_pick_contact', quoteId: DOC_ID });
-    expect(!result.ok && result.code).toBe('CONTACTS_UNAVAILABLE');
-    expect(!result.ok && result.error).toContain("aren't available in this build");
+    expect(!result.ok && result.error).toContain("Couldn't open the phone's contacts");
+    expect(!result.ok && result.code).toBeUndefined();
     expect(useStore.getState().contacts).toHaveLength(0);
   });
 
