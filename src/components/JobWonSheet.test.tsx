@@ -60,6 +60,7 @@ function renderSheet(overrides: Partial<React.ComponentProps<typeof JobWonSheet>
     onDismiss: vi.fn(),
     name: 'Sam Taylor',
     total: 770,
+    trialDaysRemaining: null,
     ...overrides,
   };
   return { ...render(<JobWonSheet {...props} />), props };
@@ -113,5 +114,52 @@ describe('JobWonSheet', () => {
     expect(props.onDismiss).toHaveBeenCalled();
     expect(eventProps('won_prompt_tapped')).toEqual({ outcome: 'not_now' });
     expect(nav.navigate).not.toHaveBeenCalled();
+  });
+
+  // The sheet stays live through the close animation, so an impatient
+  // double-tap must not report the outcome twice or navigate on a dismiss.
+  it('ignores a second tap once an outcome is chosen', () => {
+    renderSheet();
+
+    const seePro = screen.getByText('See Pro');
+    fireEvent.click(seePro);
+    fireEvent.click(seePro);
+    fireEvent.click(screen.getByText('Not now'));
+
+    expect(tracked.mock.calls.filter(([e]) => e === 'won_prompt_tapped')).toHaveLength(1);
+    expect(nav.navigate).toHaveBeenCalledTimes(1);
+  });
+
+  it('offers a free user what Pro adds', () => {
+    renderSheet({ trialDaysRemaining: null });
+
+    expect(
+      screen.getByText(
+        'Pro lets you invoice this job and get paid any way — bank, PayID, PayPal or Square.',
+      ),
+    ).toBeTruthy();
+  });
+
+  // A trial user already has invoicing and payments, so the line names what
+  // they are about to lose rather than selling them something they have.
+  it('tells a trial user their trial is ending instead of selling them Pro', () => {
+    renderSheet({ trialDaysRemaining: 2 });
+
+    expect(
+      screen.getByText('Your trial ends in 2 days — keep invoicing and getting paid with Pro.'),
+    ).toBeTruthy();
+  });
+
+  it('counts the last day in the singular, and the final day as today', () => {
+    const { unmount } = renderSheet({ trialDaysRemaining: 1 });
+    expect(
+      screen.getByText('Your trial ends in 1 day — keep invoicing and getting paid with Pro.'),
+    ).toBeTruthy();
+    unmount();
+
+    renderSheet({ trialDaysRemaining: 0 });
+    expect(
+      screen.getByText('Your trial ends today — keep invoicing and getting paid with Pro.'),
+    ).toBeTruthy();
   });
 });

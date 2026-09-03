@@ -10,7 +10,8 @@
  *   - not within ~90 days of the last prompt;
  *   - the OS additionally caps how often its native sheet actually appears
  *     (~3/yr on iOS), so requestReview() may silently do nothing — which is
- *     fine, we still back off.
+ *     fine, we still back off;
+ *   - and the whole thing is time-boxed, because the caller awaits it.
  *
  * Persistent state lives in Firestore at users/{uid}/settings/appReview.
  * Every path is fire-and-forget and swallows errors: review logic must never
@@ -22,6 +23,11 @@ import { doc, getDoc, setDoc, serverTimestamp, increment, type DocumentReference
 import { auth, db } from '../config/firebase';
 
 const NINETY_DAYS_MS = 90 * 24 * 60 * 60 * 1000;
+
+// How long the caller will wait on the gates before moving on. The Firestore
+// read/write below hangs indefinitely offline, and the quote-accept flow awaits
+// this behind a spinner.
+const REVIEW_TIMEOUT_MS = 2500;
 
 // Once-per-app-session guard. Intentionally in-memory (not persisted) so it
 // resets when the app process restarts — the 90-day cooldown below is what
@@ -52,18 +58,11 @@ async function readState(ref: DocumentReference | null): Promise<AppReviewState>
 }
 
 /**
- * Call from a genuine happy moment. Records the event and, if every gate
- * passes, shows the native review prompt. Never throws.
- *
- * Returns true only when we actually invoked the OS review prompt for this
- * call, so a caller sharing the same happy moment (the "job won" sheet) can
- * stand aside rather than stack a second sheet on top of it. Every early
- * return — web, already-prompted, cooling off — reports false.
+ * Run the gates and, if they all pass, ask the OS for its review prompt.
+ * Returns whether we asked. Never throws.
  */
-export async function maybeRequestReview(_event: HappyEvent): Promise<boolean> {
+async function runReviewGates(): Promise<boolean> {
   try {
-    if (Platform.OS === 'web') return false;
-
     const ref = reviewDocRef();
     const state = await readState(ref);
     const priorHappyEvents = state.happyEvents || 0;
@@ -95,5 +94,36 @@ export async function maybeRequestReview(_event: HappyEvent): Promise<boolean> {
   } catch {
     // Swallow — a failed review prompt must never disrupt the caller.
     return false;
+  }
+}
+
+/**
+ * Call from a genuine happy moment. Records the event and, if every gate
+ * passes, asks the OS to show its review prompt. Never throws.
+ *
+ * Returns true only when we actually invoked the OS review prompt for this
+ * call — the OS decides whether it draws anything — so a caller sharing the
+ * same happy moment (the "job won" sheet) can stand aside rather than stack a
+ * second sheet on top of it. Every early return — web, already-prompted,
+ * cooling off — reports false.
+ *
+ * The gates read and write Firestore, and callers now await this while holding
+ * a spinner on the accept it follows — offline that never resolves. So the
+ * whole thing is capped: past REVIEW_TIMEOUT_MS we report "not shown" and let
+ * the caller move on while the write finishes (or doesn't) on its own.
+ */
+export async function maybeRequestReview(_event: HappyEvent): Promise<boolean> {
+  if (Platform.OS === 'web') return false;
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      runReviewGates(),
+      new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(false), REVIEW_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
   }
 }

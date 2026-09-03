@@ -8,11 +8,12 @@
  * unlocks.
  *
  * Dismissible and non-blocking — the stage change has already landed before
- * this appears. Frequency is gated by the caller (shouldShowWonPrompt +
- * AsyncStorage); this component just renders and reports.
+ * this appears. Who sees it and how often is gated by the caller
+ * (maybeShowWonPrompt); this component just renders and reports. It is only
+ * mounted while it's up, so the close animation never renders a stale total.
  */
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { View } from 'react-native';
 import { Text, Button } from 'react-native-paper';
 import { useNavigation } from '@react-navigation/native';
@@ -30,19 +31,52 @@ interface JobWonSheetProps {
   name: string;
   /** The quote total just accepted — the value delivered. */
   total: number;
+  /**
+   * Whole days left in an ending trial, or null for a free user. A trial user
+   * already has what Pro does, so the line names what they're about to lose
+   * instead of selling them something they have.
+   */
+  trialDaysRemaining: number | null;
 }
 
-export function JobWonSheet({ visible, onDismiss, name, total }: JobWonSheetProps) {
+/** The one line on what Pro does next, told from where the tradie stands. */
+function proLine(trialDaysRemaining: number | null): string {
+  if (trialDaysRemaining === null) {
+    return 'Pro lets you invoice this job and get paid any way — bank, PayID, PayPal or Square.';
+  }
+  const ending =
+    trialDaysRemaining <= 0
+      ? 'Your trial ends today'
+      : `Your trial ends in ${trialDaysRemaining} day${trialDaysRemaining === 1 ? '' : 's'}`;
+  return `${ending} — keep invoicing and getting paid with Pro.`;
+}
+
+export function JobWonSheet({
+  visible,
+  onDismiss,
+  name,
+  total,
+  trialDaysRemaining,
+}: JobWonSheetProps) {
   const styles = useStyles();
   const navigation = useNavigation<any>();
+  // One outcome per sheet. The buttons stay live through BottomSheet's close
+  // animation, so a double-tap would otherwise report two won_prompt_tapped
+  // events (and navigate on top of a dismiss).
+  const decided = useRef(false);
 
   // One impression per open. Keyed on `visible` so a re-render mid-sheet
   // doesn't re-fire, and the close animation (visible=false) never counts.
   useEffect(() => {
-    if (visible) trackEvent('won_prompt_shown');
+    if (visible) {
+      decided.current = false;
+      trackEvent('won_prompt_shown');
+    }
   }, [visible]);
 
   const handleSeePro = () => {
+    if (decided.current) return;
+    decided.current = true;
     selectionTap();
     trackEvent('won_prompt_tapped', { outcome: 'see_pro' });
     onDismiss();
@@ -50,6 +84,8 @@ export function JobWonSheet({ visible, onDismiss, name, total }: JobWonSheetProp
   };
 
   const handleNotNow = () => {
+    if (decided.current) return;
+    decided.current = true;
     lightTap();
     trackEvent('won_prompt_tapped', { outcome: 'not_now' });
     onDismiss();
@@ -61,10 +97,7 @@ export function JobWonSheet({ visible, onDismiss, name, total }: JobWonSheetProp
         <Text style={styles.total}>{formatCurrency(total)}</Text>
         <Text style={styles.totalLabel}>accepted</Text>
 
-        <Text style={styles.body}>
-          Pro lets you invoice this job and get paid any way — bank, PayID,
-          PayPal or Square.
-        </Text>
+        <Text style={styles.body}>{proLine(trialDaysRemaining)}</Text>
 
         <Button
           mode="contained"
