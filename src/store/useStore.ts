@@ -4067,23 +4067,17 @@ export const useStore = create<AppState>((set, get) => ({
           try {
             const expoContacts = await import('expo-contacts');
             if (Platform.OS === 'android') {
-              // Ask only when not already granted. Requesting a permission the
-              // app already holds never resolves on Android: Expo hands it to
-              // the activity without a granted check, no dialog means no
-              // pause/resume, and React Native only delivers the result on
-              // resume — the second pick on a phone hung forever (API 36
-              // emulator, 3 Sep 2026).
-              let perm = await expoContacts.getPermissionsAsync();
-              if (perm.status !== 'granted') perm = await expoContacts.requestPermissionsAsync();
-              if (perm.status !== 'granted') {
-                // A first "Don't allow" on Android can be asked again; only a
-                // repeat denial needs the trip to Settings.
+              const { requestPhoneContactsPermission } = await import('../services/contactService');
+              const perm = await requestPhoneContactsPermission();
+              if (!perm.granted) {
+                // A first "Don't allow" can be asked again; only a repeat
+                // denial needs the trip to Settings.
                 return {
                   ok: false,
                   code: 'CONTACTS_DENIED',
-                  canAskAgain: perm.canAskAgain === true,
+                  canAskAgain: perm.canAskAgain,
                   error: perm.canAskAgain
-                    ? "No worries — say the word and I'll ask for contacts access again, or just tell me the name."
+                    ? "Say the word and I'll ask for contacts access again, or just tell me the name."
                     : "Contacts access is off for QuoteMate — turn it on under the phone's Settings, then say the word and I'll open them.",
                 };
               }

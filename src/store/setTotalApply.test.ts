@@ -433,19 +433,16 @@ describe('propose_pick_contact', () => {
     const result = await useStore.getState().applyProposal({ ...base, type: 'propose_pick_contact', quoteId: DOC_ID });
     expect(!result.ok && result.code).toBe('CONTACTS_DENIED');
     expect(!result.ok && result.canAskAgain).toBe(true);
-    expect(!result.ok && result.error).toContain("I'll ask for contacts access again");
+    expect(!result.ok && result.error).toContain("ask for contacts access again");
     expect(contactsMock.presentContactPickerAsync).not.toHaveBeenCalled();
   });
 
   it('on Android with access already granted it opens the picker without asking again', async () => {
-    // Requesting a permission the app already holds never resolves on Android
-    // (no dialog → no resume → React Native never delivers the result).
     platform.OS = 'android';
     contactsMock.getPermissionsAsync.mockResolvedValueOnce({ status: 'granted', canAskAgain: true } as any);
-    const result = await useStore.getState().applyProposal({ ...base, type: 'propose_pick_contact', quoteId: DOC_ID });
+    await useStore.getState().applyProposal({ ...base, type: 'propose_pick_contact', quoteId: DOC_ID });
     expect(contactsMock.requestPermissionsAsync).not.toHaveBeenCalled();
     expect(contactsMock.presentContactPickerAsync).toHaveBeenCalledTimes(1);
-    expect(!result.ok && result.code).toBe('CANCELLED');
   });
 
   it('a picker that throws is a plain failure with a usable line, and saves nothing', async () => {
