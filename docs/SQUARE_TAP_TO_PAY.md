@@ -11,7 +11,7 @@ Phase 2 wires Square's Mobile Payments SDK into QuoteMate so tradies can take ca
 - ✅ UI: `TakePaymentSheet` Tap-to-Pay row enabled when flag + device capability allow
 - ✅ Apple Tap-to-Pay entitlement — **granted 16 Apr 2026, development distribution only** (Case-ID 19476927)
 - ⏳ Apple **publishing** entitlement — needs three flow videos + checklist (see below). This is the real gate.
-- ⏳ App requirements from Apple's review guide v1.6 — most now met; outstanding: **3.1–3.3** (awareness moment, blocked on Apple's Marketing Toolkit), **5.5** (SF Symbol icon), **1.4** (osVersionNotSupported), **5.10** (receipt on decline), and the **AU surcharging** conflict
+- ⏳ App requirements from Apple's review guide v1.6 — the app side is now complete except **3.1–3.3** (awareness moment, blocked on Apple's Marketing Toolkit) and the **AU surcharging** conflict (blocked on Square)
 
 ## Run the prebuild
 
@@ -72,10 +72,18 @@ Store. To get it, build the app to meet Apple's requirements, then **reply to th
 entitlement email** (`ttpoientitlements@apple.com`, quoting Case-ID 19476927) and upload to
 Apple's File Uploader:
 
-1. A video recording of the **Onboarding flow**
-2. A video recording of the **Enabling Tap to Pay and Educating Merchants flow**
-3. A video recording of the **Checkout flow**
+1. A video recording of the **New User Flow**
+2. A video recording of the **Existing User Flow**
+3. A video recording of the **Checkout Flow**
 4. A completed **App Review Requirements Checklist**
+
+Those are Apple's exact names — use them on the uploaded files. "Existing User
+Flow" is the one that costs work: it means a merchant *already using the app*
+discovering Tap to Pay, which is the awareness moment (reqs 3.1–3.3) and needs
+Marketing Toolkit assets. Upload to Apple's File Uploader:
+Apple's File Uploader — the tokenised link is in the 16 Apr 2026 entitlement email from
+`ttpoientitlements@apple.com` (Case-ID 19476927). It is deliberately not
+reproduced here — it is a bearer token and this repo is public.
 
 Both requirement documents live at <https://apple.box.com/v/ttpoirequirements> — currently
 v1.6, refreshed 26 Aug 2026. Pull the live copy; don't work from a download.
@@ -87,6 +95,58 @@ v1.6, refreshed 26 Aug 2026. Pull the live copy; don't work from a download.
 
 Only after the publishing entitlement lands do you submit to App Review — which is itself a
 special review for entitlement-bearing apps.
+
+### One assumption to check before submitting
+
+Requirement 5.10 is implemented from the summary in this file, not from the live
+checklist — apple.box.com needs a login this repo has no access to. The reading taken
+is: *a declined payment must still offer the customer a digital record*. That ships as
+an offer (not an automatic send) carrying the business name, the amount attempted, the
+time, and a plain statement that no money was taken — deliberately no decline reason,
+because the app is never told one. If the live v1.6 wording asks for something stronger
+(a receipt Square itself issues, say), this is the requirement to re-read first.
+
+### Shooting them: `scripts/record-tap-to-pay.sh`
+
+```bash
+scripts/record-tap-to-pay.sh check                  # is the phone connected + capturable?
+scripts/record-tap-to-pay.sh shotlist               # what to tap, per video, per requirement
+scripts/record-tap-to-pay.sh record 1-onboarding    # capture until you press q
+```
+
+Output lands in `recordings/` (gitignored — these show a real Square seller account
+and real customer data, and this repo is public).
+
+**The capture is scriptable; the tapping is not.** A trusted, unlocked iPhone on USB
+appears as an AVFoundation source — the same one QuickTime's *Movie Recording →
+iPhone* uses — so `ffmpeg` can grab the screen. Driving it cannot be automated:
+`idb ui tap` needs a companion attached to a CoreSimulator target, and a physical
+iPhone exposes no such HID surface. So a person taps while the script records.
+
+**If the Mac refuses to see the phone's screen, record on the phone.** Diagnosed
+3 Sep 2026 on Thomas's iPhone (11, iOS 18.6.2): paired, Developer Mode on, on USB,
+unlocked, development-signed build installed — and macOS still published no capture
+device. QuickTime Player, with camera access confirmed working, reported exactly two
+video recording devices (both Mac cameras); an `AVCaptureDeviceDiscoverySession`
+including `.external` agreed. That rules out ffmpeg, permissions and app choice: the
+screen simply was not on offer.
+
+Don't burn time on it. iOS Control Centre → Screen Recording captures at native
+resolution, needs no Mac, and is what Apple's own reviewers expect to see. AirDrop or
+Image Capture pulls the file off afterwards. Worth one try first: plug straight into
+the Mac rather than through a hub (this one was two deep).
+
+**The Simulator is not a shortcut.** `TapToPaySettings.isDeviceCapable()` is false
+there, so `useTapToPayEnabled` resolves to `unsupported_device` and the app correctly
+hides the onboarding setup button and disables the payment row. A simulator recording
+is evidence that the feature is *absent*. Faking capability to film it would be
+misrepresenting the app to App Review.
+
+`scripts/record-tap-to-pay.test.sh` covers the device-discovery parsing — ffmpeg lists
+the iPhone under both video and audio devices at different indexes, and xctrace prints
+connected and offline phones under separate headers. Both are easy to read wrong in a
+way that only shows up with a phone in your hand.
+
 
 ### No Square reader needed
 
@@ -102,6 +162,91 @@ NFC is not one of them, because Tap to Pay runs on ProximityReader rather than C
 Setting the NFC key put us into the CoreNFC "needs a hardware demo video" review path
 (Guideline 2.1) in Apr 2026. See the comment in `plugins/withSquareSDK.js`.
 
+
+## Submission pack
+
+Everything needed to reply to Apple, in one place. Nothing here has been sent.
+
+### Reply email (to `ttpoientitlements@apple.com`)
+
+> **Subject:** Re: [Thomas Hansen] Request Access to the ProximityReader APIs
+>
+> Hi Avinash,
+>
+> QuoteMate now meets the requirements in the App Requirements and Review document.
+> I have uploaded the three flow recordings and the completed App Review Requirements
+> Checklist to the File Uploader.
+>
+> Team ID: 5GHUTAV35B · PSP: Square · First region: Australia
+> App: https://apps.apple.com/au/app/quotemate/id6754000046
+>
+> Case-ID: 19476927
+>
+> Thanks,
+> Thomas Hansen
+
+Upload the four files here, not as attachments:
+Apple's File Uploader — the tokenised link is in the 16 Apr 2026 entitlement email from
+`ttpoientitlements@apple.com` (Case-ID 19476927). It is deliberately not
+reproduced here — it is a bearer token and this repo is public.
+
+### Requirement → where a reviewer sees it
+
+| Req | Implementation | Visible in |
+| --- | --- | --- |
+| 1.4 | `isTapToPayOsSupported()` blocks below iOS 17.6 with "Update to iOS 17.6 or later"; `classifyPaymentFailure` maps the SDK error to the same message | not filmable on a current device — cite code |
+| 1.5 | `warmUpTapToPay()` on launch and on AppState active (`App.tsx`) | New User Flow (reader is ready without a wait) |
+| 1.6 | every path reads `isAppleAccountLinked()` live, never a cached flag | New User Flow |
+| 3.1–3.3 | **awareness moment — Marketing Toolkit assets required** | Existing User Flow |
+| 3.4 | setup offered on the onboarding Payments step once Square connects | New User Flow |
+| 3.5 | `linkAppleAccountIfNeeded()` — accepting Apple's T&Cs is a deliberate action | New User Flow |
+| 3.7 / 5.3 | row is never greyed out; the terms gate runs on press, not via `disabled` | Existing User Flow |
+| 3.9.1 / 5.7 | `observeTapToPayReadiness()` → spinner + "Getting Tap to Pay ready" | Existing User Flow |
+| 4.1 / 4.4 / 4.6–4.8 | `ProximityReaderDiscovery` (Apple's Merchant Education API) via `modules/tap-to-pay-education` | New User Flow |
+| 4.2 | education plays immediately after a fresh T&C acceptance | New User Flow |
+| 4.3 | "How Tap to Pay works" in Settings → Square | Existing User Flow |
+| 5.2 | row sits at the top of the payment list, no scrolling | Existing User Flow |
+| 5.4 | `tapToPayRowTitle()` returns exactly "Tap to Pay on iPhone" on iOS | all three |
+| 5.5 | SF Symbol `wave.3.right.circle` via `expo-symbols` | all three |
+| 5.10 | Square's receipt on approval; `buildDeclineRecord()` offers a shareable record on decline | Checkout Flow (film a decline too) |
+
+### Prerequisites that are not code
+
+1. **Marketing Toolkit assets** — blocks reqs 3.1–3.3, and therefore the entire Existing
+   User Flow video. The only remaining app-side blocker.
+2. **A connected AU Square seller account** with Tap to Pay enabled, plus a real
+   contactless card. The account used for the videos must genuinely be able to take money.
+3. **AU surcharging** — Apple wants the surcharge disclosed on its own screen via a
+   surcharge API. `mobile-payments-sdk-react-native` exposes none, and QuoteMate instead
+   grosses up `amountCents` and sets `allowCardSurcharge: false`. Ask Square whether the
+   RN SDK will expose `surchargeAmount`; if it will not, the honest answer on the
+   checklist is that surcharging is off for in-person payments in AU.
+
+## Marketing is gated on GA — and the guidelines are public
+
+<https://developer.apple.com/tap-to-pay/marketing-guidelines/> is readable without a
+login, unlike the Box requirement docs. It says plainly:
+
+- **Full general availability in your app before launching any marketing.** This is why
+  `quotemateapp.au/get-paid/tap-to-pay-iphone-tradies` was pulled on 3 Sep 2026 — it
+  marketed the feature months before we could ship it. Restore it (`draft: false` in the
+  website repo's `seo/data.json`) only once the publishing entitlement lands AND the
+  feature is live for users.
+- **Only Apple-approved assets** from the Marketing Toolkit. No custom videos,
+  illustrations, photography, stock imagery, or custom icons depicting iPhone or the
+  feature. Templates allow brand colours, fonts, card art and your logo — nothing more.
+- **Never shorten the name.** Always "Tap to Pay on iPhone", and never with "Apple" in
+  it. `tapToPayRowTitle()` already returns exactly that on iOS.
+- **Use the Merchant Education API** for in-app education — that is
+  `ProximityReaderDiscovery`, already shipped in `modules/tap-to-pay-education`.
+- PR, blog posts and investor material need Apple's approval before publishing, and that
+  review takes **several weeks**. Worth starting early if a launch post is planned.
+
+Toolkit (needs Tom's Apple partner sign-in):
+Apple's Marketing Toolkit — the tokenised link is in the 16 Apr 2026 entitlement email from
+`ttpoientitlements@apple.com` (Case-ID 19476927). It is deliberately not
+reproduced here — it is a bearer token and this repo is public.
+
 ## What Apple still wants
 
 Requirement numbers below are from the App Review Requirements Checklist v1.6. These have
@@ -109,7 +254,7 @@ to be true *before* the videos are shot, because the videos are the evidence.
 
 | Req | Apple requires | State |
 | --- | --- | --- |
-| 1.4 | Handle `osVersionNotSupported` below iOS 17.6 | missing |
+| 1.4 | Handle `osVersionNotSupported` below iOS 17.6 | ✅ `isTapToPayOsSupported()` gates the row up front; `classifyPaymentFailure` maps the SDK error to "update iOS" rather than "payment failed" |
 | 1.5 | Warm up the reader on launch and on foreground | ✅ `warmUpTapToPay()` on launch + AppState active (`App.tsx`) |
 | 1.6 | Read T&C acceptance from Apple, not a local variable | ✅ every path reads `isAppleAccountLinked()` live |
 | 3.1–3.3 | Awareness moment, splash modal, one push to all eligible users | **blocked** — must use Apple Marketing Toolkit assets/copy, which we don't have yet |
@@ -120,8 +265,8 @@ to be true *before* the videos are shot, because the videos are the evidence.
 | 4.1 | `ProximityReaderDiscovery` for merchant education on iOS 18+ | ✅ `modules/tap-to-pay-education` (local Expo module). Clears 4.4/4.6/4.7/4.8 |
 | 4.2 / 4.3 | Education after T&Cs, findable again in Settings | ✅ on fresh acceptance; "How Tap to Pay works" row in Square settings |
 | 5.2 | Button reachable without scrolling, top of the list | ✅ already |
-| 5.4 / 5.5 | Approved copy; SF Symbol `wave.3.right.circle` | copy ✅ (`tapToPayRowTitle`); **icon still outstanding** — needs `expo-symbols` (native dep + rebuild) |
-| 5.10 | Digital receipt on approve *and* decline | partial — confirm the decline path |
+| 5.4 / 5.5 | Approved copy; SF Symbol `wave.3.right.circle` | ✅ copy via `tapToPayRowTitle`; icon via `expo-symbols` `SymbolView`, whose own `fallback` covers Android/web |
+| 5.10 | Digital receipt on approve *and* decline | ✅ approve is Square's own receipt screen; decline offers a shareable record (`buildDeclineRecord`) through the native share sheet |
 
 ### Australia-specific
 

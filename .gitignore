@@ -84,3 +84,6 @@ functions/warragul-replay-*.json
 .bakeoff-*.json
 bakeoff-*.json
 customer-jobs-corpus*.json
+
+# Apple Tap to Pay submission videos — real seller account + customer data, never commit
+recordings/
