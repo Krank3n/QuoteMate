@@ -13,7 +13,7 @@
  * owns the side effects (minting tokens, sending, writing back).
  */
 
-/** Acceptance tokens expire 30 days after they're minted (mirrors index.ts). */
+/** Acceptance tokens expire 30 days after they're minted. index.ts imports this — one number. */
 export const TOKEN_EXPIRATION_MS = 30 * 24 * 60 * 60 * 1000;
 
 /** First reminder: 48 hours after the send. */
@@ -21,6 +21,15 @@ export const FIRST_FOLLOW_UP_MS = 48 * 60 * 60 * 1000;
 
 /** Second reminder: 7 days after the send. */
 export const SECOND_FOLLOW_UP_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * The second reminder never lands sooner than this after the first, however
+ * old the quote is. Without it a quote already past 7 days when it first
+ * becomes eligible (a tradie switching auto follow-up on with a backlog, or
+ * the send stamp only just becoming readable) would get both emails on
+ * consecutive mornings — from the tradie's own business name.
+ */
+export const MIN_GAP_MS = SECOND_FOLLOW_UP_MS - FIRST_FOLLOW_UP_MS;
 
 /** Two reminders, then we stop. */
 export const MAX_FOLLOW_UPS = 2;
@@ -55,6 +64,21 @@ export interface FollowUpQuote {
   acceptanceTokenCreatedAtMs: number | null;
   /** How many reminders have already gone out (0, 1, or more). */
   followUpCount: number;
+  /** When the last reminder went out, ms epoch — anchors MIN_GAP_MS. */
+  lastFollowUpAtMs?: number | null;
+}
+
+export interface FollowUpOptions {
+  /**
+   * The tradie's own addresses (business email, auth email). A quote sent to
+   * one of these is a self-send — the app already treats those as "only sent
+   * to your inbox", not a customer — and must never be chased as a customer.
+   */
+  ownEmails?: Array<string | null | undefined>;
+}
+
+function normaliseEmail(value: unknown): string {
+  return typeof value === 'string' ? value.trim().toLowerCase() : '';
 }
 
 export interface FollowUpSelection {
@@ -70,13 +94,17 @@ export interface FollowUpSelection {
 export function selectQuotesForFollowUp(
   quotes: FollowUpQuote[],
   now: number,
+  options: FollowUpOptions = {},
 ): FollowUpSelection[] {
   const out: FollowUpSelection[] = [];
+  const own = new Set((options.ownEmails ?? []).map(normaliseEmail).filter(Boolean));
 
   for (const q of quotes) {
     // No inbox to reach, or the send never went by email — skip.
     if (!q.customerEmail) continue;
     if (q.sendMethod && q.sendMethod !== 'email') continue;
+    // A quote the tradie sent to themselves is not a customer waiting.
+    if (own.has(normaliseEmail(q.customerEmail))) continue;
 
     // Already answered, or the tradie muted this one.
     if (q.respondedAtMs != null) continue;
@@ -87,7 +115,8 @@ export function selectQuotesForFollowUp(
     if (q.acceptanceTokenCreatedAtMs == null) continue;
 
     // The acceptance link has lapsed: a reminder would carry a dead link.
-    if (now - q.acceptanceTokenCreatedAtMs >= TOKEN_EXPIRATION_MS) continue;
+    // Same comparison as the acceptance page: valid up to and including day 30.
+    if (now - q.acceptanceTokenCreatedAtMs > TOKEN_EXPIRATION_MS) continue;
 
     const count = q.followUpCount ?? 0;
     if (count >= MAX_FOLLOW_UPS) continue;
@@ -96,7 +125,8 @@ export function selectQuotesForFollowUp(
     if (count === 0 && age >= FIRST_FOLLOW_UP_MS) {
       out.push({ quote: q, followUpNumber: 1 });
     } else if (count === 1 && age >= SECOND_FOLLOW_UP_MS) {
-      out.push({ quote: q, followUpNumber: 2 });
+      const sinceLast = q.lastFollowUpAtMs == null ? Infinity : now - q.lastFollowUpAtMs;
+      if (sinceLast >= MIN_GAP_MS) out.push({ quote: q, followUpNumber: 2 });
     }
   }
 

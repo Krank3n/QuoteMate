@@ -331,7 +331,7 @@ export function BusinessDefaultsScreen() {
               <View style={styles.toggleLabel}>
                 <Text style={styles.toggleTitle}>Auto follow-up customers</Text>
                 <Text style={styles.toggleDescription}>
-                  Sends a reminder ~3 days after a quote is sent and again at ~7 days. Stops as soon as the customer accepts or declines. Capped at 2 reminders.
+                  Sends a reminder ~2 days after a quote is sent and again at ~7 days. Stops as soon as the customer accepts or declines. Capped at 2 reminders.
                 </Text>
               </View>
               <Switch

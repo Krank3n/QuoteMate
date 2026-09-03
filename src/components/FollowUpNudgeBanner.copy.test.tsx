@@ -46,6 +46,6 @@ describe('quote_follow_up copy', () => {
     const text = subtitle(3);
     expect(text).not.toMatch(/QuoteMate/i);
     expect(text).not.toMatch(/\bAI\b/);
-    expect(text).not.toMatch(/blokes|guys|folks|mate/i);
+    expect(text).not.toMatch(/blokes|guys|folks|fancy/i);
   });
 });

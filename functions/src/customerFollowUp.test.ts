@@ -12,6 +12,7 @@ import {
   selectQuotesForFollowUp,
   type FollowUpQuote,
   FIRST_FOLLOW_UP_MS,
+  MIN_GAP_MS,
   SECOND_FOLLOW_UP_MS,
   TOKEN_EXPIRATION_MS,
 } from './customerFollowUp';
@@ -138,5 +139,42 @@ describe('follow-up constants', () => {
     expect(FIRST_FOLLOW_UP_MS).toBe(48 * HOUR);
     expect(SECOND_FOLLOW_UP_MS).toBe(7 * DAY);
     expect(TOKEN_EXPIRATION_MS).toBe(30 * DAY);
+  });
+});
+
+describe('selectQuotesForFollowUp — spacing, self-sends and the 30-day edge', () => {
+  it('waits 5 days after the first reminder even when the quote is already 12 days old', () => {
+    // A backlog quote (auto follow-up switched on late): reminder 1 went out
+    // yesterday. Day-of-send maths alone would fire reminder 2 this morning.
+    const twelveDaysOld = quote({
+      sentAtMs: NOW - 12 * DAY,
+      acceptanceTokenCreatedAtMs: NOW - 1 * DAY,
+      followUpCount: 1,
+      lastFollowUpAtMs: NOW - 1 * DAY,
+    });
+    expect(select(twelveDaysOld)).toEqual([]);
+
+    const fiveDaysLater = quote({ ...twelveDaysOld, lastFollowUpAtMs: NOW - MIN_GAP_MS });
+    expect(select(fiveDaysLater).map((s) => s.followUpNumber)).toEqual([2]);
+  });
+
+  it('a count of 1 with no last-sent stamp is still owed the second reminder at 7 days', () => {
+    const out = select(quote({ sentAtMs: NOW - 8 * DAY, acceptanceTokenCreatedAtMs: NOW - 8 * DAY, followUpCount: 1, lastFollowUpAtMs: null }));
+    expect(out.map((s) => s.followUpNumber)).toEqual([2]);
+  });
+
+  it('never chases a quote the tradie sent to their own address', () => {
+    const own = ['Tradie@Biz.com.au', null, undefined];
+    expect(selectQuotesForFollowUp([quote({ customerEmail: ' tradie@biz.com.au ' })], NOW, { ownEmails: own })).toEqual([]);
+    // The auth email counts too, and a real customer is unaffected.
+    expect(selectQuotesForFollowUp([quote({ customerEmail: 'me@gmail.com' })], NOW, { ownEmails: ['x@biz.com', 'ME@gmail.com'] })).toEqual([]);
+    expect(selectQuotesForFollowUp([quote()], NOW, { ownEmails: own })).toHaveLength(1);
+  });
+
+  it('chases the link up to and including day 30, and not a millisecond past it', () => {
+    const onTheDay = quote({ sentAtMs: NOW - TOKEN_EXPIRATION_MS, acceptanceTokenCreatedAtMs: NOW - TOKEN_EXPIRATION_MS });
+    expect(select(onTheDay)).toHaveLength(1);
+    const justPast = quote({ sentAtMs: NOW - TOKEN_EXPIRATION_MS - 1, acceptanceTokenCreatedAtMs: NOW - TOKEN_EXPIRATION_MS - 1 });
+    expect(select(justPast)).toEqual([]);
   });
 });

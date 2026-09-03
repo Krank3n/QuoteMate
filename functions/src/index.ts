@@ -223,7 +223,11 @@ import { sendExpoPushNotifications } from './expoPush';
 import { hashTerms } from './shared/pdf/terms/defaultAuTradie';
 import { generateQuotePdfBuffer } from './pdfGenerator';
 import { normaliseTimestamp } from './timestamps.helpers';
-import { selectQuotesForFollowUp, type FollowUpQuote } from './customerFollowUp';
+import {
+  selectQuotesForFollowUp,
+  TOKEN_EXPIRATION_MS as CUSTOMER_FOLLOW_UP_TOKEN_EXPIRATION_MS,
+  type FollowUpQuote,
+} from './customerFollowUp';
 import { processAndStoreLogo } from './logoProcessing';
 import { dollarsToCents, centsToDollars } from './shared/pdf/money';
 import { validateAndRepairAiOutput } from './shared/ai/validateAiOutput';
@@ -5998,7 +6002,9 @@ The selectedIndex should be 1-based (first product is 1, second is 2, etc.).`,
 import * as crypto from 'crypto';
 
 // Token expiration: 30 days in milliseconds
-const TOKEN_EXPIRATION_MS = 30 * 24 * 60 * 60 * 1000;
+// One number for the acceptance link's lifetime — the customer follow-up
+// selector imports the same constant so the two can't drift.
+const TOKEN_EXPIRATION_MS = CUSTOMER_FOLLOW_UP_TOKEN_EXPIRATION_MS;
 
 function hashToken(token: string): string {
   return crypto.createHash('sha256').update(token).digest('hex');
@@ -11110,6 +11116,12 @@ export const customerQuoteFollowUp = functions.pubsub
         .collection('quotes')
         .where('status', '==', 'sent')
         .get();
+      if (quotesSnapshot.empty) continue;
+
+      // Looked up once per tradie: replies route here, and a quote addressed
+      // here is a self-send the selector must skip.
+      const authEmail = await getUserEmail(userDoc.id);
+      const tradieReplyEmail = settings.email || authEmail || undefined;
 
       // Normalise each doc into the pure selector's shape, keeping a handle
       // back to the Firestore doc for the writes below.
@@ -11130,57 +11142,67 @@ export const customerQuoteFollowUp = functions.pubsub
           sentAtMs: toMsOrNull(q.sentAt),
           acceptanceTokenCreatedAtMs: toMsOrNull(q.acceptanceTokenCreatedAt),
           followUpCount: q.customerFollowUpCount ?? 0,
+          lastFollowUpAtMs: toMsOrNull(q.customerFollowUpLastAt),
         });
       }
 
-      for (const { quote, followUpNumber } of selectQuotesForFollowUp(candidates, now)) {
+      const due = selectQuotesForFollowUp(candidates, now, {
+        ownEmails: [settings.email, authEmail],
+      });
+
+      for (const { quote, followUpNumber } of due) {
         const quoteDoc = byId.get(quote.id);
         if (!quoteDoc) continue;
         const q = quoteDoc.data();
 
-        // Mint a fresh acceptance token. Existing tokens stay valid — the
-        // acceptance page looks them up by hash directly, so the customer's
-        // original email link still works alongside this fresh one.
-        const token = crypto.randomBytes(32).toString('hex');
-        const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
-        await db.collection('quoteAcceptanceTokens').doc(tokenHash).set({
-          userId: userDoc.id,
-          quoteId: quoteDoc.id,
-          createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        });
-        const acceptanceUrl = acceptancePageUrlForToken(token);
-
-        // Fall back to the auth email so replies still route to the tradie
-        // even if they haven't filled in business.email — same shape as
-        // sendQuoteFlavour does for the original send.
-        const tradieReplyEmail = settings.email || (await getUserEmail(userDoc.id)) || undefined;
-
-        const sent = await sendCustomerQuoteReminderEmail({
-          to: q.customerEmail,
-          customerName: q.customerName || '',
-          jobName: q.job?.name || 'your job',
-          total: q.total || 0,
-          acceptanceUrl,
-          followUpNumber,
-          business: {
-            name: businessName,
-            abn: settings.abn,
-            phone: settings.phone,
-            email: tradieReplyEmail,
-            address: settings.address,
-            logoUrl: settings.logoStorageUrl || settings.logoUri,
-            brandColor: settings.brandColor,
-          },
-          userId: userDoc.id,
-        });
-
-        if (sent) {
-          await quoteDoc.ref.update({
-            customerFollowUpCount: quote.followUpCount + 1,
-            customerFollowUpLastAt: admin.firestore.FieldValue.serverTimestamp(),
-            acceptanceTokenHash: tokenHash,
-            acceptanceTokenCreatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        // One quote's failure (token write, bounce lookup, the stamp) must not
+        // abort the run for every tradie after it — and a stamp that fails
+        // after a successful send would otherwise re-send tomorrow.
+        try {
+          // Mint a fresh acceptance token. Existing tokens stay valid — the
+          // acceptance page looks them up by hash directly, so the customer's
+          // original email link still works alongside this fresh one.
+          const token = crypto.randomBytes(32).toString('hex');
+          const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+          await db.collection('quoteAcceptanceTokens').doc(tokenHash).set({
+            userId: userDoc.id,
+            quoteId: quoteDoc.id,
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
           });
+          const acceptanceUrl = acceptancePageUrlForToken(token);
+
+          const sent = await sendCustomerQuoteReminderEmail({
+            to: q.customerEmail,
+            customerName: q.customerName || '',
+            jobName: q.job?.name || 'your job',
+            total: q.total || 0,
+            acceptanceUrl,
+            followUpNumber,
+            business: {
+              name: businessName,
+              abn: settings.abn,
+              phone: settings.phone,
+              email: tradieReplyEmail,
+              address: settings.address,
+              logoUrl: settings.logoStorageUrl || settings.logoUri,
+              brandColor: settings.brandColor,
+            },
+            userId: userDoc.id,
+          });
+
+          if (sent) {
+            await quoteDoc.ref.update({
+              customerFollowUpCount: quote.followUpCount + 1,
+              customerFollowUpLastAt: admin.firestore.FieldValue.serverTimestamp(),
+              acceptanceTokenHash: tokenHash,
+              acceptanceTokenCreatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+          }
+        } catch (err) {
+          console.error(
+            `customerQuoteFollowUp: quote ${quoteDoc.id} (user ${userDoc.id}) reminder ${followUpNumber} failed`,
+            (err as Error)?.message,
+          );
         }
       }
     }
