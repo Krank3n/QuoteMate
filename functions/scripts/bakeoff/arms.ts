@@ -20,7 +20,7 @@ import { batchSearch, describe, normalisedPrice, normaliseDescriptions } from '.
 import { ArmResult, CorpusJob, QuoteLine, ScraperProduct, Unit } from './types';
 
 // Real production logic — not reimplementations.
-import { convertLLMMaterialsToMaterials } from '../../../src/services/llmService';
+import { convertLLMMaterialsToMaterials } from '../../../shared/pricing/llmMaterials';
 import { applyPackAwarePricing } from '../../../shared/pricing/packAwarePricing';
 import { pickBestCandidate, isSemanticallyCompatible, type RankableCandidate } from '../../../shared/pricing/candidateRanker';
 import { matchEvidence, stampMatchConfidence } from '../../../shared/pricing/matchEvidence';
