@@ -223,6 +223,7 @@ import { sendExpoPushNotifications } from './expoPush';
 import { hashTerms } from './shared/pdf/terms/defaultAuTradie';
 import { generateQuotePdfBuffer } from './pdfGenerator';
 import { normaliseTimestamp } from './timestamps.helpers';
+import { selectQuotesForFollowUp, type FollowUpQuote } from './customerFollowUp';
 import { processAndStoreLogo } from './logoProcessing';
 import { dollarsToCents, centsToDollars } from './shared/pdf/money';
 import { validateAndRepairAiOutput } from './shared/ai/validateAiOutput';
@@ -11082,8 +11083,11 @@ export const onQuoteExpiring = functions.pubsub
 
 // -----------------------------------------------------------
 // customerQuoteFollowUp — Scheduled daily: nudge customers who haven't
-// accepted a sent quote yet. Two reminders max (~3 days then ~7 days
-// after sentAt). Opt-in per tradie via business settings.
+// accepted a sent quote yet. Two reminders max — first at 48 hours after the
+// send, second at 7 days — never after a response and never once the
+// acceptance link has lapsed. Opt-in per tradie via business settings. The
+// selection rules live in selectQuotesForFollowUp (customerFollowUp.ts); this
+// job just normalises docs, runs them through it, and does the side effects.
 // -----------------------------------------------------------
 export const customerQuoteFollowUp = functions.pubsub
   .schedule('every day 09:00')
@@ -11091,6 +11095,8 @@ export const customerQuoteFollowUp = functions.pubsub
   .onRun(async () => {
     const now = Date.now();
     const usersSnapshot = await db.collection('users').get();
+
+    const toMsOrNull = (v: unknown): number | null => normaliseTimestamp(v)?.getTime() ?? null;
 
     for (const userDoc of usersSnapshot.docs) {
       const settingsDoc = await db.doc(`users/${userDoc.id}/settings/business`).get();
@@ -11105,36 +11111,32 @@ export const customerQuoteFollowUp = functions.pubsub
         .where('status', '==', 'sent')
         .get();
 
+      // Normalise each doc into the pure selector's shape, keeping a handle
+      // back to the Firestore doc for the writes below.
+      const byId = new Map<string, admin.firestore.QueryDocumentSnapshot>();
+      const candidates: FollowUpQuote[] = [];
       for (const quoteDoc of quotesSnapshot.docs) {
         const q = quoteDoc.data();
-        if (!q.customerEmail) continue;
-        // Only follow up quotes the customer actually received by email. Docs
-        // marked sent via SMS/share/export (sendMethod set by the client) may
-        // never have reached this address — and an Android share-cancel can
-        // mark sent falsely. Legacy docs have no sendMethod and were always
-        // email sends, so they pass.
-        if (q.sendMethod && q.sendMethod !== 'email') continue;
-        // Skip anything that has already moved on. status === 'sent' filter
-        // catches most of this; the explicit checks defend against legacy
-        // docs where the status flag wasn't flipped.
-        if (q.acceptedAt || q.declinedAt) continue;
-        if (q.suppressAutoFollowUp) continue;
+        byId.set(quoteDoc.id, quoteDoc);
+        candidates.push({
+          id: quoteDoc.id,
+          customerEmail: q.customerEmail,
+          sendMethod: q.sendMethod,
+          // Any sign the customer has answered: the canonical respondedAt, or
+          // a legacy acceptedAt/declinedAt on docs that never got it.
+          respondedAtMs:
+            toMsOrNull(q.respondedAt) ?? toMsOrNull(q.acceptedAt) ?? toMsOrNull(q.declinedAt),
+          suppressAutoFollowUp: !!q.suppressAutoFollowUp,
+          sentAtMs: toMsOrNull(q.sentAt),
+          acceptanceTokenCreatedAtMs: toMsOrNull(q.acceptanceTokenCreatedAt),
+          followUpCount: q.customerFollowUpCount ?? 0,
+        });
+      }
 
-        const sentAtMs = q.sentAt?.toDate?.()?.getTime?.()
-          ?? (typeof q.sentAt === 'number' ? q.sentAt : 0);
-        if (!sentAtMs) continue;
-
-        const count: number = q.customerFollowUpCount ?? 0;
-        if (count >= 2) continue;
-
-        const lastAtMs = q.customerFollowUpLastAt?.toDate?.()?.getTime?.() ?? 0;
-        const ageDays = (now - sentAtMs) / 86_400_000;
-        const sinceLastDays = (now - (lastAtMs || sentAtMs)) / 86_400_000;
-
-        const shouldSend =
-          (count === 0 && ageDays >= 3) ||
-          (count === 1 && sinceLastDays >= 4);
-        if (!shouldSend) continue;
+      for (const { quote, followUpNumber } of selectQuotesForFollowUp(candidates, now)) {
+        const quoteDoc = byId.get(quote.id);
+        if (!quoteDoc) continue;
+        const q = quoteDoc.data();
 
         // Mint a fresh acceptance token. Existing tokens stay valid — the
         // acceptance page looks them up by hash directly, so the customer's
@@ -11159,7 +11161,7 @@ export const customerQuoteFollowUp = functions.pubsub
           jobName: q.job?.name || 'your job',
           total: q.total || 0,
           acceptanceUrl,
-          followUpNumber: (count + 1) as 1 | 2,
+          followUpNumber,
           business: {
             name: businessName,
             abn: settings.abn,
@@ -11174,7 +11176,7 @@ export const customerQuoteFollowUp = functions.pubsub
 
         if (sent) {
           await quoteDoc.ref.update({
-            customerFollowUpCount: count + 1,
+            customerFollowUpCount: quote.followUpCount + 1,
             customerFollowUpLastAt: admin.firestore.FieldValue.serverTimestamp(),
             acceptanceTokenHash: tokenHash,
             acceptanceTokenCreatedAt: admin.firestore.FieldValue.serverTimestamp(),
