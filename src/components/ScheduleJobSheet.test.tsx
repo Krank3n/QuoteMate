@@ -41,9 +41,29 @@ vi.mock('react-native-paper', async () => {
 });
 // The real calendar is a native-flavoured month grid; all this test needs
 // is the day-press it emits.
+/**
+ * The picked day must stay in the FUTURE.
+ *
+ * `handleSaveAndClose` only opens the demote prompt for an in-progress job when
+ * `pendingIsInFuture`, so a hardcoded date stops exercising that path the day it
+ * goes stale — silently, as a "can't find Keep in Progress" error that reads like
+ * a rendering bug. This was pinned to 2026-09-01 and duly started failing on
+ * 2026-09-02. Derive it from today instead, so the fixture states the intent.
+ */
+const pickedDay = vi.hoisted(() => {
+  const d = new Date();
+  d.setDate(d.getDate() + 7);
+  const iso = [
+    d.getFullYear(),
+    String(d.getMonth() + 1).padStart(2, '0'),
+    String(d.getDate()).padStart(2, '0'),
+  ].join('-');
+  return { iso, timestamp: new Date(`${iso}T00:00:00`).getTime() };
+});
+
 vi.mock('react-native-calendars', () => ({
   Calendar: ({ onDayPress }: { onDayPress: (d: { dateString: string }) => void }) => (
-    <button onClick={() => onDayPress({ dateString: '2026-09-01' })}>pick-day</button>
+    <button onClick={() => onDayPress({ dateString: pickedDay.iso })}>pick-day</button>
   ),
 }));
 // Same shim as the other sheet tests: the real one drags in
@@ -115,6 +135,13 @@ beforeEach(() => {
 });
 
 describe('ScheduleJobSheet', () => {
+  it('picks a day in the future, or the demote prompt below never opens', () => {
+    // Guards the fixture itself. If someone re-pins pickedDay to a literal, this
+    // fails immediately and by name, instead of the demote tests failing months
+    // later with "unable to find Keep in Progress".
+    expect(pickedDay.timestamp).toBeGreaterThan(Date.now());
+  });
+
   it('marks a quoted job Scheduled once a date is saved onto it', async () => {
     const q = renderSheet(baseJob);
     fireEvent.click(q.getByText('pick-day'));
@@ -123,7 +150,7 @@ describe('ScheduleJobSheet', () => {
     await vi.waitFor(() => expect(saveJob).toHaveBeenCalledTimes(1));
     const saved = saveJob.mock.calls[0][0] as unknown as Job;
     expect(saved.stage).toBe('scheduled');
-    expect(saved.scheduledStartDate).toBe(new Date('2026-09-01T00:00:00').getTime());
+    expect(saved.scheduledStartDate).toBe(pickedDay.timestamp);
   });
 
   it('leaves a job that is already under way in progress', async () => {
