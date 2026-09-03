@@ -581,6 +581,16 @@ export interface SendDocumentEmailInput {
    */
   acceptanceUrlForToken?: (token: string) => string;
   /**
+   * Build the email-open tracking pixel URL for a token, and mint one. Both
+   * injected for the same reason as the acceptance-URL helper — the URL host
+   * is environment-specific and the crypto stays out of this module.
+   * Present ⇒ a real customer send: a token is minted, an emailOpenTokens
+   * doc is written, and the pixel URL is embedded in the customer HTML.
+   * Absent (test sends, invoice sends) ⇒ no pixel and no token doc.
+   */
+  emailOpenPixelUrlForToken?: (token: string) => string;
+  generateEmailOpenToken?: () => { token: string; hashedToken: string };
+  /**
    * For quotes: photo attachment fetch helper (Brevo expects base64 attachments).
    */
   fetchPhotoAttachments?: (urls: string[]) => Promise<Array<{ name: string; content: string }>>;
@@ -747,6 +757,23 @@ async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailRes
     quoteId: docId,
     createdAt: admin.firestore.FieldValue.serverTimestamp(),
   });
+
+  // Email-open pixel: mint a separate 256-bit token (never the acceptance
+  // token — the pixel URL sits in a customer's inbox history for the life of
+  // the email) and stash the hash for the trackEmailOpen handler to resolve.
+  // Only real customer sends get one; test sends to the tradie's own inbox
+  // would poison the open metrics.
+  let emailOpenPixelUrl: string | undefined;
+  if (!isTestSend && input.generateEmailOpenToken && input.emailOpenPixelUrlForToken) {
+    const { token: openToken, hashedToken: openHash } = input.generateEmailOpenToken();
+    batch.set(firestore.doc(`emailOpenTokens/${openHash}`), {
+      userId,
+      quoteId: docId,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    emailOpenPixelUrl = input.emailOpenPixelUrlForToken(openToken);
+  }
+
   await batch.commit();
 
   // Material-edit telemetry: diff the sent rows against their asPriced
@@ -830,6 +857,7 @@ async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailRes
     travelAdjustment: quote.travelAdjustment,
     travelAdjustmentAmount: travelAdjustmentAmountFor(quote),
     acceptanceUrl,
+    emailOpenPixelUrl,
     photoUrls,
     depositAmount: depositAmountForEmail || undefined,
     depositPercentage: depositPctForEmail || undefined,

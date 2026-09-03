@@ -2007,6 +2007,11 @@ export async function computeEventFunnelPayload(): Promise<
   const viewedUids = new Set<string>();
   const firstViewedByKey = new Map<string, number | null>();
   const linkedKeys = new Set<string>();
+  // Emails opened by a customer (the 1x1 pixel loaded at least once) — the
+  // trackEmailOpen handler stamps emailFirstOpenedAt on the legacy quote.
+  // Same key shape as firstViewedByKey so per-quote outcome rows can pick
+  // this up alongside the link-open time.
+  const emailOpenedKeys = new Set<string>();
   for (const d of quotesSnap.docs) {
     const uid = d.ref.parent.parent?.id;
     if (!uid || isRecoveredDocId(d.id)) continue;
@@ -2015,6 +2020,7 @@ export async function computeEventFunnelPayload(): Promise<
     // Any of the token fields (hashed, legacy plaintext, or the mint stamp)
     // means an acceptance link was created for this quote.
     if (q.acceptanceTokenHash || q.acceptanceToken || q.acceptanceTokenCreatedAt) linkedKeys.add(key);
+    if (q.emailFirstOpenedAt != null) emailOpenedKeys.add(key);
     if (!isViewedDoc(q)) continue;
     viewedUids.add(uid);
     firstViewedByKey.set(key, toMillis(q.firstViewedAt) ?? toMillis(q.lastViewedAt));
@@ -2060,6 +2066,7 @@ export async function computeEventFunnelPayload(): Promise<
         rejected: data.stage === 'quote_rejected',
         sendMethod: typeof data.sendMethod === 'string' && data.sendMethod ? data.sendMethod : null,
         withLink: linkedKeys.has(key) || data.acceptanceTokenCreatedAt != null,
+        emailOpened: emailOpenedKeys.has(key),
       });
     }
   }
@@ -2153,6 +2160,10 @@ export const aggregateEventFunnel = functions
         `outcomes: senders=${payload.outcomes.senders} buckets=${JSON.stringify(payload.outcomes.buckets)} ` +
         `monetized=${JSON.stringify(payload.outcomes.monetized)} openedLink=${payload.outcomes.openedLink} ` +
         `withLink=${payload.outcomes.quotes.withLink} ` +
+        // The sent → email opened → link opened → accepted ladder the admin
+        // wanted to read at a glance.
+        `sent=${payload.outcomes.quotes.sent} emailOpened=${payload.outcomes.quotes.emailOpened} ` +
+        `linkOpened=${payload.outcomes.quotes.opened} accepted=${payload.outcomes.quotes.accepted}, ` +
         `quotes=${JSON.stringify(payload.outcomes.quotes)} ` +
         `hoursToOpen(median/p90)=${payload.outcomes.hoursToOpen.median}/${payload.outcomes.hoursToOpen.p90} ` +
         `over ${payload.outcomes.hoursToOpen.samples}, hoursToAccept=${payload.outcomes.hoursToAccept.median}/` +
