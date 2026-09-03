@@ -77,6 +77,8 @@ export interface PricingRunStore {
   /** Merge fields onto the quote document. */
   saveQuote(quoteId: string, patch: Record<string, unknown>): Promise<void>;
   loadBusinessSettings(): Promise<PricingBusinessSettings | null>;
+  /** The tier the server believes in (resolveServerPlan) — never the phone's word for it. */
+  loadPlan(): Promise<'trial' | 'free' | 'pro'>;
   notify(
     event: PricingRunNotifyEvent,
     vars: Record<string, string>,
@@ -171,6 +173,7 @@ export class ProgressWriter {
   private current: WorkingStatus;
   private lastWriteAt = 0;
   private chain: Promise<void> = Promise.resolve();
+  private trailing: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     private readonly store: Pick<PricingRunStore, 'update' | 'now'>,
@@ -187,13 +190,31 @@ export class ProgressWriter {
   report(next: Partial<WorkingStatus>): void {
     this.current = { ...this.current, ...next };
     const now = this.store.now();
-    if (now - this.lastWriteAt < this.intervalMs) return;
+    const sinceLast = now - this.lastWriteAt;
+    if (sinceLast < this.intervalMs) {
+      // Inside the window: hold it, but make sure the LAST state of a burst
+      // still lands. "Sorting pack sizes…" arrives right behind the final
+      // item event and then nothing is written for the whole reconcile pass,
+      // so without a trailing write the card sat on "Couldn't find X" for it.
+      if (!this.trailing) {
+        this.trailing = setTimeout(() => {
+          this.trailing = null;
+          this.lastWriteAt = this.store.now();
+          this.enqueue(this.current, {});
+        }, this.intervalMs - sinceLast);
+      }
+      return;
+    }
     this.lastWriteAt = now;
     this.enqueue(this.current, {});
   }
 
   /** Write the final state plus the run-level patch, after everything queued. */
   async finish(final: Partial<WorkingStatus>, patch: Record<string, unknown>): Promise<void> {
+    if (this.trailing) {
+      clearTimeout(this.trailing);
+      this.trailing = null;
+    }
     this.current = { ...this.current, ...final };
     this.enqueue(this.current, patch);
     await this.chain;
@@ -224,7 +245,15 @@ export async function runPricingRun(args: {
   const log = args.log ?? console;
 
   // At-least-once delivery: a redelivered event must not price the quote twice.
-  const run = await store.claim();
+  let run: PricingRunRecord | null;
+  try {
+    run = await store.claim();
+  } catch (err) {
+    // A transient transaction failure leaves the document queued; the phone's
+    // queue watchdog cancels it and prices on the phone.
+    log.warn('[pricingRun] claim failed', { message: String((err as Error)?.message || err) });
+    return 'skipped';
+  }
   if (!run) return 'skipped';
 
   const progress = new ProgressWriter(
@@ -261,11 +290,29 @@ export async function runPricingRun(args: {
       throw new Error('Too many pricing runs in a short time — give it a few minutes and try again.');
     }
 
+    // The same gate Mate's Apply path applies on the phone (canRunMatePipeline /
+    // canAnalysePhotos): chat must not become the paywall bypass, and a run
+    // document must not be able to claim a tier. Resolved server-side.
+    const plan = await store.loadPlan();
+    if (plan === 'free') {
+      throw new Error("Auto-pricing isn't in the free plan — add materials and prices yourself, or go Pro and Mate will sort it.");
+    }
+    // canAnalysePhotos on the phone: a trial user gets plan vision too.
+    const isPro = plan === 'pro' || plan === 'trial';
+
     const quote = await store.loadQuote(run.quoteId);
     if (!quote) throw new Error('Quote not found — it may have been deleted before pricing started.');
     if (!quote.job?.description) throw new Error('Quote has no job description — add a scope first.');
     jobName = quote.job.name || jobName;
     jobId = typeof quote.jobId === 'string' ? quote.jobId : undefined;
+
+    // The phone may have cancelled the run (or taken the document back) while
+    // this side was busy; from here on every write to the quote checks first,
+    // so both sides never price the same quote at once.
+    const assertStillOurs = async (): Promise<void> => {
+      const live = await store.read();
+      if (!live || live.status === 'cancelled') throw new PipelineCancelled();
+    };
 
     const businessSettings = await store.loadBusinessSettings();
     const templates = await deps.loadTemplates();
@@ -274,7 +321,7 @@ export async function runPricingRun(args: {
     // ── Phase 1: analyse ──
     const analysed = await generateMaterialsForQuote(
       deps,
-      { quote, businessSettings, isPro: run.options.isPro, templates },
+      { quote, businessSettings, isPro, templates },
       { onEvent: (event) => progress.report({ phase: event.phase, status: event.status, detail: event.detail }) },
     );
     let next: StoredQuote = analysed.updatedQuote;
@@ -285,6 +332,7 @@ export async function runPricingRun(args: {
     const generatedMaterialCount = run.options.labourOnly ? 0 : analysed.generatedMaterialCount;
 
     if (run.options.labourOnly) {
+      await assertStillOurs();
       await store.saveQuote(run.quoteId, quotePatch({ ...next, draftStep: 'JobPreview' }, store.now()));
       const result: PricingRunResult = {
         generatedMaterialCount: 0,
@@ -305,12 +353,16 @@ export async function runPricingRun(args: {
         },
         { status: 'done', result, finishedAt: iso() },
       );
-      await notifyIfAway('quote_priced', { job: jobName, amount: formatAud(Number(next.total) || 0) });
+      await notifyIfAway('quote_priced', {
+        job: jobName,
+        amount: formatAud(Number(recalculateQuoteTotals(next).total) || 0),
+      });
       return 'done';
     }
 
     // The analysed rows are persisted before pricing, as the app does, so a
     // snag mid-pricing still leaves the gear list on the quote.
+    await assertStillOurs();
     await store.saveQuote(run.quoteId, quotePatch(next, store.now()));
     progress.report({
       phase: 'pricing',
@@ -337,6 +389,7 @@ export async function runPricingRun(args: {
     // Finished but unsent — the wizard step the dashboard banner and the
     // unsent-quote nudge both key on.
     const final: StoredQuote = { ...priced.updatedQuote, draftStep: 'JobPreview' };
+    await assertStillOurs();
     await store.saveQuote(run.quoteId, quotePatch(final, store.now()));
 
     const result: PricingRunResult = {
@@ -368,10 +421,10 @@ export async function runPricingRun(args: {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (err instanceof PipelineCancelled) {
-      await progress.finish(
-        { phase: 'failed', status: 'Pricing was cancelled.', done: true },
-        { status: 'cancelled', finishedAt: iso() },
-      );
+      // The phone took the run back; it is pricing on the phone now. Leave
+      // the document alone — writing to it would recreate one the phone
+      // deleted, or overwrite the phone's own cancellation.
+      log.info('[pricingRun] cancelled', { quoteId: run.quoteId });
       return 'cancelled';
     }
     log.error('[pricingRun] failed', { quoteId: run.quoteId, message });
@@ -400,6 +453,7 @@ export function firestorePricingRunStore(args: {
   uid: string;
   runId: string;
   notify: PricingRunStore['notify'];
+  loadPlan: PricingRunStore['loadPlan'];
 }): PricingRunStore {
   const { db, uid, runId } = args;
   const runRef = db.doc(`users/${uid}/pricingRuns/${runId}`);
@@ -417,7 +471,12 @@ export function firestorePricingRunStore(args: {
         return { ...data, status: 'running', startedAt };
       }),
     update: async (patch) => {
-      await runRef.set(patch, { merge: true });
+      // update(), not set(merge): a merge deep-merges the `progress` map, so
+      // a key the writer dropped (the cleared item list, a stale detail line)
+      // would keep its old value on the phone's card. update() replaces the
+      // map. It also refuses a document the phone has deleted, which is the
+      // right answer — the phone owns the run again.
+      await runRef.update(patch);
     },
     read: async () => {
       const snap = await runRef.get();
@@ -445,5 +504,6 @@ export function firestorePricingRunStore(args: {
       return snap.exists ? (snap.data() as PricingBusinessSettings) : null;
     },
     notify: args.notify,
+    loadPlan: args.loadPlan,
   };
 }

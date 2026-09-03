@@ -40,7 +40,7 @@ function run(overrides: Partial<PricingRunRecord> = {}): PricingRunRecord {
   return {
     quoteId: 'q1',
     kind: 'draft',
-    options: { isPro: false, stripLabour: false, labourOnly: false },
+    options: { stripLabour: false, labourOnly: false },
     status: 'queued',
     foreground: true,
     // The fake clock starts at 1,000,000 ms; a fresh stamp means "watching".
@@ -57,6 +57,7 @@ interface FakeStore extends PricingRunStore {
   quoteWrites: Array<{ quoteId: string; patch: Record<string, unknown> }>;
   pushes: Array<{ event: string; vars: Record<string, string>; data: Record<string, string> }>;
   recentRuns: number;
+  plan: 'trial' | 'free' | 'pro';
 }
 
 function fakeStore(record: PricingRunRecord | null, quotes: Record<string, StoredQuote>): FakeStore {
@@ -68,6 +69,7 @@ function fakeStore(record: PricingRunRecord | null, quotes: Record<string, Store
     quoteWrites: [],
     pushes: [],
     recentRuns: 1,
+    plan: 'trial',
     now: () => (now += 50),
     claim: async () => {
       if (!store.record || store.record.status !== 'queued') return null;
@@ -86,6 +88,7 @@ function fakeStore(record: PricingRunRecord | null, quotes: Record<string, Store
       store.quotes[quoteId] = { ...store.quotes[quoteId], ...(patch as Partial<StoredQuote>) } as StoredQuote;
     },
     loadBusinessSettings: async () => ({ defaultLaborRate: 90 }),
+    loadPlan: async () => store.plan,
     notify: async (event, vars, data) => {
       store.pushes.push({ event, vars, data });
     },
@@ -212,6 +215,45 @@ describe('runPricingRun', () => {
     expect(store.record?.error).toMatch(/Too many pricing runs/);
   });
 
+  it('refuses the free plan and decides photo vision from the server-side plan, not the document', async () => {
+    const gated = fakeStore(run(), { q1: quote() });
+    gated.plan = 'free';
+    const analyze = vi.fn();
+    expect(await runPricingRun({ store: gated, deps: fakeDeps({ analyzeJobDescription: analyze as never }), log: silent })).toBe('failed');
+    expect(analyze).not.toHaveBeenCalled();
+    expect(gated.record?.error).toMatch(/free plan/);
+
+    const pro = fakeStore(run(), { q1: quote({ photos: [{ storageUrl: 'https://storage.example/plan.jpg', isPlan: true }] }) });
+    pro.plan = 'pro';
+    const seen = vi.fn(async (req: { photoUrls?: string[] }) => {
+      seen.mock.lastCall;
+      return { materials: [], estimatedHours: 2, jobSummary: '' };
+    });
+    await runPricingRun({ store: pro, deps: fakeDeps({ analyzeJobDescription: seen as never }), log: silent });
+    expect(seen.mock.calls[0][0].photoUrls).toEqual(['https://storage.example/plan.jpg']);
+  });
+
+  it('stops without touching the quote once the phone has taken the run back', async () => {
+    const store = fakeStore(run(), { q1: quote() });
+    const deps = fakeDeps({
+      analyzeJobDescription: async () => {
+        // The phone cancelled while the analyse call was in flight.
+        store.record = { ...(store.record as PricingRunRecord), status: 'cancelled' };
+        return { materials: [{ name: 'Screws', searchTerm: 'screws', quantity: 1, unit: 'each' }], estimatedHours: 1, jobSummary: '' };
+      },
+    });
+    expect(await runPricingRun({ store, deps, log: silent })).toBe('cancelled');
+    expect(store.quoteWrites).toHaveLength(0);
+    expect(store.record?.status).toBe('cancelled');
+  });
+
+  it('carries the real total on a labour-only push', async () => {
+    const store = fakeStore(run({ foreground: false, options: { stripLabour: false, labourOnly: true } }), { q1: quote() });
+    await runPricingRun({ store, deps: fakeDeps(), log: silent });
+    // 6 h × $90 + 10% markup, whole dollars.
+    expect(store.pushes[0]?.vars.amount).toBe('$594');
+  });
+
   it('fails cleanly when the quote was deleted before the run started', async () => {
     const store = fakeStore(run(), {});
     expect(await runPricingRun({ store, deps: fakeDeps(), log: silent })).toBe('failed');
@@ -221,7 +263,7 @@ describe('runPricingRun', () => {
   });
 
   it('labour-only keeps the hours and sections and skips pricing entirely', async () => {
-    const store = fakeStore(run({ options: { isPro: false, stripLabour: false, labourOnly: true } }), { q1: quote() });
+    const store = fakeStore(run({ options: { stripLabour: false, labourOnly: true } }), { q1: quote() });
     const batch = vi.fn();
     const deps = fakeDeps({ batchSearchBunnings: batch as unknown as PipelineDeps['batchSearchBunnings'] });
     expect(await runPricingRun({ store, deps, log: silent })).toBe('done');
@@ -234,7 +276,7 @@ describe('runPricingRun', () => {
   });
 
   it('strips the analysed labour when rate lines already charge for it', async () => {
-    const store = fakeStore(run({ options: { isPro: false, stripLabour: true, labourOnly: false } }), { q1: quote() });
+    const store = fakeStore(run({ options: { stripLabour: true, labourOnly: false } }), { q1: quote() });
     expect(await runPricingRun({ store, deps: fakeDeps(), log: silent })).toBe('done');
     const final = store.quoteWrites[1].patch as StoredQuote;
     expect(final.laborHours).toBe(0);
@@ -270,6 +312,28 @@ describe('ProgressWriter', () => {
       done: true,
     });
     expect(writes[1].status).toBe('done');
+  });
+
+  it('still lands the last state of a burst when nothing follows it', async () => {
+    vi.useFakeTimers();
+    try {
+      let now = 0;
+      const writes: Record<string, unknown>[] = [];
+      const writer = new ProgressWriter(
+        { update: async (patch) => { writes.push(patch); }, now: () => now },
+        { phase: 'pricing', status: 'Pricing…', done: false },
+        500,
+      );
+      now = 1000;
+      writer.report({ detail: 'Just priced screws' }); // written
+      now = 1100;
+      writer.report({ status: 'Sorting pack sizes and quantities…' }); // held
+      await vi.advanceTimersByTimeAsync(450);
+      expect(writes).toHaveLength(2);
+      expect(writes[1].progress).toMatchObject({ status: 'Sorting pack sizes and quantities…' });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

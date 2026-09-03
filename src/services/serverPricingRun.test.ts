@@ -102,7 +102,7 @@ function fakeIo(overrides: Partial<ServerRunIo> = {}) {
 const request = {
   quoteId: 'q1',
   kind: 'draft' as const,
-  options: { isPro: false, stripLabour: false, labourOnly: false },
+  options: { stripLabour: false, labourOnly: false },
 };
 
 describe('runPipelineOnServer', () => {
@@ -181,6 +181,20 @@ describe('runPipelineOnServer', () => {
     expect(outcome).toEqual({ kind: 'unavailable', reason: 'no server pickup' });
     expect(server.cancels).toHaveLength(1);
     expect(server.record?.status).toBe('cancelled');
+  });
+
+  it('treats its own cancellation echoing back early as the fallback, not a failure', async () => {
+    const { io, server } = fakeIo({
+      // The snapshot with status: cancelled arrives before the transaction resolves.
+      cancelIfQueued: async () => {
+        server.advance({ status: 'cancelled' });
+        await new Promise((r) => setTimeout(r, 200));
+        return true;
+      },
+    });
+    const pending = runPipelineOnServer(request, {}, io);
+    await vi.advanceTimersByTimeAsync(QUEUE_TIMEOUT_MS + 500);
+    expect(await pending).toEqual({ kind: 'unavailable', reason: 'no server pickup' });
   });
 
   it('keeps waiting when the server claims the run just as the queue watchdog fires', async () => {

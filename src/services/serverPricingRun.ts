@@ -218,6 +218,7 @@ export async function runPipelineOnServer(
   return new Promise<ServerRunOutcome>((resolve) => {
     let settled = false;
     let claimed = false;
+    let weCancelled = false;
     let lastProgressAt = io.now();
     let unsubscribeWatch: (() => void) | null = null;
     let unsubscribeAppState: (() => void) | null = null;
@@ -235,6 +236,7 @@ export async function runPipelineOnServer(
     const fallBack = async (reason: string) => {
       if (settled) return;
       let cancelled = false;
+      weCancelled = true;
       try {
         cancelled = await withTimeout(io.cancelIfQueued(runId), CREATE_TIMEOUT_MS, 'cancel timed out');
       } catch {
@@ -246,8 +248,10 @@ export async function runPipelineOnServer(
       }
       if (cancelled) {
         finish({ kind: 'unavailable', reason });
+      } else {
+        // The server claimed it in the meantime. Keep waiting.
+        weCancelled = false;
       }
-      // Not cancelled: the server claimed it in the meantime. Keep waiting.
     };
 
     // The queue watchdog: nothing has claimed the run.
@@ -336,7 +340,9 @@ export async function runPipelineOnServer(
           return;
         }
         if (latest.status === 'cancelled') {
-          finish({ kind: 'failed', error: 'Pricing was cancelled.' });
+          // Our own cancellation echoing back before the transaction resolves
+          // is the fallback, not a failure.
+          finish(weCancelled ? { kind: 'unavailable', reason: 'no server pickup' } : { kind: 'failed', error: 'Pricing was cancelled.' });
         }
       },
       (err) => {

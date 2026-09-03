@@ -24,7 +24,7 @@ ready.
 
 ```
 quoteId, kind: 'draft' | 'scope'
-options: { isPro, stripLabour, labourOnly }
+options: { stripLabour, labourOnly }      // the plan is NOT here — see below
 status: 'queued' → 'running' → 'done' | 'failed' | 'cancelled'
 progress: WorkingStatus            // what the chat card renders
 foreground: boolean                // phone-maintained; false = backgrounded/locked
@@ -32,6 +32,11 @@ createdAt, startedAt, updatedAt, finishedAt   // ISO strings
 result?: { generatedMaterialCount, fetchedCount, failedCount, skippedCount, missedSupplierTerms, reeceReauthNeeded }
 error?: string
 ```
+
+The server resolves the tradie's plan itself (`resolveServerPlan`, the
+server-owned `isPro` flag) — a free-plan run fails with the same message
+Mate's Apply path gives, and photo/plan vision follows the resolved plan, so
+the document can't hand its author a tier.
 
 The phone creates it as `queued`. The trigger claims it in a transaction
 (`queued → running`), so a redelivered event or a phone that gave up and

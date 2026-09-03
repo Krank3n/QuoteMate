@@ -2257,7 +2257,7 @@ async function analyzeJobDescriptionCore(uid: string, body: any): Promise<Record
           ? ` — covers ${r.coveragePerUnit} ${r.coverageUnit} per unit`
           : '';
         const keywords = r.keywords?.length ? ` [keywords: ${r.keywords.join(', ')}]` : '';
-        return `- "${r.name}" — ${r.price} per ${r.unit}${coverage}${keywords}`;
+        return `- "${r.name}" — $${r.price} per ${r.unit}${coverage}${keywords}`;
       }).join('\n');
       savedRatesSection = `\n\nUSER'S SAVED SUPPLIER RATES — PREFER THESE OVER RETAIL\nThe tradie has personal supplier rates below. If a required material semantically matches one of these (by name, keywords, or job context), you MUST use that rate's unit and price instead of generating a generic retail search term.\n\n${lines}\n\nMatching rules:\n1. Match by meaning, not exact name. "concrete" matches a saved rate keyworded ["concrete","slab","footing"].\n2. If a rate has coveragePerUnit, that means one purchasable unit covers that much work-volume or work-area. Compute quantity = ceil(jobAmount / coveragePerUnit) where jobAmount is measured in coverageUnit. Examples: a sheet that covers 13 m² and a 40 m² wall → ceil(40/13) = 4 sheets; a mulch bag containing 0.5 m³ and a 2 m³ bed → ceil(2/0.5) = 4 bags. Always round UP — the tradie can't buy a fraction of a packaged unit.\n3. If the job gives an area but the rate is per m³ (e.g. ready-mix concrete sold loose by the m³ with no coveragePerUnit), pick a sensible slab thickness from job context (driveway ~125mm, residential slab ~100mm, footpath ~75mm) and explain your assumption in "reasoning". Compute m³ = area × thickness.\n4. For matched items set "savedRateName" to the exact saved rate name and "pricingSource": "saved_rate". Do NOT generate a retail searchTerm for these — leave searchTerm empty.\n5. Items with no matching saved rate flow through the normal retail pricing path — generate generic searchTerms for them as usual.\n`;
     }
@@ -15526,6 +15526,7 @@ export const onPricingRunCreated = functions
         notify: async (event, vars, data) => {
           await sendAussiePush(userId, event, vars, data);
         },
+        loadPlan: () => getUserPlanServerSide(userId),
       }),
       deps: serverPipelineDeps(userId),
       log: functions.logger,

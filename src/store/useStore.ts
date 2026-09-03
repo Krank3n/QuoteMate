@@ -3320,7 +3320,7 @@ export const useStore = create<AppState>((set, get) => ({
           {
             quoteId,
             kind: options.kind ?? 'draft',
-            options: { isPro, stripLabour: rateLineCount > 0, labourOnly: !!options.labourOnly },
+            options: { stripLabour: rateLineCount > 0, labourOnly: !!options.labourOnly },
           },
           { onProgress: (status) => reportProgress(status) },
         );

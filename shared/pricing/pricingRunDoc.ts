@@ -11,9 +11,12 @@ import type { WorkingStatus } from './progress';
 export type PricingRunKind = 'draft' | 'scope';
 export type PricingRunStatus = 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
 
+/**
+ * What the phone asks for. The plan (and with it photo vision) is NOT here:
+ * the server resolves it from the subscription document, so a run document
+ * cannot hand its author a tier they don't have.
+ */
 export interface PricingRunOptions {
-  /** Pro plans get photo/plan vision in the analyse pass. */
-  isPro: boolean;
   /** Labour is charged through rate lines, so the analysis's hours come off. */
   stripLabour: boolean;
   /** Keep hours + sections, drop the gear list and skip pricing. */
