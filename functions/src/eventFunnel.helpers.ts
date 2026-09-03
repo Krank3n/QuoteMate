@@ -518,10 +518,19 @@ export interface OutcomeDocInput {
   rejected: boolean;
   /** email | sms | share | export_pdf | manual, or null when the first send predates the field. */
   sendMethod: string | null;
+  /**
+   * An acceptance link was minted for it (email and SMS sends carry one; a
+   * shared or exported PDF and a hand-marked send do not). Only linked quotes
+   * can ever be opened, so the open rate is measured against these.
+   */
+  withLink: boolean;
 }
 
 export interface OutcomeBreakdown {
-  /** Users with at least one sent quote. Every bucket below sums to this. */
+  /**
+   * Users at or past quote_sent on the shared ladder — the same population
+   * as shared.quoteSent, so the two panels agree. Every bucket sums to this.
+   */
   senders: number;
   /** Senders by best outcome — exclusive. */
   buckets: Record<OutcomeBucket, number>;
@@ -529,14 +538,14 @@ export interface OutcomeBreakdown {
   monetized: Record<OutcomeBucket, number>;
   /** Raw, not implied: senders with ≥1 quote a customer actually opened. */
   openedLink: number;
-  /** Quotes, not users. `opened` is the raw link-open count. */
-  quotes: { sent: number; opened: number; accepted: number; rejected: number };
+  /** Quotes, not users. `withLink` had a link to open; `opened` is the raw link-open count. */
+  quotes: { sent: number; withLink: number; opened: number; accepted: number; rejected: number };
   /** Hours from send to the customer's first open, per quote that was opened. One decimal. */
   hoursToOpen: WaitSummary;
   /** Hours from send to acceptance, per accepted quote with a known accept time. One decimal. */
   hoursToAccept: WaitSummary;
-  /** Per send channel: quotes sent, and how many a customer opened / accepted. */
-  bySendMethod: Record<string, { sent: number; opened: number; accepted: number }>;
+  /** Per send channel: quotes sent, how many carried a link, and how many a customer opened / accepted. */
+  bySendMethod: Record<string, { sent: number; withLink: number; opened: number; accepted: number }>;
 }
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -557,16 +566,21 @@ export function bestOutcome(docs: Pick<OutcomeDocInput, 'accepted' | 'rejected' 
 
 /**
  * Roll sent quotes up into the outcome breakdown. `inputs` supplies the sender
- * population (hasSentDoc) and who is monetised; docs whose uid is not in it
- * (test accounts, deleted users) are ignored. A sender with no doc rows —
- * possible when their only sent document is invoice-shaped — lands in
- * never_opened, so the buckets always sum to senders.
+ * population — everyone at or past quote_sent on the ladder, which includes a
+ * user whose only evidence of sending is a customer having opened or accepted
+ * a legacy quote with no documents twin — and who is monetised. Docs whose uid
+ * is not in it (test accounts, deleted users) are ignored. A sender's bucket
+ * is the best of what their quote rows say and what their user-level flags
+ * say, so those twin-less legacy quotes still land where they belong rather
+ * than in never_opened; a sender with no rows and no flags (an invoice-only
+ * sender) is never_opened. The buckets always sum to senders.
  */
 export function rollupOutcomes(
   docs: OutcomeDocInput[],
   inputs: EventFunnelUserInput[]
 ): OutcomeBreakdown {
-  const senders = inputs.filter((u) => u.hasSentDoc);
+  const sentRank = sharedStageRank('quote_sent');
+  const senders = inputs.filter((u) => sharedStageRank(furthestStage(u).shared) >= sentRank);
   const senderIds = new Set(senders.map((u) => u.uid));
   const byUid = new Map<string, OutcomeDocInput[]>();
   for (const d of docs) {
@@ -581,27 +595,39 @@ export function rollupOutcomes(
   let openedLink = 0;
   for (const u of senders) {
     const mine = byUid.get(u.uid) ?? [];
-    const bucket = bestOutcome(mine);
+    const fromRows = bestOutcome(mine);
+    const fromFlags: OutcomeBucket = u.hasAcceptedDoc
+      ? 'accepted'
+      : u.hasViewedDoc
+        ? 'opened_no_answer'
+        : 'never_opened';
+    const bucket =
+      OUTCOME_BUCKETS.indexOf(fromFlags) > OUTCOME_BUCKETS.indexOf(fromRows) ? fromFlags : fromRows;
     buckets[bucket]++;
     if (isMonetized(u)) monetized[bucket]++;
-    if (mine.some((d) => d.firstViewedAt !== null)) openedLink++;
+    if (u.hasViewedDoc || mine.some((d) => d.firstViewedAt !== null)) openedLink++;
   }
 
-  const quotes = { sent: 0, opened: 0, accepted: 0, rejected: 0 };
+  const quotes = { sent: 0, withLink: 0, opened: 0, accepted: 0, rejected: 0 };
   const toOpen: number[] = [];
   const toAccept: number[] = [];
-  const bySendMethod: Record<string, { sent: number; opened: number; accepted: number }> = {};
+  const bySendMethod: Record<string, { sent: number; withLink: number; opened: number; accepted: number }> = {};
   for (const d of docs) {
     if (!senderIds.has(d.uid)) continue;
     quotes.sent++;
     const opened = d.firstViewedAt !== null;
+    // An open proves a link existed even if the token fields were later lost.
+    const withLink = d.withLink || opened;
+    if (withLink) quotes.withLink++;
     if (opened) quotes.opened++;
     if (d.accepted) quotes.accepted++;
     if (d.rejected) quotes.rejected++;
 
     const method = d.sendMethod || 'unknown';
-    const row = bySendMethod[method] ?? (bySendMethod[method] = { sent: 0, opened: 0, accepted: 0 });
+    const row =
+      bySendMethod[method] ?? (bySendMethod[method] = { sent: 0, withLink: 0, opened: 0, accepted: 0 });
     row.sent++;
+    if (withLink) row.withLink++;
     if (opened) row.opened++;
     if (d.accepted) row.accepted++;
 

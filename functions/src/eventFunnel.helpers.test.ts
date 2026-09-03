@@ -750,6 +750,7 @@ describe('rollupOutcomes', () => {
     accepted: false,
     rejected: false,
     sendMethod: 'email',
+    withLink: true,
     ...over,
   });
   const paidSub = { ...billedSub, trialStartedAt: trialSub.trialStartedAt };
@@ -763,6 +764,9 @@ describe('rollupOutcomes', () => {
       user({ uid: 'won-by-hand', sub: trialSub, hasSentDoc: true, hasSquarePayment: true }),
       // Sent an invoice only — no quote rows — still a sender, lands in never_opened.
       user({ uid: 'invoice-only', sub: trialSub, hasSentDoc: true }),
+      // Legacy quote with no documents twin: no rows, no hasSentDoc, but a
+      // customer opened it — a sender by the ladder's rules, bucketed by flags.
+      user({ uid: 'twinless-viewed', sub: trialSub, hasViewedDoc: true }),
       user({ uid: 'drafter', sub: trialSub, hasQuoteDraft: true }),
     ];
     const docs = [
@@ -778,12 +782,24 @@ describe('rollupOutcomes', () => {
 
     const o = rollupOutcomes(docs, inputs);
 
-    expect(o.senders).toBe(6);
-    expect(o.buckets).toEqual({ never_opened: 2, opened_no_answer: 1, rejected: 1, accepted: 2 });
+    expect(o.senders).toBe(7);
+    expect(o.buckets).toEqual({ never_opened: 2, opened_no_answer: 2, rejected: 1, accepted: 2 });
     expect(o.monetized).toEqual({ never_opened: 1, opened_no_answer: 0, rejected: 0, accepted: 2 });
-    // Raw opens: the hand-marked acceptance never had its link opened.
-    expect(o.openedLink).toBe(3);
-    expect(o.quotes).toEqual({ sent: 6, opened: 3, accepted: 2, rejected: 1 });
+    // Raw opens: the hand-marked acceptance never had its link opened; the
+    // twin-less legacy view counts through its flag.
+    expect(o.openedLink).toBe(4);
+    expect(o.quotes).toEqual({ sent: 6, withLink: 6, opened: 3, accepted: 2, rejected: 1 });
+  });
+
+  it('agrees with the ladder on who is a sender, so the two panels never disagree', () => {
+    const inputs = [
+      user({ uid: 'sent', hasSentDoc: true }),
+      user({ uid: 'accepted-only-flag', hasAcceptedDoc: true }),
+      user({ uid: 'drafter', hasQuoteDraft: true }),
+    ];
+    const payload = rollupEventFunnel(inputs, NOW, 30, []);
+    expect(payload.outcomes.senders).toBe(payload.shared.quoteSent);
+    expect(payload.outcomes.buckets.accepted).toBe(1);
   });
 
   it('measures time to open and time to accept per quote, in hours to one decimal', () => {
@@ -804,19 +820,26 @@ describe('rollupOutcomes', () => {
     expect(o.hoursToAccept).toEqual({ samples: 2, median: 65, p90: 100, max: 100 });
   });
 
-  it('splits sent / opened / accepted by the channel the quote went out on', () => {
+  it('splits sent / linked / opened / accepted by the channel the quote went out on', () => {
     const inputs = [user({ uid: 'u', hasSentDoc: true })];
     const docs = [
       doc({ sendMethod: 'email' }),
       doc({ sendMethod: 'email', firstViewedAt: NOW }),
       doc({ sendMethod: 'sms', firstViewedAt: NOW, accepted: true }),
+      // A PDF share carries no link, so it can never be opened.
+      doc({ sendMethod: 'export_pdf', withLink: false }),
+      // Token fields lost but a customer opened it: the open proves the link.
+      doc({ sendMethod: 'sms', withLink: false, firstViewedAt: NOW }),
       doc({ sendMethod: null }),
     ];
-    expect(rollupOutcomes(docs, inputs).bySendMethod).toEqual({
-      email: { sent: 2, opened: 1, accepted: 0 },
-      sms: { sent: 1, opened: 1, accepted: 1 },
-      unknown: { sent: 1, opened: 0, accepted: 0 },
+    const o = rollupOutcomes(docs, inputs);
+    expect(o.bySendMethod).toEqual({
+      email: { sent: 2, withLink: 2, opened: 1, accepted: 0 },
+      sms: { sent: 2, withLink: 2, opened: 2, accepted: 1 },
+      export_pdf: { sent: 1, withLink: 0, opened: 0, accepted: 0 },
+      unknown: { sent: 1, withLink: 1, opened: 0, accepted: 0 },
     });
+    expect(o.quotes.withLink).toBe(5);
   });
 
   it('is all zeros with no senders, and rides on the main payload', () => {

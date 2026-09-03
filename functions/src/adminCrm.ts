@@ -2006,13 +2006,18 @@ export async function computeEventFunnelPayload(): Promise<
   // per-quote outcome rows can pick up their first-open time.
   const viewedUids = new Set<string>();
   const firstViewedByKey = new Map<string, number | null>();
+  const linkedKeys = new Set<string>();
   for (const d of quotesSnap.docs) {
     const uid = d.ref.parent.parent?.id;
     if (!uid || isRecoveredDocId(d.id)) continue;
     const q = d.data() as any;
+    const key = `${uid}/${d.id}`;
+    // Any of the token fields (hashed, legacy plaintext, or the mint stamp)
+    // means an acceptance link was created for this quote.
+    if (q.acceptanceTokenHash || q.acceptanceToken || q.acceptanceTokenCreatedAt) linkedKeys.add(key);
     if (!isViewedDoc(q)) continue;
     viewedUids.add(uid);
-    firstViewedByKey.set(`${uid}/${d.id}`, toMillis(q.firstViewedAt) ?? toMillis(q.lastViewedAt));
+    firstViewedByKey.set(key, toMillis(q.firstViewedAt) ?? toMillis(q.lastViewedAt));
   }
 
   // One pass over every document: draft / activated / viewed / accepted /
@@ -2054,6 +2059,7 @@ export async function computeEventFunnelPayload(): Promise<
         accepted,
         rejected: data.stage === 'quote_rejected',
         sendMethod: typeof data.sendMethod === 'string' && data.sendMethod ? data.sendMethod : null,
+        withLink: linkedKeys.has(key) || data.acceptanceTokenCreatedAt != null,
       });
     }
   }
@@ -2146,6 +2152,7 @@ export const aggregateEventFunnel = functions
         `viaPush=${payload.returns.viaPush} byType=${JSON.stringify(payload.returns.byPushType)}; ` +
         `outcomes: senders=${payload.outcomes.senders} buckets=${JSON.stringify(payload.outcomes.buckets)} ` +
         `monetized=${JSON.stringify(payload.outcomes.monetized)} openedLink=${payload.outcomes.openedLink} ` +
+        `withLink=${payload.outcomes.quotes.withLink} ` +
         `quotes=${JSON.stringify(payload.outcomes.quotes)} ` +
         `hoursToOpen(median/p90)=${payload.outcomes.hoursToOpen.median}/${payload.outcomes.hoursToOpen.p90} ` +
         `over ${payload.outcomes.hoursToOpen.samples}, hoursToAccept=${payload.outcomes.hoursToAccept.median}/` +
