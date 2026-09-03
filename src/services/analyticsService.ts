@@ -112,9 +112,15 @@ export type AnalyticsEvent =
   | 'nudge_dismissed'
   // — Conversion funnel (trial→monetised engine, Step 1) —
   // Paywall lifecycle. `source` names the surface that sent the user here
-  // (send_gate / trial_banner / dashboard / unknown).
+  // (send_gate / trial_banner / dashboard / job_won / unknown).
   | 'paywall_viewed'
   | 'paywall_dismissed'
+  // The "job won" sheet — the offer shown right after a quote is marked
+  // accepted, the first moment the app has visibly earned its keep. `shown`
+  // fires once per sheet (non-Pro only, capped once per doc / once per 7 days);
+  // `tapped` carries `outcome` (see_pro / not_now) so take-rate is measurable.
+  | 'won_prompt_shown'
+  | 'won_prompt_tapped'
   // Purchase flow: started → completed | failed | unconfirmed. User-cancels are
   // not failures and are never tracked as such.
   | 'checkout_started'

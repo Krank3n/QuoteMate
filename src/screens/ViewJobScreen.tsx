@@ -14,6 +14,7 @@ import { Text, Card, Button, TextInput, Snackbar } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { formatDistanceToNow } from 'date-fns';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import type { Job, JobStage } from '../../shared/job/types';
 import { useJobStore } from '../store/useJobStore';
@@ -53,10 +54,12 @@ import { getReeceConnectionStatus } from '../services/reeceApi';
 import { SendDocumentDialog } from '../components/SendDocumentDialog';
 import { warmEmailDraft } from '../utils/emailDraft';
 import { FollowUpSheet, type FollowUpTone } from '../components/FollowUpSheet';
+import { JobWonSheet } from '../components/JobWonSheet';
 import type { Document, DocumentStage } from '../types/document';
 import { documentToQuote, documentToInvoice } from '../types/documentAdapter';
 import { applyStageChange } from '../utils/applyStageChange';
 import { maybeRequestReview } from '../services/storeReviewService';
+import { parseWonPromptState, shouldShowWonPrompt, recordWonPromptShown } from '../utils/wonPrompt';
 import { ensureSquareConnectedForPayment } from '../utils/quoteDeliveryGuard';
 import { applyJobStageChange } from '../utils/applyJobStageChange';
 import { cascadeDeleteJob, pickPaidDocs } from '../utils/deleteJobWithDocs';
@@ -110,6 +113,7 @@ export function ViewJobScreen() {
     doc: Document;
     tone: FollowUpTone;
   } | null>(null);
+  const [wonSheetDoc, setWonSheetDoc] = useState<Document | null>(null);
   const [pendingAction, setPendingAction] = useState<JobActionId | null>(null);
   const [reeceConnected, setReeceConnected] = useState<boolean | null>(null);
   const { showAlert, dismissAlert, alertNode } = useAlertModal();
@@ -426,6 +430,40 @@ export function ViewJobScreen() {
     });
   };
 
+  // The "job won" offer. Runs after a quote is accepted, once the OS review
+  // prompt has been ruled out for this win (they must never stack). Non-Pro
+  // only, capped once per doc and once per 7 days via AsyncStorage — the pure
+  // decision lives in wonPrompt.ts. Fully swallowed: it must never disrupt the
+  // win it follows.
+  const WON_PROMPT_KEY = 'won_prompt_state';
+  const maybeShowWonPrompt = async (doc: Document) => {
+    try {
+      const plan = getEffectivePlan();
+      if (plan === 'pro') return;
+      const state = parseWonPromptState(await AsyncStorage.getItem(WON_PROMPT_KEY));
+      const now = Date.now();
+      if (
+        !shouldShowWonPrompt({
+          plan,
+          docId: doc.id,
+          shownDocIds: state.shownDocIds,
+          lastShownAt: state.lastShownAt,
+          now,
+        })
+      ) {
+        return;
+      }
+      // Persist the cap BEFORE showing, so a crash mid-sheet can't re-offer.
+      await AsyncStorage.setItem(
+        WON_PROMPT_KEY,
+        JSON.stringify(recordWonPromptShown(state, doc.id, now)),
+      ).catch(() => {});
+      setWonSheetDoc(doc);
+    } catch {
+      // Never let the offer disrupt the win flow.
+    }
+  };
+
   // Sticky-bar action dispatcher. One entry point so the bar's children
   // stay dumb — every CTA just reports its id, we resolve the side-effect
   // here against the store / nav / sheet state.
@@ -477,8 +515,15 @@ export function ViewJobScreen() {
           }
           await saveJob({ ...job, stage: 'accepted' });
           // Quote accepted (not via the tap-to-pay flow, which leads straight
-          // into payment) — opportunistic store-review ask, rate-limited.
-          maybeRequestReview('quote_accepted').catch(() => {});
+          // into payment) — opportunistic store-review ask, rate-limited. If it
+          // actually fires the OS prompt, stand the job-won sheet down for this
+          // win so two sheets never stack; otherwise offer Pro on the win.
+          {
+            const reviewShown = await maybeRequestReview('quote_accepted').catch(() => false);
+            if (!reviewShown && actionableDoc && actionableDoc.type === 'quote') {
+              await maybeShowWonPrompt(actionableDoc);
+            }
+          }
           break;
         case 'takeDeposit':
           if (actionableDoc && actionableDoc.type === 'quote') {
@@ -1077,6 +1122,13 @@ export function ViewJobScreen() {
           jobName={job.name || 'the job'}
         />
       ) : null}
+
+      <JobWonSheet
+        visible={!!wonSheetDoc}
+        onDismiss={() => setWonSheetDoc(null)}
+        name={job.customerName || job.name || 'the job'}
+        total={Number(wonSheetDoc?.total ?? 0)}
+      />
 
       {alertNode}
 

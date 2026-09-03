@@ -54,10 +54,15 @@ async function readState(ref: DocumentReference | null): Promise<AppReviewState>
 /**
  * Call from a genuine happy moment. Records the event and, if every gate
  * passes, shows the native review prompt. Never throws.
+ *
+ * Returns true only when we actually invoked the OS review prompt for this
+ * call, so a caller sharing the same happy moment (the "job won" sheet) can
+ * stand aside rather than stack a second sheet on top of it. Every early
+ * return — web, already-prompted, cooling off — reports false.
  */
-export async function maybeRequestReview(_event: HappyEvent): Promise<void> {
+export async function maybeRequestReview(_event: HappyEvent): Promise<boolean> {
   try {
-    if (Platform.OS === 'web') return;
+    if (Platform.OS === 'web') return false;
 
     const ref = reviewDocRef();
     const state = await readState(ref);
@@ -69,11 +74,11 @@ export async function maybeRequestReview(_event: HappyEvent): Promise<void> {
       await setDoc(ref, { happyEvents: increment(1), updatedAt: serverTimestamp() }, { merge: true });
     }
 
-    if (promptedThisSession) return;
-    if (priorHappyEvents < 1) return; // require at least one EARLIER happy moment
-    if (state.lastPromptedAt && Date.now() - state.lastPromptedAt < NINETY_DAYS_MS) return;
-    if (!(await StoreReview.isAvailableAsync())) return;
-    if (!(await StoreReview.hasAction())) return;
+    if (promptedThisSession) return false;
+    if (priorHappyEvents < 1) return false; // require at least one EARLIER happy moment
+    if (state.lastPromptedAt && Date.now() - state.lastPromptedAt < NINETY_DAYS_MS) return false;
+    if (!(await StoreReview.isAvailableAsync())) return false;
+    if (!(await StoreReview.hasAction())) return false;
 
     await StoreReview.requestReview();
 
@@ -86,7 +91,9 @@ export async function maybeRequestReview(_event: HappyEvent): Promise<void> {
         { merge: true },
       );
     }
+    return true;
   } catch {
     // Swallow — a failed review prompt must never disrupt the caller.
+    return false;
   }
 }
