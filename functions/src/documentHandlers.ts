@@ -33,6 +33,7 @@ import {
   generateQuotePdfBuffer,
 } from './pdfGenerator';
 import { formatAuDate } from './timestamps.helpers';
+import { shouldEmbedEmailOpenPixel } from './emailOpenPixel';
 import { hashTerms } from './shared/pdf/terms/defaultAuTradie';
 import { toPdfMaterials, toPdfSections } from './shared/pdf/mapMaterial';
 import {
@@ -586,7 +587,8 @@ export interface SendDocumentEmailInput {
    * is environment-specific and the crypto stays out of this module.
    * Present ⇒ a real customer send: a token is minted, an emailOpenTokens
    * doc is written, and the pixel URL is embedded in the customer HTML.
-   * Absent (test sends, invoice sends) ⇒ no pixel and no token doc.
+   * Absent (test sends, invoice sends, self-copy sends) ⇒ no pixel and no
+   * token doc — see shouldEmbedEmailOpenPixel.
    */
   emailOpenPixelUrlForToken?: (token: string) => string;
   generateEmailOpenToken?: () => { token: string; hashedToken: string };
@@ -761,10 +763,15 @@ async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailRes
   // Email-open pixel: mint a separate 256-bit token (never the acceptance
   // token — the pixel URL sits in a customer's inbox history for the life of
   // the email) and stash the hash for the trackEmailOpen handler to resolve.
-  // Only real customer sends get one; test sends to the tradie's own inbox
-  // would poison the open metrics.
+  // Only sends that land in a customer's inbox alone get one — a test send,
+  // or a send BCC'd back to the tradie, would read their own open as the
+  // customer's (the BCC carries the same html, so the same token).
   let emailOpenPixelUrl: string | undefined;
-  if (!isTestSend && input.generateEmailOpenToken && input.emailOpenPixelUrlForToken) {
+  if (
+    shouldEmbedEmailOpenPixel({ isTestSend, sendCopyToSelf: input.sendCopyToSelf })
+    && input.generateEmailOpenToken
+    && input.emailOpenPixelUrlForToken
+  ) {
     const { token: openToken, hashedToken: openHash } = input.generateEmailOpenToken();
     batch.set(firestore.doc(`emailOpenTokens/${openHash}`), {
       userId,

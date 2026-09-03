@@ -552,6 +552,12 @@ export interface OutcomeBreakdown {
    *  - `emailOpened` is the raw email-open count (the pixel loaded at least
    *    once). Sits between `sent` and `opened` on the ladder — the reader
    *    can now tell "email never opened" from "opened but the link ignored".
+   *    Read it as an UPPER bound: Apple Mail Privacy Protection and
+   *    corporate scanners fetch the image at delivery, so an open within
+   *    about a minute of the send is likely a proxy prefetch, not a person.
+   *    trackEmailOpen stamps emailFirstOpenAfterMs (millis from send to
+   *    first open) on the quote so those can be separated later; this count
+   *    deliberately doesn't try to guess yet.
    *  - `opened` is the raw acceptance-link-open count.
    */
   quotes: {
@@ -647,9 +653,10 @@ export function rollupOutcomes(
     if (!senderIds.has(d.uid)) continue;
     quotes.sent++;
     const opened = d.firstViewedAt !== null;
-    // An open (of the link) or an email-open both prove a link existed even
-    // when the token fields were later lost.
-    const withLink = d.withLink || opened || d.emailOpened;
+    // An open proves a link existed even if the token fields were later lost.
+    // An EMAIL-open doesn't: the pixel rides on every customer quote email,
+    // link or no link.
+    const withLink = d.withLink || opened;
     if (withLink) quotes.withLink++;
     if (d.emailOpened) quotes.emailOpened++;
     if (opened) quotes.opened++;

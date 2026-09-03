@@ -867,16 +867,17 @@ describe('rollupOutcomes', () => {
     });
   });
 
-  it('an email-open on a doc whose token fields were lost still proves a link existed', () => {
-    // A pre-pixel legacy quote could have a stamped emailFirstOpenedAt (from
-    // a backfill) without its acceptanceToken fields — the join has to treat
-    // emailOpened as evidence of `withLink`, same rule as `opened` already is.
+  it('an email-open is not evidence of an acceptance link — the pixel rides on every send', () => {
+    // The pixel is embedded whether or not the html carried an acceptance
+    // link, so an open says the EMAIL was opened and nothing about a link.
+    // Only a link-open (firstViewedAt) back-fills `withLink`.
     const inputs = [user({ uid: 'u', hasSentDoc: true })];
-    const docs = [doc({ sendMethod: 'sms', withLink: false, emailOpened: true })];
+    const docs = [doc({ sendMethod: 'email', withLink: false, emailOpened: true })];
     const o = rollupOutcomes(docs, inputs);
-    expect(o.quotes.withLink).toBe(1);
+    expect(o.quotes.withLink).toBe(0);
     expect(o.quotes.emailOpened).toBe(1);
-    expect(o.bySendMethod.sms.withLink).toBe(1);
+    expect(o.bySendMethod.email.withLink).toBe(0);
+    expect(o.bySendMethod.email.emailOpened).toBe(1);
   });
 
   it('is all zeros with no senders, and rides on the main payload', () => {

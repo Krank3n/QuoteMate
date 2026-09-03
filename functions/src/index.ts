@@ -223,6 +223,12 @@ import { sendExpoPushNotifications } from './expoPush';
 import { hashTerms } from './shared/pdf/terms/defaultAuTradie';
 import { generateQuotePdfBuffer } from './pdfGenerator';
 import { normaliseTimestamp } from './timestamps.helpers';
+import {
+  emailOpenPixelUrlForToken,
+  generateEmailOpenToken,
+  handleEmailOpen,
+  hashEmailOpenToken,
+} from './emailOpenPixel';
 import { processAndStoreLogo } from './logoProcessing';
 import { dollarsToCents, centsToDollars } from './shared/pdf/money';
 import { validateAndRepairAiOutput } from './shared/ai/validateAiOutput';
@@ -6036,19 +6042,6 @@ export function acceptancePageUrlForToken(token: string): string {
   return `${base}?token=${token}`;
 }
 
-// Pure helpers for the email-open pixel — the URL builder, the token minter,
-// the GIF bytes, headers, and the stamp shape. Kept in their own module so
-// each piece is unit-testable without the admin SDK.
-import {
-  EMAIL_OPEN_PIXEL_GIF,
-  EMAIL_OPEN_PIXEL_HEADERS,
-  buildEmailOpenStamp,
-  emailOpenPixelUrlForToken,
-  generateEmailOpenToken,
-  hashEmailOpenToken,
-  isWellFormedEmailOpenToken,
-} from './emailOpenPixel';
-
 /**
  * Email-open tracking pixel. The customer-facing quote email embeds a 1x1
  * GIF whose URL carries a random 256-bit token; when the mail client fetches
@@ -6060,67 +6053,59 @@ import {
  * can tell "email never delivered" from "opened but the customer didn't
  * click through".
  *
- * The response ALWAYS returns the 1x1 GIF with no-cache headers — an
- * unknown token, a malformed token, a Firestore hiccup, all of them look
- * identical to the mail client. Anything else risks a broken-image icon in
- * the customer's inbox, or the client caching one response and never
- * re-fetching on subsequent opens (the count then reads as 1 forever). Every
- * hit is counted; deliberately no de-duping — a re-open IS the signal.
+ * Thin wrapper: every decision lives in handleEmailOpen (emailOpenPixel.ts),
+ * which always resolves to the GIF, never creates a missing quote doc, and
+ * throttles repeat writes. This end only supplies the Firestore reads and
+ * the admin sentinels. maxInstances caps a public unauthenticated endpoint
+ * so a scanner can't scale it out over the rest of the project.
  */
-export const trackEmailOpen = functions.https.onRequest(async (req, res) => {
-  // No CORS: <img src> requests from a mail client aren't cross-origin in
-  // the JS sense, and this endpoint has nothing to give a browser JS caller
-  // anyway. No auth either — it lives in the customer's inbox.
-
-  // Write headers up front so a Firestore error below still ships the pixel.
-  res.set(EMAIL_OPEN_PIXEL_HEADERS);
-  const shipPixel = () => {
-    res.status(200).send(EMAIL_OPEN_PIXEL_GIF);
-  };
-
-  try {
-    const raw = req.query.t;
-    if (!isWellFormedEmailOpenToken(raw)) {
-      // Malformed / missing: still return the pixel so a preview scraper or
-      // a manually edited URL never sees an error. Log nothing sensitive.
-      shipPixel();
-      return;
-    }
-    const token = raw;
+export const trackEmailOpen = functions
+  .runWith({ maxInstances: 10 })
+  .https.onRequest(async (req, res) => {
+    // No CORS: <img src> requests from a mail client aren't cross-origin in
+    // the JS sense, and this endpoint has nothing to give a browser JS caller
+    // anyway. No auth either — it lives in the customer's inbox.
     const db = admin.firestore();
-    const tokenHash = hashEmailOpenToken(token);
-    const tokenSnap = await db.collection('emailOpenTokens').doc(tokenHash).get();
-    if (!tokenSnap.exists) {
-      shipPixel();
-      return;
-    }
-    const tokenData = tokenSnap.data() as { userId?: unknown; quoteId?: unknown } | undefined;
-    const userId = typeof tokenData?.userId === 'string' ? tokenData.userId : '';
-    const quoteId = typeof tokenData?.quoteId === 'string' ? tokenData.quoteId : '';
-    if (!userId || !quoteId) {
-      shipPixel();
-      return;
-    }
-    const quoteRef = db.doc(`users/${userId}/quotes/${quoteId}`);
-    const quoteSnap = await quoteRef.get();
-    // Absent quote is possible on a legacy delete; still count the open (the
-    // stamp merges onto whatever id survives) rather than error out.
-    const hasFirstOpen = !!(quoteSnap.exists && quoteSnap.data()?.emailFirstOpenedAt);
-    await quoteRef.set(
-      buildEmailOpenStamp({
-        hasFirstOpen,
-        now: admin.firestore.FieldValue.serverTimestamp(),
-        increment: admin.firestore.FieldValue.increment(1),
-      }),
-      { merge: true },
-    );
-    shipPixel();
-  } catch (err: any) {
-    // Never surface to the mail client. Log for our own visibility.
-    functions.logger.warn('trackEmailOpen_failed', { message: err?.message });
-    shipPixel();
-  }
-});
+    const result = await handleEmailOpen({
+      token: req.query.t,
+      now: Date.now(),
+      serverTimestamp: admin.firestore.FieldValue.serverTimestamp(),
+      increment: admin.firestore.FieldValue.increment(1),
+      lookupToken: async (tokenHash) => {
+        const snap = await db.collection('emailOpenTokens').doc(tokenHash).get();
+        if (!snap.exists) return null;
+        const data = snap.data() as { userId?: unknown; quoteId?: unknown } | undefined;
+        const userId = typeof data?.userId === 'string' ? data.userId : '';
+        const quoteId = typeof data?.quoteId === 'string' ? data.quoteId : '';
+        return userId && quoteId ? { userId, quoteId } : null;
+      },
+      readQuote: async ({ userId, quoteId }) => {
+        const snap = await db.doc(`users/${userId}/quotes/${quoteId}`).get();
+        // Deleted quote: null, so the handler writes nothing. An update()
+        // would throw and a merge set() would resurrect it as a blank draft.
+        if (!snap.exists) return null;
+        const data = snap.data() || {};
+        return {
+          hasFirstOpen: data.emailFirstOpenedAt != null,
+          lastOpenedAtMs: normaliseTimestamp(data.emailLastOpenedAt)?.getTime() ?? null,
+          sentAtMs: normaliseTimestamp(data.sentAt)?.getTime() ?? null,
+        };
+      },
+      writeStamp: async ({ userId, quoteId }, stamp) => {
+        // update(), never set({ merge: true }) — the doc is known to exist
+        // and must never be created by a pixel hit. Typed `any` like the
+        // sibling firstViewedAt stamp: Firestore's update() signature wants
+        // an index signature a named interface can't satisfy.
+        const update: any = stamp;
+        await db.doc(`users/${userId}/quotes/${quoteId}`).update(update);
+      },
+      onError: (err: any) => {
+        functions.logger.warn('trackEmailOpen_failed', { message: err?.message });
+      },
+    });
+    res.set(result.headers);
+    res.status(result.status).send(result.body);
+  });
 
 /**
  * Generate a secure acceptance token for a quote
