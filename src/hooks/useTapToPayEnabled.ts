@@ -26,13 +26,37 @@ import { useEffect, useState } from 'react';
 import { Platform } from 'react-native';
 import { doc, getDoc } from 'firebase/firestore';
 
-import { db } from '../config/firebase';
+import { auth, db } from '../config/firebase';
 import { isTapToPayCapable } from '../services/squarePayments';
 import { isTapToPayOsSupported } from '../services/tapToPayErrors';
 
 interface TapToPayFlag {
   ios?: boolean;
   android?: boolean;
+  /**
+   * UIDs allowed through regardless of the platform flag.
+   *
+   * Exists because a Release build has no `__DEV__` bypass, so the only way to
+   * exercise Tap to Pay on iPhone before the publishing entitlement lands would
+   * otherwise be flipping `ios` globally — which would light the row up for
+   * every tradie on an App Store build, none of which carry the entitlement at
+   * all. Apple's flow recordings have to be shot on a Release build (a debug
+   * one shows the Expo dev launcher), so this is the only safe way to film.
+   *
+   * Empty in normal operation. Clear it once `ios` goes true for real.
+   */
+  allowUserIds?: string[];
+  /**
+   * Same escape hatch, matched on email instead.
+   *
+   * Needed because Apple's "New User Flow" recording has to show account
+   * creation, so the account does not exist until the camera is already
+   * rolling — there is no uid to allowlist beforehand. The email is chosen in
+   * advance, so it can be. Compared case-insensitively; addresses are not
+   * case-sensitive in practice and a capitalised sign-up would otherwise fail
+   * silently, mid-shoot.
+   */
+  allowEmails?: string[];
 }
 
 export interface TapToPayState {
@@ -62,8 +86,22 @@ export function useTapToPayEnabled(): TapToPayState {
         const snap = await getDoc(doc(db, 'config', 'squareTapToPay'));
         const flag = (snap.exists() ? snap.data() : {}) as TapToPayFlag;
 
+        const uid = auth.currentUser?.uid ?? null;
+        const email = auth.currentUser?.email?.trim().toLowerCase() ?? null;
+        const allowlisted =
+          (!!uid &&
+            Array.isArray(flag.allowUserIds) &&
+            flag.allowUserIds.includes(uid)) ||
+          (!!email &&
+            Array.isArray(flag.allowEmails) &&
+            flag.allowEmails.some(
+              (e) => typeof e === 'string' && e.trim().toLowerCase() === email,
+            ));
+
         const platformAllowed =
-          __DEV__ || (Platform.OS === 'ios' ? !!flag.ios : !!flag.android);
+          __DEV__ ||
+          allowlisted ||
+          (Platform.OS === 'ios' ? !!flag.ios : !!flag.android);
 
         if (!platformAllowed) {
           if (!cancelled) {
