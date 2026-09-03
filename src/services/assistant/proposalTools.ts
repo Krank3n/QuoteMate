@@ -35,7 +35,6 @@ import { phoneForRecord } from '../../utils/auPhone';
 import { formatCurrency, roundToTwoDecimals } from '../../utils/documentCalculator';
 import { isWorkItem } from '../../../shared/document/lumpSum';
 import { resolveCustomerDraftRef } from './readTools';
-import { fuzzyScoreQuote } from './quoteFuzzy';
 
 /** Whitespace-folded, trimmed, capped — for text that lands in the prompt on every turn. */
 const shortText = (v: unknown): string =>
@@ -151,10 +150,45 @@ export function setPendingScopeUpdateProbe(probe: ((quoteId: string) => boolean)
 
 const nameKey = (v: unknown): string => String(v ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
 
+// Words that name what a quote IS rather than what it is FOR. "Air con
+// install" and "Smoke alarm install" share "install"; they are two jobs.
+const GENERIC_JOB_WORDS = new Set([
+  'install', 'installation', 'installing', 'fit', 'fitting', 'fitout', 'replace', 'replacement', 'replacing', 'repair', 'repairs',
+  'supply', 'new', 'job', 'quote', 'invoice', 'work', 'works', 'the', 'and', 'for', 'with', 'from', 'off', 'out', 'rear', 'front',
+]);
+
+/** The words a job name is about — lower-cased, three letters or more, not generic. */
+function jobWords(name: string): string[] {
+  return name
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((w) => w.length >= 3 && !GENERIC_JOB_WORDS.has(w));
+}
+
+const sameWord = (a: string, b: string): boolean =>
+  a === b || (a.length >= 4 && b.length >= 4 && (a.startsWith(b) || b.startsWith(a)));
+
+/**
+ * Whether two job names describe one job. Half or more of the shorter name's
+ * meaningful words have to appear in the other (a plural or a stem counts);
+ * a single shared common word never does. "Fire detectors - Red Dot" and
+ * "Smoke detector install" are both the one "Install fire detectors" job;
+ * "Air con install" is not.
+ */
+export function jobNamesLookAlike(a: string, b: string): boolean {
+  const wa = jobWords(a);
+  const wb = jobWords(b);
+  if (!wa.length || !wb.length) return false;
+  const [shorter, longer] = wa.length <= wb.length ? [wa, wb] : [wb, wa];
+  const shared = shorter.filter((w) => longer.some((o) => sameWord(w, o))).length;
+  return shared >= Math.ceil(shorter.length / 2);
+}
+
 /**
  * The applied draft a new propose_draft_quote is really a correction of:
- * same customer (id, or name) and a job name that shares its words. A second,
- * different job for the same customer ("and her fence") does not match.
+ * the same customer — by contact id or by name, whichever both sides have —
+ * and a job name that describes the same job. A second, different job for
+ * the same customer ("and her fence") does not match.
  */
 export function findRepeatedDraft(
   applied: AppliedDraft[],
@@ -163,10 +197,10 @@ export function findRepeatedDraft(
   const nextName = nameKey(next.customerName);
   return applied.find((prior) => {
     const sameCustomer =
-      (next.customerId && prior.customerId && next.customerId === prior.customerId) ||
+      (!!next.customerId && !!prior.customerId && next.customerId === prior.customerId) ||
       (!!nextName && nameKey(prior.customerName) === nextName);
     if (!sameCustomer) return false;
-    return fuzzyScoreQuote(next.jobName, prior.jobName, undefined) > 0 || fuzzyScoreQuote(prior.jobName, next.jobName, undefined) > 0;
+    return jobNamesLookAlike(next.jobName, prior.jobName);
   });
 }
 

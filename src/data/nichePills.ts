@@ -212,6 +212,13 @@ export const NICHE_PILLS: Record<string, PillSpec[]> = {
     { id: 'cable',    label: 'Cable run',  keywords: ['cable', 'wire', 'tps', 'conduit', 'cable run', 'ceiling', 'wall', 'roof void'], jsonField: 'cableRun' },
     { id: 'circuit',  label: 'Circuit',    keywords: ['new circuit', 'circuit', 'rcd', 'safety switch', 'breaker', 'mcb', 'spare way'], jsonField: 'circuit' },
   ],
+  [KEY('electrical', 'smoke_alarms')]: [
+    { id: 'count',    label: 'How many',   keywords: [/\b\d+\s*(alarm|detector|smoke)/i, 'alarm', 'detector', 'how many'],           jsonField: 'count' },
+    { id: 'type',     label: 'Hardwired/battery', keywords: ['hardwired', '240v', 'battery', 'lithium', 'mains'],                 jsonField: 'type' },
+    { id: 'link',     label: 'Interconnect', keywords: ['interconnect', 'wireless', 'rf', 'linked', 'wired together'],           jsonField: 'interconnect' },
+    { id: 'replace',  label: 'New/replace', keywords: ['replace', 'replacing', 'existing', 'new install', 'customer supplied'], jsonField: 'replacing' },
+    { id: 'brand',    label: 'Brand',      keywords: ['red dot', 'clipsal', 'brooks', 'psa', 'brand'],                            jsonField: 'brand' },
+  ],
   [KEY('electrical', 'switchboards')]: [
     { id: 'phase',    label: 'Phase',      keywords: ['single phase', 'three phase', '3 phase', 'phase'],                jsonField: 'phase' },
     { id: 'upgrade',  label: 'Upgrade',    keywords: ['upgrade', 'replace board', 'new board', 'main switch'],            jsonField: 'upgrade' },

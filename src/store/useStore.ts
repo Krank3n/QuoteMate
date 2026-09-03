@@ -22,7 +22,7 @@ import { reviewQuoteMaterials, isFlaggedRow, priceResettableIds, topLinesSummary
 import { checkDocumentIntegrity } from '../../shared/document/integrityCheck';
 import { loadTemplates } from '../services/sectionTemplateService';
 import { updateQuoteCalculations, healBrokenLabourSections } from '../utils/quoteCalculator';
-import { updateAllMaterialPrices, updateDocumentCalculations } from '../utils/documentCalculator';
+import { finiteNumber, updateAllMaterialPrices, updateDocumentCalculations } from '../utils/documentCalculator';
 import { applySetTotal, describeSetTotalPlan } from '../utils/setTotal';
 import { normalizePhoneTail } from '../utils/textMatch';
 import { normaliseLabourToHours } from '../../shared/document/labourUnits';
@@ -3219,7 +3219,23 @@ export const useStore = create<AppState>((set, get) => ({
     // whose stored totalPrice drifted from quantity × price, would otherwise
     // move the stored total after the plan had landed on the target.
     const settled = <T extends Quote | Invoice>(doc: T): T =>
-      updateQuoteCalculations({ ...doc, materials: updateAllMaterialPrices(doc.materials ?? []) } as any) as any;
+      updateQuoteCalculations({
+        ...doc,
+        materials: updateAllMaterialPrices(doc.materials ?? []),
+        // The heal skips lump-sum sections, so a lump sum with no laborTotal
+        // would survive as NaN — coerce the way the Document path does.
+        ...(Array.isArray(doc.sections)
+          ? {
+              sections: doc.sections.map((sec) => ({
+                ...sec,
+                laborHours: finiteNumber(sec.laborHours),
+                laborRate: finiteNumber(sec.laborRate),
+                laborTotal: finiteNumber(sec.laborTotal),
+                multiplier: finiteNumber(sec.multiplier) || 1,
+              })),
+            }
+          : {}),
+      } as any) as any;
     const resolveAny = async (id: string): Promise<Targeted | null> => {
       const doc = await resolveDocument(id);
       if (doc) return { kind: 'document', doc };
@@ -3241,18 +3257,26 @@ export const useStore = create<AppState>((set, get) => ({
     // leave its balance where it was. Those belong to a credit or a new
     // invoice, the same line propose_delete_quote draws.
     // The contact a customerDraft names: the saved one when the tradie
-    // already has this person (same name and same number, or same name and
-    // no number on either side — a re-draft of the same job passes the same
-    // draft again), else a fresh one. One smoke-alarm job put the customer in
-    // the book three times (3 Sep 2026). Details the draft adds fill gaps on
-    // the saved contact; they never overwrite what is there.
+    // already has this person, else a fresh one. One smoke-alarm job put the
+    // customer in the book three times (3 Sep 2026). "This person" is the
+    // same name AND the same number; or the same name with no number on
+    // either side; or the same name where the saved contact has no number
+    // and was made in the last day — the re-draft that finally carries the
+    // phone the tradie read out. A stranger who happens to share a name with
+    // an old number-less contact stays a separate person. Details the draft
+    // adds fill gaps on the saved contact; they never overwrite what is there.
+    const RECENT_CONTACT_MS = 24 * 60 * 60 * 1000;
     const contactFromDraft = async (draft: NonNullable<DraftQuoteProposal['customerDraft']>): Promise<Contact> => {
       const nameKey = draft.name.replace(/\s+/g, ' ').trim().toLowerCase();
       const tail = draft.phone ? normalizePhoneTail(draft.phone) : '';
       const existing = get().contacts.find((c) => {
         if (c.name.replace(/\s+/g, ' ').trim().toLowerCase() !== nameKey) return false;
         const theirs = c.phone ? normalizePhoneTail(c.phone) : '';
-        return tail && theirs ? tail === theirs : !tail || !theirs;
+        if (tail && theirs) return tail === theirs;
+        if (!tail && !theirs) return true;
+        if (theirs) return false;
+        const created = Date.parse(c.createdAt || '');
+        return Number.isFinite(created) && Date.now() - created < RECENT_CONTACT_MS;
       });
       if (existing) {
         const filled: Contact = {
@@ -3261,7 +3285,7 @@ export const useStore = create<AppState>((set, get) => ({
           ...(existing.email || !draft.email ? {} : { email: draft.email }),
           ...(existing.address || !draft.address ? {} : { address: draft.address }),
         };
-        if (filled !== existing && (filled.phone !== existing.phone || filled.email !== existing.email || filled.address !== existing.address)) {
+        if (filled.phone !== existing.phone || filled.email !== existing.email || filled.address !== existing.address) {
           await get().saveContact({ ...filled, updatedAt: new Date().toISOString() });
           return filled;
         }
@@ -3281,12 +3305,20 @@ export const useStore = create<AppState>((set, get) => ({
       return fresh;
     };
 
+    // Both record shapes: a Document's stage is 'partially_paid', a legacy
+    // Invoice's status is 'partial' (applyStageChange maps between them).
+    // Recorded money is the stage-independent tell — a deposit against an
+    // accepted quote has the same balance problem.
+    const PAID_STAGES = new Set(['paid', 'partially_paid', 'partial']);
     const paidGuard = (target: Targeted): ApplyProposalResult | null => {
-      const stage = (target.doc as any).stage ?? (target.doc as any).status;
-      return stage === 'paid' || stage === 'partially_paid'
+      const doc = target.doc as any;
+      const stage = doc.stage ?? doc.status;
+      const payments: Array<{ amount?: number }> = Array.isArray(doc.payments) ? doc.payments : [];
+      const moneyIn = payments.some((p) => Number(p?.amount) > 0) || Number(doc.paidTotal) > 0 || Number(doc.depositPaid) > 0;
+      return PAID_STAGES.has(stage) || moneyIn
         ? {
             ok: false,
-            error: "That one's had money paid against it — changing the total would throw the balance out. Record a credit or a new invoice instead.",
+            error: "That one's had money paid against it — changing what's on it would throw the balance out. Record a credit or a new invoice instead.",
           }
         : null;
     };
@@ -3749,7 +3781,8 @@ export const useStore = create<AppState>((set, get) => ({
           // the id — a figure that only ticks over every ~2.8 hours. Three
           // drafts of one smoke-alarm job were all QU-178840 (3 Sep 2026);
           // 104 numbers are shared across 51 accounts.
-          const quoteNumber = await get().getNextQuoteNumber();
+          // A storage hiccup allocating the number must not cost the draft.
+          const quoteNumber = await get().getNextQuoteNumber().catch(() => undefined);
 
           // Rate-card lines, when Mate charged the job off the tradie's own
           // rates: lump-sum work items at rate × quantity, in the document's
@@ -3768,7 +3801,7 @@ export const useStore = create<AppState>((set, get) => ({
           // Stamp customer + scope. Materials come from the pipeline.
           const seeded: Quote = {
             ...fresh,
-            quoteNumber,
+            ...(quoteNumber ? { quoteNumber } : {}),
             customerName: contact?.name || proposal.customerDraft?.name || '',
             customerEmail: contact?.email,
             customerPhone: contact?.phone,
@@ -3935,6 +3968,8 @@ export const useStore = create<AppState>((set, get) => ({
           if (!target) {
             return { ok: false, error: 'Quote not found.' };
           }
+          const paid = paidGuard({ kind: 'document', doc: target });
+          if (paid) return paid;
           const { documentToQuote } = await import('../types/documentAdapter');
           const sourceQuote = documentToQuote(target);
           // On a document with sections the labour is the SECTIONS: the
@@ -4125,6 +4160,12 @@ export const useStore = create<AppState>((set, get) => ({
           }
           const gated = planGate();
           if (gated) return gated;
+          {
+            const guarded = await resolveAny(proposal.quoteId);
+            if (!guarded) return { ok: false, error: 'Quote not found.' };
+            const paid = paidGuard(guarded);
+            if (paid) return paid;
+          }
           // Try the user's supplier book FIRST — if the line item the
           // assistant is adding matches a saved supplier rate, price it
           // inline so the tradie doesn't have to wait for the pricing
@@ -4378,6 +4419,13 @@ export const useStore = create<AppState>((set, get) => ({
               .catch(() => {});
           };
 
+          // A price or quantity change moves the total; a rename does not.
+          if (proposal.price !== undefined || proposal.quantity !== undefined) {
+            const guarded = await resolveAny(proposal.quoteId);
+            if (!guarded) return { ok: false, error: 'Quote not found.' };
+            const paid = paidGuard(guarded);
+            if (paid) return paid;
+          }
           const target = await resolveDocument(proposal.quoteId);
           if (target) {
             const { next, found } = applyEdit(target.materials ?? []);
@@ -4418,6 +4466,8 @@ export const useStore = create<AppState>((set, get) => ({
           // then the legacy quote/invoice arrays — one recalculating save.
           const target = await resolveAny(proposal.quoteId);
           if (!target) return { ok: false, error: 'Quote not found.' };
+          const paid = paidGuard(target);
+          if (paid) return paid;
           const materials = target.doc.materials ?? [];
           const nextMaterials = materials.filter((m) => m.id !== proposal.materialId);
           if (nextMaterials.length === materials.length) {

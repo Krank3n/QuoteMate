@@ -32,6 +32,12 @@ describe('normaliseAuPhone', () => {
     expect(normaliseAuPhone('A47528759')).toMatchObject({ formatted: '47528759', valid: false });
   });
 
+  it('never promotes nine chunked digits into a landline — only a mobile said without its zero gets one', () => {
+    expect(normaliseAuPhone('287599123')).toMatchObject({ valid: false });
+    expect(normaliseAuPhone('412 345 678')).toMatchObject({ valid: true, formatted: '0412 345 678' });
+    expect(normaliseAuPhone('13 12 53')).toMatchObject({ valid: true, formatted: '13 12 53' });
+  });
+
   it('rejects the wrong number of digits and non-AU prefixes', () => {
     expect(normaliseAuPhone('04268753564').valid).toBe(false); // 11 digits — the real over-long save
     expect(normaliseAuPhone('1412345678').valid).toBe(false);

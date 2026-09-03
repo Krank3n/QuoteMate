@@ -110,6 +110,20 @@ describe('one customer, one contact', () => {
     expect(new Set(useStore.getState().quotes.map((q) => q.contactId)).size).toBe(1);
   });
 
+  it('a same-name contact saved long ago with no number is a different person once the draft carries one', async () => {
+    useStore.setState({ contacts: [{ id: 'old', name: 'Diane Bunk', source: 'manual', createdAt: '2025-01-01T00:00:00.000Z', updatedAt: '2025-01-01T00:00:00.000Z' }] } as any);
+    await useStore.getState().applyProposal(draft({ customerDraft: { name: 'Diane Bunk', phone: '0477 535 423' } }));
+    expect(useStore.getState().contacts).toHaveLength(2);
+    expect(useStore.getState().contacts.find((c) => c.id === 'old')!.phone).toBeUndefined();
+  });
+
+  it('the draft still lands when allocating a number fails', async () => {
+    useStore.setState({ getNextQuoteNumber: vi.fn(async () => { throw new Error('storage'); }) } as any);
+    const result = await useStore.getState().applyProposal(draft());
+    expect(result.ok).toBe(true);
+    expect(saved[0].quoteNumber).toBeUndefined();
+  });
+
   it('the same name with a DIFFERENT number is a different person', async () => {
     useStore.setState({ contacts: [{ id: 'c1', name: 'Diane Bunk', phone: '0412 000 000', source: 'manual', createdAt: '', updatedAt: '' }] } as any);
     await useStore.getState().applyProposal(draft({ customerDraft: { name: 'Diane Bunk', phone: '0477 535 423' } }));
@@ -117,7 +131,9 @@ describe('one customer, one contact', () => {
   });
 
   it('never overwrites a detail the saved contact already has', async () => {
-    useStore.setState({ contacts: [{ id: 'c1', name: 'Diane Bunk', email: 'diane@example.com', source: 'manual', createdAt: '', updatedAt: '' }] } as any);
+    // Saved moments ago with no number — the re-draft that carries one is the same person.
+    const now = new Date().toISOString();
+    useStore.setState({ contacts: [{ id: 'c1', name: 'Diane Bunk', email: 'diane@example.com', source: 'manual', createdAt: now, updatedAt: now }] } as any);
     await useStore.getState().applyProposal(draft({ customerDraft: { name: 'Diane Bunk', email: 'wrong@example.com', phone: '0477 535 423' } }));
     const [c] = useStore.getState().contacts;
     expect(useStore.getState().contacts).toHaveLength(1);

@@ -1243,7 +1243,10 @@ export function AssistantScreen() {
           note(
             `[context] Re-priced quote ${proposal.quoteId}.` +
             (result.review ? ` ${result.review.summary}` : '') +
-            (gapNote ? ` ${gapNote}` : ''),
+            (gapNote ? ` ${gapNote}` : '') +
+            // Nothing else gives text-mode Mate a turn after a reprice, so
+            // what the tradie said while it ran rides here.
+            (voiceSessionRef.current?.isOpen() && narrating ? '' : correctionsClause(corrections, proposal.quoteId)),
           );
           break;
         case 'propose_update_quote_scope':
@@ -1251,14 +1254,19 @@ export function AssistantScreen() {
             `[context] Updated the scope on quote ${proposal.quoteId} and re-ran materials + pricing — ` +
             `same quote, no new one.` +
             (result.review ? ` ${result.review.summary}` : '') +
-            (gapNote ? ` ${gapNote}` : ''),
+            (gapNote ? ` ${gapNote}` : '') +
+            (offerFacts || (voiceSessionRef.current?.isOpen() && narrating) ? '' : correctionsClause(corrections, proposal.quoteId)),
           );
           break;
         case 'propose_set_total':
+          // Leads with the total that was STORED, not the one asked for: a
+          // typed adjustment line can land a cent off the target, and a note
+          // carrying two figures is the read-back failure this card exists
+          // to end.
           note(
-            `[context] Set the total on quote ${proposal.quoteId} to ${formatCurrency(proposal.targetTotal)}` +
-              `${result.moved ? ` (${result.moved})` : ''}. Materials untouched.${totalClause} ` +
-              `Tell the tradie in one short line — the card shows the new figure.`,
+            `[context] Set the total on quote ${proposal.quoteId} to ${formatCurrency(result.appliedTotal ?? proposal.targetTotal)}` +
+              `${result.moved ? ` (${result.moved})` : ''}. Materials untouched. That figure is the total — read it from here, never from memory. ` +
+              `Tell the tradie in one short line — the card shows it.`,
           );
           break;
         case 'propose_add_line_item':
@@ -1528,12 +1536,22 @@ export function AssistantScreen() {
     };
     setAppliedDraftsProbe(() => {
       const applied: Array<{ quoteId: string; jobName: string; customerId?: string; customerName?: string }> = [];
+      const state = useStore.getState();
       for (const m of currentMessages()) {
         for (const p of m.proposals || []) {
           if (p.type !== 'propose_draft_quote' || m.proposalStatus?.[p.id] !== 'applied') continue;
           const quoteId = resolveQuoteId(p.id);
           if (!quoteId || quoteId === p.id) continue;
-          applied.push({ quoteId, jobName: p.jobName, customerId: p.customerId, customerName: p.customerDraft?.name });
+          // The minted quote knows both handles — the contact it was linked
+          // to and the name on it — whichever way the model named the
+          // customer on this draft or names them on the next.
+          const minted = state.getDocumentById(quoteId) ?? state.quotes.find((q) => q.id === quoteId);
+          applied.push({
+            quoteId,
+            jobName: minted?.job?.name || p.jobName,
+            customerId: minted?.contactId ?? p.customerId,
+            customerName: minted?.customerName || p.customerDraft?.name,
+          });
         }
       }
       return applied;
@@ -2699,7 +2717,10 @@ export function AssistantScreen() {
           // Test the ACCUMULATED transcript, not this chunk: "Thought to
           // self:" routinely arrives split across deltas, and once the turn
           // is known to be scaffolding every later chunk belongs to it too.
-          if (suppressLeakedTurnRef.current || isLeakedModelOutput(assistantBubbleTextRef.current + text)) {
+          if (
+            suppressLeakedTurnRef.current ||
+            isLeakedModelOutput(assistantBubblePrefixRef.current + assistantBubbleTextRef.current + text)
+          ) {
             suppressLeakedTurnRef.current = true;
             // Blank whatever already mounted. Hidden messages are filtered
             // out of the list, and the empty text keeps the leak out of the
@@ -2708,6 +2729,7 @@ export function AssistantScreen() {
               updateMessage(convoId!, assistantBubbleIdRef.current, { text: '', hidden: true });
               assistantBubbleIdRef.current = null;
               assistantBubbleTextRef.current = '';
+              assistantBubblePrefixRef.current = '';
             }
             if (finished) suppressLeakedTurnRef.current = false;
             return;
@@ -2717,9 +2739,10 @@ export function AssistantScreen() {
           // never sets this: the watchdog's re-send is what turns a filtered
           // chain-of-thought reply into a spoken greeting instead of silence.)
           greetHeardRef.current = true;
-          // assistantBubbleTextRef always holds the FULL text: the leak filter
-          // above tests it, and a reconnect seeds history from it. Only what
-          // is RENDERED is paced.
+          // assistantBubbleTextRef holds this fragment; a continued bubble's
+          // earlier words sit in assistantBubblePrefixRef, and the leak
+          // filter above tests the two together. Only what is RENDERED is
+          // paced.
           const pacing = pacingEnabledRef.current;
           if (pacing) pacerPushText(pacerRef.current, text);
           const rendered = pacing
@@ -2745,12 +2768,16 @@ export function AssistantScreen() {
           if (!delta) return;
           touchVoiceActivity();
           if (narrationModeRef.current) return;
-          if (suppressLeakedTurnRef.current || isLeakedModelOutput(assistantBubbleTextRef.current + delta)) {
+          if (
+            suppressLeakedTurnRef.current ||
+            isLeakedModelOutput(assistantBubblePrefixRef.current + assistantBubbleTextRef.current + delta)
+          ) {
             suppressLeakedTurnRef.current = true;
             if (assistantBubbleIdRef.current) {
               updateMessage(convoId!, assistantBubbleIdRef.current, { text: '', hidden: true });
               assistantBubbleIdRef.current = null;
               assistantBubbleTextRef.current = '';
+              assistantBubblePrefixRef.current = '';
             }
             return;
           }

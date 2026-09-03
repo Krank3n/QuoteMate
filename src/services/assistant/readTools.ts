@@ -126,11 +126,18 @@ export function resolveCustomerDraftRef(ref: unknown): { name: string; phone?: s
   return typeof ref === 'string' ? draftRefs.get(ref) ?? null : null;
 }
 
-/** Test seam. */
-export function __resetCustomerDraftRefs(): void {
+/**
+ * Forget every held draft. Called on sign-out — the refs are module state,
+ * and a model-invented "draft_3" under the next account must never resolve
+ * to the previous account's address book.
+ */
+export function clearCustomerDraftRefs(): void {
   draftRefs.clear();
   draftRefSeq = 0;
 }
+
+/** Test seam. */
+export const __resetCustomerDraftRefs = clearCustomerDraftRefs;
 
 // Pure scoring/merge core shared by findCustomer (extracted so it's testable
 // without Firestore). Preserves the exact matchType/confidence/needsConfirmation

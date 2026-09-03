@@ -5,7 +5,7 @@
  * untapped. The validator refuses the repeat inside the turn.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { buildProposal, findRepeatedDraft, setAppliedDraftsProbe, setPendingScopeUpdateProbe } from '../proposalTools';
+import { buildProposal, findRepeatedDraft, jobNamesLookAlike, setAppliedDraftsProbe, setPendingScopeUpdateProbe } from '../proposalTools';
 import { setRenderableQuoteProbe } from '../showQuoteGate';
 
 const APPLIED = [
@@ -38,8 +38,27 @@ describe('findRepeatedDraft', () => {
     expect(findRepeatedDraft(APPLIED, { customerId: 'c-bob', jobName: 'Fence' })?.quoteId).toBe('q-fence-1');
   });
 
-  it('a different job for the same customer is not a repeat', () => {
+  it('a different job for the same customer is not a repeat — one shared generic word is not a match', () => {
     expect(findRepeatedDraft(APPLIED, { customerName: 'Diane Bunk', jobName: 'Pergola lights' })).toBeUndefined();
+    const jane = [{ quoteId: 'q1', jobName: 'Smoke alarm install', customerName: 'Jane Cooper' }, { quoteId: 'q2', jobName: 'Bathroom retile', customerName: 'Jane Cooper' }];
+    expect(findRepeatedDraft(jane, { customerName: 'Jane Cooper', jobName: 'Air con install' })).toBeUndefined();
+    expect(findRepeatedDraft(jane, { customerName: 'Jane Cooper', jobName: 'Gutter clean at the rear' })).toBeUndefined();
+    expect(findRepeatedDraft(jane, { customerName: 'Jane Cooper', jobName: 'Smoke alarms — Red Dot' })?.quoteId).toBe('q1');
+  });
+
+  it('matches the customer by id or by name, whichever both drafts carry', () => {
+    const prior = [{ quoteId: 'q1', jobName: 'Smoke alarm install', customerId: 'c1', customerName: 'Jane Cooper' }];
+    expect(findRepeatedDraft(prior, { customerName: 'Jane Cooper', jobName: 'Smoke alarm install' })?.quoteId).toBe('q1');
+    expect(findRepeatedDraft(prior, { customerId: 'c1', jobName: 'Smoke alarm install' })?.quoteId).toBe('q1');
+    expect(findRepeatedDraft(prior, { customerId: 'c2', jobName: 'Smoke alarm install' })).toBeUndefined();
+  });
+
+  it('jobNamesLookAlike needs half the shorter name\'s real words, stems and plurals included', () => {
+    expect(jobNamesLookAlike('Install fire detectors', 'Fire detectors - Red Dot')).toBe(true);
+    expect(jobNamesLookAlike('Install fire detectors', 'Smoke detector install')).toBe(true);
+    expect(jobNamesLookAlike('Smoke alarm install', 'Air con install')).toBe(false);
+    expect(jobNamesLookAlike('Bathroom retile', 'Gutter clean at the rear')).toBe(false);
+    expect(jobNamesLookAlike('Install', 'Installation')).toBe(false);
   });
 
   it('a different customer is not a repeat', () => {

@@ -164,6 +164,40 @@ describe('propose_set_total', () => {
     }
   });
 
+  it('a legacy invoice at status "partial", and any document with money recorded, are refused too', async () => {
+    const partial = { ...inv004(), status: 'partial', payments: [{ id: 'p', kind: 'manual', amount: 700 }], createdAt: new Date(), updatedAt: new Date(), issueDate: new Date(), dueDate: new Date() } as any;
+    const saveInvoice = vi.fn(async () => {});
+    useStore.setState({ documents: [], invoices: [partial], saveInvoice } as any);
+    const result = await useStore.getState().applyProposal({ ...base, type: 'propose_set_total', quoteId: DOC_ID, targetTotal: 5000 });
+    expect(!result.ok && result.error).toContain('money paid against it');
+    expect(saveInvoice).not.toHaveBeenCalled();
+    // A deposit against an accepted quote is money recorded, whatever the stage says.
+    useStore.setState({ documents: [inv004({ type: 'quote', stage: 'quote_accepted', payments: [{ id: 'd', kind: 'deposit', amount: 300 }] } as any)], invoices: [] } as any);
+    const deposit = await useStore.getState().applyProposal({ ...base, type: 'propose_set_total', quoteId: DOC_ID, targetTotal: 1232 });
+    expect(!deposit.ok && deposit.error).toContain('money paid against it');
+  });
+
+  it('every other tool that moves money refuses a paid invoice too — a paid $1,415.70 must not read $7,202 marked paid', async () => {
+    useStore.setState({ documents: [inv004({ stage: 'paid' } as any)] } as any);
+    const attempts = [
+      useStore.getState().applyProposal({ ...base, type: 'propose_delete_line_item', quoteId: DOC_ID, materialId: 'm1' }),
+      useStore.getState().applyProposal({ ...base, type: 'propose_update_line_item', quoteId: DOC_ID, materialId: 'm1', price: 5000 }),
+      useStore.getState().applyProposal({ ...base, type: 'propose_update_line_item', quoteId: DOC_ID, materialId: 'm1', quantity: 3 }),
+      useStore.getState().applyProposal({ ...base, type: 'propose_update_quote_rates', quoteId: DOC_ID, laborHours: 40 }),
+      useStore.getState().applyProposal({ ...base, type: 'propose_add_line_item', quoteId: DOC_ID, searchTerm: '90x45 treated pine', qty: 4, unit: 'each' }),
+    ];
+    for (const result of await Promise.all(attempts)) {
+      expect(result.ok).toBe(false);
+      expect(!result.ok && result.error).toContain('money paid against it');
+    }
+    expect(stored().total).toBe(1415.7);
+    expect(stored().materials).toHaveLength(1);
+    // A rename moves no money and is still allowed.
+    const rename = await useStore.getState().applyProposal({ ...base, type: 'propose_update_line_item', quoteId: DOC_ID, materialId: 'm1', name: 'Switchboard enclosure, 24 pole' });
+    expect(rename.ok).toBe(true);
+    expect(stored().total).toBe(1415.7);
+  });
+
   it('reports the discount line it fell back to, and moves it rather than stacking a second', async () => {
     useStore.setState({ documents: [inv004({ sections: [], laborHours: 0, laborTotal: 0, subtotal: 549, total: 713.7 })] } as any);
     const first = await useStore.getState().applyProposal({ ...base, type: 'propose_set_total', quoteId: DOC_ID, targetTotal: 650 });
@@ -172,6 +206,21 @@ describe('propose_set_total', () => {
     expect(second.ok && second.moved).toBe(`the "${DISCOUNT_NAME}" line at -$13.70`);
     expect(stored().total).toBe(700);
     expect(stored().materials.filter((m) => m.kind === 'work')).toHaveLength(1);
+  });
+
+  it('a legacy quote with a lump-sum section missing its figure is planned and saved as finite money, not NaN', async () => {
+    const quote = {
+      ...inv004(),
+      sections: [{ id: 'l', name: 'Fixed', multiplier: 1, laborHours: 0, laborHoursTotal: 0, laborRate: 0, laborUnit: 'hours', sortOrder: 0, pricing: 'lumpSum' }],
+      createdAt: new Date(), updatedAt: new Date(), status: 'draft',
+    } as any;
+    const saveQuote = vi.fn(async () => {});
+    useStore.setState({ documents: [], quotes: [quote], saveQuote } as any);
+    const result = await useStore.getState().applyProposal({ ...base, type: 'propose_set_total', quoteId: DOC_ID, targetTotal: 1500 });
+    expect(result.ok && result.appliedTotal).toBe(1500);
+    const stored = (saveQuote.mock.calls[0] as any)[0];
+    expect(stored.total).toBe(1500);
+    expect(Number.isFinite(stored.laborTotal)).toBe(true);
   });
 
   it('works on a legacy quote that is not in the documents cache yet', async () => {

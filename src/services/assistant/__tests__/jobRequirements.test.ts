@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { resolveJobRequirements, SUPPLY_OR_REPLACE_QUESTION } from '../readTools';
+import { NICHE_TEMPLATES } from '../../../data/nicheTemplates';
+import { TRADE_CATEGORIES } from '../../../../shared/pricing/tradeCategories';
 import { buildSupplierBookSnapshot } from '../../supplierBookCoverage';
 import type { FavoriteProductMapping } from '../../../types';
 
@@ -269,5 +271,17 @@ describe('smoke alarms, and supply-or-replace on every install-type job', () => 
   it('an invoice never asks it — the work is done', () => {
     const result = resolveJobRequirements({ jobType: 'Power Points', documentType: 'invoice' });
     expect(result.mustAskQuestions).not.toContain(SUPPLY_OR_REPLACE_QUESTION);
+  });
+});
+
+
+// A template whose category/niche pair is not in TRADE_CATEGORIES is
+// invisible to the wizard's job-type list (JobDetailsScreen iterates
+// cat.niches) — the Smoke Alarms template shipped that way once.
+describe('every niche template belongs to a niche the wizard can show', () => {
+  it('has a TRADE_CATEGORIES entry for each template\'s category/niche pair', () => {
+    const known = new Set(TRADE_CATEGORIES.flatMap((c) => c.niches.map((n) => `${c.id}:${n.id}`)));
+    const orphans = NICHE_TEMPLATES.filter((t) => !known.has(`${t.categoryId}:${t.nicheId}`)).map((t) => `${t.name} (${t.categoryId}:${t.nicheId})`);
+    expect(orphans).toEqual([]);
   });
 });

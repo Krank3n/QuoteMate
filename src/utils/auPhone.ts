@@ -48,7 +48,11 @@ export function normaliseAuPhone(input: unknown): AuPhone {
     .join(' ');
   let digits = normalizeDigits(words);
   if (digits.startsWith('61') && digits.length === 11) digits = `0${digits.slice(2)}`;
-  if (digits.length === 9 && /^[2-9]/.test(digits)) digits = `0${digits}`; // "412 345 678" said without the leading zero
+  // "412 345 678" said without its leading zero is a mobile and gets it back.
+  // Nine digits starting with anything else are NOT promoted to a landline:
+  // voice chunks that happen to total nine would otherwise become a valid-
+  // looking number on the customer's record.
+  if (digits.length === 9 && digits.startsWith('4')) digits = `0${digits}`;
   const valid = NATIONAL_MOBILE.test(digits) || NATIONAL_LANDLINE.test(digits) || SPECIAL.test(digits);
   return { valid, formatted: valid ? formatAuPhone(digits) : digits };
 }
@@ -57,6 +61,7 @@ function formatAuPhone(digits: string): string {
   if (NATIONAL_MOBILE.test(digits)) return `${digits.slice(0, 4)} ${digits.slice(4, 7)} ${digits.slice(7)}`;
   if (NATIONAL_LANDLINE.test(digits)) return `${digits.slice(0, 2)} ${digits.slice(2, 6)} ${digits.slice(6)}`;
   if (/^1[38]00/.test(digits)) return `${digits.slice(0, 4)} ${digits.slice(4, 7)} ${digits.slice(7)}`;
+  if (/^13\d{4}$/.test(digits)) return `${digits.slice(0, 2)} ${digits.slice(2, 4)} ${digits.slice(4)}`;
   return digits;
 }
 

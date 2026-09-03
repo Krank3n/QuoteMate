@@ -155,6 +155,16 @@ describe('applySetTotal — hourly labour', () => {
     expect(next.laborHours).toBeCloseTo((720 - (1433.7 - 1232)) / 90, 6);
   });
 
+  it('uses the sections\' rate when the document never had one stamped, instead of falling to a Discount line', () => {
+    const doc = inv004({ laborRate: 0 });
+    expect(doc.laborTotal).toBe(702);
+    const { result, next } = settle(doc, 1232);
+    expect(result.plan.mechanism).toBe('labour');
+    expect(next.total).toBe(1232);
+    expect(next.laborRate).toBe(90);
+    expect(next.materials.some((m) => m.kind === 'work')).toBe(false);
+  });
+
   it('can raise the total as well as lower it', () => {
     const { next } = settle(inv004(), 1600);
     expect(next.total).toBe(1600);
@@ -205,6 +215,20 @@ describe('applySetTotal — lump sums and the adjustment line', () => {
     expect(down.materials.filter((m) => m.kind === 'work')).toHaveLength(1);
     expect(down.materials.find((m) => m.name === DISCOUNT_NAME)).toMatchObject({ price: -63.7 });
     expect(down.total).toBe(650);
+  });
+
+  it('reads an existing adjustment line by its total — a legacy row with a quantity lands the target, not $54.97 off', () => {
+    const doc = inv004({
+      sections: [],
+      laborHours: 0,
+      materials: [material({ price: 500, totalPrice: 500 }), material({ id: 'd', name: DISCOUNT_NAME, kind: 'work', quantity: 2, price: -50, totalPrice: -100, manualPriceOverride: true })],
+    });
+    // 500 + 150 markup - 100 = 550
+    expect(doc.total).toBe(550);
+    const { next } = settle(doc, 700);
+    expect(next.total).toBe(700);
+    expect(next.materials.filter((m) => m.kind === 'work')).toHaveLength(1);
+    expect(next.materials.find((m) => m.kind === 'work')).toMatchObject({ name: PRICE_ADJUSTMENT_NAME, quantity: 1, price: 50, totalPrice: 50 });
   });
 
   it('moves the existing adjustment line on a second set-total instead of stacking another', () => {

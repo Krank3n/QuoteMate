@@ -97,8 +97,23 @@ export type SetTotalPlanResult =
 export interface SetTotalPatch {
   laborExtraHours?: number;
   laborHours?: number;
+  /** Stamped only when the document's own rate was 0 and the sections carry one. */
+  laborRate?: number;
   sections?: QuoteSection[];
   materials?: Material[];
+}
+
+/**
+ * The $/hour the extra-hours move runs at: the document's rate, or — when
+ * that was never stamped — the rate the hourly sections carry. The calculator
+ * prices extra hours at the DOCUMENT rate, so a 0 there would have sent a
+ * document with $702 of sectioned labour to a visible Discount line instead.
+ */
+function effectiveRate(source: SetTotalSource, sections: QuoteSection[]): number {
+  const own = num(source.laborRate);
+  if (own > 0) return own;
+  const section = sections.find((s) => !isLumpSumSection(s) && num(s.laborRate) > 0);
+  return section ? num(section.laborRate) : 0;
 }
 
 const CENT = 0.005;
@@ -149,7 +164,7 @@ export function planSetTotal(source: SetTotalSource, targetTotal: number): SetTo
   const deltaPre = delta / factor;
   const travelPct = num(source.travelAdjustment) / 100;
   const labourMarkupPct = num(source.laborMarkup ?? source.markup) / 100;
-  const rate = num(source.laborRate);
+  const rate = effectiveRate(source, sections);
   const labourTotal = totals.laborTotal;
   const lumpLabour = lumpSumLabourTotal(sections);
   const hourlyLabour = Math.max(0, labourTotal - lumpLabour);
@@ -198,7 +213,9 @@ export function planSetTotal(source: SetTotalSource, targetTotal: number): SetTo
 
   // 2. A lump-sum "Price adjustment" line carries it.
   const existing = findAdjustment(materials);
-  const amount = roundToTwoDecimals(num(existing?.price) + deltaPre / (1 + travelPct));
+  // What the line contributes today is its total (a legacy row can carry a
+  // quantity); the new line is always minted at quantity 1.
+  const amount = roundToTwoDecimals(num(existing?.totalPrice) + deltaPre / (1 + travelPct));
   return {
     ok: true,
     plan: { mechanism: 'adjustment', currentTotal, targetTotal: targetRounded, amount, existing: !!existing },
@@ -246,11 +263,12 @@ function patchFor(source: SetTotalSource, plan: SetTotalPlan, figure: number): S
       ),
     };
   }
-  const rate = num(source.laborRate);
+  const rate = effectiveRate(source, sections);
+  const stampRate = num(source.laborRate) > 0 ? {} : { laborRate: rate };
   if (plan.via === 'extraHours') {
-    return { laborExtraHours: num(source.laborExtraHours) + figure / rate };
+    return { ...stampRate, laborExtraHours: num(source.laborExtraHours) + figure / rate };
   }
-  return { laborHours: Math.max(0, num(source.laborHours) + figure / rate) };
+  return { ...stampRate, laborHours: Math.max(0, num(source.laborHours) + figure / rate) };
 }
 
 /**
@@ -311,11 +329,12 @@ export function applySetTotal(source: SetTotalSource, targetTotal: number): SetT
     const factor = gstFactor(source);
     const scale = 1 + num(source.laborMarkup ?? source.markup) / 100 + num(source.travelAdjustment) / 100;
     let figure = plan.deltaLabour;
-    let best = settle(figure);
+    let last = settle(figure);
+    let best = last;
     for (let pass = 0; pass < 4 && best.miss >= CENT; pass++) {
-      figure += (plan.targetTotal - best.total) / factor / scale;
-      const next = settle(figure);
-      if (next.miss < best.miss) best = next;
+      figure += (plan.targetTotal - last.total) / factor / scale;
+      last = settle(figure);
+      if (last.miss < best.miss) best = last;
     }
     return { ok: true, plan, patch: best.patch, total: best.total };
   }
