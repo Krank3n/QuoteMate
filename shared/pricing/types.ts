@@ -304,3 +304,128 @@ export interface JobSpec {
   // per-zone breakdown). Present only when a floorplan/drawing was detected.
   floorplanAnalysis?: FloorplanAnalysis;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Pipeline-only shapes. These never lived in src/types: they describe the
+// quote slice the pipeline reads, the supplier answers it consumes, and the
+// wire types of the two LLM passes it drives.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The part of a Quote the materials + pricing pipeline reads. The app's Quote
+ * and the server's stored record both satisfy it; the pipeline is generic over
+ * the concrete type so it hands back whatever it was given, with materials,
+ * sections, hours and plan geometry filled in.
+ */
+export interface PricingQuote {
+  id: string;
+  job: JobSpec;
+  materials: Material[];
+  sections?: QuoteSection[];
+  laborHours: number;
+  /** Job-level quality tier inferred at analysis time — see candidateRanker. */
+  qualityTier?: 'budget' | 'standard' | 'premium';
+  photos?: Array<{ storageUrl?: string; isPlan?: boolean }>;
+  pricesIncludeGst?: boolean;
+  gstRegistered?: boolean;
+}
+
+/** The slice of BusinessSettings the pipeline reads. */
+export interface PricingBusinessSettings {
+  defaultLaborRate?: number;
+  /** The drag-and-drop ranked supplier list (ids: 'bunnings', 'reece', or a local group id). */
+  supplierPriority?: string[];
+  tradeCategories?: string[];
+  tradeNiches?: string[];
+  tradeCategory?: string;
+  tradeNiche?: string;
+  selectedStore?: string;
+  quotingPreferences?: string[];
+}
+
+/** One Reece search hit, as the searchReeceProduct endpoint answers it. */
+export interface ReeceCandidate {
+  price: number | null;
+  productName?: string;
+  store?: string;
+  itemNumber?: string;
+  imageUrl?: string | null;
+  productUrl?: string;
+  unitOfMeasure?: string | null;
+  unitPriceExcludingGst?: number | null;
+  /** The user's Reece customer token was revoked or expired — surface a reconnect. */
+  reauthRequired?: boolean;
+  /** The user hasn't connected Reece at all. */
+  notConnected?: boolean;
+}
+
+/** What the analyse step sends to analyzeJobDescription. */
+export interface AnalyzeRequest {
+  jobDescription: string;
+  tradeContext?: {
+    categoryName?: string;
+    nicheName?: string;
+    suggestedMaterials?: string[];
+    pricingMethod?: string;
+    selectedStore?: string;
+    quotingPreferences?: string[];
+  };
+  photoUrls?: string[];
+  existingMaterials?: { name: string; quantity: number; unit: string; section?: string }[];
+  availableTemplates?: { name: string; materials: { name: string; quantity: number; unit: string }[]; laborHours: number }[];
+  userSavedRates?: Array<{
+    name: string;
+    store?: string;
+    unit: string;
+    price: number;
+    coveragePerUnit?: number;
+    coverageUnit?: string;
+    keywords?: string[];
+    notes?: string;
+  }>;
+}
+
+// Reconciliation pass — given each row's requirement and its candidate
+// products, decide how many purchases to charge for, and at what total.
+// Catches wrong-SKU matches and pack-as-unit-price bugs uniformly across
+// trades, where regex parsing of pack info from titles can't.
+
+export interface ReconcileCandidate {
+  name?: string;
+  price: number;
+  url?: string;
+  description?: string;
+  /** Pack/volume size the price covers (e.g. 500 each, 10 L), when known.
+   *  Lets the reconcile pass compute packs-needed instead of guessing. */
+  packSize?: number;
+  packUnit?: string;
+}
+
+export interface ReconcileItem {
+  id: string;
+  name: string;
+  requirement: number;
+  requirementUnit: string;
+  /** Ranked candidates from the price search; reconciliation picks one (or rejects all). */
+  candidates: ReconcileCandidate[];
+}
+
+export interface ReconcileResult {
+  id: string;
+  decision: 'apply' | 'estimate' | 'reject';
+  chosenIndex?: number;
+  /** Per-purchase price when decision='estimate' (no candidate matched). */
+  estimatedUnitPrice?: number;
+  /** Set only when the LLM deliberately corrected an inflated round-1
+   *  requirement (REQUIREMENT SANITY). Same units as the stated requirement.
+   *  The coverage floor uses this instead of requiredQty so legitimate
+   *  corrections aren't undone. */
+  correctedRequirement?: number;
+  purchaseCount?: number;
+  purchaseUnit?: string;
+  totalPrice?: number;
+  coverageNote?: string;
+  confidence?: 'high' | 'medium' | 'low';
+  reasoning?: string;
+  rejectReason?: string;
+}
