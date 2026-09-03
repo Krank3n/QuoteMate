@@ -36,6 +36,10 @@ interface SendEmailOptions {
   to: string;
   subject: string;
   htmlContent: string;
+  // Plain-text alternative. Multipart emails deliver better and give clients
+  // that don't render HTML (and screen readers) a legible fallback. Brevo
+  // takes this as `textContent`; omitted when not supplied.
+  textContent?: string;
   category: EmailCategory;
   userId?: string; // For logging and preference checking
   tags?: string[];
@@ -288,7 +292,7 @@ QuoteMate is made by Hansen Dev (Sydney NSW, Australia). You're receiving this b
 // Brevo webhook posts back events keyed to that tag, which lets us correlate
 // delivery / bounce / open / click / spam back to this exact send.
 export async function sendEmail(options: SendEmailOptions): Promise<boolean> {
-  const { to, subject, category, userId, tags, attachment, replyTo: replyToOverride, senderName, bcc } = options;
+  const { to, subject, category, userId, tags, attachment, replyTo: replyToOverride, senderName, bcc, textContent } = options;
   let { htmlContent, unsubscribeUrl } = options;
 
   // For cold lead outreach, wrap with the AU spam-act compliance footer
@@ -412,6 +416,7 @@ export async function sendEmail(options: SendEmailOptions): Promise<boolean> {
         ...(bcc?.length ? { bcc } : {}),
         subject,
         htmlContent,
+        ...(textContent ? { textContent } : {}),
         tags: brevoTags,
         // Brevo forwards custom JSON headers in webhook events — belt + braces
         // in case tag parsing fails for any reason.
@@ -1688,8 +1693,12 @@ export function formatMoney(amount: number): string {
 }
 
 // Light-themed wrapper for client-facing quote emails (business-branded, no QM logo)
-function wrapQuoteEmailTemplate(content: string, options: { brandColor?: string; businessName?: string; logoUrl?: string; preheader?: string }): string {
+function wrapQuoteEmailTemplate(content: string, options: { brandColor?: string; businessName?: string; logoUrl?: string; preheader?: string; appFooter?: boolean }): string {
   const { brandColor: rawBrandColor, businessName = '', preheader } = options;
+  // The small app-branding pill in the footer. Off for the customer-facing
+  // quote email, where only the tradie's own business may appear — see
+  // renderQuoteEmail.
+  const appFooter = options.appFooter !== false;
   const brandColor = safeBrandColor(rawBrandColor);
   // Guarded here rather than at each caller so every email through this shell
   // degrades to the business-name lockup instead of a broken-image icon.
@@ -1764,11 +1773,11 @@ function wrapQuoteEmailTemplate(content: string, options: { brandColor?: string;
             </td>
           </tr>
           <!-- Footer -->
-          <tr>
+          ${appFooter ? `<tr>
             <td style="padding:20px 0 0;text-align:center;">
               <a href="https://quotemateapp.au" target="_blank" style="display:inline-block;background:#111827;color:#ffffff;font-size:10px;font-weight:600;letter-spacing:0.6px;padding:5px 10px;border-radius:999px;text-decoration:none;">QuoteMate</a>
             </td>
-          </tr>
+          </tr>` : ''}
         </table>
       </td>
     </tr>
@@ -2482,6 +2491,259 @@ export function buildDocumentEmailHtml(data: DocumentEmailData): string {
 
 export function buildQuoteEmailHtml(data: QuoteEmailData): string {
   return buildDocumentEmailHtml({ type: 'quote', ...data });
+}
+
+// ============================================================
+// LINK-FIRST QUOTE EMAIL
+// ============================================================
+
+/**
+ * Input for the link-first customer quote email. A superset of QuoteEmailData
+ * so the no-acceptance-URL fallback can delegate straight to
+ * buildDocumentEmailHtml without re-shaping anything.
+ */
+export interface RenderQuoteEmailInput extends QuoteEmailData {
+  // Labour-section order, used only to order the inline section summary the
+  // same way the PDF orders its material groups. Optional — a legacy send with
+  // no sections array falls back to first-appearance order.
+  sections?: Array<{ name: string }>;
+}
+
+const roundToCents = (n: number): number => Math.round((Number.isFinite(n) ? n : 0) * 100) / 100;
+
+/**
+ * The inline quote summary, as {label, amount} rows. Kept pure and shared by
+ * the HTML and plain-text renderers so the two can never disagree.
+ *
+ * The materials handed in have already been through applyHideMarkupForDisplay,
+ * so each `totalPrice` is the figure the customer sees (markup folded in when
+ * the tradie hides it). Section totals therefore reconcile line-for-line with
+ * the PDF's per-section subtotals, which sum the same folded totals.
+ *
+ * - `priceDetail: 'total'` → no rows (the tradie chose to show only the grand
+ *   total; the summary would leak the breakdown they hid).
+ * - materials carry `section` tags → one row per section (PDF-ordered) plus a
+ *   Labour row when there's labour.
+ * - otherwise → the Materials and Labour subtotals.
+ */
+export function quoteSummaryRows(data: RenderQuoteEmailInput): Array<{ label: string; amount: number }> {
+  if (resolvePriceDetail(data) === 'total') return [];
+
+  const materials = data.materials || [];
+  const rows: Array<{ label: string; amount: number }> = [];
+  const hasSections = materials.some((m) => !!(m.section && m.section.trim()));
+
+  if (hasSections) {
+    const grouped = new Map<string, number>();
+    const firstSeen: string[] = [];
+    let unsectioned = 0;
+    for (const m of materials) {
+      const key = (m.section || '').trim();
+      if (!key) {
+        unsectioned += roundToCents(m.totalPrice || 0);
+        continue;
+      }
+      if (!grouped.has(key)) {
+        grouped.set(key, 0);
+        firstSeen.push(key);
+      }
+      grouped.set(key, grouped.get(key)! + roundToCents(m.totalPrice || 0));
+    }
+
+    // Named-section order first (matches the PDF), then first-appearance for
+    // any section the labour list doesn't name.
+    const orderByName = new Map<string, number>();
+    (data.sections || []).forEach((s, i) => {
+      if (s?.name && !orderByName.has(s.name)) orderByName.set(s.name, i);
+    });
+    const keys = [...firstSeen].sort((a, b) => {
+      const oa = orderByName.get(a) ?? Number.MAX_SAFE_INTEGER;
+      const ob = orderByName.get(b) ?? Number.MAX_SAFE_INTEGER;
+      if (oa !== ob) return oa - ob;
+      return firstSeen.indexOf(a) - firstSeen.indexOf(b);
+    });
+
+    for (const key of keys) rows.push({ label: key, amount: grouped.get(key)! });
+    // Materials the tradie never filed under a section — kept so the summary
+    // still adds up, under a neutral label rather than an invented heading.
+    if (unsectioned > 0) rows.push({ label: 'Other materials', amount: unsectioned });
+    if ((data.laborTotal || 0) > 0) rows.push({ label: 'Labour', amount: data.laborTotal });
+  } else {
+    if ((data.materialsSubtotal || 0) > 0) rows.push({ label: 'Materials', amount: data.materialsSubtotal });
+    if ((data.laborTotal || 0) > 0) rows.push({ label: 'Labour', amount: data.laborTotal });
+  }
+
+  return rows;
+}
+
+// "Total (inc GST)" whenever GST is charged, plain "Total" when the business
+// isn't registered — same label the acceptance page and PDF use.
+function quoteTotalLabel(data: { gstRegistered?: boolean; pricesIncludeGst?: boolean }): string {
+  return resolveGstMode(data) === 'none' ? 'Total' : 'Total (inc GST)';
+}
+
+function greetingName(customerName: string): string {
+  const first = deriveFirstName(customerName);
+  return first ? `Hi ${first},` : 'Hi there,';
+}
+
+/**
+ * Build the customer quote email as an acceptance-link-first message: the
+ * "View and accept your quote" button is the primary action, with the quote
+ * summarised inline and the PDF still attached as a copy for the record.
+ *
+ * Pure: no Firestore, no network, no crypto — everything it needs is in the
+ * input, so the whole template is unit-testable. Returns both the HTML and the
+ * matching plain-text alternative, ordered the same way.
+ *
+ * When there is no acceptance URL (an invoice-style send, or a quote whose
+ * token mint failed) it falls back to the current document-email layout rather
+ * than render an empty button.
+ */
+export function renderQuoteEmail(data: RenderQuoteEmailInput): { html: string; text: string } {
+  const acceptanceUrl = (data.acceptanceUrl || '').trim();
+  if (!acceptanceUrl) {
+    return {
+      html: buildDocumentEmailHtml({ type: 'quote', ...data }),
+      text: buildQuoteEmailText(data, ''),
+    };
+  }
+
+  const esc = escapeHtml;
+  const accent = safeBrandColor(data.business.brandColor);
+  const summary = quoteSummaryRows(data);
+
+  // Primary action. A table cell (not a padded <a>) so Outlook paints the full
+  // background; the <a> fills the cell so the whole block is tappable. Vertical
+  // padding + line-height clears the 44px minimum touch target, and it reads as
+  // a solid, high-contrast button with images switched off.
+  const button = `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:22px 0;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="360" cellpadding="0" cellspacing="0" class="qm-c-btn" style="width:360px;max-width:100%;margin:0 auto;">
+            <tr>
+              <td class="qm-c-btn" style="background:${accent};border:1px solid ${accent};border-radius:10px;text-align:center;">
+                <a href="${esc(acceptanceUrl)}" target="_blank" style="display:block;padding:16px 24px;color:#ffffff;font-size:17px;font-weight:700;line-height:1.3;text-decoration:none;">View and accept your quote</a>
+              </td>
+            </tr>
+          </table>
+          <p style="color:#6b7280;font-size:12px;line-height:1.7;text-align:center;margin:12px 0 0;">Or open the link yourself:<br><span style="color:#374151;font-weight:600;word-break:break-all;">${esc(acceptanceUrl)}</span></p>
+        </td>
+      </tr>
+    </table>`;
+
+  const summaryRow = (label: string, value: string, strong = false) => `
+            <tr>
+              <td style="padding:9px 0;color:${strong ? '#111827' : '#6b7280'};font-size:14px;${strong ? 'font-weight:700;' : ''}border-top:1px solid #eef0f3;">${esc(label)}</td>
+              <td style="padding:9px 0;color:#111827;font-size:14px;font-weight:600;text-align:right;font-variant-numeric:tabular-nums;border-top:1px solid #eef0f3;">${value}</td>
+            </tr>`;
+
+  const summaryBlock = summary.length
+    ? `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;margin:22px 0;">
+      <tr>
+        <td style="padding:16px 20px 18px;">
+          <p style="color:#9ca3af;font-size:11px;font-weight:700;letter-spacing:0.8px;text-transform:uppercase;margin:0 0 2px;">What's included</p>
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+            ${summary.map((r) => summaryRow(r.label, formatMoney(r.amount))).join('')}
+            ${summaryRow(quoteTotalLabel(data), formatMoney(data.total), true)}
+          </table>
+        </td>
+      </tr>
+    </table>`
+    : '';
+
+  const personalMessage = (data.emailBody || '').trim()
+    ? `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:22px 0;">
+      <tr><td style="border-left:3px solid ${accent};padding:2px 0 2px 16px;">
+        ${renderEmailBodyHtml(data.emailBody)}
+      </td></tr>
+    </table>`
+    : '';
+
+  const b = data.business;
+  const contactBits: string[] = [];
+  if (b.phone) contactBits.push(esc(b.phone));
+  if (b.email) contactBits.push(`<a href="mailto:${esc(b.email)}" style="color:${accent};text-decoration:none;">${esc(b.email)}</a>`);
+  const signature = `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:26px 0 0;border-top:1px solid #e5e7eb;padding-top:18px;">
+      <tr><td>
+        <p style="color:#374151;font-size:15px;line-height:1.7;margin:0;">Kind regards,</p>
+        <p style="color:#111827;font-size:16px;font-weight:700;margin:2px 0 0;">${esc(b.name || '')}</p>
+        ${contactBits.length ? `<p style="color:#6b7280;font-size:13px;line-height:1.8;margin:6px 0 0;">${contactBits.join(' &bull; ')}</p>` : ''}
+      </td></tr>
+    </table>`;
+
+  const content = `
+    <p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 18px;">${esc(greetingName(data.customerName))}</p>
+
+    <h1 style="color:#111827;font-size:23px;font-weight:800;margin:0 0 6px;line-height:1.25;letter-spacing:-0.4px;">${esc(data.jobName)}</h1>
+    <p style="color:#6b7280;font-size:14px;margin:0;">${esc(quoteTotalLabel(data))}</p>
+    <p style="color:${accent};font-size:30px;font-weight:800;margin:2px 0 0;letter-spacing:-0.6px;font-variant-numeric:tabular-nums;line-height:1.1;">${formatMoney(data.total)}</p>
+
+    ${button}
+
+    ${summaryBlock}
+
+    ${personalMessage}
+
+    <p style="color:#6b7280;font-size:14px;line-height:1.7;margin:22px 0 0;">A PDF copy of your quote is attached for your records.</p>
+
+    ${signature}
+  `;
+
+  const html = wrapQuoteEmailTemplate(content, {
+    brandColor: accent,
+    businessName: data.business.name,
+    logoUrl: data.business.logoUrl,
+    preheader: `${data.jobName} — ${formatMoney(data.total)}. Tap to view and accept your quote.`,
+    appFooter: false,
+  });
+
+  return { html, text: buildQuoteEmailText(data, acceptanceUrl) };
+}
+
+// Plain-text alternative, same order as the HTML. Markdown emphasis in the
+// tradie's message is stripped to bare text; bullets are kept as-is.
+function buildQuoteEmailText(data: RenderQuoteEmailInput, acceptanceUrl: string): string {
+  const parts: string[] = [];
+  parts.push(greetingName(data.customerName));
+  parts.push('');
+  parts.push(data.jobName || 'Your quote');
+  parts.push(`${quoteTotalLabel(data)}: ${formatMoney(data.total)}`);
+
+  if (acceptanceUrl) {
+    parts.push('');
+    parts.push('View and accept your quote:');
+    parts.push(acceptanceUrl);
+  }
+
+  const summary = quoteSummaryRows(data);
+  if (summary.length) {
+    parts.push('');
+    parts.push("What's included:");
+    for (const r of summary) parts.push(`- ${r.label}: ${formatMoney(r.amount)}`);
+    parts.push(`- ${quoteTotalLabel(data)}: ${formatMoney(data.total)}`);
+  }
+
+  const message = (data.emailBody || '').trim();
+  if (message) {
+    parts.push('');
+    parts.push(stripAbnFromBody(message).replace(/\*\*([^*\n]+)\*\*/g, '$1'));
+  }
+
+  parts.push('');
+  parts.push('A PDF copy of your quote is attached for your records.');
+
+  parts.push('');
+  parts.push('Kind regards,');
+  if (data.business.name) parts.push(data.business.name);
+  if (data.business.phone) parts.push(data.business.phone);
+  if (data.business.email) parts.push(data.business.email);
+
+  return parts.join('\n');
 }
 
 // ============================================================

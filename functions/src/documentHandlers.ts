@@ -20,7 +20,7 @@ import { isAlreadyInvoiced, type ConvertCandidate } from './shared/document/conv
 import * as functions from 'firebase-functions/v1';
 import { travelAdjustmentAmountFor } from './travelSurcharge';
 import {
-  buildQuoteEmailHtml,
+  renderQuoteEmail,
   remoteLogoUrl,
   buildInvoiceEmailHtml,
   sendEmail,
@@ -815,7 +815,7 @@ async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailRes
 
   const emailPriceDetail = resolvePriceDetail(quote, business);
 
-  const htmlContent = buildQuoteEmailHtml({
+  const { html: htmlContent, text: textContent } = renderQuoteEmail({
     customerName: quote.customerName || 'Client',
     emailBody,
     jobName: quote.job?.name || 'Job',
@@ -837,6 +837,9 @@ async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailRes
     hasTerms: !!termsToSend,
     surchargePaymentFees: business.surchargePaymentFees === true,
     priceDetail: emailPriceDetail,
+    // Orders the inline section summary the same way the PDF orders its
+    // material groups.
+    sections: Array.isArray(quote.sections) ? quote.sections : undefined,
     business: businessData,
   });
 
@@ -869,6 +872,7 @@ async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailRes
     to: recipientEmail,
     subject: `${isTestSend ? '[TEST] ' : ''}${baseSubject}`,
     htmlContent,
+    textContent,
     category: 'transactional',
     userId,
     tags: isTestSend ? ['quote-test'] : ['quote-to-client'],
