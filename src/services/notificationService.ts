@@ -210,6 +210,23 @@ class NotificationService {
   }
 
   /**
+   * The notification tap that launched this process, if any. The live
+   * response listener is registered after sign-in, and whether the OS replays
+   * a cold-start tap to a late listener differs by platform and version — so
+   * app-open attribution asks for it explicitly and de-dups by response id.
+   * Null on web, when the native module is missing, or when the app was
+   * opened normally.
+   */
+  async getLaunchNotificationResponse(): Promise<unknown | null> {
+    if (!isNativeModuleAvailable || !Notifications) return null;
+    try {
+      return (await Notifications.getLastNotificationResponseAsync()) ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Reset the app icon badge. Nothing cleared it previously, so the count grew
    * forever and stopped meaning anything.
    */

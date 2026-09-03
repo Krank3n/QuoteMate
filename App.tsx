@@ -40,6 +40,7 @@ import { seedAppearanceForExistingUser } from './src/services/appearance';
 import { RootNavigator } from './src/navigation/RootNavigator';
 import { isDemoCaptureActive } from './src/demo/demoPlayback';
 import { trackEvent } from './src/services/analyticsService';
+import { appOpenTracker, pushTapKey, pushTypeOf } from './src/services/appOpenTracker';
 import { warmUpTapToPay } from './src/services/squarePayments';
 import { syncFavoritesFromCloud } from './src/services/materialFavorites';
 import { registerQuotingProfileSource } from './src/services/assistant/quotingProfileContext';
@@ -476,6 +477,13 @@ function App() {
         // burns the one-shot OS prompt before the tradie has seen anything
         // work, and on iOS a decline is permanent. The ask now happens after
         // they send their first quote — see maybePromptForPushPermission.
+
+        // The cold open, counted once per process and held briefly so a
+        // launching notification tap can claim it (see appOpenTracker). Must
+        // precede the listener registration below, or a replayed tap could
+        // land before there is an open to attribute.
+        appOpenTracker.noteOpen('cold');
+
         if (Platform.OS !== 'web') {
           // Re-register silently for anyone who already granted permission, so
           // a reinstall or token rotation doesn't quietly stop delivery.
@@ -487,6 +495,7 @@ function App() {
           notificationService.setupNotificationListeners(
             undefined,
             (response) => {
+              appOpenTracker.notePushTap(pushTypeOf(response), pushTapKey(response));
               // Take the tradie to whatever the notification was about.
               const route = routeForNotification(
                 response?.notification?.request?.content?.data
@@ -509,6 +518,17 @@ function App() {
               void notificationService.clearBadge();
             }
           );
+
+          // A tap that launched the process may or may not reach the listener
+          // above; ask for it outright. Same key as the listener path, so it
+          // is attributed once either way. Attribution only — navigation for
+          // launch taps is unchanged.
+          notificationService
+            .getLaunchNotificationResponse()
+            .then((response) => {
+              if (response) appOpenTracker.notePushTap(pushTypeOf(response), pushTapKey(response));
+            })
+            .catch(() => {});
         }
 
         // Set up real-time listeners for cross-device sync.
@@ -616,6 +636,16 @@ function App() {
     });
     return () => sub.remove();
   }, [user]);
+
+  // app_opened, foreground half: every return from the background, on every
+  // platform (the cold open is noted at sign-in above). Not gated on `user` —
+  // the tracker doesn't care, and analytics drops anonymous writes itself.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (next) => {
+      appOpenTracker.handleAppStateChange(next);
+    });
+    return () => sub.remove();
+  }, []);
 
   // Dead-man's switch on the splash overlay. Runs once from mount rather than
   // resetting per gate, so a chain of individually-short stalls still can't

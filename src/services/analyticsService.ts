@@ -59,6 +59,15 @@ export type AnalyticsEvent =
   // dashboard_door | tab, so door-driven visits are separable from
   // tab-bar habit.
   | 'assistant_opened'
+  // — Return visits —
+  // The app came to the front: once per process (`source` cold), on every
+  // return from the background (foreground), or from a notification tap
+  // (push, with `push_type` naming which one). `hours_since_last_open` is the
+  // gap to the previous open on this device, null the first time. Before
+  // this, a tradie coming back was invisible — retention was inferred from
+  // quote timestamps — and no push had a read on whether it worked. See
+  // appOpenTracker.ts for the grace-window attribution.
+  | 'app_opened'
   // Persistent dashboard / job-screen nudge after trial expires + no Square.
   | 'trial_expired_banner_shown'
   // The hard gate at Send. Fires when SendGateModal opens — funnel's last

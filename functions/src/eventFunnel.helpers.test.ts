@@ -3,12 +3,16 @@ import {
   EventFunnelUserInput,
   SendFlowFlags,
   SendFlowUserInput,
+  RETURN_GAP_HOURS,
   docHasSquarePayment,
+  emptyAppOpenFlags,
   emptySendFlowFlags,
   foldEvent,
   furthestSendStage,
   furthestStage,
+  isAcceptedDoc,
   isMonetized,
+  isViewedDoc,
   parseSendMethod,
   sumSquarePayments,
   rollupEventFunnel,
@@ -33,6 +37,8 @@ function user(over: Partial<EventFunnelUserInput> = {}): EventFunnelUserInput {
     sub: null,
     hasQuoteDraft: false,
     hasSentDoc: false,
+    hasViewedDoc: false,
+    hasAcceptedDoc: false,
     hasSquareConnection: false,
     hasSquarePayment: false,
     viewedPaywall: false,
@@ -66,6 +72,19 @@ describe('furthestStage', () => {
     expect(furthestStage(user({ hasQuoteDraft: true })).shared).toBe('quote_draft');
     // hasSentDoc wins even if the draft flag was missed.
     expect(furthestStage(user({ hasSentDoc: true })).shared).toBe('quote_sent');
+    expect(furthestStage(user({ hasSentDoc: true, hasViewedDoc: true })).shared).toBe(
+      'customer_viewed'
+    );
+    expect(
+      furthestStage(user({ hasSentDoc: true, hasViewedDoc: true, hasAcceptedDoc: true })).shared
+    ).toBe('quote_accepted');
+  });
+
+  it('an acceptance the tradie marked by hand still counts, with no view stamp at all', () => {
+    // Marked accepted in the app: acceptedAt exists, firstViewedAt never did.
+    expect(furthestStage(user({ hasSentDoc: true, hasAcceptedDoc: true })).shared).toBe(
+      'quote_accepted'
+    );
   });
 
   it('never regresses below durable evidence on Path A', () => {
@@ -116,7 +135,13 @@ describe('rollupEventFunnel', () => {
 
     const payload = rollupEventFunnel(inputs, NOW, 30);
 
-    expect(payload.shared).toEqual({ signups: 5, quoteDraft: 4, quoteSent: 3 });
+    expect(payload.shared).toEqual({
+      signups: 5,
+      quoteDraft: 4,
+      quoteSent: 3,
+      customerViewed: 0,
+      quoteAccepted: 0,
+    });
     expect(payload.pathA.paywallViewed).toBe(2);
     expect(payload.pathA.checkoutStarted).toBe(1);
     expect(payload.pathA.proPaid).toBe(1);
@@ -154,8 +179,160 @@ describe('rollupEventFunnel', () => {
     const payload = rollupEventFunnel([], NOW, 30);
     expect(payload.conversion.trialToMonetized).toBe(0);
     expect(payload.conversion.activationRate).toBe(0);
+    expect(payload.conversion.sentToViewed).toBe(0);
+    expect(payload.conversion.sentToAccepted).toBe(0);
     expect(payload.pathA.pctCheckoutStarted).toBe(0);
     expect(payload.pathB.pctFirstPayment).toBe(0);
+  });
+
+  it('counts the customer-outcome stages cumulatively and buckets monetised users by furthest stage', () => {
+    const paidSub = { ...billedSub, trialStartedAt: trialSub.trialStartedAt };
+    const inputs = [
+      // Sent, customer never opened it, never paid.
+      user({ uid: 'sent-only', sub: trialSub, hasSentDoc: true }),
+      // Sent, customer opened it, never paid.
+      user({ uid: 'viewed', sub: trialSub, hasSentDoc: true, hasViewedDoc: true }),
+      // Sent, opened, accepted — and paid for Pro.
+      user({
+        uid: 'won-paid',
+        sub: paidSub,
+        hasSentDoc: true,
+        hasViewedDoc: true,
+        hasAcceptedDoc: true,
+      }),
+      // Accepted by hand (no view stamp) and collecting via Square.
+      user({ uid: 'won-square', sub: trialSub, hasSentDoc: true, hasAcceptedDoc: true, hasSquarePayment: true }),
+      // Paid without ever sending (the odd early adopter) — lands in quote_draft's bucket.
+      user({ uid: 'paid-draft', sub: paidSub, hasQuoteDraft: true }),
+    ];
+
+    const payload = rollupEventFunnel(inputs, NOW, 30);
+
+    expect(payload.shared).toEqual({
+      signups: 5,
+      quoteDraft: 5,
+      quoteSent: 4,
+      customerViewed: 3, // the hand-marked acceptance implies a view
+      quoteAccepted: 2,
+    });
+    expect(payload.conversion.sentToViewed).toBe(3 / 4);
+    expect(payload.conversion.sentToAccepted).toBe(2 / 4);
+    expect(payload.histogram.shared).toEqual({
+      signup: 0,
+      quote_draft: 1,
+      quote_sent: 1,
+      customer_viewed: 1,
+      quote_accepted: 2,
+    });
+    // The question the table exists to answer: does a won job predict paying?
+    expect(payload.monetizedByStage).toEqual({
+      signup: 0,
+      quote_draft: 1,
+      quote_sent: 0,
+      customer_viewed: 0,
+      quote_accepted: 2,
+    });
+    expect(payload.monetized.count).toBe(3);
+  });
+
+  it('rolls app_opened flags into return counts, and reads no events as zero', () => {
+    const inputs = [
+      user({
+        uid: 'came-back-from-push',
+        opens: { openedApp: true, returnedLater: true, returnedViaPush: true },
+      }),
+      user({
+        uid: 'same-sitting-only',
+        opens: { openedApp: true, returnedLater: false, returnedViaPush: false },
+      }),
+      user({ uid: 'no-events' }),
+    ];
+    expect(rollupEventFunnel(inputs, NOW, 30).returns).toEqual({
+      opened: 2,
+      returnedLater: 1,
+      viaPush: 1,
+    });
+  });
+});
+
+describe('foldAppOpenEvent (via foldEvent)', () => {
+  it('a cold open with no previous open is an open, not a return', () => {
+    const flags = foldEvent(undefined, 'app_opened', { source: 'cold', hours_since_last_open: null });
+    expect(flags.openedApp).toBe(true);
+    expect(flags.returnedLater).toBe(false);
+    expect(flags.returnedViaPush).toBe(false);
+  });
+
+  it('a later sitting is a return; the same sitting resumed is not', () => {
+    const same = foldEvent(undefined, 'app_opened', { source: 'foreground', hours_since_last_open: 0.2 });
+    expect(same.returnedLater).toBe(false);
+    const later = foldEvent(same, 'app_opened', {
+      source: 'foreground',
+      hours_since_last_open: RETURN_GAP_HOURS,
+    });
+    expect(later.returnedLater).toBe(true);
+  });
+
+  it('attributes a push-sourced open regardless of the gap', () => {
+    const flags = foldEvent(undefined, 'app_opened', {
+      source: 'push',
+      push_type: 'quote_viewed',
+      hours_since_last_open: 0.1,
+    });
+    expect(flags.returnedViaPush).toBe(true);
+    expect(flags.returnedLater).toBe(false);
+  });
+
+  it('degrades malformed props to "opened, details unknown"', () => {
+    const flags = foldEvent(undefined, 'app_opened', { hours_since_last_open: 'yesterday' });
+    expect(flags).toMatchObject({ openedApp: true, returnedLater: false, returnedViaPush: false });
+    expect(foldEvent(undefined, 'app_opened', null).openedApp).toBe(true);
+  });
+
+  it('leaves the other flag bags alone', () => {
+    const flags = foldEvent(undefined, 'app_opened', { source: 'push' });
+    expect(flags.viewedPaywall).toBe(false);
+    expect(flags.openedSendSheet).toBe(false);
+  });
+});
+
+describe('isViewedDoc', () => {
+  it('true on any of the acceptance page\'s view stamps', () => {
+    expect(isViewedDoc({ firstViewedAt: { toMillis: () => NOW } })).toBe(true);
+    expect(isViewedDoc({ lastViewedAt: NOW })).toBe(true);
+    expect(isViewedDoc({ viewCount: 3 })).toBe(true);
+  });
+
+  it('false for an unstamped documents twin, a zero count, and nothing at all', () => {
+    expect(isViewedDoc({ stage: 'quote_sent', sentAt: NOW })).toBe(false);
+    expect(isViewedDoc({ viewCount: 0 })).toBe(false);
+    expect(isViewedDoc(null)).toBe(false);
+    expect(isViewedDoc(undefined)).toBe(false);
+  });
+});
+
+describe('isAcceptedDoc', () => {
+  it('true for the accepted stage, an acceptedAt stamp, or a quote turned invoice', () => {
+    expect(isAcceptedDoc({ stage: 'quote_accepted' })).toBe(true);
+    // Progressed past accepted but the stamp survived the transition.
+    expect(isAcceptedDoc({ stage: 'paid', acceptedAt: NOW })).toBe(true);
+    expect(isAcceptedDoc({ stage: 'invoice_sent', invoicedAt: NOW })).toBe(true);
+  });
+
+  it('true for a legacy customer accept: respondedAt on a doc the mirror moved on', () => {
+    expect(isAcceptedDoc({ stage: 'invoice_sent', respondedAt: NOW })).toBe(true);
+  });
+
+  it('never for rejected or cancelled, whatever else is stamped', () => {
+    expect(isAcceptedDoc({ stage: 'quote_rejected', respondedAt: NOW })).toBe(false);
+    expect(isAcceptedDoc({ stage: 'cancelled', acceptedAt: NOW, invoicedAt: NOW })).toBe(false);
+  });
+
+  it('false for a plain sent quote and an invoice-only document', () => {
+    expect(isAcceptedDoc({ stage: 'quote_sent', sentAt: NOW })).toBe(false);
+    expect(isAcceptedDoc({ stage: 'invoice_sent', sentAt: NOW })).toBe(false);
+    expect(isAcceptedDoc({ stage: 'paid' })).toBe(false);
+    expect(isAcceptedDoc(null)).toBe(false);
   });
 });
 
@@ -168,6 +345,7 @@ describe('foldEvent', () => {
       viewedPaywall: true,
       startedCheckout: true,
       ...emptySendFlowFlags(),
+      ...emptyAppOpenFlags(),
     });
   });
 
@@ -177,6 +355,7 @@ describe('foldEvent', () => {
       viewedPaywall: false,
       startedCheckout: false,
       ...emptySendFlowFlags(),
+      ...emptyAppOpenFlags(),
     });
   });
 
