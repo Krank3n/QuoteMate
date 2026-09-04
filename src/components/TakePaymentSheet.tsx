@@ -379,7 +379,17 @@ export function TakePaymentSheet({
     // enforced on press rather than by disabling the row. Same outcome for the
     // tradie, but the control stays live the way Apple's review expects.
     if (!termsGatePassed) {
-      onError('Confirm the customer has read the terms before charging.');
+      // Not an error — the tradie has simply not ticked the box yet. Routing it
+      // through onError put it under the host's red "Payment error" heading,
+      // which is what a reviewer sees in a submission recording and reads as
+      // the app failing. Shown from the sheet's own alert so the title can say
+      // what actually happened.
+      showAlert({
+        type: 'warning',
+        title: 'Confirm the terms first',
+        message:
+          'Tick that the customer has read and agreed to the terms, then charge the card.',
+      });
       return;
     }
     setChargingCard(true);

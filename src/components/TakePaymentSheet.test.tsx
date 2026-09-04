@@ -512,11 +512,10 @@ describe('TakePaymentSheet Tap to Pay row meets Apple review requirements', () =
     fireEvent.click(getByText('Tap to Pay / Card Entry'));
 
     // The press registered — a disabled row would have done nothing at all.
-    await waitFor(() =>
-      expect(props.onError).toHaveBeenCalledWith(
-        'Confirm the customer has read the terms before charging.',
-      ),
-    );
+    await waitFor(() => expect(getByText('Confirm the terms first')).toBeTruthy());
+    // Not reported as a payment error: that heading appears in Apple's
+    // submission recordings and reads as the app failing.
+    expect(props.onError).not.toHaveBeenCalled();
     // ...and it still refused to charge.
     expect(squarePayments.takeInAppPayment).not.toHaveBeenCalled();
   });
