@@ -338,6 +338,31 @@ availability.
 
 The new `PAYMENTS_WRITE_IN_PERSON` scope is required for Tap to Pay. Existing connected sellers will need to **disconnect and reconnect** Square once to re-grant scopes — the Square Integration screen will surface this as a `disconnectedReason: 'scope_mismatch'` if Square refuses to refresh. Plan a one-line in-app banner before flipping `android: true` for existing tradies.
 
+## Location permission
+
+Square refuses an in-person payment without location permission on **both**
+platforms — a card-network rule, not a Square quirk: the transaction has to be
+placed in a supported country. Square checks the authorisation status and
+errors if it isn't already granted; it never raises the prompt itself, so we do
+it in `ensureLocationPermission()` (`src/services/squarePayments.ts`) before
+`authorize()`.
+
+- **Android** — `PermissionsAndroid.request(ACCESS_FINE_LOCATION)`.
+- **iOS** — `expo-location`'s `getForegroundPermissionsAsync` /
+  `requestForegroundPermissionsAsync`. Without it, iOS showed the tradie
+  *"location settings have not been granted, please request access"* — an error
+  message where a permission dialog should have been. When `canAskAgain` is
+  false we point at Settings rather than firing a request iOS will no-op.
+
+`expo-location` is a **dependency only — deliberately NOT in `plugins`**. Its
+config plugin would write generic `NSLocationAlways*` usage strings into
+Info.plist, which tells App Review we want always-on location we never use. The
+one string we need, `NSLocationWhenInUseUsageDescription`, is set by
+`withSquareSDK.js`, and the Android permissions come from expo-location's own
+bundled manifest. Adding the plugin buys nothing and costs review questions.
+
+Because it's a native module, this ships in a **build, not an OTA**.
+
 ## Auth flow at runtime
 
 1. `takeInAppPayment` checks `getAuthorizationState()`.

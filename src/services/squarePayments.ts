@@ -31,6 +31,7 @@ import {
 } from 'mobile-payments-sdk-react-native';
 import { Platform, PermissionsAndroid } from 'react-native';
 import * as Crypto from 'expo-crypto';
+import * as Location from 'expo-location';
 
 import * as squareService from './squareService';
 import { presentTapToPayEducation } from '../../modules/tap-to-pay-education';
@@ -59,26 +60,54 @@ interface TakeInAppPaymentArgs {
 }
 
 /**
- * Square's Android SDK refuses to pair a reader (even the virtual Tap to Pay
- * one) without runtime-granted fine location permission. iOS handles this
- * via the Info.plist usage string + system prompt on first use. Call this
- * before `authorize()` on Android or the SDK throws `payment_no_permission_location`.
+ * Square's SDK will not take an in-person payment without location permission,
+ * on either platform — it is a card-network requirement, not a Square quirk.
+ *
+ * Both platforms need us to ASK. Square checks the authorisation status and
+ * refuses if it is not already granted; it never triggers the prompt itself. On
+ * iOS that surfaced as "location settings have not been granted, please request
+ * access" — an error message where a permission dialog should have been, with
+ * no way forward for the tradie. The Info.plist usage string is present, so iOS
+ * was willing to ask all along; nothing was asking it to.
  */
-async function ensureAndroidLocationPermission(): Promise<void> {
-  if (Platform.OS !== 'android') return;
-  const granted = await PermissionsAndroid.request(
-    PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
-    {
-      title: 'Location permission required',
-      message:
-        'Square requires location access to process in-person card payments.',
-      buttonPositive: 'Allow',
-      buttonNegative: 'Cancel',
+async function ensureLocationPermission(): Promise<void> {
+  if (Platform.OS === 'android') {
+    const granted = await PermissionsAndroid.request(
+      PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+      {
+        title: 'Location permission required',
+        message:
+          'Square requires location access to process in-person card payments.',
+        buttonPositive: 'Allow',
+        buttonNegative: 'Cancel',
+      }
+    );
+    if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
+      throw new Error(
+        'Location permission is required to take card payments. Enable it in system settings and try again.'
+      );
     }
-  );
-  if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
+    return;
+  }
+
+  if (Platform.OS !== 'ios') return;
+
+  const current = await Location.getForegroundPermissionsAsync();
+  if (current.granted) return;
+
+  // canAskAgain false means iOS will not show the dialog again — a second
+  // request would no-op and the tradie would be stuck on the same error
+  // forever. Send them to Settings instead of pretending we can ask.
+  if (!current.canAskAgain) {
     throw new Error(
-      'Location permission is required to take card payments. Enable it in system settings and try again.'
+      'Location is off for QuoteMate. Turn it on in Settings › Privacy & Security › Location Services to take card payments.'
+    );
+  }
+
+  const asked = await Location.requestForegroundPermissionsAsync();
+  if (!asked.granted) {
+    throw new Error(
+      'Location permission is required to take card payments. Allow it when prompted, or turn it on in Settings.'
     );
   }
 }
@@ -122,7 +151,7 @@ export async function takeInAppPayment({
     throw new Error('Invalid app fee amount.');
   }
 
-  await ensureAndroidLocationPermission();
+  await ensureLocationPermission();
   await ensureAuthorized();
   // iOS only: if the merchant hasn't accepted Apple's Tap to Pay T&Cs yet,
   // pressing the pay button opens that acceptance first — followed by Apple's
@@ -208,7 +237,7 @@ export async function isTapToPayCapable(): Promise<boolean> {
  * Google secure-element handshake. Unskippable per payment-network rules.
  */
 export async function primeTapToPayOnDevice(): Promise<void> {
-  await ensureAndroidLocationPermission();
+  await ensureLocationPermission();
   await ensureAuthorized();
   // Apple reqs 3.6 / 4.2: Settings is the enablement path outside checkout, so
   // acceptance and education have to happen here too — not only on the
