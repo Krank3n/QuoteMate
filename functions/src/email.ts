@@ -1610,6 +1610,15 @@ interface QuoteEmailData {
   gstRegistered?: boolean;
   pricesIncludeGst?: boolean;
   acceptanceUrl?: string;
+  /**
+   * URL of the email-open tracking pixel for THIS send. When present, the
+   * pixel <img> is embedded at the end of the customer-facing HTML so the
+   * mail client fetches it on open — the only signal available from a
+   * transactional email that answers "did anyone even open this quote?".
+   * Only ever set for customer sends (never a test send to the tradie).
+   * See emailOpenPixel.ts.
+   */
+  emailOpenPixelUrl?: string;
   photoUrls?: string[];
   // Deposit shown to the customer above the Accept button so they know what
   // they'll be asked to pay up front.
@@ -2468,6 +2477,8 @@ export function buildDocumentEmailHtml(data: DocumentEmailData): string {
     </p>
 
     ${renderBusinessFooter(data.business, accent)}
+
+    ${!isInvoice ? renderEmailOpenPixel(data.emailOpenPixelUrl) : ''}
   `;
 
   return wrapQuoteEmailTemplate(content, {
@@ -2476,6 +2487,21 @@ export function buildDocumentEmailHtml(data: DocumentEmailData): string {
     logoUrl: data.business.logoUrl,
     preheader: `${typeLabel} for ${data.jobName} — ${formatMoney(data.total)} from ${data.business.name}`,
   });
+}
+
+/**
+ * 1x1 tracking pixel appended at the very end of a customer-facing quote
+ * email so the mail client's remote-image fetch tells us the quote was
+ * opened. See emailOpenPixel.ts for the URL contract. Deliberately never
+ * rendered for invoices (this instrumentation exists to answer the
+ * quote-open question) or for a quote without a URL (a test send).
+ */
+function renderEmailOpenPixel(url: string | undefined): string {
+  if (!url) return '';
+  // width/height 1, display:block, no alt text — the customer sees nothing.
+  // Brevo rewrites <a href> for click tracking but leaves <img src> alone,
+  // so this URL reaches the recipient intact.
+  return `<img src="${escapeHtml(url)}" width="1" height="1" alt="" style="display:block;width:1px;height:1px;border:0;" />`;
 }
 
 // ----- legacy wrappers — kept for callers that still build per-type payloads -----

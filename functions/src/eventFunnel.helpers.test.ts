@@ -751,6 +751,7 @@ describe('rollupOutcomes', () => {
     rejected: false,
     sendMethod: 'email',
     withLink: true,
+    emailOpened: false,
     ...over,
   });
   const paidSub = { ...billedSub, trialStartedAt: trialSub.trialStartedAt };
@@ -788,7 +789,9 @@ describe('rollupOutcomes', () => {
     // Raw opens: the hand-marked acceptance never had its link opened; the
     // twin-less legacy view counts through its flag.
     expect(o.openedLink).toBe(4);
-    expect(o.quotes).toEqual({ sent: 6, withLink: 6, opened: 3, accepted: 2, rejected: 1 });
+    expect(o.quotes).toEqual({
+      sent: 6, withLink: 6, emailOpened: 0, opened: 3, accepted: 2, rejected: 1,
+    });
   });
 
   it('agrees with the ladder on who is a sender, so the two panels never disagree', () => {
@@ -834,18 +837,54 @@ describe('rollupOutcomes', () => {
     ];
     const o = rollupOutcomes(docs, inputs);
     expect(o.bySendMethod).toEqual({
-      email: { sent: 2, withLink: 2, opened: 1, accepted: 0 },
-      sms: { sent: 2, withLink: 2, opened: 2, accepted: 1 },
-      export_pdf: { sent: 1, withLink: 0, opened: 0, accepted: 0 },
-      unknown: { sent: 1, withLink: 1, opened: 0, accepted: 0 },
+      email: { sent: 2, withLink: 2, emailOpened: 0, opened: 1, accepted: 0 },
+      sms: { sent: 2, withLink: 2, emailOpened: 0, opened: 2, accepted: 1 },
+      export_pdf: { sent: 1, withLink: 0, emailOpened: 0, opened: 0, accepted: 0 },
+      unknown: { sent: 1, withLink: 1, emailOpened: 0, opened: 0, accepted: 0 },
     });
     expect(o.quotes.withLink).toBe(5);
+  });
+
+  it('counts an email-open per quote and splits it by channel — the gap between sent and link-opened', () => {
+    const inputs = [user({ uid: 'u', hasSentDoc: true })];
+    const docs = [
+      // Sent, email opened, link never followed — the "opened but ignored" case.
+      doc({ sendMethod: 'email', emailOpened: true }),
+      // Email opened AND link followed AND accepted — the healthy path.
+      doc({ sendMethod: 'email', emailOpened: true, firstViewedAt: NOW + H, accepted: true, acceptedAt: NOW + 3 * H }),
+      // Email never opened — inbox never saw it (delivery / spam issue).
+      doc({ sendMethod: 'email' }),
+      // SMS has no pixel: emailOpened stays false even when the link is opened.
+      doc({ sendMethod: 'sms', firstViewedAt: NOW + H }),
+    ];
+    const o = rollupOutcomes(docs, inputs);
+    expect(o.quotes).toEqual({
+      sent: 4, withLink: 4, emailOpened: 2, opened: 2, accepted: 1, rejected: 0,
+    });
+    expect(o.bySendMethod).toEqual({
+      email: { sent: 3, withLink: 3, emailOpened: 2, opened: 1, accepted: 1 },
+      sms: { sent: 1, withLink: 1, emailOpened: 0, opened: 1, accepted: 0 },
+    });
+  });
+
+  it('an email-open is not evidence of an acceptance link — the pixel rides on every send', () => {
+    // The pixel is embedded whether or not the html carried an acceptance
+    // link, so an open says the EMAIL was opened and nothing about a link.
+    // Only a link-open (firstViewedAt) back-fills `withLink`.
+    const inputs = [user({ uid: 'u', hasSentDoc: true })];
+    const docs = [doc({ sendMethod: 'email', withLink: false, emailOpened: true })];
+    const o = rollupOutcomes(docs, inputs);
+    expect(o.quotes.withLink).toBe(0);
+    expect(o.quotes.emailOpened).toBe(1);
+    expect(o.bySendMethod.email.withLink).toBe(0);
+    expect(o.bySendMethod.email.emailOpened).toBe(1);
   });
 
   it('is all zeros with no senders, and rides on the main payload', () => {
     const empty = rollupOutcomes([], []);
     expect(empty.senders).toBe(0);
     expect(empty.hoursToOpen.samples).toBe(0);
+    expect(empty.quotes.emailOpened).toBe(0);
     expect(rollupEventFunnel([], NOW, 30).outcomes).toEqual(empty);
   });
 });

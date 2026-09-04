@@ -272,6 +272,48 @@ describe('quote email — summary card', () => {
   });
 });
 
+describe('quote email — email-open pixel', () => {
+  const PIXEL = 'https://us-central1-hansendev.cloudfunctions.net/trackEmailOpen?t=deadbeef';
+
+  it('embeds the pixel as a 1x1 <img> at the end when a URL is supplied', () => {
+    const html = quote({ emailOpenPixelUrl: PIXEL });
+    expect(html).toContain(`src="${PIXEL}"`);
+    // Zero visible weight: 1x1, display:block, no border, no alt text.
+    expect(html).toMatch(/width="1"\s+height="1"/);
+    expect(html).toContain('display:block');
+    // Must sit at the very end so a partial-load client still counts the open.
+    const pixelIdx = html.indexOf(PIXEL);
+    const bodyEnd = html.lastIndexOf('</body>');
+    expect(pixelIdx).toBeGreaterThan(-1);
+    expect(pixelIdx).toBeLessThan(bodyEnd);
+    // Nothing between the pixel and </body> but whitespace and the wrapper closing tags.
+    const trailing = html.slice(pixelIdx, bodyEnd);
+    expect(trailing).not.toMatch(/<img[^>]*src="(?!https:\/\/us-central1-hansendev)/i);
+  });
+
+  it('renders no pixel when no URL is supplied (test sends, older callers)', () => {
+    const html = quote();
+    expect(html).not.toContain('trackEmailOpen');
+    // No stray width=1 height=1 img either.
+    expect(html).not.toMatch(/width="1"\s+height="1"/);
+  });
+
+  it('never adds a pixel to an invoice email — instrumentation is quote-only', () => {
+    const html = invoice({ emailOpenPixelUrl: PIXEL } as any);
+    expect(html).not.toContain(PIXEL);
+    expect(html).not.toContain('trackEmailOpen');
+  });
+
+  it('escapes a hostile pixel URL rather than breaking out of the src attribute', () => {
+    const hostile = 'https://x.test/p?t=abc"onload="alert(1)';
+    const html = quote({ emailOpenPixelUrl: hostile });
+    // The double-quote is escaped so the src attribute stays intact and the
+    // hostile fragment lands inside it as a data value, not as an attribute.
+    expect(html).not.toContain('"onload="alert(1)');
+    expect(html).toContain('&quot;onload=&quot;alert(1)');
+  });
+});
+
 describe('quote email — money', () => {
   it('renders totals with thousands separators', () => {
     const html = quote();

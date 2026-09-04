@@ -228,6 +228,12 @@ import {
   TOKEN_EXPIRATION_MS as CUSTOMER_FOLLOW_UP_TOKEN_EXPIRATION_MS,
   type FollowUpQuote,
 } from './customerFollowUp';
+import {
+  emailOpenPixelUrlForToken,
+  generateEmailOpenToken,
+  handleEmailOpen,
+  hashEmailOpenToken,
+} from './emailOpenPixel';
 import { processAndStoreLogo } from './logoProcessing';
 import { dollarsToCents, centsToDollars } from './shared/pdf/money';
 import { validateAndRepairAiOutput } from './shared/ai/validateAiOutput';
@@ -6044,6 +6050,71 @@ export function acceptancePageUrlForToken(token: string): string {
 }
 
 /**
+ * Email-open tracking pixel. The customer-facing quote email embeds a 1x1
+ * GIF whose URL carries a random 256-bit token; when the mail client fetches
+ * it (a proxy for the email being opened), we look up the token's hash in
+ * emailOpenTokens, then stamp emailFirstOpenedAt / emailLastOpenedAt /
+ * emailOpenCount on the SAME legacy users/{uid}/quotes/{quoteId} doc that
+ * getQuoteForAcceptance stamps firstViewedAt on. That gives the funnel two
+ * separate reads — email opened vs acceptance-link opened — so an admin
+ * can tell "email never delivered" from "opened but the customer didn't
+ * click through".
+ *
+ * Thin wrapper: every decision lives in handleEmailOpen (emailOpenPixel.ts),
+ * which always resolves to the GIF, never creates a missing quote doc, and
+ * throttles repeat writes. This end only supplies the Firestore reads and
+ * the admin sentinels. maxInstances caps a public unauthenticated endpoint
+ * so a scanner can't scale it out over the rest of the project.
+ */
+export const trackEmailOpen = functions
+  .runWith({ maxInstances: 10 })
+  .https.onRequest(async (req, res) => {
+    // No CORS: <img src> requests from a mail client aren't cross-origin in
+    // the JS sense, and this endpoint has nothing to give a browser JS caller
+    // anyway. No auth either — it lives in the customer's inbox.
+    const db = admin.firestore();
+    const result = await handleEmailOpen({
+      token: req.query.t,
+      now: Date.now(),
+      serverTimestamp: admin.firestore.FieldValue.serverTimestamp(),
+      increment: admin.firestore.FieldValue.increment(1),
+      lookupToken: async (tokenHash) => {
+        const snap = await db.collection('emailOpenTokens').doc(tokenHash).get();
+        if (!snap.exists) return null;
+        const data = snap.data() as { userId?: unknown; quoteId?: unknown } | undefined;
+        const userId = typeof data?.userId === 'string' ? data.userId : '';
+        const quoteId = typeof data?.quoteId === 'string' ? data.quoteId : '';
+        return userId && quoteId ? { userId, quoteId } : null;
+      },
+      readQuote: async ({ userId, quoteId }) => {
+        const snap = await db.doc(`users/${userId}/quotes/${quoteId}`).get();
+        // Deleted quote: null, so the handler writes nothing. An update()
+        // would throw and a merge set() would resurrect it as a blank draft.
+        if (!snap.exists) return null;
+        const data = snap.data() || {};
+        return {
+          hasFirstOpen: data.emailFirstOpenedAt != null,
+          lastOpenedAtMs: normaliseTimestamp(data.emailLastOpenedAt)?.getTime() ?? null,
+          sentAtMs: normaliseTimestamp(data.sentAt)?.getTime() ?? null,
+        };
+      },
+      writeStamp: async ({ userId, quoteId }, stamp) => {
+        // update(), never set({ merge: true }) — the doc is known to exist
+        // and must never be created by a pixel hit. Typed `any` like the
+        // sibling firstViewedAt stamp: Firestore's update() signature wants
+        // an index signature a named interface can't satisfy.
+        const update: any = stamp;
+        await db.doc(`users/${userId}/quotes/${quoteId}`).update(update);
+      },
+      onError: (err: any) => {
+        functions.logger.warn('trackEmailOpen_failed', { message: err?.message });
+      },
+    });
+    res.set(result.headers);
+    res.status(result.status).send(result.body);
+  });
+
+/**
  * Generate a secure acceptance token for a quote
  * Creates a 256-bit random token, stores it on the quote, returns the acceptance URL
  */
@@ -6257,6 +6328,11 @@ export const sendQuoteEmail = functions.runWith({ timeoutSeconds: 120, memory: '
           return r ? { paymentLinkId: r.paymentLinkId, paymentLinkUrl: r.paymentLinkUrl } : null;
         },
         acceptanceUrlForToken: acceptancePageUrlForToken,
+        emailOpenPixelUrlForToken: emailOpenPixelUrlForToken,
+        generateEmailOpenToken: () => {
+          const token = generateEmailOpenToken();
+          return { token, hashedToken: hashEmailOpenToken(token) };
+        },
         fetchPhotoAttachments,
         generateAcceptanceToken: () => {
           const token = crypto.randomBytes(32).toString('hex');
