@@ -206,11 +206,40 @@ describe('unsent_quote', () => {
 });
 
 describe('quote_follow_up', () => {
+  // The admin funnel moved this threshold from 4 days to 2: acceptances land
+  // in a median of 20 hours, so a quote still silent at 48 hours is the one
+  // worth chasing. These pin the two-day boundary from both sides.
+  it('pins the threshold at 2 days', () => {
+    expect(QUOTE_FOLLOW_UP_MIN_DAYS).toBe(2);
+  });
+
+  it('a quote sent 2 days ago fires the follow-up', () => {
+    const n = pick({ quotes: [quote({ sentAt: NOW - 2 * DAY })] });
+    expect(n?.type).toBe('quote_follow_up');
+    expect(n?.days).toBe(2);
+  });
+
+  it('a quote sent 1 day ago does not fire yet', () => {
+    expect(pick({ quotes: [quote({ sentAt: NOW - 1 * DAY })] })).toBeNull();
+  });
+
   it(`waits ${QUOTE_FOLLOW_UP_MIN_DAYS} days before suggesting a follow-up`, () => {
     const n = pick({
       quotes: [quote({ sentAt: NOW - (QUOTE_FOLLOW_UP_MIN_DAYS - 1) * DAY })],
     });
     expect(n).toBeNull();
+  });
+
+  it('never nudges a quote the customer has already responded to', () => {
+    // A responded quote leaves 'sent' (accepted/declined), so the status
+    // filter drops it — no follow-up for a quote that's already answered.
+    expect(pick({ quotes: [quote({ status: 'accepted', sentAt: NOW - 8 * DAY })] })).toBeNull();
+    expect(pick({ quotes: [quote({ status: 'declined', sentAt: NOW - 8 * DAY })] })).toBeNull();
+  });
+
+  it('reports days since send so the copy can say how long it has been', () => {
+    // Drives the banner subtitle "Sent N days ago, no reply yet".
+    expect(pick({ quotes: [quote({ sentAt: NOW - 3 * DAY })] })?.days).toBe(3);
   });
 
   it('skips sent quotes with no sentAt audit stamp (legacy docs)', () => {
@@ -278,6 +307,14 @@ describe('snoozing', () => {
     });
     expect(n?.type).toBe('quote_follow_up');
     expect(n?.docId).toBe('aging');
+  });
+
+  it('a snoozed follow-up stays hidden while the snooze is live', () => {
+    const n = pick({
+      quotes: [quote({ id: 'aging', sentAt: NOW - 3 * DAY })],
+      snoozed: { 'quote_follow_up:aging': NOW + DAY },
+    });
+    expect(n).toBeNull();
   });
 
   it('an expired snooze no longer hides the nudge', () => {

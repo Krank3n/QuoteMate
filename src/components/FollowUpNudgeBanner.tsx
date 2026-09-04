@@ -25,7 +25,7 @@ interface NudgeMeta {
   subtitle: (n: FollowUpNudge) => string;
 }
 
-const nudgeMetaFor = (themeColors: Tokens): Record<NudgeType, NudgeMeta> => ({
+export const nudgeMetaFor = (themeColors: Tokens): Record<NudgeType, NudgeMeta> => ({
   invoice_overdue: {
     icon: 'alert-circle-outline',
     accent: themeColors.error,
@@ -54,7 +54,9 @@ const nudgeMetaFor = (themeColors: Tokens): Record<NudgeType, NudgeMeta> => ({
     icon: 'bell-outline',
     accent: themeColors.warning,
     accentBg: themeColors.warningSubtle,
-    subtitle: (n) => `Sent ${n.days} day${n.days === 1 ? '' : 's'} ago, no reply — worth a follow-up`,
+    // days is always >= QUOTE_FOLLOW_UP_MIN_DAYS (2) here, so it's never
+    // singular — but keep the plural guard in case the threshold ever drops.
+    subtitle: (n) => `Sent ${n.days} day${n.days === 1 ? '' : 's'} ago, no reply yet — worth a follow-up`,
   },
 });
 

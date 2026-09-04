@@ -43,8 +43,13 @@ export interface FollowUpNudge {
   testSent?: boolean;
 }
 
-/** Don't suggest following a quote up until it's had a fair chance. */
-export const QUOTE_FOLLOW_UP_MIN_DAYS = 4;
+/**
+ * Don't suggest following a quote up until it's had a fair chance — but the
+ * admin funnel put a number on "a fair chance": acceptances land in a median
+ * of 20 hours, and a quote still silent at 48 hours is the one worth chasing.
+ * Waiting the old four days meant nudging after most of the action was over.
+ */
+export const QUOTE_FOLLOW_UP_MIN_DAYS = 2;
 /** Give a self-send a day's grace — they may be about to send it on. */
 export const SELF_SEND_MIN_MS = 24 * 60 * 60 * 1000;
 /** A finished-but-unsent quote gets the same day of grace. */

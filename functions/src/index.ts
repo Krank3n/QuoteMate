@@ -223,6 +223,17 @@ import { sendExpoPushNotifications } from './expoPush';
 import { hashTerms } from './shared/pdf/terms/defaultAuTradie';
 import { generateQuotePdfBuffer } from './pdfGenerator';
 import { normaliseTimestamp } from './timestamps.helpers';
+import {
+  selectQuotesForFollowUp,
+  TOKEN_EXPIRATION_MS as CUSTOMER_FOLLOW_UP_TOKEN_EXPIRATION_MS,
+  type FollowUpQuote,
+} from './customerFollowUp';
+import {
+  emailOpenPixelUrlForToken,
+  generateEmailOpenToken,
+  handleEmailOpen,
+  hashEmailOpenToken,
+} from './emailOpenPixel';
 import { processAndStoreLogo } from './logoProcessing';
 import { dollarsToCents, centsToDollars } from './shared/pdf/money';
 import { validateAndRepairAiOutput } from './shared/ai/validateAiOutput';
@@ -5997,7 +6008,9 @@ The selectedIndex should be 1-based (first product is 1, second is 2, etc.).`,
 import * as crypto from 'crypto';
 
 // Token expiration: 30 days in milliseconds
-const TOKEN_EXPIRATION_MS = 30 * 24 * 60 * 60 * 1000;
+// One number for the acceptance link's lifetime — the customer follow-up
+// selector imports the same constant so the two can't drift.
+const TOKEN_EXPIRATION_MS = CUSTOMER_FOLLOW_UP_TOKEN_EXPIRATION_MS;
 
 function hashToken(token: string): string {
   return crypto.createHash('sha256').update(token).digest('hex');
@@ -6035,6 +6048,71 @@ export function acceptancePageUrlForToken(token: string): string {
     || 'https://us-central1-hansendev.cloudfunctions.net/quoteAcceptancePage').replace(/\/$/, '');
   return `${base}?token=${token}`;
 }
+
+/**
+ * Email-open tracking pixel. The customer-facing quote email embeds a 1x1
+ * GIF whose URL carries a random 256-bit token; when the mail client fetches
+ * it (a proxy for the email being opened), we look up the token's hash in
+ * emailOpenTokens, then stamp emailFirstOpenedAt / emailLastOpenedAt /
+ * emailOpenCount on the SAME legacy users/{uid}/quotes/{quoteId} doc that
+ * getQuoteForAcceptance stamps firstViewedAt on. That gives the funnel two
+ * separate reads — email opened vs acceptance-link opened — so an admin
+ * can tell "email never delivered" from "opened but the customer didn't
+ * click through".
+ *
+ * Thin wrapper: every decision lives in handleEmailOpen (emailOpenPixel.ts),
+ * which always resolves to the GIF, never creates a missing quote doc, and
+ * throttles repeat writes. This end only supplies the Firestore reads and
+ * the admin sentinels. maxInstances caps a public unauthenticated endpoint
+ * so a scanner can't scale it out over the rest of the project.
+ */
+export const trackEmailOpen = functions
+  .runWith({ maxInstances: 10 })
+  .https.onRequest(async (req, res) => {
+    // No CORS: <img src> requests from a mail client aren't cross-origin in
+    // the JS sense, and this endpoint has nothing to give a browser JS caller
+    // anyway. No auth either — it lives in the customer's inbox.
+    const db = admin.firestore();
+    const result = await handleEmailOpen({
+      token: req.query.t,
+      now: Date.now(),
+      serverTimestamp: admin.firestore.FieldValue.serverTimestamp(),
+      increment: admin.firestore.FieldValue.increment(1),
+      lookupToken: async (tokenHash) => {
+        const snap = await db.collection('emailOpenTokens').doc(tokenHash).get();
+        if (!snap.exists) return null;
+        const data = snap.data() as { userId?: unknown; quoteId?: unknown } | undefined;
+        const userId = typeof data?.userId === 'string' ? data.userId : '';
+        const quoteId = typeof data?.quoteId === 'string' ? data.quoteId : '';
+        return userId && quoteId ? { userId, quoteId } : null;
+      },
+      readQuote: async ({ userId, quoteId }) => {
+        const snap = await db.doc(`users/${userId}/quotes/${quoteId}`).get();
+        // Deleted quote: null, so the handler writes nothing. An update()
+        // would throw and a merge set() would resurrect it as a blank draft.
+        if (!snap.exists) return null;
+        const data = snap.data() || {};
+        return {
+          hasFirstOpen: data.emailFirstOpenedAt != null,
+          lastOpenedAtMs: normaliseTimestamp(data.emailLastOpenedAt)?.getTime() ?? null,
+          sentAtMs: normaliseTimestamp(data.sentAt)?.getTime() ?? null,
+        };
+      },
+      writeStamp: async ({ userId, quoteId }, stamp) => {
+        // update(), never set({ merge: true }) — the doc is known to exist
+        // and must never be created by a pixel hit. Typed `any` like the
+        // sibling firstViewedAt stamp: Firestore's update() signature wants
+        // an index signature a named interface can't satisfy.
+        const update: any = stamp;
+        await db.doc(`users/${userId}/quotes/${quoteId}`).update(update);
+      },
+      onError: (err: any) => {
+        functions.logger.warn('trackEmailOpen_failed', { message: err?.message });
+      },
+    });
+    res.set(result.headers);
+    res.status(result.status).send(result.body);
+  });
 
 /**
  * Generate a secure acceptance token for a quote
@@ -6250,6 +6328,11 @@ export const sendQuoteEmail = functions.runWith({ timeoutSeconds: 120, memory: '
           return r ? { paymentLinkId: r.paymentLinkId, paymentLinkUrl: r.paymentLinkUrl } : null;
         },
         acceptanceUrlForToken: acceptancePageUrlForToken,
+        emailOpenPixelUrlForToken: emailOpenPixelUrlForToken,
+        generateEmailOpenToken: () => {
+          const token = generateEmailOpenToken();
+          return { token, hashedToken: hashEmailOpenToken(token) };
+        },
         fetchPhotoAttachments,
         generateAcceptanceToken: () => {
           const token = crypto.randomBytes(32).toString('hex');
@@ -11082,8 +11165,11 @@ export const onQuoteExpiring = functions.pubsub
 
 // -----------------------------------------------------------
 // customerQuoteFollowUp — Scheduled daily: nudge customers who haven't
-// accepted a sent quote yet. Two reminders max (~3 days then ~7 days
-// after sentAt). Opt-in per tradie via business settings.
+// accepted a sent quote yet. Two reminders max — first at 48 hours after the
+// send, second at 7 days — never after a response and never once the
+// acceptance link has lapsed. Opt-in per tradie via business settings. The
+// selection rules live in selectQuotesForFollowUp (customerFollowUp.ts); this
+// job just normalises docs, runs them through it, and does the side effects.
 // -----------------------------------------------------------
 export const customerQuoteFollowUp = functions.pubsub
   .schedule('every day 09:00')
@@ -11091,6 +11177,8 @@ export const customerQuoteFollowUp = functions.pubsub
   .onRun(async () => {
     const now = Date.now();
     const usersSnapshot = await db.collection('users').get();
+
+    const toMsOrNull = (v: unknown): number | null => normaliseTimestamp(v)?.getTime() ?? null;
 
     for (const userDoc of usersSnapshot.docs) {
       const settingsDoc = await db.doc(`users/${userDoc.id}/settings/business`).get();
@@ -11104,81 +11192,93 @@ export const customerQuoteFollowUp = functions.pubsub
         .collection('quotes')
         .where('status', '==', 'sent')
         .get();
+      if (quotesSnapshot.empty) continue;
 
+      // Looked up once per tradie: replies route here, and a quote addressed
+      // here is a self-send the selector must skip.
+      const authEmail = await getUserEmail(userDoc.id);
+      const tradieReplyEmail = settings.email || authEmail || undefined;
+
+      // Normalise each doc into the pure selector's shape, keeping a handle
+      // back to the Firestore doc for the writes below.
+      const byId = new Map<string, admin.firestore.QueryDocumentSnapshot>();
+      const candidates: FollowUpQuote[] = [];
       for (const quoteDoc of quotesSnapshot.docs) {
         const q = quoteDoc.data();
-        if (!q.customerEmail) continue;
-        // Only follow up quotes the customer actually received by email. Docs
-        // marked sent via SMS/share/export (sendMethod set by the client) may
-        // never have reached this address — and an Android share-cancel can
-        // mark sent falsely. Legacy docs have no sendMethod and were always
-        // email sends, so they pass.
-        if (q.sendMethod && q.sendMethod !== 'email') continue;
-        // Skip anything that has already moved on. status === 'sent' filter
-        // catches most of this; the explicit checks defend against legacy
-        // docs where the status flag wasn't flipped.
-        if (q.acceptedAt || q.declinedAt) continue;
-        if (q.suppressAutoFollowUp) continue;
-
-        const sentAtMs = q.sentAt?.toDate?.()?.getTime?.()
-          ?? (typeof q.sentAt === 'number' ? q.sentAt : 0);
-        if (!sentAtMs) continue;
-
-        const count: number = q.customerFollowUpCount ?? 0;
-        if (count >= 2) continue;
-
-        const lastAtMs = q.customerFollowUpLastAt?.toDate?.()?.getTime?.() ?? 0;
-        const ageDays = (now - sentAtMs) / 86_400_000;
-        const sinceLastDays = (now - (lastAtMs || sentAtMs)) / 86_400_000;
-
-        const shouldSend =
-          (count === 0 && ageDays >= 3) ||
-          (count === 1 && sinceLastDays >= 4);
-        if (!shouldSend) continue;
-
-        // Mint a fresh acceptance token. Existing tokens stay valid — the
-        // acceptance page looks them up by hash directly, so the customer's
-        // original email link still works alongside this fresh one.
-        const token = crypto.randomBytes(32).toString('hex');
-        const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
-        await db.collection('quoteAcceptanceTokens').doc(tokenHash).set({
-          userId: userDoc.id,
-          quoteId: quoteDoc.id,
-          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        byId.set(quoteDoc.id, quoteDoc);
+        candidates.push({
+          id: quoteDoc.id,
+          customerEmail: q.customerEmail,
+          sendMethod: q.sendMethod,
+          // Any sign the customer has answered: the canonical respondedAt, or
+          // a legacy acceptedAt/declinedAt on docs that never got it.
+          respondedAtMs:
+            toMsOrNull(q.respondedAt) ?? toMsOrNull(q.acceptedAt) ?? toMsOrNull(q.declinedAt),
+          suppressAutoFollowUp: !!q.suppressAutoFollowUp,
+          sentAtMs: toMsOrNull(q.sentAt),
+          acceptanceTokenCreatedAtMs: toMsOrNull(q.acceptanceTokenCreatedAt),
+          followUpCount: q.customerFollowUpCount ?? 0,
+          lastFollowUpAtMs: toMsOrNull(q.customerFollowUpLastAt),
         });
-        const acceptanceUrl = acceptancePageUrlForToken(token);
+      }
 
-        // Fall back to the auth email so replies still route to the tradie
-        // even if they haven't filled in business.email — same shape as
-        // sendQuoteFlavour does for the original send.
-        const tradieReplyEmail = settings.email || (await getUserEmail(userDoc.id)) || undefined;
+      const due = selectQuotesForFollowUp(candidates, now, {
+        ownEmails: [settings.email, authEmail],
+      });
 
-        const sent = await sendCustomerQuoteReminderEmail({
-          to: q.customerEmail,
-          customerName: q.customerName || '',
-          jobName: q.job?.name || 'your job',
-          total: q.total || 0,
-          acceptanceUrl,
-          followUpNumber: (count + 1) as 1 | 2,
-          business: {
-            name: businessName,
-            abn: settings.abn,
-            phone: settings.phone,
-            email: tradieReplyEmail,
-            address: settings.address,
-            logoUrl: settings.logoStorageUrl || settings.logoUri,
-            brandColor: settings.brandColor,
-          },
-          userId: userDoc.id,
-        });
+      for (const { quote, followUpNumber } of due) {
+        const quoteDoc = byId.get(quote.id);
+        if (!quoteDoc) continue;
+        const q = quoteDoc.data();
 
-        if (sent) {
-          await quoteDoc.ref.update({
-            customerFollowUpCount: count + 1,
-            customerFollowUpLastAt: admin.firestore.FieldValue.serverTimestamp(),
-            acceptanceTokenHash: tokenHash,
-            acceptanceTokenCreatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        // One quote's failure (token write, bounce lookup, the stamp) must not
+        // abort the run for every tradie after it — and a stamp that fails
+        // after a successful send would otherwise re-send tomorrow.
+        try {
+          // Mint a fresh acceptance token. Existing tokens stay valid — the
+          // acceptance page looks them up by hash directly, so the customer's
+          // original email link still works alongside this fresh one.
+          const token = crypto.randomBytes(32).toString('hex');
+          const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+          await db.collection('quoteAcceptanceTokens').doc(tokenHash).set({
+            userId: userDoc.id,
+            quoteId: quoteDoc.id,
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
           });
+          const acceptanceUrl = acceptancePageUrlForToken(token);
+
+          const sent = await sendCustomerQuoteReminderEmail({
+            to: q.customerEmail,
+            customerName: q.customerName || '',
+            jobName: q.job?.name || 'your job',
+            total: q.total || 0,
+            acceptanceUrl,
+            followUpNumber,
+            business: {
+              name: businessName,
+              abn: settings.abn,
+              phone: settings.phone,
+              email: tradieReplyEmail,
+              address: settings.address,
+              logoUrl: settings.logoStorageUrl || settings.logoUri,
+              brandColor: settings.brandColor,
+            },
+            userId: userDoc.id,
+          });
+
+          if (sent) {
+            await quoteDoc.ref.update({
+              customerFollowUpCount: quote.followUpCount + 1,
+              customerFollowUpLastAt: admin.firestore.FieldValue.serverTimestamp(),
+              acceptanceTokenHash: tokenHash,
+              acceptanceTokenCreatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+          }
+        } catch (err) {
+          console.error(
+            `customerQuoteFollowUp: quote ${quoteDoc.id} (user ${userDoc.id}) reminder ${followUpNumber} failed`,
+            (err as Error)?.message,
+          );
         }
       }
     }

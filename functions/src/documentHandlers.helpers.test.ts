@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'fs';
+import { dirname, join } from 'path';
+import { fileURLToPath } from 'url';
 import {
   buildSelfCopyBcc,
   buildQuotePdfHtmlForQuote,
@@ -111,5 +114,33 @@ describe('buildQuotePdfHtmlForQuote — quote date', () => {
     );
     expect(html).toContain('15 January 2026');
     expect(html).not.toContain('09 August 2026');
+  });
+});
+
+/**
+ * The quote send is only reachable with the admin SDK, so the one rule that
+ * has to hold at that call site — a send BCC'd back to the tradie carries no
+ * pixel, because that copy is the SAME html and the tradie opening it would
+ * be recorded as the customer opening theirs — is pinned by reading the
+ * source. shouldEmbedEmailOpenPixel itself is unit-tested in
+ * emailOpenPixel.test.ts.
+ */
+describe('quote send — email-open pixel gating', () => {
+  const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'documentHandlers.ts'), 'utf8');
+
+  it('decides the pixel through shouldEmbedEmailOpenPixel, passing the self-copy flag', () => {
+    expect(src).toContain(
+      'shouldEmbedEmailOpenPixel({ isTestSend, sendCopyToSelf: input.sendCopyToSelf })',
+    );
+  });
+
+  it('mints the open token only inside that gate — no token doc on a self-copy or test send', () => {
+    const gateIdx = src.indexOf('shouldEmbedEmailOpenPixel({');
+    const mintIdx = src.indexOf('input.generateEmailOpenToken()');
+    expect(gateIdx).toBeGreaterThan(-1);
+    expect(mintIdx).toBeGreaterThan(gateIdx);
+    // Exactly one mint site, and one emailOpenTokens write, both in the gate.
+    expect(src.match(/input\.generateEmailOpenToken\(\)/g)).toHaveLength(1);
+    expect(src.match(/emailOpenTokens\//g)).toHaveLength(1);
   });
 });
