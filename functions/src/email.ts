@@ -36,6 +36,11 @@ interface SendEmailOptions {
   to: string;
   subject: string;
   htmlContent: string;
+  // Plain-text alternative. A multipart message reads properly in clients that
+  // don't render HTML (and to a screen reader), and a text part is one of the
+  // signals bulk filters weigh. Brevo takes it as `textContent`; when omitted
+  // the key is left off the payload entirely and Brevo derives its own.
+  textContent?: string;
   category: EmailCategory;
   userId?: string; // For logging and preference checking
   tags?: string[];
@@ -288,7 +293,7 @@ QuoteMate is made by Hansen Dev (Sydney NSW, Australia). You're receiving this b
 // Brevo webhook posts back events keyed to that tag, which lets us correlate
 // delivery / bounce / open / click / spam back to this exact send.
 export async function sendEmail(options: SendEmailOptions): Promise<boolean> {
-  const { to, subject, category, userId, tags, attachment, replyTo: replyToOverride, senderName, bcc } = options;
+  const { to, subject, category, userId, tags, attachment, replyTo: replyToOverride, senderName, bcc, textContent } = options;
   let { htmlContent, unsubscribeUrl } = options;
 
   // For cold lead outreach, wrap with the AU spam-act compliance footer
@@ -412,6 +417,7 @@ export async function sendEmail(options: SendEmailOptions): Promise<boolean> {
         ...(bcc?.length ? { bcc } : {}),
         subject,
         htmlContent,
+        ...(textContent ? { textContent } : {}),
         tags: brevoTags,
         // Brevo forwards custom JSON headers in webhook events — belt + braces
         // in case tag parsing fails for any reason.
@@ -1697,8 +1703,12 @@ export function formatMoney(amount: number): string {
 }
 
 // Light-themed wrapper for client-facing quote emails (business-branded, no QM logo)
-function wrapQuoteEmailTemplate(content: string, options: { brandColor?: string; businessName?: string; logoUrl?: string; preheader?: string }): string {
+function wrapQuoteEmailTemplate(content: string, options: { brandColor?: string; businessName?: string; logoUrl?: string; preheader?: string; appFooter?: boolean }): string {
   const { brandColor: rawBrandColor, businessName = '', preheader } = options;
+  // The small app-branding pill under the card. Default ON, off only where a
+  // customer must see the tradie's business and nothing else — see the quote
+  // branch of buildDocumentEmailHtml and buildQuoteReminderEmailHtml.
+  const appFooter = options.appFooter !== false;
   const brandColor = safeBrandColor(rawBrandColor);
   // Guarded here rather than at each caller so every email through this shell
   // degrades to the business-name lockup instead of a broken-image icon.
@@ -1773,11 +1783,11 @@ function wrapQuoteEmailTemplate(content: string, options: { brandColor?: string;
             </td>
           </tr>
           <!-- Footer -->
-          <tr>
+          ${appFooter ? `<tr>
             <td style="padding:20px 0 0;text-align:center;">
               <a href="https://quotemateapp.au" target="_blank" style="display:inline-block;background:#111827;color:#ffffff;font-size:10px;font-weight:600;letter-spacing:0.6px;padding:5px 10px;border-radius:999px;text-decoration:none;">QuoteMate</a>
             </td>
-          </tr>
+          </tr>` : ''}
         </table>
       </td>
     </tr>
@@ -2032,11 +2042,16 @@ export interface PricingRowsInput {
   travelAdjustmentAmount?: number;
 }
 
-export function renderPricingRows(input: PricingRowsInput): string {
-  const { materialsSubtotal, laborTotal, subtotal, gst, total, accent, depositCredit } = input;
-  const gstRegistered = input.gstRegistered !== false;
-  const gstMode = resolveGstMode(input);
-  const hasDeposit = !!(depositCredit && depositCredit > 0);
+/**
+ * The price build-up as {label, value} pairs, in the order the customer reads
+ * them. One derivation, shared by the HTML ladder below and the plain-text
+ * part (buildQuoteEmailText), so the two presentations of the same quote can
+ * never disagree about which lines the customer may see or what they say.
+ *
+ * The total is deliberately NOT in here: it is rendered as the hero figure in
+ * both surfaces, not as another row.
+ */
+function pricingBreakdownRows(input: PricingRowsInput): Array<{ label: string; value: string }> {
   // Same three modes as the PDF, resolved by the same function, so the email
   // body and the attachment can't disagree about what the customer may see.
   const detail = resolvePriceDetail(input);
@@ -2058,6 +2073,41 @@ export function renderPricingRows(input: PricingRowsInput): string {
   const travelPercent = Number(input.travelAdjustment) || 0;
   const travelAmount = Number(input.travelAdjustmentAmount) || 0;
   const showTravel = showSubtotalRow && travelPercent > 0 && travelAmount > 0;
+
+  const rows: Array<{ label: string; value: string }> = [];
+  if (showMaterials) rows.push({ label: 'Materials', value: formatMoney(input.materialsSubtotal) });
+  if (showLabor) rows.push({ label: 'Labour', value: formatMoney(input.laborTotal) });
+  if (showSubtotalRow) rows.push({ label: 'Subtotal', value: formatMoney(input.subtotal) });
+  if (showTravel) rows.push({ label: `Travel adjustment (${travelPercent}%)`, value: formatMoney(travelAmount) });
+  if (resolveGstMode(input) === 'exclusive') rows.push({ label: 'GST', value: formatMoney(input.gst) });
+  return rows;
+}
+
+/**
+ * The total's label, exactly as the ladder, the hero line above the CTA, the
+ * plain-text part and the PDF all print it.
+ */
+function totalLabelFor(input: { gstRegistered?: boolean }): string {
+  return input.gstRegistered !== false ? 'Total (inc GST)' : 'Total';
+}
+
+/**
+ * The GST disclosure that rides under the hero total. Shown in every
+ * price-detail mode — it is a legal disclosure, not a preference (see
+ * shared/document/priceDetail.ts) — and the hero total is now the first number
+ * the customer reads, so it cannot be the number without it.
+ */
+function gstDisclosureFor(input: { gstRegistered?: boolean; pricesIncludeGst?: boolean; gst: number }): string {
+  return resolveGstMode(input) === 'none'
+    ? NO_GST_NOTE
+    : `Includes GST of ${formatMoney(input.gst)}`;
+}
+
+export function renderPricingRows(input: PricingRowsInput): string {
+  const { gst, total, accent, depositCredit } = input;
+  const gstMode = resolveGstMode(input);
+  const hasDeposit = !!(depositCredit && depositCredit > 0);
+  const breakdownRows = pricingBreakdownRows(input);
   const row = (label: string, value: string, valueColor = '#111827') => `
             <tr>
               <td style="padding:11px 0;color:#6b7280;font-size:14px;border-bottom:1px solid #eef0f3;">${label}</td>
@@ -2085,20 +2135,16 @@ export function renderPricingRows(input: PricingRowsInput): string {
 
   // priceDetail 'total' on a business that isn't GST-registered leaves nothing
   // to break down. Rendering the "Summary" header over an empty box looked
-  // like a bug, so the card collapses to the total on its own. Mirrors the row
-  // conditions below exactly — a row must never render outside this guard.
-  const hasBreakdownRows = showMaterials || showLabor || showSubtotalRow || showTravel || gstMode === 'exclusive' || hasDeposit;
+  // like a bug, so the card collapses to the total on its own. Derived from the
+  // rows themselves — a row can never render outside this guard.
+  const hasBreakdownRows = breakdownRows.length > 0 || hasDeposit;
   const breakdownSection = hasBreakdownRows
     ? `
       <tr>
         <td style="padding:18px 22px 8px;">
           <p style="color:#9ca3af;font-size:11px;font-weight:700;letter-spacing:0.8px;text-transform:uppercase;margin:0 0 4px;">Summary</p>
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
-            ${showMaterials ? row('Materials', formatMoney(materialsSubtotal)) : ''}
-            ${showLabor ? row('Labour', formatMoney(laborTotal)) : ''}
-            ${showSubtotalRow ? row('Subtotal', formatMoney(subtotal)) : ''}
-            ${showTravel ? row(`Travel adjustment (${travelPercent}%)`, formatMoney(travelAmount)) : ''}
-            ${gstMode === 'exclusive' ? row('GST', formatMoney(gst)) : ''}
+            ${breakdownRows.map(r => row(r.label, r.value)).join('')}
             ${hasDeposit ? `
             <tr>
               <td style="padding:11px 0;color:#059669;font-size:14px;border-bottom:1px solid #eef0f3;">Deposit already paid</td>
@@ -2116,7 +2162,7 @@ export function renderPricingRows(input: PricingRowsInput): string {
         <td style="padding:16px 22px 18px;background:#f9fafb;${hasBreakdownRows ? 'border-top:2px solid #111827;' : ''}">
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
             <tr>
-              <td style="color:#111827;font-size:13px;font-weight:700;letter-spacing:0.6px;text-transform:uppercase;vertical-align:bottom;">${hasDeposit ? 'Balance Due' : gstRegistered ? 'Total (inc GST)' : 'Total'}</td>
+              <td style="color:#111827;font-size:13px;font-weight:700;letter-spacing:0.6px;text-transform:uppercase;vertical-align:bottom;">${hasDeposit ? 'Balance Due' : totalLabelFor(input)}</td>
               <td style="color:${accent};font-size:26px;font-weight:800;text-align:right;font-variant-numeric:tabular-nums;letter-spacing:-0.5px;line-height:1.1;vertical-align:bottom;">${formatMoney(total)}</td>
             </tr>
             ${gstMode === 'inclusive' ? `
@@ -2127,10 +2173,10 @@ export function renderPricingRows(input: PricingRowsInput): string {
                   : `Total includes GST of ${formatMoney(gst)}`
               }</td>
             </tr>` : ''}
-            ${gstRegistered ? '' : `
+            ${gstMode === 'none' ? `
             <tr>
               <td colspan="2" style="color:#6b7280;font-size:12px;padding-top:6px;">${NO_GST_NOTE}</td>
-            </tr>`}
+            </tr>` : ''}
             ${metaLine}
           </table>
         </td>
@@ -2361,6 +2407,15 @@ export type DocumentEmailData =
  * for the doc-specific bits (header copy, accept-vs-pay CTA, photos vs
  * deposit-credit, preheader) and reuses shared component helpers for the
  * 80% in common (body, pricing rows, business footer, wrapper template).
+ *
+ * The two types differ in what the email is FOR, so they order the same blocks
+ * differently. An invoice is a record: body, then what's owed, then how to pay.
+ * A quote is a decision, and the decision is the acceptance link — measured on
+ * real sends, the button sat below the price ladder, the tradie's message and
+ * the photos, and almost nobody scrolled to it. So on a quote the total and
+ * the accept/decline panel come first, and the detail that justifies the
+ * number follows underneath. Nothing was dropped in the move; see the quote
+ * branch of `content` for the running order.
  */
 export function buildDocumentEmailHtml(data: DocumentEmailData): string {
   const accent = safeBrandColor(data.business.brandColor);
@@ -2383,7 +2438,33 @@ export function buildDocumentEmailHtml(data: DocumentEmailData): string {
       </tr>
     </table>`;
 
-  const preBodyExtras = !isInvoice ? renderPhotosSection(data.photoUrls) : '';
+  const photosSection = !isInvoice ? renderPhotosSection(data.photoUrls) : '';
+
+  // Greeting. The quote goes to someone deciding whether to trust this tradie,
+  // so it opens on their first name where we can read one out of the contact —
+  // and on a plain "Hi there," rather than "Hi Joe's Plumbing Pty Ltd," where
+  // we can't (see deriveFirstName).
+  const quoteFirstName = !isInvoice ? deriveFirstName(data.customerName) : null;
+  const greetingLine = isInvoice
+    ? `Hi ${esc(data.customerName)},`
+    : quoteFirstName ? `Hi ${esc(quoteFirstName)},` : 'Hi there,';
+
+  // Quote only: the total, stated once above the decision panel with its GST
+  // disclosure under it. Same figure, same formatting and same label as the
+  // ladder further down and as the attached PDF — it is the same helpers doing
+  // the printing.
+  const heroTotal = !isInvoice
+    ? `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 4px;">
+      <tr>
+        <td>
+          <p style="color:#6b7280;font-size:12px;font-weight:700;letter-spacing:0.8px;text-transform:uppercase;margin:0;">${totalLabelFor(data)}</p>
+          <p style="color:${accent};font-size:30px;font-weight:800;margin:2px 0 0;letter-spacing:-0.6px;line-height:1.1;font-variant-numeric:tabular-nums;">${formatMoney(data.total)}</p>
+          <p style="color:#6b7280;font-size:12px;line-height:1.6;margin:6px 0 0;">${gstDisclosureFor(data)}</p>
+        </td>
+      </tr>
+    </table>`
+    : '';
 
   const pricingRows = renderPricingRows({
     materialsSubtotal: data.materialsSubtotal,
@@ -2420,10 +2501,10 @@ export function buildDocumentEmailHtml(data: DocumentEmailData): string {
       })
     : '';
 
-  // For quotes the accept/decline CTA sits below the "PDF attached" line; for
-  // invoices the Pay Now button sits above it, so the post-attachment slot
-  // takes the quote CTA only.
-  const postAttachmentCta = !isInvoice
+  // The decision panel: Accept, Decline, and the deposit terms and Square
+  // hand-off when there is one. Unchanged — only its position moved, from
+  // under the closing paragraph to directly under the total.
+  const quoteCta = !isInvoice
     ? renderQuoteCta({
         acceptanceUrl: data.acceptanceUrl,
         depositAmount: data.depositAmount,
@@ -2448,27 +2529,49 @@ export function buildDocumentEmailHtml(data: DocumentEmailData): string {
       ${data.hasTerms ? '' : 'This quote is valid for 30 days. '}${attachmentNote} If you have any questions, just reply to this email.
     </p>`;
 
-  const content = `
-    ${headerStrip}
+  // Quote: greeting → job and total (with the GST disclosure) → the decision
+  // panel → the price ladder that justifies the number → the tradie's message
+  // → site photos → validity, PDF note and the reply invitation.
+  // Invoice: unchanged — body → what's owed → how to pay.
+  const documentBody = isInvoice
+    ? `
     <h1 style="color:#111827;font-size:25px;font-weight:800;margin:0 0 20px;line-height:1.25;letter-spacing:-0.4px;">
       ${esc(data.jobName)}
     </h1>
     <p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 16px;">
-      Hi ${esc(data.customerName)},
+      ${greetingLine}
     </p>
 
     ${renderEmailBodyHtml(data.emailBody)}
-
-    ${preBodyExtras}
 
     ${pricingRows}
 
     ${postPricingCta}
 
     ${paymentMethodsBlock}
+`
+    : `
+    <p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 16px;">
+      ${greetingLine}
+    </p>
+    <h1 style="color:#111827;font-size:25px;font-weight:800;margin:0 0 10px;line-height:1.25;letter-spacing:-0.4px;">
+      ${esc(data.jobName)}
+    </h1>
 
-    ${postAttachmentCta}
+    ${heroTotal}
 
+    ${quoteCta}
+
+    ${pricingRows}
+
+    ${renderEmailBodyHtml(data.emailBody)}
+
+    ${photosSection}
+`;
+
+  const content = `
+    ${headerStrip}
+    ${documentBody}
     ${closingNotice}
 
     <p style="color:#374151;font-size:15px;line-height:1.7;margin:20px 0 0;">
@@ -2486,6 +2589,10 @@ export function buildDocumentEmailHtml(data: DocumentEmailData): string {
     businessName: data.business.name,
     logoUrl: data.business.logoUrl,
     preheader: `${typeLabel} for ${data.jobName} — ${formatMoney(data.total)} from ${data.business.name}`,
+    // A quote is the tradie's document to their customer: the only business
+    // name on it is theirs, so the app-branding pill is off. Invoices keep
+    // today's footer — this pass is the quote email only.
+    appFooter: isInvoice,
   });
 }
 
@@ -2508,6 +2615,93 @@ function renderEmailOpenPixel(url: string | undefined): string {
 
 export function buildQuoteEmailHtml(data: QuoteEmailData): string {
   return buildDocumentEmailHtml({ type: 'quote', ...data });
+}
+
+/**
+ * The plain-text alternative to the customer quote email, in the same running
+ * order as the HTML: greeting, job and total with its GST disclosure, the
+ * acceptance link (and the Square deposit link when there is one) each on a
+ * line of its own, the same price ladder, the tradie's message, the closing
+ * notice and their sign-off.
+ *
+ * Built from the same payload and the same helpers as buildQuoteEmailHtml —
+ * pricingBreakdownRows, totalLabelFor, gstDisclosureFor — so the two parts of
+ * the multipart message can't show a customer different money.
+ */
+export function buildQuoteEmailText(data: QuoteEmailData): string {
+  const lines: string[] = [];
+  const firstName = deriveFirstName(data.customerName);
+  lines.push(firstName ? `Hi ${firstName},` : 'Hi there,');
+
+  lines.push('');
+  lines.push(data.jobName);
+  lines.push(`${totalLabelFor(data)}: ${formatMoney(data.total)}`);
+  lines.push(gstDisclosureFor(data));
+
+  // The whole point of the email. Bare on its own line so every mail client
+  // linkifies it and nothing is appended for the customer to trim off.
+  if (data.acceptanceUrl) {
+    lines.push('');
+    lines.push('View and accept your quote:');
+    lines.push(data.acceptanceUrl);
+  }
+
+  if (data.depositAmount && data.depositAmount > 0) {
+    lines.push('');
+    lines.push(`Deposit to get started${data.depositPercentage ? ` (${data.depositPercentage}%)` : ''}: ${formatMoney(data.depositAmount)}`);
+    if (data.depositPayNowUrl) {
+      lines.push('Paying the deposit accepts this quote:');
+      lines.push(data.depositPayNowUrl);
+    } else {
+      lines.push(`You'll be asked for this after accepting. The rest is invoiced when the job's done.`);
+    }
+  }
+
+  const breakdownRows = pricingBreakdownRows({
+    materialsSubtotal: data.materialsSubtotal,
+    laborTotal: data.laborTotal,
+    subtotal: data.subtotal,
+    gst: data.gst,
+    total: data.total,
+    gstRegistered: data.gstRegistered,
+    pricesIncludeGst: data.pricesIncludeGst,
+    accent: '',
+    priceDetail: data.priceDetail,
+    showMaterialCosts: data.showMaterialCosts,
+    showLaborCosts: data.showLaborCosts,
+    travelAdjustment: data.travelAdjustment,
+    travelAdjustmentAmount: data.travelAdjustmentAmount,
+  });
+  if (breakdownRows.length) {
+    lines.push('');
+    lines.push('Summary');
+    for (const r of breakdownRows) lines.push(`- ${r.label}: ${r.value}`);
+    lines.push(`- ${totalLabelFor(data)}: ${formatMoney(data.total)}`);
+  }
+
+  // The tradie's own words, with the tiny markdown subset the HTML renders as
+  // <strong> flattened back to bare text.
+  const message = stripAbnFromBody(data.emailBody || '').trim();
+  if (message) {
+    lines.push('');
+    lines.push(message.replace(/\*\*([^*\n]+)\*\*/g, '$1'));
+  }
+
+  lines.push('');
+  lines.push(`${data.hasTerms ? '' : 'This quote is valid for 30 days. '}The full PDF quote is attached for your records. If you have any questions, just reply to this email.`);
+
+  lines.push('');
+  lines.push('Kind regards,');
+  if (data.business.name) lines.push(data.business.name);
+  const footerBits = [
+    data.business.abn ? `ABN: ${data.business.abn}` : '',
+    data.business.phone || '',
+    data.business.email || '',
+    data.business.address || '',
+  ].filter(Boolean);
+  if (footerBits.length) lines.push(footerBits.join(' • '));
+
+  return lines.join('\n');
 }
 
 // ============================================================
@@ -2773,6 +2967,9 @@ export function buildQuoteReminderEmailHtml(data: QuoteReminderEmailData): strin
     businessName: business.name,
     logoUrl: business.logoUrl,
     preheader: `Reminder: ${jobName} quote — ${formatMoney(total)} from ${business.name}`,
+    // Same rule as the quote it is reminding them about: the customer sees the
+    // tradie's business and nobody else's.
+    appFooter: false,
   });
 }
 
