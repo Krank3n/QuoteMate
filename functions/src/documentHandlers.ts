@@ -21,6 +21,7 @@ import * as functions from 'firebase-functions/v1';
 import { travelAdjustmentAmountFor } from './travelSurcharge';
 import {
   buildQuoteEmailHtml,
+  buildQuoteEmailText,
   remoteLogoUrl,
   buildInvoiceEmailHtml,
   sendEmail,
@@ -849,7 +850,7 @@ async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailRes
 
   const emailPriceDetail = resolvePriceDetail(quote, business);
 
-  const htmlContent = buildQuoteEmailHtml({
+  const quoteEmailData = {
     customerName: quote.customerName || 'Client',
     emailBody,
     jobName: quote.job?.name || 'Job',
@@ -873,7 +874,13 @@ async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailRes
     surchargePaymentFees: business.surchargePaymentFees === true,
     priceDetail: emailPriceDetail,
     business: businessData,
-  });
+  };
+
+  // One payload, both parts of the multipart message — the HTML the customer
+  // usually sees and the plain-text alternative for the clients that don't
+  // render it.
+  const htmlContent = buildQuoteEmailHtml(quoteEmailData);
+  const textContent = buildQuoteEmailText(quoteEmailData);
 
   const pdfHtml = buildQuotePdfHtmlForQuote(quote, business, {
     terms: termsToSend || undefined,
@@ -904,6 +911,7 @@ async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailRes
     to: recipientEmail,
     subject: `${isTestSend ? '[TEST] ' : ''}${baseSubject}`,
     htmlContent,
+    textContent,
     category: 'transactional',
     userId,
     tags: isTestSend ? ['quote-test'] : ['quote-to-client'],

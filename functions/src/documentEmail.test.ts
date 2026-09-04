@@ -7,8 +7,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildDocumentEmailHtml,
+  buildQuoteEmailText,
   buildQuoteReminderEmailHtml,
   formatMoney,
+  renderPricingRows,
   safeBrandColor,
   remoteLogoUrl,
 } from './email';
@@ -24,9 +26,8 @@ const business = {
 
 const ACCEPTANCE_URL = 'https://quotemateapp.au/q?token=abc123';
 
-function quote(over: Record<string, any> = {}) {
-  return buildDocumentEmailHtml({
-    type: 'quote',
+function quoteData(over: Record<string, any> = {}) {
+  return {
     customerName: 'Sarah',
     emailBody: 'Quote attached.',
     jobName: 'Colorbond fence',
@@ -39,7 +40,16 @@ function quote(over: Record<string, any> = {}) {
     acceptanceUrl: ACCEPTANCE_URL,
     business,
     ...over,
-  } as any);
+  } as any;
+}
+
+function quote(over: Record<string, any> = {}) {
+  return buildDocumentEmailHtml({ type: 'quote', ...quoteData(over) });
+}
+
+// The plain-text half of the same multipart message, from the same payload.
+function quoteText(over: Record<string, any> = {}) {
+  return buildQuoteEmailText(quoteData(over));
 }
 
 function invoice(over: Record<string, any> = {}) {
@@ -61,11 +71,16 @@ function invoice(over: Record<string, any> = {}) {
   } as any);
 }
 
-// Count occurrences of a literal in the *visible* email — the hidden
-// preheader legitimately repeats the total for the inbox list view.
+// The email minus the hidden preheader, which legitimately repeats the job
+// name and the total for the inbox list view — and does so before any of the
+// visible content, which would scramble every ordering assertion below.
+function visible(html: string): string {
+  return html.replace(/<div style="display:none;[\s\S]*?<\/div>/, '');
+}
+
+// Count occurrences of a literal in the *visible* email.
 function countVisible(html: string, needle: string): number {
-  const body = html.replace(/<div style="display:none;[\s\S]*?<\/div>/, '');
-  return body.split(needle).length - 1;
+  return visible(html).split(needle).length - 1;
 }
 
 describe('formatMoney', () => {
@@ -214,6 +229,176 @@ describe('quote email — accept / decline', () => {
   });
 });
 
+describe('quote email — the acceptance link is the primary action', () => {
+  it('puts the decision panel above the price ladder', () => {
+    const html = visible(quote());
+    const ctaAt = html.indexOf('Happy to go ahead?');
+    const ladderAt = html.indexOf('Subtotal');
+    expect(ctaAt).toBeGreaterThan(-1);
+    expect(ladderAt).toBeGreaterThan(-1);
+    expect(ctaAt).toBeLessThan(ladderAt);
+  });
+
+  it('opens on the greeting, then the job and its total, then the buttons', () => {
+    const html = visible(quote());
+    const order = [
+      html.indexOf('Hi Sarah,'),
+      html.indexOf('Colorbond fence'),
+      html.indexOf('$8,118.55'),
+      html.indexOf('Happy to go ahead?'),
+    ];
+    expect(order.every((n) => n > -1)).toBe(true);
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+  });
+
+  it('greets by first name and falls back to "Hi there," for anything that is not one', () => {
+    expect(quote()).toContain('Hi Sarah,');
+    expect(quote({ customerName: 'sarah connor' })).toContain('Hi Sarah,');
+    // A business name is not a person — greeting "Hi Plumbing," reads as a
+    // botched mailmerge on the one email that has to look professional.
+    expect(quote({ customerName: 'Plumbing Services' })).toContain('Hi there,');
+    expect(quote({ customerName: '' })).toContain('Hi there,');
+  });
+
+  it('sends the Accept button to the acceptance URL, escaped, with action=accept', () => {
+    const html = quote();
+    expect(html).toContain(`href="${ACCEPTANCE_URL}&amp;action=accept"`);
+    // The unrewritten URL is also printed as bare text for anyone who wants to
+    // read where the button goes before they tap it.
+    expect(html).toContain(ACCEPTANCE_URL);
+  });
+
+  it('keeps the tradie message, the photos and the closing notice after the decision', () => {
+    const html = visible(quote({ photoUrls: ['https://cdn.test/site1.jpg'] }));
+    const ctaAt = html.indexOf('Happy to go ahead?');
+    expect(html.indexOf('Quote attached.')).toBeGreaterThan(ctaAt);
+    expect(html.indexOf('Site Photos')).toBeGreaterThan(ctaAt);
+    expect(html.indexOf('valid for 30 days')).toBeGreaterThan(ctaAt);
+    expect(html.indexOf('just reply to this email')).toBeGreaterThan(ctaAt);
+  });
+
+  it('renders the site photos the customer sent us', () => {
+    const html = quote({ photoUrls: ['https://cdn.test/site1.jpg', 'file:///local.jpg'] });
+    expect(html).toContain('src="https://cdn.test/site1.jpg"');
+    expect(html).not.toContain('file:///local.jpg');
+  });
+});
+
+describe('quote email — the money adds up', () => {
+  it('embeds renderPricingRows verbatim rather than a second set of numbers', () => {
+    // The reviewed-and-rejected version printed its own section rows, which
+    // did not sum to the total and contradicted the attached PDF.
+    const ladder = renderPricingRows({
+      materialsSubtotal: 4180.5,
+      laborTotal: 3200,
+      subtotal: 7380.5,
+      gst: 738.05,
+      total: 8118.55,
+      accent: '#1d4ed8',
+    });
+    expect(quote()).toContain(ladder);
+  });
+
+  it('states one total, in the hero line and in the ladder, and they agree', () => {
+    expect(countVisible(quote(), '$8,118.55')).toBe(2);
+  });
+
+  it("discloses GST in 'itemised', 'summary' and 'total' alike", () => {
+    for (const priceDetail of ['itemised', 'summary', 'total'] as const) {
+      expect(quote({ priceDetail })).toContain('Includes GST of $738.05');
+    }
+  });
+
+  it('carries the no-GST note in every mode when the business is not registered', () => {
+    for (const priceDetail of ['itemised', 'summary', 'total'] as const) {
+      const html = quote({ priceDetail, gstRegistered: false, gst: 0 });
+      expect(html).toContain('No GST has been charged.');
+      expect(html).not.toContain('Includes GST of');
+      expect(html).toContain('>Total<');
+    }
+  });
+
+  it("never splits Materials and Labour in 'summary' mode", () => {
+    const html = quote({ priceDetail: 'summary' });
+    expect(html).not.toContain('Materials');
+    expect(html).not.toContain('Labour');
+    // The subtotal and the GST disclosure survive — 'summary' hides the split,
+    // not the money.
+    expect(html).toContain('Subtotal');
+    expect(html).toContain('Includes GST of $738.05');
+  });
+});
+
+describe('quote email — the tradie brand, never ours', () => {
+  it('keeps the business name, ABN, phone, email and address in the footer', () => {
+    const html = quote({ business: { ...business, address: '12 Trade St, Sydney NSW 2000' } });
+    expect(html).toContain('Hansen Fencing');
+    expect(html).toContain('ABN: 12 345 678 901');
+    expect(html).toContain('0412 345 678');
+    expect(html).toContain('tom@hansenfencing.com.au');
+    expect(html).toContain('12 Trade St, Sydney NSW 2000');
+  });
+
+  it('never puts the app name in front of a customer, in HTML or in text', () => {
+    expect(quote()).not.toContain('QuoteMate');
+    expect(quoteText()).not.toContain('QuoteMate');
+  });
+
+  it('leaves the app footer on every other email through the same wrapper', () => {
+    // Default ON — only the customer quote and its reminder opt out.
+    expect(invoice()).toContain('>QuoteMate</a>');
+  });
+});
+
+describe('quote email — plain-text part', () => {
+  it('carries the acceptance URL on a line of its own', () => {
+    const lines = quoteText().split('\n');
+    expect(lines).toContain(ACCEPTANCE_URL);
+  });
+
+  it('puts the Square deposit link on its own line too', () => {
+    const lines = quoteText({
+      depositAmount: 2029.64,
+      depositPercentage: 25,
+      depositPayNowUrl: 'https://square.link/u/demo',
+    }).split('\n');
+    expect(lines).toContain('https://square.link/u/demo');
+    expect(lines).toContain('Deposit to get started (25%): $2,029.64');
+  });
+
+  it('keeps the same running order as the HTML', () => {
+    const text = quoteText();
+    const order = [
+      text.indexOf('Hi Sarah,'),
+      text.indexOf('Colorbond fence'),
+      text.indexOf('Total (inc GST): $8,118.55'),
+      text.indexOf(ACCEPTANCE_URL),
+      text.indexOf('Subtotal'),
+      text.indexOf('Quote attached.'),
+      text.indexOf('The full PDF quote is attached'),
+      text.indexOf('Kind regards,'),
+    ];
+    expect(order.every((n) => n > -1)).toBe(true);
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+  });
+
+  it('prints the same money and GST disclosure as the HTML', () => {
+    const text = quoteText();
+    expect(text).toContain('Total (inc GST): $8,118.55');
+    expect(text).toContain('Includes GST of $738.05');
+    expect(text).toContain('- Materials: $4,180.50');
+    expect(text).toContain('- Labour: $3,200.00');
+    expect(text).toContain('- Subtotal: $7,380.50');
+  });
+
+  it("hides in text exactly what the HTML hides in 'summary' mode", () => {
+    const text = quoteText({ priceDetail: 'summary' });
+    expect(text).not.toContain('Materials');
+    expect(text).not.toContain('Labour');
+    expect(text).toContain('- Subtotal: $7,380.50');
+  });
+});
+
 describe('document email — escaping', () => {
   it('escapes customer-, job- and business-supplied text', () => {
     const html = quote({
@@ -223,7 +408,11 @@ describe('document email — escaping', () => {
     });
     expect(html).not.toContain('<script>alert(1)</script>');
     expect(html).not.toContain('<img src=x onerror=alert(1)>');
-    expect(html).toContain('&lt;script&gt;');
+    expect(html).toContain('Fence &quot;&amp;&quot; gate &lt;b&gt;');
+    expect(html).toContain('&lt;img src=x onerror=alert(1)&gt;');
+    // The greeting no longer echoes a hostile "name" at all — deriveFirstName
+    // refuses anything that isn't name-shaped, so it falls back to "Hi there,".
+    expect(html).toContain('Hi there,');
   });
 
   it('escapes the hidden preheader too', () => {
@@ -385,6 +574,19 @@ describe('quote reminder email', () => {
       business,
     });
     expect(html).not.toContain('<script>alert(1)</script>');
+  });
+
+  it('carries no app footer — the customer sees the tradie and nobody else', () => {
+    const html = buildQuoteReminderEmailHtml({
+      customerName: 'Sarah',
+      jobName: 'Colorbond fence',
+      total: 8118.55,
+      acceptanceUrl: ACCEPTANCE_URL,
+      followUpNumber: 1,
+      business,
+    });
+    expect(html).not.toContain('QuoteMate');
+    expect(html).toContain('Hansen Fencing');
   });
 });
 
