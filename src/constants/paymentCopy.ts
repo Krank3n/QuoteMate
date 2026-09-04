@@ -21,6 +21,9 @@ export const paymentCopy = {
   // Dialog titles — success is specific about what happened, errors share one
   // title so tradies learn a single "something went wrong with money" signal.
   paymentReceivedTitle: 'Payment received',
+  /** Apple req 5.10 — offering the customer a receipt after an approved charge. */
+  sendReceipt: 'Send receipt',
+  done: 'Done',
   paymentRecordedTitle: 'Payment recorded',
   paymentUpdatedTitle: 'Payment updated',
   paymentErrorTitle: 'Payment error',

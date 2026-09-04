@@ -67,6 +67,7 @@ import { formatScheduledDateLong } from '../utils/formatSchedule';
 import { selectionTap, lightTap } from '../utils/haptics';
 import { useAlertModal } from '../hooks/useAlertModal';
 import { paymentCopy } from '../constants/paymentCopy';
+import { cardChargeSuccessAlert } from '../utils/cardChargeSuccessAlert';
 import { TRIAL_MS } from '../utils/trialConfig';
 import { GridBackground } from '../components/GridBackground';
 
@@ -1112,13 +1113,7 @@ export function ViewJobScreen() {
         onError={(message) =>
           showAlert({ type: 'error', title: paymentCopy.paymentErrorTitle, message })
         }
-        onSuccess={({ amount }) =>
-          showAlert({
-            type: 'success',
-            title: paymentCopy.paymentReceivedTitle,
-            message: `${formatCurrency(amount)} charged to card.`,
-          })
-        }
+        onSuccess={(info) => showAlert(cardChargeSuccessAlert(info))}
         onRecordManualPayment={(invoiceId) =>
           navigation.navigate('RecordPayment', { invoiceId })
         }

@@ -71,6 +71,7 @@ import { resolvePreviewFooterActions } from './previewFooterActions';
 import { useAlertModal } from '../../hooks/useAlertModal';
 import { formatCurrency } from '../../utils/quoteCalculator';
 import { paymentCopy } from '../../constants/paymentCopy';
+import { cardChargeSuccessAlert } from '../../utils/cardChargeSuccessAlert';
 import { GridBackground } from '../../components/GridBackground';
 import { resolvePriceDetail } from '../../../shared/document/priceDetail';
 
@@ -927,13 +928,7 @@ export function JobPreviewScreen() {
         onError={(message) =>
           showAlert({ type: 'error', title: paymentCopy.paymentErrorTitle, message })
         }
-        onSuccess={({ amount }) =>
-          showAlert({
-            type: 'success',
-            title: paymentCopy.paymentReceivedTitle,
-            message: `${formatCurrency(amount)} charged to card.`,
-          })
-        }
+        onSuccess={(info) => showAlert(cardChargeSuccessAlert(info))}
         onRecordManualPayment={(invoiceId) =>
           navigation.navigate('RecordPayment', { invoiceId })
         }

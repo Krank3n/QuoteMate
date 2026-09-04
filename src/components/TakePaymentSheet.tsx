@@ -49,6 +49,7 @@ import {
 import { useStore } from '../store/useStore';
 import { useAlertModal } from '../hooks/useAlertModal';
 import { buildDeclineRecord } from '../utils/paymentDeclineRecord';
+import { buildPaymentReceipt } from '../utils/paymentReceipt';
 import { SymbolView } from 'expo-symbols';
 import type { SFSymbol } from 'sf-symbols-typescript';
 import { BottomSheet } from './BottomSheet';
@@ -111,7 +112,16 @@ interface TakePaymentSheetProps {
    * its success dialog over the closing sheet. Share-pay-link stays silent —
    * sharing a link is not a completed payment.
    */
-  onSuccess?: (info: { kind: 'card_charge'; amount: number }) => void;
+  onSuccess?: (info: {
+    kind: 'card_charge';
+    amount: number;
+    /**
+     * Apple req 5.10 — shares a receipt with the customer. Built here because
+     * the sheet is what knows the business name, the reference and the amount
+     * actually charged; the screens showing the dialog do not.
+     */
+    sendReceipt: () => Promise<void>;
+  }) => void;
   /**
    * Route to the manual-recording flow (RecordPaymentScreen) for an already-
    * received bank transfer / cash / cheque. Only wired for invoice targets —
@@ -299,6 +309,33 @@ export function TakePaymentSheet({
   };
 
   /**
+   * Apple req 5.10, approved half. Square shows no receipt screen of its own on
+   * this path — reviewing the checkout footage confirmed the app simply said
+   * "Payment received" and returned to the job — so the offer has to come from
+   * here. Same share sheet as the decline record: an "Activity view", which is
+   * one of the methods Apple names.
+   */
+  const shareReceipt = async (paidDollars: number): Promise<void> => {
+    try {
+      await Share.share({
+        message: buildPaymentReceipt({
+          businessName: businessSettings?.businessName,
+          reference:
+            activeTarget.kind === 'invoice'
+              ? activeTarget.invoiceNumber
+                ? `Invoice ${activeTarget.invoiceNumber}`
+                : activeTarget.jobName
+              : activeTarget.jobName,
+          amount: paidDollars,
+        }),
+      });
+    } catch {
+      // Dismissing the share sheet throws on some platforms. The money is
+      // already taken; nothing here should look like a payment failure.
+    }
+  };
+
+  /**
    * Apple req 5.10. A decline is the moment a customer most needs something in
    * writing: their bank may show a pending authorisation that later vanishes,
    * and this is the only thing telling them no money moved. Offered, not sent —
@@ -397,7 +434,12 @@ export function TakePaymentSheet({
         fallbackTerms: !snapshotTerms && liveTerms ? liveTerms : undefined,
       });
       onDismiss();
-      onSuccess?.({ kind: 'card_charge', amount: centsToDollars(amountCents) });
+      const paidDollars = centsToDollars(amountCents);
+      onSuccess?.({
+        kind: 'card_charge',
+        amount: paidDollars,
+        sendReceipt: () => shareReceipt(paidDollars),
+      });
     } catch (error: any) {
       // The three outcomes Apple treats differently. A tradie who backed out
       // wants no message at all; a declined card owes the customer a record

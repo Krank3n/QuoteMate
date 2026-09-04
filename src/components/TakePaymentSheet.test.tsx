@@ -428,7 +428,11 @@ describe('TakePaymentSheet success + dialog conventions', () => {
     fireEvent.click(getByText('Tap to Pay / Card Entry'));
 
     await waitFor(() =>
-      expect(onSuccess).toHaveBeenCalledWith({ kind: 'card_charge', amount: 1200 }),
+      expect(onSuccess).toHaveBeenCalledWith(
+        // sendReceipt rides along for Apple req 5.10; its behaviour is covered
+        // in the receipt cases below.
+        expect.objectContaining({ kind: 'card_charge', amount: 1200 }),
+      ),
     );
     // Dismiss first — the host's success dialog opens over the closing sheet.
     expect((props.onDismiss as any).mock.invocationCallOrder[0]).toBeLessThan(
@@ -759,5 +763,64 @@ describe('req 5.12 — finding out about a payment you did not see', () => {
     fireEvent.click(getByText('Tap to Pay / Card Entry'));
 
     await waitFor(() => expect(notice.away).toEqual(['cancelled']));
+  });
+});
+
+describe('req 5.10 — a receipt after an approved payment', () => {
+  it('hands the caller a way to send one', async () => {
+    tapToPay.state = { enabled: true };
+    const onSuccess = vi.fn();
+    const { getByText } = renderSheet({
+      onSuccess,
+      ensureSquareConnected: vi.fn(async () => true),
+    });
+
+    fireEvent.click(getByText('Tap to Pay / Card Entry'));
+
+    await waitFor(() => expect(onSuccess).toHaveBeenCalled());
+    const info = onSuccess.mock.calls[0][0];
+    // Square shows no receipt screen of its own here — if the sheet does not
+    // provide this, the approved half of 5.10 is simply not met.
+    expect(typeof info.sendReceipt).toBe('function');
+    expect(info.kind).toBe('card_charge');
+  });
+
+  it('the receipt names the business and the amount, and stays confidential', async () => {
+    tapToPay.state = { enabled: true };
+    store.businessSettings = { businessName: 'Slimjims' };
+    const share = vi.spyOn(Share, 'share').mockResolvedValue({ action: 'sharedAction' } as any);
+    const onSuccess = vi.fn();
+    const { getByText } = renderSheet({
+      onSuccess,
+      ensureSquareConnected: vi.fn(async () => true),
+    });
+
+    fireEvent.click(getByText('Tap to Pay / Card Entry'));
+    await waitFor(() => expect(onSuccess).toHaveBeenCalled());
+    await onSuccess.mock.calls[0][0].sendReceipt();
+
+    const message = (share.mock.calls[0][0] as any).message as string;
+    expect(message).toMatch(/Slimjims/);
+    expect(message).toMatch(/payment received/i);
+    expect(message).toMatch(/Invoice INV-0042/);
+    expect(message).not.toMatch(/quotemate/i);
+    share.mockRestore();
+  });
+
+  it('a dismissed share sheet never looks like a failed payment', async () => {
+    tapToPay.state = { enabled: true };
+    const share = vi.spyOn(Share, 'share').mockRejectedValue(new Error('dismissed'));
+    const onSuccess = vi.fn();
+    const { getByText } = renderSheet({
+      onSuccess,
+      ensureSquareConnected: vi.fn(async () => true),
+    });
+
+    fireEvent.click(getByText('Tap to Pay / Card Entry'));
+    await waitFor(() => expect(onSuccess).toHaveBeenCalled());
+
+    // The money is already taken; this must resolve, not throw.
+    await expect(onSuccess.mock.calls[0][0].sendReceipt()).resolves.toBeUndefined();
+    share.mockRestore();
   });
 });

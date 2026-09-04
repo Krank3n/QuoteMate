@@ -312,7 +312,7 @@ to be true *before* the videos are shot, because the videos are the evidence.
 | 4.2 / 4.3 | Education after T&Cs, findable again in Settings | ✅ on fresh acceptance; "How Tap to Pay works" row in Square settings |
 | 5.2 | Button reachable without scrolling, top of the list | ✅ already |
 | 5.4 / 5.5 | Approved copy; SF Symbol `wave.3.right.circle` | ✅ copy via `tapToPayRowTitle`; icon via `expo-symbols` `SymbolView`, whose own `fallback` covers Android/web |
-| 5.10 | Digital receipt on approve *and* decline | ✅ approve is Square's own receipt screen; decline offers a shareable record (`buildDeclineRecord`) via the native share sheet — v1.7 names "Activity views" as an accepted method, which is exactly that |
+| 5.10 | Digital receipt on approve *and* decline | ✅ both halves offer a shareable record via the native share sheet ("Activity views", which v1.7 names as accepted): `buildPaymentReceipt` on approve, `buildDeclineRecord` on decline. **Square shows no receipt screen of its own** — an earlier note here assumed it did, and the checkout footage disproved it |
 | 5.12 | Notify the user when a transaction isn't approved and they closed the app first | ✅ `tapToPayOutcomeNotice` — a local notification armed before the tap (survives app termination) plus an immediate one when the outcome is known and the app is backgrounded |
 
 ### Australia-specific
