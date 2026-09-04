@@ -3422,11 +3422,20 @@ export const useStore = create<AppState>((set, get) => ({
           priced: Quote,
           counts: { fetchedCount: number; failedCount: number; skippedCount: number },
         ): Promise<ScopePipelineRun> => {
+          // fetchPricesForQuote returns `{ ...quote, materials }` — it prices the
+          // rows and leaves every money field as it was BEFORE the run ($0 on a
+          // fresh draft). Settle the totals here, before anything reads one off
+          // the object: checkDocumentIntegrity compares stored totals against the
+          // rows, so on the phone-priced path it reported EVERY draft as "figures
+          // don't add up" ("stored materialsSubtotal=0, recomputed=245.4" was read
+          // out to a tradie on a $500 smoke-alarm job, 4 Sep). The server path
+          // never showed it because pricingRun's quotePatch recalculates first.
           // Finished but unsent — stamp the wizard step the banner and nudge read.
-          get().updateQuote({ ...priced, draftStep: 'JobPreview' });
+          const settled = updateQuoteCalculations({ ...priced, draftStep: 'JobPreview' });
+          get().updateQuote(settled);
           await get().saveDraft(get().currentQuote!);
-          let review = reviewQuoteMaterials(priced.materials, priced.sections);
-          const integrity = checkDocumentIntegrity(priced as any);
+          let review = reviewQuoteMaterials(settled.materials, settled.sections);
+          const integrity = checkDocumentIntegrity(settled as any);
           if (integrity.length) {
             // eslint-disable-next-line no-console
             console.warn('[Mate] integrity', quoteId, integrity.map((i) => i.code).join(','));
@@ -3435,11 +3444,11 @@ export const useStore = create<AppState>((set, get) => ({
           const supplierGap = await summariseSupplierGap(
             missedSupplierTerms,
             review.counts.estimated,
-            priced.materials,
+            settled.materials,
           );
 
           let pricingSummary = summarisePriceCounts(counts);
-          const topLines = topLinesSummary(priced.materials);
+          const topLines = topLinesSummary(settled.materials);
           if (topLines) pricingSummary = `${pricingSummary}\n${topLines}`;
 
           onProgress?.({
