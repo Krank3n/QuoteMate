@@ -27,7 +27,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 
 import { makeStyles, useThemeColors } from '../theme';
 import { APP_STORE_URL, PLAY_STORE_URL } from '../config/storeLinks';
-import type { AppUpdateInfo } from '../services/appUpdateService';
+import { parseBuild, type AppUpdateInfo } from '../services/appUpdateService';
+import { currentAppBuild } from '../services/appIdentity';
 
 const SCREEN_HEIGHT = Dimensions.get('window').height;
 
@@ -109,6 +110,13 @@ export function AppUpdateSheet({ visible, onDismiss, info }: Props) {
   };
 
   const currentVersion = Constants.expoConfig?.version ?? '—';
+  // Two store releases can share a version string (Android shipped 1.56 as
+  // both 171 and 172), and "1.56 → 1.56" reads as a no-op. Show the build on
+  // both sides whenever it is the thing that differs.
+  const runningBuild = parseBuild(currentAppBuild().build);
+  const showBuilds = info.latestBuild !== null && info.latestVersion === currentVersion;
+  const currentLabel = showBuilds && runningBuild !== null ? `${currentVersion} (${runningBuild})` : currentVersion;
+  const latestLabel = showBuilds ? `${info.latestVersion} (${info.latestBuild})` : info.latestVersion;
 
   const handleUpdate = () => {
     if (STORE_URL) Linking.openURL(STORE_URL);
@@ -173,7 +181,7 @@ export function AppUpdateSheet({ visible, onDismiss, info }: Props) {
           <View style={styles.versionRow}>
             <View style={styles.versionBadge}>
               <Text style={styles.versionLabel}>Current</Text>
-              <Text style={styles.versionValue}>{currentVersion}</Text>
+              <Text style={styles.versionValue}>{currentLabel}</Text>
             </View>
             <MaterialCommunityIcons
               name="arrow-right"
@@ -186,7 +194,7 @@ export function AppUpdateSheet({ visible, onDismiss, info }: Props) {
                 Latest
               </Text>
               <Text style={[styles.versionValue, styles.versionValueNew]}>
-                {info.latestVersion}
+                {latestLabel}
               </Text>
             </View>
           </View>

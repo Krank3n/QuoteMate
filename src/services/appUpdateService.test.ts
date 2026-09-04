@@ -16,6 +16,21 @@ vi.mock('expo-constants', () => ({
   default: { get expoConfig() { return { version: installedVersion, extra: {} }; } },
 }));
 
+// The running build. appIdentity reaches for expo-application/expo-updates,
+// none of which exist in the runner.
+let installedBuild: string | null = '171';
+vi.mock('./appIdentity', () => ({
+  currentAppBuild: () => ({
+    version: installedVersion,
+    build: installedBuild,
+    platform: 'android',
+    updateId: null,
+    runtimeVersion: null,
+    channel: null,
+    updatedAt: null,
+  }),
+}));
+
 // config/appUpdate as the client would read it.
 let updateDoc: Record<string, unknown> | null = null;
 vi.mock('firebase/firestore', () => ({
@@ -29,8 +44,12 @@ vi.mock('firebase/firestore', () => ({
 import {
   UPDATE_SNOOZE_MS,
   checkForUpdate,
+  compareRelease,
+  decideUpdate,
   isSnoozed,
+  parseBuild,
   readUpdateSnooze,
+  releaseKey,
   snoozeUpdate,
   type AppUpdateInfo,
 } from './appUpdateService';
@@ -43,12 +62,14 @@ const soft: AppUpdateInfo = {
   updateAvailable: true,
   forceUpdate: false,
   latestVersion: '1.56',
+  latestBuild: null,
   whatsNew: 'Mate reads plans now.',
 };
 
 beforeEach(() => {
   store.clear();
   installedVersion = '1.55';
+  installedBuild = '171';
   updateDoc = { latestVersion: '1.56', minimumVersion: '1.0.0', whatsNew: 'Mate reads plans now.' };
 });
 
@@ -106,6 +127,7 @@ describe('checkForUpdate', () => {
       updateAvailable: true,
       forceUpdate: false,
       latestVersion: '1.56',
+      latestBuild: null,
       whatsNew: 'Mate reads plans now.',
     });
   });
@@ -144,5 +166,80 @@ describe('checkForUpdate', () => {
     // The announce script guards against writing one; this pins the client side.
     updateDoc = { latestVersion: '1.0.74', minimumVersion: '1.0.0', whatsNew: '' };
     expect(await checkForUpdate(NOW)).toBeNull();
+  });
+});
+
+describe('build-aware updates', () => {
+  const config = { latestVersion: '1.56', minimumVersion: '1.0.0', whatsNew: 'x', latestBuild: { ios: 94, android: 172 } };
+
+  it('prompts a device on the same version but an older store build', () => {
+    // The case that went unnoticed: Android shipped 1.56 twice, and only
+    // versionCode 172 can take an over-the-air update. On version strings
+    // alone a 171 device reads itself as current.
+    const info = decideUpdate({ currentVersion: '1.56', currentBuild: 171, platform: 'android', config });
+    expect(info).toMatchObject({ updateAvailable: true, latestVersion: '1.56', latestBuild: 172 });
+  });
+
+  it('stays quiet once the device is on the newest build', () => {
+    expect(decideUpdate({ currentVersion: '1.56', currentBuild: 172, platform: 'android', config })).toBeNull();
+    expect(decideUpdate({ currentVersion: '1.56', currentBuild: 200, platform: 'android', config })).toBeNull();
+  });
+
+  it('reads the build for the running platform, never the other one', () => {
+    // iOS build 94 and Android versionCode 172 are unrelated sequences.
+    expect(decideUpdate({ currentVersion: '1.56', currentBuild: 94, platform: 'ios', config })).toBeNull();
+    expect(decideUpdate({ currentVersion: '1.56', currentBuild: 93, platform: 'ios', config })?.latestBuild).toBe(94);
+    // A platform the config says nothing about falls back to versions alone.
+    expect(decideUpdate({ currentVersion: '1.56', currentBuild: 1, platform: 'web', config })).toBeNull();
+  });
+
+  it('still prompts on an older version whatever the builds say', () => {
+    const info = decideUpdate({ currentVersion: '1.55', currentBuild: 999, platform: 'android', config });
+    expect(info?.updateAvailable).toBe(true);
+  });
+
+  it('behaves exactly as before when the config names no builds', () => {
+    const legacy = { latestVersion: '1.56', minimumVersion: '1.0.0', whatsNew: 'x' };
+    expect(decideUpdate({ currentVersion: '1.56', currentBuild: 171, platform: 'android', config: legacy })).toBeNull();
+    expect(decideUpdate({ currentVersion: '1.55', currentBuild: 171, platform: 'android', config: legacy })?.updateAvailable).toBe(true);
+  });
+
+  it('force-updates a build below the floor on the same version', () => {
+    const forced = { ...config, minimumVersion: '1.56', minimumBuild: { android: 172 } };
+    expect(decideUpdate({ currentVersion: '1.56', currentBuild: 171, platform: 'android', config: forced })?.forceUpdate).toBe(true);
+    expect(decideUpdate({ currentVersion: '1.56', currentBuild: 172, platform: 'android', config: forced })).toBeNull();
+  });
+
+  it('snoozes each build separately, so declining 171 does not silence 172', () => {
+    const at171: AppUpdateInfo = { ...soft, latestVersion: '1.56', latestBuild: 171 };
+    const at172: AppUpdateInfo = { ...soft, latestVersion: '1.56', latestBuild: 172 };
+    const snooze = { version: releaseKey('1.56', 171), dismissedAt: NOW };
+    expect(isSnoozed(at171, snooze, NOW + DAY)).toBe(true);
+    expect(isSnoozed(at172, snooze, NOW + DAY)).toBe(false);
+  });
+
+  it('parses build numbers and refuses junk', () => {
+    expect(parseBuild('172')).toBe(172);
+    expect(parseBuild(94)).toBe(94);
+    expect(parseBuild('1.56.94')).toBe(1);
+    expect(parseBuild('abc')).toBeNull();
+    expect(parseBuild(undefined)).toBeNull();
+  });
+
+  it('orders releases by version first, then build', () => {
+    expect(compareRelease({ version: '1.55', build: 999 }, { version: '1.56', build: 1 })).toBe(-1);
+    expect(compareRelease({ version: '1.56', build: 171 }, { version: '1.56', build: 172 })).toBe(-1);
+    expect(compareRelease({ version: '1.56', build: 172 }, { version: '1.56', build: 172 })).toBe(0);
+    // A missing build on either side means the versions decide.
+    expect(compareRelease({ version: '1.56', build: null }, { version: '1.56', build: 172 })).toBe(0);
+  });
+
+  it('reads the running build end to end through checkForUpdate', async () => {
+    installedVersion = '1.56';
+    installedBuild = '171';
+    updateDoc = { ...config };
+    // The mocked appIdentity reports android, so the android build applies.
+    const info = await checkForUpdate(NOW);
+    expect(info?.latestBuild).toBe(172);
   });
 });

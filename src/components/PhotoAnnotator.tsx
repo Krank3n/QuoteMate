@@ -21,6 +21,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import Svg, { Path, Line, Ellipse, G, Polygon, Text as SvgText, Rect } from 'react-native-svg';
 import { captureRef } from 'react-native-view-shot';
 import { makeStyles, useThemeColors } from '../theme';
+import { useModalInsets } from '../hooks/useModalInsets';
 import { selectionTap, lightTap } from '../utils/haptics';
 
 // --- Types ---
@@ -121,6 +122,9 @@ function getArrowHeadPoints(endX: number, endY: number, startX: number, startY: 
 // --- Component ---
 
 export function PhotoAnnotator({ visible, imageUri, onSave, onCancel }: PhotoAnnotatorProps) {
+  // A <Modal> sits outside the SafeAreaProvider, and edge-to-edge draws it
+  // under Android's navigation bar — see utils/modalInsets.
+  const modalInsets = useModalInsets(20);
   const styles = useStyles();
   const themeColors = useThemeColors();
   // Tool & style state
@@ -623,8 +627,16 @@ export function PhotoAnnotator({ visible, imageUri, onSave, onCancel }: PhotoAnn
 
   const hasAnnotations = annotations.length > 0;
 
+  // onRequestClose is what gives Android's Back a meaning inside a <Modal>.
+  // Without it Back fell through to the activity and closed the app from a
+  // full-screen editor, losing the annotation in progress.
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="fullScreen">
+    <Modal
+      visible={visible}
+      animationType="slide"
+      presentationStyle="fullScreen"
+      onRequestClose={onCancel}
+    >
       <View style={styles.container}>
         {/* Header */}
         <View style={styles.header}>
@@ -749,7 +761,7 @@ export function PhotoAnnotator({ visible, imageUri, onSave, onCancel }: PhotoAnn
         )}
 
         {/* Bottom toolbar */}
-        <View style={styles.toolbar}>
+        <View style={[styles.toolbar, { paddingBottom: modalInsets.bottom }]}>
           {/* Tool buttons */}
           <View style={styles.toolButtons}>
             {TOOLS.map(({ tool, icon }) => (
@@ -921,7 +933,7 @@ const useStyles = makeStyles((t) => ({
     alignItems: 'center',
     paddingHorizontal: 24,
     paddingVertical: 16,
-    paddingBottom: Platform.OS === 'ios' ? 40 : 20,
+    // paddingBottom comes from the modal's safe-area inset at the call site.
   },
   toolButtons: {
     flexDirection: 'row',

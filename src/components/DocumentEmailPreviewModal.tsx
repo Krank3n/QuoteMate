@@ -36,7 +36,7 @@ import {
   ActivityIndicator,
 } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { useSafeAreaInsets, initialWindowMetrics } from 'react-native-safe-area-context';
+import { useModalInsets } from '../hooks/useModalInsets';
 import { format } from 'date-fns';
 import { LinearGradient } from 'expo-linear-gradient';
 import { makeStyles, useThemeColors } from '../theme';
@@ -113,18 +113,12 @@ export function DocumentEmailPreviewModal({
 }: Props) {
   const styles = useStyles();
   const themeColors = useThemeColors();
-  const insets = useSafeAreaInsets();
-  // RN's <Modal> renders in its own native view hierarchy, so the root
-  // SafeAreaProvider doesn't reach inside — useSafeAreaInsets().bottom
-  // returns 0 on iOS and the footer ends up sitting on top of the home
-  // indicator. initialWindowMetrics is captured at app startup from native,
-  // giving the real bottom inset regardless of tree position. On Android
-  // the system already pushes the modal above the nav bar, so adding the
-  // inset there would double-pad the footer.
-  const fallbackBottom = initialWindowMetrics?.insets.bottom ?? 0;
-  const bottomInset = Platform.OS === 'ios'
-    ? Math.max(insets.bottom, fallbackBottom, 16)
-    : 16;
+  // Android used to be excluded from this (a flat 16), on the reasoning that
+  // the system pushed modals above the nav bar. Edge-to-edge ended that: the
+  // send footer was sitting under the back/home/recents buttons. Both
+  // platforms now take the real inset — see utils/modalInsets.
+  const insets = useModalInsets();
+  const bottomInset = insets.bottom;
 
   const isInvoice = doc.type === 'invoice';
   const { quotes } = useStore();

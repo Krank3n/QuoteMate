@@ -16,9 +16,17 @@
  * Everything here is pure so the guards that prevent a repeat are testable.
  */
 
+/** Per-platform store build numbers (iOS CFBundleVersion, Android versionCode). */
+export interface StoreBuilds {
+  ios?: number;
+  android?: number;
+}
+
 export interface AppUpdateConfig {
   latestVersion?: string;
   minimumVersion?: string;
+  latestBuild?: StoreBuilds;
+  minimumBuild?: StoreBuilds;
   whatsNew?: string;
 }
 
@@ -36,6 +44,15 @@ export interface AnnounceInput {
   whatsNew: string;
   /** Only ever set deliberately: this force-updates everyone below it. */
   minimumVersion?: string;
+  /**
+   * Store build numbers of THIS version, per platform. They matter because a
+   * version string is not unique: Android shipped 1.56 as versionCode 171 and
+   * again as 172, and only 172 could take an over-the-air update — but a 171
+   * device compared "1.56" to "1.56" and was never prompted. Omitted builds
+   * are carried forward from the existing config.
+   */
+  iosBuild?: number;
+  androidBuild?: number;
   /** package.json version, purely to warn about the drift that caused this. */
   packageVersion?: string;
   allowDowngrade?: boolean;
@@ -165,6 +182,43 @@ export function planAnnouncement(input: AnnounceInput): AnnouncePlan {
     );
   }
 
+  // Builds are only meaningful against the version they belong to, so a build
+  // supplied for a NEW version replaces the old one outright rather than
+  // merging with a build number from the previous release.
+  const carriedBuilds: StoreBuilds =
+    isValidVersion(current.latestVersion) && current.latestVersion === version
+      ? { ...(current.latestBuild || {}) }
+      : {};
+  const nextBuilds: StoreBuilds = { ...carriedBuilds };
+  const setBuild = (platform: 'ios' | 'android', value: number | undefined) => {
+    if (value === undefined) return;
+    if (!Number.isInteger(value) || value <= 0) {
+      errors.push(`--${platform}-build "${value}" is not a positive whole number.`);
+      return;
+    }
+    const previous = carriedBuilds[platform];
+    if (typeof previous === 'number' && value < previous && !input.allowDowngrade) {
+      errors.push(
+        `Refusing to move the ${platform} build backwards for ${version}, from ${previous} ` +
+        `to ${value}. Pass allowDowngrade to roll back a bad announcement.`
+      );
+      return;
+    }
+    nextBuilds[platform] = value;
+  };
+  setBuild('ios', input.iosBuild);
+  setBuild('android', input.androidBuild);
+
+  // Announcing a version whose builds are unknown still works — the client
+  // then compares versions alone, exactly as it did before builds existed.
+  if (Object.keys(nextBuilds).length === 0) {
+    warnings.push(
+      `No store build numbers for ${version}. Devices on an older BUILD of the same ` +
+      `version (Android 1.56 code 171 vs 172) cannot be told apart, so they will not ` +
+      `be prompted. Pass --ios-build / --android-build to close that gap.`
+    );
+  }
+
   const trimmedWhatsNew = (whatsNew || '').trim();
   if (!trimmedWhatsNew) {
     errors.push('whatsNew is empty — the update sheet would show a blank changelog.');
@@ -198,6 +252,8 @@ export function planAnnouncement(input: AnnounceInput): AnnouncePlan {
     next: {
       latestVersion: latest,
       minimumVersion: nextMinimum,
+      latestBuild: nextBuilds,
+      minimumBuild: current.minimumBuild ?? {},
       whatsNew: trimmedWhatsNew,
     },
   };

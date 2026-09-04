@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { View, StyleSheet, Platform, KeyboardAvoidingView, ScrollView, Image, Animated, TextInput as RNTextInput } from 'react-native';
+import { View, StyleSheet, Platform, KeyboardAvoidingView, ScrollView, Image, Animated, BackHandler, TextInput as RNTextInput } from 'react-native';
 import { Text, TextInput, Button, Surface, Title, ActivityIndicator } from 'react-native-paper';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signInWithCredential, OAuthProvider, sendEmailVerification, getAdditionalUserInfo, UserCredential } from 'firebase/auth';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
@@ -88,6 +88,19 @@ export function AuthScreen() {
   const styles = useStyles();
   const themeColors = useThemeColors();
   const [isSignUp, setIsSignUp] = useState(false);
+
+  // Sign-in and sign-up are one screen with a flag, not two routes, so Android
+  // had no history to go back to: Back from "Create your account" closed the
+  // app outright. Send it back to sign-in instead, and only then let the
+  // system have the press.
+  useEffect(() => {
+    if (Platform.OS !== 'android' || !isSignUp) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      setIsSignUp(false);
+      return true;
+    });
+    return () => sub.remove();
+  }, [isSignUp]);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');

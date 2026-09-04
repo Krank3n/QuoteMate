@@ -25,6 +25,8 @@
  *   --version <version>    The version live in the stores (required)
  *   --whats-new "<text>"   Changelog shown in the sheet (required)
  *   --write                Perform the write (otherwise prints the plan)
+ *   --ios-build <n>        iOS build number (CFBundleVersion) of that version
+ *   --android-build <n>    Android versionCode of that version
  *   --minimum <version>    Set the force-update floor. Blocks everyone below it.
  *   --allow-downgrade      Permit moving latestVersion backwards (rollback)
  */
@@ -98,18 +100,32 @@ async function main() {
   const snap = await ref.get();
   const currentConfig = (snap.exists ? snap.data() : null) as AppUpdateConfig | null;
 
+  // Store build numbers of this version. Optional, but without them two
+  // releases of the same version look identical to the client — see the
+  // helper's guard.
+  const buildFlag = (name: string): number | undefined => {
+    const raw = flag(name);
+    if (raw === undefined) return undefined;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : Number.NaN;
+  };
+
   const plan = planAnnouncement({
     version,
     appConfigVersion: appConfigVersion ?? undefined,
     currentConfig,
     whatsNew: flagPhrase('whats-new') || '',
     minimumVersion: flag('minimum'),
+    iosBuild: buildFlag('ios-build'),
+    androidBuild: buildFlag('android-build'),
     packageVersion,
     allowDowngrade: has('allow-downgrade'),
   });
 
   console.log(`\nproject:        ${projectId}`);
   console.log(`--version:      ${version}   (what clients will be told is latest)`);
+  console.log(`--ios-build:    ${flag('ios-build') ?? '(unchanged)'}`);
+  console.log(`--android-build:${flag('android-build') ?? '(unchanged)'}`);
   console.log(`app.config.js:  ${appConfigVersion ?? '(unreadable)'}`);
   console.log(`package.json:   ${packageVersion ?? '(unreadable)'}`);
   if (!appConfigVersion) {
