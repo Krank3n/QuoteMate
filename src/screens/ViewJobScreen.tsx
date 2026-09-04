@@ -14,6 +14,7 @@ import { Text, Card, Button, TextInput, Snackbar } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { formatDistanceToNow } from 'date-fns';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import type { Job, JobStage } from '../../shared/job/types';
 import { useJobStore } from '../store/useJobStore';
@@ -53,10 +54,12 @@ import { getReeceConnectionStatus } from '../services/reeceApi';
 import { SendDocumentDialog } from '../components/SendDocumentDialog';
 import { warmEmailDraft } from '../utils/emailDraft';
 import { FollowUpSheet, type FollowUpTone } from '../components/FollowUpSheet';
+import { JobWonSheet } from '../components/JobWonSheet';
 import type { Document, DocumentStage } from '../types/document';
 import { documentToQuote, documentToInvoice } from '../types/documentAdapter';
 import { applyStageChange } from '../utils/applyStageChange';
 import { maybeRequestReview } from '../services/storeReviewService';
+import { maybeShowWonPrompt } from '../utils/wonPrompt';
 import { ensureSquareConnectedForPayment } from '../utils/quoteDeliveryGuard';
 import { applyJobStageChange } from '../utils/applyJobStageChange';
 import { cascadeDeleteJob, pickPaidDocs } from '../utils/deleteJobWithDocs';
@@ -64,6 +67,7 @@ import { formatScheduledDateLong } from '../utils/formatSchedule';
 import { selectionTap, lightTap } from '../utils/haptics';
 import { useAlertModal } from '../hooks/useAlertModal';
 import { paymentCopy } from '../constants/paymentCopy';
+import { TRIAL_MS } from '../utils/trialConfig';
 import { GridBackground } from '../components/GridBackground';
 
 export function ViewJobScreen() {
@@ -99,6 +103,18 @@ export function ViewJobScreen() {
   );
   const isPro = subscriptionStatus?.isPro || isTrialActive;
 
+  // Whole days left in the trial (ceil), counted the same way the dashboard
+  // and TrialBanner count it. Null when the tradie never started a trial.
+  const trialDaysRemaining = subscriptionStatus?.trialStartedAt
+    ? Math.max(
+        0,
+        Math.ceil(
+          (TRIAL_MS - (Date.now() - new Date(subscriptionStatus.trialStartedAt).getTime())) /
+            (24 * 60 * 60 * 1000),
+        ),
+      )
+    : null;
+
   const [stageSheetVisible, setStageSheetVisible] = useState(false);
   const [docStageSheetDoc, setDocStageSheetDoc] = useState<Document | null>(null);
   const [paymentSheetDoc, setPaymentSheetDoc] = useState<Document | null>(null);
@@ -109,6 +125,11 @@ export function ViewJobScreen() {
   const [followUpState, setFollowUpState] = useState<{
     doc: Document;
     tone: FollowUpTone;
+  } | null>(null);
+  const [wonSheetState, setWonSheetState] = useState<{
+    doc: Document;
+    /** Days left when the offer was made, or null for a free user. */
+    trialDaysRemaining: number | null;
   } | null>(null);
   const [pendingAction, setPendingAction] = useState<JobActionId | null>(null);
   const [reeceConnected, setReeceConnected] = useState<boolean | null>(null);
@@ -279,7 +300,41 @@ export function ViewJobScreen() {
       </TouchableOpacity>
     ) : null;
 
+  // The "job won" offer. Runs after a quote is accepted, never blocking it.
+  // Who sees it (free, or a trial in its last days, on a priced quote) and how
+  // often (once per doc, once per 7 days) lives in wonPrompt.ts, which also
+  // persists the cap before reporting back. `reviewShown` stands the offer down
+  // when the OS review prompt was asked for on this same win.
+  const offerWonPrompt = async (doc: Document, reviewShown: boolean) => {
+    const plan = getEffectivePlan();
+    const show = await maybeShowWonPrompt({
+      doc,
+      plan,
+      trialDaysRemaining,
+      reviewShown,
+      now: Date.now(),
+      getItem: (key) => AsyncStorage.getItem(key),
+      setItem: (key, value) => AsyncStorage.setItem(key, value),
+    });
+    if (show) {
+      setWonSheetState({
+        doc,
+        trialDaysRemaining: plan === 'trial' ? trialDaysRemaining : null,
+      });
+    }
+  };
+
   const applyStageTransition = async (target: JobStage) => {
+    // Accepting from the job stage sheet drags the primary quote along to
+    // 'quote_accepted' (applyJobStageChange), so the same win happens here.
+    // Read the doc's stage before the change: re-picking a stage it already
+    // holds isn't a win.
+    const wonQuote =
+      target === 'accepted' &&
+      actionableDoc?.type === 'quote' &&
+      actionableDoc.stage !== 'quote_accepted'
+        ? actionableDoc
+        : null;
     try {
       await applyJobStageChange({
         job,
@@ -296,7 +351,10 @@ export function ViewJobScreen() {
         title: 'Stage update failed',
         message: 'Something went wrong updating the stage. Please try again.',
       });
+      return;
     }
+    // Same offer as markApproved. No store-review ask on this path.
+    if (wonQuote) await offerWonPrompt(wonQuote, false);
   };
 
   const handleStageSelect = async (target: JobStage) => {
@@ -477,8 +535,17 @@ export function ViewJobScreen() {
           }
           await saveJob({ ...job, stage: 'accepted' });
           // Quote accepted (not via the tap-to-pay flow, which leads straight
-          // into payment) — opportunistic store-review ask, rate-limited.
-          maybeRequestReview('quote_accepted').catch(() => {});
+          // into payment) — opportunistic store-review ask, rate-limited and
+          // time-boxed so it can't hold the sticky bar's spinner offline. A
+          // true means the OS prompt was REQUESTED (the OS decides whether it
+          // draws it), which is enough to stand the job-won sheet down for this
+          // win rather than risk stacking two sheets.
+          {
+            const reviewShown = await maybeRequestReview('quote_accepted').catch(() => false);
+            if (actionableDoc && actionableDoc.type === 'quote') {
+              await offerWonPrompt(actionableDoc, reviewShown);
+            }
+          }
           break;
         case 'takeDeposit':
           if (actionableDoc && actionableDoc.type === 'quote') {
@@ -848,6 +915,11 @@ export function ViewJobScreen() {
         title: 'Stage update failed',
         message: 'Something went wrong updating the stage. Please try again.',
       });
+      return;
+    }
+    // Same win as markApproved, reached from the document's own stage sheet.
+    if (target === 'quote_accepted' && doc.type === 'quote' && doc.stage !== 'quote_accepted') {
+      await offerWonPrompt(doc, false);
     }
   };
 
@@ -1075,6 +1147,16 @@ export function ViewJobScreen() {
           customerEmail={job.customerEmail}
           businessName={businessSettings?.businessName || 'us'}
           jobName={job.name || 'the job'}
+        />
+      ) : null}
+
+      {wonSheetState ? (
+        <JobWonSheet
+          visible={true}
+          onDismiss={() => setWonSheetState(null)}
+          name={job.customerName || job.name || 'the job'}
+          total={Number(wonSheetState.doc.total)}
+          trialDaysRemaining={wonSheetState.trialDaysRemaining}
         />
       ) : null}
 
