@@ -72,8 +72,10 @@ export default function MaterialMatchSelector({
     return badge[confidence];
   };
 
+  // Without onRequestClose, Android's Back skipped this modal and closed the
+  // app instead of cancelling the pick.
   return (
-    <Modal visible={visible} animationType="slide" transparent={true}>
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={onCancel}>
       <View style={styles.overlay}>
         <View style={styles.container}>
           {/* Header */}

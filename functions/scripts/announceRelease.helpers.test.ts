@@ -198,6 +198,10 @@ describe('planAnnouncement vs app.config.js', () => {
     expect(plan.next).toEqual({
       latestVersion: '1.55',
       minimumVersion: '1.0.0',
+      // No build flags passed, and the version changed, so the previous
+      // release's build numbers are cleared rather than carried onto it.
+      latestBuild: {},
+      minimumBuild: {},
       whatsNew: 'Mate greets you first now.',
     });
     const text = plan.warnings.join(' ');
@@ -206,5 +210,81 @@ describe('planAnnouncement vs app.config.js', () => {
     expect(text).toMatch(/ahead of the "1\.55"/);
     expect(text).not.toMatch(/package\.json/);
     expect(text).not.toMatch(/BLOCKED/);
+  });
+});
+
+describe('store build numbers', () => {
+  const base = {
+    version: '1.56',
+    appConfigVersion: '1.56',
+    whatsNew: 'Mate prices in the background now.',
+  };
+
+  it('records the build per platform, so two releases of one version differ', () => {
+    // The gap this closes: Android 1.56 shipped as versionCode 171 and 172,
+    // and a 171 device comparing version strings alone read itself as current.
+    const plan = planAnnouncement({
+      ...base,
+      currentConfig: { latestVersion: '1.55', minimumVersion: '1.0.0', whatsNew: '' },
+      iosBuild: 94,
+      androidBuild: 172,
+    });
+    expect(plan.ok).toBe(true);
+    expect(plan.next.latestBuild).toEqual({ ios: 94, android: 172 });
+  });
+
+  it('carries a build forward when re-announcing the same version', () => {
+    const plan = planAnnouncement({
+      ...base,
+      currentConfig: { latestVersion: '1.56', minimumVersion: '1.0.0', whatsNew: '', latestBuild: { ios: 94, android: 171 } },
+      androidBuild: 172,
+    });
+    expect(plan.next.latestBuild).toEqual({ ios: 94, android: 172 });
+  });
+
+  it('drops the old builds when the version moves on', () => {
+    const plan = planAnnouncement({
+      ...base,
+      version: '1.57',
+      appConfigVersion: '1.57',
+      currentConfig: { latestVersion: '1.56', minimumVersion: '1.0.0', whatsNew: '', latestBuild: { android: 172 } },
+    });
+    // 172 belongs to 1.56; carrying it onto 1.57 would claim a build nobody has.
+    expect(plan.next.latestBuild).toEqual({});
+  });
+
+  it('refuses a build that moves backwards, or is not a whole number', () => {
+    const back = planAnnouncement({
+      ...base,
+      currentConfig: { latestVersion: '1.56', minimumVersion: '1.0.0', whatsNew: '', latestBuild: { android: 172 } },
+      androidBuild: 171,
+    });
+    expect(back.ok).toBe(false);
+    expect(back.errors.join(' ')).toMatch(/backwards/);
+
+    const junk = planAnnouncement({
+      ...base,
+      currentConfig: null,
+      iosBuild: Number.NaN,
+    });
+    expect(junk.ok).toBe(false);
+    expect(junk.errors.join(' ')).toMatch(/positive whole number/);
+  });
+
+  it('allows a deliberate rollback', () => {
+    const plan = planAnnouncement({
+      ...base,
+      currentConfig: { latestVersion: '1.56', minimumVersion: '1.0.0', whatsNew: '', latestBuild: { android: 172 } },
+      androidBuild: 171,
+      allowDowngrade: true,
+    });
+    expect(plan.ok).toBe(true);
+    expect(plan.next.latestBuild).toEqual({ android: 171 });
+  });
+
+  it('warns when a release is announced with no build numbers at all', () => {
+    const plan = planAnnouncement({ ...base, currentConfig: null });
+    expect(plan.ok).toBe(true);
+    expect(plan.warnings.join(' ')).toMatch(/cannot be told apart/);
   });
 });
