@@ -146,6 +146,31 @@ describe('tradeFallbackUnitPriceWithUnit — a price must say what it is per', (
     expect(hit).toEqual({ price: 18, per: 'each' });
   });
 
+  it('does not give plasterboard fixings the sheet price, and lets them reach a real search', () => {
+    // 4 Sep 2026, a $500 smoke-alarm job: "Plasterboard wall plugs / anchors"
+    // matched the sheet rule, was routed away from retail, took the $35 SHEET
+    // price and billed 4 anchors at $140 — the biggest line on the quote, read
+    // out to the tradie as such. Wall plugs are $6 a bag at Bunnings.
+    expect(isNonRetailTradeRow('Plasterboard wall plugs / anchors', 'each', 4)).toBe(false);
+    expect(isNonRetailTradeRow('plasterboard wall plug anchor plastic', 'each', 4)).toBe(false);
+    expect(tradeFallbackUnitPrice('Plasterboard wall plugs / anchors', 'each')).toBeNull();
+    expect(tradeFallbackUnitPrice('plasterboard hollow wall anchor', 'each')).toBeNull();
+    expect(tradeFallbackUnitPrice('cement sheet fixings', 'each')).toBeNull();
+    expect(tradeFallbackUnitPrice('plasterboard picture hooks', 'each')).toBeNull();
+  });
+
+  it('still routes the sheets themselves away from retail at the sheet price', () => {
+    expect(isNonRetailTradeRow('plasterboard 10mm sheet', 'each', 12)).toBe(true);
+    expect(isNonRetailTradeRow('villaboard 6mm', 'm²', 30)).toBe(true);
+    expect(isNonRetailTradeRow('external cladding', 'm²', 40)).toBe(true);
+    expect(tradeFallbackUnitPrice('plasterboard 10mm sheet', 'each')).toBe(35);
+  });
+
+  it('leaves the non-sheet rows that shared the old routing rule alone', () => {
+    expect(isNonRetailTradeRow("plumber's putty", 'each', 1)).toBe(true);
+    expect(isNonRetailTradeRow('safety debris netting', 'm²', 60)).toBe(true);
+  });
+
   it('does not give plasterboard consumables the sheet price', () => {
     // "plasterboard paper joint tape" billed 75 m at $35/m = $2,386.50.
     expect(tradeFallbackUnitPrice('plasterboard paper joint tape', 'm')).toBeNull();

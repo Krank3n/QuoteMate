@@ -16,6 +16,13 @@
  * AU retail-ish unit prices so the quote total is not silently $0.
  */
 
+/**
+ * Fixings that hang off a sheet job. They carry the sheet's name but they are
+ * counted hardware, never square metres of board, so neither the non-retail
+ * routing nor the sheet rate in the fallback table may claim them.
+ */
+const SHEET_FIXING = /\b(?:plugs?|anchors?|fixings?|hooks?)\b/;
+
 export function isNonRetailTradeRow(nameText: string, unit?: string, qty?: number): boolean {
   const name = nameText.toLowerCase();
   const quantity = qty ?? 0;
@@ -45,7 +52,15 @@ export function isNonRetailTradeRow(nameText: string, unit?: string, qty?: numbe
   // line manages 26%. Sending a stocked item here trades the app's single
   // biggest advantage for its weakest fallback. Plasterboard and cement sheet
   // stay — the scraper genuinely misses those more often than it finds them.
-  if (/plasterboard|villaboard|fibre\s+cement\s+sheet|fiber\s+cement\s+sheet|cement\s+sheet|cladding\s+sheets?|external\s+cladding|plumber'?s?\s+putty|plumbing\s+putty|debris\s+netting|safety\s+debris/.test(name)) return true;
+  // Sheets only. The FIXINGS that hang off a plasterboard job — wall plugs,
+  // anchors, hooks — are ordinary Bunnings stock that a real search prices
+  // well, and routing them here meant they never got one: "Plasterboard wall
+  // plugs / anchors" took the $35 SHEET rate off the fallback table below and
+  // billed 4 anchors at $140 on a $500 smoke-alarm job (4 Sep 2026). Compound,
+  // tape and screws deliberately still route here — only the table excludes
+  // them, and narrowing their routing is a separate measured call.
+  if (/plasterboard|villaboard|fibre\s+cement\s+sheet|fiber\s+cement\s+sheet|cement\s+sheet|cladding\s+sheets?|external\s+cladding/.test(name) && !SHEET_FIXING.test(name)) return true;
+  if (/plumber'?s?\s+putty|plumbing\s+putty|debris\s+netting|safety\s+debris/.test(name)) return true;
   if (/road\s+base|crusher\s+dust|aggregate\s+base/.test(name)) return true;
   if (/green\s+waste|tip\s*fee|tipping|dumping|disposal|hook\s*bin|soil\s+disposal|spoil\s+disposal|dirt\s+disposal|heavy\s+waste/.test(name)) return true;
   if (/vehicle\s+(?:running\s+)?(?:costs?|fuel)|travel\s+fuel/.test(name)) return true;
@@ -129,8 +144,9 @@ export function tradeFallbackUnitPrice(nameText: string, unit?: string): number 
   // Sheet price. The negative lookahead keeps the consumables that hang off a
   // plasterboard job off the sheet rate — "plasterboard jointing compound" and
   // "plasterboard paper joint tape" both matched here and were billed $35 per
-  // kilo and per metre respectively.
-  if (/(?:plasterboard|villaboard|fibre\s+cement\s+sheet|fiber\s+cement\s+sheet|cement\s+sheet|cladding\s+sheets?|external\s+cladding)\b(?![\s\S]*\b(?:compound|tape|screws?|stopping|cornice|adhesive|cement\s+mix|sealant|primer)\b)/.test(name)) return unit === 'm²' ? 12 : 35;
+  // kilo and per metre respectively, and "Plasterboard wall plugs / anchors"
+  // billed 4 anchors at $35 each.
+  if (/(?:plasterboard|villaboard|fibre\s+cement\s+sheet|fiber\s+cement\s+sheet|cement\s+sheet|cladding\s+sheets?|external\s+cladding)\b(?![\s\S]*\b(?:compound|tape|screws?|stopping|cornice|adhesive|cement\s+mix|sealant|primer|plugs?|anchors?|fixings?|hooks?)\b)/.test(name)) return unit === 'm²' ? 12 : 35;
   if (/floor\s+tiles?|wall\s+tiles?|ceramic\s+tiles?|porcelain\s+tiles?/.test(name) && !/roof/.test(name)) return unit === 'm²' ? 45 : 30;
   if (/\bgrout\b/.test(name)) return unit === 'kg' ? 4 : 55;
   if (/\b(?:pvc|pex)\b.*\bpipe\b|\bpipe\b.*\b(?:pvc|pex)\b|waste\s+pipe|dwv\s+pipe/.test(name)) return unit === 'm' ? 8 : 24;
