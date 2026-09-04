@@ -67,7 +67,7 @@ import { buildGreetPrompt, withTypeInsteadHint } from './assistant/voiceCopy';
 import { GREET_RETRY_MS, shouldRetryGreet } from './assistant/greetWatchdog';
 import { composerClosedPadding, mateKeyboardOffset } from './assistant/composerKeyboard';
 import { DEFAULT_THINKING_LABEL, labelForToolCalls } from './assistant/thinkingLabels';
-import { isLeakedModelOutput } from './assistant/leakedOutput';
+import { isLeakedModelOutput, narratedToolCall, stripLeakedScaffolding } from './assistant/leakedOutput';
 import {
   voiceActionForAppState,
   VOICE_INACTIVE_GRACE_MS,
@@ -2524,6 +2524,11 @@ export function AssistantScreen() {
       // currently being spoken/transcribed can render its cards on
       // turnComplete without juggling separate state.
       let turnProposals: Proposal[] = [];
+      // A tool Mate WROTE OUT instead of calling, this turn. Cleared at turn
+      // end; `nudgedLastTurn` stops the nudge itself from becoming a loop when
+      // the model narrates its way through the correction too.
+      let narratedTool: string | null = null;
+      let nudgedLastTurn = false;
 
       // The server's inputTranscription.finished flag isn't sent reliably
       // across utterances — without a hard boundary, every spoken sentence
@@ -2544,8 +2549,14 @@ export function AssistantScreen() {
       // ticker and let it fire once the words have caught up with the audio.
       // Everything painted into the assistant bubble goes through here, so a
       // reopened bubble's earlier words are prepended in exactly one place.
+      // Every streamed update to a bubble funnels through here, so this is the
+      // one place a leaked tag or a narrated tool call can be taken out of what
+      // the tradie reads. The refs keep the RAW text — the leak detector below
+      // tests that, and stripping before it ran would hide the evidence from it.
       const paint = (bubbleId: string, text: string) =>
-        updateMessage(convoId!, bubbleId, { text: assistantBubblePrefixRef.current + text });
+        updateMessage(convoId!, bubbleId, {
+          text: stripLeakedScaffolding(assistantBubblePrefixRef.current + text),
+        });
 
       // Release the bubble. Remembered by the continuity rule: text that
       // arrives next with no tradie speech in between continues it.
@@ -2609,7 +2620,7 @@ export function AssistantScreen() {
         appendMessage(convoId!, {
           id,
           role: 'assistant',
-          text: rendered ?? text,
+          text: stripLeakedScaffolding(rendered ?? text),
           createdAt: new Date().toISOString(),
         });
         return [];
@@ -2719,10 +2730,15 @@ export function AssistantScreen() {
           // Test the ACCUMULATED transcript, not this chunk: "Thought to
           // self:" routinely arrives split across deltas, and once the turn
           // is known to be scaffolding every later chunk belongs to it too.
-          if (
-            suppressLeakedTurnRef.current ||
-            isLeakedModelOutput(assistantBubblePrefixRef.current + assistantBubbleTextRef.current + text)
-          ) {
+          const accumulated = assistantBubblePrefixRef.current + assistantBubbleTextRef.current + text;
+          // Remember a tool Mate described rather than called. The strip in
+          // paint() keeps it off the screen; onTurnComplete is what gets the
+          // action back. Tested WITHOUT the carried prefix — that holds an
+          // earlier turn's words, and a bracket never spans a turn boundary,
+          // so including it would re-report last turn's narration as this
+          // turn's and burn the one nudge on a turn that was fine.
+          narratedTool = narratedTool ?? narratedToolCall(assistantBubbleTextRef.current + text);
+          if (suppressLeakedTurnRef.current || isLeakedModelOutput(accumulated)) {
             suppressLeakedTurnRef.current = true;
             // Blank whatever already mounted. Hidden messages are filtered
             // out of the list, and the empty text keeps the leak out of the
@@ -2913,6 +2929,9 @@ export function AssistantScreen() {
           // auto-close.
           touchVoiceActivity();
           finishAssistantBubble();
+          // Read before the reset — the narrated-call nudge at the bottom of
+          // this handler needs to know whether the turn produced a real card.
+          const hadProposals = turnProposals.length > 0;
           turnProposals = [];
 
           // The tradie confirmed/cancelled a card by voice this turn — run the
@@ -2952,6 +2971,31 @@ export function AssistantScreen() {
           // Continuous mode: session stays open, so applying a draft here lets
           // it narrate the pipeline wait as usual.
           runVoiceAction();
+
+          // Mate wrote a tool call out as speech instead of making it — no
+          // card, no quote, and a tradie told the job was drafted when it
+          // wasn't (4 Sep 2026, twice in one session). Hand it one chance to
+          // do it properly. Gated on the turn producing no card of its own,
+          // and on not having just nudged, so a model that narrates its way
+          // through the correction is left alone rather than looped.
+          const missed = narratedTool;
+          narratedTool = null;
+          if (missed && !hadProposals && !nudgedLastTurn && voiceSessionRef.current) {
+            nudgedLastTurn = true;
+            // eslint-disable-next-line no-console
+            console.warn('[Mate voice] narrated tool call, nudging:', missed);
+            try {
+              voiceSessionRef.current.sendUserText(
+                `[context] You wrote out ${missed} as words instead of calling it, so nothing happened —` +
+                  ' no card reached the tradie. Call the tool now, for real, with the details you already have.' +
+                  " Don't mention this note and don't say the tool's name out loud.",
+              );
+            } catch { /* session died between turns — nothing to correct */ }
+          } else if (!missed || hadProposals) {
+            // A turn that narrated nothing, or that produced a real card,
+            // ends the episode — the next genuine slip gets its own nudge.
+            nudgedLastTurn = false;
+          }
           if (voiceSessionRef.current) setVoiceState('listening');
         },
         onError: (err) => {
