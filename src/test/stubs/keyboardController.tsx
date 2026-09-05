@@ -11,6 +11,10 @@
  * definition; what the tests assert is the content inside these wrappers.
  * Whether the avoidance itself is wired correctly is a static question, and
  * components/keyboardAvoidance.guard.test.ts answers it.
+ *
+ * Only the five names the app actually imports are here. Adding an import of
+ * some other export later fails as an ESM "no such export" rather than
+ * degrading quietly, which is the right way round.
  */
 
 import React from 'react';
@@ -19,10 +23,7 @@ import { View, ScrollView, type ViewProps, type ScrollViewProps } from 'react-na
 type Wrapper = ViewProps & {
   behavior?: string;
   keyboardVerticalOffset?: number;
-  automaticOffset?: boolean;
-  enabled?: boolean;
   offset?: { closed?: number; opened?: number };
-  contentContainerStyle?: ViewProps['style'];
 };
 
 /** Drop the keyboard-only props so React Native Web doesn't see unknown ones. */
@@ -30,11 +31,8 @@ const passthrough = (displayName: string) => {
   const Component = ({
     children,
     behavior: _behavior,
-    keyboardVerticalOffset: _offset,
-    automaticOffset: _automaticOffset,
-    enabled: _enabled,
-    offset: _o,
-    contentContainerStyle: _ccs,
+    keyboardVerticalOffset: _verticalOffset,
+    offset: _offset,
     ...rest
   }: Wrapper) => <View {...rest}>{children}</View>;
   Component.displayName = displayName;
@@ -51,11 +49,3 @@ export const KeyboardAwareScrollView = ({ children, ...rest }: ScrollViewProps) 
 );
 KeyboardAwareScrollView.displayName = 'KeyboardAwareScrollView';
 
-export const useKeyboardState = () => ({ isVisible: false, height: 0 });
-export const useReanimatedKeyboardAnimation = () => ({ height: { value: 0 }, progress: { value: 0 } });
-export const useKeyboardController = () => ({ enabled: true, setEnabled: () => {} });
-export const KeyboardController = {
-  dismiss: async () => {},
-  setInputMode: () => {},
-  setDefaultMode: () => {},
-};

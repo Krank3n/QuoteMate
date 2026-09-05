@@ -482,7 +482,7 @@ export function DocumentEmailPreviewModal({
   // scroll content with `keyboardHeight` (below) and swapping the footer for a
   // Done bar while the keyboard is up. See hooks/useKeyboardHeight for why a
   // KeyboardAvoidingView is the wrong tool inside a react-native <Modal>.
-  const innerKav = (
+  const modalContent = (
     <View style={styles.container}>
       {/* Header */}
       <LinearGradient
@@ -764,7 +764,7 @@ export function DocumentEmailPreviewModal({
           Wrap everything in Portal.Host now to keep menu/popup positioning
           consistent across both flows. */}
       <Portal.Host>
-        {innerKav}
+        {modalContent}
 
         {/* Alert modals rendered outside KAV so they appear on top */}
         <AlertModal
