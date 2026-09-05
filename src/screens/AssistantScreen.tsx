@@ -133,6 +133,7 @@ import {
 } from '../services/assistant/proposalTools';
 import { correctionsClause, createPricingCorrections } from './assistant/pricingCorrections';
 import { setRenderableQuoteProbe } from '../services/assistant/showQuoteGate';
+import { scopeStatusOf } from '../services/assistant/scopeEditable';
 import { createBubbleContinuity, joinFragments } from './assistant/bubbleContinuity';
 import { formatCurrency } from '../utils/documentCalculator';
 import { setPendingProposalProbe } from '../services/assistant/pendingProposalGate';
@@ -1537,7 +1538,7 @@ export function AssistantScreen() {
       return state.conversations.find((c) => c.id === state.currentConversationId)?.messages || [];
     };
     setAppliedDraftsProbe(() => {
-      const applied: Array<{ quoteId: string; jobName: string; customerId?: string; customerName?: string }> = [];
+      const applied: Array<{ quoteId: string; jobName: string; customerId?: string; customerName?: string; status?: string }> = [];
       const state = useStore.getState();
       for (const m of currentMessages()) {
         for (const p of m.proposals || []) {
@@ -1553,6 +1554,10 @@ export function AssistantScreen() {
             jobName: minted?.job?.name || p.jobName,
             customerId: minted?.contactId ?? p.customerId,
             customerName: minted?.customerName || p.customerDraft?.name,
+            // Carried so the guard can stand aside once this one is sent —
+            // the scope tool refuses it from that point, and a second document
+            // becomes the only route to the change the tradie asked for.
+            status: scopeStatusOf(minted),
           });
         }
       }

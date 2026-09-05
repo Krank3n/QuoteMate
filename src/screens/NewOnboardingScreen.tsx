@@ -12,17 +12,25 @@
 
 import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import {
-    View,
-    StyleSheet,
-    ScrollView,
-    KeyboardAvoidingView,
-    Platform,
-    BackHandler,
-    TouchableOpacity,
-    Animated,
-    Image,
-    TextInput as RNTextInput,
+  View,
+  StyleSheet,
+  ScrollView,
+  Platform,
+  BackHandler,
+  TouchableOpacity,
+  Animated,
+  Image,
+  TextInput as RNTextInput,
 } from 'react-native';
+// Android stopped resizing the window for the keyboard when this app went
+// edge-to-edge (targetSdk 35+, edgeToEdgeEnabled), and the app-wide
+// KeyboardProvider takes over insets besides. `behavior={undefined}` on
+// Android used to be correct — the window shrank and the layout followed — so
+// what was a deliberate no-op became the keyboard sitting on top of the
+// content. keyboard-controller's KeyboardAvoidingView is driven by the same
+// provider and animates on the UI thread, and it takes `padding` on both
+// platforms.
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
     Text,
@@ -1212,7 +1220,7 @@ export function NewOnboardingScreen() {
     return (
         <KeyboardAvoidingView
             style={styles.container}
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            behavior="padding"
             keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top : 0}
         >
       <GridBackground />

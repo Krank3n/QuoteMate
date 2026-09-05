@@ -56,6 +56,15 @@ export default defineConfig({
         find: /^(.*\/)?services\/nativeGoogleSignIn$/,
         replacement: resolve(__dirname, 'src/services/nativeGoogleSignIn.web.ts'),
       },
+      // react-native-keyboard-controller ships syntax vite can't parse
+      // ("Unexpected token 'typeof'"). It's a static import in AuthScreen, the
+      // send modal and every screen that avoids the keyboard, so one unparsed
+      // module fails whole suites. jsdom has no keyboard to avoid anyway — the
+      // wiring is checked statically by keyboardAvoidance.guard.test.ts.
+      {
+        find: /^react-native-keyboard-controller$/,
+        replacement: resolve(__dirname, 'src/test/stubs/keyboardController.tsx'),
+      },
     ],
   },
 });

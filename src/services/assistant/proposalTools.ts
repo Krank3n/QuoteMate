@@ -28,6 +28,7 @@ import type { Material, RateLine } from '../../types';
 import { resolveQuoteId } from './quoteRefMap';
 import { resolveKnownQuoteId } from './showQuoteGate';
 import { isPricingInFlight } from './pricingInFlight';
+import { canUpdateScope } from './scopeEditable';
 import { sanitizeJobDescription } from '../../utils/sanitizeJobDescription';
 import { MAX_LABEL_CHARS, RATE_CARD_UNITS, normalisePreference, normaliseRateUnit } from '../quotingProfile';
 import { planSetTotal, setTotalGstMode, type SetTotalSource } from '../../utils/setTotal';
@@ -136,6 +137,12 @@ export interface AppliedDraft {
   jobName: string;
   customerId?: string;
   customerName?: string;
+  /**
+   * The minted quote's status. Once it leaves 'draft' the scope tool refuses
+   * it, so this guard must let a fresh draft through or there is no way
+   * forward at all — see scopeEditable.
+   */
+  status?: string;
 }
 let appliedDraftsProbe: (() => AppliedDraft[]) | null = null;
 let pendingScopeUpdateProbe: ((quoteId: string) => boolean) | null = null;
@@ -196,6 +203,10 @@ export function findRepeatedDraft(
 ): AppliedDraft | undefined {
   const nextName = nameKey(next.customerName);
   return applied.find((prior) => {
+    // A sent quote cannot take a scope change, so a second document is the
+    // only way to quote the revised job. Blocking the draft here left the
+    // tradie with nothing but the manual wizard.
+    if (!canUpdateScope(prior.status)) return false;
     const sameCustomer =
       (!!next.customerId && !!prior.customerId && next.customerId === prior.customerId) ||
       (!!nextName && nameKey(prior.customerName) === nextName);

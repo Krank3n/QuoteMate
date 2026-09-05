@@ -14,9 +14,16 @@ import {
   ScrollView,
   TouchableOpacity,
   Modal as RNModal,
-  KeyboardAvoidingView,
-  Platform,
 } from 'react-native';
+// Android stopped resizing the window for the keyboard when this app went
+// edge-to-edge (targetSdk 35+, edgeToEdgeEnabled), and the app-wide
+// KeyboardProvider takes over insets besides. `behavior={undefined}` on
+// Android used to be correct — the window shrank and the layout followed — so
+// what was a deliberate no-op became the keyboard sitting on top of the
+// content. keyboard-controller's KeyboardAvoidingView is driven by the same
+// provider and animates on the UI thread, and it takes `padding` on both
+// platforms.
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import {
   Text,
   Button,
@@ -130,7 +137,7 @@ export function InvoiceReviewModal({
     >
       <KeyboardAvoidingView
         style={styles.fullScreen}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior="padding"
       >
         <View style={[styles.header, { paddingTop: safeInsets.top + 8 }]}>
           <View style={styles.headerTextWrap}>

@@ -294,7 +294,7 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
   {
     name: 'propose_remember_preference',
     description:
-      "Remember a STANDING rule about how this tradie quotes, in their words, as one plain sentence: \"labour separate from materials\", \"customers supply their own materials\", \"we only quote labour\", \"round every quote to the nearest $50\". Apply saves it to their settings and it applies to every quote from then on — on this phone and every other. Only for rules that outlast this job, never for this job's details. Propose it once when they state one; if they knock the card back, drop it.",
+      "Remember a STANDING rule about how this tradie quotes, in their words, as one plain sentence: \"labour separate from materials\", \"customers supply their own materials\", \"we only quote labour\", \"round every quote to the nearest fifty\". Apply saves it to their settings and it applies to every quote from then on — on this phone and every other. Only for rules that outlast this job, never for this job's details. Propose it once when they state one; if they knock the card back, drop it.",
     parameters: {
       type: 'object',
       properties: {
@@ -306,7 +306,7 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
   {
     name: 'propose_save_rate',
     description:
-      "Save a charge-out rate to the tradie's rate card: \"220 a square ex GST, supply and fit\", \"$90 a room\", \"day rate's 650\". Apply stores it on their settings; you then use it on drafts as a rateLine. Saving a label that already exists replaces that rate. Only ever save a number the tradie said — never one you worked out.",
+      "Save a charge-out rate to the tradie's rate card: \"220 a square ex GST, supply and fit\", \"ninety a room\", \"day rate's 650\". Apply stores it on their settings; you then use it on drafts as a rateLine. Saving a label that already exists replaces that rate. Only ever save a number the tradie said — never one you worked out.",
     parameters: {
       type: 'object',
       properties: {
@@ -323,7 +323,7 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
   {
     name: 'propose_add_line_item',
     description:
-      "Add ONE line to an existing quote or invoice. Two forms. (1) A material: pass searchTerm + qty + unit and the pricing engine finds the product and price on Apply — you never pass a price for a material. (2) A lump sum at a price the TRADIE said (\"add a $180 callout\", \"$450 for the disposal\", \"put $300 on for the skip\"): pass label + price (and scope if they described the work) — it lands as a lump-sum work line at exactly that figure: no product search, no markup, no quantity. Never turn a price the tradie stated into a material search, and never invent a price to make a lump sum. Say 'inc GST' / 'ex GST' only via pricesIncludeGst when they said it; otherwise the figure goes on in the document's own basis.",
+      "Add ONE line to an existing quote or invoice. Two forms. (1) A material: pass searchTerm + qty + unit and the pricing engine finds the product and price on Apply — you never pass a price for a material. (2) A lump sum at a price the TRADIE said (\"add a one-eighty callout\", \"four fifty for the disposal\", \"put three hundred on for the skip\"): pass label + price (and scope if they described the work) — it lands as a lump-sum work line at exactly that figure: no product search, no markup, no quantity. Never turn a price the tradie stated into a material search, and never invent a price to make a lump sum. Say 'inc GST' / 'ex GST' only via pricesIncludeGst when they said it; otherwise the figure goes on in the document's own basis.",
     parameters: {
       type: 'object',
       properties: {
@@ -343,7 +343,7 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
   {
     name: 'propose_update_line_item',
     description:
-      "Change a line that's ALREADY on a quote or invoice — its price, its quantity, or its name. Use this whenever the tradie wants a row corrected: \"make the plywood a hundred bucks\", \"that should be 12 not 6\", \"the decking's $8.50 a metre\". NEVER tell them to go and type a price in themselves — that was the old answer and it's wrong, you can do it from here. Always call get_quote first so you have the real material id and can show what's changing (pass displayName, displayCurrentPrice, displayCurrentQty, displayUnit). Setting a price marks the row as manually priced, which also clears any 'estimated' flag review_quote raised against it, and saves that price to the tradie's supplier book so the next quote starts from their number. A row with kind 'work' is a lump sum: its price IS the line total, it has no real quantity, and it is never saved to the book — pass price only. Pass only the fields that change. For a row that isn't on the quote at all, use propose_add_line_item; to take one off, propose_delete_line_item.",
+      "Change a line that's ALREADY on a quote or invoice — its price, its quantity, or its name. Use this whenever the tradie wants a row corrected: \"make the plywood a hundred bucks\", \"that should be 12 not 6\", \"the decking's eight fifty a metre\". NEVER tell them to go and type a price in themselves — that was the old answer and it's wrong, you can do it from here. Always call get_quote first so you have the real material id and can show what's changing (pass displayName, displayCurrentPrice, displayCurrentQty, displayUnit). Setting a price marks the row as manually priced, which also clears any 'estimated' flag review_quote raised against it, and saves that price to the tradie's supplier book so the next quote starts from their number. A row with kind 'work' is a lump sum: its price IS the line total, it has no real quantity, and it is never saved to the book — pass price only. Pass only the fields that change. For a row that isn't on the quote at all, use propose_add_line_item; to take one off, propose_delete_line_item.",
     parameters: {
       type: 'object',
       properties: {
@@ -511,7 +511,7 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
   {
     name: 'propose_update_quote_rates',
     description:
-      "Change the labour or markup numbers on an existing quote or invoice without re-running the pricing pipeline. Use this whenever the tradie wants to bump the markup percentage, change the labour rate, adjust labour hours, or tweak the labour markup on a specific doc (\"bump markup to 30%\", \"change hours to 14\", \"labour rate to $130/h\"). Pass only the fields that are changing \u2014 omitted fields stay as-is. Markup values are percentages (30 means 30%). laborRate is $/hour, laborHours is hours. Always know the quote id first (from list_recent_quotes / get_quote / the [context] line after a draft).",
+      "Change the labour or markup numbers on an existing quote or invoice without re-running the pricing pipeline. Use this whenever the tradie wants to bump the markup percentage, change the labour rate, adjust labour hours, or tweak the labour markup on a specific doc (\"bump markup to 30%\", \"change hours to 14\", \"labour rate to a hundred and thirty an hour\"). Pass only the fields that are changing \u2014 omitted fields stay as-is. Markup values are percentages (30 means 30%). laborRate is $/hour, laborHours is hours. Always know the quote id first (from list_recent_quotes / get_quote / the [context] line after a draft).",
     parameters: {
       type: 'object',
       properties: {
@@ -582,7 +582,7 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
   {
     name: 'propose_set_total',
     description:
-      "Set the customer-facing TOTAL of an existing quote or invoice to the figure the tradie said: \"make the total $1,232\", \"call it twelve hundred\", \"bring it down to fifteen hundred all up\", \"round it to $2,000\". This is the tool for a total — never steer them to markup or a labour rate instead, and never say you can't set the final price. Apply moves the labour to land on that figure when the document has labour (what a tradie does themselves), otherwise it puts a lump-sum 'Price adjustment' line on; materials and their prices are never touched. The target is what the customer reads at the bottom, GST included where it applies. A total under the materials alone is refused. Needs the real quote id (a \"[context]\" line, list_recent_quotes or get_quote). Pass displayName so the card names the document.",
+      "Set the customer-facing TOTAL of an existing quote or invoice to the figure the tradie said: \"make the total twelve thirty two\", \"call it twelve hundred\", \"bring it down to fifteen hundred all up\", \"round it to two grand\". This is the tool for a total — never steer them to markup or a labour rate instead, and never say you can't set the final price. Apply moves the labour to land on that figure when the document has labour (what a tradie does themselves), otherwise it puts a lump-sum 'Price adjustment' line on; materials and their prices are never touched. The target is what the customer reads at the bottom, GST included where it applies. A total under the materials alone is refused. Needs the real quote id (a \"[context]\" line, list_recent_quotes or get_quote). Pass displayName so the card names the document.",
     parameters: {
       type: 'object',
       properties: {

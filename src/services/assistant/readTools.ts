@@ -27,6 +27,7 @@ import { Material } from '../../types';
 import { reviewQuoteMaterials } from '../../utils/quoteReview';
 import { resolveSupplierBookLookup } from './supplierBookLookup';
 import { isProposalId, resolveQuoteId } from './quoteRefMap';
+import { looksLikeDocumentNumber, resolveDocumentNumber } from './quoteNumberLookup';
 import { fuzzyScoreQuote } from './quoteFuzzy';
 import { getPillsForNiche } from '../../data/nichePills';
 import { NICHE_TEMPLATES } from '../../data/nicheTemplates';
@@ -486,6 +487,51 @@ export async function listRecentQuotes(input: {
   return { documents: merged.slice(0, rowLimit) };
 }
 
+/**
+ * Recent rows, in the shape the number/candidate helpers want. Never throws —
+ * these run inside error paths, where a second failure would replace a useful
+ * message with a useless one.
+ */
+async function recentRows(): Promise<Array<{ id: string; number?: string; jobName?: string; customerName?: string }>> {
+  try {
+    const res = (await listRecentQuotes({ limit: 15 })) as {
+      documents?: Array<{ id: string; number?: string; jobName?: string; customerName?: string }>;
+    };
+    return res?.documents ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/** Resolve a document number to an id, or explain why it couldn't be. */
+async function findIdByDocumentNumber(numberish: string): Promise<{ id?: string; error?: string }> {
+  const rows = await recentRows();
+  const id = resolveDocumentNumber(rows, numberish);
+  if (id) return { id };
+  return {
+    error:
+      `"${numberish}" is a document number, not a document id, and nothing in the recent list carries it. ` +
+      `Call list_recent_quotes with a query (customer or job name) and use the id from that. ` +
+      `Do NOT ask the tradie for a number — they cannot give you an id.`,
+  };
+}
+
+/** "Quote not found", with the recents attached so Mate can pick the right one. */
+async function notFoundWithCandidates(requestedId: string): Promise<string> {
+  const rows = await recentRows();
+  if (!rows.length) {
+    return `No quote with id ${requestedId}, and there are no recent quotes on this account to match it against.`;
+  }
+  const listed = rows
+    .slice(0, 5)
+    .map((r) => `${r.id} (${r.number || 'no number'} — ${r.jobName || 'unnamed job'} for ${r.customerName || 'unnamed customer'})`)
+    .join('; ');
+  return (
+    `No quote with id ${requestedId}. Recent ones are: ${listed}. ` +
+    `Pick the one the tradie means and use its id — do NOT ask them to read you a quote number.`
+  );
+}
+
 export async function getQuote(input: { quoteId: string }): Promise<unknown> {
   const uid = requireUid();
   // The model often passes the proposal id (from propose_*'s response) instead
@@ -501,12 +547,26 @@ export async function getQuote(input: { quoteId: string }): Promise<unknown> {
     };
   }
 
+  // A customer-facing number ("QU-001") is not an id, and asking the tradie to
+  // read one out used to be a dead end — see quoteNumberLookup. Trade it for
+  // the real id before the lookup rather than 404ing on it.
+  if (looksLikeDocumentNumber(docId)) {
+    const byNumber = await findIdByDocumentNumber(docId);
+    if (byNumber.id) return getQuote({ quoteId: byNumber.id });
+    return { error: byNumber.error };
+  }
+
   const snap = await getDoc(doc(db, 'users', uid, 'documents', docId));
   if (!snap.exists()) {
     // Mirror the server's legacy fallback — very fresh records may not have
     // been mirrored into /documents yet.
     const legacy = await getDoc(doc(db, 'users', uid, 'quotes', docId));
-    if (!legacy.exists()) return { error: 'Quote not found.' };
+    if (!legacy.exists()) {
+      // A bare "Quote not found." is where Mate ran out of moves and started
+      // asking the tradie to look things up. Hand back the recents so it can
+      // recover inside the same turn.
+      return { error: await notFoundWithCandidates(docId) };
+    }
     return { quote: serialize(legacy.data()) };
   }
   const data = snap.data() || {};

@@ -60,6 +60,7 @@ import { maybeRequestReview } from '../services/storeReviewService';
 import { ensureJobForDocument, ensureJobForQuote, useJobStore } from './useJobStore';
 import { canAnalysePhotos, canRunMatePipeline } from './planGates';
 import { markPricingStarted, markPricingFinished, isPricingInFlight } from '../services/assistant/pricingInFlight';
+import { canUpdateScope } from '../services/assistant/scopeEditable';
 import { runPipelineOnServer } from '../services/serverPricingRun';
 import { PRICING_RUN_LEDGER_KEY } from '../services/pricingRunLedger';
 
@@ -3914,10 +3915,14 @@ export const useStore = create<AppState>((set, get) => ({
             }
           }
           if (!base) return { ok: false, error: 'Quote not found.' };
-          if (base.status && base.status !== 'draft') {
+          if (!canUpdateScope(base.status)) {
             return {
               ok: false,
-              error: "That quote's already gone to the customer — changing the scope now would change what they saw. Draft a new one instead.",
+              error:
+                "That quote's already gone to the customer — changing the scope now would change what they saw. " +
+                'Draft a fresh one for the revised job with propose_draft_quote (full corrected description). ' +
+                'The one-job-one-quote guard steps aside for a sent quote, so that call will go through — say in one line ' +
+                "that the sent one stays as it is and you're doing a new one.",
             };
           }
           // The analyse pass is additive over whatever rows exist, so the
