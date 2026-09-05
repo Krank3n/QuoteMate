@@ -576,7 +576,10 @@ export function JobPreviewScreen() {
   return (
     <KeyboardAvoidingView
       style={styles.outerContainer}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      // padding on both platforms: Android no longer resizes the window for
+      // the keyboard under edge-to-edge, so `undefined` there did nothing at
+      // all. See components/keyboardAvoidance.guard.test.ts.
+      behavior="padding"
     >
       <View style={styles.gridHost}>
     <GridBackground />

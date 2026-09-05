@@ -19,9 +19,8 @@ import {
   ScrollView,
   TouchableOpacity,
   Modal as RNModal,
-  KeyboardAvoidingView,
-  Platform,
 } from 'react-native';
+import { useKeyboardHeight } from '../hooks/useKeyboardHeight';
 import {
   Text,
   Button,
@@ -103,6 +102,7 @@ export function SupplierListReviewModal({
   const styles = useStyles();
   const themeColors = useThemeColors();
   const safeInsets = useSafeAreaInsets();
+  const keyboardInset = useKeyboardHeight();
   const [supplierName, setSupplierName] = useState(initialSupplierName);
   const [rows, setRows] = useState<ReviewItemState[]>([]);
   const [keywordDraft, setKeywordDraft] = useState<Record<string, string>>({});
@@ -227,10 +227,9 @@ export function SupplierListReviewModal({
       presentationStyle="fullScreen"
       onRequestClose={onCancel}
     >
-      <KeyboardAvoidingView
-        style={styles.fullScreen}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
+      {/* A <Modal> is its own native window and does not get the app's
+          keyboard-avoiding provider on Android — see hooks/useKeyboardHeight. */}
+      <View style={[styles.fullScreen, { paddingBottom: keyboardInset }]}>
         <View style={[styles.header, { paddingTop: safeInsets.top + 8 }]}>
           <View style={styles.headerTextWrap}>
             <Text style={styles.title}>
@@ -420,7 +419,7 @@ export function SupplierListReviewModal({
             Save selected ({selectedCount})
           </Button>
         </View>
-      </KeyboardAvoidingView>
+      </View>
     </RNModal>
   );
 }

@@ -24,7 +24,6 @@ import {
   ScrollView,
   TouchableOpacity,
   Platform,
-  KeyboardAvoidingView,
   Keyboard,
 } from 'react-native';
 import {
@@ -479,11 +478,12 @@ export function DocumentEmailPreviewModal({
     ? `Your invoice has been sent to ${recipientEmail}\n${formatCurrency(doc.total)} due by ${format(new Date(doc.dueDate), 'dd MMM yyyy')}`
     : `Your ${isInvoice ? 'invoice' : 'quote'} has been sent to ${recipientEmail}`;
 
-  const innerKav = (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
+  // No keyboard-avoiding wrapper: this modal does its own, by padding the
+  // scroll content with `keyboardHeight` (below) and swapping the footer for a
+  // Done bar while the keyboard is up. See hooks/useKeyboardHeight for why a
+  // KeyboardAvoidingView is the wrong tool inside a react-native <Modal>.
+  const modalContent = (
+    <View style={styles.container}>
       {/* Header */}
       <LinearGradient
         colors={[themeColors.accentText, themeColors.accent, themeColors.accentText]}
@@ -743,7 +743,7 @@ export function DocumentEmailPreviewModal({
           </View>
         </View>
       ) : null}
-    </KeyboardAvoidingView>
+    </View>
   );
 
   // onRequestClose is required for Android's hardware/gesture Back to do
@@ -764,7 +764,7 @@ export function DocumentEmailPreviewModal({
           Wrap everything in Portal.Host now to keep menu/popup positioning
           consistent across both flows. */}
       <Portal.Host>
-        {innerKav}
+        {modalContent}
 
         {/* Alert modals rendered outside KAV so they appear on top */}
         <AlertModal

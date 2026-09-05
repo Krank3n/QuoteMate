@@ -14,9 +14,8 @@ import {
   ScrollView,
   TouchableOpacity,
   Modal as RNModal,
-  KeyboardAvoidingView,
-  Platform,
 } from 'react-native';
+import { useKeyboardHeight } from '../hooks/useKeyboardHeight';
 import {
   Text,
   Button,
@@ -81,6 +80,7 @@ export function InvoiceReviewModal({
   const styles = useStyles();
   const themeColors = useThemeColors();
   const safeInsets = useSafeAreaInsets();
+  const keyboardInset = useKeyboardHeight();
   const [supplierName, setSupplierName] = useState(initialSupplierName);
   const [rows, setRows] = useState<InvoiceReviewRow[]>([]);
 
@@ -128,10 +128,9 @@ export function InvoiceReviewModal({
       presentationStyle="fullScreen"
       onRequestClose={onCancel}
     >
-      <KeyboardAvoidingView
-        style={styles.fullScreen}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
+      {/* A <Modal> is its own native window and does not get the app's
+          keyboard-avoiding provider on Android — see hooks/useKeyboardHeight. */}
+      <View style={[styles.fullScreen, { paddingBottom: keyboardInset }]}>
         <View style={[styles.header, { paddingTop: safeInsets.top + 8 }]}>
           <View style={styles.headerTextWrap}>
             <Text style={styles.title}>
@@ -277,7 +276,7 @@ export function InvoiceReviewModal({
             </Button>
           </View>
         </View>
-      </KeyboardAvoidingView>
+      </View>
     </RNModal>
   );
 }

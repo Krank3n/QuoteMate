@@ -15,7 +15,6 @@ import {
     View,
     StyleSheet,
     ScrollView,
-    KeyboardAvoidingView,
     Platform,
     BackHandler,
     TouchableOpacity,
@@ -23,6 +22,10 @@ import {
     Image,
     TextInput as RNTextInput,
 } from 'react-native';
+// Not react-native's: under edge-to-edge Android no longer resizes the window
+// for the keyboard, so RN's KeyboardAvoidingView does nothing there. See
+// components/keyboardAvoidance.guard.test.ts.
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
     Text,
@@ -1212,7 +1215,7 @@ export function NewOnboardingScreen() {
     return (
         <KeyboardAvoidingView
             style={styles.container}
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            behavior="padding"
             keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top : 0}
         >
       <GridBackground />

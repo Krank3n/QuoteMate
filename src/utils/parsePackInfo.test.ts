@@ -135,4 +135,70 @@ describe('the reconcile model\'s own phrasing (QU-178514 corrupted floor)', () =
   it('still ignores bare "1 each" title noise', () => {
     expect(parsePackInfo('Gate Hinge 1 each')).toBeNull();
   });
+
+  // A ladder's duty rating was being read as a pack size: a real quote carried
+  // "Ladder levelling/stabiliser accessory | 1 pack @ $161.82" with a packSize
+  // of 120 kg. A safety rating is not a quantity in a box.
+  describe('load ratings are not pack sizes', () => {
+    it('does not read a ladder duty rating as a pack size', () => {
+      expect(parsePackInfo('Bailey Ladder Leveller 120kg Rated')).toBeNull();
+      expect(parsePackInfo('Ladder Stabiliser Accessory 150 kg Rating')).toBeNull();
+    });
+
+    it('does not read a rating stated word-first', () => {
+      expect(parsePackInfo('Werner Extension Ladder rated to 120kg')).toBeNull();
+      expect(parsePackInfo('Trestle Platform, max load 150kg')).toBeNull();
+      expect(parsePackInfo('Fall Arrest Harness WLL 140kg')).toBeNull();
+      expect(parsePackInfo('Storage Bracket holds up to 30kg')).toBeNull();
+    });
+
+    it('masks a bare weight on access gear, where kg is always what it holds', () => {
+      expect(parsePackInfo('Gorilla 1.8m 120kg Fibreglass Stepladder')).toEqual({ packSize: 1.8, packUnit: 'm' });
+      expect(parsePackInfo('Aluminium Scaffold Plank 225kg')).toBeNull();
+    });
+
+    it('masks every weight on access gear — a trestle\'s own weight is not a pack either', () => {
+      expect(parsePackInfo('120kg rated trestle, 15kg each')).toBeNull();
+    });
+
+    it('a rating phrase is surgical: another weight in the same title survives', () => {
+      expect(parsePackInfo('Cement 20kg bag, rated to 200kg per pallet')).toEqual({ packSize: 20, packUnit: 'kg' });
+    });
+
+    // parsePackInfo is not only fed product titles. recoverPackInfo hands it the
+    // reconcile model's own coverage note, and on an estimate row that note is
+    // the ONLY statement of a pack size — blank it and the under-buy guard has
+    // nothing to divide by.
+    it('never blanks a pack size stated in prose', () => {
+      const prose = { proseSource: true } as const;
+      expect(parsePackInfo('Each bag holds 20kg; 5 bags needed', prose)).toEqual({ packSize: 20, packUnit: 'kg' });
+      expect(parsePackInfo('20kg per bag, 11 bags total 220kg for the post holes and brackets', prose)).toEqual({
+        packSize: 20,
+        packUnit: 'kg',
+      });
+      expect(
+        parsePackInfo('Ideal for setting fence posts, clothes hoists, letterboxes and brackets. 20kg bag.', prose),
+      ).toEqual({ packSize: 20, packUnit: 'kg' });
+    });
+
+    it('still strips a real rating out of prose', () => {
+      expect(parsePackInfo('Ladder platform rated to 120kg', { proseSource: true })).toBeNull();
+    });
+
+    it('"holds" alone is a pack statement, not a rating — only "holds up to" is', () => {
+      expect(parsePackInfo('Each bag holds 20kg')).toEqual({ packSize: 20, packUnit: 'kg' });
+      expect(parsePackInfo('Storage Bracket holds up to 30kg')).toBeNull();
+    });
+
+    it('"Heavy Duty" is a marketing word, not a duty rating', () => {
+      expect(parsePackInfo('Heavy Duty 20kg Concrete Mix')).toEqual({ packSize: 20, packUnit: 'kg' });
+      expect(parsePackInfo('Ladder 120kg Duty Rating')).toBeNull();
+    });
+
+    it('leaves ordinary bagged goods alone', () => {
+      expect(parsePackInfo('Boral 20kg General Purpose Cement')).toEqual({ packSize: 20, packUnit: 'kg' });
+      expect(parsePackInfo('Rapid Set Concrete 20kg Bag')).toEqual({ packSize: 20, packUnit: 'kg' });
+      expect(parsePackInfo('Tile Adhesive 20kg')).toEqual({ packSize: 20, packUnit: 'kg' });
+    });
+  });
 });

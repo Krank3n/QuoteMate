@@ -27,6 +27,7 @@ import { Material } from '../../types';
 import { reviewQuoteMaterials } from '../../utils/quoteReview';
 import { resolveSupplierBookLookup } from './supplierBookLookup';
 import { isProposalId, resolveQuoteId } from './quoteRefMap';
+import { missingQuoteMessage, type CandidateRow } from './quoteLookupRecovery';
 import { fuzzyScoreQuote } from './quoteFuzzy';
 import { getPillsForNiche } from '../../data/nichePills';
 import { NICHE_TEMPLATES } from '../../data/nicheTemplates';
@@ -444,7 +445,12 @@ export async function listRecentQuotes(input: {
         type: 'quote',
         stage,
         status: stage,
-        number: data.number,
+        // The legacy collection calls it quoteNumber; only the mirrored
+        // document has `number`. Reading the wrong one left every freshly
+        // drafted quote — exactly the rows this branch exists to merge in,
+        // before the mirror catches up — with no number to match a tradie's
+        // "Q-001" against.
+        number: data.quoteNumber || data.number,
         customerName: data.customerName,
         jobName: data.job?.name || data.jobName,
         total: typeof data.total === 'number' ? data.total : undefined,
@@ -486,6 +492,22 @@ export async function listRecentQuotes(input: {
   return { documents: merged.slice(0, rowLimit) };
 }
 
+/**
+ * Recent rows for the recovery paths below. Never throws — these run inside
+ * error handling, where a second failure would replace a useful message with a
+ * useless one.
+ */
+async function recentRows(query?: string): Promise<CandidateRow[]> {
+  try {
+    const res = (await listRecentQuotes(query ? { query, limit: 5 } : { limit: 15 })) as {
+      documents?: CandidateRow[];
+    };
+    return res?.documents ?? [];
+  } catch {
+    return [];
+  }
+}
+
 export async function getQuote(input: { quoteId: string }): Promise<unknown> {
   const uid = requireUid();
   // The model often passes the proposal id (from propose_*'s response) instead
@@ -506,7 +528,19 @@ export async function getQuote(input: { quoteId: string }): Promise<unknown> {
     // Mirror the server's legacy fallback — very fresh records may not have
     // been mirrored into /documents yet.
     const legacy = await getDoc(doc(db, 'users', uid, 'quotes', docId));
-    if (!legacy.exists()) return { error: 'Quote not found.' };
+    if (!legacy.exists()) {
+      // Not an id, then. It may still be a handle a tradie would use — most
+      // often the document number off the card ("QU-001"). listRecentQuotes
+      // matches those through fuzzyScoreQuote, so ask it before giving up.
+      const byHandle = await recentRows(docId);
+      if (byHandle.length === 1 && byHandle[0].id && byHandle[0].id !== docId) {
+        return getQuote({ quoteId: byHandle[0].id });
+      }
+      // A bare "Quote not found." is where Mate ran out of moves and started
+      // asking the tradie to look things up. Hand back the recents instead so
+      // it can recover inside the same turn.
+      return { error: missingQuoteMessage(docId, byHandle.length ? byHandle : await recentRows()) };
+    }
     return { quote: serialize(legacy.data()) };
   }
   const data = snap.data() || {};

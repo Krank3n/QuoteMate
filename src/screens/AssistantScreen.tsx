@@ -133,6 +133,7 @@ import {
 } from '../services/assistant/proposalTools';
 import { correctionsClause, createPricingCorrections } from './assistant/pricingCorrections';
 import { setRenderableQuoteProbe } from '../services/assistant/showQuoteGate';
+import { scopeStatusOf } from '../services/assistant/scopeEditable';
 import { createBubbleContinuity, joinFragments } from './assistant/bubbleContinuity';
 import { formatCurrency } from '../utils/documentCalculator';
 import { setPendingProposalProbe } from '../services/assistant/pendingProposalGate';
@@ -1537,7 +1538,7 @@ export function AssistantScreen() {
       return state.conversations.find((c) => c.id === state.currentConversationId)?.messages || [];
     };
     setAppliedDraftsProbe(() => {
-      const applied: Array<{ quoteId: string; jobName: string; customerId?: string; customerName?: string }> = [];
+      const applied: Array<{ quoteId: string; jobName: string; customerId?: string; customerName?: string; status?: string }> = [];
       const state = useStore.getState();
       for (const m of currentMessages()) {
         for (const p of m.proposals || []) {
@@ -1547,12 +1548,24 @@ export function AssistantScreen() {
           // The minted quote knows both handles — the contact it was linked
           // to and the name on it — whichever way the model named the
           // customer on this draft or names them on the next.
-          const minted = state.getDocumentById(quoteId) ?? state.quotes.find((q) => q.id === quoteId);
+          // The legacy quotes row is what the scope guard in the store reads, and
+          // it is written on send; the mirrored document lags it by seconds to
+          // minutes. Reading the document first here made the two guards
+          // disagree for exactly that window — the store refusing the scope
+          // update because the quote was sent while this probe still saw a
+          // draft and refused the re-draft — which is the deadlock all over
+          // again, in the window right after a send where it actually bit.
+          const legacy = state.quotes.find((q) => q.id === quoteId);
+          const minted = state.getDocumentById(quoteId) ?? legacy;
           applied.push({
             quoteId,
             jobName: minted?.job?.name || p.jobName,
             customerId: minted?.contactId ?? p.customerId,
             customerName: minted?.customerName || p.customerDraft?.name,
+            // Carried so the guard can stand aside once this one is sent —
+            // the scope tool refuses it from that point, and a second document
+            // becomes the only route to the change the tradie asked for.
+            status: scopeStatusOf(legacy) ?? scopeStatusOf(minted),
           });
         }
       }
