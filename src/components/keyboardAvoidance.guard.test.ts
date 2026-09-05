@@ -20,21 +20,32 @@
  * react-native-keyboard-controller's KeyboardAvoidingView is driven by the same
  * provider and takes `padding` on both platforms, so these two patterns are
  * banned outright rather than fixed one screen at a time.
+ *
+ * With one exception, learned on an emulator (5 Sep 2026): NOT inside a
+ * react-native <Modal>. A Modal is its own Dialog window. React Native sets
+ * SOFT_INPUT_ADJUST_RESIZE on it unconditionally, and the keyboard provider
+ * listens to the ACTIVITY's window, not the Dialog's — so a controller
+ * KeyboardAvoidingView in there is driven by a window it isn't in. On the send
+ * modal it left the content squeezed into the top half of the screen with a
+ * dead black band below it: the padding went on when the keyboard opened and
+ * never came off. Modals use hooks/useKeyboardHeight instead, which reads
+ * react-native's own Keyboard events — those do fire inside a Modal.
  */
 
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { basename, join, relative, resolve } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 
 const SRC = resolve(__dirname, '..');
-const SELF = basename(__filename);
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {
     if (entry === 'node_modules' || entry.startsWith('.')) continue;
     const full = join(dir, entry);
     if (statSync(full).isDirectory()) walk(full, out);
-    else if (/\.tsx?$/.test(entry) && entry !== SELF) out.push(full);
+    // Tests are skipped the way the other guards in this repo skip them: a
+    // fixture is allowed to render whatever it needs to.
+    else if (/\.tsx?$/.test(entry) && !/\.test\.tsx?$/.test(entry)) out.push(full);
   }
   return out;
 }
@@ -67,6 +78,28 @@ describe('Android keyboard avoidance', () => {
     expect(users.length).toBeGreaterThan(0);
     for (const f of users) {
       expect(f.text, f.path).toMatch(/from ['"]react-native-keyboard-controller['"]/);
+    }
+  });
+
+  it('no react-native <Modal> wraps its content in a KeyboardAvoidingView', () => {
+    // The provider cannot see a Modal's own window on Android. Modals take
+    // hooks/useKeyboardHeight instead — see the note at the top of this file.
+    const offenders = sources
+      .filter((f) => /<(?:RN)?Modal\b/.test(f.text) && /<KeyboardAvoidingView/.test(f.text))
+      .map((f) => f.path);
+    expect(offenders, 'a modal must use useKeyboardHeight, not a KeyboardAvoidingView').toEqual([]);
+  });
+
+  it('the modals that used to disable Android avoidance now read the keyboard themselves', () => {
+    for (const path of [
+      'components/DocumentEmailPreviewModal.tsx',
+      'components/InvoiceReviewModal.tsx',
+      'components/SpreadsheetColumnMapperModal.tsx',
+      'components/SupplierListReviewModal.tsx',
+    ]) {
+      const file = sources.find((f) => f.path === path);
+      expect(file, path).toBeDefined();
+      expect(file!.text, path).toMatch(/keyboardHeight|useKeyboardHeight/);
     }
   });
 

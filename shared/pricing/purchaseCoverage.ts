@@ -223,11 +223,20 @@ export interface PackInfoSources {
  */
 export function recoverPackInfo(
   s: PackInfoSources,
-  parsePack: (text?: string) => { packSize: number; packUnit: string } | null,
+  parsePack: (
+    text?: string,
+    opts?: { proseSource?: boolean },
+  ) => { packSize: number; packUnit: string } | null,
 ): { packSize?: number; packUnit?: string } {
   const fromCandidateName = parsePack(s.candidateProductName);
+  // rowDescription and statedByModel are SENTENCES — the model's coverage note
+  // or reasoning, or a description bullet — not product titles. They get the
+  // prose reading, so a load-rated noun mentioned in passing ("...for the post
+  // holes and brackets") can't blank the pack size stated alongside it.
   const fromStated =
-    parsePack(s.rowDescription) ?? parsePack(s.statedByModel) ?? parsePack(s.rowName);
+    parsePack(s.rowDescription, { proseSource: true }) ??
+    parsePack(s.statedByModel, { proseSource: true }) ??
+    parsePack(s.rowName);
   return {
     packSize:
       s.candidatePackSize ?? fromCandidateName?.packSize ?? s.rowPackSize ?? fromStated?.packSize,

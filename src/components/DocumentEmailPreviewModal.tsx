@@ -26,10 +26,6 @@ import {
   Platform,
   Keyboard,
 } from 'react-native';
-// Not react-native's: under edge-to-edge Android no longer resizes the window
-// for the keyboard, so RN's KeyboardAvoidingView does nothing there. See
-// components/keyboardAvoidance.guard.test.ts.
-import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import {
   Text,
   TextInput,
@@ -482,11 +478,12 @@ export function DocumentEmailPreviewModal({
     ? `Your invoice has been sent to ${recipientEmail}\n${formatCurrency(doc.total)} due by ${format(new Date(doc.dueDate), 'dd MMM yyyy')}`
     : `Your ${isInvoice ? 'invoice' : 'quote'} has been sent to ${recipientEmail}`;
 
+  // No keyboard-avoiding wrapper: this modal does its own, by padding the
+  // scroll content with `keyboardHeight` (below) and swapping the footer for a
+  // Done bar while the keyboard is up. See hooks/useKeyboardHeight for why a
+  // KeyboardAvoidingView is the wrong tool inside a react-native <Modal>.
   const innerKav = (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior="padding"
-    >
+    <View style={styles.container}>
       {/* Header */}
       <LinearGradient
         colors={[themeColors.accentText, themeColors.accent, themeColors.accentText]}
@@ -746,7 +743,7 @@ export function DocumentEmailPreviewModal({
           </View>
         </View>
       ) : null}
-    </KeyboardAvoidingView>
+    </View>
   );
 
   // onRequestClose is required for Android's hardware/gesture Back to do

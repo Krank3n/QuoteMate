@@ -19,10 +19,7 @@ import {
   TouchableOpacity,
   Modal as RNModal,
 } from 'react-native';
-// Not react-native's: under edge-to-edge Android no longer resizes the window
-// for the keyboard, so RN's KeyboardAvoidingView does nothing there. See
-// components/keyboardAvoidance.guard.test.ts.
-import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
+import { useKeyboardHeight } from '../hooks/useKeyboardHeight';
 import { Text, Button, IconButton, Divider } from 'react-native-paper';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
@@ -66,6 +63,7 @@ export function SpreadsheetColumnMapperModal({
   const styles = useStyles();
   const themeColors = useThemeColors();
   const insets = useSafeAreaInsets();
+  const keyboardInset = useKeyboardHeight();
   const [mapping, setMapping] = useState<Partial<ColumnMapping>>({});
 
   useEffect(() => {
@@ -117,10 +115,9 @@ export function SpreadsheetColumnMapperModal({
       presentationStyle="formSheet"
       onRequestClose={onCancel}
     >
-      <KeyboardAvoidingView
-        behavior="padding"
-        style={styles.flex}
-      >
+      {/* A <Modal> is its own native window and does not get the app's
+          keyboard-avoiding provider on Android — see hooks/useKeyboardHeight. */}
+      <View style={[styles.flex, { paddingBottom: keyboardInset }]}>
         <View style={[styles.container, { paddingTop: insets.top + 8 }]}>
           <View style={styles.header}>
             <IconButton icon="close" onPress={onCancel} accessibilityLabel="Cancel" />
@@ -245,7 +242,7 @@ export function SpreadsheetColumnMapperModal({
             </Button>
           </View>
         </View>
-      </KeyboardAvoidingView>
+      </View>
     </RNModal>
   );
 }

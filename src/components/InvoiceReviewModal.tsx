@@ -15,10 +15,7 @@ import {
   TouchableOpacity,
   Modal as RNModal,
 } from 'react-native';
-// Not react-native's: under edge-to-edge Android no longer resizes the window
-// for the keyboard, so RN's KeyboardAvoidingView does nothing there. See
-// components/keyboardAvoidance.guard.test.ts.
-import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
+import { useKeyboardHeight } from '../hooks/useKeyboardHeight';
 import {
   Text,
   Button,
@@ -83,6 +80,7 @@ export function InvoiceReviewModal({
   const styles = useStyles();
   const themeColors = useThemeColors();
   const safeInsets = useSafeAreaInsets();
+  const keyboardInset = useKeyboardHeight();
   const [supplierName, setSupplierName] = useState(initialSupplierName);
   const [rows, setRows] = useState<InvoiceReviewRow[]>([]);
 
@@ -130,10 +128,9 @@ export function InvoiceReviewModal({
       presentationStyle="fullScreen"
       onRequestClose={onCancel}
     >
-      <KeyboardAvoidingView
-        style={styles.fullScreen}
-        behavior="padding"
-      >
+      {/* A <Modal> is its own native window and does not get the app's
+          keyboard-avoiding provider on Android — see hooks/useKeyboardHeight. */}
+      <View style={[styles.fullScreen, { paddingBottom: keyboardInset }]}>
         <View style={[styles.header, { paddingTop: safeInsets.top + 8 }]}>
           <View style={styles.headerTextWrap}>
             <Text style={styles.title}>
@@ -279,7 +276,7 @@ export function InvoiceReviewModal({
             </Button>
           </View>
         </View>
-      </KeyboardAvoidingView>
+      </View>
     </RNModal>
   );
 }

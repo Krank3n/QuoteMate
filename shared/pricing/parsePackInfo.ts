@@ -27,6 +27,12 @@ export interface ParsePackOptions {
    * Set this to the requirement's unit and a reading in that unit wins.
    */
   preferUnit?: PackInfo['packUnit'];
+  /**
+   * This text is prose, not a product title — a coverage note, a reasoning
+   * line, or a description bullet. Turns off the load-rated-noun mask, which is
+   * safe on a title and destructive on a sentence. See maskLoadRatings.
+   */
+  proseSource?: boolean;
 }
 
 const NUM = String.raw`(\d+(?:\.\d+)?)`;
@@ -117,8 +123,15 @@ const CAPACITY_PHRASE_RES: RegExp[] = [
   // "120kg load rating", "120kg max load", "120kg duty rating", "120kg limit".
   /\b\d+(?:\.\d+)?\s*kgs?\s*(?:[-\u2013\u2014\/]\s*)?(?:max(?:imum)?\s+)?(?:load\s+|weight\s+|duty\s+|working\s+)?(?:rated|rating|capacity|limit|load|duty|max(?:imum)?)\b/gi,
   // Rating word first: "rated to 120kg", "capacity of 120kg", "max load 150kg",
-  // "holds up to 120kg", "supports 120kg", "WLL 200kg", "SWL 200kg".
-  /\b(?:rated|rating|capacity|limit|duty|wll|swl|safe\s+working\s+load|load\s+capacity|weight\s+(?:limit|capacity)|max(?:imum)?(?:\s+(?:load|weight))?|holds?|supports?)\b(?:\s+(?:up\s+to|to|of|at))?\s*:?\s*\d+(?:\.\d+)?\s*kgs?\b/gi,
+  // "holds up to 120kg", "WLL 200kg", "SWL 200kg".
+  //
+  // Every word here has to be a rating word on its own. A bare "holds" is not:
+  // "each bag holds 20kg" is a PACK statement, and it is how the reconcile
+  // model writes its coverage notes — masking it deleted the only pack size an
+  // estimate row had. Bare "duty" is not either ("Heavy Duty 20kg Concrete
+  // Mix"); it survives in the weight-first pattern above, where "120kg duty
+  // rating" still matches through "rating".
+  /\b(?:rated|rating|capacity|limit|wll|swl|safe\s+working\s+load|load\s+capacity|weight\s+(?:limit|capacity)|max(?:imum)?\s+(?:load|weight)|holds?\s+up\s+to|supports?\s+up\s+to)\b(?:\s+(?:to|of|at))?\s*:?\s*\d+(?:\.\d+)?\s*kgs?\b/gi,
 ];
 
 /**
@@ -132,11 +145,21 @@ const LOAD_RATED_NOUN_RE =
 /** Bare kg/g weights, for masking on load-rated goods. */
 const BARE_WEIGHT_RE = /\b\d+(?:\.\d+)?\s*kgs?\b/gi;
 
-/** Replace load-rating weights with a digit-free token so no pattern reads them. */
-export function maskLoadRatings(title: string): string {
-  let out = title;
+/**
+ * Replace load-rating weights with a digit-free token so no pattern reads them.
+ *
+ * `prose` turns off the blunt noun rule. parsePackInfo is not only fed product
+ * titles: recoverPackInfo hands it the reconcile model's own coverage note,
+ * which on an estimate row is the ONLY place a pack size is stated. Sentences
+ * like "20kg per bag, 11 bags for the post holes and brackets" mention
+ * load-rated nouns in passing, and masking every weight in them deleted the
+ * pack size that the under-buy guard depends on. The precise rating phrases
+ * still run — they are safe on any text.
+ */
+function maskLoadRatings(text: string, prose: boolean): string {
+  let out = text;
   for (const re of CAPACITY_PHRASE_RES) out = out.replace(re, ' [rating] ');
-  if (LOAD_RATED_NOUN_RE.test(out)) out = out.replace(BARE_WEIGHT_RE, ' [rating] ');
+  if (!prose && LOAD_RATED_NOUN_RE.test(out)) out = out.replace(BARE_WEIGHT_RE, ' [rating] ');
   return out;
 }
 
@@ -165,7 +188,7 @@ export function parsePackInfo(
     : productName;
   if (typeof text !== 'string') return null;
   // Strip load ratings before anything reads a weight — see maskLoadRatings.
-  const title = maskLoadRatings(text.trim()).trim();
+  const title = maskLoadRatings(text.trim(), opts.proseSource === true).trim();
   if (!title) return null;
 
   // A stated figure in the unit we need beats anything inferred. "Earthwool

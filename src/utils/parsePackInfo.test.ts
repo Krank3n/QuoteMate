@@ -165,6 +165,36 @@ describe('the reconcile model\'s own phrasing (QU-178514 corrupted floor)', () =
       expect(parsePackInfo('Cement 20kg bag, rated to 200kg per pallet')).toEqual({ packSize: 20, packUnit: 'kg' });
     });
 
+    // parsePackInfo is not only fed product titles. recoverPackInfo hands it the
+    // reconcile model's own coverage note, and on an estimate row that note is
+    // the ONLY statement of a pack size — blank it and the under-buy guard has
+    // nothing to divide by.
+    it('never blanks a pack size stated in prose', () => {
+      const prose = { proseSource: true } as const;
+      expect(parsePackInfo('Each bag holds 20kg; 5 bags needed', prose)).toEqual({ packSize: 20, packUnit: 'kg' });
+      expect(parsePackInfo('20kg per bag, 11 bags total 220kg for the post holes and brackets', prose)).toEqual({
+        packSize: 20,
+        packUnit: 'kg',
+      });
+      expect(
+        parsePackInfo('Ideal for setting fence posts, clothes hoists, letterboxes and brackets. 20kg bag.', prose),
+      ).toEqual({ packSize: 20, packUnit: 'kg' });
+    });
+
+    it('still strips a real rating out of prose', () => {
+      expect(parsePackInfo('Ladder platform rated to 120kg', { proseSource: true })).toBeNull();
+    });
+
+    it('"holds" alone is a pack statement, not a rating — only "holds up to" is', () => {
+      expect(parsePackInfo('Each bag holds 20kg')).toEqual({ packSize: 20, packUnit: 'kg' });
+      expect(parsePackInfo('Storage Bracket holds up to 30kg')).toBeNull();
+    });
+
+    it('"Heavy Duty" is a marketing word, not a duty rating', () => {
+      expect(parsePackInfo('Heavy Duty 20kg Concrete Mix')).toEqual({ packSize: 20, packUnit: 'kg' });
+      expect(parsePackInfo('Ladder 120kg Duty Rating')).toBeNull();
+    });
+
     it('leaves ordinary bagged goods alone', () => {
       expect(parsePackInfo('Boral 20kg General Purpose Cement')).toEqual({ packSize: 20, packUnit: 'kg' });
       expect(parsePackInfo('Rapid Set Concrete 20kg Bag')).toEqual({ packSize: 20, packUnit: 'kg' });
