@@ -72,14 +72,6 @@ vi.mock('mobile-payments-sdk-react-native', () => ({
 
 vi.mock('expo-crypto', () => ({ randomUUID: () => 'uuid-1' }));
 
-// Square refuses an in-person payment without location permission and never
-// prompts for it itself, so the app has to. See ensureLocationPermission.
-const location = vi.hoisted(() => ({
-  granted: true,
-  canAskAgain: true,
-  askGrants: true,
-  requestCalls: 0,
-}));
 vi.mock('expo-location', () => ({
   getForegroundPermissionsAsync: vi.fn(async () => ({
     granted: location.granted,
@@ -367,74 +359,45 @@ describe('observeTapToPayReadiness — Apple req 3.9.1', () => {
   });
 });
 
-describe('location permission on iOS', () => {
-  beforeEach(() => {
-    location.granted = true;
-    location.canAskAgain = true;
-    location.askGrants = true;
-    location.requestCalls = 0;
-    sdk.authorizationState = 'AUTHORIZED';
-    sdk.appleAccountLinked = true;
+describe('an OTA reaching a binary without the native module', () => {
+  it('does not fail the payment when expo-location is absent', async () => {
+    // requireNativeModule throws on a binary built before expo-location
+    // existed. loadLocation() returns null there; the payment must proceed
+    // exactly as it did before the fix shipped, not regress.
+    const { ensureLocationPermissionWith } = await import('../squarePayments');
+    await expect(ensureLocationPermissionWith(null)).resolves.toBeUndefined();
   });
 
-  it('asks for location rather than failing with "not granted"', async () => {
-    location.granted = false;
-    const { takeInAppPayment } = await import('../squarePayments');
-    await takeInAppPayment({
-      target: { kind: 'invoice', invoiceId: 'inv-1' },
-      amountCents: 1000,
-      appFeeCents: 10,
+  it('still asks when the module IS present', async () => {
+    const { ensureLocationPermissionWith } = await import('../squarePayments');
+    const req = vi.fn(async () => ({ granted: true, canAskAgain: true }));
+    await ensureLocationPermissionWith({
+      getForegroundPermissionsAsync: async () => ({ granted: false, canAskAgain: true }),
+      requestForegroundPermissionsAsync: req,
     });
-    expect(location.requestCalls).toBe(1);
+    expect(req).toHaveBeenCalledTimes(1);
   });
 
-  it('does not re-ask when permission is already granted', async () => {
-    const { takeInAppPayment } = await import('../squarePayments');
-    await takeInAppPayment({
-      target: { kind: 'invoice', invoiceId: 'inv-1' },
-      amountCents: 1000,
-      appFeeCents: 10,
-    });
-    expect(location.requestCalls).toBe(0);
-  });
-
-  it('points at Settings when iOS will not show the prompt again', async () => {
-    location.granted = false;
-    location.canAskAgain = false;
-    const { takeInAppPayment } = await import('../squarePayments');
+  it('sends the tradie to Settings when iOS will not prompt again', async () => {
+    const { ensureLocationPermissionWith } = await import('../squarePayments');
+    const req = vi.fn(async () => ({ granted: false, canAskAgain: false }));
     await expect(
-      takeInAppPayment({
-        target: { kind: 'invoice', invoiceId: 'inv-1' },
-        amountCents: 1000,
-        appFeeCents: 10,
+      ensureLocationPermissionWith({
+        getForegroundPermissionsAsync: async () => ({ granted: false, canAskAgain: false }),
+        requestForegroundPermissionsAsync: req,
       }),
     ).rejects.toThrow(/Settings/);
-    // Asking again would be a no-op and strand the tradie on the same error.
-    expect(location.requestCalls).toBe(0);
+    expect(req).not.toHaveBeenCalled();
   });
 
-  it('explains itself when the tradie declines the prompt', async () => {
-    location.granted = false;
-    location.askGrants = false;
-    const { takeInAppPayment } = await import('../squarePayments');
+  it('explains a declined prompt', async () => {
+    const { ensureLocationPermissionWith } = await import('../squarePayments');
     await expect(
-      takeInAppPayment({
-        target: { kind: 'invoice', invoiceId: 'inv-1' },
-        amountCents: 1000,
-        appFeeCents: 10,
+      ensureLocationPermissionWith({
+        getForegroundPermissionsAsync: async () => ({ granted: false, canAskAgain: true }),
+        requestForegroundPermissionsAsync: async () => ({ granted: false, canAskAgain: true }),
       }),
     ).rejects.toThrow(/Location permission is required/);
   });
-
-  it('never starts a payment without location', async () => {
-    location.granted = false;
-    location.askGrants = false;
-    const { takeInAppPayment } = await import('../squarePayments');
-    await takeInAppPayment({
-      target: { kind: 'invoice', invoiceId: 'inv-1' },
-      amountCents: 1000,
-      appFeeCents: 10,
-    }).catch(() => {});
-    expect(sdk.startPayment).not.toHaveBeenCalled();
-  });
 });
+

@@ -31,7 +31,6 @@ import {
 } from 'mobile-payments-sdk-react-native';
 import { Platform, PermissionsAndroid } from 'react-native';
 import * as Crypto from 'expo-crypto';
-import * as Location from 'expo-location';
 
 import * as squareService from './squareService';
 import { presentTapToPayEducation } from '../../modules/tap-to-pay-education';
@@ -70,7 +69,52 @@ interface TakeInAppPaymentArgs {
  * no way forward for the tradie. The Info.plist usage string is present, so iOS
  * was willing to ask all along; nothing was asking it to.
  */
+/**
+ * The slice of expo-location this file uses.
+ *
+ * Declared as a type rather than imported, because the module must NOT be
+ * loaded at import time — see loadLocation().
+ */
+interface LocationModule {
+  getForegroundPermissionsAsync(): Promise<{ granted: boolean; canAskAgain: boolean }>;
+  requestForegroundPermissionsAsync(): Promise<{ granted: boolean; canAskAgain: boolean }>;
+}
+
+/**
+ * Loaded lazily, and this matters more than it looks.
+ *
+ * `expo-location` resolves its native module at module scope —
+ * `requireNativeModule('ExpoLocation')` runs on import and THROWS when the
+ * native side is absent. squarePayments is on the launch path (App.tsx imports
+ * warmUpTapToPay), so a static import would crash every already-shipped binary
+ * that receives this JS over the air, because those binaries were built before
+ * expo-location existed. An OTA is exactly how this code reaches most users.
+ *
+ * A lazy require means an old binary only ever fails here, at payment time,
+ * where it degrades to the previous behaviour instead of failing to launch.
+ * `require` rather than `import()` because Metro rejects dynamic import on
+ * device — the same trap the contact picker hit.
+ */
+function loadLocation(): LocationModule | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    return require('expo-location') as LocationModule;
+  } catch {
+    return null;
+  }
+}
+
 async function ensureLocationPermission(): Promise<void> {
+  return ensureLocationPermissionWith(loadLocation());
+}
+
+/**
+ * Exported for tests: takes the module rather than reaching for it, so the
+ * behaviour can be exercised without mocking a lazy require.
+ */
+export async function ensureLocationPermissionWith(
+  location: LocationModule | null,
+): Promise<void> {
   if (Platform.OS === 'android') {
     const granted = await PermissionsAndroid.request(
       PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
@@ -92,7 +136,12 @@ async function ensureLocationPermission(): Promise<void> {
 
   if (Platform.OS !== 'ios') return;
 
-  const current = await Location.getForegroundPermissionsAsync();
+  // An OTA reaching a binary built before expo-location existed. Square's own
+  // behaviour is what the tradie had yesterday; failing the payment here would
+  // be a regression caused purely by shipping the fix.
+  if (!location) return;
+
+  const current = await location.getForegroundPermissionsAsync();
   if (current.granted) return;
 
   // canAskAgain false means iOS will not show the dialog again — a second
@@ -104,7 +153,7 @@ async function ensureLocationPermission(): Promise<void> {
     );
   }
 
-  const asked = await Location.requestForegroundPermissionsAsync();
+  const asked = await location.requestForegroundPermissionsAsync();
   if (!asked.granted) {
     throw new Error(
       'Location permission is required to take card payments. Allow it when prompted, or turn it on in Settings.'
