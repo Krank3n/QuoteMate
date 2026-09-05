@@ -48,3 +48,42 @@ export function resolveDocumentNumber(rows: NumberedRow[], wanted: string): stri
   const hits = rows.filter((r) => r.id && numberKey(r.number) === key);
   return hits.length === 1 ? hits[0].id : undefined;
 }
+
+export interface CandidateRow extends NumberedRow {
+  jobName?: string;
+  customerName?: string;
+}
+
+/**
+ * What to tell Mate when a lookup misses.
+ *
+ * A bare "Quote not found." is where Mate ran out of moves and started asking
+ * the tradie to go and read things off their screen. Naming the recent
+ * documents turns a dead end into a choice it can make itself, inside the same
+ * turn — and says outright not to make the ask.
+ */
+export function missingQuoteMessage(requestedId: string, rows: CandidateRow[]): string {
+  if (!rows.length) {
+    return `No quote with id ${requestedId}, and there are no recent quotes on this account to match it against.`;
+  }
+  const listed = rows
+    .slice(0, 5)
+    .map(
+      (r) =>
+        `${r.id} (${r.number || 'no number'} — ${r.jobName || 'unnamed job'} for ${r.customerName || 'unnamed customer'})`,
+    )
+    .join('; ');
+  return (
+    `No quote with id ${requestedId}. Recent ones are: ${listed}. ` +
+    `Pick the one the tradie means and use its id — do NOT ask them to read you a quote number.`
+  );
+}
+
+/** What to tell Mate when a document NUMBER matches nothing it can see. */
+export function unresolvedNumberMessage(numberish: string): string {
+  return (
+    `"${numberish}" is a document number, not a document id, and nothing in the recent list carries it. ` +
+    `Call list_recent_quotes with a query (customer or job name) and use the id from that. ` +
+    `Do NOT ask the tradie for a number — they cannot give you an id.`
+  );
+}

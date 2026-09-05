@@ -6,7 +6,12 @@
  * and Mate still couldn't act.
  */
 import { describe, expect, it } from 'vitest';
-import { looksLikeDocumentNumber, resolveDocumentNumber } from '../quoteNumberLookup';
+import {
+  looksLikeDocumentNumber,
+  missingQuoteMessage,
+  resolveDocumentNumber,
+  unresolvedNumberMessage,
+} from '../quoteNumberLookup';
 
 describe('looksLikeDocumentNumber', () => {
   it('recognises the numbers printed on documents, however they are typed', () => {
@@ -54,5 +59,47 @@ describe('resolveDocumentNumber', () => {
 
   it('skips rows with no number rather than matching them to an empty key', () => {
     expect(resolveDocumentNumber(rows, '-')).toBeUndefined();
+  });
+});
+
+describe('what a miss tells Mate', () => {
+  const rows = [
+    { id: 'doc-a', number: 'QU-001', jobName: 'Eaves replacement', customerName: 'Dave Loew' },
+    { id: 'doc-b', number: 'QU-002', jobName: 'Deck stain', customerName: 'Katie Ross' },
+  ];
+
+  it('names the recent documents so Mate can pick one itself', () => {
+    const msg = missingQuoteMessage('prop_9f2', rows);
+    expect(msg).toContain('doc-a');
+    expect(msg).toContain('Eaves replacement');
+    expect(msg).toContain('Dave Loew');
+  });
+
+  it('lists at most five, so a long history cannot bury the instruction', () => {
+    const many = Array.from({ length: 12 }, (_, i) => ({ id: `doc-${i}`, number: `QU-${i}` }));
+    const msg = missingQuoteMessage('nope', many);
+    expect(msg).toContain('doc-4');
+    expect(msg).not.toContain('doc-5');
+  });
+
+  it('fills the blanks rather than printing undefined at a tradie', () => {
+    expect(missingQuoteMessage('nope', [{ id: 'doc-x' }])).toContain('doc-x (no number — unnamed job for unnamed customer)');
+  });
+
+  it('says plainly when there is nothing to offer', () => {
+    expect(missingQuoteMessage('nope', [])).toContain('no recent quotes on this account');
+  });
+
+  it('every miss message forbids the ask that started this', () => {
+    expect(missingQuoteMessage('nope', rows)).toContain('do NOT ask them to read you a quote number');
+    expect(missingQuoteMessage('nope', [])).not.toContain('read you a quote number');
+    expect(unresolvedNumberMessage('QU-999')).toContain('Do NOT ask the tradie for a number');
+  });
+
+  it('explains what a number is when one resolves to nothing', () => {
+    const msg = unresolvedNumberMessage('QU-999');
+    expect(msg).toContain('QU-999');
+    expect(msg).toContain('not a document id');
+    expect(msg).toContain('list_recent_quotes');
   });
 });

@@ -27,7 +27,12 @@ import { Material } from '../../types';
 import { reviewQuoteMaterials } from '../../utils/quoteReview';
 import { resolveSupplierBookLookup } from './supplierBookLookup';
 import { isProposalId, resolveQuoteId } from './quoteRefMap';
-import { looksLikeDocumentNumber, resolveDocumentNumber } from './quoteNumberLookup';
+import {
+  looksLikeDocumentNumber,
+  missingQuoteMessage,
+  resolveDocumentNumber,
+  unresolvedNumberMessage,
+} from './quoteNumberLookup';
 import { fuzzyScoreQuote } from './quoteFuzzy';
 import { getPillsForNiche } from '../../data/nichePills';
 import { NICHE_TEMPLATES } from '../../data/nicheTemplates';
@@ -508,28 +513,12 @@ async function findIdByDocumentNumber(numberish: string): Promise<{ id?: string;
   const rows = await recentRows();
   const id = resolveDocumentNumber(rows, numberish);
   if (id) return { id };
-  return {
-    error:
-      `"${numberish}" is a document number, not a document id, and nothing in the recent list carries it. ` +
-      `Call list_recent_quotes with a query (customer or job name) and use the id from that. ` +
-      `Do NOT ask the tradie for a number — they cannot give you an id.`,
-  };
+  return { error: unresolvedNumberMessage(numberish) };
 }
 
 /** "Quote not found", with the recents attached so Mate can pick the right one. */
 async function notFoundWithCandidates(requestedId: string): Promise<string> {
-  const rows = await recentRows();
-  if (!rows.length) {
-    return `No quote with id ${requestedId}, and there are no recent quotes on this account to match it against.`;
-  }
-  const listed = rows
-    .slice(0, 5)
-    .map((r) => `${r.id} (${r.number || 'no number'} — ${r.jobName || 'unnamed job'} for ${r.customerName || 'unnamed customer'})`)
-    .join('; ');
-  return (
-    `No quote with id ${requestedId}. Recent ones are: ${listed}. ` +
-    `Pick the one the tradie means and use its id — do NOT ask them to read you a quote number.`
-  );
+  return missingQuoteMessage(requestedId, await recentRows());
 }
 
 export async function getQuote(input: { quoteId: string }): Promise<unknown> {
@@ -552,8 +541,10 @@ export async function getQuote(input: { quoteId: string }): Promise<unknown> {
   // the real id before the lookup rather than 404ing on it.
   if (looksLikeDocumentNumber(docId)) {
     const byNumber = await findIdByDocumentNumber(docId);
-    if (byNumber.id) return getQuote({ quoteId: byNumber.id });
-    return { error: byNumber.error };
+    // A legacy record whose id IS its number would recurse forever. Fall
+    // through to the ordinary lookup instead — the id is already correct.
+    if (byNumber.id && byNumber.id !== docId) return getQuote({ quoteId: byNumber.id });
+    if (!byNumber.id) return { error: byNumber.error };
   }
 
   const snap = await getDoc(doc(db, 'users', uid, 'documents', docId));

@@ -5,14 +5,9 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { View, StyleSheet, Platform, ScrollView, Image, Animated, BackHandler, TextInput as RNTextInput } from 'react-native';
-// Android stopped resizing the window for the keyboard when this app went
-// edge-to-edge (targetSdk 35+, edgeToEdgeEnabled), and the app-wide
-// KeyboardProvider takes over insets besides. `behavior={undefined}` on
-// Android used to be correct — the window shrank and the layout followed — so
-// what was a deliberate no-op became the keyboard sitting on top of the
-// content. keyboard-controller's KeyboardAvoidingView is driven by the same
-// provider and animates on the UI thread, and it takes `padding` on both
-// platforms.
+// Not react-native's: under edge-to-edge Android no longer resizes the window
+// for the keyboard, so RN's KeyboardAvoidingView does nothing there. See
+// components/keyboardAvoidance.guard.test.ts.
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { Text, TextInput, Button, Surface, Title, ActivityIndicator } from 'react-native-paper';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signInWithCredential, OAuthProvider, sendEmailVerification, getAdditionalUserInfo, UserCredential } from 'firebase/auth';
