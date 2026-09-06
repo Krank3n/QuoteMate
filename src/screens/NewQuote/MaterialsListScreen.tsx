@@ -17,12 +17,13 @@ import {
   Alert,
   FlatList,
 } from 'react-native';
-// Not react-native's: under edge-to-edge Android no longer resizes the window
-// for the keyboard, so RN's KeyboardAvoidingView does nothing there — and a
-// screen with no wrapper at all is the same bug without the tell-tale. Wraps
-// both the list (rows are edited inline) and the New Section modal, which is a
-// paper <Modal> in the same window. See components/keyboardAvoidance.guard.test.ts.
-import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
+// The list is a FlatList, so it can't be wrapped in a KeyboardAwareScrollView —
+// but renderScrollComponent swaps the scroller FlatList uses internally, which
+// gets the same behaviour: the focused row scrolls into view rather than just
+// being reachable. The New Section modal keeps a KeyboardAvoidingView; it is a
+// paper <Modal> in the same window with no list inside it.
+// See components/keyboardAvoidance.guard.test.ts.
+import { KeyboardAvoidingView, KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import {
   Text,
   Button,
@@ -407,6 +408,10 @@ const EMPTY_MATERIALS_MESSAGES = [
 export function MaterialsListScreen() {
   const styles = useStyles();
   const themeColors = useThemeColors();
+  // The action bar is keyboard-sticky, so it rides ABOVE the keyboard. The
+  // scroller has to clear the bar as well, not just the keyboard, or the
+  // focused field is lifted straight underneath the buttons.
+  const [footerHeight, setFooterHeight] = useState(0);
   const emptyMessage = useMemo(() => EMPTY_MATERIALS_MESSAGES[Math.floor(Math.random() * EMPTY_MATERIALS_MESSAGES.length)], []);
   const chasingTitle = useMemo(() => CHASING_TITLES[Math.floor(Math.random() * CHASING_TITLES.length)], []);
   const chasingSubtitle = useMemo(() => CHASING_SUBTITLES[Math.floor(Math.random() * CHASING_SUBTITLES.length)], []);
@@ -2327,9 +2332,21 @@ export function MaterialsListScreen() {
   );
 
   return (
-    <KeyboardAvoidingView style={styles.container} behavior="padding">
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior="padding"
+      // automaticOffset: onLayout's y is parent-relative, so behind a nav
+      // header it reads too small and the view under-lifts. Ask native for the
+      // real screen position instead.
+      automaticOffset
+    >
       <GridBackground />
       <FlatList
+          // Rows carry inline price/qty inputs, so the list itself has to lift
+          // the focused one clear of the keyboard.
+          renderScrollComponent={(props) => (
+            <KeyboardAwareScrollView {...props} bottomOffset={footerHeight + 24} />
+          )}
           data={showMaterialsList ? flatData : []}
           keyExtractor={(item) => item.key}
           renderItem={renderFlatItem}
@@ -2346,6 +2363,13 @@ export function MaterialsListScreen() {
       />
 
       <FixedBottomButton
+        onHeightChange={setFooterHeight}
+        // Sticky stays ON. The bar is position:absolute/bottom:0, so the
+        // screen's KeyboardAvoidingView padding cannot move it — only this
+        // transform can. Verified on a simulator: with sticky off the keyboard
+        // covers the bar outright. The double-lift this prop guards against is
+        // handled instead by bottomOffset, which already includes the bar's
+        // height, so the field clears the bar rather than landing under it.
         label={isAiAnalyzing ? "Cancel" : (isEditFromPreview ? "Save" : "Next: Labour & Markup")}
         onPress={isAiAnalyzing ? handleCancelGeneration : (isEditFromPreview ? handleSaveAndReturn : handleNext)}
         mode={isAiAnalyzing ? "outlined" : "contained"}
@@ -2371,7 +2395,15 @@ export function MaterialsListScreen() {
           }}
           contentContainerStyle={styles.newSectionModal}
         >
-          <KeyboardAvoidingView behavior="padding">
+          <KeyboardAvoidingView
+            behavior="padding"
+            // automaticOffset: the lift is computed from onLayout's y, which is
+            // relative to the PARENT. Behind a nav header or inside a centred modal
+            // that reads far too small and the view under-lifts — which is why iOS
+            // stayed covered while Android (container at window top) looked fine.
+            // This asks native for the true screen position instead.
+            automaticOffset
+          >
           <Text style={styles.newSectionModalTitle}>New Section</Text>
           <TextInput
             label="Section Name"

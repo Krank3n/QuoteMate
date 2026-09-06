@@ -86,7 +86,15 @@ export function CancellationReasonModal({
         onDismiss={handleDismiss}
         contentContainerStyle={styles.modalContainer}
       >
-  <KeyboardAvoidingView behavior="padding">
+        <KeyboardAvoidingView
+          behavior="padding"
+          // automaticOffset: the lift is computed from onLayout's y, which is
+          // relative to the PARENT. Behind a nav header or inside a centred modal
+          // that reads far too small and the view under-lifts — which is why iOS
+          // stayed covered while Android (container at window top) looked fine.
+          // This asks native for the true screen position instead.
+          automaticOffset
+        >
         <Surface style={styles.surface}>
           <ScrollView showsVerticalScrollIndicator={false}>
             <Text style={styles.title}>We're sorry to see you go</Text>

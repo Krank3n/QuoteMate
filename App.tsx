@@ -4,7 +4,7 @@
  */
 
 import 'react-native-gesture-handler';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { initSentry, wrapRootComponent, reportIssue } from './src/config/sentry';
 import { Platform, LogBox, InteractionManager, AppState } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -20,6 +20,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { onAuthStateChanged } from 'firebase/auth';
 import { KeyboardProvider, KeyboardToolbar } from 'react-native-keyboard-controller';
+import { isStickyFooterMounted, subscribeStickyFooter } from './src/components/stickyFooterPresence';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { useStore } from './src/store/useStore';
@@ -102,6 +103,15 @@ function RouteAwareKeyboardToolbar() {
     update();
     return navigationRef.addListener('state', update);
   }, []);
+  // A screen with its own keyboard-sticky action bar already owns the strip
+  // above the keyboard; drawing the toolbar there puts prev/next/Done straight
+  // on top of Save. See components/stickyFooterPresence.
+  const stickyFooter = useSyncExternalStore(
+    subscribeStickyFooter,
+    isStickyFooterMounted,
+    isStickyFooterMounted,
+  );
+  if (stickyFooter) return null;
   if (!keyboardToolbarVisibleForRoute(routeName)) return null;
   return <KeyboardToolbar />;
 }
@@ -794,7 +804,15 @@ function App() {
   return (
     <GestureHandlerRootView style={appStyles.flex}>
       <SafeAreaProvider>
-        <KeyboardProvider>
+        {/* preload={false}: on iOS the library warms the keyboard at startup by
+            adding a hidden UITextField and calling becomeFirstResponder /
+            resignFirstResponder (see ios/extensions/UIResponder.swift). It is
+            meant to be invisible, but on an older device the two calls do not
+            land in the same frame and the keyboard visibly flashes up as the
+            app opens — reported from an iPhone 11, 6 Sep 2026. The cost of
+            turning it off is a slightly slower FIRST keyboard open; the cost of
+            leaving it on is an app that looks broken the moment it launches. */}
+        <KeyboardProvider preload={false}>
           <PaperProvider theme={paperTheme}>
             <NavigationContainer
               key="root"

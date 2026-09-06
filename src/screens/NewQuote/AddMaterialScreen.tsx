@@ -16,12 +16,11 @@ import {
   Linking,
   Keyboard,
 } from 'react-native';
-// Not react-native's: under edge-to-edge Android no longer resizes the window
-// for the keyboard, so RN's KeyboardAvoidingView does nothing there — and a
-// screen with no wrapper at all is the same bug without the tell-tale. The
-// manual-entry form renders in the screen body as well as inside the
-// BottomSheet (which lifts itself). See components/keyboardAvoidance.guard.test.ts.
-import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
+// KeyboardAwareScrollView, not a bare KeyboardAvoidingView: the latter only
+// shrinks the area, so the field you just tapped is reachable but you have to
+// scroll to it yourself. This one scrolls the focused input into view. Same
+// shape as CustomerDetailsScreen and the settings screens.
+import { KeyboardAvoidingView, KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { useAddMaterialStyles } from './AddMaterial/styles';
 import { ManualEntrySection } from './AddMaterial/ManualEntrySection';
 import {
@@ -230,6 +229,10 @@ const SavedItemRow = React.memo(function SavedItemRow({
 export function AddMaterialScreen() {
   const styles = useAddMaterialStyles();
   const themeColors = useThemeColors();
+  // The action bar is keyboard-sticky, so it rides ABOVE the keyboard. The
+  // scroller has to clear the bar as well, not just the keyboard, or the
+  // focused field is lifted straight underneath the buttons.
+  const [footerHeight, setFooterHeight] = useState(0);
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const safeInsets = useSafeAreaInsets();
@@ -1510,10 +1513,12 @@ export function AddMaterialScreen() {
 
   // Render Search & Add Tab - search first, recently used below, manual entry in bottom sheet
   const renderSearchTab = () => (
-    <ScrollView
+    <KeyboardAwareScrollView
       style={styles.tabContent}
       contentContainerStyle={styles.scrollContent}
       keyboardShouldPersistTaps="handled"
+      // Breathing room between the focused field and the keyboard top.
+      bottomOffset={footerHeight + 24}
     >
       <WebContainer>
       {isEditMode || isSavedItemMode ? (
@@ -1556,7 +1561,7 @@ export function AddMaterialScreen() {
         </>
       )}
       </WebContainer>
-    </ScrollView>
+    </KeyboardAwareScrollView>
   );
 
   // Render Saved Items Tab
@@ -1859,7 +1864,14 @@ export function AddMaterialScreen() {
   }, [isEditMode, isSavedItemEditMode, isSavedItemCreateMode, supplierBookOnly, navigation]);
 
   return (
-    <KeyboardAvoidingView style={styles.container} behavior="padding">
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior="padding"
+      // automaticOffset: onLayout's y is parent-relative, so behind a nav
+      // header it reads too small and the view under-lifts. Ask native for the
+      // real screen position instead.
+      automaticOffset
+    >
       <GridBackground />
       {/* Tab Selector - hidden in edit mode, saved-item modes, and supplier-book-only mode */}
       {!isEditMode && !isSavedItemMode && !supplierBookOnly && (
@@ -1913,6 +1925,13 @@ export function AddMaterialScreen() {
       {/* Fixed Bottom Button — only for edit / saved-item modes */}
       {!supplierBookOnly && (isEditMode || isSavedItemMode) && (
         <FixedBottomButton
+        onHeightChange={setFooterHeight}
+        // Sticky stays ON. The bar is position:absolute/bottom:0, so the
+        // screen's KeyboardAvoidingView padding cannot move it — only this
+        // transform can. Verified on a simulator: with sticky off the keyboard
+        // covers the bar outright. The double-lift this prop guards against is
+        // handled instead by bottomOffset, which already includes the bar's
+        // height, so the field clears the bar rather than landing under it.
           label={
             isSavedItemMode
               ? (isSavedItemEditMode ? 'Save Changes' : 'Add to Supplier Book')

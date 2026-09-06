@@ -483,13 +483,22 @@ export function DocumentEmailPreviewModal({
   // Done bar while the keyboard is up. See hooks/useKeyboardHeight for why a
   // KeyboardAvoidingView is the wrong tool inside a react-native <Modal>.
   const modalContent = (
-    <View style={styles.container}>
+    // The keyboard inset goes on the CONTAINER, not the scroll content.
+    // Padding the content only adds room to scroll into; the viewport still
+    // extends under the keyboard, so a field low in the sheet stays covered —
+    // which is exactly what a tradie reported on iOS. Shrinking the container
+    // ends the visible area above the keyboard.
+    <View style={[styles.container, { paddingBottom: keyboardHeight }]}>
       {/* Header */}
       <LinearGradient
         colors={[themeColors.accentText, themeColors.accent, themeColors.accentText]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 0 }}
-        style={[styles.header, { paddingTop: insets.top + 12 }]}
+        // presentationStyle="pageSheet" already starts the sheet below the
+        // status bar on iOS, so adding the top inset there stacks a second
+        // status bar's worth of padding and the orange header reads far too
+        // tall. Android modals ARE full-screen, so the inset is right there.
+        style={[styles.header, { paddingTop: (Platform.OS === 'ios' ? 0 : insets.top) + 12 }]}
       >
         <TouchableOpacity onPress={handleDismiss} style={styles.headerButton}>
           <MaterialCommunityIcons name="chevron-left" size={26} color={themeColors.onAccent} />
@@ -505,7 +514,6 @@ export function DocumentEmailPreviewModal({
         contentContainerStyle={[
           styles.scrollContent,
           isEditingBody && styles.scrollContentEditing,
-          keyboardHeight > 0 && { paddingBottom: keyboardHeight },
         ]}
         keyboardShouldPersistTaps="handled"
       >
