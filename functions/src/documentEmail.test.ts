@@ -9,6 +9,7 @@ import {
   buildDocumentEmailHtml,
   buildQuoteEmailText,
   buildQuoteReminderEmailHtml,
+  buildInvoiceReminderEmailHtml,
   formatMoney,
   renderPricingRows,
   safeBrandColor,
@@ -585,6 +586,118 @@ describe('quote reminder email', () => {
       followUpNumber: 1,
       business,
     });
+    expect(html).not.toContain('QuoteMate');
+    expect(html).toContain('Hansen Fencing');
+  });
+});
+
+describe('invoice reminder email', () => {
+  const PAY_URL = 'https://square.link/u/abc123';
+
+  function reminder(over: Record<string, any> = {}) {
+    return buildInvoiceReminderEmailHtml({
+      customerName: 'Sarah',
+      jobName: 'Colorbond fence',
+      invoiceNumber: 'INV-0042',
+      balanceDue: 4218.5,
+      dueDate: '2026-09-01T00:00:00.000Z',
+      daysOverdue: 5,
+      followUpNumber: 1,
+      business,
+      ...over,
+    });
+  }
+
+  it('asks for the outstanding balance, not the invoice total', () => {
+    // A part-paid invoice must never chase the customer for the whole job.
+    const html = reminder({ balanceDue: 1200 });
+    expect(html).toContain('Amount due');
+    expect(html).toContain('$1,200.00');
+    expect(html).not.toContain('$4,218.50');
+  });
+
+  it('renders the Pay now button when a fresh link was minted', () => {
+    const html = reminder({ payNowUrl: PAY_URL });
+    expect(html).toContain(PAY_URL);
+    expect(html).toContain('Pay now');
+  });
+
+  it('sends without a Pay now button when Square is not connected', () => {
+    const html = reminder();
+    expect(html).not.toContain('Pay now');
+    expect(html).toContain('$4,218.50');
+  });
+
+  it('falls back to the bank details when there is no pay link', () => {
+    const html = reminder({
+      plan: 'pro',
+      paymentMethods: {
+        showOnDocuments: true,
+        bankAccount: { enabled: true, accountName: 'Hansen Fencing', bsb: '062-000', accountNumber: '1234 5678' },
+      },
+    });
+    expect(html).toContain('How to pay');
+    expect(html).toContain('062-000');
+  });
+
+  it('demotes the bank details to an alternative once a pay link exists', () => {
+    const html = reminder({
+      payNowUrl: PAY_URL,
+      plan: 'pro',
+      paymentMethods: {
+        showOnDocuments: true,
+        bankAccount: { enabled: true, accountName: 'Hansen Fencing', bsb: '062-000', accountNumber: '1234 5678' },
+      },
+    });
+    expect(html).toContain('Other ways to pay');
+  });
+
+  it('leads with "no need to do anything" on the first chase', () => {
+    // The app's records go stale whenever someone pays in cash, so the first
+    // chase must never read as an accusation.
+    const html = reminder({ followUpNumber: 1 });
+    expect(html).toContain('already paid');
+    expect(html).not.toContain('days past its due date');
+  });
+
+  it('names the days overdue on the second chase', () => {
+    const html = reminder({ followUpNumber: 2, daysOverdue: 12 });
+    expect(html).toContain('12 days past its due date');
+  });
+
+  it('omits the day count on the second chase when it is not past due', () => {
+    const html = reminder({ followUpNumber: 2, daysOverdue: 0 });
+    expect(html).not.toContain('0 days past');
+  });
+
+  it('survives an unparseable due date without printing "Invalid Date"', () => {
+    const html = reminder({ dueDate: 'not-a-date' });
+    expect(html).not.toContain('Invalid Date');
+    expect(html).not.toContain('NaN');
+  });
+
+  it('reads a due date that arrives as a Firestore Timestamp', () => {
+    // `new Date(timestamp)` is Invalid Date, which once dropped the due date
+    // off an invoice email entirely. Both Timestamp shapes must survive.
+    const seconds = Math.floor(Date.parse('2026-09-01T12:00:00Z') / 1000);
+    for (const stamp of [{ seconds, nanoseconds: 0 }, { _seconds: seconds, _nanoseconds: 0 }]) {
+      const html = reminder({ dueDate: stamp });
+      expect(html).toContain('1 September 2026');
+      expect(html).not.toContain('Invalid Date');
+    }
+  });
+
+  it('escapes the job name and the customer name', () => {
+    const html = reminder({
+      jobName: '<script>alert(1)</script>',
+      customerName: '<img src=x onerror=alert(1)>',
+    });
+    expect(html).not.toContain('<script>alert(1)</script>');
+    expect(html).not.toContain('<img src=x');
+  });
+
+  it('carries no app footer — the customer sees the tradie and nobody else', () => {
+    const html = reminder();
     expect(html).not.toContain('QuoteMate');
     expect(html).toContain('Hansen Fencing');
   });

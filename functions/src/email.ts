@@ -3002,6 +3002,150 @@ export function sendCustomerQuoteReminderEmail(args: QuoteReminderEmailData & {
   });
 }
 
+export interface InvoiceReminderEmailData {
+  customerName: string;
+  jobName: string;
+  invoiceNumber?: string;
+  /** What's still owed — never the invoice total, which may be part-paid. */
+  balanceDue: number;
+  /** The due date the reminder is measured from, in any Firestore-shaped form. */
+  dueDate: unknown;
+  /** Whole days past due, for the second reminder's copy. */
+  daysOverdue: number;
+  /** Fresh Square link. Absent when the tradie has no Square, or the mint failed. */
+  payNowUrl?: string;
+  /** Bank/PayID/BPAY block — pro & trial only, same gate as the invoice email. */
+  paymentMethods?: any;
+  plan?: 'trial' | 'free' | 'pro';
+  surchargePaymentFees?: boolean;
+  followUpNumber: 1 | 2;
+  business: DocEmailBusiness;
+}
+
+/**
+ * The invoice chase's HTML. Split out from the send for the same reason as
+ * buildQuoteReminderEmailHtml — it renders in tests without a Brevo call.
+ *
+ * The whole email is the tradie's, not ours: business name, business colours,
+ * no app footer. It carries the balance and a way to pay, and points back at
+ * the PDF the customer already has rather than re-itemising the job.
+ */
+export function buildInvoiceReminderEmailHtml(data: InvoiceReminderEmailData): string {
+  const {
+    customerName, jobName, invoiceNumber, balanceDue, dueDate, daysOverdue,
+    payNowUrl, paymentMethods, plan, surchargePaymentFees, followUpNumber, business,
+  } = data;
+  const accent = safeBrandColor(business.brandColor);
+  const esc = escapeHtml;
+
+  // normaliseTimestamp, not `new Date(...)`, for the same reason renderPricingRows
+  // uses it: a Firestore Timestamp parses to Invalid Date, and an invoice email
+  // once went out with no due date on it at all because of exactly that. Every
+  // "Due …" here is dropped rather than printed wrong when it can't be read.
+  const parsedDue = normaliseTimestamp(dueDate);
+  const dueLabel = parsedDue
+    ? parsedDue.toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' })
+    : '';
+
+  // Firmer on the second pass, but never threatening — this goes out under the
+  // tradie's name to a customer they may well work for again. Both passes lead
+  // with the possibility that it is already sorted, because the app's records
+  // go stale whenever someone pays in cash.
+  const lead = followUpNumber === 1
+    ? `Just a heads up that the invoice below has gone past its due date${dueLabel ? ` of ${esc(dueLabel)}` : ''}. If you've already paid it, thanks — no need to do anything.`
+    : `The invoice below is still showing as unpaid on our end${daysOverdue > 0 ? `, ${daysOverdue} days past its due date` : ''}. If it's already been paid, or something about it doesn't look right, reply to this email and we'll get it sorted.`;
+
+  const heading = invoiceNumber ? `Invoice ${esc(invoiceNumber)}` : 'Invoice';
+
+  const content = `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 14px;">
+      <tr>
+        <td>
+          <span style="display:inline-block;background:${accent};color:#ffffff;font-size:10px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;padding:5px 10px;border-radius:4px;">Payment reminder</span>
+        </td>
+      </tr>
+    </table>
+    <h1 style="color:#111827;font-size:25px;font-weight:800;margin:0 0 20px;line-height:1.25;letter-spacing:-0.4px;">
+      ${heading}
+    </h1>
+    <p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 16px;">
+      Hi ${esc(customerName || 'there')},
+    </p>
+
+    <p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 16px;">
+      ${lead}
+    </p>
+
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;margin:26px 0 22px;overflow:hidden;">
+      <tr>
+        <td style="padding:16px 22px;background:#f9fafb;border-top:2px solid #111827;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+            <tr>
+              <td style="color:#111827;font-size:13px;font-weight:700;letter-spacing:0.6px;text-transform:uppercase;vertical-align:bottom;">Amount due</td>
+              <td style="color:${accent};font-size:26px;font-weight:800;text-align:right;font-variant-numeric:tabular-nums;letter-spacing:-0.5px;line-height:1.1;vertical-align:bottom;">${formatMoney(balanceDue)}</td>
+            </tr>
+            <tr>
+              <td colspan="2" style="color:#6b7280;font-size:12px;padding-top:8px;">
+                ${esc(jobName)}${dueLabel ? ` &bull; due ${esc(dueLabel)}` : ''}. The full PDF invoice was attached to your previous email.
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+
+    ${renderInvoicePayNowCta(payNowUrl, false, surchargePaymentFees, accent)}
+
+    ${renderInvoicePaymentMethods({ paymentMethods, plan, accent, hasPayNow: !!payNowUrl })}
+
+    <p style="color:#374151;font-size:15px;line-height:1.7;margin:24px 0 0;">
+      Cheers,<br/>
+      <strong style="color:#111827;">${esc(business.name)}</strong>
+    </p>
+
+    ${renderBusinessFooter(business, accent)}
+  `;
+
+  return wrapQuoteEmailTemplate(content, {
+    brandColor: accent,
+    businessName: business.name,
+    logoUrl: business.logoUrl,
+    preheader: `${formatMoney(balanceDue)} outstanding on ${invoiceNumber ? `invoice ${invoiceNumber}` : jobName} from ${business.name}`,
+    // Same rule as the invoice it is reminding them about: the customer sees
+    // the tradie's business and nobody else's.
+    appFooter: false,
+  });
+}
+
+/**
+ * Customer-facing chase for an invoice that's past due and still unpaid.
+ * Triggered by the customerInvoiceFollowUp scheduled function.
+ */
+export function sendCustomerInvoiceReminderEmail(args: InvoiceReminderEmailData & {
+  to: string;
+  userId: string;
+}): Promise<boolean> {
+  const { to, invoiceNumber, followUpNumber, business, userId } = args;
+  const label = invoiceNumber ? `invoice ${invoiceNumber}` : 'your invoice';
+
+  const subject = followUpNumber === 1
+    ? `Reminder: ${label} from ${business.name} is past due`
+    : `Following up: ${label} from ${business.name} is still unpaid`;
+
+  return sendEmail({
+    to,
+    subject,
+    htmlContent: buildInvoiceReminderEmailHtml(args),
+    category: 'transactional',
+    userId,
+    tags: ['invoice-customer-reminder', `followup:${followUpNumber}`],
+    // Match the original invoice send: from-name shows the tradie's business
+    // and replies route back to them, not to the QuoteMate inbox.
+    senderName: business.name || undefined,
+    replyTo: business.email ? { email: business.email, name: business.name } : undefined,
+  });
+}
+
 // ============================================================
 // ADMIN NOTIFICATION EMAILS
 // ============================================================

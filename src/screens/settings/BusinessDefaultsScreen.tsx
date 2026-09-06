@@ -35,6 +35,7 @@ import { AlertModal } from '../../components/AlertModal';
 import { useUnsavedChangesGuard } from '../../hooks/useUnsavedChangesGuard';
 import { checkSquareConnection } from '../../services/squareService';
 import { resolveAutoStartMic } from '../assistant/shouldAutoStartMic';
+import { resolveAutoCustomerFollowUp } from '../../../shared/document/autoFollowUp';
 import { defaultAuTradieTerms, hashTerms, isUnmodifiedStarterTerms } from '../../../shared/pdf/terms/defaultAuTradie';
 import { PASSTHROUGH_SURCHARGE_PCT } from '../../../shared/pdf/squareFees';
 import {
@@ -71,7 +72,7 @@ export function BusinessDefaultsScreen() {
   const [gstMode, setGstMode] = useState<GstMode>('exclusive');
   const [showMarkup, setShowMarkup] = useState(false);
   const [priceDetail, setPriceDetail] = useState<PriceDetail>('itemised');
-  const [autoCustomerFollowUp, setAutoCustomerFollowUp] = useState(false);
+  const [autoCustomerFollowUp, setAutoCustomerFollowUp] = useState(true);
   const [autoStartMic, setAutoStartMic] = useState(false);
   const [termsAndConditions, setTermsAndConditions] = useState('');
 
@@ -95,7 +96,7 @@ export function BusinessDefaultsScreen() {
     // Resolved, never read raw — an account that only ever set the legacy
     // pair migrates on read with no backfill.
     const pd = resolvePriceDetail(null, businessSettings);
-    const acf = businessSettings.autoCustomerFollowUpEnabled === true;
+    const acf = resolveAutoCustomerFollowUp(businessSettings.autoCustomerFollowUpEnabled);
     const asm = resolveAutoStartMic(businessSettings.autoStartMicOnMate);
     const tc = businessSettings.termsAndConditions ?? '';
 
@@ -340,7 +341,7 @@ export function BusinessDefaultsScreen() {
               <View style={styles.toggleLabel}>
                 <Text style={styles.toggleTitle}>Auto follow-up customers</Text>
                 <Text style={styles.toggleDescription}>
-                  Sends a reminder ~2 days after a quote is sent and again at ~7 days. Stops as soon as the customer accepts or declines. Capped at 2 reminders.
+                  Chases quotes and invoices for you, under your business name. Quotes at 2 and 7 days after sending; invoices at 3 and 10 days past due. Two reminders each, and they stop the moment the customer accepts, declines or pays.
                 </Text>
               </View>
               <Switch

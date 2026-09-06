@@ -22,6 +22,7 @@ import {
   sendLeadInterestEmail,
   sendQuoteFollowUpEmail,
   sendCustomerQuoteReminderEmail,
+  sendCustomerInvoiceReminderEmail,
   sendAffiliateInviteEmail,
   sendNewProSubscriptionEmail,
   sendMaterialListErrorEmail,
@@ -225,9 +226,17 @@ import { generateQuotePdfBuffer } from './pdfGenerator';
 import { normaliseTimestamp } from './timestamps.helpers';
 import {
   selectQuotesForFollowUp,
+  selectInvoicesForFollowUp,
+  CHASEABLE_INVOICE_STATUSES,
+  DEFAULT_ON_FROM_MS as FOLLOW_UP_DEFAULT_ON_FROM_MS,
   TOKEN_EXPIRATION_MS as CUSTOMER_FOLLOW_UP_TOKEN_EXPIRATION_MS,
   type FollowUpQuote,
+  type FollowUpInvoice,
 } from './customerFollowUp';
+import {
+  resolveAutoCustomerFollowUp,
+  isAutoCustomerFollowUpDefaulted,
+} from './shared/document/autoFollowUp';
 import {
   emailOpenPixelUrlForToken,
   generateEmailOpenToken,
@@ -11166,12 +11175,24 @@ export const onQuoteExpiring = functions.pubsub
 // -----------------------------------------------------------
 // customerQuoteFollowUp — Scheduled daily: nudge customers who haven't
 // accepted a sent quote yet. Two reminders max — first at 48 hours after the
-// send, second at 7 days — never after a response and never once the
-// acceptance link has lapsed. Opt-in per tradie via business settings. The
-// selection rules live in selectQuotesForFollowUp (customerFollowUp.ts); this
-// job just normalises docs, runs them through it, and does the side effects.
+// send, second at 7 days — never after a response, never once the acceptance
+// link has lapsed, and never more than one per customer per run.
+// On by default per tradie, muted from business settings — see
+// resolveAutoCustomerFollowUp. An account the default enrolled is only chased
+// on quotes sent after the flip, so changing a default never reaches back
+// through a tradie's history (FOLLOW_UP_DEFAULT_ON_FROM_MS). The selection
+// rules live in selectQuotesForFollowUp (customerFollowUp.ts); this job just
+// normalises docs, runs them through it, and does the side effects.
 // -----------------------------------------------------------
-export const customerQuoteFollowUp = functions.pubsub
+// Both follow-up jobs walk every user. They were cheap while the setting was
+// opt-in and almost nobody had found it; default-on means the per-user queries,
+// the Brevo sends and (for invoices) a Square mint per chase now actually run,
+// so neither fits in the 60-second default any more. A run that times out
+// half-way just resumes tomorrow — the per-doc counters make that safe — but
+// the tail of the user list would never be reached.
+export const customerQuoteFollowUp = functions
+  .runWith({ timeoutSeconds: 540 })
+  .pubsub
   .schedule('every day 09:00')
   .timeZone('Australia/Sydney')
   .onRun(async () => {
@@ -11183,7 +11204,13 @@ export const customerQuoteFollowUp = functions.pubsub
     for (const userDoc of usersSnapshot.docs) {
       const settingsDoc = await db.doc(`users/${userDoc.id}/settings/business`).get();
       const settings = settingsDoc.exists ? (settingsDoc.data() || {}) : {};
-      if (!settings.autoCustomerFollowUpEnabled) continue;
+      if (!resolveAutoCustomerFollowUp(settings.autoCustomerFollowUpEnabled)) continue;
+
+      // An account the default enrolled gets chases opened only on documents
+      // dated after the flip; one that opted in explicitly keeps its history.
+      const openFromMs = isAutoCustomerFollowUpDefaulted(settings.autoCustomerFollowUpEnabled)
+        ? FOLLOW_UP_DEFAULT_ON_FROM_MS
+        : undefined;
 
       const businessName = settings.businessName || '';
       if (!businessName) continue;
@@ -11224,6 +11251,7 @@ export const customerQuoteFollowUp = functions.pubsub
 
       const due = selectQuotesForFollowUp(candidates, now, {
         ownEmails: [settings.email, authEmail],
+        openFromMs,
       });
 
       for (const { quote, followUpNumber } of due) {
@@ -11277,6 +11305,163 @@ export const customerQuoteFollowUp = functions.pubsub
         } catch (err) {
           console.error(
             `customerQuoteFollowUp: quote ${quoteDoc.id} (user ${userDoc.id}) reminder ${followUpNumber} failed`,
+            (err as Error)?.message,
+          );
+        }
+      }
+    }
+  });
+
+// -----------------------------------------------------------
+// customerInvoiceFollowUp — Scheduled daily: chase customers whose invoice is
+// past due and still unpaid. Two reminders max — first at 3 days past the due
+// date, second at 10 — never once the balance is cleared, never opened on a
+// debt older than MAX_OVERDUE_AGE_MS, and never more than one per customer
+// per run. On by default per tradie, muted from
+// business settings by the same switch as the quote chase — and, like the
+// quote chase, an account the default enrolled is only chased on invoices
+// falling due after the flip.
+//
+// Runs half an hour after customerQuoteFollowUp so a tradie with both a silent
+// quote and an overdue invoice doesn't fire two customer emails in the same
+// minute. Selection rules live in selectInvoicesForFollowUp; this job
+// normalises docs, mints a fresh pay link, sends, and writes back.
+// -----------------------------------------------------------
+export const customerInvoiceFollowUp = functions
+  .runWith({ timeoutSeconds: 540 })
+  .pubsub
+  .schedule('every day 09:30')
+  .timeZone('Australia/Sydney')
+  .onRun(async () => {
+    const now = Date.now();
+    const usersSnapshot = await db.collection('users').get();
+
+    const toMsOrNull = (v: unknown): number | null => normaliseTimestamp(v)?.getTime() ?? null;
+
+    for (const userDoc of usersSnapshot.docs) {
+      const settingsDoc = await db.doc(`users/${userDoc.id}/settings/business`).get();
+      const settings = settingsDoc.exists ? (settingsDoc.data() || {}) : {};
+      if (!resolveAutoCustomerFollowUp(settings.autoCustomerFollowUpEnabled)) continue;
+
+      // An account the default enrolled gets chases opened only on documents
+      // dated after the flip; one that opted in explicitly keeps its history.
+      const openFromMs = isAutoCustomerFollowUpDefaulted(settings.autoCustomerFollowUpEnabled)
+        ? FOLLOW_UP_DEFAULT_ON_FROM_MS
+        : undefined;
+
+      // Every customer-facing string is the tradie's business name. Without one
+      // there is nothing to sign the email with, so there is no email.
+      const businessName = settings.businessName || '';
+      if (!businessName) continue;
+
+      const invoicesSnapshot = await userDoc.ref
+        .collection('invoices')
+        .where('status', 'in', Array.from(CHASEABLE_INVOICE_STATUSES))
+        .get();
+      if (invoicesSnapshot.empty) continue;
+
+      const authEmail = await getUserEmail(userDoc.id);
+      const tradieReplyEmail = settings.email || authEmail || undefined;
+
+      const byId = new Map<string, admin.firestore.QueryDocumentSnapshot>();
+      const candidates: FollowUpInvoice[] = [];
+      for (const invoiceDoc of invoicesSnapshot.docs) {
+        const inv = invoiceDoc.data();
+        byId.set(invoiceDoc.id, invoiceDoc);
+        candidates.push({
+          id: invoiceDoc.id,
+          customerEmail: inv.customerEmail,
+          sendMethod: inv.sendMethod,
+          status: inv.status,
+          suppressAutoFollowUp: !!inv.suppressAutoFollowUp,
+          sentAtMs: toMsOrNull(inv.sentAt),
+          dueAtMs: toMsOrNull(inv.dueDate),
+          // The same helper the Square link charges off, so the figure in the
+          // email can never disagree with the figure at the checkout.
+          balanceDue: invoiceLinkAmountDue(inv),
+          followUpCount: inv.customerFollowUpCount ?? 0,
+          lastFollowUpAtMs: toMsOrNull(inv.customerFollowUpLastAt),
+        });
+      }
+
+      const due = selectInvoicesForFollowUp(candidates, now, {
+        ownEmails: [settings.email, authEmail],
+        openFromMs,
+      });
+      if (due.length === 0) continue;
+
+      // Read once per tradie rather than per invoice — it only gates whether
+      // the bank/PayID block renders.
+      const plan = await getUserPlanServerSide(userDoc.id);
+      const hasSquare = (
+        await db.doc(`users/${userDoc.id}/settings/squareConnection`).get()
+      ).exists;
+
+      for (const { invoice, followUpNumber } of due) {
+        const invoiceDoc = byId.get(invoice.id);
+        if (!invoiceDoc) continue;
+        const inv = invoiceDoc.data();
+
+        // One invoice's failure (a Square timeout, a bounce, the stamp) must
+        // not abort the run for every tradie after it — and a stamp that fails
+        // after a successful send would otherwise re-send tomorrow.
+        try {
+          // Mint a FRESH pay link rather than reusing inv.squarePaymentLinkUrl.
+          // Square has no API to reprice a link, and the stored one was sized
+          // to the balance at send time — so if any payment has been recorded
+          // since, that URL still collects the OLD, larger amount while this
+          // email quotes the new one. Minting off invoiceLinkAmountDue is what
+          // keeps the figure in the email and the figure at the checkout the
+          // same number. Best-effort: no Square, no link, and the email falls
+          // back to the tradie's own payment details.
+          let payNowUrl: string | undefined;
+          if (hasSquare) {
+            try {
+              const link = await createSquarePaymentLinkInternal(userDoc.id, invoiceDoc.id);
+              if (link) payNowUrl = link.paymentLinkUrl;
+            } catch (linkErr) {
+              console.error(
+                `customerInvoiceFollowUp: pay link mint failed for invoice ${invoiceDoc.id} (user ${userDoc.id})`,
+                (linkErr as Error)?.message,
+              );
+            }
+          }
+
+          const dueAtMs = invoice.dueAtMs ?? now;
+          const sent = await sendCustomerInvoiceReminderEmail({
+            to: inv.customerEmail,
+            customerName: inv.customerName || '',
+            jobName: inv.job?.name || 'your job',
+            invoiceNumber: inv.invoiceNumber,
+            balanceDue: invoice.balanceDue,
+            dueDate: new Date(dueAtMs).toISOString(),
+            daysOverdue: Math.max(0, Math.floor((now - dueAtMs) / (24 * 60 * 60 * 1000))),
+            payNowUrl,
+            paymentMethods: settings.paymentMethods,
+            plan,
+            surchargePaymentFees: settings.surchargePaymentFees === true,
+            followUpNumber,
+            business: {
+              name: businessName,
+              abn: settings.abn,
+              phone: settings.phone,
+              email: tradieReplyEmail,
+              address: settings.address,
+              logoUrl: settings.logoStorageUrl || settings.logoUri,
+              brandColor: settings.brandColor,
+            },
+            userId: userDoc.id,
+          });
+
+          if (sent) {
+            await invoiceDoc.ref.update({
+              customerFollowUpCount: invoice.followUpCount + 1,
+              customerFollowUpLastAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+          }
+        } catch (err) {
+          console.error(
+            `customerInvoiceFollowUp: invoice ${invoiceDoc.id} (user ${userDoc.id}) reminder ${followUpNumber} failed`,
             (err as Error)?.message,
           );
         }
