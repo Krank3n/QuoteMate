@@ -404,6 +404,14 @@ export interface ChatMessage {
   // bubble doesn't have to swap when one card is applied.
   proposals?: Proposal[];
   proposalStatus?: Record<string, ProposalStatus>;
+  // Which model produced this turn — "claude-sonnet-5", a Gemini Live id, and
+  // so on. Recorded because the brain behind Mate is chosen server-side and
+  // moves: text falls back from Claude to Gemini mid-conversation when a key
+  // is unfunded, and the voice provider is an A/B by uid bucket. Without this,
+  // "was that Gemini being thick or a real bug?" is unanswerable from a
+  // transcript — which is exactly the question the admin panel gets asked.
+  // Assistant messages only.
+  model?: string;
   // Set when the assistant call failed; UI renders the message in muted red.
   errorMessage?: string;
   // When present, the message renders as a live "working" card that the

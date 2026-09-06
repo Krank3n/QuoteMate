@@ -8,6 +8,7 @@
  *   - All other endpoints are onCall and require `context.auth.token.admin === true`.
  */
 import * as functions from 'firebase-functions/v1';
+import { summariseModels } from './shared/assistant/modelsUsed';
 import * as admin from 'firebase-admin';
 import { sendEmail, getUserEmail } from './email';
 import { applyBrevoEventToLead } from './leadOutreach';
@@ -2330,6 +2331,11 @@ export const adminListAssistantConversations = functions
           userBusinessName: biz.businessName || authRec?.displayName || null,
           platform: c.platform || null,
           app: appBuildOf(c),
+          // Which brain answered. Recomputed from the per-message stamps
+          // rather than read from the doc's rollup, so a conversation synced
+          // by an older client still reports correctly — and there is one
+          // implementation of the summary, not two.
+          models: summariseModels(c.messages),
           createdAt: tsMs(c.createdAt),
           updatedAt: tsMs(c.updatedAt),
           syncedAt: tsMs(c.syncedAt),
