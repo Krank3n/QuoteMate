@@ -77,7 +77,7 @@ import { stripeService } from './src/services/stripeService';
 import { firestoreService } from './src/services/firestoreService';
 import { documentService } from './src/services/documentService';
 import { notificationService } from './src/services/notificationService';
-import { routeForNotification } from './src/services/notificationRouting';
+import { resolvableNotificationRoute } from './src/services/notificationRouting';
 import { checkForUpdate, snoozeUpdate, AppUpdateInfo, releaseKey } from './src/services/appUpdateService';
 import { checkDeferredLink } from './src/services/supplierDiscoveryService';
 import { applyPendingReferral, storePendingReferral } from './src/services/pendingReferral';
@@ -506,9 +506,13 @@ function App() {
             undefined,
             (response) => {
               appOpenTracker.notePushTap(pushTypeOf(response), pushTapKey(response));
-              // Take the tradie to whatever the notification was about.
-              const route = routeForNotification(
-                response?.notification?.request?.content?.data
+              // Take the tradie to whatever the notification was about, but only
+              // once RootNavigator is mounted (post-onboarding) — otherwise the
+              // route resolves to null and we leave them be. Fresh-read the gate.
+              const mainAppMounted = useStore.getState().isOnboarded;
+              const route = resolvableNotificationRoute(
+                response?.notification?.request?.content?.data,
+                mainAppMounted
               );
               if (!route || !navigationRef.isReady()) return;
               try {

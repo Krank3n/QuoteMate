@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { routeForNotification } from '../notificationRouting';
+import { resolvableNotificationRoute, routeForNotification } from '../notificationRouting';
 
 describe('routeForNotification', () => {
   it('opens the job a notification is about', () => {
@@ -42,5 +42,22 @@ describe('routeForNotification', () => {
 
   it('ignores an unrecognised screen hint', () => {
     expect(routeForNotification({ screen: 'settings' })).toBeNull();
+  });
+});
+
+describe('resolvableNotificationRoute', () => {
+  it('resolves the route when the main app is mounted', () => {
+    expect(resolvableNotificationRoute({ jobId: 'job-1' }, true))
+      .toEqual({ screen: 'ViewJob', params: { jobId: 'job-1' } });
+  });
+
+  it('returns null when RootNavigator is not mounted, even with a valid route', () => {
+    // Regression: a tap that lands while the user is still onboarding would
+    // otherwise throw "not handled by any navigator" (Sentry issue #163).
+    expect(resolvableNotificationRoute({ jobId: 'job-1' }, false)).toBeNull();
+  });
+
+  it('returns null when the payload resolves to no route', () => {
+    expect(resolvableNotificationRoute({}, true)).toBeNull();
   });
 });
