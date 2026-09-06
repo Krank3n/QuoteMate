@@ -256,10 +256,16 @@ class FirestoreService {
   /**
    * Load all quotes from Firestore
    */
-  async loadQuotes(): Promise<Quote[]> {
+  /**
+   * `null` means the read failed, `[]` means the account genuinely has no
+   * quotes. The caller backfills the cloud from the device when it sees `[]`,
+   * so collapsing the two would re-upload every quote on this device after any
+   * transient read error.
+   */
+  async loadQuotes(): Promise<Quote[] | null> {
     const userId = this.getUserId();
     if (!userId) {
-      return [];
+      return null;
     }
 
     try {
@@ -271,9 +277,14 @@ class FirestoreService {
         return this.quoteFromData(doc.data());
       });
 
+      // An empty result straight out of the local cache is "we never reached
+      // the server", not "this account has no quotes" — same discriminator as
+      // loadOnboardingStatus.
+      if (quotes.length === 0 && snapshot.metadata?.fromCache) return null;
+
       return quotes;
     } catch (error) {
-      return [];
+      return null;
     }
   }
 
@@ -413,12 +424,24 @@ class FirestoreService {
   }
 
   /**
-   * Load onboarding status from Firestore
+   * Load onboarding status from Firestore.
+   *
+   * `null` means "couldn't tell", NOT "not onboarded". The two used to be the
+   * same value, and that is what dropped signed-in tradies into the onboarding
+   * wizard on a cold start: with no network (or with the network still coming
+   * up as the app launches) `getDoc` resolves out of an empty local cache with
+   * `exists() === false`, which read as a definitive "never onboarded". App.tsx
+   * then renders NewOnboardingScreen over the top of a working account —
+   * reproduced end-to-end on an API 36 emulator, 6 Sep 2026, where offline it
+   * never recovered at all.
+   *
+   * `fromCache` is the discriminator: a non-existent doc is only real news when
+   * the server said so.
    */
-  async loadOnboardingStatus(): Promise<boolean> {
+  async loadOnboardingStatus(): Promise<boolean | null> {
     const userId = this.getUserId();
     if (!userId) {
-      return false;
+      return null;
     }
 
     try {
@@ -427,12 +450,14 @@ class FirestoreService {
 
       if (snapshot.exists()) {
         const data = snapshot.data();
-        return data.isOnboarded || false;
+        return data.isOnboarded === true;
       }
 
-      return false;
+      // Missing doc straight from the server is a genuine "not onboarded".
+      // Missing doc out of the cache just means we never reached the server.
+      return snapshot.metadata?.fromCache ? null : false;
     } catch (error) {
-      return false;
+      return null;
     }
   }
 
@@ -581,10 +606,15 @@ class FirestoreService {
       this.onboardingUnsubscribe = onSnapshot(profileRef, (snapshot) => {
         if (snapshot.exists()) {
           const data = snapshot.data();
-          callback(data.isOnboarded || false);
-        } else {
-          callback(false);
+          callback(data.isOnboarded === true);
+          return;
         }
+        // Same rule as loadOnboardingStatus: a missing doc raised from an empty
+        // local cache is not evidence the tradie never onboarded, and emitting
+        // `false` here threw signed-in users into the wizard mid-session. Wait
+        // for the server to say so.
+        if (snapshot.metadata?.fromCache) return;
+        callback(false);
       }, (error) => {
       });
 

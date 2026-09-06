@@ -51,6 +51,7 @@ import { OnboardingProgress, OnboardingStep } from '../components/OnboardingProg
 import { CelebrationAnimation } from '../components/CelebrationAnimation';
 import { AlertModal } from '../components/AlertModal';
 import { WebContainer } from '../components/WebContainer';
+import { whenSplashClear } from '../components/splashPresence';
 import { BrandImageEditor, type BrandImageValue } from '../components/BrandImageEditor';
 import { TRADE_CATEGORIES } from '../constants/tradeCategories';
 import { auth } from '../config/firebase';
@@ -207,6 +208,7 @@ export function NewOnboardingScreen() {
     const hydratedRef = useRef(false);
 
     // Input refs — for focusing next input on keyboard Return and auto-focus on step entry
+    const businessNameRef = useRef<RNTextInput>(null);
     const phoneRef = useRef<RNTextInput>(null);
     const emailRef = useRef<RNTextInput>(null);
     const abnRef = useRef<RNTextInput>(null);
@@ -338,13 +340,30 @@ export function NewOnboardingScreen() {
             }),
         ]).start();
 
-        // Auto-focus first input on text-entry steps (after the slide-in finishes)
-        const focusTimer = setTimeout(() => {
-            if (currentStep === 3) phoneRef.current?.focus();
-            else if (currentStep === 5) laborRateRef.current?.focus();
-        }, 450);
+        // Auto-focus first input on text-entry steps (after the slide-in finishes).
+        //
+        // Step 1 used to carry `autoFocus` on the field instead. This screen
+        // mounts UNDERNEATH the launch splash, so autoFocus opened the keyboard
+        // over the top of the logo on every Android cold start — the app looked
+        // like it was typing to itself before it had drawn anything. Waiting on
+        // splashPresence keeps the intent (land on the step with the cursor
+        // ready) without firing it at a screen nobody can see yet.
+        let cancelled = false;
+        let focusTimer: ReturnType<typeof setTimeout> | undefined;
+        void whenSplashClear().then(() => {
+            if (cancelled) return;
+            focusTimer = setTimeout(() => {
+                if (cancelled) return;
+                if (currentStep === 1) businessNameRef.current?.focus();
+                else if (currentStep === 3) phoneRef.current?.focus();
+                else if (currentStep === 5) laborRateRef.current?.focus();
+            }, 450);
+        });
 
-        return () => clearTimeout(focusTimer);
+        return () => {
+            cancelled = true;
+            if (focusTimer) clearTimeout(focusTimer);
+        };
     }, [currentStep]);
 
     // Android hardware back — go to previous step instead of exiting
@@ -766,7 +785,7 @@ export function NewOnboardingScreen() {
                     mode="outlined"
                     style={styles.input}
                     placeholder="e.g., Smith's Plumbing"
-                    autoFocus
+                    ref={businessNameRef}
                     returnKeyType="next"
                     onSubmitEditing={handleNext}
                     autoComplete="off"

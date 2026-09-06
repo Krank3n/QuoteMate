@@ -37,6 +37,24 @@ if (Platform.OS === 'web') {
   });
 }
 
+/**
+ * Where the Firebase JS SDK parks the signed-in user.
+ *
+ * Read at launch to answer "should a session be restored?" BEFORE the SDK has
+ * got round to saying so. Its RN persistence fires onAuthStateChanged with
+ * `null` while this read is still in flight, and auth.currentUser is null then
+ * too, so nothing the SDK exposes can tell that null apart from a real sign
+ * out — which is what put the sign-in screen in front of signed-in tradies on
+ * every Android cold start. This key is the ground truth: it exists if and
+ * only if there is a persisted session. See App.tsx / isAuthKnown.
+ *
+ * Derived from the same config object the auth instance was built from, so the
+ * two cannot drift. Format is the SDK's (`firebase:authUser:{apiKey}:{appName}`)
+ * — if a future version changes it the read simply finds nothing, and the gate
+ * degrades to not waiting, which is the old behaviour rather than a worse one.
+ */
+export const AUTH_PERSISTENCE_KEY = `firebase:authUser:${firebaseConfig.apiKey}:[DEFAULT]`;
+
 export const db = getFirestore(app);
 export const storage = getStorage(app);
 export const functions = getFunctions(app);

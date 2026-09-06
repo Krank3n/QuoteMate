@@ -17,10 +17,11 @@
  * (Platform.isTesting) — there is no observable mid-fade state otherwise.
  */
 import React from 'react';
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { render, act } from '@testing-library/react';
 import { Animated } from 'react-native';
 import { SplashOverlay } from './SplashOverlay';
+import { isSplashCovering, __resetSplashPresence } from './splashPresence';
 
 type EndCallback = (result: { finished: boolean }) => void;
 
@@ -97,5 +98,59 @@ describe('SplashOverlay', () => {
     rerender(<SplashOverlay visible />);
     expect(queryByTestId('splash-overlay')).toBeTruthy();
     expect(queryByTestId('splash-logo')).toBeTruthy();
+  });
+});
+
+/**
+ * The overlay is also the publisher for splashPresence — that is what lets a
+ * screen mounted underneath it wait before doing something the user is meant to
+ * see. Without it, NewOnboardingScreen's first field opened the keyboard over
+ * the top of the logo on every Android cold start.
+ */
+describe('SplashOverlay → splashPresence', () => {
+  beforeEach(() => {
+    __resetSplashPresence();
+  });
+
+  it('reports "covering" while it is up', () => {
+    render(React.createElement(SplashOverlay, { visible: true }));
+    expect(isSplashCovering()).toBe(true);
+  });
+
+  it('reports "clear" on the same tick the reveal starts, not when it finishes', () => {
+    // Matches pointerEvents: the app underneath is interactive from the first
+    // frame of the fade, so waiters should not sit through another 450ms.
+    const { finish } = stubExitAnimation();
+    const { rerender } = render(React.createElement(SplashOverlay, { visible: true }));
+
+    act(() => {
+      rerender(React.createElement(SplashOverlay, { visible: false }));
+    });
+    expect(isSplashCovering()).toBe(false);
+
+    finish(true);
+    expect(isSplashCovering()).toBe(false);
+  });
+
+  it('reports "clear" even when it never renders at all (demo capture builds)', () => {
+    // splashPresence defaults to covering, so a build that never shows the
+    // splash would otherwise leave every waiter hanging forever.
+    render(React.createElement(SplashOverlay, { visible: false }));
+    expect(isSplashCovering()).toBe(false);
+  });
+
+  it('reports "covering" again when a post-sign-in load brings it back', () => {
+    const { finish } = stubExitAnimation();
+    const { rerender } = render(React.createElement(SplashOverlay, { visible: true }));
+    act(() => {
+      rerender(React.createElement(SplashOverlay, { visible: false }));
+    });
+    finish(true);
+
+    act(() => {
+      rerender(React.createElement(SplashOverlay, { visible: true }));
+    });
+
+    expect(isSplashCovering()).toBe(true);
   });
 });
