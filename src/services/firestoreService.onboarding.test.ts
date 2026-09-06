@@ -18,7 +18,7 @@ vi.mock('firebase/firestore', () => ({
   Timestamp: { fromDate: vi.fn((d: Date) => d), now: vi.fn(() => 'now') },
 }));
 
-import { setDoc } from 'firebase/firestore';
+import { setDoc, getDoc, onSnapshot } from 'firebase/firestore';
 import { firestoreService } from './firestoreService';
 import { auth } from '../config/firebase';
 
@@ -111,5 +111,114 @@ describe('saveOnboardingStatus', () => {
     setDocMock.mockRejectedValueOnce(new Error('permission-denied'));
 
     await expect(firestoreService.saveOnboardingStatus(true)).rejects.toThrow('permission-denied');
+  });
+});
+
+/**
+ * "Couldn't read it" must never be reported as "never onboarded".
+ *
+ * Firestore on React Native has no persistent cache, so on a cold start the
+ * local cache is empty and both a `getDoc` and the initial `onSnapshot` can
+ * resolve out of it with `exists() === false` before the server is ever
+ * reached. Both used to report that as a definitive `false`, which put
+ * signed-in tradies in the onboarding wizard: measured on an API 36 emulator
+ * with the network off, 6 Sep 2026, where the wizard was still on screen 15
+ * seconds later on an account with quotes and a business profile.
+ *
+ * `metadata.fromCache` is the discriminator — a missing document is only news
+ * when the server said so.
+ */
+const snapshot = (opts: {
+  exists: boolean;
+  fromCache: boolean;
+  data?: Record<string, unknown>;
+}) => ({
+  exists: () => opts.exists,
+  data: () => opts.data ?? {},
+  metadata: { fromCache: opts.fromCache },
+});
+
+describe('loadOnboardingStatus', () => {
+  it('returns null — not false — when the doc is missing from the cache', async () => {
+    vi.mocked(getDoc).mockResolvedValue(
+      snapshot({ exists: false, fromCache: true }) as never,
+    );
+
+    await expect(firestoreService.loadOnboardingStatus()).resolves.toBeNull();
+  });
+
+  it('returns false when the SERVER confirms there is no onboarding doc', async () => {
+    vi.mocked(getDoc).mockResolvedValue(
+      snapshot({ exists: false, fromCache: false }) as never,
+    );
+
+    await expect(firestoreService.loadOnboardingStatus()).resolves.toBe(false);
+  });
+
+  it('returns true for a real doc, cached or not — cached data is still data', async () => {
+    for (const fromCache of [true, false]) {
+      vi.mocked(getDoc).mockResolvedValue(
+        snapshot({ exists: true, fromCache, data: { isOnboarded: true } }) as never,
+      );
+      await expect(firestoreService.loadOnboardingStatus()).resolves.toBe(true);
+    }
+  });
+
+  it('returns null when the read throws', async () => {
+    vi.mocked(getDoc).mockRejectedValue(new Error('unavailable'));
+
+    await expect(firestoreService.loadOnboardingStatus()).resolves.toBeNull();
+  });
+
+  it('returns null when signed out, so no caller reads it as "needs onboarding"', async () => {
+    (auth as { currentUser: unknown }).currentUser = null;
+
+    await expect(firestoreService.loadOnboardingStatus()).resolves.toBeNull();
+  });
+});
+
+describe('listenToOnboardingStatus', () => {
+  /** Drive the onSnapshot callback the service registered. */
+  const emit = (snap: ReturnType<typeof snapshot>) => {
+    const handler = vi.mocked(onSnapshot).mock.calls[0][1] as (s: unknown) => void;
+    handler(snap);
+  };
+
+  it('REGRESSION: stays silent on a cache-only "no such document"', () => {
+    // This is the event that kept the wizard on screen offline: checkOnboarding
+    // had already resolved `true`, and then the listener overwrote it.
+    const callback = vi.fn();
+    firestoreService.listenToOnboardingStatus(callback);
+
+    emit(snapshot({ exists: false, fromCache: true }));
+
+    expect(callback).not.toHaveBeenCalled();
+  });
+
+  it('reports false when the server confirms the doc is gone', () => {
+    const callback = vi.fn();
+    firestoreService.listenToOnboardingStatus(callback);
+
+    emit(snapshot({ exists: false, fromCache: false }));
+
+    expect(callback).toHaveBeenCalledWith(false);
+  });
+
+  it('reports the flag from a document that exists', () => {
+    const callback = vi.fn();
+    firestoreService.listenToOnboardingStatus(callback);
+
+    emit(snapshot({ exists: true, fromCache: false, data: { isOnboarded: true } }));
+
+    expect(callback).toHaveBeenCalledWith(true);
+  });
+
+  it('reports false for a document that exists but has never completed onboarding', () => {
+    const callback = vi.fn();
+    firestoreService.listenToOnboardingStatus(callback);
+
+    emit(snapshot({ exists: true, fromCache: false, data: { lastStepKey: 'branding' } }));
+
+    expect(callback).toHaveBeenCalledWith(false);
   });
 });

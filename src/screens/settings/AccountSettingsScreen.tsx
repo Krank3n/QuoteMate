@@ -39,6 +39,7 @@ import {
   OAuthProvider,
   User,
 } from 'firebase/auth';
+import { markSignOutIntent } from '../../services/authIntent';
 import { doc, getDoc } from 'firebase/firestore';
 import * as Google from 'expo-auth-session/providers/google';
 import * as AppleAuthentication from 'expo-apple-authentication';
@@ -117,6 +118,10 @@ export function AccountSettingsScreen() {
     try {
       // Device-held customer details from find_customer die with the session.
       clearCustomerDraftRefs();
+      // Tell the auth listener this null is real. Without it App.tsx ignores
+      // the sign-out, because Firebase emits indistinguishable spurious nulls
+      // during token refresh — see services/authIntent.
+      markSignOutIntent();
       await signOut(auth);
       await clearAllData();
 

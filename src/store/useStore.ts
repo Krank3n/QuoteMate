@@ -178,7 +178,15 @@ interface AppState {
   dismissUpgradeBanner: () => Promise<void>;
 
   // Onboarding
-  isOnboarded: boolean;
+  /**
+   * `null` = not determined yet. App.tsx holds the splash on `null` rather than
+   * guessing, because the two wrong guesses are not symmetric: showing the
+   * dashboard to a genuinely new user is recoverable, but showing the wizard to
+   * an established tradie invites them to overwrite their own business profile.
+   * Starting this at `false` is what put signed-in users in the wizard on a
+   * slow or offline cold start.
+   */
+  isOnboarded: boolean | null;
   setOnboarded: (value: boolean) => Promise<void>;
   checkOnboarding: () => Promise<void>;
 
@@ -644,7 +652,8 @@ export const useStore = create<AppState>((set, get) => ({
   lastSyncError: null,
   setSyncError: (err) => set({ lastSyncError: err }),
   clearSyncError: () => set({ lastSyncError: null }),
-  isOnboarded: false,
+  // null, not false — "we haven't looked yet". See the type.
+  isOnboarded: null,
   subscriptionStatus: null,
   nextQuoteNumber: 1,
   invoices: [],
@@ -683,32 +692,43 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
+  /**
+   * Device first, then the cloud — see the note on loadQuotes for why the old
+   * cloud-first order held the splash on a network round trip and showed an
+   * empty app when that round trip was slow.
+   */
   loadBusinessSettings: async () => {
     try {
-      // If user is signed in, try loading from Firestore first
-      if (auth.currentUser) {
-        const cloudSettings = await firestoreService.loadBusinessSettings();
-        if (cloudSettings) {
-          // Save to local storage for offline access
-          await AsyncStorage.setItem(
-            STORAGE_KEYS.BUSINESS_SETTINGS,
-            JSON.stringify(cloudSettings)
-          );
-          set({ businessSettings: cloudSettings });
-          return;
+      // 1. Whatever this device already has, on screen immediately.
+      let local: BusinessSettings | null = null;
+      try {
+        const stored = await AsyncStorage.getItem(STORAGE_KEYS.BUSINESS_SETTINGS);
+        if (stored) {
+          local = JSON.parse(stored) as BusinessSettings;
+          set({ businessSettings: local });
         }
+      } catch {
+        // Unreadable cache — fall through to the cloud.
       }
 
-      // Fallback to local storage
-      const stored = await AsyncStorage.getItem(STORAGE_KEYS.BUSINESS_SETTINGS);
-      if (stored) {
-        const settings: BusinessSettings = JSON.parse(stored);
-        set({ businessSettings: settings });
+      if (!auth.currentUser) return;
 
-        // Sync to cloud if user is signed in but no cloud data exists
-        if (auth.currentUser) {
-          await firestoreService.saveBusinessSettings(settings);
-        }
+      // 2. Refresh from the cloud. listenToBusinessSettings keeps it current
+      //    after this, so a failure here costs freshness, not the screen.
+      const cloudSettings = await firestoreService.loadBusinessSettings();
+      if (cloudSettings) {
+        await AsyncStorage.setItem(
+          STORAGE_KEYS.BUSINESS_SETTINGS,
+          JSON.stringify(cloudSettings)
+        );
+        set({ businessSettings: cloudSettings });
+        return;
+      }
+
+      // 3. Nothing in the cloud but something on the device: push it up, same
+      //    as before. This is how a pre-sync install seeds its account.
+      if (local) {
+        await firestoreService.saveBusinessSettings(local);
       }
     } catch (error) {
       // silently ignore
@@ -1191,62 +1211,75 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   // Load quotes from storage
+  /**
+   * Device first, then the cloud.
+   *
+   * This used to await a Firestore read before touching AsyncStorage, and the
+   * local copy was only ever reached when the cloud came back EMPTY — not when
+   * it came back slowly. So a launch on a weak connection held the splash for
+   * the full bootstrap timeout and then opened on a dashboard with no quotes,
+   * while a perfectly good copy sat on the device the whole time. Reproduced on
+   * an API 36 emulator with the network off, 6 Sep 2026.
+   *
+   * Reading the device first costs one AsyncStorage hit and makes the app
+   * usable before the network is even asked. listenToQuotes/mergeRemoteQuotes
+   * keep it current from there.
+   */
   loadQuotes: async () => {
-    try {
-      // If user is signed in, try loading from Firestore first
-      if (auth.currentUser) {
-        const cloudQuotes = await firestoreService.loadQuotes();
-        if (cloudQuotes.length > 0) {
-          // Backfill laborMarkup from material markup for legacy quotes
-          // Backfill laborMarkup, and canonicalise labour units — the legacy
-          // `quotes` collection predates the documents collection's read-path
-          // normalisation, so day-shaped records still arrive here.
-          const backfilled = cloudQuotes.map((q) =>
-            normaliseLabourToHours(q.laborMarkup === undefined ? { ...q, laborMarkup: q.markup } : q)
-          );
-          // Save to local storage for offline access
-          await AsyncStorage.setItem(
-            STORAGE_KEYS.QUOTES,
-            JSON.stringify(backfilled)
-          );
-          const reconciledNextNumber = reconcileNextNumber({
-            items: backfilled,
-            field: (q) => q.quoteNumber,
-            prefix: 'Q',
-            cached: get().nextQuoteNumber,
-          });
-          set({ quotes: backfilled, nextQuoteNumber: reconciledNextNumber });
-          return;
-        }
-      }
-
-      // Fallback to local storage
-      const stored = await AsyncStorage.getItem(STORAGE_KEYS.QUOTES);
-      if (stored) {
-        const parsed: Quote[] = JSON.parse(stored, (key, value) => {
-          // Parse date strings back to Date objects
-          if (key === 'createdAt' || key === 'updatedAt') {
-            return new Date(value);
-          }
-          return value;
-        });
-        // Backfill laborMarkup from material markup for legacy quotes
-        const quotes = parsed.map((q) =>
-          normaliseLabourToHours(q.laborMarkup === undefined ? { ...q, laborMarkup: q.markup } : q)
-        );
-        const reconciledNextNumber = reconcileNextNumber({
-          items: quotes,
+    /** Legacy shapes: quotes predates the documents collection's read-path
+     *  normalisation, so day-shaped labour and missing laborMarkup arrive here. */
+    const normalise = (list: Quote[]) =>
+      list.map((q) =>
+        normaliseLabourToHours(q.laborMarkup === undefined ? { ...q, laborMarkup: q.markup } : q)
+      );
+    const apply = (list: Quote[]) => {
+      set({
+        quotes: list,
+        nextQuoteNumber: reconcileNextNumber({
+          items: list,
           field: (q) => q.quoteNumber,
           prefix: 'Q',
           cached: get().nextQuoteNumber,
-        });
-        set({ quotes, nextQuoteNumber: reconciledNextNumber });
+        }),
+      });
+    };
 
-        // Sync to cloud if user is signed in but no cloud data exists
-        if (auth.currentUser && quotes.length > 0) {
-          for (const quote of quotes) {
-            await firestoreService.saveQuote(quote);
-          }
+    try {
+      // 1. The device's copy, on screen immediately.
+      let local: Quote[] | null = null;
+      try {
+        const stored = await AsyncStorage.getItem(STORAGE_KEYS.QUOTES);
+        if (stored) {
+          const parsed: Quote[] = JSON.parse(stored, (key, value) =>
+            key === 'createdAt' || key === 'updatedAt' ? new Date(value) : value
+          );
+          local = normalise(parsed);
+          apply(local);
+        }
+      } catch {
+        // Unreadable cache — fall through to the cloud.
+      }
+
+      if (!auth.currentUser) return;
+
+      // 2. Refresh from the cloud. null = the read failed or never reached the
+      //    server, in which case the device's copy stands.
+      const cloudQuotes = await firestoreService.loadQuotes();
+      if (cloudQuotes === null) return;
+
+      if (cloudQuotes.length > 0) {
+        const backfilled = normalise(cloudQuotes);
+        await AsyncStorage.setItem(STORAGE_KEYS.QUOTES, JSON.stringify(backfilled));
+        apply(backfilled);
+        return;
+      }
+
+      // 3. The account really has no quotes but this device does: push them up.
+      //    Gated on a confirmed-empty read, never on a failed one, or a flaky
+      //    launch would re-upload the tradie's whole history one doc at a time.
+      if (local && local.length > 0) {
+        for (const quote of local) {
+          await firestoreService.saveQuote(quote);
         }
       }
     } catch (error) {
@@ -1493,32 +1526,65 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
+  /**
+   * Resolve whether this tradie has finished the wizard.
+   *
+   * Device first, then the server — the reverse of the original order, and the
+   * reason matters. Reading the cloud first meant the splash sat on a network
+   * round trip before the app could decide which screen to show, and a read
+   * that came back empty (offline, or the network still waking up at launch)
+   * was indistinguishable from "never onboarded". The device's own flag is
+   * instant, offline-proof, and can only have been written by finishing the
+   * wizard on this device.
+   *
+   * Never resolves to `false` on a failed read. `null` stays `null` and the
+   * caller keeps waiting — see the isOnboarded type.
+   */
   checkOnboarding: async () => {
     try {
-      // If user is signed in, try loading from Firestore first
-      if (auth.currentUser) {
-        const cloudStatus = await firestoreService.loadOnboardingStatus();
-        if (cloudStatus) {
-          // Save to local storage for offline access
-          await AsyncStorage.setItem(STORAGE_KEYS.ONBOARDED, JSON.stringify(cloudStatus));
-          set({ isOnboarded: cloudStatus });
+      // 1. The device's own record. Paint from it immediately: an established
+      //    tradie goes straight to the dashboard with no network involved.
+      let local: boolean | null = null;
+      try {
+        const stored = await AsyncStorage.getItem(STORAGE_KEYS.ONBOARDED);
+        if (stored != null) local = JSON.parse(stored) === true;
+      } catch {
+        // Unreadable storage is a "don't know", not a "no".
+      }
+      if (local === true) set({ isOnboarded: true });
+
+      // 2. The server, when there is one to ask. null = couldn't reach it.
+      const cloud = auth.currentUser
+        ? await firestoreService.loadOnboardingStatus()
+        : null;
+
+      if (cloud === true) {
+        set({ isOnboarded: true });
+        if (local !== true) {
+          await AsyncStorage.setItem(STORAGE_KEYS.ONBOARDED, JSON.stringify(true));
+        }
+        return;
+      }
+
+      if (cloud === false) {
+        // The server is certain there is no onboarding doc. A device holding
+        // the local flag has completed the wizard before — on an older build,
+        // or with a write that never landed. Heal the cloud rather than making
+        // them redo it.
+        if (local === true) {
+          void firestoreService.saveOnboardingStatus(true);
+          set({ isOnboarded: true });
           return;
         }
+        set({ isOnboarded: false });
+        return;
       }
 
-      // Fallback to local storage
-      const stored = await AsyncStorage.getItem(STORAGE_KEYS.ONBOARDED);
-      if (stored) {
-        const isOnboarded = JSON.parse(stored);
-        set({ isOnboarded });
-
-        // Sync to cloud if user is signed in but no cloud data exists
-        if (auth.currentUser && isOnboarded) {
-          await firestoreService.saveOnboardingStatus(isOnboarded);
-        }
-      }
+      // 3. No server answer. The device is all we have; `null` when it has
+      //    nothing to say, and the caller decides how long to wait.
+      set({ isOnboarded: local });
     } catch (error) {
-      // silently ignore
+      // Leave isOnboarded as it was rather than guessing.
     }
   },
 
@@ -4771,7 +4837,9 @@ export const useStore = create<AppState>((set, get) => ({
         businessSettings: null,
         quotes: [],
         currentQuote: null,
-        isOnboarded: false,
+        // null, not false: after a wipe we genuinely don't know yet, and
+        // checkOnboarding runs next. false here would flash the wizard.
+        isOnboarded: null,
         subscriptionStatus: null,
         invoices: [],
         currentInvoice: null,

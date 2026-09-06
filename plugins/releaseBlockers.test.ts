@@ -50,6 +50,15 @@ describe('Android target SDK (Play upload requirement)', () => {
     // activity. The plugin writes the documented opt-out into the manifest.
     expect(source).toMatch(/\.\/plugins\/withPredictiveBackOptOut/);
   });
+
+  it('registers the window-background plugin, or the cold start flashes a blank frame', () => {
+    // MainActivity launches under Theme.App.SplashScreen (navy drawable) and
+    // swaps to AppTheme in onCreate. AppTheme sets no windowBackground, so the
+    // window falls through to ?android:colorBackground until React draws —
+    // measured as a 0.8s white screen on an API 36 emulator, dark grey with the
+    // device in dark mode. The plugin paints AppTheme the splash navy.
+    expect(source).toMatch(/\.\/plugins\/withAndroidWindowBackground/);
+  });
 });
 
 describe('iOS Tap to Pay entitlement (App Store export blocker)', () => {

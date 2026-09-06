@@ -16,6 +16,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Animated, Platform, StyleSheet } from 'react-native';
 
+import { setSplashCovering } from './splashPresence';
+
 // Deliberately NOT theme tokens. This is the navy baked into the logo art
 // (assets/logo-lrg-margin.png) and the native splash backgrounds — it must
 // match them in every theme, or the logo shows as a square tile. The spinner
@@ -47,6 +49,10 @@ export function SplashOverlay({ visible }: SplashOverlayProps) {
   const spinnerOpacity = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
+    // Announced on the same tick the reveal starts, matching pointerEvents
+    // below: the app underneath is interactive from then on, so mount-time work
+    // that the user is meant to see is free to run. See splashPresence.
+    setSplashCovering(visible);
     if (visible) {
       setMounted(true);
       overlayOpacity.setValue(1);

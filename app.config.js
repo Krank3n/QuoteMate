@@ -147,6 +147,11 @@ export default {
       // onBackPressed — and so React Native's BackHandler — ever firing: back
       // exits the app from any screen. See the plugin.
       "./plugins/withPredictiveBackOptOut",
+      // AppTheme declares no windowBackground, so between MainActivity swapping
+      // off the splash theme and React's first frame the window paints
+      // ?android:colorBackground — a full-screen white (or dark grey) flash. See
+      // the plugin.
+      "./plugins/withAndroidWindowBackground",
       "./plugins/withReleaseSigning",
       ["./plugins/withKotlinVersion", "2.2.0"],
       // GoogleSignIn iOS SDK (native Google sign-in) pulls Swift pod

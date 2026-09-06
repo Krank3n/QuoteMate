@@ -49,7 +49,11 @@ import { trackWebEvent } from './src/utils/webAnalytics';
 import {
   raceTimeout,
   failedLoaderNames,
+  resolveLaunchGate,
+  isAuthKnown,
   BOOTSTRAP_TIMEOUT_MS,
+  FIRST_PAINT_TIMEOUT_MS,
+  SESSION_RESTORE_TIMEOUT_MS,
   SPLASH_MAX_MS,
   type LoaderName,
 } from './src/utils/bootstrapGate';
@@ -68,8 +72,9 @@ import { NewOnboardingScreen } from './src/screens/NewOnboardingScreen';
 import { AuthScreen } from './src/screens/AuthScreen';
 import { subscriptionSyncService } from './src/services/subscriptionSyncService';
 import { recoverPendingPurchases } from './src/services/receiptEntitlement';
-import { auth } from './src/config/firebase';
+import { auth, AUTH_PERSISTENCE_KEY } from './src/config/firebase';
 import { shouldClearLocalData } from './src/utils/localDataReset';
+import { consumeSignOutIntent } from './src/services/authIntent';
 import { initWebAnalytics } from './src/utils/webAnalytics';
 import { fetchReclaimedOldUid } from './src/services/accountReclaimService';
 import { captureAttributionFromUrl, persistAttributionIfNew } from './src/services/attributionService';
@@ -241,6 +246,17 @@ function App() {
   const [fontsLoaded, setFontsLoaded] = useState(false);
   const [user, setUser] = useState<any>(null);
   const [userDataLoaded, setUserDataLoaded] = useState(false);
+  // Firebase has said something — a user, or null. Deliberately NOT the same as
+  // knowing whether anybody is signed in: its RN persistence reports null
+  // before it has read the stored session, and that null used to lift the
+  // splash onto the sign-in screen in front of a signed-in tradie. isAuthKnown
+  // is what turns these three flags into an answer.
+  const [firebaseReported, setFirebaseReported] = useState(false);
+  // The device's record of a live session; null while the read is in flight.
+  const [hadSession, setHadSession] = useState<boolean | null>(null);
+  // Give-up point for a session the device says exists but Firebase never
+  // produces (revoked server-side). See SESSION_RESTORE_TIMEOUT_MS.
+  const [restoreDeadlinePassed, setRestoreDeadlinePassed] = useState(false);
   // Absolute ceiling on the splash. The batch timeouts cover the two load
   // gates; this covers everything else that can wedge them (a font load that
   // never resolves, a throw before either flag is set). Nothing is worth
@@ -253,16 +269,27 @@ function App() {
   // few seconds after the dashboard mounts, and the data-load Promise.all
   // runs twice — which feels (and looks) like the app reloading itself.
   const initialisedForUidRef = useRef<string | null>(null);
+  // Has Firebase produced a real user at any point in this process?
+  //
+  // This is what separates a genuine sign-out from the `null` that Firebase's
+  // RN persistence emits before it has read the persisted session. Without it
+  // the null ran the whole sign-out branch on every cold start — tearing down
+  // listeners nothing had built yet, and (worse, once it existed) writing
+  // "no active session" over the flag the launch gate was about to read.
+  const sawUserRef = useRef(false);
   // Selector, NOT a bare useStore() destructure — the bare form subscribes
   // App to the whole store, so every quote save / listener echo re-rendered
   // the entire app tree (NavigationContainer down), dropping frames right as
   // the user navigated. isOnboarded is the only state App renders from; the
   // load actions are stable and fetched via getState() inside the effects.
   const isOnboarded = useStore((s) => s.isOnboarded);
+  // Tiebreak for the one case where onboarding is never determined (offline on
+  // a device that has never synced). A boolean selector, so it re-renders App
+  // only when the answer actually flips.
+  const hasLocalBusiness = useStore((s) => !!s.businessSettings?.businessName);
   const [updateInfo, setUpdateInfo] = useState<AppUpdateInfo | null>(null);
   const [showUpdateSheet, setShowUpdateSheet] = useState(false);
 
-  const requiresAuth = true;
   // Capture-only — true exclusively when a marketing demo build has an injected
   // payload (window.__QM_DEMO__). Renders the real navigator (Mate tab) without
   // a live login so the demo harness can record. The injected payload is the
@@ -413,9 +440,25 @@ function App() {
           loadNextQuoteNumber(),
         ]).then((r) => { settled = r; });
 
+        // Two races over the same batch, answering two different questions.
+        //
+        // First: when may the splash come down? Every loader now paints the
+        // device's copy before it asks the network (see loadQuotes), and the
+        // realtime listeners registered below keep it current — so once the
+        // device has been read there is nothing left worth staring at a logo
+        // for. Waiting on the cloud half meant a launch on a weak connection
+        // held the splash for seconds and then opened on the same data it had
+        // all along. Not awaited: the batch keeps running behind the app.
+        void raceTimeout(batch, FIRST_PAINT_TIMEOUT_MS).then(() => {
+          setUserDataLoaded(true);
+        });
+
+        // Second: did the batch actually finish? Unchanged 8s contract — this
+        // is the stranded-signup safety net, and it must NOT fire every time a
+        // tradie opens the app in a basement.
         const outcome = await raceTimeout(batch, BOOTSTRAP_TIMEOUT_MS);
 
-        setUserDataLoaded(true); // Mark user data as loaded — dashboard can render
+        setUserDataLoaded(true); // no-op if the first-paint race already did it
 
         if (outcome === 'timeout') {
           // Let the next auth event have another go. The user is already
@@ -580,8 +623,19 @@ function App() {
           }
         });
       } else {
+        // A null BEFORE we have ever seen a user is Firebase's persistence
+        // still loading, not a sign-out. There is nothing to tear down at that
+        // point anyway — and running this branch is what used to overwrite the
+        // active-session flag, so the launch gate read "signed out" from a
+        // value this very launch had just written.
+        if (!sawUserRef.current) return;
         // User signed out, clean up listeners and notification token
         initialisedForUidRef.current = null;
+        // Nothing to wait for any more: Firebase clears its persistence record
+        // on sign-out, so the next launch reads "no session" by itself. This
+        // just makes the CURRENT render agree immediately, so the sign-in
+        // screen appears on the tap rather than after the restore grace.
+        setHadSession(false);
         firestoreService.cleanup();
         documentService.cleanup();
         useJobStore.getState().cleanup();
@@ -591,6 +645,32 @@ function App() {
     };
 
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      // Who it is, and the fact that we now know, in ONE update — not split
+      // across the async handler below. handleAuthChange awaits two
+      // AsyncStorage reads (and sometimes a whole clearAllData) before it
+      // reaches its own setUser, so announcing "auth resolved" here while
+      // `user` was still null opened a window where the gate saw a signed-out
+      // app and rendered the sign-in screen. That window was measured at ~1.1s
+      // on an API 36 emulator and is exactly the "Welcome back" flash.
+      //
+      // A null is only a sign-out if the app asked for one.
+      //
+      // The old guard here was `auth.currentUser` — the theory being that it
+      // stays populated through a token refresh. It does not: on a cold start
+      // Firebase delivers the restored user and then, ~1s later, a second null
+      // with auth.currentUser ALSO null. That null tore the app down to the
+      // sign-in screen mid-launch, and it is the flash that survived every fix
+      // aimed at the launch gate, because it lands after the session is
+      // already restored. See services/authIntent for what is and isn't
+      // covered.
+      if (!currentUser && sawUserRef.current && !consumeSignOutIntent()) return;
+      if (!currentUser && auth.currentUser) return;
+      if (currentUser) sawUserRef.current = true;
+      setUser(currentUser);
+      // Firebase has spoken. Whether that settles the question is isAuthKnown's
+      // call, not ours — a null here may just be the persistence read still
+      // running.
+      setFirebaseReported(true);
       // Recovery lives here rather than inside the handler so the whole body
       // above — including the awaits that sit outside their own try/catch
       // (clearAllData, the AsyncStorage writes) — is covered. A throw used to
@@ -613,6 +693,37 @@ function App() {
     };
   }, []);
 
+  // "Was somebody signed in last time?" — asked of the device, because Firebase
+  // cannot answer it. Its RN persistence fires onAuthStateChanged with `null`
+  // before the persisted session is read, auth.currentUser is null then too,
+  // and authStateReady() resolves on that same first emission. Both were tried
+  // against a real Android cold start; both still showed the sign-in screen to
+  // a signed-in tradie for ~1.1s. See isAuthKnown.
+  useEffect(() => {
+    let cancelled = false;
+    // Firebase's own persistence record, not a flag of ours. It exists if and
+    // only if there is a session to restore, needs no bookkeeping at sign-in or
+    // sign-out, and is already correct for every install that updates into this
+    // build. A flag we maintained ourselves would have to be migrated, and
+    // would strand a signed-out tradie on the splash for the whole restore
+    // grace period on every launch until something wrote it.
+    AsyncStorage.getItem(AUTH_PERSISTENCE_KEY)
+      .then((session) => {
+        if (!cancelled) setHadSession(session != null);
+      })
+      .catch(() => {
+        // Unreadable storage: assume no session rather than stalling the gate.
+        if (!cancelled) setHadSession(false);
+      });
+    // Bounded, so a session that was revoked server-side still reaches the
+    // sign-in screen instead of sitting on the logo until SPLASH_MAX_MS.
+    const timer = setTimeout(() => setRestoreDeadlinePassed(true), SESSION_RESTORE_TIMEOUT_MS);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, []);
+
   // Icons + Archivo. Both must land before first paint or the app renders one
   // face and then reflows into another. Failure still opens the gate: the type
   // scale falls back to the system font, which is a slightly plainer app rather
@@ -628,7 +739,7 @@ function App() {
   // here before it shipped. A fresh install falls through to 'system'. No-ops
   // once a preference exists, so it is safe to re-run on every auth change.
   useEffect(() => {
-    void seedAppearanceForExistingUser(!!user && isOnboarded);
+    void seedAppearanceForExistingUser(!!user && isOnboarded === true);
   }, [user, isOnboarded]);
 
   // Apple req 1.5: warm up Tap to Pay at launch and on every return to the
@@ -794,12 +905,28 @@ function App() {
   // app's lifetime. Children swap inside (AuthScreen ↔ onboarding ↔ main app)
   // so signing in doesn't tear down and rebuild the entire React tree, which
   // is what caused the "app reloads on sign-in" symptom.
-  const splashVisible =
-    !DEMO_CAPTURE &&
-    !splashExpired &&
-    (isLoading || !fontsLoaded || (!!user && !userDataLoaded));
-  const showAuthScreen = !DEMO_CAPTURE && requiresAuth && !user;
-  const showMainApp = DEMO_CAPTURE || isOnboarded;
+  // Which of splash / sign-in / onboarding / app to show. The ordering rules
+  // live in resolveLaunchGate so they can be asserted without mounting the app
+  // — they were wrong in four ways at once, and every one of them was only
+  // visible as a flash on a real Android cold start. Auth is always required —
+  // the old requiresAuth constant was hardcoded true and is folded in here.
+  const authResolved = isAuthKnown({
+    signedIn: !!user,
+    firebaseReported,
+    hadSession,
+    restoreDeadlinePassed,
+  });
+  const { splashVisible, showAuthScreen, showMainApp } = resolveLaunchGate({
+    demoCapture: DEMO_CAPTURE,
+    splashExpired,
+    localLoading: isLoading,
+    fontsLoaded,
+    authResolved,
+    signedIn: !!user,
+    userDataLoaded,
+    isOnboarded,
+    hasLocalBusiness,
+  });
 
   return (
     <GestureHandlerRootView style={appStyles.flex}>
