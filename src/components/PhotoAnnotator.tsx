@@ -22,6 +22,9 @@ import Svg, { Path, Line, Ellipse, G, Polygon, Text as SvgText, Rect } from 'rea
 import { captureRef } from 'react-native-view-shot';
 import { makeStyles, useThemeColors } from '../theme';
 import { useModalInsets } from '../hooks/useModalInsets';
+// A react-native <Modal> is its own window, so the app's keyboard provider
+// cannot see it — see hooks/useKeyboardHeight.
+import { useKeyboardHeight } from '../hooks/useKeyboardHeight';
 import { selectionTap, lightTap } from '../utils/haptics';
 
 // --- Types ---
@@ -125,6 +128,7 @@ export function PhotoAnnotator({ visible, imageUri, onSave, onCancel }: PhotoAnn
   // A <Modal> sits outside the SafeAreaProvider, and edge-to-edge draws it
   // under Android's navigation bar — see utils/modalInsets.
   const modalInsets = useModalInsets(20);
+  const keyboardInset = useKeyboardHeight();
   const styles = useStyles();
   const themeColors = useThemeColors();
   // Tool & style state
@@ -637,7 +641,7 @@ export function PhotoAnnotator({ visible, imageUri, onSave, onCancel }: PhotoAnn
       presentationStyle="fullScreen"
       onRequestClose={onCancel}
     >
-      <View style={styles.container}>
+      <View style={[styles.container, { paddingBottom: keyboardInset }]}>
         {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity onPress={onCancel} style={styles.headerButton}>

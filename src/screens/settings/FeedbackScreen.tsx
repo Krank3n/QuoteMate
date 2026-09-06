@@ -15,6 +15,11 @@ import {
   ActivityIndicator,
   Linking,
 } from 'react-native';
+// Not react-native's: under edge-to-edge Android no longer resizes the window
+// for the keyboard, so RN's KeyboardAvoidingView does nothing there — and a
+// screen with no wrapper at all is the same bug without the tell-tale. See
+// components/keyboardAvoidance.guard.test.ts.
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import {
   Text,
   Surface,
@@ -77,7 +82,7 @@ export function FeedbackScreen() {
   };
 
   return (
-    <View style={styles.container}>
+    <KeyboardAvoidingView style={styles.container} behavior="padding">
       <GridBackground />
       <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.scrollContent}>
         <WebContainer>
@@ -197,7 +202,7 @@ export function FeedbackScreen() {
         message={modal.message}
         showConfetti={modal.type === 'success'}
       />
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 

@@ -10,7 +10,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { View, StyleSheet, Pressable, Linking, Platform, TouchableOpacity } from 'react-native';
 import { NestableScrollContainer } from 'react-native-draggable-flatlist';
-import { Text, Card, Button, TextInput, Snackbar } from 'react-native-paper';
+import { Text, Card, Button, Snackbar } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { formatDistanceToNow } from 'date-fns';

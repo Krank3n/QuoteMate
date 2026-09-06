@@ -17,6 +17,12 @@ import {
   Alert,
   FlatList,
 } from 'react-native';
+// Not react-native's: under edge-to-edge Android no longer resizes the window
+// for the keyboard, so RN's KeyboardAvoidingView does nothing there — and a
+// screen with no wrapper at all is the same bug without the tell-tale. Wraps
+// both the list (rows are edited inline) and the New Section modal, which is a
+// paper <Modal> in the same window. See components/keyboardAvoidance.guard.test.ts.
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import {
   Text,
   Button,
@@ -2321,7 +2327,7 @@ export function MaterialsListScreen() {
   );
 
   return (
-    <View style={styles.container}>
+    <KeyboardAvoidingView style={styles.container} behavior="padding">
       <GridBackground />
       <FlatList
           data={showMaterialsList ? flatData : []}
@@ -2365,6 +2371,7 @@ export function MaterialsListScreen() {
           }}
           contentContainerStyle={styles.newSectionModal}
         >
+          <KeyboardAvoidingView behavior="padding">
           <Text style={styles.newSectionModalTitle}>New Section</Text>
           <TextInput
             label="Section Name"
@@ -2436,6 +2443,7 @@ export function MaterialsListScreen() {
               <Text style={styles.newSectionSaveText}>Create</Text>
             </TouchableOpacity>
           </View>
+          </KeyboardAvoidingView>
         </Modal>
       </Portal>
       )}
@@ -2929,7 +2937,7 @@ export function MaterialsListScreen() {
 
       {/* Unsaved-changes confirmation when navigating away */}
       <AlertModal {...unsavedModalProps} />
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 

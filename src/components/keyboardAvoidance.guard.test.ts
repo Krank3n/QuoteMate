@@ -55,6 +55,13 @@ const sources = walk(SRC).map((path) => ({ path: relative(SRC, path), text: read
 /** A react-native import block that pulls in KeyboardAvoidingView. */
 const RN_KAV_IMPORT = /import\s*\{[^}]*\bKeyboardAvoidingView\b[^}]*\}\s*from\s*['"]react-native['"]/s;
 
+/**
+ * A react-native <Modal> — its own window. Matches `Modal` or `Modal as
+ * RNModal` in a react-native import block. Paper's Modal comes from
+ * 'react-native-paper' and is a different thing entirely.
+ */
+const RN_MODAL_IMPORT = /import\s*\{[^}]*\bModal\b(?:\s+as\s+\w+)?[^}]*\}\s*from\s*['"]react-native['"]/s;
+
 /** The Android no-op: padding on iOS, nothing on Android. */
 const IOS_ONLY_BEHAVIOR = /behavior=\{\s*Platform\.OS\s*===\s*['"]ios['"]\s*\?\s*['"](?:padding|height|position)['"]\s*:\s*undefined\s*\}/;
 
@@ -82,12 +89,15 @@ describe('Android keyboard avoidance', () => {
   });
 
   it('no react-native <Modal> wraps its content in a KeyboardAvoidingView', () => {
-    // The provider cannot see a Modal's own window on Android. Modals take
-    // hooks/useKeyboardHeight instead — see the note at the top of this file.
+    // Only react-native's Modal is a separate window. A react-native-paper
+    // <Modal> renders through <Portal> into the app's own tree — same window,
+    // so the provider reaches it and a KeyboardAvoidingView is correct there.
+    // Telling them apart matters: banning both would forbid the right fix on
+    // half these files.
     const offenders = sources
-      .filter((f) => /<(?:RN)?Modal\b/.test(f.text) && /<KeyboardAvoidingView/.test(f.text))
+      .filter((f) => RN_MODAL_IMPORT.test(f.text) && /<KeyboardAvoidingView/.test(f.text))
       .map((f) => f.path);
-    expect(offenders, 'a modal must use useKeyboardHeight, not a KeyboardAvoidingView').toEqual([]);
+    expect(offenders, 'a react-native Modal must use useKeyboardHeight instead').toEqual([]);
   });
 
   it('the modals that used to disable Android avoidance now read the keyboard themselves', () => {
@@ -108,5 +118,82 @@ describe('Android keyboard avoidance', () => {
     expect(RN_KAV_IMPORT.test("import { KeyboardAvoidingView } from 'react-native-keyboard-controller';")).toBe(false);
     expect(IOS_ONLY_BEHAVIOR.test("behavior={Platform.OS === 'ios' ? 'padding' : undefined}")).toBe(true);
     expect(IOS_ONLY_BEHAVIOR.test('behavior="padding"')).toBe(false);
+  });
+});
+
+/**
+ * The gap this guard originally missed.
+ *
+ * The first pass banned the OLD spelling — `behavior={ios ? 'padding' :
+ * undefined}` — on the assumption that a surface with no wrapper at all was
+ * fine. It was not. A screen without a KeyboardAvoidingView also used to work,
+ * for exactly the same reason: adjustResize shrank the window and its
+ * ScrollView followed. Edge-to-edge broke those too, and they carry no
+ * tell-tale for a regex to find.
+ *
+ * Proven on an emulator (6 Sep 2026): Settings -> Business Details -> Brand
+ * Colour, tap the Hex field. The keyboard docks, the page does not move a
+ * pixel, and the field being typed into is behind it.
+ *
+ * So: any top-level surface with a text input needs a handler, and new ones
+ * have to say why if they don't.
+ */
+describe('every surface with a text input handles the keyboard', () => {
+  /** Anything that lifts content clear of the keyboard, by any mechanism. */
+  const HANDLED =
+    /KeyboardAvoidingView|useKeyboardHeight|KeyboardAwareScrollView|KeyboardStickyView|keyboardHeight|Keyboard\.addListener|keyboardOffset/;
+
+  /**
+   * Surfaces that need no handler of their own, with the reason. A new entry
+   * here should be a fact about the layout, not a shrug.
+   */
+  const EXEMPT: Record<string, string> = {
+    'screens/DiscoverSuppliersScreen.tsx':
+      'the only input is a search bar pinned above the list, which the keyboard opens below',
+    'screens/NewQuote/AddMaterial/ManualEntrySection.tsx':
+      'not a surface — a form rendered by AddMaterialScreen, both inside its BottomSheet and in the screen body, and both of those handle the keyboard',
+  };
+
+  /** Renders inside <BottomSheet>, which translates itself by the keyboard height. */
+  const INSIDE_SAFE_PARENT = /<BottomSheet\b/;
+
+  it('no screen or modal has an unhandled text input', () => {
+    const offenders = sources
+      .filter((f) => /TextInput/.test(f.text))
+      .filter((f) => !HANDLED.test(f.text))
+      .filter((f) => !INSIDE_SAFE_PARENT.test(f.text))
+      .filter((f) => f.path.startsWith('screens/') || /<(RN)?Modal\b/.test(f.text))
+      .filter((f) => !(f.path in EXEMPT))
+      .map((f) => f.path);
+    expect(offenders, 'add a handler, or an EXEMPT entry saying why none is needed').toEqual([]);
+  });
+
+  it('every exemption names a real file, so the list cannot rot', () => {
+    for (const path of Object.keys(EXEMPT)) {
+      expect(sources.some((f) => f.path === path), path).toBe(true);
+    }
+  });
+
+  it('the settings screens that were proven broken on device now handle it', () => {
+    for (const name of [
+      'BusinessProfile', 'BusinessDefaults', 'AccountSettings', 'PaymentMethods',
+      'JobTemplateEditor', 'EditSupplier', 'Feedback', 'CallKatie',
+    ]) {
+      const file = sources.find((f) => f.path === `screens/settings/${name}Screen.tsx`);
+      expect(file, name).toBeDefined();
+      expect(HANDLED.test(file!.text), name).toBe(true);
+    }
+  });
+
+  it('the three surfaces called out by name are covered', () => {
+    for (const path of [
+      'screens/NewQuote/MaterialsListScreen.tsx',  // materials list
+      'components/DocumentEmailPreviewModal.tsx',  // send screen
+      'screens/AssistantScreen.tsx',               // Mate
+    ]) {
+      const file = sources.find((f) => f.path === path);
+      expect(file, path).toBeDefined();
+      expect(HANDLED.test(file!.text), path).toBe(true);
+    }
   });
 });

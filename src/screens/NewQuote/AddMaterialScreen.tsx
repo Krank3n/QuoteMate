@@ -16,6 +16,12 @@ import {
   Linking,
   Keyboard,
 } from 'react-native';
+// Not react-native's: under edge-to-edge Android no longer resizes the window
+// for the keyboard, so RN's KeyboardAvoidingView does nothing there — and a
+// screen with no wrapper at all is the same bug without the tell-tale. The
+// manual-entry form renders in the screen body as well as inside the
+// BottomSheet (which lifts itself). See components/keyboardAvoidance.guard.test.ts.
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useAddMaterialStyles } from './AddMaterial/styles';
 import { ManualEntrySection } from './AddMaterial/ManualEntrySection';
 import {
@@ -1853,7 +1859,7 @@ export function AddMaterialScreen() {
   }, [isEditMode, isSavedItemEditMode, isSavedItemCreateMode, supplierBookOnly, navigation]);
 
   return (
-    <View style={styles.container}>
+    <KeyboardAvoidingView style={styles.container} behavior="padding">
       <GridBackground />
       {/* Tab Selector - hidden in edit mode, saved-item modes, and supplier-book-only mode */}
       {!isEditMode && !isSavedItemMode && !supplierBookOnly && (
@@ -2092,6 +2098,6 @@ export function AddMaterialScreen() {
         {snackbarMessage}
       </Snackbar>
 
-    </View>
+    </KeyboardAvoidingView>
   );
 }

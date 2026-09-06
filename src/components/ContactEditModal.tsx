@@ -13,6 +13,12 @@
 
 import React, { useEffect, useState } from 'react';
 import { ScrollView, View } from 'react-native';
+// A paper <Modal> renders through <Portal> into the app's own React tree — the
+// same window — so the keyboard provider reaches it and the controller's
+// KeyboardAvoidingView works here. (A react-native <Modal> is a separate
+// window and needs hooks/useKeyboardHeight instead.) Paper does no keyboard
+// avoidance of its own. See components/keyboardAvoidance.guard.test.ts.
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { Button, Modal, Portal, Text, TextInput } from 'react-native-paper';
 
 import { makeStyles, useThemeColors } from '../theme';
@@ -100,6 +106,7 @@ export function ContactEditModal({
         onDismiss={onDismiss}
         contentContainerStyle={styles.modalContainer}
       >
+  <KeyboardAvoidingView behavior="padding">
         <Text style={styles.modalTitle}>{title ?? 'Edit customer'}</Text>
         {/* flexGrow 0 so the modal hugs its fields instead of always standing
             80% tall with dead space under the buttons; flexShrink 1 so the
@@ -191,6 +198,7 @@ export function ContactEditModal({
             Save
           </Button>
         </View>
+        </KeyboardAvoidingView>
       </Modal>
     </Portal>
   );

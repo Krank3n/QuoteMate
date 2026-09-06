@@ -12,6 +12,11 @@ import {
   Alert,
   TouchableOpacity,
 } from 'react-native';
+// Not react-native's: under edge-to-edge Android no longer resizes the window
+// for the keyboard, so RN's KeyboardAvoidingView does nothing there — and a
+// screen with no wrapper at all is the same bug without the tell-tale. See
+// components/keyboardAvoidance.guard.test.ts.
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import {
   Text,
   TextInput,
@@ -340,7 +345,7 @@ export function BusinessProfileScreen() {
   };
 
   return (
-    <View style={styles.container}>
+    <KeyboardAvoidingView style={styles.container} behavior="padding">
       <GridBackground />
       <ScrollView
         style={styles.scrollView}
@@ -630,7 +635,7 @@ export function BusinessProfileScreen() {
       />
 
       <AlertModal {...unsavedModalProps} />
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
