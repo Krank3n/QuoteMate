@@ -121,6 +121,21 @@ async function hasPriorHardBounce(to: string): Promise<boolean> {
   }
 }
 
+/**
+ * The light palette the tradie-facing emails share with the customer-facing
+ * quote and invoice templates further down this file. Same ink, same rules,
+ * same green — a tradie who has just sent a quote out of QuoteMate should not
+ * get a reply from QuoteMate that looks like a different product.
+ *
+ * The old shell was a dark slate card (#0f172a page on a #1e293b card). It
+ * predated the quote-email design pass and never got the same treatment: no
+ * forced-dark opt-out, no full-bleed on a phone, and a palette that shares
+ * nothing with the document the tradie's own customer receives.
+ */
+const QM_GREEN = '#059669';      // button fills, the card's top rule, hero numbers
+const QM_GREEN_INK = '#047857';  // accent TEXT — #059669 is too light at 13px on white
+const QM_BLUE_INK = '#0369a1';   // secondary accent; the light-mode twin of the app's #5AB9EA
+
 // Shared email wrapper (base layout for all emails)
 function wrapEmailTemplate(content: string, options?: { unsubscribeUrl?: string; preheader?: string }): string {
   const { unsubscribeUrl, preheader } = options || {};
@@ -131,15 +146,36 @@ function wrapEmailTemplate(content: string, options?: { unsubscribeUrl?: string;
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <!-- Opt out of client-forced dark mode, same as the quote/invoice template.
+       Apple Mail and Outlook otherwise invert the card to a muddy grey and
+       wash out the green on the buttons. -->
+  <meta name="color-scheme" content="light">
+  <meta name="supported-color-schemes" content="light">
   <title>QuoteMate</title>
   <!--[if mso]>
   <style>table,td{font-family:Arial,sans-serif!important}</style>
   <![endif]-->
   <style>
+    :root { color-scheme: light; supported-color-schemes: light; }
     @media only screen and (max-width: 600px) {
-      .qm-outer-pad { padding: 16px 8px !important; }
-      .qm-card-pad { padding: 24px 18px !important; }
-      .qm-logo-pad { padding: 0 0 20px !important; }
+      /* Merge the page background into the card so the email reads as one
+         continuous surface instead of a card floating on a page. */
+      .qm-body-bg { background-color: #ffffff !important; }
+      .qm-page-bg { background-color: #ffffff !important; }
+      .qm-outer-pad { padding: 0 !important; }
+      .qm-card-shell {
+        border-left: 0 !important;
+        border-right: 0 !important;
+        border-bottom: 0 !important;
+        border-radius: 0 !important;
+      }
+      .qm-card-pad { padding: 26px 20px !important; }
+      /* The outer padding is gone on a phone, so the logo and footer carry
+         their own. */
+      .qm-logo-pad { padding: 26px 0 18px !important; }
+      .qm-footer-pad { padding: 22px 20px 30px !important; }
+      /* Buttons go full-bleed so the tap target spans the screen. */
+      .qm-btn { width: 100% !important; max-width: 100% !important; }
       .qm-day-cell { padding: 0 3px !important; }
       .qm-day-link { padding: 12px 4px !important; }
       .qm-day-num { font-size: 17px !important; }
@@ -150,24 +186,24 @@ function wrapEmailTemplate(content: string, options?: { unsubscribeUrl?: string;
     }
   </style>
 </head>
-<body style="margin:0;padding:0;background-color:#0f172a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
-  ${preheader ? `<div style="display:none;font-size:1px;color:#0f172a;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;">${preheader}</div>` : ''}
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#0f172a;">
+<body class="qm-body-bg" style="margin:0;padding:0;background-color:#f7f7f7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  ${preheader ? `<div style="display:none;font-size:1px;color:#f7f7f7;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;">${escapeHtml(preheader)}${'&#847;&zwnj;&nbsp;'.repeat(60)}</div>` : ''}
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" class="qm-page-bg" style="background-color:#f7f7f7;">
     <tr>
       <td align="center" class="qm-outer-pad" style="padding:32px 16px;">
         <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;">
           <!-- Logo -->
           <tr>
-            <td align="center" class="qm-logo-pad" style="padding:0 0 32px;">
-              <img src="https://hansendev.web.app/email-assets/logo.png" alt="QuoteMate" width="160" style="display:block;width:160px;height:auto;border-radius:20px;" />
+            <td align="center" class="qm-logo-pad" style="padding:0 0 20px;">
+              <img src="https://hansendev.web.app/email-assets/logo.png" alt="QuoteMate" width="76" style="display:block;width:76px;height:auto;border-radius:16px;" />
             </td>
           </tr>
           <!-- Main Card -->
           <tr>
             <td>
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#1e293b;border-radius:16px;overflow:hidden;border:1px solid #334155;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" class="qm-card-shell" style="background-color:#ffffff;border-radius:14px;overflow:hidden;border:1px solid #e5e7eb;border-top:4px solid ${QM_GREEN};">
                 <tr>
-                  <td class="qm-card-pad" style="padding:40px 36px;">
+                  <td class="qm-card-pad" style="padding:34px 32px;">
                     ${content}
                   </td>
                 </tr>
@@ -176,13 +212,13 @@ function wrapEmailTemplate(content: string, options?: { unsubscribeUrl?: string;
           </tr>
           <!-- Footer -->
           <tr>
-            <td style="padding:28px 0 0;text-align:center;">
-              <p style="color:#475569;font-size:13px;margin:0 0 6px;line-height:1.5;">
+            <td class="qm-footer-pad" style="padding:22px 0 0;text-align:center;">
+              <p style="color:#6b7280;font-size:13px;margin:0 0 6px;line-height:1.5;">
                 QuoteMate &mdash; Professional Quoting for Tradies
               </p>
               ${unsubscribeUrl ? `
                 <p style="margin:0;">
-                  <a href="${unsubscribeUrl}" style="color:#64748b;font-size:12px;text-decoration:underline;">Unsubscribe from marketing emails</a>
+                  <a href="${unsubscribeUrl}" style="color:#6b7280;font-size:12px;text-decoration:underline;">Unsubscribe from marketing emails</a>
                 </p>
               ` : ''}
             </td>
@@ -197,16 +233,16 @@ function wrapEmailTemplate(content: string, options?: { unsubscribeUrl?: string;
 
 // Reusable component: status badge
 function badge(text: string, bgColor: string, textColor: string): string {
-  return `<span style="display:inline-block;background:${bgColor};color:${textColor};font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;padding:4px 10px;border-radius:20px;">${text}</span>`;
+  return `<span style="display:inline-block;background:${bgColor};color:${textColor};font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;padding:5px 11px;border-radius:20px;">${text}</span>`;
 }
 
 // Reusable component: info card row
 function infoRow(label: string, value: string, isLast = false): string {
   return `
     <tr>
-      <td style="padding:10px 0;${!isLast ? 'border-bottom:1px solid #334155;' : ''}">
-        <span style="color:#94a3b8;font-size:13px;">${label}</span><br/>
-        <span style="color:#f1f5f9;font-size:15px;font-weight:600;">${value}</span>
+      <td style="padding:10px 0;${!isLast ? 'border-bottom:1px solid #e5e7eb;' : ''}">
+        <span style="color:#6b7280;font-size:13px;">${label}</span><br/>
+        <span style="color:#111827;font-size:15px;font-weight:600;">${value}</span>
       </td>
     </tr>`;
 }
@@ -214,22 +250,34 @@ function infoRow(label: string, value: string, isLast = false): string {
 // App deep link - tries custom scheme first (opens app), falls back to Play Store / App Store
 const APP_LINK = 'https://hansendev.web.app/open';
 
-// Reusable component: CTA button
-function ctaButton(text: string, color: string = '#009868', href: string = APP_LINK): string {
+/**
+ * Reusable component: CTA button.
+ *
+ * Built as a table cell rather than a padded `<a>` for the same reason the
+ * quote email's Accept button is — Outlook only paints the background on the
+ * cell — and it goes full-bleed on a phone through `.qm-btn`.
+ */
+function ctaButton(text: string, color: string = QM_GREEN, href: string = APP_LINK): string {
   return `
-    <table role="presentation" cellpadding="0" cellspacing="0" style="margin:28px 0 0;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:28px 0 0;">
       <tr>
-        <td style="background:${color};border-radius:10px;text-align:center;">
-          <a href="${href}" target="_blank" style="display:inline-block;padding:14px 32px;color:#ffffff;font-size:15px;font-weight:700;text-decoration:none;">${text}</a>
+        <td align="center">
+          <table role="presentation" width="320" cellpadding="0" cellspacing="0" class="qm-btn" style="width:320px;max-width:100%;margin:0 auto;">
+            <tr>
+              <td class="qm-btn" style="background:${color};border:1px solid ${color};border-radius:10px;text-align:center;">
+                <a href="${href}" target="_blank" style="display:block;padding:15px 24px;color:#ffffff;font-size:16px;font-weight:700;line-height:1.2;text-decoration:none;">${text}</a>
+              </td>
+            </tr>
+          </table>
         </td>
       </tr>
     </table>`;
 }
 
-// Reusable component: info card (dark card within card)
+// Reusable component: info card (inset panel within the card)
 function infoCard(rows: string, accentColor?: string): string {
   return `
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#0f172a;border-radius:12px;${accentColor ? `border-left:4px solid ${accentColor};` : ''}margin:24px 0;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;${accentColor ? `border-left:4px solid ${accentColor};` : ''}margin:24px 0;">
       <tr>
         <td style="padding:20px 24px;">
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
@@ -247,7 +295,7 @@ function featureBullet(icon: string, text: string): string {
       <tr>
         <td width="28" valign="top" style="font-size:16px;">${icon}</td>
         <td valign="top" style="padding-left:8px;">
-          <p style="color:#cbd5e1;font-size:14px;margin:0;line-height:1.5;">${text}</p>
+          <p style="color:#374151;font-size:14px;margin:0;line-height:1.5;">${text}</p>
         </td>
       </tr>
     </table>`;
@@ -536,12 +584,12 @@ function getNextWeekdaysSydney(count: number): Array<{ iso: string; month: strin
 function calendarDayButton(weekday: string, dayNum: number, monthShort: string, href: string): string {
   return `
     <td valign="top" class="qm-day-cell" style="width:33.33%;padding:0 4px;">
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#0f172a;border:1px solid #009868;border-radius:10px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f9fafb;border:1px solid ${QM_GREEN};border-radius:10px;">
         <tr>
           <td align="center" style="padding:0;">
-            <a href="${href}" target="_blank" class="qm-day-link" style="display:block;padding:14px 6px;text-decoration:none;color:#f8fafc;">
-              <span class="qm-day-wd" style="display:block;color:#00c897;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;margin:0 0 4px;">${weekday}</span>
-              <span class="qm-day-num" style="display:block;color:#f8fafc;font-size:19px;font-weight:700;line-height:1.1;">${dayNum} ${monthShort}</span>
+            <a href="${href}" target="_blank" class="qm-day-link" style="display:block;padding:14px 6px;text-decoration:none;color:#111827;">
+              <span class="qm-day-wd" style="display:block;color:${QM_GREEN_INK};font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;margin:0 0 4px;">${weekday}</span>
+              <span class="qm-day-num" style="display:block;color:#111827;font-size:19px;font-weight:700;line-height:1.1;">${dayNum} ${monthShort}</span>
             </a>
           </td>
         </tr>
@@ -562,14 +610,14 @@ export function sendWelcomeEmail(to: string, businessName: string, userId: strin
     .join('');
 
   const content = wrapEmailTemplate(`
-    <p style="color:#00c897;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;margin:0 0 10px;">A quick hello</p>
-    <h1 class="qm-h1" style="color:#f8fafc;font-size:26px;font-weight:700;margin:0 0 16px;line-height:1.3;">
+    <p style="color:${QM_GREEN_INK};font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;margin:0 0 10px;">A quick hello</p>
+    <h1 class="qm-h1" style="color:#111827;font-size:26px;font-weight:700;margin:0 0 16px;line-height:1.3;">
       G'day${businessName ? `, ${greeting}` : ''} &mdash; I'm Tom, I built QuoteMate.
     </h1>
-    <p class="qm-body" style="color:#cbd5e1;font-size:15px;line-height:1.65;margin:0 0 16px;">
+    <p class="qm-body" style="color:#374151;font-size:15px;line-height:1.65;margin:0 0 16px;">
       Most tradies pick QuoteMate up in about 8 minutes once someone walks them through it. I'd love to do that with you &mdash; show you the bits that matter for your trade and answer anything you're stuck on.
     </p>
-    <p class="qm-body" style="color:#cbd5e1;font-size:15px;line-height:1.65;margin:0 0 20px;">
+    <p class="qm-body" style="color:#374151;font-size:15px;line-height:1.65;margin:0 0 20px;">
       Pick a day that suits and I'll send through a time:
     </p>
 
@@ -580,27 +628,27 @@ export function sendWelcomeEmail(to: string, businessName: string, userId: strin
     </table>
 
     <p style="text-align:center;margin:0 0 28px;">
-      <a href="${TOM_CALENDLY_BASE}" target="_blank" style="color:#5ab9ea;font-size:14px;text-decoration:underline;">Or pick another time &rarr;</a>
+      <a href="${TOM_CALENDLY_BASE}" target="_blank" style="color:${QM_BLUE_INK};font-size:14px;text-decoration:underline;">Or pick another time &rarr;</a>
     </p>
 
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#0f172a;border-radius:12px;border-left:4px solid #5ab9ea;margin:0 0 22px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;border-left:4px solid ${QM_BLUE_INK};margin:0 0 22px;">
       <tr>
         <td class="qm-video-card-pad" style="padding:18px 22px;">
-          <p style="color:#f8fafc;font-size:15px;font-weight:600;margin:0 0 4px;">Prefer to suss it out solo first?</p>
-          <p style="color:#94a3b8;font-size:14px;line-height:1.55;margin:0 0 14px;">
+          <p style="color:#111827;font-size:15px;font-weight:600;margin:0 0 4px;">Prefer to suss it out solo first?</p>
+          <p style="color:#6b7280;font-size:14px;line-height:1.55;margin:0 0 14px;">
             There's a 5-minute walkthrough on the homepage that covers the basics.
           </p>
-          <a href="https://quotemateapp.au" target="_blank" style="display:inline-block;background:#5ab9ea;color:#0f172a;font-size:14px;font-weight:700;padding:10px 18px;border-radius:8px;text-decoration:none;">
+          <a href="https://quotemateapp.au" target="_blank" style="display:inline-block;background:${QM_BLUE_INK};color:#ffffff;font-size:14px;font-weight:700;padding:10px 18px;border-radius:8px;text-decoration:none;">
             Watch the walkthrough &rarr;
           </a>
         </td>
       </tr>
     </table>
 
-    <p class="qm-body" style="color:#cbd5e1;font-size:15px;line-height:1.65;margin:0 0 4px;">
+    <p class="qm-body" style="color:#374151;font-size:15px;line-height:1.65;margin:0 0 4px;">
       Either way &mdash; if anything trips you up, just reply to this email. Goes straight to me.
     </p>
-    <p style="color:#f8fafc;font-size:15px;line-height:1.65;margin:20px 0 0;">
+    <p style="color:#111827;font-size:15px;line-height:1.65;margin:20px 0 0;">
       Cheers,<br/>
       <strong>Tom</strong>
     </p>
@@ -624,25 +672,25 @@ export function sendQuoteSentEmail(
   userId: string
 ): Promise<boolean> {
   const content = wrapEmailTemplate(`
-    <p style="color:#94a3b8;font-size:14px;margin:0 0 8px;">Quote delivered</p>
-    <h1 style="color:#f8fafc;font-size:26px;font-weight:700;margin:0 0 20px;line-height:1.3;">
+    <p style="color:#6b7280;font-size:14px;margin:0 0 8px;">Quote delivered</p>
+    <h1 style="color:#111827;font-size:26px;font-weight:700;margin:0 0 20px;line-height:1.3;">
       Your quote is on its way
     </h1>
-    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 4px;">
-      Quote <strong style="color:#f8fafc;">#${quoteNumber}</strong> has been sent to <strong style="color:#f8fafc;">${customerName}</strong>.
+    <p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 4px;">
+      Quote <strong style="color:#111827;">#${quoteNumber}</strong> has been sent to <strong style="color:#111827;">${customerName}</strong>.
     </p>
 
     ${infoCard(
       infoRow('Customer', customerName) +
       infoRow('Quote Number', `#${quoteNumber}`) +
-      infoRow('Total', `$${total.toFixed(2)}`, true),
-      '#5ab9ea'
+      infoRow('Total', `${formatMoney(total)}`, true),
+      QM_BLUE_INK
     )}
 
-    <p style="color:#94a3b8;font-size:14px;line-height:1.6;margin:0;">
+    <p style="color:#6b7280;font-size:14px;line-height:1.6;margin:0;">
       We'll notify you as soon as your client responds.
     </p>
-  `, { preheader: `Quote #${quoteNumber} sent to ${customerName} for $${total.toFixed(2)}` });
+  `, { preheader: `Quote #${quoteNumber} sent to ${customerName} for ${formatMoney(total)}` });
 
   return sendEmail({
     to,
@@ -702,31 +750,31 @@ export async function sendQuoteAcceptedEmail(
 
   const content = wrapEmailTemplate(`
     <div style="text-align:center;margin:0 0 24px;">
-      <div style="background:#064e3b;width:56px;height:56px;border-radius:50%;display:inline-block;line-height:56px;font-size:28px;margin:0 0 16px;">
+      <div style="background:#ecfdf5;color:#047857;width:56px;height:56px;border-radius:50%;display:inline-block;line-height:56px;font-size:28px;margin:0 0 16px;">
         &#10003;
       </div>
-      ${badge('ACCEPTED', '#064e3b', '#00c897')}
+      ${badge('ACCEPTED', '#ecfdf5', QM_GREEN_INK)}
     </div>
-    <h1 style="color:#f8fafc;font-size:26px;font-weight:700;margin:0 0 12px;text-align:center;line-height:1.3;">
+    <h1 style="color:#111827;font-size:26px;font-weight:700;margin:0 0 12px;text-align:center;line-height:1.3;">
       You've won the job!
     </h1>
-    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 4px;text-align:center;">
-      <strong style="color:#f8fafc;">${customerName}</strong> has accepted your quote.
+    <p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 4px;text-align:center;">
+      <strong style="color:#111827;">${customerName}</strong> has accepted your quote.
     </p>
 
     ${infoCard(
       infoRow('Customer', customerName) +
       infoRow('Quote Number', `#${quoteNumber}`) +
-      infoRow('Total', `$${total.toFixed(2)}`, !clientNotes) +
+      infoRow('Total', `${formatMoney(total)}`, !clientNotes) +
       (clientNotes ? infoRow('Client Notes', clientNotes, true) : ''),  
-      '#00c897'
+      QM_GREEN_INK
     )}
 
-    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 0;text-align:center;">
+    <p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 0;text-align:center;">
       ${hook.line}
     </p>
-    ${ctaButton(hook.cta, '#009868')}
-  `, { preheader: `Great news! ${customerName} accepted quote #${quoteNumber} for $${total.toFixed(2)}` });
+    ${ctaButton(hook.cta)}
+  `, { preheader: `Great news! ${customerName} accepted quote #${quoteNumber} for ${formatMoney(total)}` });
 
   return sendEmail({
     to,
@@ -748,27 +796,27 @@ export function sendQuoteDeclinedEmail(
 ): Promise<boolean> {
   const content = wrapEmailTemplate(`
     <div style="text-align:center;margin:0 0 24px;">
-      <div style="background:#7f1d1d;width:56px;height:56px;border-radius:50%;display:inline-block;line-height:56px;font-size:24px;margin:0 0 16px;">
+      <div style="background:#fef2f2;color:#b91c1c;width:56px;height:56px;border-radius:50%;display:inline-block;line-height:56px;font-size:24px;margin:0 0 16px;">
         &#10005;
       </div>
-      ${badge('DECLINED', '#7f1d1d', '#ef4444')}
+      ${badge('DECLINED', '#fef2f2', '#b91c1c')}
     </div>
-    <h1 style="color:#f8fafc;font-size:26px;font-weight:700;margin:0 0 12px;text-align:center;line-height:1.3;">
+    <h1 style="color:#111827;font-size:26px;font-weight:700;margin:0 0 12px;text-align:center;line-height:1.3;">
       Quote declined
     </h1>
-    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 4px;text-align:center;">
-      <strong style="color:#f8fafc;">${customerName}</strong> has declined your quote.
+    <p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 4px;text-align:center;">
+      <strong style="color:#111827;">${customerName}</strong> has declined your quote.
     </p>
 
     ${infoCard(
       infoRow('Customer', customerName) +
       infoRow('Quote Number', `#${quoteNumber}`) +
-      infoRow('Total', `$${total.toFixed(2)}`, !clientNotes) +
+      infoRow('Total', `${formatMoney(total)}`, !clientNotes) +
       (clientNotes ? infoRow('Client Notes', clientNotes, true) : ''),
-      '#ef4444'
+      '#dc2626'
     )}
 
-    <p style="color:#94a3b8;font-size:14px;line-height:1.6;margin:0;text-align:center;">
+    <p style="color:#6b7280;font-size:14px;line-height:1.6;margin:0;text-align:center;">
       Consider following up to discuss their concerns &mdash; a quick call can often turn a no into a yes.
     </p>
   `, { preheader: `${customerName} declined quote #${quoteNumber}` });
@@ -786,34 +834,34 @@ export function sendQuoteDeclinedEmail(
 export function sendPaymentFailedEmail(to: string, userId: string): Promise<boolean> {
   const content = wrapEmailTemplate(`
     <div style="text-align:center;margin:0 0 24px;">
-      <div style="background:#78350f;width:56px;height:56px;border-radius:50%;display:inline-block;line-height:56px;font-size:28px;margin:0 0 16px;">
+      <div style="background:#fffbeb;color:#b45309;width:56px;height:56px;border-radius:50%;display:inline-block;line-height:56px;font-size:28px;margin:0 0 16px;">
         !
       </div>
-      ${badge('ACTION REQUIRED', '#78350f', '#e6b872')}
+      ${badge('ACTION REQUIRED', '#fffbeb', '#b45309')}
     </div>
-    <h1 style="color:#f8fafc;font-size:26px;font-weight:700;margin:0 0 16px;text-align:center;line-height:1.3;">
+    <h1 style="color:#111827;font-size:26px;font-weight:700;margin:0 0 16px;text-align:center;line-height:1.3;">
       Payment couldn't be processed
     </h1>
-    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 24px;text-align:center;">
+    <p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 24px;text-align:center;">
       We were unable to charge your payment method for your QuoteMate Pro subscription.
     </p>
 
     ${infoCard(`
       <tr>
         <td style="padding:12px 0;">
-          <p style="color:#fca5a5;font-size:14px;font-weight:600;margin:0 0 6px;">What happens next?</p>
-          <p style="color:#94a3b8;font-size:14px;margin:0;line-height:1.6;">
+          <p style="color:#b91c1c;font-size:14px;font-weight:600;margin:0 0 6px;">What happens next?</p>
+          <p style="color:#6b7280;font-size:14px;margin:0;line-height:1.6;">
             If your payment method isn't updated soon, your subscription will be paused and you'll be moved to the free plan.
           </p>
         </td>
       </tr>
-    `, '#ef4444')}
+    `, '#dc2626')}
 
     <div style="text-align:center;">
-      <p style="color:#cbd5e1;font-size:14px;margin:0 0 4px;">Update your payment method in:</p>
-      <p style="color:#f8fafc;font-size:14px;font-weight:600;margin:0;">Settings &rarr; Subscription</p>
+      <p style="color:#374151;font-size:14px;margin:0 0 4px;">Update your payment method in:</p>
+      <p style="color:#111827;font-size:14px;font-weight:600;margin:0;">Settings &rarr; Subscription</p>
     </div>
-    ${ctaButton('Update Payment Method', '#ef4444')}
+    ${ctaButton('Update Payment Method', '#dc2626')}
   `, { preheader: 'Your subscription payment failed. Update your payment method to keep QuoteMate Pro.' });
 
   return sendEmail({
@@ -829,29 +877,29 @@ export function sendPaymentFailedEmail(to: string, userId: string): Promise<bool
 export function sendSubscriptionCancelledEmail(to: string, businessName: string, userId: string): Promise<boolean> {
   const greeting = businessName || 'there';
   const content = wrapEmailTemplate(`
-    <p style="color:#94a3b8;font-size:14px;margin:0 0 8px;">Subscription update</p>
-    <h1 style="color:#f8fafc;font-size:26px;font-weight:700;margin:0 0 20px;line-height:1.3;">
+    <p style="color:#6b7280;font-size:14px;margin:0 0 8px;">Subscription update</p>
+    <h1 style="color:#111827;font-size:26px;font-weight:700;margin:0 0 20px;line-height:1.3;">
       We're sorry to see you go, ${greeting}
     </h1>
-    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 8px;">
+    <p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 8px;">
       Your QuoteMate Pro subscription has been cancelled. You'll still have access to all Pro features until the end of your current billing period.
     </p>
-    <p style="color:#94a3b8;font-size:14px;line-height:1.6;margin:0 0 24px;">
+    <p style="color:#6b7280;font-size:14px;line-height:1.6;margin:0 0 24px;">
       After that, you'll move to the free plan with limited quotes per month.
     </p>
 
     ${infoCard(`
       <tr>
         <td style="padding:12px 0;">
-          <p style="color:#f8fafc;font-size:14px;font-weight:600;margin:0 0 6px;">Changed your mind?</p>
-          <p style="color:#94a3b8;font-size:14px;margin:0;line-height:1.6;">
+          <p style="color:#111827;font-size:14px;font-weight:600;margin:0 0 6px;">Changed your mind?</p>
+          <p style="color:#6b7280;font-size:14px;margin:0;line-height:1.6;">
             You can resubscribe anytime from Settings &rarr; Subscription in the app. Your data is safe and waiting.
           </p>
         </td>
       </tr>
     `)}
 
-    <p style="color:#64748b;font-size:14px;line-height:1.6;margin:24px 0 0;">
+    <p style="color:#6b7280;font-size:14px;line-height:1.6;margin:24px 0 0;">
       We'd love to know why you cancelled &mdash; your feedback helps us build a better product. Just reply to this email.
     </p>
   `, { preheader: 'Your Pro subscription has been cancelled. You\'ll have access until the end of your billing period.' });
@@ -882,27 +930,27 @@ export function sendReEngagementEmail(
     : `Your next quote is waiting`;
 
   const content = wrapEmailTemplate(`
-    <h1 style="color:#f8fafc;font-size:26px;font-weight:700;margin:0 0 20px;line-height:1.3;">
+    <h1 style="color:#111827;font-size:26px;font-weight:700;margin:0 0 20px;line-height:1.3;">
       ${heading}
     </h1>
-    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 24px;">
-      It's been <strong style="color:#f8fafc;">${daysSinceLastActive} days</strong> since your last visit. Jobs don't quote themselves &mdash; let's get back to it.
+    <p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 24px;">
+      It's been <strong style="color:#111827;">${daysSinceLastActive} days</strong> since your last visit. Jobs don't quote themselves &mdash; let's get back to it.
     </p>
 
     ${infoCard(`
       <tr>
         <td style="padding:12px 0;">
-          <p style="color:#f8fafc;font-size:14px;font-weight:600;margin:0 0 16px;">Here's what you can do in 60 seconds:</p>
-          ${featureBullet('&#127908;', 'Describe a job with <strong style="color:#f8fafc;">voice</strong> &mdash; no typing needed')}
-          ${featureBullet('&#128176;', 'Get <strong style="color:#f8fafc;">real-time prices</strong> from major hardware stores')}
-          ${featureBullet('&#128232;', 'Send quotes clients can <strong style="color:#f8fafc;">accept with one click</strong>')}
+          <p style="color:#111827;font-size:14px;font-weight:600;margin:0 0 16px;">Here's what you can do in 60 seconds:</p>
+          ${featureBullet('&#127908;', 'Describe a job with <strong style="color:#111827;">voice</strong> &mdash; no typing needed')}
+          ${featureBullet('&#128176;', 'Get <strong style="color:#111827;">real-time prices</strong> from major hardware stores')}
+          ${featureBullet('&#128232;', 'Send quotes clients can <strong style="color:#111827;">accept with one click</strong>')}
         </td>
       </tr>
     `)}
 
     ${ctaButton('Create a Quote')}
 
-    <p style="color:#64748b;font-size:14px;line-height:1.6;margin:28px 0 8px;text-align:center;">
+    <p style="color:#6b7280;font-size:14px;line-height:1.6;margin:28px 0 8px;text-align:center;">
       Or let us know how you're going &mdash; one tap:
     </p>
 
@@ -912,21 +960,21 @@ export function sendReEngagementEmail(
           <table role="presentation" cellpadding="0" cellspacing="0">
             <tr>
               <td style="padding:0 6px;">
-                <a href="https://us-central1-hansendev.cloudfunctions.net/quickFeedback?userId=${userId}&rating=great&category=re-engagement" target="_blank" style="display:inline-block;background:#064e3b;border:2px solid #00c897;border-radius:12px;padding:14px 20px;text-decoration:none;text-align:center;min-width:80px;">
+                <a href="https://us-central1-hansendev.cloudfunctions.net/quickFeedback?userId=${userId}&rating=great&category=re-engagement" target="_blank" style="display:inline-block;background:#ecfdf5;border:2px solid ${QM_GREEN_INK};border-radius:12px;padding:14px 20px;text-decoration:none;text-align:center;min-width:80px;">
                   <span style="font-size:28px;display:block;margin:0 0 4px;">&#128170;</span>
-                  <span style="color:#00c897;font-size:12px;font-weight:700;">Still keen</span>
+                  <span style="color:${QM_GREEN_INK};font-size:12px;font-weight:700;">Still keen</span>
                 </a>
               </td>
               <td style="padding:0 6px;">
-                <a href="https://us-central1-hansendev.cloudfunctions.net/quickFeedback?userId=${userId}&rating=okay&category=re-engagement" target="_blank" style="display:inline-block;background:#1e293b;border:2px solid #f59e0b;border-radius:12px;padding:14px 20px;text-decoration:none;text-align:center;min-width:80px;">
+                <a href="https://us-central1-hansendev.cloudfunctions.net/quickFeedback?userId=${userId}&rating=okay&category=re-engagement" target="_blank" style="display:inline-block;background:#fffbeb;border:2px solid #b45309;border-radius:12px;padding:14px 20px;text-decoration:none;text-align:center;min-width:80px;">
                   <span style="font-size:28px;display:block;margin:0 0 4px;">&#128528;</span>
-                  <span style="color:#f59e0b;font-size:12px;font-weight:700;">Hit a snag</span>
+                  <span style="color:#b45309;font-size:12px;font-weight:700;">Hit a snag</span>
                 </a>
               </td>
               <td style="padding:0 6px;">
-                <a href="https://us-central1-hansendev.cloudfunctions.net/quickFeedback?userId=${userId}&rating=bad&category=re-engagement" target="_blank" style="display:inline-block;background:#1e293b;border:2px solid #ef4444;border-radius:12px;padding:14px 20px;text-decoration:none;text-align:center;min-width:80px;">
+                <a href="https://us-central1-hansendev.cloudfunctions.net/quickFeedback?userId=${userId}&rating=bad&category=re-engagement" target="_blank" style="display:inline-block;background:#fef2f2;border:2px solid #b91c1c;border-radius:12px;padding:14px 20px;text-decoration:none;text-align:center;min-width:80px;">
                   <span style="font-size:28px;display:block;margin:0 0 4px;">&#128075;</span>
-                  <span style="color:#ef4444;font-size:12px;font-weight:700;">Not for me</span>
+                  <span style="color:#b91c1c;font-size:12px;font-weight:700;">Not for me</span>
                 </a>
               </td>
             </tr>
@@ -976,23 +1024,23 @@ export function sendTrialEndingEmail(
   const pricingUrl = 'https://quotemateapp.au/pricing?utm_source=lifecycle&utm_medium=email&utm_campaign=trial&utm_content=trial_ending';
   const foundingLine = founding
     ? `
-    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:16px 0 0;">
-      Lock it in as a <strong style="color:#f8fafc;">founding member</strong> and $49/mo is yours for life &mdash; the price goes to $${NEXT_PRICE_AUD.monthly} for new members once the first ${founding.cap} are in. Right now there are <strong style="color:#f8fafc;">${founding.spotsLeft} of ${founding.cap} spots left</strong>.
+    <p style="color:#374151;font-size:15px;line-height:1.7;margin:16px 0 0;">
+      Lock it in as a <strong style="color:#111827;">founding member</strong> and $49/mo is yours for life &mdash; the price goes to $${NEXT_PRICE_AUD.monthly} for new members once the first ${founding.cap} are in. Right now there are <strong style="color:#111827;">${founding.spotsLeft} of ${founding.cap} spots left</strong>.
     </p>`
     : '';
 
   const content = wrapEmailTemplate(`
-    <h1 style="color:#f8fafc;font-size:26px;font-weight:700;margin:0 0 20px;line-height:1.3;">
+    <h1 style="color:#111827;font-size:26px;font-weight:700;margin:0 0 20px;line-height:1.3;">
       Your Pro trial ends ${daysWord}
     </h1>
-    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 24px;">
+    <p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 24px;">
       Hi ${greeting} &mdash; straight version, no tricks. Here's exactly what changes when the trial wraps up:
     </p>
 
     ${infoCard(`
       <tr>
         <td style="padding:12px 0;">
-          <p style="color:#f8fafc;font-size:14px;font-weight:600;margin:0 0 16px;">You keep, free, forever:</p>
+          <p style="color:#111827;font-size:14px;font-weight:600;margin:0 0 16px;">You keep, free, forever:</p>
           ${featureBullet('&#9989;', 'Unlimited quotes and invoices')}
           ${featureBullet('&#9989;', 'Your branding on every PDF, GST handled')}
           ${featureBullet('&#9989;', 'Online card payments')}
@@ -1003,7 +1051,7 @@ export function sendTrialEndingEmail(
     ${infoCard(`
       <tr>
         <td style="padding:12px 0;">
-          <p style="color:#f8fafc;font-size:14px;font-weight:600;margin:0 0 16px;">Pro keeps doing:</p>
+          <p style="color:#111827;font-size:14px;font-weight:600;margin:0 0 16px;">Pro keeps doing:</p>
           ${featureBullet('&#128736;', 'Material lists built for you, with live supplier pricing')}
           ${featureBullet('&#128196;', 'Every premium template')}
           ${featureBullet('&#128179;', 'Lower Square rate + bank/PayID/BPAY/PayPal options')}
@@ -1011,13 +1059,13 @@ export function sendTrialEndingEmail(
       </tr>
     `)}
 
-    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:24px 0 0;">
-      Pro is <strong style="color:#f8fafc;">$49/month</strong>, or <strong style="color:#f8fafc;">$328 for the year</strong> &mdash; 44% off, which works out around $6.30 a week. Most tradies lose more than that in forgotten line items on one quote.
+    <p style="color:#374151;font-size:15px;line-height:1.7;margin:24px 0 0;">
+      Pro is <strong style="color:#111827;">$49/month</strong>, or <strong style="color:#111827;">$328 for the year</strong> &mdash; 44% off, which works out around $6.30 a week. Most tradies lose more than that in forgotten line items on one quote.
     </p>
 ${foundingLine}
-    ${ctaButton(founding ? 'Claim your founding spot' : 'Keep Pro — takes 30 seconds', '#009868', pricingUrl)}
+    ${ctaButton(founding ? 'Claim your founding spot' : 'Keep Pro — takes 30 seconds', QM_GREEN, pricingUrl)}
 
-    <p style="color:#64748b;font-size:14px;line-height:1.6;margin:28px 0 0;">
+    <p style="color:#6b7280;font-size:14px;line-height:1.6;margin:28px 0 0;">
       Either way, your quotes, invoices and customers stay yours.
     </p>
   `, { unsubscribeUrl, preheader: 'What you keep free forever, what Pro keeps doing.' });
@@ -1053,26 +1101,26 @@ export function sendTrialEndingNudgeEmail(
   const daysWord = daysRemaining <= 1 ? 'tomorrow' : `in ${daysRemaining} days`;
 
   const content = wrapEmailTemplate(`
-    <h1 style="color:#f8fafc;font-size:24px;font-weight:700;margin:0 0 20px;line-height:1.3;">
+    <h1 style="color:#111827;font-size:24px;font-weight:700;margin:0 0 20px;line-height:1.3;">
       Before your trial wraps up &mdash; quick one
     </h1>
-    <p style="color:#94a3b8;font-size:14px;margin:0 0 16px;">Hi ${greeting},</p>
-    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 16px;">
+    <p style="color:#6b7280;font-size:14px;margin:0 0 16px;">Hi ${greeting},</p>
+    <p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 16px;">
       It's Tom &mdash; I built QuoteMate. Your trial wraps up ${daysWord}, and I noticed you've built a quote but haven't sent one to a customer yet.
     </p>
-    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 16px;">
+    <p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 16px;">
       Was there something that didn't feel right &mdash; pricing off, layout not you, or just flat out with work? Hit reply and tell me. It comes straight to me, not a support queue, and it genuinely shapes what I fix next.
     </p>
-    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0;">
+    <p style="color:#374151;font-size:15px;line-height:1.7;margin:0;">
       And if the quote's good to go, sending takes about ten seconds &mdash; your customer gets a link they can accept right on their phone.
     </p>
 
     ${ctaButton('Send that quote')}
 
-    <p style="color:#64748b;font-size:14px;line-height:1.6;margin:28px 0 0;">
+    <p style="color:#6b7280;font-size:14px;line-height:1.6;margin:28px 0 0;">
       No pressure either way &mdash; quotes and invoices stay free after the trial.
     </p>
-    <p style="color:#f8fafc;font-size:15px;line-height:1.65;margin:28px 0 0;">
+    <p style="color:#111827;font-size:15px;line-height:1.65;margin:28px 0 0;">
       Cheers,<br/>
       <strong>Tom</strong> &mdash; QuoteMate
     </p>
@@ -1106,26 +1154,26 @@ export function sendTrialEndedEmail(
   const pricingUrl = 'https://quotemateapp.au/pricing?utm_source=lifecycle&utm_medium=email&utm_campaign=trial&utm_content=trial_ended';
   const foundingLine = founding
     ? `
-    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 8px;">
-      And if Pro's still on your mind: your <strong style="color:#f8fafc;">founding spot's open while they last</strong> &mdash; $49/mo locked for life, ${founding.spotsLeft} of ${founding.cap} left. Once they fill, it's $${NEXT_PRICE_AUD.monthly} for new members. No deadline, no pressure &mdash; just first in.
+    <p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 8px;">
+      And if Pro's still on your mind: your <strong style="color:#111827;">founding spot's open while they last</strong> &mdash; $49/mo locked for life, ${founding.spotsLeft} of ${founding.cap} left. Once they fill, it's $${NEXT_PRICE_AUD.monthly} for new members. No deadline, no pressure &mdash; just first in.
     </p>`
     : '';
 
   const content = wrapEmailTemplate(`
-    <h1 style="color:#f8fafc;font-size:26px;font-weight:700;margin:0 0 20px;line-height:1.3;">
+    <h1 style="color:#111827;font-size:26px;font-weight:700;margin:0 0 20px;line-height:1.3;">
       You're on the free plan now &mdash; one question
     </h1>
-    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 16px;">
+    <p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 16px;">
       Hi ${greeting} &mdash; your trial wrapped up. You're on the free plan now: unlimited quotes and invoices, nothing deleted, no card charged, because we never took one.
     </p>
-    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 16px;">
-      One question, genuinely: <strong style="color:#f8fafc;">what would Pro have needed to do for you to keep it?</strong> Hit reply with one line. Brutal is fine &mdash; brutal is useful.
+    <p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 16px;">
+      One question, genuinely: <strong style="color:#111827;">what would Pro have needed to do for you to keep it?</strong> Hit reply with one line. Brutal is fine &mdash; brutal is useful.
     </p>
-    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 8px;">
+    <p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 8px;">
       If the answer is price: the annual plan is $328, about $6.30 a week. If the answer is a missing feature, there's a decent chance it gets built &mdash; feature requests from real users run this roadmap.
     </p>
 ${foundingLine}
-    ${ctaButton('See Pro pricing', '#009868', pricingUrl)}
+    ${ctaButton('See Pro pricing', QM_GREEN, pricingUrl)}
   `, { unsubscribeUrl, preheader: 'No card charged, nothing lost. But tell me one thing.' });
 
   return sendEmail({
@@ -1157,17 +1205,17 @@ export function sendTrialStartValueEmail(
   const name = (businessName || '').trim();
 
   const content = wrapEmailTemplate(`
-    <h1 style="color:#f8fafc;font-size:26px;font-weight:700;margin:0 0 20px;line-height:1.3;">
+    <h1 style="color:#111827;font-size:26px;font-weight:700;margin:0 0 20px;line-height:1.3;">
       Your 14 days of Pro start now
     </h1>
-    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 24px;">
+    <p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 24px;">
       Good on ya${name ? `, ${name}` : ''} &mdash; your first quote's in, and that kicks off 14 days with everything unlocked. No card, no catch.
     </p>
 
     ${infoCard(`
       <tr>
         <td style="padding:12px 0;">
-          <p style="color:#f8fafc;font-size:14px;font-weight:600;margin:0 0 16px;">While it's all unlocked, put it to work:</p>
+          <p style="color:#111827;font-size:14px;font-weight:600;margin:0 0 16px;">While it's all unlocked, put it to work:</p>
           ${featureBullet('&#128736;', 'Materials lists priced for you, with live supplier prices')}
           ${featureBullet('&#128196;', 'Every premium PDF template')}
           ${featureBullet('&#128179;', 'Lower card fee + bank/PayID/BPAY/PayPal options for your customers')}
@@ -1175,8 +1223,8 @@ export function sendTrialStartValueEmail(
       </tr>
     `)}
 
-    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:24px 0 0;">
-      One thing to do today: <strong style="color:#f8fafc;">send that quote</strong>. Email, SMS or share it, straight from the app. Quotes sent within the hour win jobs that quotes sent at 9pm lose.
+    <p style="color:#374151;font-size:15px;line-height:1.7;margin:24px 0 0;">
+      One thing to do today: <strong style="color:#111827;">send that quote</strong>. Email, SMS or share it, straight from the app. Quotes sent within the hour win jobs that quotes sent at 9pm lose.
     </p>
 
     ${ctaButton('Send your quote')}
@@ -1207,16 +1255,16 @@ export function sendTrialSquarePitchEmail(
   const greeting = (businessName || '').trim() || 'there';
 
   const content = wrapEmailTemplate(`
-    <h1 style="color:#f8fafc;font-size:26px;font-weight:700;margin:0 0 20px;line-height:1.3;">
+    <h1 style="color:#111827;font-size:26px;font-weight:700;margin:0 0 20px;line-height:1.3;">
       Get paid the second the job's done
     </h1>
-    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 16px;">
+    <p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 16px;">
       Hi ${greeting} &mdash; you're sending tidy quotes. Here's the other half: getting paid without chasing.
     </p>
-    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 16px;">
-      Hook up Square &mdash; takes about a minute &mdash; and every quote and invoice carries a <strong style="color:#f8fafc;">Pay Now button</strong> your customer can tap on their phone. Deposits up front, balances on the day, no &ldquo;I'll do a transfer tonight&rdquo;.
+    <p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 16px;">
+      Hook up Square &mdash; takes about a minute &mdash; and every quote and invoice carries a <strong style="color:#111827;">Pay Now button</strong> your customer can tap on their phone. Deposits up front, balances on the day, no &ldquo;I'll do a transfer tonight&rdquo;.
     </p>
-    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0;">
+    <p style="color:#374151;font-size:15px;line-height:1.7;margin:0;">
       It's yours to keep on the free plan too &mdash; no need to be on Pro.
     </p>
 
@@ -1256,32 +1304,32 @@ export function sendTrialMidValueEmail(
     ${infoCard(`
       <tr>
         <td style="padding:12px 0;">
-          <p style="color:#f8fafc;font-size:14px;font-weight:600;margin:0 0 16px;">Your first week:</p>
-          ${featureBullet('&#128221;', `<strong style="color:#f8fafc;">${recap.quotesBuilt} quote${recap.quotesBuilt === 1 ? '' : 's'}</strong> built`)}
-          ${featureBullet('&#128176;', `<strong style="color:#f8fafc;">${dollars}</strong> quoted`)}
-          ${featureBullet('&#128232;', `<strong style="color:#f8fafc;">${recap.sent}</strong> sent to customers`)}
+          <p style="color:#111827;font-size:14px;font-weight:600;margin:0 0 16px;">Your first week:</p>
+          ${featureBullet('&#128221;', `<strong style="color:#111827;">${recap.quotesBuilt} quote${recap.quotesBuilt === 1 ? '' : 's'}</strong> built`)}
+          ${featureBullet('&#128176;', `<strong style="color:#111827;">${dollars}</strong> quoted`)}
+          ${featureBullet('&#128232;', `<strong style="color:#111827;">${recap.sent}</strong> sent to customers`)}
         </td>
       </tr>
     `)}
-    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:24px 0 16px;">
+    <p style="color:#374151;font-size:15px;line-height:1.7;margin:24px 0 16px;">
       That's real work off your plate.
     </p>`
     : `
-    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 16px;">
+    <p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 16px;">
       One week into your trial &mdash; how's it treating you? If you've got a job sitting unquoted, now's the moment: describe it and QuoteMate prices the materials and labour for you.
     </p>`;
 
   const content = wrapEmailTemplate(`
-    <h1 style="color:#f8fafc;font-size:26px;font-weight:700;margin:0 0 20px;line-height:1.3;">
+    <h1 style="color:#111827;font-size:26px;font-weight:700;margin:0 0 20px;line-height:1.3;">
       ${recap.rich ? 'One week in — here’s your tally' : 'One week in — 7 days of Pro to go'}
     </h1>
-    <p style="color:#94a3b8;font-size:14px;margin:0 0 16px;">Hi ${greeting},</p>
+    <p style="color:#6b7280;font-size:14px;margin:0 0 16px;">Hi ${greeting},</p>
 ${recapBlock}
-    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0;">
+    <p style="color:#374151;font-size:15px;line-height:1.7;margin:0;">
       7 days left on Pro. After that you keep going free &mdash; unlimited quotes and invoices, nothing deleted &mdash; you'll just add a pay link to each job and the fee's a touch higher.
     </p>
 
-    ${ctaButton('See what Pro keeps', '#009868', pricingUrl)}
+    ${ctaButton('See what Pro keeps', QM_GREEN, pricingUrl)}
   `, { unsubscribeUrl, preheader: recap.rich ? 'Your first week, tallied up — and 7 days of Pro to go.' : 'Halfway through — 7 days of Pro to go.' });
 
   return sendEmail({
@@ -1311,16 +1359,16 @@ export function sendSquareIdleNudgeEmail(
   const greeting = (businessName || '').trim() || 'there';
 
   const content = wrapEmailTemplate(`
-    <h1 style="color:#f8fafc;font-size:26px;font-weight:700;margin:0 0 20px;line-height:1.3;">
+    <h1 style="color:#111827;font-size:26px;font-weight:700;margin:0 0 20px;line-height:1.3;">
       Your Pay Now button's ready &mdash; put it to work
     </h1>
-    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 16px;">
+    <p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 16px;">
       Hi ${greeting} &mdash; you've hooked up Square, nice one. But nothing's come through it yet, and a connected account earns you exactly nothing until a customer taps that button.
     </p>
-    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 16px;">
-      Next quote or invoice you send, choose <strong style="color:#f8fafc;">&ldquo;Get paid on this quote&rdquo;</strong> and it goes out with a Pay Now button &mdash; your customer pays by card on their phone, and the job's marked paid before you've packed up.
+    <p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 16px;">
+      Next quote or invoice you send, choose <strong style="color:#111827;">&ldquo;Get paid on this quote&rdquo;</strong> and it goes out with a Pay Now button &mdash; your customer pays by card on their phone, and the job's marked paid before you've packed up.
     </p>
-    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0;">
+    <p style="color:#374151;font-size:15px;line-height:1.7;margin:0;">
       Deposits up front, balances on the day, no chasing transfers.
     </p>
 
@@ -1352,16 +1400,16 @@ export function sendSquareNoPaylinkNudgeEmail(
   const greeting = (businessName || '').trim() || 'there';
 
   const content = wrapEmailTemplate(`
-    <h1 style="color:#f8fafc;font-size:26px;font-weight:700;margin:0 0 20px;line-height:1.3;">
+    <h1 style="color:#111827;font-size:26px;font-weight:700;margin:0 0 20px;line-height:1.3;">
       Your quotes are ready to get paid
     </h1>
-    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 16px;">
+    <p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 16px;">
       Hi ${greeting} &mdash; you've built proper quotes in QuoteMate, and there's one step left to close the loop: getting paid through them.
     </p>
-    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 16px;">
-      Hook up Square &mdash; takes about a minute &mdash; and every quote and invoice you send carries a <strong style="color:#f8fafc;">Pay Now button</strong>. Deposits before you order materials, balances the day the job wraps, no &ldquo;I'll do a transfer tonight&rdquo;.
+    <p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 16px;">
+      Hook up Square &mdash; takes about a minute &mdash; and every quote and invoice you send carries a <strong style="color:#111827;">Pay Now button</strong>. Deposits before you order materials, balances the day the job wraps, no &ldquo;I'll do a transfer tonight&rdquo;.
     </p>
-    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0;">
+    <p style="color:#374151;font-size:15px;line-height:1.7;margin:0;">
       It's part of the free plan &mdash; connecting it is also what switches sending back on now your trial's wrapped.
     </p>
 
@@ -1395,10 +1443,10 @@ export function sendOnboardingTipEmail(
       heading: 'Talk to QuoteMate',
       preheader: 'Skip the typing. Describe your job with voice and get a full quote in seconds.',
       body: `
-        <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 8px;">
-          Instead of typing job descriptions on-site, just tap the <strong style="color:#f8fafc;">microphone icon</strong> and describe the job out loud.
+        <p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 8px;">
+          Instead of typing job descriptions on-site, just tap the <strong style="color:#111827;">microphone icon</strong> and describe the job out loud.
         </p>
-        <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0;">
+        <p style="color:#374151;font-size:15px;line-height:1.7;margin:0;">
           QuoteMate will transcribe it and generate a full quote with materials, labour, and pricing &mdash; all in seconds.
         </p>
       `,
@@ -1414,20 +1462,20 @@ export function sendOnboardingTipEmail(
       heading: 'Send it to win it',
       preheader: 'Your quotes look professional. Send one to a client and see how easy it is.',
       body: `
-        <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 8px;">
-          A quote sitting in drafts doesn't win jobs. Sending one takes <strong style="color:#f8fafc;">10 seconds</strong>:
+        <p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 8px;">
+          A quote sitting in drafts doesn't win jobs. Sending one takes <strong style="color:#111827;">10 seconds</strong>:
         </p>
-        <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 4px;">
-          &#9312; Open your quote and tap <strong style="color:#f8fafc;">Send</strong>
+        <p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 4px;">
+          &#9312; Open your quote and tap <strong style="color:#111827;">Send</strong>
         </p>
-        <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 4px;">
+        <p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 4px;">
           &#9313; Enter your client's email or mobile
         </p>
-        <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 4px;">
-          &#9314; They get a <strong style="color:#f8fafc;">professional acceptance link</strong>
+        <p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 4px;">
+          &#9314; They get a <strong style="color:#111827;">professional acceptance link</strong>
         </p>
-        <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0;">
-          &#9315; You get an <strong style="color:#f8fafc;">instant notification</strong> when they respond
+        <p style="color:#374151;font-size:15px;line-height:1.7;margin:0;">
+          &#9315; You get an <strong style="color:#111827;">instant notification</strong> when they respond
         </p>
       `,
     },
@@ -1441,13 +1489,13 @@ export function sendOnboardingTipEmail(
       heading: "Your first quote's the hard part",
       preheader: 'Give QuoteMate a rough job and it hands back a finished quote in about five minutes.',
       body: `
-        <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 16px;">
+        <p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 16px;">
           It's Tom &mdash; I built QuoteMate. You signed up a couple of weeks back but haven't built a quote yet, and that first one's honestly the only tricky bit.
         </p>
-        <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 16px;">
+        <p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 16px;">
           Give it a job, even a rough one &mdash; &ldquo;repaint a three-bedroom interior&rdquo; is plenty. QuoteMate prices the materials at live supplier rates, works out the labour, and hands you a quote your customer can accept on their phone. About five minutes, start to finish.
         </p>
-        <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0;">
+        <p style="color:#374151;font-size:15px;line-height:1.7;margin:0;">
           Stuck on anything? Just reply &mdash; it comes straight to me, not a support queue.
         </p>
       `,
@@ -1463,30 +1511,30 @@ export function sendOnboardingTipEmail(
 
   const content = isPersonalNote
     ? wrapEmailTemplate(`
-    <h1 style="color:#f8fafc;font-size:24px;font-weight:700;margin:0 0 20px;line-height:1.3;">
+    <h1 style="color:#111827;font-size:24px;font-weight:700;margin:0 0 20px;line-height:1.3;">
       ${tip.heading}
     </h1>
-    <p style="color:#94a3b8;font-size:14px;margin:0 0 16px;">Hi ${greeting},</p>
+    <p style="color:#6b7280;font-size:14px;margin:0 0 16px;">Hi ${greeting},</p>
     ${tip.body}
 
     ${ctaButton('Build your first quote')}
 
-    <p style="color:#f8fafc;font-size:15px;line-height:1.65;margin:28px 0 0;">
+    <p style="color:#111827;font-size:15px;line-height:1.65;margin:28px 0 0;">
       Cheers,<br/>
       <strong>Tom</strong> &mdash; QuoteMate
     </p>
   `, { unsubscribeUrl, preheader: tip.preheader })
     : wrapEmailTemplate(`
     <div style="text-align:center;margin:0 0 24px;">
-      <div style="background:#1e293b;border:2px solid #334155;width:56px;height:56px;border-radius:50%;display:inline-block;line-height:56px;font-size:28px;margin:0 0 12px;">
+      <div style="background:#f9fafb;border:2px solid #e5e7eb;width:56px;height:56px;border-radius:50%;display:inline-block;line-height:56px;font-size:28px;margin:0 0 12px;">
         ${tip.emoji}
       </div>
-      ${badge('PRO TIP', '#1e293b', '#94a3b8')}
+      ${badge('PRO TIP', '#f3f4f6', '#6b7280')}
     </div>
-    <h1 style="color:#f8fafc;font-size:24px;font-weight:700;margin:0 0 20px;text-align:center;line-height:1.3;">
+    <h1 style="color:#111827;font-size:24px;font-weight:700;margin:0 0 20px;text-align:center;line-height:1.3;">
       ${tip.heading}
     </h1>
-    <p style="color:#94a3b8;font-size:14px;margin:0 0 16px;">Hey ${greeting},</p>
+    <p style="color:#6b7280;font-size:14px;margin:0 0 16px;">Hey ${greeting},</p>
     ${tip.body}
 
     ${ctaButton('Try It Now')}
@@ -1516,13 +1564,13 @@ export function sendUpdateAnnouncementEmail(
 
   const content = wrapEmailTemplate(`
     <div style="text-align:center;margin:0 0 24px;">
-      ${badge('NEW UPDATE', '#064e3b', '#00c897')}
+      ${badge('NEW UPDATE', '#ecfdf5', QM_GREEN_INK)}
     </div>
-    <h1 style="color:#f8fafc;font-size:26px;font-weight:700;margin:0 0 20px;text-align:center;line-height:1.3;">
+    <h1 style="color:#111827;font-size:26px;font-weight:700;margin:0 0 20px;text-align:center;line-height:1.3;">
       Big updates to QuoteMate
     </h1>
-    <p style="color:#94a3b8;font-size:14px;margin:0 0 20px;">Hey ${greeting},</p>
-    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 28px;">
+    <p style="color:#6b7280;font-size:14px;margin:0 0 20px;">Hey ${greeting},</p>
+    <p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 28px;">
       We've been hard at work making QuoteMate better for tradies like you. Here's what's new:
     </p>
 
@@ -1530,53 +1578,53 @@ export function sendUpdateAnnouncementEmail(
     ${infoCard(`
       <tr>
         <td style="padding:12px 0;">
-          <p style="color:#f8fafc;font-size:16px;font-weight:700;margin:0 0 8px;">&#127881; 14-Day Free Trial</p>
-          <p style="color:#94a3b8;font-size:14px;margin:0;line-height:1.6;">
-            New to QuoteMate? You now get <strong style="color:#f8fafc;">full access to every feature for 14 days</strong> &mdash; no credit card required. Create unlimited quotes, send invoices, and use your business logo on everything.
+          <p style="color:#111827;font-size:16px;font-weight:700;margin:0 0 8px;">&#127881; 14-Day Free Trial</p>
+          <p style="color:#6b7280;font-size:14px;margin:0;line-height:1.6;">
+            New to QuoteMate? You now get <strong style="color:#111827;">full access to every feature for 14 days</strong> &mdash; no credit card required. Create unlimited quotes, send invoices, and use your business logo on everything.
           </p>
         </td>
       </tr>
-    `, '#00c897')}
+    `, QM_GREEN_INK)}
 
     <!-- Invoicing -->
     ${infoCard(`
       <tr>
         <td style="padding:12px 0;">
-          <p style="color:#f8fafc;font-size:16px;font-weight:700;margin:0 0 8px;">&#128196; Full Invoicing</p>
-          <p style="color:#94a3b8;font-size:14px;margin:0;line-height:1.6;">
+          <p style="color:#111827;font-size:16px;font-weight:700;margin:0 0 8px;">&#128196; Full Invoicing</p>
+          <p style="color:#6b7280;font-size:14px;margin:0;line-height:1.6;">
             Convert accepted quotes to invoices with one tap. Track payment status, record partial payments, send invoices via email or SMS, and export professional PDFs &mdash; all from the one app.
           </p>
         </td>
       </tr>
-    `, '#5ab9ea')}
+    `, QM_BLUE_INK)}
 
     <!-- Payment Tracking -->
     ${infoCard(`
       <tr>
         <td style="padding:12px 0;">
-          <p style="color:#f8fafc;font-size:16px;font-weight:700;margin:0 0 8px;">&#128176; Payment Tracking</p>
-          <p style="color:#94a3b8;font-size:14px;margin:0;line-height:1.6;">
-            Record partial or full payments against invoices &mdash; bank transfer, card, cash, or cheque. Set flexible payment terms like <strong style="color:#f8fafc;">Net 7, Net 14, Net 30</strong>, or custom due dates. Overdue invoices are flagged automatically.
+          <p style="color:#111827;font-size:16px;font-weight:700;margin:0 0 8px;">&#128176; Payment Tracking</p>
+          <p style="color:#6b7280;font-size:14px;margin:0;line-height:1.6;">
+            Record partial or full payments against invoices &mdash; bank transfer, card, cash, or cheque. Set flexible payment terms like <strong style="color:#111827;">Net 7, Net 14, Net 30</strong>, or custom due dates. Overdue invoices are flagged automatically.
           </p>
         </td>
       </tr>
-    `, '#a78bfa')}
+    `, '#7c3aed')}
 
     <!-- Smarter Pricing -->
     ${infoCard(`
       <tr>
         <td style="padding:12px 0;">
-          <p style="color:#f8fafc;font-size:16px;font-weight:700;margin:0 0 8px;">&#128200; More Accurate Pricing</p>
-          <p style="color:#94a3b8;font-size:14px;margin:0;line-height:1.6;">
+          <p style="color:#111827;font-size:16px;font-weight:700;margin:0 0 8px;">&#128200; More Accurate Pricing</p>
+          <p style="color:#6b7280;font-size:14px;margin:0;line-height:1.6;">
             We've improved our material pricing engine. Prices are now pulled in real time from major hardware stores, so your quotes are tighter and more competitive.
           </p>
         </td>
       </tr>
-    `, '#cfa153')}
+    `, '#b45309')}
 
     ${ctaButton('Open QuoteMate')}
 
-    <p style="color:#64748b;font-size:14px;line-height:1.6;margin:28px 0 0;text-align:center;">
+    <p style="color:#6b7280;font-size:14px;line-height:1.6;margin:28px 0 0;text-align:center;">
       Questions or feedback? Just reply to this email &mdash; we read every message.
     </p>
   `, { unsubscribeUrl, preheader: 'Free trial, invoicing, payment tracking, and smarter pricing — QuoteMate just got a whole lot better.' });
@@ -1662,7 +1710,9 @@ function escapeHtml(str: string): string {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-export const DEFAULT_BRAND_COLOR = '#059669';
+// Same green as the tradie-facing shell (QM_GREEN) — one brand value, two
+// template families.
+export const DEFAULT_BRAND_COLOR = QM_GREEN;
 
 /**
  * A logo is only usable on a customer-facing surface if the recipient's device
@@ -2826,19 +2876,19 @@ export function sendQuoteFollowUpEmail(
   const noMaterialsLine = hasMaterials
     ? ''
     : `
-    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 16px;">
+    <p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 16px;">
       One thing I noticed &mdash; there were no material items on the quote. Did you want to have a crack at generating them? The app can build a materials list with live pricing for you in a few seconds, so you're not leaving money on the table. Happy to walk you through it if you get stuck.
     </p>`;
 
   const content = wrapEmailTemplate(`
-    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 16px;">
+    <p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 16px;">
       ${greeting}
     </p>
-    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 16px;">
-      It's Tom from QuoteMate &mdash; I'm the guy that built it. Just saw your quote for <strong style="color:#f8fafc;">${jobName}</strong>, how did it go? Is there anything I can do to help out?
+    <p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 16px;">
+      It's Tom from QuoteMate &mdash; I'm the guy that built it. Just saw your quote for <strong style="color:#111827;">${jobName}</strong>, how did it go? Is there anything I can do to help out?
     </p>
 ${noMaterialsLine}
-    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 16px;">
+    <p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 16px;">
       Genuinely keen to hear how you found it &mdash; what worked, what didn't, anything that nearly made you chuck your phone at the wall. If you've got 10 seconds, just hit reply and let me know, or tap one of the buttons below.
     </p>
 
@@ -2848,21 +2898,21 @@ ${noMaterialsLine}
           <table role="presentation" cellpadding="0" cellspacing="0">
             <tr>
               <td style="padding:0 6px;">
-                <a href="https://us-central1-hansendev.cloudfunctions.net/quickFeedback?userId=${userId}&rating=great" target="_blank" style="display:inline-block;background:#064e3b;border:2px solid #00c897;border-radius:12px;padding:14px 20px;text-decoration:none;text-align:center;min-width:80px;">
+                <a href="https://us-central1-hansendev.cloudfunctions.net/quickFeedback?userId=${userId}&rating=great" target="_blank" style="display:inline-block;background:#ecfdf5;border:2px solid ${QM_GREEN_INK};border-radius:12px;padding:14px 20px;text-decoration:none;text-align:center;min-width:80px;">
                   <span style="font-size:28px;display:block;margin:0 0 4px;">&#129321;</span>
-                  <span style="color:#00c897;font-size:12px;font-weight:700;">Loved it</span>
+                  <span style="color:${QM_GREEN_INK};font-size:12px;font-weight:700;">Loved it</span>
                 </a>
               </td>
               <td style="padding:0 6px;">
-                <a href="https://us-central1-hansendev.cloudfunctions.net/quickFeedback?userId=${userId}&rating=okay" target="_blank" style="display:inline-block;background:#1e293b;border:2px solid #f59e0b;border-radius:12px;padding:14px 20px;text-decoration:none;text-align:center;min-width:80px;">
+                <a href="https://us-central1-hansendev.cloudfunctions.net/quickFeedback?userId=${userId}&rating=okay" target="_blank" style="display:inline-block;background:#fffbeb;border:2px solid #b45309;border-radius:12px;padding:14px 20px;text-decoration:none;text-align:center;min-width:80px;">
                   <span style="font-size:28px;display:block;margin:0 0 4px;">&#128528;</span>
-                  <span style="color:#f59e0b;font-size:12px;font-weight:700;">It was alright</span>
+                  <span style="color:#b45309;font-size:12px;font-weight:700;">It was alright</span>
                 </a>
               </td>
               <td style="padding:0 6px;">
-                <a href="https://us-central1-hansendev.cloudfunctions.net/quickFeedback?userId=${userId}&rating=bad" target="_blank" style="display:inline-block;background:#1e293b;border:2px solid #ef4444;border-radius:12px;padding:14px 20px;text-decoration:none;text-align:center;min-width:80px;">
+                <a href="https://us-central1-hansendev.cloudfunctions.net/quickFeedback?userId=${userId}&rating=bad" target="_blank" style="display:inline-block;background:#fef2f2;border:2px solid #b91c1c;border-radius:12px;padding:14px 20px;text-decoration:none;text-align:center;min-width:80px;">
                   <span style="font-size:28px;display:block;margin:0 0 4px;">&#128169;</span>
-                  <span style="color:#ef4444;font-size:12px;font-weight:700;">Needs work</span>
+                  <span style="color:#b91c1c;font-size:12px;font-weight:700;">Needs work</span>
                 </a>
               </td>
             </tr>
@@ -2871,7 +2921,7 @@ ${noMaterialsLine}
       </tr>
     </table>
 
-    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:28px 0 0;">
+    <p style="color:#374151;font-size:15px;line-height:1.7;margin:28px 0 0;">
       Cheers,<br/>
       Tom &mdash; QuoteMate &#127866;
     </p>
@@ -3175,37 +3225,37 @@ export function sendNewUserNotificationEmail(
   const methodDisplay = methodLabels[authMethod] || authMethod || 'Unknown';
 
   const content = wrapEmailTemplate(`
-    <p style="color:#94a3b8;font-size:14px;margin:0 0 8px;">New User Registration</p>
-    <h1 style="color:#f8fafc;font-size:26px;font-weight:700;margin:0 0 20px;line-height:1.3;">
+    <p style="color:#6b7280;font-size:14px;margin:0 0 8px;">New User Registration</p>
+    <h1 style="color:#111827;font-size:26px;font-weight:700;margin:0 0 20px;line-height:1.3;">
       A new user just signed up!
     </h1>
 
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 24px;">
       <tr>
-        <td style="padding:12px 16px;background:#1e293b;border-radius:8px;">
+        <td style="padding:12px 16px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;">
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
             <tr>
-              <td style="padding:8px 0;border-bottom:1px solid #334155;">
-                <span style="color:#94a3b8;font-size:13px;">Email</span><br/>
-                <span style="color:#f8fafc;font-size:15px;font-weight:600;">${userEmail}</span>
+              <td style="padding:8px 0;border-bottom:1px solid #e5e7eb;">
+                <span style="color:#6b7280;font-size:13px;">Email</span><br/>
+                <span style="color:#111827;font-size:15px;font-weight:600;">${userEmail}</span>
               </td>
             </tr>
             <tr>
-              <td style="padding:8px 0;border-bottom:1px solid #334155;">
-                <span style="color:#94a3b8;font-size:13px;">Platform</span><br/>
-                <span style="color:#f8fafc;font-size:15px;font-weight:600;">${platformDisplay}</span>
+              <td style="padding:8px 0;border-bottom:1px solid #e5e7eb;">
+                <span style="color:#6b7280;font-size:13px;">Platform</span><br/>
+                <span style="color:#111827;font-size:15px;font-weight:600;">${platformDisplay}</span>
               </td>
             </tr>
             <tr>
-              <td style="padding:8px 0;border-bottom:1px solid #334155;">
-                <span style="color:#94a3b8;font-size:13px;">Sign-up Method</span><br/>
-                <span style="color:#f8fafc;font-size:15px;font-weight:600;">${methodDisplay}</span>
+              <td style="padding:8px 0;border-bottom:1px solid #e5e7eb;">
+                <span style="color:#6b7280;font-size:13px;">Sign-up Method</span><br/>
+                <span style="color:#111827;font-size:15px;font-weight:600;">${methodDisplay}</span>
               </td>
             </tr>
             <tr>
               <td style="padding:8px 0;">
-                <span style="color:#94a3b8;font-size:13px;">Business Name</span><br/>
-                <span style="color:#f8fafc;font-size:15px;font-weight:600;">${businessName || 'Not set yet'}</span>
+                <span style="color:#6b7280;font-size:13px;">Business Name</span><br/>
+                <span style="color:#111827;font-size:15px;font-weight:600;">${businessName || 'Not set yet'}</span>
               </td>
             </tr>
           </table>
@@ -3241,43 +3291,43 @@ export function sendNewProSubscriptionEmail(
   const planDisplay = isYearly ? 'Yearly ($328/yr)' : 'Monthly ($49/mo)';
 
   const content = wrapEmailTemplate(`
-    <p style="color:#94a3b8;font-size:14px;margin:0 0 8px;">New Pro Subscription 💰</p>
-    <h1 style="color:#f8fafc;font-size:26px;font-weight:700;margin:0 0 20px;line-height:1.3;">
+    <p style="color:#6b7280;font-size:14px;margin:0 0 8px;">New Pro Subscription 💰</p>
+    <h1 style="color:#111827;font-size:26px;font-weight:700;margin:0 0 20px;line-height:1.3;">
       A user just upgraded to Pro!
     </h1>
 
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 24px;">
       <tr>
-        <td style="padding:12px 16px;background:#1e293b;border-radius:8px;">
+        <td style="padding:12px 16px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;">
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
             <tr>
-              <td style="padding:8px 0;border-bottom:1px solid #334155;">
-                <span style="color:#94a3b8;font-size:13px;">Email</span><br/>
-                <span style="color:#f8fafc;font-size:15px;font-weight:600;">${userEmail}</span>
+              <td style="padding:8px 0;border-bottom:1px solid #e5e7eb;">
+                <span style="color:#6b7280;font-size:13px;">Email</span><br/>
+                <span style="color:#111827;font-size:15px;font-weight:600;">${userEmail}</span>
               </td>
             </tr>
             <tr>
-              <td style="padding:8px 0;border-bottom:1px solid #334155;">
-                <span style="color:#94a3b8;font-size:13px;">Business Name</span><br/>
-                <span style="color:#f8fafc;font-size:15px;font-weight:600;">${businessName || 'Not set'}</span>
+              <td style="padding:8px 0;border-bottom:1px solid #e5e7eb;">
+                <span style="color:#6b7280;font-size:13px;">Business Name</span><br/>
+                <span style="color:#111827;font-size:15px;font-weight:600;">${businessName || 'Not set'}</span>
               </td>
             </tr>
             <tr>
-              <td style="padding:8px 0;border-bottom:1px solid #334155;">
-                <span style="color:#94a3b8;font-size:13px;">Plan</span><br/>
-                <span style="color:#22c55e;font-size:15px;font-weight:600;">${planDisplay}</span>
+              <td style="padding:8px 0;border-bottom:1px solid #e5e7eb;">
+                <span style="color:#6b7280;font-size:13px;">Plan</span><br/>
+                <span style="color:${QM_GREEN_INK};font-size:15px;font-weight:600;">${planDisplay}</span>
               </td>
             </tr>
             <tr>
-              <td style="padding:8px 0;border-bottom:1px solid #334155;">
-                <span style="color:#94a3b8;font-size:13px;">Platform</span><br/>
-                <span style="color:#f8fafc;font-size:15px;font-weight:600;">${platformDisplay}</span>
+              <td style="padding:8px 0;border-bottom:1px solid #e5e7eb;">
+                <span style="color:#6b7280;font-size:13px;">Platform</span><br/>
+                <span style="color:#111827;font-size:15px;font-weight:600;">${platformDisplay}</span>
               </td>
             </tr>
             <tr>
               <td style="padding:8px 0;">
-                <span style="color:#94a3b8;font-size:13px;">User ID</span><br/>
-                <span style="color:#f8fafc;font-size:13px;font-family:monospace;">${userId}</span>
+                <span style="color:#6b7280;font-size:13px;">User ID</span><br/>
+                <span style="color:#111827;font-size:13px;font-family:monospace;">${userId}</span>
               </td>
             </tr>
           </table>
@@ -3309,31 +3359,31 @@ export function sendFeedbackEmail(
   const escapedCategory = escapeHtmlEmail(category);
 
   const content = wrapEmailTemplate(`
-    <p style="color:#94a3b8;font-size:14px;margin:0 0 8px;">User Feedback</p>
-    <h1 style="color:#f8fafc;font-size:26px;font-weight:700;margin:0 0 20px;line-height:1.3;">
+    <p style="color:#6b7280;font-size:14px;margin:0 0 8px;">User Feedback</p>
+    <h1 style="color:#111827;font-size:26px;font-weight:700;margin:0 0 20px;line-height:1.3;">
       New feedback from a user
     </h1>
 
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 24px;">
       <tr>
-        <td style="padding:12px 16px;background:#1e293b;border-radius:8px;">
+        <td style="padding:12px 16px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;">
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
             <tr>
-              <td style="padding:8px 0;border-bottom:1px solid #334155;">
-                <span style="color:#94a3b8;font-size:13px;">From</span><br/>
-                <span style="color:#f8fafc;font-size:15px;font-weight:600;">${escapeHtmlEmail(userEmail)}</span>
+              <td style="padding:8px 0;border-bottom:1px solid #e5e7eb;">
+                <span style="color:#6b7280;font-size:13px;">From</span><br/>
+                <span style="color:#111827;font-size:15px;font-weight:600;">${escapeHtmlEmail(userEmail)}</span>
               </td>
             </tr>
             <tr>
-              <td style="padding:8px 0;border-bottom:1px solid #334155;">
-                <span style="color:#94a3b8;font-size:13px;">Category</span><br/>
-                <span style="color:#f8fafc;font-size:15px;font-weight:600;">${escapedCategory}</span>
+              <td style="padding:8px 0;border-bottom:1px solid #e5e7eb;">
+                <span style="color:#6b7280;font-size:13px;">Category</span><br/>
+                <span style="color:#111827;font-size:15px;font-weight:600;">${escapedCategory}</span>
               </td>
             </tr>
             <tr>
               <td style="padding:8px 0;">
-                <span style="color:#94a3b8;font-size:13px;">Feedback</span><br/>
-                <span style="color:#f8fafc;font-size:15px;line-height:1.6;">${escapedFeedback}</span>
+                <span style="color:#6b7280;font-size:13px;">Feedback</span><br/>
+                <span style="color:#111827;font-size:15px;line-height:1.6;">${escapedFeedback}</span>
               </td>
             </tr>
           </table>
@@ -3382,55 +3432,55 @@ export function sendLeadInterestEmail(
     : '—';
 
   const content = wrapEmailTemplate(`
-    <p style="color:#94a3b8;font-size:14px;margin:0 0 8px;">New Lead — Call Answering (Katie)</p>
-    <h1 style="color:#f8fafc;font-size:26px;font-weight:700;margin:0 0 20px;line-height:1.3;">
+    <p style="color:#6b7280;font-size:14px;margin:0 0 8px;">New Lead — Call Answering (Katie)</p>
+    <h1 style="color:#111827;font-size:26px;font-weight:700;margin:0 0 20px;line-height:1.3;">
       ${businessName} wants Katie set up
     </h1>
 
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 24px;">
       <tr>
-        <td style="padding:12px 16px;background:#1e293b;border-radius:8px;">
+        <td style="padding:12px 16px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;">
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
             <tr>
-              <td style="padding:8px 0;border-bottom:1px solid #334155;">
-                <span style="color:#94a3b8;font-size:13px;">Business</span><br/>
-                <span style="color:#f8fafc;font-size:15px;font-weight:600;">${businessName}</span>
+              <td style="padding:8px 0;border-bottom:1px solid #e5e7eb;">
+                <span style="color:#6b7280;font-size:13px;">Business</span><br/>
+                <span style="color:#111827;font-size:15px;font-weight:600;">${businessName}</span>
               </td>
             </tr>
             <tr>
-              <td style="padding:8px 0;border-bottom:1px solid #334155;">
-                <span style="color:#94a3b8;font-size:13px;">Best number to call</span><br/>
-                <span style="color:#f8fafc;font-size:15px;font-weight:600;">${contactPhone}</span>
+              <td style="padding:8px 0;border-bottom:1px solid #e5e7eb;">
+                <span style="color:#6b7280;font-size:13px;">Best number to call</span><br/>
+                <span style="color:#111827;font-size:15px;font-weight:600;">${contactPhone}</span>
               </td>
             </tr>
             <tr>
-              <td style="padding:8px 0;border-bottom:1px solid #334155;">
-                <span style="color:#94a3b8;font-size:13px;">Calls missed per week</span><br/>
-                <span style="color:#f8fafc;font-size:15px;font-weight:600;">${missedCalls}</span>
+              <td style="padding:8px 0;border-bottom:1px solid #e5e7eb;">
+                <span style="color:#6b7280;font-size:13px;">Calls missed per week</span><br/>
+                <span style="color:#111827;font-size:15px;font-weight:600;">${missedCalls}</span>
               </td>
             </tr>
             ${typicalJobValue ? `<tr>
-              <td style="padding:8px 0;border-bottom:1px solid #334155;">
-                <span style="color:#94a3b8;font-size:13px;">Typical job value</span><br/>
-                <span style="color:#f8fafc;font-size:15px;font-weight:600;">${typicalJobValue}</span>
+              <td style="padding:8px 0;border-bottom:1px solid #e5e7eb;">
+                <span style="color:#6b7280;font-size:13px;">Typical job value</span><br/>
+                <span style="color:#111827;font-size:15px;font-weight:600;">${typicalJobValue}</span>
               </td>
             </tr>` : ''}
             ${estLostPerYear ? `<tr>
-              <td style="padding:8px 0;border-bottom:1px solid #334155;">
-                <span style="color:#94a3b8;font-size:13px;">Est. lost revenue / year</span><br/>
-                <span style="color:#cfa153;font-size:15px;font-weight:700;">${estLostPerYear}</span>
+              <td style="padding:8px 0;border-bottom:1px solid #e5e7eb;">
+                <span style="color:#6b7280;font-size:13px;">Est. lost revenue / year</span><br/>
+                <span style="color:#b45309;font-size:15px;font-weight:700;">${estLostPerYear}</span>
               </td>
             </tr>` : ''}
             <tr>
-              <td style="padding:8px 0;border-bottom:1px solid #334155;">
-                <span style="color:#94a3b8;font-size:13px;">Account email</span><br/>
-                <span style="color:#f8fafc;font-size:15px;font-weight:600;">${escapeHtmlEmail(userEmail)}</span>
+              <td style="padding:8px 0;border-bottom:1px solid #e5e7eb;">
+                <span style="color:#6b7280;font-size:13px;">Account email</span><br/>
+                <span style="color:#111827;font-size:15px;font-weight:600;">${escapeHtmlEmail(userEmail)}</span>
               </td>
             </tr>
             <tr>
               <td style="padding:8px 0;">
-                <span style="color:#94a3b8;font-size:13px;">Notes</span><br/>
-                <span style="color:#f8fafc;font-size:15px;line-height:1.6;">${notes}</span>
+                <span style="color:#6b7280;font-size:13px;">Notes</span><br/>
+                <span style="color:#111827;font-size:15px;line-height:1.6;">${notes}</span>
               </td>
             </tr>
           </table>
@@ -3438,7 +3488,7 @@ export function sendLeadInterestEmail(
       </tr>
     </table>
 
-    <p style="color:#64748b;font-size:12px;margin:0;">User ID: ${escapeHtmlEmail(userId)}</p>
+    <p style="color:#6b7280;font-size:12px;margin:0;">User ID: ${escapeHtmlEmail(userId)}</p>
   `);
 
   return sendEmail({
@@ -3457,29 +3507,29 @@ export function sendAffiliateInviteEmail(
   recipientEmail: string,
 ): Promise<boolean> {
   const content = wrapEmailTemplate(`
-    <h1 style="color:#f1f5f9;font-size:24px;font-weight:700;margin:0 0 20px;">Hey Legend! 🤙</h1>
-    <p style="color:#cbd5e1;font-size:15px;line-height:1.6;margin:0 0 16px;">
+    <h1 style="color:#111827;font-size:24px;font-weight:700;margin:0 0 20px;">Hey Legend! 🤙</h1>
+    <p style="color:#374151;font-size:15px;line-height:1.6;margin:0 0 16px;">
       It's Tom here — hope you're doing well mate!
     </p>
-    <p style="color:#cbd5e1;font-size:15px;line-height:1.6;margin:0 0 16px;">
-      I wanted to reach out because I've set you up as an affiliate for <strong style="color:#f1f5f9;">QuoteMate</strong> — my quoting app built for tradies.
+    <p style="color:#374151;font-size:15px;line-height:1.6;margin:0 0 16px;">
+      I wanted to reach out because I've set you up as an affiliate for <strong style="color:#111827;">QuoteMate</strong> — my quoting app built for tradies.
     </p>
-    <p style="color:#cbd5e1;font-size:15px;line-height:1.6;margin:0 0 16px;">
-      As an affiliate, you'll earn <strong style="color:#10b981;">50% commission</strong> on every Pro subscription that signs up through your referral link. It's a pretty sweet deal — you just share your link and earn cash when people subscribe.
+    <p style="color:#374151;font-size:15px;line-height:1.6;margin:0 0 16px;">
+      As an affiliate, you'll earn <strong style="color:${QM_GREEN_INK};">50% commission</strong> on every Pro subscription that signs up through your referral link. It's a pretty sweet deal — you just share your link and earn cash when people subscribe.
     </p>
     ${infoCard(
       infoRow('Commission Rate', '50% of net revenue', false) +
       infoRow('Subscription Price', '$49 AUD/month', false) +
       infoRow('How It Works', 'Share your referral link → they subscribe → you earn', true),
-      '#10b981'
+      QM_GREEN
     )}
-    <p style="color:#cbd5e1;font-size:15px;line-height:1.6;margin:0 0 16px;">
+    <p style="color:#374151;font-size:15px;line-height:1.6;margin:0 0 16px;">
       To get started, just sign up at the link below and your affiliate status will be activated automatically. You'll get a unique referral link and QR code to share around.
     </p>
-    ${ctaButton('Get Started with QuoteMate', '#009868', 'https://quotemateapp.au')}
-    <p style="color:#94a3b8;font-size:13px;line-height:1.5;margin:24px 0 0;">
+    ${ctaButton('Get Started with QuoteMate', QM_GREEN, 'https://quotemateapp.au')}
+    <p style="color:#6b7280;font-size:13px;line-height:1.5;margin:24px 0 0;">
       Cheers legend,<br/>
-      <strong style="color:#f1f5f9;">Tom</strong>
+      <strong style="color:#111827;">Tom</strong>
     </p>
   `);
 
@@ -3505,37 +3555,37 @@ export function sendMaterialListErrorEmail(
   const timestamp = new Date().toLocaleString('en-AU', { timeZone: 'Australia/Sydney' });
 
   const content = wrapEmailTemplate(`
-    <p style="color:#94a3b8;font-size:14px;margin:0 0 8px;">Material List Generation Failed</p>
-    <h1 style="color:#ef4444;font-size:26px;font-weight:700;margin:0 0 20px;line-height:1.3;">
+    <p style="color:#6b7280;font-size:14px;margin:0 0 8px;">Material List Generation Failed</p>
+    <h1 style="color:#b91c1c;font-size:26px;font-weight:700;margin:0 0 20px;line-height:1.3;">
       A material list generation has failed
     </h1>
 
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 24px;">
       <tr>
-        <td style="padding:12px 16px;background:#1e293b;border-radius:8px;">
+        <td style="padding:12px 16px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;">
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
             <tr>
-              <td style="padding:8px 0;border-bottom:1px solid #334155;">
-                <span style="color:#94a3b8;font-size:13px;">User</span><br/>
-                <span style="color:#f8fafc;font-size:15px;font-weight:600;">${userEmail || userId}</span>
+              <td style="padding:8px 0;border-bottom:1px solid #e5e7eb;">
+                <span style="color:#6b7280;font-size:13px;">User</span><br/>
+                <span style="color:#111827;font-size:15px;font-weight:600;">${userEmail || userId}</span>
               </td>
             </tr>
             <tr>
-              <td style="padding:8px 0;border-bottom:1px solid #334155;">
-                <span style="color:#94a3b8;font-size:13px;">Time (AEST)</span><br/>
-                <span style="color:#f8fafc;font-size:15px;font-weight:600;">${timestamp}</span>
+              <td style="padding:8px 0;border-bottom:1px solid #e5e7eb;">
+                <span style="color:#6b7280;font-size:13px;">Time (AEST)</span><br/>
+                <span style="color:#111827;font-size:15px;font-weight:600;">${timestamp}</span>
               </td>
             </tr>
             <tr>
-              <td style="padding:8px 0;border-bottom:1px solid #334155;">
-                <span style="color:#94a3b8;font-size:13px;">Error</span><br/>
-                <span style="color:#ef4444;font-size:15px;font-weight:600;">${errorMessage}</span>
+              <td style="padding:8px 0;border-bottom:1px solid #e5e7eb;">
+                <span style="color:#6b7280;font-size:13px;">Error</span><br/>
+                <span style="color:#b91c1c;font-size:15px;font-weight:600;">${errorMessage}</span>
               </td>
             </tr>
             <tr>
               <td style="padding:8px 0;">
-                <span style="color:#94a3b8;font-size:13px;">Job Description</span><br/>
-                <span style="color:#f8fafc;font-size:14px;">${truncatedJob}</span>
+                <span style="color:#6b7280;font-size:13px;">Job Description</span><br/>
+                <span style="color:#111827;font-size:14px;">${truncatedJob}</span>
               </td>
             </tr>
           </table>
@@ -3566,18 +3616,19 @@ export function sendDraftNudgeEmail(
   const totalValue = drafts.reduce((sum, d) => sum + d.total, 0);
   const formattedValue = `$${totalValue.toLocaleString('en-AU', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 
-  const draftRows = drafts.slice(0, 5).map(d => `
+  const shownDrafts = drafts.slice(0, 5);
+  const draftRows = shownDrafts.map((d, i) => `
     <tr>
-      <td style="padding:10px 0;border-bottom:1px solid #334155;">
-        <span style="color:#f8fafc;font-size:14px;font-weight:600;">${d.customerName}</span><br/>
-        <span style="color:#94a3b8;font-size:13px;">${d.jobName} &mdash; $${d.total.toLocaleString('en-AU', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>
-        <span style="color:#64748b;font-size:12px;float:right;">${d.daysOld}d ago</span>
+      <td style="padding:10px 0;${i < shownDrafts.length - 1 ? 'border-bottom:1px solid #e5e7eb;' : ''}">
+        <span style="color:#111827;font-size:14px;font-weight:600;">${d.customerName}</span><br/>
+        <span style="color:#6b7280;font-size:13px;">${d.jobName} &mdash; $${d.total.toLocaleString('en-AU', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>
+        <span style="color:#6b7280;font-size:12px;float:right;">${d.daysOld}d ago</span>
       </td>
     </tr>
   `).join('');
 
   const moreText = drafts.length > 5
-    ? `<p style="color:#64748b;font-size:13px;margin:8px 0 0;">+ ${drafts.length - 5} more draft${drafts.length - 5 > 1 ? 's' : ''}</p>`
+    ? `<p style="color:#6b7280;font-size:13px;margin:8px 0 0;">+ ${drafts.length - 5} more draft${drafts.length - 5 > 1 ? 's' : ''}</p>`
     : '';
 
   const heading = tier === 3
@@ -3586,20 +3637,20 @@ export function sendDraftNudgeEmail(
 
   const subtext = tier === 3
     ? `These quotes have been sitting for over a week. Send them off or they might go cold.`
-    : `That's <strong style="color:#f8fafc;">${formattedValue}</strong> worth of work waiting to land in your customer's inbox.`;
+    : `That's <strong style="color:#111827;">${formattedValue}</strong> worth of work waiting to land in your customer's inbox.`;
 
   const content = wrapEmailTemplate(`
     <div style="text-align:center;margin:0 0 24px;">
-      ${badge(`${draftCount} UNSENT`, '#78350f', '#e6b872')}
+      ${badge(`${draftCount} UNSENT`, '#fffbeb', '#b45309')}
     </div>
-    <h1 style="color:#f8fafc;font-size:26px;font-weight:700;margin:0 0 16px;text-align:center;line-height:1.3;">
+    <h1 style="color:#111827;font-size:26px;font-weight:700;margin:0 0 16px;text-align:center;line-height:1.3;">
       ${heading}
     </h1>
-    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 24px;text-align:center;">
+    <p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 24px;text-align:center;">
       ${subtext}
     </p>
 
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#0f172a;border-radius:12px;border:1px solid #334155;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f9fafb;border-radius:12px;border:1px solid #e5e7eb;">
       <tr>
         <td style="padding:16px 20px;">
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
@@ -3612,7 +3663,7 @@ export function sendDraftNudgeEmail(
 
     ${ctaButton('Review & Send Quotes')}
 
-    <p style="color:#64748b;font-size:13px;line-height:1.5;margin:24px 0 0;text-align:center;">
+    <p style="color:#6b7280;font-size:13px;line-height:1.5;margin:24px 0 0;text-align:center;">
       Quotes sent sooner get accepted more often. Don't let these go cold!
     </p>
   `, { unsubscribeUrl, preheader: `You have ${draftCount} unsent quote${draftCount > 1 ? 's' : ''} worth ${formattedValue}. Send them before they go cold.` });
@@ -3656,16 +3707,16 @@ export function sendReadyToSendNudgeEmail(
 
   const content = wrapEmailTemplate(`
     <div style="text-align:center;margin:0 0 24px;">
-      ${badge('READY TO SEND', '#78350f', '#e6b872')}
+      ${badge('READY TO SEND', '#fffbeb', '#b45309')}
     </div>
-    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 16px;">
+    <p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 16px;">
       ${greeting},
     </p>
-    <h1 style="color:#f8fafc;font-size:26px;font-weight:700;margin:0 0 16px;text-align:center;line-height:1.3;">
+    <h1 style="color:#111827;font-size:26px;font-weight:700;margin:0 0 16px;text-align:center;line-height:1.3;">
       ${heading}
     </h1>
-    <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0 0 24px;text-align:center;">
-      You built it ${ageText} ago and it hasn't gone out yet${total > 0 ? ` &mdash; that's <strong style="color:#f8fafc;">${formattedTotal}</strong> of work still sitting in your drafts` : ''}. Have a quick look and send it through.
+    <p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 24px;text-align:center;">
+      You built it ${ageText} ago and it hasn't gone out yet${total > 0 ? ` &mdash; that's <strong style="color:#111827;">${formattedTotal}</strong> of work still sitting in your drafts` : ''}. Have a quick look and send it through.
     </p>
 
     ${ctaButton('Open in QuoteMate')}
@@ -3696,21 +3747,21 @@ export function sendReadyToSendNudgeEmail(
  */
 export function sendPasswordResetLinkEmail(to: string, resetLink: string, userId?: string): Promise<boolean> {
   const content = wrapEmailTemplate(`
-    <p style="color:#00c897;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;margin:0 0 10px;">Account access</p>
-    <h1 class="qm-h1" style="color:#f8fafc;font-size:26px;font-weight:700;margin:0 0 16px;line-height:1.3;">
+    <p style="color:${QM_GREEN_INK};font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;margin:0 0 10px;">Account access</p>
+    <h1 class="qm-h1" style="color:#111827;font-size:26px;font-weight:700;margin:0 0 16px;line-height:1.3;">
       Set a new password
     </h1>
-    <p class="qm-body" style="color:#cbd5e1;font-size:15px;line-height:1.65;margin:0 0 16px;">
-      Someone asked to reset the QuoteMate password for <strong style="color:#f8fafc;">${to}</strong>. Tap the button below and you can pick a new one.
+    <p class="qm-body" style="color:#374151;font-size:15px;line-height:1.65;margin:0 0 16px;">
+      Someone asked to reset the QuoteMate password for <strong style="color:#111827;">${to}</strong>. Tap the button below and you can pick a new one.
     </p>
-    ${ctaButton('Set a new password', '#009868', resetLink)}
-    <p class="qm-body" style="color:#94a3b8;font-size:14px;line-height:1.6;margin:24px 0 0;">
+    ${ctaButton('Set a new password', QM_GREEN, resetLink)}
+    <p class="qm-body" style="color:#6b7280;font-size:14px;line-height:1.6;margin:24px 0 0;">
       This link is good for one hour. If it's expired by the time you get to it, just ask for another from the sign-in screen.
     </p>
-    <p class="qm-body" style="color:#94a3b8;font-size:14px;line-height:1.6;margin:12px 0 0;">
+    <p class="qm-body" style="color:#6b7280;font-size:14px;line-height:1.6;margin:12px 0 0;">
       If that wasn't you, you can ignore this — nothing changes and your password stays as it is.
     </p>
-    <p class="qm-body" style="color:#cbd5e1;font-size:15px;line-height:1.65;margin:24px 0 0;">
+    <p class="qm-body" style="color:#374151;font-size:15px;line-height:1.65;margin:24px 0 0;">
       Cheers,<br/>Tom
     </p>
   `, { preheader: 'Set a new QuoteMate password' });
@@ -3736,21 +3787,21 @@ export function sendPasswordResetLinkEmail(to: string, resetLink: string, userId
  */
 export function sendSocialSignInReminderEmail(to: string, providerDescription: string, userId?: string): Promise<boolean> {
   const content = wrapEmailTemplate(`
-    <p style="color:#00c897;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;margin:0 0 10px;">Account access</p>
-    <h1 class="qm-h1" style="color:#f8fafc;font-size:26px;font-weight:700;margin:0 0 16px;line-height:1.3;">
+    <p style="color:${QM_GREEN_INK};font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;margin:0 0 10px;">Account access</p>
+    <h1 class="qm-h1" style="color:#111827;font-size:26px;font-weight:700;margin:0 0 16px;line-height:1.3;">
       No password needed &mdash; you're a ${providerDescription} sign-in
     </h1>
-    <p class="qm-body" style="color:#cbd5e1;font-size:15px;line-height:1.65;margin:0 0 16px;">
-      Someone asked to reset the QuoteMate password for <strong style="color:#f8fafc;">${to}</strong>. There's no password on this account to reset &mdash; it was set up with <strong style="color:#f8fafc;">${providerDescription}</strong>.
+    <p class="qm-body" style="color:#374151;font-size:15px;line-height:1.65;margin:0 0 16px;">
+      Someone asked to reset the QuoteMate password for <strong style="color:#111827;">${to}</strong>. There's no password on this account to reset &mdash; it was set up with <strong style="color:#111827;">${providerDescription}</strong>.
     </p>
-    <p class="qm-body" style="color:#cbd5e1;font-size:15px;line-height:1.65;margin:0 0 8px;">
-      Head back to the sign-in screen and tap the <strong style="color:#f8fafc;">${providerDescription}</strong> button instead &mdash; you'll go straight in, and everything will be where you left it.
+    <p class="qm-body" style="color:#374151;font-size:15px;line-height:1.65;margin:0 0 8px;">
+      Head back to the sign-in screen and tap the <strong style="color:#111827;">${providerDescription}</strong> button instead &mdash; you'll go straight in, and everything will be where you left it.
     </p>
-    ${ctaButton('Open QuoteMate', '#009868')}
-    <p class="qm-body" style="color:#94a3b8;font-size:14px;line-height:1.6;margin:24px 0 0;">
+    ${ctaButton('Open QuoteMate')}
+    <p class="qm-body" style="color:#6b7280;font-size:14px;line-height:1.6;margin:24px 0 0;">
       If that wasn't you, you can safely ignore this — nothing has changed on your account.
     </p>
-    <p class="qm-body" style="color:#cbd5e1;font-size:15px;line-height:1.65;margin:24px 0 0;">
+    <p class="qm-body" style="color:#374151;font-size:15px;line-height:1.65;margin:24px 0 0;">
       Cheers,<br/>Tom
     </p>
   `, { preheader: `Sign in with ${providerDescription} — no password needed` });
