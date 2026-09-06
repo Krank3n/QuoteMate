@@ -16,12 +16,11 @@ import {
   Linking,
   Keyboard,
 } from 'react-native';
-// Not react-native's: under edge-to-edge Android no longer resizes the window
-// for the keyboard, so RN's KeyboardAvoidingView does nothing there — and a
-// screen with no wrapper at all is the same bug without the tell-tale. The
-// manual-entry form renders in the screen body as well as inside the
-// BottomSheet (which lifts itself). See components/keyboardAvoidance.guard.test.ts.
-import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
+// KeyboardAwareScrollView, not a bare KeyboardAvoidingView: the latter only
+// shrinks the area, so the field you just tapped is reachable but you have to
+// scroll to it yourself. This one scrolls the focused input into view. Same
+// shape as CustomerDetailsScreen and the settings screens.
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { useAddMaterialStyles } from './AddMaterial/styles';
 import { ManualEntrySection } from './AddMaterial/ManualEntrySection';
 import {
@@ -1510,10 +1509,12 @@ export function AddMaterialScreen() {
 
   // Render Search & Add Tab - search first, recently used below, manual entry in bottom sheet
   const renderSearchTab = () => (
-    <ScrollView
+    <KeyboardAwareScrollView
       style={styles.tabContent}
       contentContainerStyle={styles.scrollContent}
       keyboardShouldPersistTaps="handled"
+      // Breathing room between the focused field and the keyboard top.
+      bottomOffset={24}
     >
       <WebContainer>
       {isEditMode || isSavedItemMode ? (
@@ -1556,7 +1557,7 @@ export function AddMaterialScreen() {
         </>
       )}
       </WebContainer>
-    </ScrollView>
+    </KeyboardAwareScrollView>
   );
 
   // Render Saved Items Tab
@@ -1859,16 +1860,7 @@ export function AddMaterialScreen() {
   }, [isEditMode, isSavedItemEditMode, isSavedItemCreateMode, supplierBookOnly, navigation]);
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior="padding"
-      // automaticOffset: the lift is computed from onLayout's y, which is
-      // relative to the PARENT. Behind a nav header or inside a centred modal
-      // that reads far too small and the view under-lifts — which is why iOS
-      // stayed covered while Android (container at window top) looked fine.
-      // This asks native for the true screen position instead.
-      automaticOffset
-    >
+    <View style={styles.container}>
       <GridBackground />
       {/* Tab Selector - hidden in edit mode, saved-item modes, and supplier-book-only mode */}
       {!isEditMode && !isSavedItemMode && !supplierBookOnly && (
@@ -2107,6 +2099,6 @@ export function AddMaterialScreen() {
         {snackbarMessage}
       </Snackbar>
 
-    </KeyboardAvoidingView>
+    </View>
   );
 }

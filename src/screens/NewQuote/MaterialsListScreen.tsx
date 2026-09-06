@@ -17,12 +17,13 @@ import {
   Alert,
   FlatList,
 } from 'react-native';
-// Not react-native's: under edge-to-edge Android no longer resizes the window
-// for the keyboard, so RN's KeyboardAvoidingView does nothing there — and a
-// screen with no wrapper at all is the same bug without the tell-tale. Wraps
-// both the list (rows are edited inline) and the New Section modal, which is a
-// paper <Modal> in the same window. See components/keyboardAvoidance.guard.test.ts.
-import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
+// The list is a FlatList, so it can't be wrapped in a KeyboardAwareScrollView —
+// but renderScrollComponent swaps the scroller FlatList uses internally, which
+// gets the same behaviour: the focused row scrolls into view rather than just
+// being reachable. The New Section modal keeps a KeyboardAvoidingView; it is a
+// paper <Modal> in the same window with no list inside it.
+// See components/keyboardAvoidance.guard.test.ts.
+import { KeyboardAvoidingView, KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import {
   Text,
   Button,
@@ -2327,18 +2328,14 @@ export function MaterialsListScreen() {
   );
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior="padding"
-      // automaticOffset: the lift is computed from onLayout's y, which is
-      // relative to the PARENT. Behind a nav header or inside a centred modal
-      // that reads far too small and the view under-lifts — which is why iOS
-      // stayed covered while Android (container at window top) looked fine.
-      // This asks native for the true screen position instead.
-      automaticOffset
-    >
+    <View style={styles.container}>
       <GridBackground />
       <FlatList
+          // Rows carry inline price/qty inputs, so the list itself has to lift
+          // the focused one clear of the keyboard.
+          renderScrollComponent={(props) => (
+            <KeyboardAwareScrollView {...props} bottomOffset={24} />
+          )}
           data={showMaterialsList ? flatData : []}
           keyExtractor={(item) => item.key}
           renderItem={renderFlatItem}
@@ -2954,7 +2951,7 @@ export function MaterialsListScreen() {
 
       {/* Unsaved-changes confirmation when navigating away */}
       <AlertModal {...unsavedModalProps} />
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
