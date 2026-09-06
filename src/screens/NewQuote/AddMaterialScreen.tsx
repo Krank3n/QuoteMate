@@ -229,6 +229,10 @@ const SavedItemRow = React.memo(function SavedItemRow({
 export function AddMaterialScreen() {
   const styles = useAddMaterialStyles();
   const themeColors = useThemeColors();
+  // The action bar is keyboard-sticky, so it rides ABOVE the keyboard. The
+  // scroller has to clear the bar as well, not just the keyboard, or the
+  // focused field is lifted straight underneath the buttons.
+  const [footerHeight, setFooterHeight] = useState(0);
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const safeInsets = useSafeAreaInsets();
@@ -1514,7 +1518,7 @@ export function AddMaterialScreen() {
       contentContainerStyle={styles.scrollContent}
       keyboardShouldPersistTaps="handled"
       // Breathing room between the focused field and the keyboard top.
-      bottomOffset={24}
+      bottomOffset={footerHeight + 24}
     >
       <WebContainer>
       {isEditMode || isSavedItemMode ? (
@@ -1914,6 +1918,7 @@ export function AddMaterialScreen() {
       {/* Fixed Bottom Button — only for edit / saved-item modes */}
       {!supplierBookOnly && (isEditMode || isSavedItemMode) && (
         <FixedBottomButton
+        onHeightChange={setFooterHeight}
           label={
             isSavedItemMode
               ? (isSavedItemEditMode ? 'Save Changes' : 'Add to Supplier Book')

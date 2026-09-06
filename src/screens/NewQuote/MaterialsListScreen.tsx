@@ -408,6 +408,10 @@ const EMPTY_MATERIALS_MESSAGES = [
 export function MaterialsListScreen() {
   const styles = useStyles();
   const themeColors = useThemeColors();
+  // The action bar is keyboard-sticky, so it rides ABOVE the keyboard. The
+  // scroller has to clear the bar as well, not just the keyboard, or the
+  // focused field is lifted straight underneath the buttons.
+  const [footerHeight, setFooterHeight] = useState(0);
   const emptyMessage = useMemo(() => EMPTY_MATERIALS_MESSAGES[Math.floor(Math.random() * EMPTY_MATERIALS_MESSAGES.length)], []);
   const chasingTitle = useMemo(() => CHASING_TITLES[Math.floor(Math.random() * CHASING_TITLES.length)], []);
   const chasingSubtitle = useMemo(() => CHASING_SUBTITLES[Math.floor(Math.random() * CHASING_SUBTITLES.length)], []);
@@ -2334,7 +2338,7 @@ export function MaterialsListScreen() {
           // Rows carry inline price/qty inputs, so the list itself has to lift
           // the focused one clear of the keyboard.
           renderScrollComponent={(props) => (
-            <KeyboardAwareScrollView {...props} bottomOffset={24} />
+            <KeyboardAwareScrollView {...props} bottomOffset={footerHeight + 24} />
           )}
           data={showMaterialsList ? flatData : []}
           keyExtractor={(item) => item.key}
@@ -2352,6 +2356,7 @@ export function MaterialsListScreen() {
       />
 
       <FixedBottomButton
+        onHeightChange={setFooterHeight}
         label={isAiAnalyzing ? "Cancel" : (isEditFromPreview ? "Save" : "Next: Labour & Markup")}
         onPress={isAiAnalyzing ? handleCancelGeneration : (isEditFromPreview ? handleSaveAndReturn : handleNext)}
         mode={isAiAnalyzing ? "outlined" : "contained"}

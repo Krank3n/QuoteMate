@@ -5,7 +5,7 @@
  */
 
 import React, { useEffect, useRef } from 'react';
-import { View, StyleSheet, Platform, Animated, Easing, TouchableOpacity } from 'react-native';
+import { View, StyleSheet, Platform, Animated, Easing, TouchableOpacity, type LayoutChangeEvent } from 'react-native';
 import { Text } from 'react-native-paper';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { KeyboardStickyView } from 'react-native-keyboard-controller';
@@ -48,6 +48,15 @@ interface FixedBottomButtonProps {
    *  already handles keyboard avoidance itself (e.g. wraps in
    *  KeyboardAvoidingView), to avoid double-translating the bar. */
   disableKeyboardSticky?: boolean;
+  /**
+   * Measured height of the bar, reported on layout.
+   *
+   * A screen whose list scrolls the focused field into view needs this: the
+   * scroller lifts the field clear of the KEYBOARD, but this bar is sticky and
+   * rides above the keyboard too, so without accounting for it the field is
+   * lifted straight underneath the buttons. Feed it into bottomOffset.
+   */
+  onHeightChange?: (height: number) => void;
 }
 
 /**
@@ -201,6 +210,7 @@ export function FixedBottomButton({
   secondaryLoadingOnPress,
   disableSolidBackground = false,
   disableKeyboardSticky = false,
+  onHeightChange,
 }: FixedBottomButtonProps) {
   const styles = useStyles();
   const insets = useSafeAreaInsets();
@@ -230,6 +240,7 @@ export function FixedBottomButton({
 
       <Container
         offset={useSticky ? { closed: 0, opened: insets.bottom } : undefined}
+        onLayout={(e: LayoutChangeEvent) => onHeightChange?.(e.nativeEvent.layout.height)}
         style={[
           styles.bottomActions,
           Platform.OS === 'web'
