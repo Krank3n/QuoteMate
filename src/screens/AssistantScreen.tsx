@@ -546,6 +546,10 @@ export function AssistantScreen() {
   // Voice session refs. These live across renders so the mic capture and
   // audio queue don't get re-created when the screen re-renders mid-turn.
   const voiceSessionRef = useRef<VoiceSession | null>(null);
+  // Held separately from the session because a bubble can still be closing
+  // after the session has gone — the model that produced it is still the fact
+  // we want on the message.
+  const voiceModelRef = useRef<string | null>(null);
   const micRef = useRef<MicCaptureHandle | null>(null);
   const audioQueueRef = useRef<AudioQueue | null>(null);
   // 'sticky' = mic icon toggle (stays listening across turns).
@@ -2195,6 +2199,10 @@ export function AssistantScreen() {
           console.warn('[Mate] empty reply from assistantChat', response.usage?.model);
         }
         updateMessage(convoId, streamingId, {
+          // assistantChat reports which brain actually answered, and it is not
+          // always the configured one — a dead Claude key falls the turn back
+          // to Gemini server-side. Record what replied, not what we asked for.
+          model: response.usage?.model,
           text: response.text?.trim() || (response.proposals.length > 0 ? 'Here you go — tap Apply.' : ''),
           proposals: response.proposals,
           proposalStatus: Object.fromEntries(response.proposals.map((p) => [p.id, 'pending' as ProposalStatus])),
@@ -2635,6 +2643,10 @@ export function AssistantScreen() {
           role: 'assistant',
           text: stripLeakedScaffolding(rendered ?? text),
           createdAt: new Date().toISOString(),
+          // The server chooses the voice provider per user and can A/B it, so
+          // only the mint knows which brain is on the other end of this
+          // session. See VoiceSession.model.
+          model: voiceModelRef.current ?? undefined,
         });
         return [];
       };
@@ -3048,6 +3060,7 @@ export function AssistantScreen() {
       }
 
       voiceSessionRef.current = session;
+      voiceModelRef.current = session.model ?? null;
       audioQueueRef.current = makeQueue();
       // ElevenLabs plays on its own WebRTC track and sends us no PCM, so there
       // is no audio clock to pace against — its transcripts pass straight

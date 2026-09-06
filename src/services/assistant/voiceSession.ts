@@ -220,6 +220,16 @@ export interface VoiceSessionOptions {
 }
 
 export interface VoiceSession {
+  /**
+   * Which brain answered, for the record. The SERVER picks the voice provider
+   * per user (and can A/B it by uid bucket), so "what was Mate running when it
+   * said that?" is not answerable from the client's own config — it is only
+   * knowable from the mint. Stamped onto every assistant message the session
+   * produces and rolled up onto the logged conversation, so the admin panel
+   * can attribute behaviour to a model instead of guessing.
+   */
+  model?: string;
+  provider?: string;
   /** Stream a base64 PCM 16 kHz mono chunk from the mic. */
   sendMicChunk: (base64Pcm: string) => void;
   /** Send a text user turn over the same session (useful when the tradie types mid-voice). */
@@ -301,6 +311,22 @@ export async function openVoiceSession(
   opts: VoiceSessionOptions = {},
 ): Promise<VoiceSession> {
   const minted = await mintLiveToken('voice');
+  const session = await openForMint(minted, history, cb, opts);
+  // Attached here, once, rather than in each transport: the mint is the only
+  // thing that knows which brain this session got, and it passes through this
+  // one function whichever way the server routed the user.
+  return Object.assign(session, {
+    model: minted.model,
+    provider: minted.provider || 'gemini',
+  });
+}
+
+async function openForMint(
+  minted: MintedToken,
+  history: ChatMessage[],
+  cb: VoiceSessionCallbacks,
+  opts: VoiceSessionOptions,
+): Promise<VoiceSession> {
   if (isElevenLabsMint(minted)) {
     const { openElevenLabsVoiceSession } = await import('./elevenLabsVoiceSession');
     return openElevenLabsVoiceSession(minted, history, cb, opts);
