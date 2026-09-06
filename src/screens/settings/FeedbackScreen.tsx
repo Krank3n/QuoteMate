@@ -15,11 +15,13 @@ import {
   ActivityIndicator,
   Linking,
 } from 'react-native';
-// Not react-native's: under edge-to-edge Android no longer resizes the window
-// for the keyboard, so RN's KeyboardAvoidingView does nothing there — and a
-// screen with no wrapper at all is the same bug without the tell-tale. See
+// Under edge-to-edge Android no longer resizes the window for the keyboard, so
+// a form screen with a plain ScrollView leaves its fields behind it — and RN's
+// own KeyboardAvoidingView is a no-op there too. This one shrinks the scroll
+// area AND scrolls the focused field into view, which a bare
+// KeyboardAvoidingView does not. Same shape as CustomerDetailsScreen. See
 // components/keyboardAvoidance.guard.test.ts.
-import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import {
   Text,
   Surface,
@@ -82,9 +84,13 @@ export function FeedbackScreen() {
   };
 
   return (
-    <KeyboardAvoidingView style={styles.container} behavior="padding">
+    <View style={styles.container}>
       <GridBackground />
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.scrollContent}>
+      <KeyboardAwareScrollView
+        // Breathing room between the focused field and the keyboard top.
+        bottomOffset={24}
+        style={{ flex: 1 }} contentContainerStyle={styles.scrollContent}
+      >
         <WebContainer>
           {/* WhatsApp quick feedback */}
           <TouchableOpacity
@@ -192,7 +198,7 @@ export function FeedbackScreen() {
             We read every single message.
           </Text>
         </WebContainer>
-      </ScrollView>
+      </KeyboardAwareScrollView>
 
       <AlertModal
         visible={modal.visible}
@@ -202,7 +208,7 @@ export function FeedbackScreen() {
         message={modal.message}
         showConfetti={modal.type === 'success'}
       />
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
