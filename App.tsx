@@ -794,7 +794,15 @@ function App() {
   return (
     <GestureHandlerRootView style={appStyles.flex}>
       <SafeAreaProvider>
-        <KeyboardProvider>
+        {/* preload={false}: on iOS the library warms the keyboard at startup by
+            adding a hidden UITextField and calling becomeFirstResponder /
+            resignFirstResponder (see ios/extensions/UIResponder.swift). It is
+            meant to be invisible, but on an older device the two calls do not
+            land in the same frame and the keyboard visibly flashes up as the
+            app opens — reported from an iPhone 11, 6 Sep 2026. The cost of
+            turning it off is a slightly slower FIRST keyboard open; the cost of
+            leaving it on is an app that looks broken the moment it launches. */}
+        <KeyboardProvider preload={false}>
           <PaperProvider theme={paperTheme}>
             <NavigationContainer
               key="root"
