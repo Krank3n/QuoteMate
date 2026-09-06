@@ -1204,11 +1204,6 @@ export const useStore = create<AppState>((set, get) => ({
           const backfilled = cloudQuotes.map((q) =>
             normaliseLabourToHours(q.laborMarkup === undefined ? { ...q, laborMarkup: q.markup } : q)
           );
-          // Save to local storage for offline access
-          await AsyncStorage.setItem(
-            STORAGE_KEYS.QUOTES,
-            JSON.stringify(backfilled)
-          );
           const reconciledNextNumber = reconcileNextNumber({
             items: backfilled,
             field: (q) => q.quoteNumber,
@@ -1216,6 +1211,17 @@ export const useStore = create<AppState>((set, get) => ({
             cached: get().nextQuoteNumber,
           });
           set({ quotes: backfilled, nextQuoteNumber: reconciledNextNumber });
+          // Mirror to local storage for offline access. Not awaited: this
+          // write can grow to several MB for an established business, and
+          // blocking bootstrap on a large SharedPreferences write is what
+          // produced a production Background ANR (loadQuotes sits in
+          // App.tsx's critical/first-paint batch). Firestore is already the
+          // source of truth above, so a slow or failed mirror write is safe
+          // to ignore. See issue #157.
+          AsyncStorage.setItem(
+            STORAGE_KEYS.QUOTES,
+            JSON.stringify(backfilled)
+          ).catch(() => {});
           return;
         }
       }
