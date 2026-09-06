@@ -481,9 +481,13 @@ export interface BusinessSettings {
   // this list, treat it as appended at the end. Reece is only honoured
   // when the user has connected (the integration screen flips that on).
   supplierPriority?: string[];
-  // Auto-nudge customers who haven't accepted a sent quote. Off by default.
-  // When on, the customerQuoteFollowUp scheduled function emails the
-  // customer ~3 days after send and again ~7 days, capped at 2 nudges.
+  // Auto-nudge customers who owe the tradie an answer or money. ON by
+  // default — resolve through resolveAutoCustomerFollowUp, never read raw,
+  // because undefined means "on" here. When on, customerQuoteFollowUp emails
+  // the customer 48 hours after a quote is sent and again at 7 days, and
+  // customerInvoiceFollowUp emails them 3 days after an invoice's due date
+  // and again at 10. Capped at 2 nudges each, and both stop the moment the
+  // customer answers or pays.
   autoCustomerFollowUpEnabled?: boolean;
   // Opt-IN — undefined counts as OFF (each auto-start mints a Live token
   // and burns a daily assistant turn, so the tab defaults to text). When
