@@ -4,7 +4,7 @@
  */
 
 import 'react-native-gesture-handler';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { initSentry, wrapRootComponent, reportIssue } from './src/config/sentry';
 import { Platform, LogBox, InteractionManager, AppState } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -20,6 +20,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { onAuthStateChanged } from 'firebase/auth';
 import { KeyboardProvider, KeyboardToolbar } from 'react-native-keyboard-controller';
+import { isStickyFooterMounted, subscribeStickyFooter } from './src/components/stickyFooterPresence';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { useStore } from './src/store/useStore';
@@ -102,6 +103,15 @@ function RouteAwareKeyboardToolbar() {
     update();
     return navigationRef.addListener('state', update);
   }, []);
+  // A screen with its own keyboard-sticky action bar already owns the strip
+  // above the keyboard; drawing the toolbar there puts prev/next/Done straight
+  // on top of Save. See components/stickyFooterPresence.
+  const stickyFooter = useSyncExternalStore(
+    subscribeStickyFooter,
+    isStickyFooterMounted,
+    isStickyFooterMounted,
+  );
+  if (stickyFooter) return null;
   if (!keyboardToolbarVisibleForRoute(routeName)) return null;
   return <KeyboardToolbar />;
 }

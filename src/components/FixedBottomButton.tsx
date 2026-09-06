@@ -10,6 +10,7 @@ import { Text } from 'react-native-paper';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { KeyboardStickyView } from 'react-native-keyboard-controller';
 import { makeStyles } from '../theme';
+import { registerStickyFooter } from './stickyFooterPresence';
 import { FooterButton } from './FooterButton';
 import { lightTap } from '../utils/haptics';
 
@@ -230,6 +231,14 @@ export function FixedBottomButton({
   // On Android, soft-input "adjustResize" already handles it; on web it's static.
   const useSticky = Platform.OS === 'ios' && !disableKeyboardSticky;
   const Container: any = useSticky ? KeyboardStickyView : View;
+
+  // While a sticky bar is up it owns the strip directly above the keyboard, so
+  // the global keyboard toolbar has to stand down or it draws on top of these
+  // buttons. See stickyFooterPresence.
+  useEffect(() => {
+    if (!useSticky) return;
+    return registerStickyFooter();
+  }, [useSticky]);
 
   return (
     <>

@@ -2364,11 +2364,12 @@ export function MaterialsListScreen() {
 
       <FixedBottomButton
         onHeightChange={setFooterHeight}
-        // The screen already lifts its own chrome (KeyboardAvoidingView
-        // above), so the bar must not translate itself as well — the
-        // component's own docs call this out. Same as LaborMarkup,
-        // JobDetails and ServiceReport.
-        disableKeyboardSticky
+        // Sticky stays ON. The bar is position:absolute/bottom:0, so the
+        // screen's KeyboardAvoidingView padding cannot move it — only this
+        // transform can. Verified on a simulator: with sticky off the keyboard
+        // covers the bar outright. The double-lift this prop guards against is
+        // handled instead by bottomOffset, which already includes the bar's
+        // height, so the field clears the bar rather than landing under it.
         label={isAiAnalyzing ? "Cancel" : (isEditFromPreview ? "Save" : "Next: Labour & Markup")}
         onPress={isAiAnalyzing ? handleCancelGeneration : (isEditFromPreview ? handleSaveAndReturn : handleNext)}
         mode={isAiAnalyzing ? "outlined" : "contained"}
