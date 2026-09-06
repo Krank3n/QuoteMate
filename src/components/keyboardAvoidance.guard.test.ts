@@ -197,3 +197,44 @@ describe('every surface with a text input handles the keyboard', () => {
     }
   });
 });
+
+/**
+ * Every KeyboardAvoidingView has to know where it actually is on screen.
+ *
+ * It computes the lift as `frame.y + frame.height - keyboardY`, where `frame`
+ * comes from onLayout — and onLayout's `y` is relative to the PARENT, not the
+ * screen. Behind a navigation header, or inside a centred modal, that reads far
+ * smaller than the truth, so the view lifts by too little and the field stays
+ * covered.
+ *
+ * Android hid this: under edge-to-edge the screen container starts at the
+ * window top, so parent-relative and screen-absolute happen to agree. iOS does
+ * not agree, which is why the first fix passed on an emulator and a tradie
+ * still had elements behind the keyboard on an iPhone (6 Sep 2026).
+ *
+ * Two ways to be correct: `automaticOffset`, which asks native for the real
+ * screen position, or a hand-measured `keyboardVerticalOffset`. The screens
+ * carrying numbers like -48 and 90 are earlier one-off patches for this same
+ * bug; prefer automaticOffset for anything new.
+ */
+describe('every KeyboardAvoidingView accounts for its position on screen', () => {
+  const OPEN_TAG = /<KeyboardAvoidingView\b([\s\S]*?)>/g;
+
+  it('none is left to guess from a parent-relative layout', () => {
+    const offenders: string[] = [];
+    for (const file of sources) {
+      for (const match of file.text.matchAll(OPEN_TAG)) {
+        const props = match[1];
+        if (/automaticOffset|keyboardVerticalOffset/.test(props)) continue;
+        const line = file.text.slice(0, match.index).split('\n').length;
+        offenders.push(`${file.path}:${line}`);
+      }
+    }
+    expect(offenders, 'add automaticOffset (preferred) or a keyboardVerticalOffset').toEqual([]);
+  });
+
+  it('finds the tags it is meant to be checking', () => {
+    const total = sources.reduce((n, f) => n + [...f.text.matchAll(OPEN_TAG)].length, 0);
+    expect(total).toBeGreaterThan(5);
+  });
+});
