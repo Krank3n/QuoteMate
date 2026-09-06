@@ -14,6 +14,13 @@ import {
   Alert,
   TextInput as RNTextInput,
 } from 'react-native';
+// Under edge-to-edge Android no longer resizes the window for the keyboard, so
+// a form screen with a plain ScrollView leaves its fields behind it — and RN's
+// own KeyboardAvoidingView is a no-op there too. This one shrinks the scroll
+// area AND scrolls the focused field into view, which a bare
+// KeyboardAvoidingView does not. Same shape as CustomerDetailsScreen. See
+// components/keyboardAvoidance.guard.test.ts.
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import {
   Text,
   TextInput,
@@ -159,7 +166,11 @@ export function JobTemplateEditorScreen() {
   return (
     <View style={styles.container}>
       <GridBackground />
-      <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+      <KeyboardAwareScrollView
+        // Breathing room between the focused field and the keyboard top.
+        bottomOffset={24}
+        contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled"
+      >
         <WebContainer>
           <TextInput
             label="Template Name"
@@ -345,7 +356,7 @@ export function JobTemplateEditorScreen() {
 
           <View style={{ height: 100 }} />
         </WebContainer>
-      </ScrollView>
+      </KeyboardAwareScrollView>
 
       <FixedBottomButton
         label={existingTemplate ? 'Save Changes' : 'Save Template'}

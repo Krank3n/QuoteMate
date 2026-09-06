@@ -14,6 +14,12 @@
 
 import React, { useEffect, useState } from 'react';
 import { View, StyleSheet, ScrollView } from 'react-native';
+// A paper <Modal> renders through <Portal> into the app's own React tree — the
+// same window — so the keyboard provider reaches it and the controller's
+// KeyboardAvoidingView works here. (A react-native <Modal> is a separate
+// window and needs hooks/useKeyboardHeight instead.) Paper does no keyboard
+// avoidance of its own. See components/keyboardAvoidance.guard.test.ts.
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { Modal, Portal, Text, TextInput, Button, Switch } from 'react-native-paper';
 
 import { ActionSheet } from './ActionSheet';
@@ -189,6 +195,7 @@ export function SendReportDialog({
           // window on desktop — same structure AlertModal uses.
           contentContainerStyle={styles.modalContainer}
         >
+          <KeyboardAvoidingView behavior="padding">
           <View style={styles.card}>
           <ScrollView keyboardShouldPersistTaps="handled">
             {sentTo ? (
@@ -284,6 +291,7 @@ export function SendReportDialog({
             )}
           </ScrollView>
           </View>
+          </KeyboardAvoidingView>
         </Modal>
       </Portal>
     </>
