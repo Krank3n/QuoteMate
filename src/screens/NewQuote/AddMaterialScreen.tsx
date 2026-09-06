@@ -20,7 +20,7 @@ import {
 // shrinks the area, so the field you just tapped is reachable but you have to
 // scroll to it yourself. This one scrolls the focused input into view. Same
 // shape as CustomerDetailsScreen and the settings screens.
-import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
+import { KeyboardAvoidingView, KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { useAddMaterialStyles } from './AddMaterial/styles';
 import { ManualEntrySection } from './AddMaterial/ManualEntrySection';
 import {
@@ -1864,7 +1864,14 @@ export function AddMaterialScreen() {
   }, [isEditMode, isSavedItemEditMode, isSavedItemCreateMode, supplierBookOnly, navigation]);
 
   return (
-    <View style={styles.container}>
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior="padding"
+      // automaticOffset: onLayout's y is parent-relative, so behind a nav
+      // header it reads too small and the view under-lifts. Ask native for the
+      // real screen position instead.
+      automaticOffset
+    >
       <GridBackground />
       {/* Tab Selector - hidden in edit mode, saved-item modes, and supplier-book-only mode */}
       {!isEditMode && !isSavedItemMode && !supplierBookOnly && (
@@ -1919,6 +1926,11 @@ export function AddMaterialScreen() {
       {!supplierBookOnly && (isEditMode || isSavedItemMode) && (
         <FixedBottomButton
         onHeightChange={setFooterHeight}
+        // The screen already lifts its own chrome (KeyboardAvoidingView
+        // above), so the bar must not translate itself as well — the
+        // component's own docs call this out. Same as LaborMarkup,
+        // JobDetails and ServiceReport.
+        disableKeyboardSticky
           label={
             isSavedItemMode
               ? (isSavedItemEditMode ? 'Save Changes' : 'Add to Supplier Book')
@@ -2104,6 +2116,6 @@ export function AddMaterialScreen() {
         {snackbarMessage}
       </Snackbar>
 
-    </View>
+    </KeyboardAvoidingView>
   );
 }

@@ -2332,7 +2332,14 @@ export function MaterialsListScreen() {
   );
 
   return (
-    <View style={styles.container}>
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior="padding"
+      // automaticOffset: onLayout's y is parent-relative, so behind a nav
+      // header it reads too small and the view under-lifts. Ask native for the
+      // real screen position instead.
+      automaticOffset
+    >
       <GridBackground />
       <FlatList
           // Rows carry inline price/qty inputs, so the list itself has to lift
@@ -2357,6 +2364,11 @@ export function MaterialsListScreen() {
 
       <FixedBottomButton
         onHeightChange={setFooterHeight}
+        // The screen already lifts its own chrome (KeyboardAvoidingView
+        // above), so the bar must not translate itself as well — the
+        // component's own docs call this out. Same as LaborMarkup,
+        // JobDetails and ServiceReport.
+        disableKeyboardSticky
         label={isAiAnalyzing ? "Cancel" : (isEditFromPreview ? "Save" : "Next: Labour & Markup")}
         onPress={isAiAnalyzing ? handleCancelGeneration : (isEditFromPreview ? handleSaveAndReturn : handleNext)}
         mode={isAiAnalyzing ? "outlined" : "contained"}
@@ -2956,7 +2968,7 @@ export function MaterialsListScreen() {
 
       {/* Unsaved-changes confirmation when navigating away */}
       <AlertModal {...unsavedModalProps} />
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
