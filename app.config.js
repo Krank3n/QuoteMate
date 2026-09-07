@@ -13,15 +13,24 @@ export default {
     // built from this tree as an OTA for 1.45 — the appVersion runtime
     // policy below is what stops that from happening automatically.
     //
-    // 1.56: adds LiveKit WebRTC (@elevenlabs/react-native). The same rule, and
-    // this time it is load-bearing in a specific way: liveSession declares
-    // VOICE_CLIENT_CAPABILITIES = ['elevenlabs'] on every voice mint, and that
-    // claim is made by JS, not verified against the native binary. OTA this
-    // bundle onto a 1.55 build and the client would promise a transport it
-    // does not have — the server would hand it an ElevenLabs token, the
-    // LiveKit import would fail, and the tradie would lose the session having
-    // already spent a quota turn. runtimeVersion: appVersion is what makes
-    // that impossible, but only while this number is ahead of 1.55.
+    // 1.56: adds LiveKit WebRTC (@elevenlabs/react-native). Same rule — a
+    // version that gains a native module needs a build, not an OTA, and the
+    // appVersion policy below is what enforces it by default.
+    //
+    // The voice transport no longer rests on that policy alone. It used to:
+    // the capability claim was made by JS, so this bundle on a 1.55 build
+    // promised a transport the binary didn't have and cost the tradie a
+    // session plus a quota turn. liveSession.voiceClientCapabilities() now
+    // reads NativeModules.WebRTCModule — the BINARY, not the bundle — so the
+    // same JS on 1.55 reports ['openai'] and is never handed an ElevenLabs
+    // token it can't open.
+    //
+    // That is what makes a deliberate cross-runtime publish safe when one is
+    // needed: pin `version` down in a throwaway worktree and publish from
+    // there, never here (done 6 Sep 2026 to carry a settings-only fix to
+    // 1.55). It does NOT generalise — a native dep that loads at LAUNCH still
+    // kills an older binary outright, which is exactly what the expo-location
+    // OTA did on 4 Sep 2026.
     version: "1.56",
     orientation: "portrait",
     icon: "./assets/icon.png",
