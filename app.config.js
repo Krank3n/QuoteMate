@@ -31,7 +31,7 @@ export default {
     // 1.55). It does NOT generalise — a native dep that loads at LAUNCH still
     // kills an older binary outright, which is exactly what the expo-location
     // OTA did on 4 Sep 2026.
-    version: "1.56",
+    version: "1.57",
     orientation: "portrait",
     icon: "./assets/icon.png",
     userInterfaceStyle: "automatic",
@@ -207,7 +207,7 @@ export default {
         backgroundColor: "#0A0E16"  // Dark blue-gray to match app theme
       },
       package: "com.quotemate.app",
-      versionCode: 172,
+      versionCode: 173,
       // Android 16 (targetSdk 36) enforces edge-to-edge and ignores the
       // opt-out flag. Declaring it here makes Expo theme for it deliberately
       // rather than emitting an opt-out Android no longer honours.
