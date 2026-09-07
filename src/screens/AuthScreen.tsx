@@ -28,6 +28,7 @@ import {
 } from '../services/googleSignInCore';
 import { requestPasswordReset } from '../services/passwordResetCore';
 import { GridBackground } from '../components/GridBackground';
+import { readSignupIntentFromLocation } from '../utils/signupIntent';
 
 // Detect in-app browsers (Facebook Messenger, Instagram, etc.) that block popups
 function isInAppBrowser(): boolean {
@@ -91,7 +92,13 @@ async function saveRegistrationPlatform(result: UserCredential, method: 'email' 
 export function AuthScreen() {
   const styles = useStyles();
   const themeColors = useThemeColors();
-  const [isSignUp, setIsSignUp] = useState(false);
+  // Default to sign-in, except when the marketing site says otherwise: its
+  // acquisition CTAs carry ?signup=1, so "Get my first quote" no longer lands
+  // a first-time visitor on "Welcome back". Its "Log in" links don't, and
+  // native has no query string, so both stay on sign-in.
+  const [isSignUp, setIsSignUp] = useState(
+    () => Platform.OS === 'web' && readSignupIntentFromLocation(),
+  );
 
   // Sign-in and sign-up are one screen with a flag, not two routes, so Android
   // had no history to go back to: Back from "Create your account" closed the
