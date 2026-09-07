@@ -38,11 +38,18 @@ The release signing config in `android/app/build.gradle` reads from `keystore.pr
    - `versionCode` = current build.gradle value + 1 (or max with a user-supplied Play Store value, if given)
    - `versionName` = bump the patch number by 1 (e.g. "1.0.87" → "1.0.88")
    - Use the Edit tool to update the values in `android/app/build.gradle`, and set `android.versionCode` in `app.config.js` to the same value — the prebuild in step 5 rewrites `build.gradle` from it.
+   - Mirror `expo.version` into `package.json` → `version`. `docs/RELEASE.md` treats `app.config.js` as the only authoritative version, but requires the copy be kept in step; letting it drift is what wrote a stale value into `config/appUpdate` and killed the update prompt for months. It was still at 1.55 while the app shipped 1.57.
+   - `versionName` also moves `runtimeVersion` (policy `appVersion`), so the new version is a NEW OTA runtime. Say so when reporting: future OTAs must be published for it as well as the outgoing version, or the people who update stop receiving OTAs.
 
 5. Regenerate `android/` from the config, then run the Gradle release bundle build (**do NOT run `clean` first** — it wipes native CMake caches and causes prefab errors). The prebuild is what puts the EAS Update channel header (`updates.requestHeaders` in `app.config.js`) into the manifest; a build without it never receives an OTA:
    ```
    npx expo prebuild --platform android --no-install && cd android && ./gradlew bundleRelease
    ```
+   Export `SENTRY_AUTH_TOKEN` (it is in `.env`) first, or the build fails at
+   `createBundleReleaseJsAndAssets_SentryUpload` with "Auth token is required".
+   Do not work around that by disabling the upload — a production build without
+   sourcemaps gives minified stacks in Sentry.
+
    Set the timeout to 600000ms (10 minutes) to allow for the full Gradle build.
 
 6. After a successful build, copy the AAB to a consistent output location:
@@ -63,7 +70,23 @@ The release signing config in `android/app/build.gradle` reads from `keystore.pr
    - The new `versionName` and `versionCode`
    - Whether the SHA1 fingerprint matched
 
-9. **Remind the user of the post-release step.** Once the build is actually live
+9. **Deploy it.** Building is only half the job — an AAB sitting in `builds/android/`
+   reaches nobody. Releases here are always built locally AND submitted from
+   here; `eas submit` is an upload, not a cloud build, and the Play service
+   account is already at `credentials/play-service-account.json`.
+
+   Submitting to the production track is outward-facing and hard to reverse, so
+   confirm with the user first, then:
+
+   ```
+   npx eas-cli@latest submit --platform android --profile production \
+     --path builds/android/quotemate-v{versionName}-{versionCode}.aab
+   ```
+
+   The `preview` profile targets Play's internal track instead, if the user wants
+   a staged rollout first.
+
+10. **Remind the user of the post-release step.** Once the build is actually live
    on both stores (not before — see `docs/RELEASE.md`), the in-app update sheet
    has to be told about it:
 
