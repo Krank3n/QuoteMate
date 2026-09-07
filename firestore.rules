@@ -44,6 +44,7 @@ service cloud.firestore {
       allow write: if isOwner(userId)
         && !(collection == 'profile' && docId == 'subscription')
         && !(collection == 'profile' && docId == 'referral')
+        && !(collection == 'profile' && docId == 'attribution')
         && collection != 'affiliateEarnings';
     }
     // Anything nested deeper. {rest=**} can only resolve to a document here
@@ -87,6 +88,25 @@ service cloud.firestore {
     match /users/{userId}/profile/referral {
       allow read: if isOwner(userId);
       allow write: if false;
+    }
+
+    // First touch (users/{uid}/profile/attribution): where this account came
+    // from, written once by the account's own web client and then frozen.
+    //
+    // The client already checks for an existing doc before writing, but a
+    // client-side check is both a race and the wrong place to enforce
+    // provenance: while the owner wildcard above covered this doc, any
+    // signed-in user could rewrite their own origin at will, and the paid
+    // ad scoreboard and the organic channel rollup would faithfully follow
+    // whatever they put there. Create-only makes "first touch" mean it.
+    //
+    // Read stays open so the app can show a user their own record; the admin
+    // SDK bypasses rules, so backfills and corrections remain possible
+    // server-side.
+    match /users/{userId}/profile/attribution {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId);
+      allow update, delete: if false;
     }
 
     // Affiliate earning ledger — read-only to the affiliate, written only by

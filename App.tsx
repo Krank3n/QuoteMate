@@ -408,8 +408,12 @@ function App() {
 
         // Ad attribution (web only, fire-and-forget): write-once first-touch
         // params captured at launch to users/{uid}/profile/attribution.
+        // creationTime is what lets the service tell a brand-new account from
+        // a returning sign-in or an hourly token refresh, so the organic
+        // first-touch record is only ever stamped on an account it can
+        // actually explain. Absent metadata simply skips that half.
         if (newUid) {
-          void persistAttributionIfNew(newUid);
+          void persistAttributionIfNew(newUid, currentUser?.metadata?.creationTime ?? null);
         }
 
         setUserDataLoaded(false); // Reset when new user signs in

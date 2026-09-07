@@ -2111,8 +2111,11 @@ export async function computeEventFunnelPayload(): Promise<
     if (isBilledSub(sub)) foundingTaken++;
   }
 
-  // Per-ad acquisition scoreboard (users/{uid}/profile/attribution is written
-  // once, first-touch, by the web app). Organic users are the baseline count.
+  // Acquisition scoreboard (users/{uid}/profile/attribution is written once,
+  // first-touch, by the web app). Two views come out of the same join: per-ad
+  // rows keyed on utm_content, and a channel rollup that reads the newer
+  // `acquisition` map so organic search can be counted as itself. Accounts
+  // with no first-touch record at all are `unknown`, never organic.
   const attribution = rollupAttribution(
     inputs.map((input) => ({
       uid: input.uid,
