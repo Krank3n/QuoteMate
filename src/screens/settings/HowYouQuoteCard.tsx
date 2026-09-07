@@ -179,7 +179,9 @@ function RuleForm({ onSave }: { onSave: (rule: string) => void }) {
         autoFocus
       />
       <Text style={styles.formHint}>One plain sentence, the way you'd say it. Mate follows it on every quote.</Text>
-      <FooterButton label="Save rule" disabled={!ready} onPress={() => onSave(rule)} />
+      <View style={styles.buttonRow}>
+        <FooterButton label="Save rule" disabled={!ready} onPress={() => onSave(rule)} />
+      </View>
     </View>
   );
 }
@@ -251,13 +253,15 @@ function RateForm({ gstBasis, onSave }: { gstBasis: boolean | undefined; onSave:
           accessibilityLabel="Rate includes materials"
         />
       </View>
-      <FooterButton
-        label="Save rate"
-        disabled={!ready}
-        onPress={() => {
-          if (rate !== null) onSave({ label, rate, unit, includesMaterials });
-        }}
-      />
+      <View style={styles.buttonRow}>
+        <FooterButton
+          label="Save rate"
+          disabled={!ready}
+          onPress={() => {
+            if (rate !== null) onSave({ label, rate, unit, includesMaterials });
+          }}
+        />
+      </View>
     </View>
   );
 }
@@ -316,6 +320,14 @@ const useStyles = makeStyles((t) => ({
   form: {
     paddingHorizontal: 20,
     paddingBottom: 24,
+  },
+  // FooterButton carries flex:1 for the footers it was built for, so it needs
+  // a row to stretch across. In a plain column it collapses to no height at
+  // all — the button rendered nowhere, and not into the a11y tree either.
+  buttonRow: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    width: '100%',
   },
   input: {
     marginBottom: 12,

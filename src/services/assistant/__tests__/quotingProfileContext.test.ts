@@ -29,9 +29,14 @@ describe('systemPromptWithProfile', () => {
     expect(quotingProfileContextNote()).toBe(`[context] ${NO_PROFILE_NOTE}`);
   });
 
-  it('the nothing-saved line is the cue the prompt keys off, and points at the rule', () => {
-    expect(NO_PROFILE_NOTE.startsWith('How this business quotes: nothing saved yet')).toBe(true);
-    expect(NO_PROFILE_NOTE).toContain('"How they quote"');
+  // Deliberately self-contained rather than a pointer: on the simulator a
+  // one-line pointer plus the rule in its own section was ignored twice.
+  it('the nothing-saved line carries the whole instruction, not a pointer', () => {
+    expect(NO_PROFILE_NOTE.startsWith('How this business quotes: NOTHING SAVED YET')).toBe(true);
+    expect(NO_PROFILE_NOTE).toContain('the must-ask turn carries one extra question');
+    expect(NO_PROFILE_NOTE).toContain('never as a turn of its own');
+    expect(NO_PROFILE_NOTE).toContain('propose_save_rate');
+    expect(NO_PROFILE_NOTE).toContain('never ask again this conversation');
   });
 
   it('appends the saved profile after the static prompt, and drops the nothing-saved line', () => {

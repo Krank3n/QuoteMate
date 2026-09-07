@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { resolveJobRequirements, SUPPLY_OR_REPLACE_QUESTION } from '../readTools';
+import { HOW_YOU_PRICE_QUESTION, resolveJobRequirements, SUPPLY_OR_REPLACE_QUESTION } from '../readTools';
 import { NICHE_TEMPLATES } from '../../../data/nicheTemplates';
 import { TRADE_CATEGORIES } from '../../../../shared/pricing/tradeCategories';
 import { buildSupplierBookSnapshot } from '../../supplierBookCoverage';
@@ -271,6 +271,49 @@ describe('smoke alarms, and supply-or-replace on every install-type job', () => 
   it('an invoice never asks it — the work is done', () => {
     const result = resolveJobRequirements({ jobType: 'Power Points', documentType: 'invoice' });
     expect(result.mustAskQuestions).not.toContain(SUPPLY_OR_REPLACE_QUESTION);
+  });
+});
+
+/**
+ * The "how do you price this" question rides in the must-ask data, not in the
+ * prompt. Three simulator runs (7 Sep 2026) with the instruction in the prompt
+ * — in its own section, in the must-ask step, and in the prompt's last line —
+ * produced a textbook must-ask turn with the question left out every time. In
+ * the must-ask list it was asked on the first run, folded into the same turn.
+ */
+describe('the how-you-price question', () => {
+  it('is asked when the business has saved no rule and no rate', () => {
+    const result = resolveJobRequirements({ categoryId: 'other', nicheId: 'fencing', hasQuotingProfile: false });
+    expect(result.mustAskQuestions).toContain(HOW_YOU_PRICE_QUESTION);
+  });
+
+  it('rides alongside the niche questions rather than replacing them', () => {
+    const withProfile = resolveJobRequirements({ categoryId: 'other', nicheId: 'fencing', hasQuotingProfile: true });
+    const without = resolveJobRequirements({ categoryId: 'other', nicheId: 'fencing', hasQuotingProfile: false });
+    expect(without.mustAskQuestions).toEqual([...withProfile.mustAskQuestions, HOW_YOU_PRICE_QUESTION]);
+  });
+
+  it('stops once anything is saved', () => {
+    const result = resolveJobRequirements({ categoryId: 'other', nicheId: 'fencing', hasQuotingProfile: true });
+    expect(result.mustAskQuestions).not.toContain(HOW_YOU_PRICE_QUESTION);
+  });
+
+  // A caller that cannot tell (settings not loaded) must not ask a tradie who
+  // may well have a rate card already.
+  it('stays quiet when the caller did not say', () => {
+    const result = resolveJobRequirements({ categoryId: 'other', nicheId: 'fencing' });
+    expect(result.mustAskQuestions).not.toContain(HOW_YOU_PRICE_QUESTION);
+  });
+
+  it('an invoice never asks it — the price is already agreed', () => {
+    const result = resolveJobRequirements({ jobType: 'Power Points', documentType: 'invoice', hasQuotingProfile: false });
+    expect(result.mustAskQuestions).not.toContain(HOW_YOU_PRICE_QUESTION);
+  });
+
+  it('names both cards, so an answer is saved rather than just used once', () => {
+    expect(HOW_YOU_PRICE_QUESTION).toContain('propose_save_rate');
+    expect(HOW_YOU_PRICE_QUESTION).toContain('propose_remember_preference');
+    expect(HOW_YOU_PRICE_QUESTION).toContain('draft anyway');
   });
 });
 

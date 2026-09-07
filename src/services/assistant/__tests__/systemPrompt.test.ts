@@ -230,7 +230,7 @@ describe('how they quote', () => {
   it('keys the question off the exact line the injector sends', () => {
     // systemPrompt.ts has no imports by design, so the cue can't be shared —
     // this is the only thing stopping the two from drifting apart.
-    const cue = 'How this business quotes: nothing saved yet';
+    const cue = 'How this business quotes: NOTHING SAVED YET';
     expect(NO_PROFILE_NOTE.startsWith(cue)).toBe(true);
     expect(section).toContain(`"${cue}"`);
     expect(section).toContain('[context] note');
@@ -240,6 +240,18 @@ describe('how they quote', () => {
     expect(section).toContain('fold ONE question into the must-ask turn of the first job');
     expect(section).toContain('never its own turn');
     expect(section).toContain("draft anyway and don't ask again this conversation");
+  });
+
+  // On the sim, Mate composed a textbook must-ask turn and simply left the
+  // pricing question out: the rule lived only in "How they quote", pages away
+  // from the step that builds that turn. The trigger has to be at the point of
+  // composition, or the model never reaches for it.
+  it('the must-ask gate itself carries the trigger', () => {
+    const steps = MATE_SYSTEM_PROMPT.slice(MATE_SYSTEM_PROMPT.indexOf('2. **Must-ask gate**'));
+    const gate = steps.slice(0, steps.indexOf('\n3.'));
+    expect(gate).toContain('NOTHING SAVED YET');
+    expect(gate).toContain('this same turn also carries the one pricing question');
+    expect(gate).toContain('See "How they quote"');
   });
 
   it('"just work it up" is remembered too, so it is never asked twice', () => {
