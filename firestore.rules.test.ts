@@ -298,6 +298,38 @@ describe('referral / affiliate program (PAY-04)', () => {
     await assertFails(deleteDoc(doc(mallory, 'referrals/QM-AB2CD3')));
   });
 
+  it('lets a new account write its first touch exactly once, then freezes it', async () => {
+    // The whole acquisition scoreboard rests on this doc meaning "first
+    // touch". A client that can rewrite it can re-credit its own signup to
+    // any ad or channel it likes.
+    const path = 'users/alice/profile/attribution';
+    await assertSucceeds(setDoc(doc(aliceDb(), path), {
+      utm_source: 'facebook',
+      utm_content: 'qm-a1',
+      landedAt: '2026-09-07T01:00:00.000Z',
+      capturedOn: 'web',
+      acquisition: { channel: 'organic_search', source: 'google', medium: 'organic' },
+    }));
+    // Same client, second attempt: overwrite, field update and delete all fail.
+    await assertFails(setDoc(doc(aliceDb(), path), { utm_content: 'qm-b2-later' }));
+    await assertFails(updateDoc(doc(aliceDb(), path), { utm_content: 'qm-b2-later' }));
+    await assertFails(updateDoc(doc(aliceDb(), path), {
+      acquisition: { channel: 'organic_search' },
+    }));
+    await assertFails(deleteDoc(doc(aliceDb(), path)));
+    // The owner can still read their own record.
+    await assertSucceeds(getDoc(doc(aliceDb(), path)));
+  });
+
+  it('denies another user writing or reading someone else\'s first touch', async () => {
+    await seed('users/alice/profile/attribution', { utm_source: 'facebook' });
+    const mallory = env.authenticatedContext('mallory').firestore();
+    await assertFails(setDoc(doc(mallory, 'users/alice/profile/attribution'), {
+      utm_source: 'mallory-ad',
+    }));
+    await assertFails(getDoc(doc(mallory, 'users/alice/profile/attribution')));
+  });
+
   it('denies all client access to payout records', async () => {
     await seed('affiliatePayouts/p1', { affiliateUserId: 'alice', amount: 1715 });
     await assertFails(getDoc(doc(aliceDb(), 'affiliatePayouts/p1')));
