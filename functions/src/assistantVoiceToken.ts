@@ -130,8 +130,18 @@ export async function mintElevenLabsConversationToken(args: {
 // ---------------------------------------------------------------------------
 
 /** Model label for cost records and the UI. Compound, like the ElevenLabs one. */
-export const OA_VOICE_MODEL_LABEL = 'openai/gpt-realtime-2';
-export const OA_REALTIME_MODEL = 'gpt-realtime-2';
+export const OA_VOICE_MODEL_LABEL = 'openai/gpt-realtime-2.1';
+// 2.1 costs exactly what gpt-realtime-2 did — $32/$64 per 1M audio tokens in/out
+// — and brings better alphanumeric recognition, silence and noise handling, and
+// a p95 latency roughly a quarter lower. gpt-realtime-2 is NOT deprecated, so
+// pinning back to it is a one-word revert here plus a deploy.
+//
+// The thing to watch on 2.1 is self-narration: other developers report it
+// leaking its own stage directions ("Let me continue with the call..."). Mate
+// has shipped that exact bug before, when the voice greeting read out its
+// reasoning, so treat a narration report on this model as a reason to pin back
+// rather than a prompt to tune.
+export const OA_REALTIME_MODEL = 'gpt-realtime-2.1';
 
 export interface MintedOpenAiToken {
   token: string;

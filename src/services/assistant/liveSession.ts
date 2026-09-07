@@ -51,6 +51,27 @@ export class LiveOfflineError extends Error {
  * message, while the voice reconnect loop can single it out and stop re-minting
  * (retrying into a rate limit only deepens it).
  */
+/**
+ * A non-Gemini transport could not be established at all.
+ *
+ * Distinct from LiveOfflineError because it is ACTIONABLE: the provider the
+ * server nominated is unusable for this session, but Gemini Live may well be
+ * fine, so openVoiceSession retries there rather than showing the tradie
+ * "Voice mode is offline". Anything that leaves the tradie able to talk to
+ * Mate beats a correct error message.
+ *
+ * Born from a real outage: the OpenAI key ran out of credits while a 50%
+ * rollout was live. Minting kept returning 200 — a client secret costs nothing
+ * to issue — so the server had no idea, handed out openai tokens as usual, and
+ * every one of those sessions died on the first frame with no way back.
+ */
+export class VoiceTransportUnavailableError extends LiveOfflineError {
+  constructor(message: string, readonly provider: string) {
+    super(message);
+    this.name = 'VoiceTransportUnavailableError';
+  }
+}
+
 export class LiveRateLimitError extends LiveOfflineError {
   constructor(message: string) {
     super(message);
@@ -188,7 +209,10 @@ function mintAllowed(now: number): boolean {
 // Function. `mode` distinguishes the voice quota bucket from text; omit it for
 // the text path. The Function verifies the ID token, rate-limits, reserves a
 // quota turn, and returns the token bound to the Live model.
-export async function mintLiveToken(mode?: 'voice'): Promise<MintedToken> {
+export async function mintLiveToken(
+  mode?: 'voice',
+  opts: { excludeProviders?: string[] } = {},
+): Promise<MintedToken> {
   const idToken = await auth.currentUser?.getIdToken();
   if (!idToken) throw new LiveAuthError('Sign in to use Mate.');
 
@@ -213,7 +237,15 @@ export async function mintLiveToken(mode?: 'voice'): Promise<MintedToken> {
       body: JSON.stringify({
         platform: Platform.OS,
         mode,
-        ...(mode === 'voice' ? { supports: voiceClientCapabilities() } : {}),
+        // Declaring FEWER capabilities is how the client asks for a different
+        // transport, and it needs no server change: decideVoiceProvider
+        // already sends a client that cannot open the configured provider
+        // home to Gemini (reason `client-cannot-<provider>`). Reusing that
+        // path means the fallback is served by logic already in production
+        // rather than a second, differently-shaped override.
+        ...(mode === 'voice'
+          ? { supports: voiceClientCapabilities().filter((c) => !opts.excludeProviders?.includes(c)) }
+          : {}),
       }),
     }, MINT_TIMEOUT_MS);
   } catch (err: any) {
