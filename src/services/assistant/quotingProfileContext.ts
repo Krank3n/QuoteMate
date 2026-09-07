@@ -8,12 +8,18 @@
  * and hands the same text out as a "[context]" note for ElevenLabs, whose
  * prompt is provisioned server-side.
  *
+ * While a business has saved nothing, the same seam carries an explicit
+ * "nothing saved yet" line instead, so Mate asks once on their first job
+ * (see "How they quote" in the prompt). No settings at all — store not
+ * ready, source threw — means no line either way: the prompt stays static
+ * rather than telling Mate to ask a tradie who may well have a rate card.
+ *
  * The settings source is registered by the store rather than imported, so
  * none of the assistant services grow an import edge into the store graph.
  */
 import type { BusinessSettings } from '../../types';
 import { MATE_SYSTEM_PROMPT } from './systemPrompt';
-import { buildQuotingProfileBlock } from '../quotingProfile';
+import { NO_PROFILE_NOTE, buildQuotingProfileBlock } from '../quotingProfile';
 
 type ProfileSource = () => BusinessSettings | null | undefined;
 
@@ -36,23 +42,29 @@ export function registeredBusinessSettings(): BusinessSettings | null {
   }
 }
 
-/** The block, or null when the tradie has saved nothing. Never throws. */
-function quotingProfileBlock(): string | null {
+/**
+ * The block when they've saved something, the "nothing saved yet" line when
+ * their settings are loaded but empty, null when there are no settings to
+ * read. Never throws.
+ */
+function profileText(): string | null {
   try {
-    return buildQuotingProfileBlock(source());
+    const settings = source();
+    if (!settings) return null;
+    return buildQuotingProfileBlock(settings) ?? NO_PROFILE_NOTE;
   } catch {
     return null;
   }
 }
 
-/** The static prompt, plus the profile when there is one. */
+/** The static prompt, plus the profile (or the nothing-saved line) when settings are loaded. */
 export function systemPromptWithProfile(): string {
-  const block = quotingProfileBlock();
-  return block ? `${MATE_SYSTEM_PROMPT}\n\n${block}` : MATE_SYSTEM_PROMPT;
+  const text = profileText();
+  return text ? `${MATE_SYSTEM_PROMPT}\n\n${text}` : MATE_SYSTEM_PROMPT;
 }
 
-/** The same profile as a silent context note, for providers that own their prompt. */
+/** The same text as a silent context note, for providers that own their prompt. */
 export function quotingProfileContextNote(): string | null {
-  const block = quotingProfileBlock();
-  return block ? `[context] ${block}` : null;
+  const text = profileText();
+  return text ? `[context] ${text}` : null;
 }

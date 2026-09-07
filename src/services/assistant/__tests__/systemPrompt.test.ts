@@ -8,6 +8,7 @@
 import { describe, it, expect } from 'vitest';
 import { MATE_SYSTEM_PROMPT } from '../systemPrompt';
 import { TOOL_DECLARATIONS } from '../toolSchemas';
+import { NO_PROFILE_NOTE } from '../../quotingProfile';
 
 /**
  * One prompt block, from its heading to the next blank line. Sections are
@@ -221,6 +222,29 @@ describe('how they quote', () => {
     expect(section).toContain('rateLines on propose_draft_quote');
     expect(section).toContain("materialsMode 'labour_only'");
     expect(section).toContain('Never guess a quantity');
+  });
+
+  // The first conversation is the only one most tradies have, so the one
+  // "how do you price this" question rides inside the must-ask turn of the
+  // first job — never its own turn, never a second time, never a gate.
+  it('keys the question off the exact line the injector sends', () => {
+    // systemPrompt.ts has no imports by design, so the cue can't be shared —
+    // this is the only thing stopping the two from drifting apart.
+    const cue = 'How this business quotes: nothing saved yet';
+    expect(NO_PROFILE_NOTE.startsWith(cue)).toBe(true);
+    expect(section).toContain(`"${cue}"`);
+    expect(section).toContain('[context] note');
+  });
+
+  it('asks once, inside the must-ask turn, and never blocks the draft', () => {
+    expect(section).toContain('fold ONE question into the must-ask turn of the first job');
+    expect(section).toContain('never its own turn');
+    expect(section).toContain("draft anyway and don't ask again this conversation");
+  });
+
+  it('"just work it up" is remembered too, so it is never asked twice', () => {
+    expect(section).toContain('propose_remember_preference "Work up materials and labour for every job"');
+    expect(MATE_SYSTEM_PROMPT).toContain('The one price you may ask for is their own charge-out rate');
   });
 
   it('keeps the house tone', () => {

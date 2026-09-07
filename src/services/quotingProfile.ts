@@ -154,6 +154,45 @@ export function buildQuotingProfileBlock(
   return lines.join('\n');
 }
 
+// ─── Nothing saved yet ──────────────────────────────────────────────────────
+
+/**
+ * What Mate is told in place of the block while a business has saved
+ * nothing. An absent block is a weak cue; this one is explicit, and the
+ * prompt's "How they quote" rule keys off it (one question on the first job,
+ * never repeated). The rule itself lives in the prompt, not here.
+ */
+export const NO_PROFILE_NOTE = 'How this business quotes: nothing saved yet — see "How they quote".';
+
+/**
+ * The GST basis a rate is saved in: the tradie's own when they stated one,
+ * their usual one otherwise. A business not registered for GST has no basis —
+ * the card and the prompt then say nothing about GST.
+ */
+export function rateGstBasis(
+  settings: Pick<BusinessSettings, 'gstRegistered' | 'pricesIncludeGst'>,
+  stated?: boolean,
+): boolean | undefined {
+  if (settings.gstRegistered === false) return undefined;
+  return stated ?? settings.pricesIncludeGst === true;
+}
+
+/**
+ * "$120", "120.50", "1,200" typed into a rate field → a positive number, to
+ * the cent; null for anything else. A comma with one or two digits after it
+ * and no point ("120,50") is a decimal comma from a European-locale keypad,
+ * not a thousands separator — read it as $120.50, never $12,050.
+ */
+export function parseRateAmount(text: unknown): number | null {
+  if (typeof text !== 'string') return null;
+  let cleaned = text.replace(/[$\s]/g, '');
+  if (!cleaned.includes('.') && /^\d+,\d{1,2}$/.test(cleaned)) cleaned = cleaned.replace(',', '.');
+  cleaned = cleaned.replace(/,/g, '');
+  if (!/^\d*\.?\d+$/.test(cleaned)) return null;
+  const n = roundToTwoDecimals(Number(cleaned));
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
 // ─── Rate lines on a draft ──────────────────────────────────────────────────
 
 /**
