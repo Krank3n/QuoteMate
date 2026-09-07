@@ -15,6 +15,7 @@
 // do: the tradie stops watching, and finds out at the customer's place.
 
 import { sendOfferLine, type SendOfferFacts } from './sendOfferNote';
+import { snagStepLabel } from '../../services/assistant/pipelineSnagCopy';
 import { correctionsClause } from './pricingCorrections';
 
 export interface PipelineDoneArgs {
@@ -24,6 +25,12 @@ export interface PipelineDoneArgs {
   ok: boolean;
   /** Apply succeeded but pricing did not finish. `ok` is still true. */
   pipelineDegraded?: boolean;
+  /**
+   * Rows on the degraded quote. Zero means the analyse never landed, so the
+   * step to name is "Build my list" — the button MaterialsListScreen actually
+   * renders when there is nothing to price. Omitted keeps the priced wording.
+   */
+  materialCount?: number;
   /** Failure text, when ok is false. */
   error?: string;
   /** "Heads up — ..." from review_quote, when there are flagged rows. */
@@ -71,12 +78,19 @@ export function buildPipelineDonePrompt(args: PipelineDoneArgs): string {
   if (args.pipelineDegraded) {
     // The draft exists; the prices don't. Mate must not round this up to
     // "done" — the tradie has to know there's a step left, or they'll send a
-    // quote with empty prices on it.
+    // quote with empty prices on it. Which step depends on how far the run
+    // got: a snag in the ANALYSE phase leaves no rows at all, and naming
+    // Fetch Prices then sends them looking for a button that isn't rendered.
+    const step = snagStepLabel(args.materialCount);
+    const state =
+      step === 'Fetch Prices'
+        ? { missing: 'the quote currently has no prices on it', what: "pricing didn't get through" }
+        : { missing: 'the quote has no gear list on it yet', what: "the gear list didn't get built" };
     return (
-      `[pipeline-done] The draft for "${args.jobLabel}" was created, but the pricing run did NOT finish — ` +
-      `the quote currently has no prices on it.${extras} ` +
-      `One short honest line: the draft's there but pricing didn't get through, and they'll need to ` +
-      `tap Fetch Prices on it. Do NOT say it's done, drafted, sorted, ready, or finished — it isn't. ${NO_ECHO}`
+      `[pipeline-done] The draft for "${args.jobLabel}" was created, but the run did NOT finish — ` +
+      `${state.missing}.${extras} ` +
+      `One short honest line: the draft's there but ${state.what}, and they'll need to ` +
+      `tap ${step} on it. Do NOT say it's done, drafted, sorted, ready, or finished — it isn't. ${NO_ECHO}`
     );
   }
 

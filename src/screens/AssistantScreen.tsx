@@ -1062,6 +1062,8 @@ export function AssistantScreen() {
           // the prices didn't land. Branching on ok alone made Mate say it came
           // together fine over an unpriced quote.
           pipelineDegraded: result.ok ? result.pipelineDegraded : undefined,
+          // Decides whether the spoken line names Fetch Prices or Build my list.
+          materialCount: result.ok ? result.materialCount : undefined,
           error: result.ok ? undefined : result.error,
           reviewNote:
             result.ok && result.review && result.review.issues.length > 0

@@ -188,6 +188,43 @@ describe('the rest of the user tree keeps working', () => {
   });
 });
 
+describe('users/{uid}/analyseRuns (parked analyse results)', () => {
+  const RUN_PATH = 'users/alice/analyseRuns/req-1';
+  const parked = {
+    status: 'done',
+    startedAt: '2026-09-07T10:51:31.886Z',
+    finishedAt: '2026-09-07T10:53:20.721Z',
+    result: { materials: [{ name: 'Ceiling White 15L' }], estimatedHours: 64 },
+  };
+
+  it('lets the owner collect a result the server parked for them', async () => {
+    await seed(RUN_PATH, parked);
+    await assertSucceeds(getDoc(doc(aliceDb(), RUN_PATH)));
+  });
+
+  it('lets the owner delete one once it has been used', async () => {
+    await seed(RUN_PATH, parked);
+    await assertSucceeds(deleteDoc(doc(aliceDb(), RUN_PATH)));
+  });
+
+  it('denies a client minting its own analyse result', async () => {
+    await assertFails(setDoc(doc(aliceDb(), RUN_PATH), parked));
+  });
+
+  it('denies a client rewriting one the server wrote', async () => {
+    await seed(RUN_PATH, parked);
+    await assertFails(updateDoc(doc(aliceDb(), RUN_PATH), { status: 'done' }));
+    await assertFails(setDoc(doc(aliceDb(), RUN_PATH), { ...parked, result: { materials: [] } }));
+  });
+
+  it('denies another user everything', async () => {
+    await seed(RUN_PATH, parked);
+    const mallory = env.authenticatedContext('mallory').firestore();
+    await assertFails(getDoc(doc(mallory, RUN_PATH)));
+    await assertFails(deleteDoc(doc(mallory, RUN_PATH)));
+  });
+});
+
 describe('squareOAuthStates (PAY-03)', () => {
   it('denies all client access, even authenticated', async () => {
     await seed('squareOAuthStates/somehash', { uid: 'alice', createdAtMs: 1 });

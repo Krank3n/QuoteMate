@@ -45,7 +45,11 @@ service cloud.firestore {
         && !(collection == 'profile' && docId == 'subscription')
         && !(collection == 'profile' && docId == 'referral')
         && !(collection == 'profile' && docId == 'attribution')
-        && collection != 'affiliateEarnings';
+        && collection != 'affiliateEarnings'
+        // analyseRuns is server-written; the owner may only read and delete
+        // it, which the explicit match below grants. Rules OR together, so
+        // the carve-out has to happen here or that match grants nothing.
+        && collection != 'analyseRuns';
     }
     // Anything nested deeper. {rest=**} can only resolve to a document here
     // when it covers at least one segment, so this never re-grants the doc
@@ -146,6 +150,17 @@ service cloud.firestore {
     // self-describing.
     match /users/{userId}/jobs/{jobId} {
       allow read, write: if isOwner(userId);
+    }
+
+    // Parked analyse results (users/{uid}/analyseRuns/{requestId}) — the
+    // server's copy of a materials run, so a phone that loses the HTTP
+    // response can still collect it. Written only by the Cloud Function
+    // (admin SDK, bypasses rules); the owner reads it and deletes it once
+    // it's been used. Creating or updating one is denied by the carve-out in
+    // the wildcard above — otherwise a client could feed itself a materials
+    // list it never paid for.
+    match /users/{userId}/analyseRuns/{requestId} {
+      allow read, delete: if isOwner(userId);
     }
 
     // Users can only read their own subscription data
