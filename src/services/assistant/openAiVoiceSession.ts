@@ -23,7 +23,7 @@ import { buildClientTools } from './clientTools';
 import { buildSeedContext } from './seedContext';
 import { ALL_TOOL_DECLARATIONS } from './toolSchemas';
 import { systemPromptWithProfile } from './quotingProfileContext';
-import { OpenAiMintedToken, LiveOfflineError } from './liveSession';
+import { OpenAiMintedToken, LiveOfflineError, VoiceTransportUnavailableError } from './liveSession';
 import { base64ToBytes, bytesToBase64 } from './audioCodec';
 import type { VoiceSession, VoiceSessionCallbacks, VoiceSessionOptions } from './voiceSession';
 import { isMeaningfulTranscript, shouldAnswerYet } from './heardSomething';
@@ -33,6 +33,13 @@ import { MATE_ASR_KEYWORDS, ASR_NAME_BUDGET } from './elevenLabsAgentConfig';
 
 export const OA_REALTIME_URL = 'wss://api.openai.com/v1/realtime';
 export const OA_CONNECT_TIMEOUT_MS = 20_000;
+/**
+ * How long to wait for the server to echo our config back before treating the
+ * transport as unusable. Shorter than the connect timeout because the socket
+ * is already open by then — this is one round trip, not a handshake — and a
+ * tradie holding a phone to their ear is paying for every second of it.
+ */
+export const OA_READY_TIMEOUT_MS = 8_000;
 
 /** Mate's tools in OpenAI's function shape. The schemas are already JSON Schema. */
 export function toOpenAiTools() {
@@ -122,6 +129,45 @@ export const OA_TRANSCRIPT_WAIT_MS = 2_000;
  * against the same synthesised Australian speech, gpt-4o-transcribe with the
  * prompt returned the name, "Colorbond", "Villaboard" and "square metres"
  * exactly right.
+ *
+ * DEPRECATED BY OPENAI: announced 26 Aug 2026, shuts down 26 Feb 2027, with
+ * gpt-transcribe and gpt-live-transcribe named as the replacements. Staying
+ * put anyway, on evidence rather than inertia. Measured 7 Sep 2026 through
+ * THIS socket — a realtime transcription session, not the REST endpoint — over
+ * three synthesised Australian voices and 16 utterances weighted to names and
+ * job refs:
+ *
+ *   gpt-4o-transcribe    143/144 keywords, 0 mishearings
+ *   gpt-transcribe       121/144,           4 mishearings
+ *   gpt-live-transcribe  109/144,           5 mishearings
+ *
+ * All three accept and honour the `prompt` (gpt-transcribe falls to 100/140
+ * without it), so the vocabulary hint is not the gap. Much of the raw spread
+ * is formatting: the replacements transcribe "QM four seven three two" where
+ * this model writes "QM4732". What decides it is the mishearings, every one of
+ * them a NAME whose correct spelling was sitting in the prompt — "Luffaga" as
+ * "Lafarga"/"LaFaga", "Vogt" as "spoke", "Nguyen-Talbot" as "Wintalbot", and
+ * gpt-live-transcribe missing "Karl" as "Carl" in all three voices. A mangled
+ * name is what makes Mate create a second contact for the same customer, which
+ * is the failure this prompt exists to prevent.
+ *
+ * gpt-live-transcribe is further out than its score suggests, for two reasons
+ * that are about wiring rather than accuracy:
+ *   - it emits NO transcription.completed event, ever (0 of 48 clips, against
+ *     deltas on all 48). The reply gate below would still fire, since that
+ *     runs off deltas, but the `.completed` handler — what the tradie sees
+ *     they said, and the backstop for a turn with no deltas — would go dead.
+ *   - it rejects `turn_detection` outright ("Turn detection is not supported
+ *     for this transcription model"), so the 1200ms silence window below stops
+ *     being ours to set. That window is load-bearing: 700ms cut tradies off
+ *     mid-thought and Mate answered the fragments.
+ * It also costs $0.017/min against $0.006 here, roughly 2.8x.
+ *
+ * So this must move before Feb 2027, and on today's evidence neither
+ * replacement is ready. Re-measure nearer the date with the harness above.
+ * Note also that this model's age is not evidence against it: the id is a bare
+ * alias created 2025-03-15 with no dated snapshots exposed, so what it
+ * currently resolves to is not something the API will tell us.
  */
 export const OA_TRANSCRIBE_MODEL = 'gpt-4o-transcribe';
 
@@ -208,6 +254,34 @@ export async function openOpenAiVoiceSession(
     }, OA_TRANSCRIPT_WAIT_MS);
   };
 
+  // ---- readiness -------------------------------------------------------
+  //
+  // A socket that OPENS is not a socket that works. The credit-exhaustion
+  // outage handshook cleanly and then failed on the first frame, so resolving
+  // this function at onopen handed the screen a corpse and the tradie an error
+  // message with nowhere to go. Readiness is `session.updated` — the server
+  // echoing back the config we just sent — and an `error` arriving before it
+  // means this transport is unusable, which openVoiceSession answers by
+  // reopening on Gemini.
+  //
+  // Failing safe cuts one way on purpose: if OpenAI ever stops sending
+  // session.updated, every session falls back to Gemini instead of breaking.
+  // That is a silent A/B kill, visible in the model stamps on
+  // /admin/conversations, and much cheaper than the alternative.
+  let markReady: () => void = () => {};
+  let markUnusable: (err: Error) => void = () => {};
+  // Set by EITHER outcome: the session was accepted, or the transport was
+  // condemned. Both mean "stop deciding", which is what every guard below asks.
+  let settled = false;
+  const readiness = new Promise<void>((resolve, reject) => {
+    markReady = () => { if (!settled) { settled = true; resolve(); } };
+    markUnusable = (err: Error) => { if (!settled) { settled = true; reject(err); } };
+  });
+  const readyTimer = setTimeout(
+    () => markUnusable(new VoiceTransportUnavailableError('Voice session never confirmed.', 'openai')),
+    OA_READY_TIMEOUT_MS,
+  );
+
   // One session.update carries the prompt, the tools and the audio contract.
   // Server VAD does turn detection, matching what Gemini did — the alternative
   // is us deciding when the tradie stopped talking, which we are worse at.
@@ -262,14 +336,27 @@ export async function openOpenAiVoiceSession(
 
   connected = true;
 
-  ws.onclose = () => { if (alive) finish(); };
-  ws.onerror = () => { if (alive) finish(new LiveOfflineError('Voice connection lost.')); };
+  ws.onclose = () => {
+    if (!settled) { clearTimeout(readyTimer); markUnusable(new VoiceTransportUnavailableError('Voice session closed before it started.', 'openai')); return; }
+    if (alive) finish();
+  };
+  ws.onerror = () => {
+    if (!settled) { clearTimeout(readyTimer); markUnusable(new VoiceTransportUnavailableError('Voice connection failed.', 'openai')); return; }
+    if (alive) finish(new LiveOfflineError('Voice connection lost.'));
+  };
 
   ws.onmessage = async (event: { data: unknown }) => {
     let msg: any;
     try { msg = JSON.parse(String(event.data)); } catch { return; }
 
     switch (msg.type) {
+      // The server echoed our config back: tools, transcription and audio
+      // contract all accepted. Only now is this transport known to work.
+      case 'session.updated':
+        clearTimeout(readyTimer);
+        markReady();
+        break;
+
       // The VAD decided a turn ended. Nothing is said back until the
       // transcript shows someone actually spoke — but arm a backstop so a
       // transcription that never lands can't leave Mate mute.
@@ -378,6 +465,15 @@ export async function openOpenAiVoiceSession(
           queuedResponse = true;
           break;
         }
+        // Before readiness this is not "a turn went wrong", it is "this
+        // provider cannot serve anyone" — an exhausted key, a model the
+        // account cannot reach, a rejected config. Condemn the transport so
+        // the caller can reopen on Gemini, instead of reporting a dead end.
+        if (!settled) {
+          clearTimeout(readyTimer);
+          markUnusable(new VoiceTransportUnavailableError(text, 'openai'));
+          break;
+        }
         responseInFlight = false;
         cb.onError?.(new LiveOfflineError(text));
         break;
@@ -386,6 +482,18 @@ export async function openOpenAiVoiceSession(
         break;
     }
   };
+
+  // Nothing below here runs until the server has accepted the session, or the
+  // rejection has already been handed to openVoiceSession to retry elsewhere.
+  try {
+    await readiness;
+  } catch (err) {
+    clearTimeout(readyTimer);
+    alive = false;
+    closedOnce = true;   // this socket never became a session; no onClose is owed
+    try { ws.close(); } catch { /* already gone */ }
+    throw err;
+  }
 
   return {
     // The screen feeds the mic and owns playback, exactly as on the Gemini

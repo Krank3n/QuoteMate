@@ -7,10 +7,12 @@
  * session down and surfaced as an error bubble. Capture stays at the rate the
  * recorder actually delivers and the conversion happens here.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   upsample16kTo24k, toOpenAiTools, openOpenAiVoiceSession, buildTranscriptionPrompt,
+  OA_READY_TIMEOUT_MS,
 } from '../openAiVoiceSession';
+import { VoiceTransportUnavailableError } from '../liveSession';
 import { bytesToBase64, base64ToBytes } from '../audioCodec';
 import { ALL_TOOL_DECLARATIONS } from '../toolSchemas';
 
@@ -107,7 +109,16 @@ describe('openOpenAiVoiceSession', () => {
       FakeSocket.last = this;
       setTimeout(() => this.onopen?.(), 0);
     }
-    send(raw: string) { this.sent.push(JSON.parse(raw)); }
+    send(raw: string) {
+      const frame = JSON.parse(raw);
+      this.sent.push(frame);
+      // The real server echoes the accepted config back, and the session is
+      // not considered open until it does. Deferred because onmessage is
+      // wired immediately AFTER this send returns.
+      if (frame.type === 'session.update') {
+        setTimeout(() => this.onmessage?.({ data: JSON.stringify({ type: 'session.updated', session: frame.session }) }), 0);
+      }
+    }
     close() { /* noop */ }
     frames(type: string) { return this.sent.filter((f) => f.type === type); }
   }
@@ -178,7 +189,16 @@ describe('replying only to actual speech', () => {
     onclose?: () => void;
     onerror?: () => void;
     constructor() { Sock.last = this; setTimeout(() => this.onopen?.(), 0); }
-    send(raw: string) { this.sent.push(JSON.parse(raw)); }
+    send(raw: string) {
+      const frame = JSON.parse(raw);
+      this.sent.push(frame);
+      // The real server echoes the accepted config back, and the session is
+      // not considered open until it does. Deferred because onmessage is
+      // wired immediately AFTER this send returns.
+      if (frame.type === 'session.update') {
+        setTimeout(() => this.onmessage?.({ data: JSON.stringify({ type: 'session.updated', session: frame.session }) }), 0);
+      }
+    }
     close() { /* noop */ }
     frames(t: string) { return this.sent.filter((f) => f.type === t); }
   }
@@ -370,5 +390,105 @@ describe('buildTranscriptionPrompt', () => {
   it('skips blank and too-short entries', () => {
     const p = buildTranscriptionPrompt(['', '  ', 'Jo']);
     expect(p).not.toContain('Jo,');
+  });
+});
+
+/**
+ * Condemning a transport that opens but cannot serve.
+ *
+ * From a real outage: the OpenAI key ran out of credits during a 50% rollout.
+ * Minting a client secret is free, so it kept returning 200 and the server
+ * went on routing half the tradies to a provider that could not answer. The
+ * socket handshook, the config went out, and the first frame back was an
+ * error — at which point openOpenAiVoiceSession had already resolved and the
+ * screen had nothing to do but print "Voice mode is offline".
+ */
+describe('an OpenAI transport that opens but cannot serve', () => {
+  const MINTED = { provider: 'openai', token: 't', model: 'gpt-realtime-2.1', voice: 'cedar' } as any;
+
+  /** Fake whose reply to session.update is configurable. */
+  const makeSock = (reply: (frame: any) => any | null) => class {
+    static last: any;
+    sent: any[] = [];
+    closed = false;
+    onopen?: () => void;
+    onmessage?: (e: { data: string }) => void;
+    onclose?: () => void;
+    onerror?: () => void;
+    constructor() { (this.constructor as any).last = this; setTimeout(() => this.onopen?.(), 0); }
+    send(raw: string) {
+      const frame = JSON.parse(raw);
+      this.sent.push(frame);
+      if (frame.type !== 'session.update') return;
+      const r = reply(frame);
+      if (r) setTimeout(() => this.onmessage?.({ data: JSON.stringify(r) }), 0);
+    }
+    close() { this.closed = true; }
+  };
+
+  const openWith = async (SockClass: any, cb: any = {}) => {
+    const prev = (globalThis as any).WebSocket;
+    (globalThis as any).WebSocket = SockClass;
+    try { return await openOpenAiVoiceSession(MINTED, [], cb); }
+    finally { (globalThis as any).WebSocket = prev; }
+  };
+
+  it('rejects rather than handing back a dead session when the key is out of credits', async () => {
+    // The exact frame the live API returned during the outage.
+    const Sock = makeSock(() => ({
+      type: 'error',
+      error: { message: 'You have no credits remaining.', code: 'credit_balance_exhausted' },
+    }));
+    await expect(openWith(Sock)).rejects.toBeInstanceOf(VoiceTransportUnavailableError);
+  });
+
+  it('names the provider it condemned, so the caller knows what to avoid', async () => {
+    const Sock = makeSock(() => ({ type: 'error', error: { message: 'nope' } }));
+    await expect(openWith(Sock)).rejects.toMatchObject({ provider: 'openai' });
+  });
+
+  it('closes the socket it is abandoning', async () => {
+    const Sock = makeSock(() => ({ type: 'error', error: { message: 'nope' } }));
+    await expect(openWith(Sock)).rejects.toThrow();
+    expect(Sock.last.closed).toBe(true);
+  });
+
+  it('does not report the failure through onError — the retry owns it', async () => {
+    // A cb.onError here would print an error bubble the tradie should never
+    // see, since the fallback is about to give them a working session.
+    const errors: Error[] = [];
+    const Sock = makeSock(() => ({ type: 'error', error: { message: 'nope' } }));
+    await expect(openWith(Sock, { onError: (e: Error) => errors.push(e) })).rejects.toThrow();
+    expect(errors).toEqual([]);
+  });
+
+  it('still surfaces an error that arrives AFTER the session is established', async () => {
+    // Once the session works, an error is one turn going wrong, not a dead
+    // provider — it belongs on screen, not in a transport retry.
+    const errors: Error[] = [];
+    const Sock = makeSock((f) => ({ type: 'session.updated', session: f.session }));
+    const session = await openWith(Sock, { onError: (e: Error) => errors.push(e) });
+    expect(session).toBeTruthy();
+    Sock.last.onmessage?.({ data: JSON.stringify({ type: 'error', error: { message: 'turn failed' } }) });
+    expect(errors.map((e) => e.message)).toEqual(['turn failed']);
+    expect(errors[0]).not.toBeInstanceOf(VoiceTransportUnavailableError);
+  });
+
+  it('condemns the transport when the server never confirms the session', async () => {
+    // A silent socket is as unusable as an erroring one, and waiting out the
+    // full connect timeout with the phone at your ear is not an option.
+    vi.useFakeTimers();
+    try {
+      const Sock = makeSock(() => null);
+      const prev = (globalThis as any).WebSocket;
+      (globalThis as any).WebSocket = Sock;
+      const p = openOpenAiVoiceSession(MINTED, [], {});
+      const assertion = expect(p).rejects.toBeInstanceOf(VoiceTransportUnavailableError);
+      await vi.advanceTimersByTimeAsync(OA_READY_TIMEOUT_MS + 10);
+      await assertion;
+      (globalThis as any).WebSocket = prev;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

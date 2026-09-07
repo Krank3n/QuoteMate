@@ -41,6 +41,7 @@ import {
   mintLiveToken,
   isElevenLabsMint,
   isOpenAiMint,
+  VoiceTransportUnavailableError,
   MintedToken,
 } from './liveSession';
 
@@ -310,11 +311,29 @@ export async function openVoiceSession(
   cb: VoiceSessionCallbacks,
   opts: VoiceSessionOptions = {},
 ): Promise<VoiceSession> {
-  const minted = await mintLiveToken('voice');
-  const session = await openForMint(minted, history, cb, opts);
+  let minted = await mintLiveToken('voice');
+  let session: VoiceSession;
+  try {
+    session = await openForMint(minted, history, cb, opts);
+  } catch (err) {
+    // Only a transport the server nominated but that cannot serve ANYONE is
+    // worth retrying elsewhere. A timeout, a rate limit or a dead network are
+    // the tradie's connection, not the provider, and Gemini would fare no
+    // better — those propagate.
+    if (!(err instanceof VoiceTransportUnavailableError)) throw err;
+    // Re-mint declaring that this client can no longer open the failed
+    // transport, which routes the server's own decision to Gemini. Once only:
+    // a second failure is the real answer, and a loop here would burn the
+    // 10/min mint ceiling in seconds.
+    minted = await mintLiveToken('voice', { excludeProviders: [err.provider] });
+    session = await openForMint(minted, history, cb, opts);
+  }
   // Attached here, once, rather than in each transport: the mint is the only
   // thing that knows which brain this session got, and it passes through this
-  // one function whichever way the server routed the user.
+  // one function whichever way the server routed the user. After a fallback
+  // this is the SECOND mint, so the stamp records the transport that actually
+  // spoke — which is what makes a fallback visible in /admin/conversations
+  // rather than silently skewing the A/B.
   return Object.assign(session, {
     model: minted.model,
     provider: minted.provider || 'gemini',

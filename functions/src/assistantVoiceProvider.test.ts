@@ -101,6 +101,50 @@ describe('decideVoiceProvider', () => {
   });
 });
 
+/**
+ * The client uses this deliberately, not just incidentally.
+ *
+ * When a nominated transport turns out to be unusable mid-open — an exhausted
+ * key, a rejected config — the device re-mints declaring it can no longer open
+ * that provider, and relies on these branches to send it to Gemini. That makes
+ * the fallback a property of logic already in production rather than a second
+ * override path, so these cases are load-bearing now: changing them breaks
+ * voice recovery on the client.
+ */
+describe('a client that declares it cannot open the configured provider', () => {
+  it('sends an openai rollout home to Gemini', () => {
+    const d = decideVoiceProvider(base({
+      config: { provider: 'openai', rolloutPercent: 100 },
+      clientSupports: ['elevenlabs'],
+    }));
+    expect(d.provider).toBe('gemini');
+    expect(d.reason).toBe('client-cannot-openai');
+  });
+
+  it('sends a force-listed uid home too — the capability outranks the force list', () => {
+    // Forcing a transport onto a client that cannot open it is how the outage
+    // would have repeated for exactly the uid most likely to be testing it.
+    const d = decideVoiceProvider(base({
+      uid: 'forced-1',
+      config: { provider: 'openai', rolloutPercent: 100, forceUids: ['forced-1'] },
+      clientSupports: ['elevenlabs'],
+    }));
+    expect(d.provider).toBe('gemini');
+    expect(d.reason).toBe('client-cannot-openai');
+  });
+
+  it('falls to Gemini when the retry leaves no declared transports at all', () => {
+    // On a native build without LiveKit, capabilities are ['openai'] alone, so
+    // excluding openai empties the list entirely.
+    const d = decideVoiceProvider(base({
+      config: { provider: 'openai', rolloutPercent: 100 },
+      clientSupports: [],
+    }));
+    expect(d.provider).toBe('gemini');
+    expect(d.reason).toBe('client-unsupported');
+  });
+});
+
 describe('hashUidToPercent', () => {
   it('is stable across calls', () => {
     expect(hashUidToPercent('abc')).toBe(hashUidToPercent('abc'));
