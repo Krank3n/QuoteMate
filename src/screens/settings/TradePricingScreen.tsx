@@ -41,7 +41,7 @@ import { loadGroups } from '../../services/supplierGroupService';
 import { composeSupplierList, type SupplierEntry } from '../../services/supplierPriority';
 import type { SupplierGroup } from '../../types';
 import { GridBackground } from '../../components/GridBackground';
-import { rateSummary, removePreference, removeRate } from '../../services/quotingProfile';
+import { HowYouQuoteCard } from './HowYouQuoteCard';
 
 export function TradePricingScreen() {
   const styles = useStyles();
@@ -90,21 +90,26 @@ export function TradePricingScreen() {
     }, []),
   );
 
-  useEffect(() => {
-    if (businessSettings) {
-      const cats = businessSettings.tradeCategories || (businessSettings.tradeCategory ? [businessSettings.tradeCategory] : []);
-      const niches = businessSettings.tradeNiches || (businessSettings.tradeNiche ? [businessSettings.tradeNiche] : []);
-      const priority = businessSettings.supplierPriority || [];
-      setSelectedCategories(cats);
-      setSelectedNiches(niches);
-      setSupplierPriority(priority);
-      setInitialSnapshot(JSON.stringify({
-        cats: [...cats].sort(),
-        niches: [...niches].sort(),
-        priority,
-      }));
-    }
+  // Seed the draft from settings — but only when the fields this screen
+  // edits actually change. A "How you quote" save writes a fresh settings
+  // object that leaves categories, niches and priority untouched; re-seeding
+  // on object identity would silently throw away unsaved toggles up here.
+  const mirrored = useMemo(() => {
+    if (!businessSettings) return null;
+    const cats = businessSettings.tradeCategories || (businessSettings.tradeCategory ? [businessSettings.tradeCategory] : []);
+    const niches = businessSettings.tradeNiches || (businessSettings.tradeNiche ? [businessSettings.tradeNiche] : []);
+    const priority = businessSettings.supplierPriority || [];
+    const key = JSON.stringify({ cats: [...cats].sort(), niches: [...niches].sort(), priority });
+    return { cats, niches, priority, key };
   }, [businessSettings]);
+  const mirroredKey = mirrored?.key ?? null;
+  useEffect(() => {
+    if (!mirrored) return;
+    setSelectedCategories(mirrored.cats);
+    setSelectedNiches(mirrored.niches);
+    setSupplierPriority(mirrored.priority);
+    setInitialSnapshot(mirrored.key);
+  }, [mirroredKey]); // keyed on the mirrored fields, not the object
 
   // Load the user's local supplier groups (for the draggable list). Refresh
   // on focus so adding/editing a supplier in the Supplier Book reflects
@@ -177,31 +182,6 @@ export function TradePricingScreen() {
     const category = getTradeCategoryById(catId);
     return category?.niches.map(niche => ({ ...niche, categoryId: catId })) || [];
   });
-
-  // "How you quote" — rules and rates Mate saved from chat. Removing one
-  // saves straight away: it is not part of this screen's draft/Save cycle
-  // (the snapshot above tracks categories, niches and priority only), and a
-  // wrong rule left in place is applied to the very next quote.
-  const quotingPreferences = businessSettings?.quotingPreferences ?? [];
-  const rateCard = businessSettings?.rateCard ?? [];
-  const handleRemovePreference = useCallback(async (text: string) => {
-    if (!businessSettings) return;
-    try {
-      const next = removePreference(businessSettings.quotingPreferences, text);
-      await setBusinessSettings({ ...businessSettings, quotingPreferences: next.length ? next : undefined });
-    } catch {
-      setShowErrorModal(true);
-    }
-  }, [businessSettings, setBusinessSettings]);
-  const handleRemoveRate = useCallback(async (id: string) => {
-    if (!businessSettings) return;
-    try {
-      const next = removeRate(businessSettings.rateCard, id);
-      await setBusinessSettings({ ...businessSettings, rateCard: next.length ? next : undefined });
-    } catch {
-      setShowErrorModal(true);
-    }
-  }, [businessSettings, setBusinessSettings]);
 
   const handleSave = async (opts?: { silent?: boolean }): Promise<boolean> => {
     try {
@@ -330,6 +310,9 @@ export function TradePricingScreen() {
                       isSelected && styles.categoryCardSelected,
                     ]}
                     onPress={() => handleCategoryToggle(category.id)}
+                    accessibilityRole="button"
+                    accessibilityLabel={category.name}
+                    aria-selected={isSelected}
                   >
                     {isSelected && (
                       <View style={styles.categoryCheckmark}>
@@ -402,45 +385,14 @@ export function TradePricingScreen() {
             </Surface>
           )}
 
-          {/* How you quote — only once Mate has saved something, so the 95%
-              who never state a rule or a rate never see an empty card. */}
-          {(quotingPreferences.length > 0 || rateCard.length > 0) && (
-            <Surface style={styles.card}>
-              <Title style={styles.sectionTitle}>How you quote</Title>
-              <Text style={styles.helperText}>
-                Rules and rates Mate has saved from your chats. Every quote follows them — remove anything that's off.
-              </Text>
-              {quotingPreferences.map((pref) => (
-                <View key={pref} style={styles.profileRow}>
-                  <Text style={styles.profileText}>{pref}</Text>
-                  <TouchableOpacity
-                    style={styles.profileRemove}
-                    onPress={() => handleRemovePreference(pref)}
-                    accessibilityLabel={`Remove preference: ${pref}`}
-                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                  >
-                    <MaterialCommunityIcons name="close-circle-outline" size={20} color={themeColors.textMuted} />
-                  </TouchableOpacity>
-                </View>
-              ))}
-              {rateCard.map((rate) => (
-                <View key={rate.id} style={styles.profileRow}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.supplierName}>{rate.label}</Text>
-                    <Text style={styles.supplierSubtitle}>{rateSummary(rate)}</Text>
-                  </View>
-                  <TouchableOpacity
-                    style={styles.profileRemove}
-                    onPress={() => handleRemoveRate(rate.id)}
-                    accessibilityLabel={`Remove rate: ${rate.label}`}
-                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                  >
-                    <MaterialCommunityIcons name="close-circle-outline" size={20} color={themeColors.textMuted} />
-                  </TouchableOpacity>
-                </View>
-              ))}
-            </Surface>
-          )}
+          {/* How you quote — the rules and rates Mate follows. Saves on its
+              own, outside this screen's draft/Save cycle (the snapshot above
+              tracks categories, niches and priority only). */}
+          <HowYouQuoteCard
+            settings={businessSettings}
+            save={setBusinessSettings}
+            onError={() => setShowErrorModal(true)}
+          />
 
           {/* Hardware Store Priority */}
           <Surface style={styles.card}>
@@ -726,23 +678,6 @@ const useStyles = makeStyles((t) => ({
     fontWeight: '700',
     color: t.colors.onAccent,
     letterSpacing: 0.4,
-  },
-  profileRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 10,
-    borderTopWidth: 1,
-    borderTopColor: t.colors.border,
-  },
-  profileText: {
-    flex: 1,
-    fontSize: 14,
-    color: t.colors.text,
-    lineHeight: 20,
-  },
-  profileRemove: {
-    paddingLeft: 12,
-    paddingVertical: 4,
   },
   addSupplierButton: {
     flexDirection: 'row',

@@ -13,6 +13,8 @@ import {
   formatRate,
   normalisePreference,
   normaliseRateUnit,
+  parseRateAmount,
+  rateGstBasis,
   rateLineUnitPrice,
   rateLinesCoverMaterials,
   rateSummary,
@@ -228,5 +230,53 @@ describe('rate lines on a document', () => {
     expect(list[0].label).toHaveLength(120);
     expect('pricesIncludeGst' in list[0]).toBe(false);
     expect(rateSummary(list[0])).toBe('$180.00 per job · materials included');
+  });
+});
+
+// The settings card and Mate's Save-rate card must agree on the basis a
+// rate is stored in, or the same number would mean two different prices.
+describe('rateGstBasis', () => {
+  it("is the tradie's stated basis when they gave one", () => {
+    expect(rateGstBasis({ gstRegistered: true, pricesIncludeGst: true }, false)).toBe(false);
+    expect(rateGstBasis({ gstRegistered: true, pricesIncludeGst: false }, true)).toBe(true);
+  });
+
+  it('falls back to the business default when unsaid', () => {
+    expect(rateGstBasis({ gstRegistered: true, pricesIncludeGst: true })).toBe(true);
+    expect(rateGstBasis({ gstRegistered: true, pricesIncludeGst: false })).toBe(false);
+    expect(rateGstBasis({ gstRegistered: true })).toBe(false);
+  });
+
+  it('is undefined for a business not registered for GST, whatever they said', () => {
+    expect(rateGstBasis({ gstRegistered: false, pricesIncludeGst: true })).toBeUndefined();
+    expect(rateGstBasis({ gstRegistered: false, pricesIncludeGst: false }, true)).toBeUndefined();
+  });
+});
+
+describe('parseRateAmount', () => {
+  it('reads what a person types into a money field', () => {
+    expect(parseRateAmount('120')).toBe(120);
+    expect(parseRateAmount('$120')).toBe(120);
+    expect(parseRateAmount(' 120.50 ')).toBe(120.5);
+    expect(parseRateAmount('1,200')).toBe(1200);
+    expect(parseRateAmount('1,200.50')).toBe(1200.5);
+    expect(parseRateAmount('.5')).toBe(0.5);
+    expect(parseRateAmount('85.555')).toBe(85.56);
+  });
+
+  it('reads a decimal comma as a decimal, not as thousands — $120.50, never $12,050', () => {
+    expect(parseRateAmount('120,50')).toBe(120.5);
+    expect(parseRateAmount('12,5')).toBe(12.5);
+  });
+
+  it('refuses anything that is not a positive amount, including one that rounds to nothing', () => {
+    expect(parseRateAmount('')).toBeNull();
+    expect(parseRateAmount('0')).toBeNull();
+    expect(parseRateAmount('0.004')).toBeNull();
+    expect(parseRateAmount('-40')).toBeNull();
+    expect(parseRateAmount('120 per room')).toBeNull();
+    expect(parseRateAmount('12.3.4')).toBeNull();
+    expect(parseRateAmount(120)).toBeNull();
+    expect(parseRateAmount(undefined)).toBeNull();
   });
 });

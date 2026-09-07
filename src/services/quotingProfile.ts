@@ -154,6 +154,57 @@ export function buildQuotingProfileBlock(
   return lines.join('\n');
 }
 
+// ─── Nothing saved yet ──────────────────────────────────────────────────────
+
+/**
+ * What Mate is told in place of the block while a business has saved nothing.
+ *
+ * This carries the whole instruction rather than pointing at "How they quote",
+ * and that redundancy is deliberate: on the simulator (7 Sep 2026) a one-line
+ * pointer here plus the rule in its own section produced a textbook must-ask
+ * turn with the pricing question simply left out, twice. It sits in the last
+ * and most salient slot in the prompt, and only reaches a business that has
+ * saved nothing — once they save anything it is replaced by the compact
+ * profile block, so the extra tokens are spent on exactly the tradies the
+ * question exists for.
+ */
+export const NO_PROFILE_NOTE = [
+  'How this business quotes: NOTHING SAVED YET.',
+  'So on the FIRST job of this conversation, the must-ask turn carries one extra question, asked in the same message as the scope questions, never as a turn of its own: do they charge this kind of job at a set rate — per room, per m², per hour, per day or per job — or should you work it up from materials and labour?',
+  'Word it for their trade, one line, not a menu.',
+  'A rate they state → propose_save_rate. A standing rule ("labour only", "the customer supplies the gear", "just work it up") → propose_remember_preference.',
+  'If they ignore it or brush it off, draft as normal and never ask again this conversation. It must never hold up a quote.',
+].join(' ');
+
+/**
+ * The GST basis a rate is saved in: the tradie's own when they stated one,
+ * their usual one otherwise. A business not registered for GST has no basis —
+ * the card and the prompt then say nothing about GST.
+ */
+export function rateGstBasis(
+  settings: Pick<BusinessSettings, 'gstRegistered' | 'pricesIncludeGst'>,
+  stated?: boolean,
+): boolean | undefined {
+  if (settings.gstRegistered === false) return undefined;
+  return stated ?? settings.pricesIncludeGst === true;
+}
+
+/**
+ * "$120", "120.50", "1,200" typed into a rate field → a positive number, to
+ * the cent; null for anything else. A comma with one or two digits after it
+ * and no point ("120,50") is a decimal comma from a European-locale keypad,
+ * not a thousands separator — read it as $120.50, never $12,050.
+ */
+export function parseRateAmount(text: unknown): number | null {
+  if (typeof text !== 'string') return null;
+  let cleaned = text.replace(/[$\s]/g, '');
+  if (!cleaned.includes('.') && /^\d+,\d{1,2}$/.test(cleaned)) cleaned = cleaned.replace(',', '.');
+  cleaned = cleaned.replace(/,/g, '');
+  if (!/^\d*\.?\d+$/.test(cleaned)) return null;
+  const n = roundToTwoDecimals(Number(cleaned));
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
 // ─── Rate lines on a draft ──────────────────────────────────────────────────
 
 /**

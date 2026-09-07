@@ -61,13 +61,44 @@ vi.mock('react-native-draggable-flatlist', () => {
 // Heavy native/expo dependency graphs irrelevant to the render path — same
 // approach as TakePaymentSheet.test.tsx / StickyJobActionBar.test.tsx.
 vi.mock('@expo/vector-icons/MaterialCommunityIcons', () => ({ default: () => null }));
-vi.mock('react-native-paper', () => ({
-  DefaultTheme: { colors: {} },
-  MD3DarkTheme: { colors: {} },
-  Text: ({ children }: any) => React.createElement('span', null, children),
-  Title: ({ children }: any) => React.createElement('span', null, children),
-  Surface: ({ children }: any) => React.createElement('div', null, children),
-  Chip: ({ children }: any) => React.createElement('span', null, children),
+vi.mock('react-native-paper', () => {
+  // Paper's TextInput carries its label as a prop; the shim exposes it as the
+  // accessible name so tests can type by label, the way the real one reads.
+  const TextInput: any = ({ label, value, onChangeText }: any) =>
+    React.createElement('input', {
+      'aria-label': label,
+      value: value ?? '',
+      onChange: (e: any) => onChangeText?.(e.target.value),
+    });
+  TextInput.Affix = () => null;
+  return {
+    DefaultTheme: { colors: {} },
+    MD3DarkTheme: { colors: {} },
+    Text: ({ children }: any) => React.createElement('span', null, children),
+    Title: ({ children }: any) => React.createElement('span', null, children),
+    Surface: ({ children }: any) => React.createElement('div', null, children),
+    Chip: ({ children, onPress, accessibilityLabel, disabled }: any) =>
+      React.createElement(
+        'span',
+        { role: 'button', 'aria-label': accessibilityLabel, 'aria-disabled': disabled ? 'true' : undefined, onClick: disabled ? undefined : onPress },
+        children,
+      ),
+    TouchableRipple: ({ children, onPress, accessibilityLabel }: any) =>
+      React.createElement('span', { role: 'button', 'aria-label': accessibilityLabel, onClick: onPress }, children),
+    Switch: ({ value, onValueChange, accessibilityLabel }: any) =>
+      React.createElement('input', {
+        type: 'checkbox',
+        role: 'switch',
+        'aria-label': accessibilityLabel,
+        checked: !!value,
+        onChange: () => onValueChange?.(!value),
+      }),
+    TextInput,
+  };
+});
+vi.mock('../../components/FooterButton', () => ({
+  FooterButton: ({ label, onPress, disabled }: any) =>
+    React.createElement('button', { disabled, onClick: onPress }, label),
 }));
 
 // Navigation: the screen calls useNavigation() and registers useFocusEffect
@@ -122,7 +153,17 @@ vi.mock('../../hooks/useUnsavedChangesGuard', () => ({
   useUnsavedChangesGuard: () => ({ unsavedModalProps: {}, allowNextNavigation: vi.fn() }),
 }));
 
+// The sheet chassis has its own lifecycle tests; the shim renders the "How you
+// quote" add forms only while the screen says the sheet is open.
+vi.mock('../../components/BottomSheet', () => ({
+  BottomSheet: (props: any) =>
+    props.visible
+      ? React.createElement('div', null, React.createElement('span', null, props.title), props.children)
+      : null,
+}));
+
 import { TradePricingScreen } from './TradePricingScreen';
+import { TRADE_CATEGORIES } from '../../constants/tradeCategories';
 
 describe('TradePricingScreen on web', () => {
   beforeEach(() => {
@@ -174,9 +215,97 @@ describe('TradePricingScreen on web', () => {
       storeValue.state.setBusinessSettings = async () => {};
     });
 
-    it('is absent until Mate has saved something', () => {
-      const { queryByText } = render(<TradePricingScreen />);
-      expect(queryByText('How you quote')).toBeNull();
+    // The card is the tradie's door into what Mate remembers, so it has to be
+    // there before anything is saved — otherwise "memory" is invisible until
+    // Mate happens to fill it.
+    it('is there before anything is saved, with the two ways to add', () => {
+      const { getByText, getByLabelText } = render(<TradePricingScreen />);
+      expect(getByText('How you quote')).toBeTruthy();
+      expect(getByLabelText('Add a rule')).toBeTruthy();
+      expect(getByLabelText('Add a rate')).toBeTruthy();
+    });
+
+    it('adds a rule by hand in a sheet, saves straight away, and closes the sheet', async () => {
+      const setBusinessSettings = vi.fn(async () => {});
+      storeValue.state.setBusinessSettings = setBusinessSettings;
+      const { getByLabelText, getByText, queryByLabelText } = render(<TradePricingScreen />);
+      expect(queryByLabelText('Rule')).toBeNull();
+      fireEvent.click(getByLabelText('Add a rule'));
+      fireEvent.change(getByLabelText('Rule'), { target: { value: '  Labour only, the customer buys the  materials ' } });
+      fireEvent.click(getByText('Save rule'));
+      await waitFor(() => expect(setBusinessSettings).toHaveBeenCalledTimes(1));
+      expect(setBusinessSettings.mock.calls[0][0]).toMatchObject({
+        quotingPreferences: ['Labour only, the customer buys the materials'],
+      });
+      await waitFor(() => expect(queryByLabelText('Rule')).toBeNull());
+    });
+
+    it('adds a rate by hand in the business GST basis, and refuses one with no amount', async () => {
+      const setBusinessSettings = vi.fn(async () => {});
+      storeValue.state.businessSettings = { supplierPriority: [], gstRegistered: true, pricesIncludeGst: true } as any;
+      storeValue.state.setBusinessSettings = setBusinessSettings;
+      const { getByLabelText, getByText } = render(<TradePricingScreen />);
+      fireEvent.click(getByLabelText('Add a rate'));
+      expect(getByText('Inc GST, the way your quotes show prices.')).toBeTruthy();
+      fireEvent.change(getByLabelText('What the rate is for'), { target: { value: 'End of lease clean' } });
+      fireEvent.click(getByText('Save rate'));
+      expect(setBusinessSettings).not.toHaveBeenCalled();
+
+      fireEvent.change(getByLabelText('Rate'), { target: { value: '120' } });
+      fireEvent.click(getByText('per room'));
+      fireEvent.click(getByLabelText('Rate includes materials'));
+      fireEvent.click(getByText('Save rate'));
+      await waitFor(() => expect(setBusinessSettings).toHaveBeenCalledTimes(1));
+      const saved = setBusinessSettings.mock.calls[0][0] as any;
+      expect(saved.rateCard).toHaveLength(1);
+      expect(saved.rateCard[0]).toMatchObject({
+        label: 'End of lease clean',
+        unit: 'room',
+        rate: 120,
+        pricesIncludeGst: true,
+        includesMaterials: true,
+      });
+    });
+
+    // The store updates local state first and only then awaits Firestore,
+    // whose write never settles offline. Waiting on it left the sheet open
+    // forever with the rule already showing behind it.
+    it('closes the sheet on save even when the write never settles', async () => {
+      storeValue.state.setBusinessSettings = vi.fn(() => new Promise<void>(() => {}));
+      const { getByLabelText, getByText, queryByLabelText } = render(<TradePricingScreen />);
+      fireEvent.click(getByLabelText('Add a rule'));
+      fireEvent.change(getByLabelText('Rule'), { target: { value: 'Labour only' } });
+      fireEvent.click(getByText('Save rule'));
+      await waitFor(() => expect(queryByLabelText('Rule')).toBeNull());
+    });
+
+    it('keeps the add buttons off until the business settings have loaded', () => {
+      storeValue.state.businessSettings = null as any;
+      const { getByLabelText } = render(<TradePricingScreen />);
+      expect(getByLabelText('Add a rule').getAttribute('aria-disabled')).toBe('true');
+      expect(getByLabelText('Add a rate').getAttribute('aria-disabled')).toBe('true');
+    });
+
+    // Every settings write hands the screen a new object. The draft of
+    // categories/niches/priority must only re-seed when THOSE fields change,
+    // or a rule saved from the card wipes an unsaved category toggle.
+    it('a settings write that leaves the trade fields alone does not reset unsaved category toggles', async () => {
+      const category = TRADE_CATEGORIES[0].name;
+      const { getByLabelText, findByText, rerender } = render(<TradePricingScreen />);
+      const selected = (name: string) => getByLabelText(name).getAttribute('aria-selected');
+      await findByText('Reece'); // the focus-time supplier loads have settled
+      fireEvent.click(getByLabelText(category));
+      await waitFor(() => expect(selected(category)).toBe('true'));
+
+      storeValue.state.businessSettings = { supplierPriority: [], quotingPreferences: ['Labour only'] } as any;
+      rerender(<TradePricingScreen />);
+      await waitFor(() => expect(selected(category)).toBe('true'));
+
+      // The control: a write that does change the trade fields still re-seeds.
+      storeValue.state.businessSettings = { supplierPriority: [], tradeCategories: [TRADE_CATEGORIES[1].id] } as any;
+      rerender(<TradePricingScreen />);
+      await waitFor(() => expect(selected(TRADE_CATEGORIES[1].name)).toBe('true'));
+      expect(selected(category)).toBe('false');
     });
 
     it('lists the saved rules and rates', () => {

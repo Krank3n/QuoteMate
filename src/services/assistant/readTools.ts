@@ -34,6 +34,7 @@ import { NICHE_TEMPLATES } from '../../data/nicheTemplates';
 import { buildWordWeights, scoreName, NICHE_MATCH_FLOOR } from './nicheMatch';
 import { isSpecialistSupplyNiche } from '../../data/specialistSupplyNiches';
 import { coversProbes, type SupplierBookSnapshot } from '../supplierBookCoverage';
+import { registeredBusinessSettings } from './quotingProfileContext';
 // Folding rules are shared with the jobs-list search — see src/utils/textMatch.
 // If they drift, a name is findable by Mate and not by the jobs list.
 import {
@@ -628,6 +629,12 @@ export interface JobRequirementsInput {
   /** Injected so resolveJobRequirements stays pure and synchronous. */
   supplierBook?: SupplierBookSnapshot;
   /**
+   * False when the business has saved no quoting rule and no rate, which adds
+   * HOW_YOU_PRICE_QUESTION to the must-ask list. Undefined leaves it out, so a
+   * caller that cannot tell never asks a tradie who may well have a rate card.
+   */
+  hasQuotingProfile?: boolean;
+  /**
    * 'invoice' means the work is already done. The niche's must-ask questions
    * are for scoping a job that hasn't happened yet — an electrician invoicing
    * a switchboard was asked poles, circuits, RCDs, asbestos and offered a
@@ -685,6 +692,22 @@ const MEASUREMENT_DRIVEN_METHODS = new Set(['per_sqm', 'per_linear_m', 'per_cubi
 /** The supply question every install-type job carries. */
 export const SUPPLY_OR_REPLACE_QUESTION =
   'Supplying the gear new, or replacing existing units — and is any of it customer-supplied?';
+
+/**
+ * Asked once, on a business that has saved no rule and no rate.
+ *
+ * This rides in mustAskQuestions rather than in the prompt because three
+ * simulator runs (7 Sep 2026) proved prompt text cannot win here: with the
+ * instruction in "How they quote", in the must-ask step AND in the last line
+ * of the prompt, Mate composed a textbook must-ask turn and left the pricing
+ * question out every time. The prompt says three separate times that pricing
+ * is the engine's job and not Mate's ("you do NOT compute prices", "never ask
+ * for prices"), and one late instruction does not beat that framing. The
+ * must-ask list is data the model does reliably ask from, and it is where
+ * SUPPLY_OR_REPLACE_QUESTION already lives for the same reason.
+ */
+export const HOW_YOU_PRICE_QUESTION =
+  'How they charge for this kind of job — a set rate (per room, m², hour, day or job), or worked up from materials and labour. Ask it in their words, and offer propose_save_rate for a rate or propose_remember_preference for a rule. If they skip it, drop it and draft anyway.';
 const INSTALL_TYPE_RE = /\b(install|installation|fit|fit-?out|replace|replacement|supply)\b/i;
 // "Off existing" (a circuit) is not the same question; the niche has to ask
 // about replacing or customer-supplied gear outright to be counted as covered.
@@ -854,6 +877,12 @@ function buildRequirements(
     mustAskQuestions.push(SUPPLY_OR_REPLACE_QUESTION);
   }
 
+  // A business with nothing saved gets the one "how do you price this"
+  // question, folded into the same turn as the scope questions.
+  if (input.hasQuotingProfile === false) {
+    mustAskQuestions.push(HOW_YOU_PRICE_QUESTION);
+  }
+
   const pricingMethod = template?.pricingMethod || undefined;
   const measurementDriven = !!pricingMethod && MEASUREMENT_DRIVEN_METHODS.has(pricingMethod);
 
@@ -922,6 +951,12 @@ export async function getJobRequirements(input: {
       niche = niche ?? (data.tradeNiche as string) ?? (data.tradeNiches as string[])?.[0];
     }
   }
+  // The same registered settings the prompt's profile block reads, so the
+  // question and the block can never disagree about whether anything is saved.
+  const settings = registeredBusinessSettings();
+  const hasQuotingProfile = settings
+    ? (settings.quotingPreferences?.length ?? 0) > 0 || (settings.rateCard?.length ?? 0) > 0
+    : undefined;
   // Imported lazily so resolveJobRequirements stays unit-testable without
   // AsyncStorage / Firestore at import time — same reason as the contact
   // helpers above.
@@ -937,6 +972,7 @@ export async function getJobRequirements(input: {
     // usual trade — see JobRequirementsInput.categoryFromSettings.
     categoryFromSettings: !input.category && !input.niche,
     supplierBook,
+    ...(hasQuotingProfile === undefined ? {} : { hasQuotingProfile }),
   });
 }
 

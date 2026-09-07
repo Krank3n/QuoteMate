@@ -35,6 +35,7 @@ import {
   rateLineUnitPrice,
   rateLinesCoverMaterials,
   stripLabourFromQuote,
+  rateGstBasis,
   upsertRate,
 } from '../services/quotingProfile';
 import type { RateLine } from '../types';
@@ -4448,13 +4449,7 @@ export const useStore = create<AppState>((set, get) => ({
               label: proposal.label,
               unit: proposal.unit,
               rate: proposal.rate,
-              // The tradie's own basis when they said it; their usual one
-              // otherwise. A business not registered for GST has no basis —
-              // the card and the prompt then say nothing about GST.
-              pricesIncludeGst:
-                settings.gstRegistered === false
-                  ? undefined
-                  : (proposal.pricesIncludeGst ?? settings.pricesIncludeGst === true),
+              pricesIncludeGst: rateGstBasis(settings, proposal.pricesIncludeGst),
               includesMaterials: proposal.includesMaterials,
               notes: proposal.notes,
             }),
