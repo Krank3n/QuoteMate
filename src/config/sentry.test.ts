@@ -39,11 +39,20 @@ describe('SENTRY_IGNORE_ERRORS', () => {
     ).toBe(true);
   });
 
+  it('filters the browser/SDK-native fetch AbortError seen in production (sentry-7720411163, #173)', () => {
+    expect(matchesIgnoreList('AbortError: The user aborted a request')).toBe(true);
+  });
+
   it('does not swallow other NotFoundErrors or unrelated crashes', () => {
     expect(matchesIgnoreList('NotFoundError: The object can not be found here.')).toBe(false);
     expect(
       matchesIgnoreList("TypeError: Cannot read properties of undefined (reading 'routes')"),
     ).toBe(false);
+    // The AbortError regex is the narrow exact message, so an unrelated error
+    // that merely mentions "abort" must still report.
+    expect(matchesIgnoreList('Error: failed to abort the payment capture')).toBe(false);
+    // Mate's user-facing timeout error keeps reporting if it ever reaches Sentry.
+    expect(matchesIgnoreList('LiveOfflineError: Connection timed out')).toBe(false);
   });
 
   it('is passed to Sentry.init in enabled builds', () => {
