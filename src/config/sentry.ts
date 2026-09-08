@@ -30,9 +30,19 @@ export function shouldEnableSentry(dsn: string, isDev: boolean): boolean {
  * calls set/releasePointerCapture (fast flick, touch cancel, unmount
  * mid-gesture). No first-party frame, the browser auto-releases capture,
  * and the drag/slider interaction still completes — pure noise.
+ *
+ * Fetch abort (sentry-7720411163, ticket #173): a browser/SDK-native fetch
+ * abort on the web /app build — the request is cancelled by navigating away,
+ * closing the tab, or a third-party SDK's own cancellation. Our only
+ * first-party AbortController (fetchWithTimeout in services/assistant/
+ * liveSession.ts) already catches its own abort and converts it to a
+ * LiveOfflineError, so a raw "AbortError: The user aborted a request" has no
+ * first-party frame and is auto-captured by Sentry's global unhandledrejection
+ * handler — pure noise. The regex matches the exact production message only.
  */
 export const SENTRY_IGNORE_ERRORS: (string | RegExp)[] = [
   /Failed to execute '(set|release)PointerCapture' on 'Element'/,
+  /AbortError: The user aborted a request/,
 ];
 
 export function initSentry(): void {
