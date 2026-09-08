@@ -39,11 +39,16 @@ describe('SENTRY_IGNORE_ERRORS', () => {
     ).toBe(true);
   });
 
-  it('does not swallow other NotFoundErrors or unrelated crashes', () => {
+  it('filters the reason-less WebRTC teardown AbortError seen in production', () => {
+    expect(matchesIgnoreList('AbortError: signal is aborted without reason')).toBe(true);
+  });
+
+  it('does not swallow other NotFoundErrors, unrelated crashes, or first-party AbortErrors', () => {
     expect(matchesIgnoreList('NotFoundError: The object can not be found here.')).toBe(false);
     expect(
       matchesIgnoreList("TypeError: Cannot read properties of undefined (reading 'routes')"),
     ).toBe(false);
+    expect(matchesIgnoreList('AbortError: request timed out after 30s')).toBe(false);
   });
 
   it('is passed to Sentry.init in enabled builds', () => {

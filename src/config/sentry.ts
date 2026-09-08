@@ -30,9 +30,19 @@ export function shouldEnableSentry(dsn: string, isDev: boolean): boolean {
  * calls set/releasePointerCapture (fast flick, touch cancel, unmount
  * mid-gesture). No first-party frame, the browser auto-releases capture,
  * and the drag/slider interaction still completes — pure noise.
+ *
+ * Reason-less abort ("AbortError: signal is aborted without reason"): thrown
+ * by the LiveKit/ElevenLabs voice-session WebRTC SDK's own connection teardown
+ * (@elevenlabs/client over livekit-client) calling controller.abort() with no
+ * reason during disconnect/reconnect. No first-party frame — our only
+ * AbortController (src/services/assistant/liveSession.ts) already catches its
+ * own abort and converts it to a LiveOfflineError before it reaches Sentry, so
+ * this is a dangling rejection from the SDK's internals. Scoped to the exact
+ * reason-less phrasing so genuine first-party AbortErrors still report.
  */
 export const SENTRY_IGNORE_ERRORS: (string | RegExp)[] = [
   /Failed to execute '(set|release)PointerCapture' on 'Element'/,
+  /signal is aborted without reason/i,
 ];
 
 export function initSentry(): void {
