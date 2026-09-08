@@ -14,7 +14,7 @@
 import React from 'react';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, fireEvent, screen, waitFor, act } from '@testing-library/react';
-import { Alert } from 'react-native';
+import { Alert, Share } from 'react-native';
 
 // Platform.OS is switchable: the SMS row's viability depends on it (web can
 // only copy the message and announce it through a no-op Alert.alert).
@@ -105,12 +105,14 @@ vi.mock('../services/llmService', () => llm);
 
 const guard = vi.hoisted(() => ({
   ensureCanDeliver: vi.fn(async () => ({ ok: true })),
-  attachTrialPayLink: vi.fn(async () => ({ status: 'connect_required' })),
+  attachPayLink: vi.fn(async (): Promise<string | undefined> => undefined),
 }));
 vi.mock('../utils/quoteDeliveryGuard', () => ({
   ...guard,
   // Real rule, kept in sync by quoteDeliveryGuard.test.ts.
-  shouldOfferTrialPayLink: (plan: string, doc: any) => plan === 'trial' && !doc.squarePaymentLinkUrl,
+  carriesPayableAmount: (target: any) =>
+    target.kind === 'invoice'
+    || (target.doc.requireDeposit === true && (target.doc.depositPercentage ?? 0) > 0),
 }));
 
 const store = vi.hoisted(() => ({
@@ -134,6 +136,7 @@ vi.mock('../store/useStore', () => {
 import { SendDocumentDialog } from './SendDocumentDialog';
 import { resetWarmedEmailDrafts, warmEmailDraft } from '../utils/emailDraft';
 import { trackEvent } from '../services/analyticsService';
+import { exportDocumentPDF } from '../utils/pdfGenerator';
 import type { Document } from '../types/document';
 
 const tracked = vi.mocked(trackEvent);
@@ -189,8 +192,11 @@ function eventProps(name: string) {
 beforeEach(() => {
   vi.clearAllMocks();
   resetWarmedEmailDrafts();
+  // Reset here, not at the end of the test that changes it: a failure there
+  // used to leak an expired trial into every test after it.
+  store.state.subscriptionStatus = { trialStartedAt: 1, trialExpired: false, isPro: false };
   guard.ensureCanDeliver.mockResolvedValue({ ok: true } as any);
-  guard.attachTrialPayLink.mockResolvedValue({ status: 'connect_required' } as any);
+  guard.attachPayLink.mockResolvedValue(undefined);
   store.state.getEffectivePlan = () => 'trial';
   rn.platformOS = 'android';
 });
@@ -216,18 +222,39 @@ describe('opening the send flow', () => {
     await waitFor(() => expect(screen.getByTestId('sheet')).toBeTruthy());
   });
 
-  it('keeps the sheet for free-plan users, whose gate does a Square round-trip first', async () => {
+  // A plain quote has nothing for Square to collect, so the free plan is
+  // never gated on it — 8 of the 13 tradies who met that gate on a quote
+  // abandoned the send.
+  it('sends a free-plan quote straight to the preview like anyone else', async () => {
     store.state.getEffectivePlan = () => 'free';
 
     renderDialog();
 
-    await waitFor(() => expect(screen.getByTestId('sheet')).toBeTruthy());
-    expect(screen.queryByTestId('preview')).toBeNull();
+    await waitFor(() => expect(screen.getByTestId('preview')).toBeTruthy());
+    expect(screen.queryByTestId('sheet')).toBeNull();
     expect(eventProps('send_sheet_opened')).toEqual({
       doc_type: 'quote',
       has_customer_email: true,
       plan: 'free',
     });
+  });
+
+  it('keeps the sheet for a free-plan invoice, whose gate does a Square round-trip first', async () => {
+    store.state.getEffectivePlan = () => 'free';
+
+    renderDialog({ doc: doc({ type: 'invoice', dueDate: 0 } as any) });
+
+    await waitFor(() => expect(screen.getByTestId('sheet')).toBeTruthy());
+    expect(screen.queryByTestId('preview')).toBeNull();
+  });
+
+  it('keeps the sheet for a free-plan deposit quote too', async () => {
+    store.state.getEffectivePlan = () => 'free';
+
+    renderDialog({ doc: doc({ requireDeposit: true, depositPercentage: 20 }) });
+
+    await waitFor(() => expect(screen.getByTestId('sheet')).toBeTruthy());
+    expect(screen.queryByTestId('preview')).toBeNull();
   });
 
   it('reports the open with doc type, address and plan', async () => {
@@ -264,8 +291,9 @@ describe('the sheet itself', () => {
   });
 
   it('keeps Email first when both are on file', async () => {
-    store.state.getEffectivePlan = () => 'free'; // free plan keeps the sheet up
-    renderDialog({ doc: doc({ customerPhone: '0412 345 678' }) });
+    // A free-plan deposit quote is gated, which keeps the sheet up.
+    store.state.getEffectivePlan = () => 'free';
+    renderDialog({ doc: doc({ customerPhone: '0412 345 678', requireDeposit: true, depositPercentage: 20 }) });
 
     await waitFor(() => expect(screen.getByTestId('sheet')).toBeTruthy());
     expect(sheetLabels()).toEqual(['Email', 'SMS', 'Share', 'Export PDF']);
@@ -373,14 +401,14 @@ describe('the warmed email body', () => {
   it('falls back to the local template for free users', async () => {
     store.state.subscriptionStatus = { trialStartedAt: null, trialExpired: true, isPro: false };
     store.state.getEffectivePlan = () => 'free';
-    renderDialog({ doc: doc({ draftEmailBody: undefined }) });
+    // A deposit quote, so the free plan is gated and the sheet stays up.
+    renderDialog({ doc: doc({ draftEmailBody: undefined, requireDeposit: true, depositPercentage: 20 }) });
     await waitFor(() => expect(screen.getByTestId('sheet')).toBeTruthy());
 
     fireEvent.click(screen.getByText('Email'));
 
     await waitFor(() => expect(llm.getDefaultEmailBody).toHaveBeenCalled());
     expect(llm.generateQuoteEmail).not.toHaveBeenCalled();
-    store.state.subscriptionStatus = { trialStartedAt: 1, trialExpired: false, isPro: false };
   });
 });
 
@@ -424,18 +452,21 @@ describe('More ways to send', () => {
   });
 });
 
-describe('the pay-link ask, now after the send', () => {
-  it('asks once the doc is away, not before', async () => {
+describe('after the email goes out', () => {
+  // The post-send "Want a Pay Now button?" ask was tapped 8 times in its
+  // life and every tap bounced to settings. The link now arrives on its own
+  // (the server attaches it to email sends), so nothing stands between a
+  // sent doc and the door.
+  it('closes the flow — there is no pay-link ask', async () => {
     const { props } = renderDialog();
     await waitFor(() => expect(screen.getByTestId('preview')).toBeTruthy());
 
     fireEvent.click(screen.getByText('stub-sent'));
     fireEvent.click(screen.getByText('stub-close'));
 
-    expect(screen.getByText('Want a Pay Now button?')).toBeTruthy();
-    expect(eventProps('pay_link_optin_shown')).toEqual({ doc_type: 'quote' });
-    // The flow stays open for the ask instead of closing out from under it.
-    expect(props.onDismiss).not.toHaveBeenCalled();
+    expect(screen.queryByText('Want a Pay Now button?')).toBeNull();
+    expect(tracked.mock.calls.map(([e]) => e)).not.toContain('pay_link_optin_shown');
+    expect(props.onDismiss).toHaveBeenCalled();
   });
 
   // The doc snapshot this dialog holds is stamped `draft`; re-writing the
@@ -452,49 +483,14 @@ describe('the pay-link ask, now after the send', () => {
     expect(store.state.saveDraft).not.toHaveBeenCalled();
   });
 
-  it('stays out of the way when the preview is abandoned', async () => {
-    const { props } = renderDialog();
-    await waitFor(() => expect(screen.getByTestId('preview')).toBeTruthy());
-
-    fireEvent.click(screen.getByText('stub-close'));
-
-    expect(screen.queryByText('Want a Pay Now button?')).toBeNull();
-    expect(tracked.mock.calls.map(([e]) => e)).not.toContain('pay_link_optin_shown');
-    expect(props.onDismiss).toHaveBeenCalled();
-  });
-
-  it('is not offered to a doc that already carries a pay link', async () => {
-    renderDialog({ doc: doc({ squarePaymentLinkUrl: 'https://sq.link/x' }) });
+  it('never asks Square for a link on the email path — the server attaches it', async () => {
+    renderDialog({ doc: doc({ type: 'invoice', dueDate: 0 } as any) });
     await waitFor(() => expect(screen.getByTestId('preview')).toBeTruthy());
 
     fireEvent.click(screen.getByText('stub-sent'));
     fireEvent.click(screen.getByText('stub-close'));
 
-    expect(screen.queryByText('Want a Pay Now button?')).toBeNull();
-  });
-
-  it('records the opt-in outcome when taken', async () => {
-    renderDialog();
-    await waitFor(() => expect(screen.getByTestId('preview')).toBeTruthy());
-    fireEvent.click(screen.getByText('stub-sent'));
-    fireEvent.click(screen.getByText('stub-close'));
-
-    fireEvent.click(screen.getByText('Set it up'));
-
-    await waitFor(() => expect(guard.attachTrialPayLink).toHaveBeenCalledTimes(1));
-    expect(eventProps('pay_link_optin_tapped')).toEqual({ doc_type: 'quote', outcome: 'connect_required' });
-  });
-
-  it('"Not now" closes the flow without attaching anything', async () => {
-    const { props } = renderDialog();
-    await waitFor(() => expect(screen.getByTestId('preview')).toBeTruthy());
-    fireEvent.click(screen.getByText('stub-sent'));
-    fireEvent.click(screen.getByText('stub-close'));
-
-    fireEvent.click(screen.getByText('Not now'));
-
-    expect(guard.attachTrialPayLink).not.toHaveBeenCalled();
-    expect(props.onDismiss).toHaveBeenCalled();
+    expect(guard.attachPayLink).not.toHaveBeenCalled();
   });
 });
 
@@ -514,6 +510,98 @@ describe('non-email channels', () => {
     expect(message).not.toContain('%20');
     expect(eventProps('send_method_chosen')).toEqual({ method: 'sms', doc_type: 'quote' });
     expect(eventProps('quote_send_succeeded')).toEqual({ doc_type: 'quote', method: 'sms', to_self: false });
+  });
+
+  // 13 of the first 36 invoices went out by SMS / Share / PDF with no Pay Now
+  // link: only the email path had the server mint one. These channels
+  // compose the customer's copy on the phone, so they fetch the link first.
+  const invoiceDoc = (overrides: Partial<Document> = {}) => doc({
+    type: 'invoice',
+    customerEmail: undefined,
+    customerPhone: '0412 345 678',
+    dueDate: 0,
+    ...overrides,
+  } as any);
+
+  it('puts the Pay Now link in an invoice SMS when Square can mint one', async () => {
+    guard.attachPayLink.mockResolvedValue('https://square.link/u/pay');
+    renderDialog({ doc: invoiceDoc() });
+    await waitFor(() => expect(screen.getByTestId('sheet')).toBeTruthy());
+
+    fireEvent.click(screen.getByText('SMS'));
+
+    await waitFor(() => expect(sms.openSmsComposer).toHaveBeenCalledTimes(1));
+    const [, message] = sms.openSmsComposer.mock.calls[0];
+    expect(message).toContain('View and pay online:\nhttps://square.link/u/pay');
+    expect(guard.attachPayLink).toHaveBeenCalledWith({
+      kind: 'invoice',
+      doc: expect.objectContaining({ id: 'q1' }),
+    });
+  });
+
+  it('sends the invoice SMS without a link when Square has none to give', async () => {
+    renderDialog({ doc: invoiceDoc() });
+    await waitFor(() => expect(screen.getByTestId('sheet')).toBeTruthy());
+
+    fireEvent.click(screen.getByText('SMS'));
+
+    await waitFor(() => expect(sms.openSmsComposer).toHaveBeenCalledTimes(1));
+    const [, message] = sms.openSmsComposer.mock.calls[0];
+    expect(message).not.toContain('pay online');
+    expect(eventProps('quote_send_succeeded')).toEqual({ doc_type: 'invoice', method: 'sms', to_self: false });
+  });
+
+  it('uses the link the free-tier gate already minted instead of asking twice', async () => {
+    guard.ensureCanDeliver.mockResolvedValue({ ok: true, squarePaymentLinkUrl: 'https://square.link/u/gate' } as any);
+    renderDialog({ doc: invoiceDoc() });
+    await waitFor(() => expect(screen.getByTestId('sheet')).toBeTruthy());
+
+    fireEvent.click(screen.getByText('SMS'));
+
+    await waitFor(() => expect(sms.openSmsComposer).toHaveBeenCalledTimes(1));
+    expect(sms.openSmsComposer.mock.calls[0][1]).toContain('https://square.link/u/gate');
+    expect(guard.attachPayLink).not.toHaveBeenCalled();
+  });
+
+  it('shares an invoice with its Pay Now link', async () => {
+    guard.attachPayLink.mockResolvedValue('https://square.link/u/pay');
+    renderDialog({ doc: invoiceDoc() });
+    await waitFor(() => expect(screen.getByTestId('sheet')).toBeTruthy());
+
+    fireEvent.click(screen.getByText('Share'));
+
+    await waitFor(() => expect(Share.share).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(Share.share).mock.calls[0][0].message).toContain('Pay online: https://square.link/u/pay');
+  });
+
+  // Up to two round-trips now sit between the tap and the composer on an
+  // invoice. A tap that looks ignored is a send that dies on the sheet.
+  it('shows progress on the tapped row while the link is fetched, and ignores a second tap', async () => {
+    let release!: (url: string) => void;
+    guard.attachPayLink.mockReturnValue(new Promise<string | undefined>((r) => { release = r; }));
+    renderDialog({ doc: invoiceDoc() });
+    await waitFor(() => expect(screen.getByTestId('sheet')).toBeTruthy());
+
+    fireEvent.click(screen.getByText('Share'));
+    await waitFor(() => expect(screen.getByText('Preparing…')).toBeTruthy());
+    fireEvent.click(screen.getByText('Preparing…'));
+    fireEvent.click(screen.getByText('Export PDF'));
+
+    await act(async () => { release('https://square.link/u/pay'); });
+    await waitFor(() => expect(Share.share).toHaveBeenCalledTimes(1));
+    expect(guard.attachPayLink).toHaveBeenCalledTimes(1);
+    expect(exportDocumentPDF).not.toHaveBeenCalled();
+  });
+
+  it('exports the invoice PDF carrying the Pay Now link', async () => {
+    guard.attachPayLink.mockResolvedValue('https://square.link/u/pay');
+    renderDialog({ doc: invoiceDoc() });
+    await waitFor(() => expect(screen.getByTestId('sheet')).toBeTruthy());
+
+    fireEvent.click(screen.getByText('Export PDF'));
+
+    await waitFor(() => expect(exportDocumentPDF).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(exportDocumentPDF).mock.calls[0][0].squarePaymentLinkUrl).toBe('https://square.link/u/pay');
   });
 
   it('keeps the quote in draft when the SMS composer is cancelled', async () => {
@@ -774,20 +862,18 @@ describe('settling the total before it reaches a customer', () => {
     expect(sms.openSmsComposer.mock.calls[0][1]).toContain('Total: $770.00');
   });
 
-  it('mints the Pay Now link against the settled total, not the screen\'s', async () => {
-    // attachTrialPayLink asks Square for a link for a real amount (deposit, or
-    // the full quote total). A stale figure here puts a Pay Now button on the
-    // customer's page for money the quote no longer says.
-    renderDialog({ doc: drifting({ customerEmail: 'barb@example.com' }) });
+  it('hands the settled quote to the pay-link mint, not the screen\'s', async () => {
+    // attachPayLink asks Square for a link for a real amount (the deposit).
+    // A stale figure here puts a Pay Now button on the customer's page for
+    // money the quote no longer says.
+    renderDialog({ doc: drifting({ requireDeposit: true, depositPercentage: 20 }) });
+    await waitFor(() => expect(screen.getByTestId('sheet')).toBeTruthy());
+
+    fireEvent.click(screen.getByText('SMS'));
     await answerSettlePrompt('send');
-    await waitFor(() => expect(screen.getByTestId('preview')).toBeTruthy());
-    fireEvent.click(screen.getByText('stub-sent'));
-    fireEvent.click(screen.getByText('stub-close'));
 
-    fireEvent.click(screen.getByText('Set it up'));
-
-    await waitFor(() => expect(guard.attachTrialPayLink).toHaveBeenCalledTimes(1));
-    expect(guard.attachTrialPayLink.mock.calls[0][0].doc.total).toBe(7819.02);
+    await waitFor(() => expect(guard.attachPayLink).toHaveBeenCalledTimes(1));
+    expect(guard.attachPayLink.mock.calls[0][0].doc.total).toBe(7819.02);
   });
 
   it('settles an invoice by leaving it alone — saveInvoice does not re-cost', async () => {

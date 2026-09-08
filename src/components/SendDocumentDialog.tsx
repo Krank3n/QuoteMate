@@ -11,9 +11,11 @@
  *      preview. The sheet (SMS / Share / Export PDF) stays one tap away
  *      behind "More ways to send", and is still the entry point when there's
  *      no address on file.
- *   2. The Path B pay-link opt-in no longer sits above Email in the sheet —
- *      tapping it without Square connected abandoned the send entirely. It
- *      now asks AFTER the doc is out the door, aimed at the next one.
+ *   2. Nothing about payments sits in the send flow any more. The pay-link
+ *      opt-in that used to sit above Email abandoned sends; moved after the
+ *      send it was tapped 8 times in its life and every tap bounced to
+ *      settings. The Pay Now link now just arrives: the server attaches it
+ *      to email sends, and the non-email channels fetch it below.
  *
  * SendDocumentButton itself wraps this dialog — nothing changes for callers.
  */
@@ -32,12 +34,12 @@ import { markDocumentSent } from '../utils/applyStageChange';
 import { maybePromptForPushPermission } from '../services/pushPermissionPrompt';
 import { useStore } from '../store/useStore';
 import {
+  attachPayLink,
+  carriesPayableAmount,
   ensureCanDeliver,
-  attachTrialPayLink,
-  shouldOfferTrialPayLink,
+  type DeliveryDoc,
 } from '../utils/quoteDeliveryGuard';
 import { ActionSheet, ActionSheetOption } from './ActionSheet';
-import { AlertModal } from './AlertModal';
 import { DocumentEmailPreviewModal } from './DocumentEmailPreviewModal';
 import { SendGateModal } from './SendGateModal';
 import { trackEvent } from '../services/analyticsService';
@@ -137,13 +139,12 @@ export function SendDocumentDialog({
   const [emailBody, setEmailBody] = useState('');
   const [emailSubject, setEmailSubject] = useState('');
   const [isGeneratingEmail, setIsGeneratingEmail] = useState(false);
-  const [payLinkAttached, setPayLinkAttached] = useState(false);
-  const [isAttachingPayLink, setIsAttachingPayLink] = useState(false);
-  const [payLinkOfferVisible, setPayLinkOfferVisible] = useState(false);
-  const [isPreparingSms, setIsPreparingSms] = useState(false);
-  // Set by the preview modal on a successful send; gates the post-send
-  // pay-link ask so we only pitch payments to someone who just delivered,
-  // and stops us re-writing the doc once it has left.
+  // The non-email row being readied: its label shows progress while the
+  // Pay Now link (and, for a quote SMS, the acceptance link) is fetched, so
+  // a tap never looks ignored, and a second tap can't start it twice.
+  const [preparing, setPreparing] = useState<'sms' | 'share' | 'export_pdf' | null>(null);
+  // Set by the preview modal on a successful send; stops us re-writing the
+  // doc once it has left.
   const emailSentRef = useRef(false);
   // The doc whose body `emailBody` currently holds. Guards against reseeding
   // over the tradie's own edits when the preview is reopened in one session.
@@ -151,11 +152,19 @@ export function SendDocumentDialog({
 
   const docType = isInvoice ? 'invoice' : 'quote';
 
-  // Path B opt-in: offer trial users a Pay Now link once this doc has gone
-  // out, so the next one can carry a card button. Free users are gated
-  // instead; Pro/linked docs need nothing.
-  const offerPayLink =
-    shouldOfferTrialPayLink(getEffectivePlan(), doc) && !payLinkAttached;
+  /**
+   * What the delivery guard sees. Takes the settled quote rather than
+   * `activeQuote`: callers settle inside the same invocation, so the state
+   * that would update it has not re-rendered this closure yet — and the
+   * guard may mint a Square link for the quote's amount, so a stale figure
+   * here bills the customer the wrong money.
+   */
+  const deliveryTarget = (settledQuote: Quote): DeliveryDoc =>
+    isInvoice ? { kind: 'invoice', doc: invoice } : { kind: 'quote', doc: settledQuote };
+
+  /** The doc as it leaves, carrying the Pay Now link fetched for it. */
+  const withPayLink = (sendDoc: Document, url?: string): Document =>
+    url ? { ...sendDoc, squarePaymentLinkUrl: url } : sendDoc;
 
   const defaultSubject = (() => {
     const businessName = businessSettings?.businessName || 'Your Business';
@@ -261,23 +270,19 @@ export function SendDocumentDialog({
   };
 
   /**
-   * Free-tier delivery gate. Returns true when the caller can proceed.
-   * On `connect_square` failure, opens the two-option SendGateModal so the
+   * Free-tier delivery gate. Resolves to the passed gate (which may carry a
+   * link it minted) when the caller can proceed, null when it cannot. On
+   * `connect_square` failure, opens the two-option SendGateModal so the
    * user has already-invested-time pushing them toward Square or Pro. On
    * `mint_link_failed`, falls back to a plain alert — that's a transient
-   * Square API error, not an entitlement issue. Pro / trial users always
-   * pass without a network round-trip.
+   * Square API error, not an entitlement issue. Pro / trial users, and any
+   * plain quote, pass without a network round-trip.
    */
-  const passesDeliveryGate = async (settledQuote: Quote): Promise<boolean> => {
-    // Takes the settled quote rather than reading `activeQuote`: callers settle
-    // inside the same invocation, so the state that would update it has not
-    // re-rendered this closure yet. On the free tier this gate mints a Square
-    // payment link for the quote's amount, so a stale figure here bills the
-    // customer the wrong money.
-    const gate = await ensureCanDeliver(
-      isInvoice ? { kind: 'invoice', doc: invoice } : { kind: 'quote', doc: settledQuote }
-    );
-    if (gate.ok) return true;
+  const runDeliveryGate = async (
+    settledQuote: Quote,
+  ): Promise<{ squarePaymentLinkUrl?: string } | null> => {
+    const gate = await ensureCanDeliver(deliveryTarget(settledQuote));
+    if (gate.ok) return gate;
     setActionSheetVisible(false);
     if (gate.reason === 'connect_square') {
       trackEvent('send_gate_shown', { doc_type: isInvoice ? 'invoice' : 'quote' });
@@ -287,7 +292,23 @@ export function SendDocumentDialog({
         { text: 'OK', onPress: onDismiss },
       ]);
     }
-    return false;
+    return null;
+  };
+
+  /** The email path: the server attaches the Pay Now link on send. */
+  const passesDeliveryGate = async (settledQuote: Quote): Promise<boolean> =>
+    (await runDeliveryGate(settledQuote)) !== null;
+
+  /**
+   * The non-email paths compose the customer's copy on the phone, so the
+   * link has to be in hand before anything is written. Best-effort: a send
+   * goes ahead without one sooner than not at all. Null only when the gate
+   * refused.
+   */
+  const payLinkForDelivery = async (settledQuote: Quote): Promise<{ url?: string } | null> => {
+    const gate = await runDeliveryGate(settledQuote);
+    if (!gate) return null;
+    return { url: gate.squarePaymentLinkUrl ?? await attachPayLink(deliveryTarget(settledQuote)) };
   };
 
   const openPreviewWithBody = (body: string, prefilled: boolean, waitMs: number) => {
@@ -375,7 +396,6 @@ export function SendDocumentDialog({
     if (!visible) {
       setActionSheetVisible(false);
       setEmailPreviewVisible(false);
-      setPayLinkOfferVisible(false);
       // Drop the settled figures with the flow that settled them. The next
       // open re-derives them from whatever the doc looks like by then.
       setSettled(null);
@@ -389,11 +409,14 @@ export function SendDocumentDialog({
       has_customer_email: hasCustomerEmail(doc),
       plan,
     });
-    // Free plan keeps the sheet: its delivery gate does a Square round-trip
-    // (and may mint a payment link) before anything can go out, so routing
-    // straight through would leave the tradie tapping Send and watching an
-    // unchanged screen. On the sheet, that wait happens with the UI already up.
-    if (plan !== 'free' && hasCustomerEmail(doc)) void handleEmailOption();
+    // A free-plan doc with money on it keeps the sheet: its delivery gate
+    // does a Square round-trip (and may mint a payment link) before anything
+    // can go out, so routing straight through would leave the tradie tapping
+    // Send and watching an unchanged screen. On the sheet, that wait happens
+    // with the UI already up. A plain quote is never gated, so it goes
+    // straight to the preview on every plan.
+    const gated = plan === 'free' && carriesPayableAmount(deliveryTarget(quote));
+    if (!gated && hasCustomerEmail(doc)) void handleEmailOption();
     else setActionSheetVisible(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
@@ -418,13 +441,6 @@ export function SendDocumentDialog({
     // reconstructs the legacy quote from a doc snapshot stamped `draft`,
     // which merges straight back over the server's sent status.
     if (!emailSentRef.current) persistEmailEdits();
-    // Ask about payments only once the doc is actually out the door — the
-    // ask used to sit in front of the send and cost us the send itself.
-    if (emailSentRef.current && offerPayLink) {
-      trackEvent('pay_link_optin_shown', { doc_type: docType });
-      setPayLinkOfferVisible(true);
-      return;
-    }
     onDismiss();
   };
 
@@ -498,7 +514,7 @@ export function SendDocumentDialog({
   };
 
   const handleSendSMS = async () => {
-    if (isPreparingSms) return;
+    if (preparing) return;
     const rawPhone = isInvoice ? (invoice.customerPhone || '') : (quote.customerPhone || '');
     const phone = cleanSmsRecipient(rawPhone);
     if (!phone) {
@@ -507,35 +523,44 @@ export function SendDocumentDialog({
     }
     const settledNow = await settleTotals();
     if (!settledNow) return;
-    if (!(await passesDeliveryGate(settledNow.quote))) return;
-    trackEvent('send_method_chosen', { method: 'sms', doc_type: docType });
-
-    // A quote SMS must carry the quote itself, not merely announce a total.
-    // Minting also snapshots the current terms server-side for the public
-    // review page. Keep the sheet visible with progress copy while it runs.
+    // Keep the sheet visible with progress copy while the links are fetched.
+    setPreparing('sms');
+    let delivery: { url?: string } | null;
     let quoteUrl: string | undefined;
-    if (!isInvoice) {
-      setIsPreparingSms(true);
-      try {
-        quoteUrl = await generateAcceptanceLink(doc.id);
-      } catch {
-        Alert.alert(
-          'Could not create quote link',
-          'Check your connection and try again, or send the quote by email.',
-        );
-        return;
-      } finally {
-        setIsPreparingSms(false);
+    try {
+      // On a quote the Pay Now link is the deposit link; the SMS carries the
+      // acceptance page instead, whose Pay Deposit button serves the same
+      // link, so only an invoice SMS puts the URL in the message itself.
+      delivery = await payLinkForDelivery(settledNow.quote);
+      if (!delivery) return;
+      trackEvent('send_method_chosen', { method: 'sms', doc_type: docType });
+
+      // A quote SMS must carry the quote itself, not merely announce a total.
+      // Minting also snapshots the current terms server-side for the public
+      // review page.
+      if (!isInvoice) {
+        try {
+          quoteUrl = await generateAcceptanceLink(doc.id);
+        } catch {
+          Alert.alert(
+            'Could not create quote link',
+            'Check your connection and try again, or send the quote by email.',
+          );
+          return;
+        }
       }
+    } finally {
+      setPreparing(null);
     }
+    const sendDoc = withPayLink(settledNow.doc, delivery.url);
 
     setActionSheetVisible(false);
     const customerName = isInvoice ? invoice.customerName : settledNow.quote.customerName;
     const jobName = isInvoice ? invoice.job.name : settledNow.quote.job.name;
     const total = isInvoice ? invoice.total : settledNow.quote.total;
     const businessName = businessSettings?.businessName || 'us';
-    const invoicePayLine = invoice.squarePaymentLinkUrl
-      ? `\n\nView and pay online:\n${invoice.squarePaymentLinkUrl}`
+    const invoicePayLine = delivery.url
+      ? `\n\nView and pay online:\n${delivery.url}`
       : '';
     // Deliberate line breaks make the composer easy to review and keep the
     // customer-facing text readable instead of one long encoded URI payload.
@@ -558,7 +583,7 @@ export function SendDocumentDialog({
             {
               text: 'Mark as sent',
               onPress: async () => {
-                await recordSend('sms', settledNow.doc);
+                await recordSend('sms', sendDoc);
                 onDismiss();
               },
             },
@@ -578,7 +603,7 @@ export function SendDocumentDialog({
             {
               text: 'Mark as sent',
               onPress: async () => {
-                await recordSend('sms', settledNow.doc);
+                await recordSend('sms', sendDoc);
                 onDismiss();
               },
             },
@@ -587,7 +612,7 @@ export function SendDocumentDialog({
         );
         return;
       }
-      await recordSend('sms', settledNow.doc);
+      await recordSend('sms', sendDoc);
       onDismiss();
     } catch {
       // Keep the send sheet available for a retry or another delivery method.
@@ -597,18 +622,31 @@ export function SendDocumentDialog({
   };
 
   const handleShareFromDialog = async () => {
+    if (preparing) return;
     const settledNow = await settleTotals();
     if (!settledNow) return;
-    if (!(await passesDeliveryGate(settledNow.quote))) return;
+    setPreparing('share');
+    let delivery: { url?: string } | null;
+    try {
+      delivery = await payLinkForDelivery(settledNow.quote);
+    } finally {
+      setPreparing(null);
+    }
+    if (!delivery) return;
     setActionSheetVisible(false);
     trackEvent('send_method_chosen', { method: 'share', doc_type: docType });
     try {
+      // On a quote the link collects the deposit, and paying it accepts the
+      // quote — the hosted page's "Accept & Pay Deposit" in one line.
+      const payLine = delivery.url
+        ? `\n${isInvoice ? 'Pay online' : 'Accept and pay deposit'}: ${delivery.url}`
+        : '';
       const message = isInvoice
-        ? `Invoice for ${invoice.customerName}\n${invoice.job.name}\nTotal: ${formatCurrency(invoice.total)}\nDue: ${format(new Date(invoice.dueDate), 'dd MMM yyyy')}`
-        : `Quote for ${settledNow.quote.customerName}\n${settledNow.quote.job.name}\nTotal: ${formatCurrency(settledNow.quote.total)}`;
+        ? `Invoice for ${invoice.customerName}\n${invoice.job.name}\nTotal: ${formatCurrency(invoice.total)}\nDue: ${format(new Date(invoice.dueDate), 'dd MMM yyyy')}${payLine}`
+        : `Quote for ${settledNow.quote.customerName}\n${settledNow.quote.job.name}\nTotal: ${formatCurrency(settledNow.quote.total)}${payLine}`;
       const result = await Share.share({ message, title: isInvoice ? 'Share Invoice' : 'Share Quote' });
       if (result.action === Share.sharedAction) {
-        await recordSend('share', settledNow.doc);
+        await recordSend('share', withPayLink(settledNow.doc, delivery.url));
       }
     } catch {
       Alert.alert('Error', `Could not share ${isInvoice ? 'invoice' : 'quote'}`);
@@ -617,62 +655,27 @@ export function SendDocumentDialog({
   };
 
   const handleExportFromDialog = async () => {
+    if (preparing) return;
     const settledNow = await settleTotals();
     if (!settledNow) return;
-    if (!(await passesDeliveryGate(settledNow.quote))) return;
+    setPreparing('export_pdf');
+    let delivery: { url?: string } | null;
+    try {
+      delivery = await payLinkForDelivery(settledNow.quote);
+    } finally {
+      setPreparing(null);
+    }
+    if (!delivery) return;
     setActionSheetVisible(false);
     trackEvent('send_method_chosen', { method: 'export_pdf', doc_type: docType });
     try {
-      await exportDocumentPDF(settledNow.doc, businessSettings, 'export', { isPro });
-      await recordSend('export_pdf', settledNow.doc);
+      // The PDF reads the Pay Now link off the doc it is handed.
+      const exportDoc = withPayLink(settledNow.doc, delivery.url);
+      await exportDocumentPDF(exportDoc, businessSettings, 'export', { isPro });
+      await recordSend('export_pdf', exportDoc);
     } catch {
       Alert.alert('Error', 'Failed to export PDF. Please try again.');
     }
-    onDismiss();
-  };
-
-  /**
-   * Trial opt-in, taken AFTER the doc has gone out: wire up Square so the
-   * next one can carry a Pay Now button. Not connected yet → route to
-   * SquareIntegrationScreen (square_connected fires there on OAuth success);
-   * already connected → the link lands on this doc too, so the customer can
-   * still pay from its online page.
-   */
-  const handleAddPayLink = async () => {
-    if (isAttachingPayLink) return;
-    setIsAttachingPayLink(true);
-    try {
-      // Settled, not the screen's copy: this mints a Square link for a real
-      // amount — the deposit, or the full quote total — so a stale figure here
-      // puts a Pay Now button on the customer's page for the wrong money.
-      const result = await attachTrialPayLink(
-        isInvoice ? { kind: 'invoice', doc: invoice } : { kind: 'quote', doc: activeQuote }
-      );
-      trackEvent('pay_link_optin_tapped', {
-        doc_type: docType,
-        outcome: result.status,
-      });
-      setPayLinkOfferVisible(false);
-      if (result.status === 'connect_required') {
-        onDismiss();
-        navigation.navigate('SquareIntegration' as never);
-      } else if (result.status === 'attached') {
-        setPayLinkAttached(true);
-        Alert.alert(
-          'Pay Now button added',
-          `Your customer can pay this ${isInvoice ? 'invoice' : 'quote'} by card from its online page.`,
-          [{ text: 'OK', onPress: onDismiss }],
-        );
-      } else {
-        Alert.alert("Couldn't add the pay link", result.message, [{ text: 'OK', onPress: onDismiss }]);
-      }
-    } finally {
-      setIsAttachingPayLink(false);
-    }
-  };
-
-  const dismissPayLinkOffer = () => {
-    setPayLinkOfferVisible(false);
     onDismiss();
   };
 
@@ -691,14 +694,14 @@ export function SendDocumentDialog({
     Platform.OS !== 'web' && /\d/.test(cleanSmsRecipient(doc.customerPhone || ''));
   const channelRows: Record<SendChannel, ActionSheetOption> = {
     email: { icon: 'email-outline', label: 'Email', onPress: handleEmailOption },
-    sms: { icon: 'message-text', label: isPreparingSms ? 'Preparing SMS…' : 'SMS', onPress: handleSendSMS },
+    sms: { icon: 'message-text', label: preparing === 'sms' ? 'Preparing SMS…' : 'SMS', onPress: handleSendSMS },
   };
   const sendOptions: ActionSheetOption[] = [
     ...orderSendOptions({ hasEmail: hasCustomerEmail(doc), canSms }).map(
       (channel) => channelRows[channel],
     ),
-    { icon: 'share-variant', label: 'Share', onPress: handleShareFromDialog },
-    { icon: 'file-pdf-box', label: 'Export PDF', onPress: handleExportFromDialog },
+    { icon: 'share-variant', label: preparing === 'share' ? 'Preparing…' : 'Share', onPress: handleShareFromDialog },
+    { icon: 'file-pdf-box', label: preparing === 'export_pdf' ? 'Preparing PDF…' : 'Export PDF', onPress: handleExportFromDialog },
   ];
 
   return (
@@ -725,22 +728,6 @@ export function SendDocumentDialog({
         onSent={() => { emailSentRef.current = true; }}
         isPro={isPro}
         isRegenerating={isGeneratingEmail}
-      />
-
-      {/* Post-send Path B ask. Deliberately after delivery: in front of it,
-          this row cost sends outright when Square wasn't connected. */}
-      <AlertModal
-        visible={payLinkOfferVisible}
-        onDismiss={dismissPayLinkOffer}
-        type="info"
-        icon="credit-card-fast-outline"
-        title="Want a Pay Now button?"
-        message={`Connect Square and your ${isInvoice ? 'invoices' : 'quotes'} go out with a Pay Now button — your customer can pay by card the moment it lands.`}
-        primaryButtonText="Set it up"
-        primaryButtonAction={handleAddPayLink}
-        primaryButtonLoading={isAttachingPayLink}
-        secondaryButtonText="Not now"
-        secondaryButtonAction={dismissPayLinkOffer}
       />
 
       <SendGateModal

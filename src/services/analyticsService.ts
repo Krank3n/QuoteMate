@@ -153,11 +153,6 @@ export type AnalyticsEvent =
   | 'trial_started'
   // Path B: Square OAuth completed (client-observed poll success).
   | 'square_connected'
-  // Path B opt-in at send (trial users): the "get paid on this quote" row.
-  // shown = impression per sheet open; tapped carries `outcome`
-  // (connect_required / attached / failed) so attach-rate is measurable.
-  | 'pay_link_optin_shown'
-  | 'pay_link_optin_tapped'
   // — Service reports —
   // First persist of a new service report (mints the RP number; re-saves
   // don't fire again).
