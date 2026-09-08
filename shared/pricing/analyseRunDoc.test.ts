@@ -60,10 +60,15 @@ describe('readAnalyseHandoff', () => {
     });
   });
 
-  it('does not hang on a done record with no result', () => {
+  it('gives up at once on a done record with no result — the server could not park it', () => {
+    // The server writes this marker when the payload write itself failed.
+    // Waiting out the deadline here would make that failure SLOWER than the
+    // pre-fix code, which surfaced it instantly.
     const record: AnalyseRunRecord = { status: 'done', startedAt: 'x' };
-    expect(readAnalyseHandoff(record, HANDOFF_GRACE_MS).kind).toBe('give-up');
-    expect(readAnalyseHandoff(record, 1_000).kind).toBe('wait');
+    expect(readAnalyseHandoff(record, 1_000)).toEqual({
+      kind: 'give-up',
+      reason: 'the result could not be parked',
+    });
   });
 });
 

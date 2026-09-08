@@ -79,9 +79,14 @@ export function readAnalyseHandoff(
   if (record?.status === 'failed') {
     return { kind: 'failed', error: record.error || 'The analyse failed on the server.' };
   }
-  // A done record with no result is a malformed write, not a result to wait
-  // for — treat it as nothing rather than hanging until the deadline.
-  if (!record || record.status === 'done') {
+  // A done record with no result is the server saying it finished but could
+  // not park the payload (write failed, too large). Nothing is coming, and
+  // the server knows it — so this must NOT read as "still running" and hold
+  // the phone until the deadline. The caller re-throws its original error.
+  if (record?.status === 'done') {
+    return { kind: 'give-up', reason: 'the result could not be parked' };
+  }
+  if (!record) {
     return elapsedMs >= HANDOFF_GRACE_MS
       ? { kind: 'give-up', reason: 'the analyse never reached the server' }
       : { kind: 'wait' };

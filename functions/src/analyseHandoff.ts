@@ -76,7 +76,7 @@ export function analyseHandoffWriter(
   // — `done` is awaited before the response goes out, so a write that hung
   // would spend the analyse's remaining budget and lose the very run this
   // module exists to save.
-  const attempt = async (what: string, build: () => AnalyseRunRecord) => {
+  const attempt = async (what: string, build: () => AnalyseRunRecord): Promise<boolean> => {
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       await Promise.race([
@@ -85,31 +85,31 @@ export function analyseHandoffWriter(
           timer = setTimeout(() => reject(new Error('handoff write timed out')), HANDOFF_WRITE_TIMEOUT_MS);
         }),
       ]);
+      return true;
     } catch (err: any) {
       console.warn('[analyse handoff] write failed', { uid, requestId, what, message: err?.message });
+      return false;
     } finally {
       // Or a fast write leaves a 5 s timer holding the event loop open.
       if (timer) clearTimeout(timer);
     }
   };
+  const finished = () => ({ startedAt, finishedAt: new Date().toISOString(), expiresAt: expiresAt() });
 
   return {
-    started: () => attempt('started', () => ({ status: 'running', startedAt, expiresAt: expiresAt() })),
-    done: (result) =>
-      attempt('done', () => ({
-        status: 'done',
-        result: asStorable(result),
-        startedAt,
-        finishedAt: new Date().toISOString(),
-        expiresAt: expiresAt(),
-      })),
-    failed: (message) =>
-      attempt('failed', () => ({
-        status: 'failed',
-        error: message,
-        startedAt,
-        finishedAt: new Date().toISOString(),
-        expiresAt: expiresAt(),
-      })),
+    started: async () => {
+      await attempt('started', () => ({ status: 'running', startedAt, expiresAt: expiresAt() }));
+    },
+    done: async (result) => {
+      const parked = await attempt('done', () => ({ status: 'done', result: asStorable(result), ...finished() }));
+      // Couldn't park the payload. Leave the marker anyway: a phone that finds
+      // `running` waits out the whole deadline, while `done` with no result
+      // tells it at once that nothing is coming — so the failure surfaces as
+      // fast as it did before this module existed, not slower.
+      if (!parked) await attempt('done-marker', () => ({ status: 'done', ...finished() }));
+    },
+    failed: async (message) => {
+      await attempt('failed', () => ({ status: 'failed', error: message, ...finished() }));
+    },
   };
 }

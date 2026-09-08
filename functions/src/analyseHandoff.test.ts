@@ -107,11 +107,15 @@ describe('analyseHandoffWriter', () => {
     try {
       const db = () => ({ doc: () => ({ set: () => new Promise(() => {}) }) }) as any;
       const pending = analyseHandoffWriter('u1', 'req-1', db).done({ materials: [] });
-      await vi.advanceTimersByTimeAsync(HANDOFF_WRITE_TIMEOUT_MS + 10);
+      // The payload write times out, then the result-less marker gets its own
+      // bounded go — so a dead Firestore costs at most 2 × the timeout here,
+      // on the failure path only, and never the analyse's remaining budget.
+      await vi.advanceTimersByTimeAsync(2 * HANDOFF_WRITE_TIMEOUT_MS + 10);
       await expect(pending).resolves.toBeUndefined();
+      expect(warn).toHaveBeenCalledTimes(2);
       expect(warn).toHaveBeenCalledWith(
         '[analyse handoff] write failed',
-        expect.objectContaining({ message: 'handoff write timed out' }),
+        expect.objectContaining({ what: 'done-marker', message: 'handoff write timed out' }),
       );
     } finally {
       vi.useRealTimers();
@@ -129,6 +133,27 @@ describe('analyseHandoffWriter', () => {
     }
   });
 
+  it('leaves a result-less done marker when the payload itself cannot be parked', async () => {
+    // First write (the payload) fails; the marker must still land, or the
+    // phone reads `running` and waits out the whole deadline.
+    let calls = 0;
+    const writes: any[] = [];
+    const db = () =>
+      ({
+        doc: () => ({
+          set: async (record: any) => {
+            calls += 1;
+            if (calls === 1) throw new Error('document too large');
+            writes.push(record);
+          },
+        }),
+      }) as any;
+    await analyseHandoffWriter('u1', 'req-1', db).done({ materials: [{ name: 'x' }] });
+    expect(writes).toHaveLength(1);
+    expect(writes[0].status).toBe('done');
+    expect('result' in writes[0]).toBe(false);
+  });
+
   it('swallows a Firestore failure instead of failing the analyse', async () => {
     const { db } = fakeDb(() => {
       throw new Error('doc too large');
@@ -138,6 +163,7 @@ describe('analyseHandoffWriter', () => {
     await expect(handoff.started()).resolves.toBeUndefined();
     await expect(handoff.done({ materials: [] })).resolves.toBeUndefined();
     await expect(handoff.failed('boom')).resolves.toBeUndefined();
-    expect(warn).toHaveBeenCalledTimes(3);
+    // started, done, done's marker fallback, failed.
+    expect(warn).toHaveBeenCalledTimes(4);
   });
 });
