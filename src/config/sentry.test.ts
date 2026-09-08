@@ -43,6 +43,32 @@ describe('SENTRY_IGNORE_ERRORS', () => {
     expect(matchesIgnoreList('AbortError: The user aborted a request')).toBe(true);
   });
 
+  it('filters chrome.storage extension-injection noise (#127)', () => {
+    expect(
+      matchesIgnoreList("undefined is not an object (evaluating 'chrome.storage[n].get')"),
+    ).toBe(true);
+    expect(
+      matchesIgnoreList("undefined is not an object (evaluating 'chrome.storage.local.get')"),
+    ).toBe(true);
+    expect(
+      matchesIgnoreList("undefined is not an object (evaluating 'chrome.storage.sync.set')"),
+    ).toBe(true);
+  });
+
+  it('filters the Firebase Auth IndexedDB teardown race seen on the web build (#97)', () => {
+    // Exact production Sentry message (oi._openDb / initializeCurrentUser).
+    expect(matchesIgnoreList('Database is closing/hidden')).toBe(true);
+    expect(matchesIgnoreList('Error: Database is closing')).toBe(true);
+  });
+
+  it('does not swallow real IndexedDB failures that indicate a genuine bug', () => {
+    expect(matchesIgnoreList('IndexedDB write failed: QuotaExceededError')).toBe(false);
+    expect(matchesIgnoreList('Database deleted by request of the user')).toBe(false);
+    expect(matchesIgnoreList('The database connection is closing')).toBe(false);
+    expect(matchesIgnoreList('FirebaseError: Missing or insufficient permissions.')).toBe(false);
+    expect(matchesIgnoreList('UnknownError: Internal error opening backing store.')).toBe(false);
+  });
+
   it('does not swallow other NotFoundErrors or unrelated crashes', () => {
     expect(matchesIgnoreList('NotFoundError: The object can not be found here.')).toBe(false);
     expect(
@@ -53,6 +79,11 @@ describe('SENTRY_IGNORE_ERRORS', () => {
     expect(matchesIgnoreList('Error: failed to abort the payment capture')).toBe(false);
     // Mate's user-facing timeout error keeps reporting if it ever reaches Sentry.
     expect(matchesIgnoreList('LiveOfflineError: Connection timed out')).toBe(false);
+    // A real first-party error that merely mentions storage must still report.
+    expect(
+      matchesIgnoreList("TypeError: undefined is not an object (evaluating 'this.storage.get')"),
+    ).toBe(false);
+    expect(matchesIgnoreList('Error: chrome storage quota exceeded')).toBe(false);
   });
 
   it('is passed to Sentry.init in enabled builds', () => {

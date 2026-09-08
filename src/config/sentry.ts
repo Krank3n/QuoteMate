@@ -39,10 +39,30 @@ export function shouldEnableSentry(dsn: string, isDev: boolean): boolean {
  * LiveOfflineError, so a raw "AbortError: The user aborted a request" has no
  * first-party frame and is auto-captured by Sentry's global unhandledrejection
  * handler — pure noise. The regex matches the exact production message only.
+ *
+ * chrome.storage (sentry-7697477367, ticket #127): TypeError "undefined is not
+ * an object (evaluating 'chrome.storage[n].get')". chrome.storage is a
+ * Chrome-extension-only API — ordinary page/app JS (our react-native-web
+ * bundle in a browser) cannot reach it. So this can only be a user's browser
+ * extension injecting a content script that Sentry's global handler
+ * misattributes to our page — never a first-party bug. Stack is fully
+ * minified with no first-party frame, confirming it.
+ *
+ * Firebase Auth IndexedDB teardown (sentry-7676030309, ticket #97): thrown
+ * deep inside the minified Auth SDK's indexedDBLocalPersistence (oi._openDb →
+ * initializeCurrentUser) when the tab or webview is closing/hidden (tab close,
+ * bfcache, backgrounding) mid-read. Web-only: native persistence is
+ * AsyncStorage, which never touches IndexedDB. It's a benign SDK-internal
+ * bootstrap race with no data loss and no reachable first-party call site —
+ * our onAuthStateChanged handler never sees it. Only the exact observed
+ * phrasing is matched so genuine IndexedDB faults (quota exceeded, corruption,
+ * permission denial, forced deletion) still report.
  */
 export const SENTRY_IGNORE_ERRORS: (string | RegExp)[] = [
   /Failed to execute '(set|release)PointerCapture' on 'Element'/,
   /AbortError: The user aborted a request/,
+  /undefined is not an object \(evaluating 'chrome\.storage[^']*\.(get|set|remove)'\)/,
+  /Database is closing(\/hidden)?/,
 ];
 
 export function initSentry(): void {
