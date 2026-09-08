@@ -18,6 +18,18 @@ import { auth } from '../config/firebase';
 import { generateId } from '../utils/generateId';
 import { HANDOFF_FETCH_BACKSTOP_MS } from '../../shared/pricing/analyseRunDoc';
 import { forgetParkedAnalyse, waitForParkedAnalyse } from './analyseHandoff';
+import { recordAnalyseSent, recordAnalyseSettled } from './analyseLedger';
+
+/**
+ * Phone-only extras on an analyse call. `quoteId` puts the request in the
+ * analyse ledger so a later process can collect the result after an app
+ * kill; `resume` IS that later collection — the parked payload, already
+ * read, to be returned in place of a fresh request.
+ */
+export interface AnalyzeOptions {
+  quoteId?: string;
+  resume?: { requestId: string; result: Record<string, unknown> };
+}
 // Lazy-import FileSystem (only available on native). try/catch so the module
 // stays importable where the native package can't load (e.g. unit tests) —
 // every use site already null-guards.
@@ -70,10 +82,11 @@ export async function analyzeJobDescription(
     coverageUnit?: string;
     keywords?: string[];
     notes?: string;
-  }>
+  }>,
+  options: AnalyzeOptions = {},
 ): Promise<LLMResponse> {
   // All platforms route through Firebase Functions so API keys stay server-side
-  return analyzeViaFirebaseFunction(jobDescription, tradeContext, photoUrls, existingMaterials, availableTemplates, userSavedRates);
+  return analyzeViaFirebaseFunction(jobDescription, tradeContext, photoUrls, existingMaterials, availableTemplates, userSavedRates, options);
 }
 
 /** Read a Blob's bytes as a bare base64 string (no data: prefix). */
@@ -139,8 +152,17 @@ async function analyzeViaFirebaseFunction(
     coverageUnit?: string;
     keywords?: string[];
     notes?: string;
-  }>
+  }>,
+  options: AnalyzeOptions = {},
 ): Promise<LLMResponse> {
+  // A previous process already did the asking and this one has collected the
+  // answer (analyseResume). Nothing goes on the wire; the caller's post-analyse
+  // steps run over the parked payload exactly as they would over a fresh one.
+  if (options.resume) {
+    forgetParkedAnalyse(options.resume.requestId);
+    return normaliseAnalyzeResponse(options.resume.result);
+  }
+
   // Photos reach the server two ways, both handled here AND on web:
   //  - remote https (Firebase Storage) URLs → send as `photoUrls`; the function
   //    fetches the bytes server-side. Avoids browser CORS on the web app and
@@ -168,13 +190,17 @@ async function analyzeViaFirebaseFunction(
   // requestId, so a dead socket costs a Firestore read instead of the job.
   // See src/services/analyseHandoff.ts for the whole story.
   const requestId = generateId();
+  const sentAt = Date.now();
+  // Remembered outside this process's memory, so an app kill mid-analyse
+  // leaves a way back to the parked result. Settled in the finally below on
+  // every outcome this process lives to see.
+  if (options.quoteId) await recordAnalyseSent({ requestId, quoteId: options.quoteId, sentAt });
   const idToken = await auth.currentUser?.getIdToken();
   // Stop holding a socket open forever if the request never settles. Set well
   // past the slowest real analyse — the parked copy, not this timer, is what
   // makes letting go safe.
   const controller = new AbortController();
   const backstop = setTimeout(() => controller.abort(), HANDOFF_FETCH_BACKSTOP_MS);
-  const sentAt = Date.now();
 
   let data: any;
   try {
@@ -226,6 +252,9 @@ async function analyzeViaFirebaseFunction(
     throw err;
   } finally {
     clearTimeout(backstop);
+    // Every branch above is terminal for this process. The one case the
+    // entry must outlive is the process dying — where this never runs.
+    if (options.quoteId) recordAnalyseSettled(requestId).catch(() => {});
   }
 
   forgetParkedAnalyse(requestId);

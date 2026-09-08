@@ -45,6 +45,11 @@ import { appOpenTracker, pushTapKey, pushTypeOf } from './src/services/appOpenTr
 import { warmUpTapToPay } from './src/services/squarePayments';
 import { syncFavoritesFromCloud } from './src/services/materialFavorites';
 import { registerQuotingProfileSource } from './src/services/assistant/quotingProfileContext';
+import { resumeUnfinishedAnalyses } from './src/services/analyseResume';
+import { listUnsettledAnalyses, recordAnalyseSettled } from './src/services/analyseLedger';
+import { generateMaterialsForQuote } from './src/services/materialsPipeline';
+import { loadTemplates } from './src/services/sectionTemplateService';
+import { canAnalysePhotos } from './src/store/planGates';
 import { trackWebEvent } from './src/utils/webAnalytics';
 import {
   raceTimeout,
@@ -456,6 +461,33 @@ function App() {
         void raceTimeout(batch, FIRST_PAINT_TIMEOUT_MS).then(() => {
           setUserDataLoaded(true);
         });
+
+        // An analyse the LAST process sent and never lived to see finish. The
+        // server parked the result; the request id is in the analyse ledger.
+        // Needs the quotes loaded (to find the draft) and a signed-in user
+        // (to read the parked doc), so it waits on the batch — behind the
+        // app, never the splash. Once per process; see analyseResume.
+        void batch.then(() =>
+          resumeUnfinishedAnalyses({
+            now: () => Date.now(),
+            unsettled: (nowMs) => listUnsettledAnalyses(nowMs),
+            settled: (requestId) => recordAnalyseSettled(requestId),
+            findQuote: (quoteId) => useStore.getState().quotes.find((q) => q.id === quoteId),
+            applyParked: async (quote, resume) => {
+              const { businessSettings, getEffectivePlan } = useStore.getState();
+              const templates = await loadTemplates().catch(() => []);
+              const result = await generateMaterialsForQuote({
+                quote,
+                businessSettings,
+                isPro: canAnalysePhotos(getEffectivePlan()),
+                templates,
+                resume,
+              });
+              return result.updatedQuote;
+            },
+            saveDraft: (quote) => useStore.getState().saveDraft(quote),
+          }),
+        );
 
         // Second: did the batch actually finish? Unchanged 8s contract — this
         // is the stranded-signup safety net, and it must NOT fire every time a

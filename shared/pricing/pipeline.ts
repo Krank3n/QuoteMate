@@ -139,6 +139,12 @@ export interface GenerateMaterialsArgs<Q extends PricingQuote = PricingQuote> {
   isPro: boolean;
   /** All saved section templates available to the trader. */
   templates: SectionTemplate[];
+  /**
+   * Phone-only. Apply a result a previous process parked instead of asking
+   * for a new one — see AnalyzeRequest.resume. Everything after the analyse
+   * call (rates, sections, hours) runs exactly as it would have.
+   */
+  resume?: { requestId: string; result: Record<string, unknown> };
 }
 
 export interface GenerateMaterialsCallbacks {
@@ -241,6 +247,8 @@ export async function generateMaterialsForQuote<Q extends PricingQuote>(
     existingMaterials: existingMatsForAi,
     availableTemplates: templateDataForAi,
     userSavedRates: userSavedRatesForAi,
+    quoteId: quote.id,
+    ...(args.resume ? { resume: args.resume } : {}),
   });
 
   if (shouldCancel?.()) throw new PipelineCancelled();
