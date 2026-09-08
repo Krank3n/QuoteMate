@@ -40,6 +40,7 @@ import { ServiceReport } from '../../shared/report/types';
 import { resolvePriceDetail } from '../../shared/document/priceDetail';
 import { useStore } from '../store/useStore';
 import { checkSquareConnection } from '../services/squareService';
+import { carriesPayableAmount } from './quoteDeliveryGuard';
 
 // Module-level cache for the base64-encoded logo HTML keyed by source URI.
 // Logos rarely change but reading + base64-encoding the file on every PDF
@@ -264,8 +265,16 @@ export async function generateDocumentPDF(
   // stage past 'draft'), the customer already has a clean copy — a watermark
   // now would only scare the tradie into thinking the customer saw it. Sent
   // docs are records, not deliverables.
+  //
+  // And only documents with money on them — the same rule as the send gate.
+  // A plain quote is never gated anywhere, so it is never watermarked either.
   let watermark: string | undefined;
-  if (plan === 'free' && useStore.getState().isTrialExpired() && doc.stage === 'draft') {
+  if (
+    plan === 'free'
+    && useStore.getState().isTrialExpired()
+    && doc.stage === 'draft'
+    && carriesPayableAmount({ kind: doc.type === 'invoice' ? 'invoice' : 'quote', doc })
+  ) {
     try {
       const sq = await checkSquareConnection();
       if (!sq.connected) watermark = 'UPGRADE TO SEND';

@@ -1,6 +1,7 @@
 /**
  * SendGateModal — the hard gate that fires when a free-tier user (trial
- * expired, no Square) tries to send a quote or invoice. By the time they
+ * expired, no Square) tries to send an invoice or a deposit quote — a plain
+ * quote is never gated. By the time they
  * reach this modal they've already invested time building the document
  * (sunk-cost flow), so the copy frames each path as a no-brainer rather
  * than a wall.
