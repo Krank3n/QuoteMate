@@ -2,7 +2,7 @@
  * Reclaiming an analyse the phone stopped listening for.
  *
  * analyzeJobDescription is one bare `fetch` that routinely runs 40–150 s. On
- * 7 Sep 2026 one ran 108.8 s and finished 200, but iOS had suspended the app
+ * 7 Sep 2026 one ran close to two minutes and finished 200, but iOS had suspended the app
  * during the wait; the socket died, the phone raised "Network request failed"
  * four minutes later, and a finished gear list was thrown away. Nothing was
  * retryable — a second call is another two minutes of Opus, and the comment
@@ -24,6 +24,7 @@ import { doc, deleteDoc, onSnapshot } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
 import {
   HANDOFF_GRACE_MS,
+  HANDOFF_INPROCESS_WAIT_MS,
   readAnalyseHandoff,
   type AnalyseRunRecord,
 } from '../../shared/pricing/analyseRunDoc';
@@ -31,10 +32,15 @@ import {
 /** How often the wait re-checks the clock when no snapshot has arrived. */
 export const HANDOFF_TICK_MS = 2_000;
 
+/** Where a snapshot came from. A cached one can't prove a document is absent. */
+export interface HandoffSnapshotMeta {
+  fromCache: boolean;
+}
+
 export interface AnalyseHandoffIo {
   watch(
     requestId: string,
-    onChange: (record: AnalyseRunRecord | null) => void,
+    onChange: (record: AnalyseRunRecord | null, meta: HandoffSnapshotMeta) => void,
     onError: (error: unknown) => void,
   ): () => void;
   forget(requestId: string): Promise<void>;
@@ -50,7 +56,10 @@ export const defaultAnalyseHandoffIo: AnalyseHandoffIo = {
     }
     return onSnapshot(
       doc(db, 'users', uid, 'analyseRuns', requestId),
-      (snap) => onChange(snap.exists() ? (snap.data() as AnalyseRunRecord) : null),
+      (snap) =>
+        onChange(snap.exists() ? (snap.data() as AnalyseRunRecord) : null, {
+          fromCache: snap.metadata.fromCache,
+        }),
       onError,
     );
   },
@@ -80,7 +89,9 @@ export function waitForParkedAnalyse(
   requestId: string,
   sentAt: number,
   io: AnalyseHandoffIo = defaultAnalyseHandoffIo,
+  options: { maxWaitMs?: number } = {},
 ): Promise<ParkedAnalyse> {
+  const maxWaitMs = options.maxWaitMs ?? HANDOFF_INPROCESS_WAIT_MS;
   return new Promise<ParkedAnalyse>((resolve) => {
     let settled = false;
     let latest: AnalyseRunRecord | null = null;
@@ -113,7 +124,16 @@ export function waitForParkedAnalyse(
         }
         return;
       }
-      const verdict = readAnalyseHandoff(latest, io.now() - sentAt);
+      const verdict = readAnalyseHandoff(latest, {
+        sinceSentMs: io.now() - sentAt,
+        sinceWaitMs: io.now() - waitStartedAt,
+      });
+      // Still running, and this caller has waited as long as it is prepared
+      // to. Not the server's verdict — the caller keeps the ledger entry.
+      if (verdict.kind === 'wait' && latest?.status === 'running' && io.now() - waitStartedAt >= maxWaitMs) {
+        finish({ kind: 'gone', reason: 'still running' });
+        return;
+      }
       if (verdict.kind === 'done') finish({ kind: 'done', result: verdict.result });
       else if (verdict.kind === 'failed') finish({ kind: 'failed', error: verdict.error });
       else if (verdict.kind === 'give-up') finish({ kind: 'gone', reason: verdict.reason });
@@ -127,7 +147,15 @@ export function waitForParkedAnalyse(
 
     const subscription = io.watch(
       requestId,
-      (record) => {
+      (record, meta) => {
+        // An offline SDK answers first from its cache, and a document it has
+        // never seen reads as "does not exist" — which is not the server
+        // saying so. Treating that as heard turned every offline wake-up
+        // past the grace period into "never reached the server", discarding
+        // a result that was sitting on the server the whole time. A cached
+        // RECORD is still real data (it came from the server once); only a
+        // cached absence is ignored.
+        if (meta.fromCache && !record) return;
         heard = true;
         latest = record;
         judge();

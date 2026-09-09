@@ -47,8 +47,9 @@ import { syncFavoritesFromCloud } from './src/services/materialFavorites';
 import { registerQuotingProfileSource } from './src/services/assistant/quotingProfileContext';
 import { resumeUnfinishedAnalyses } from './src/services/analyseResume';
 import { listUnsettledAnalyses, recordAnalyseSettled } from './src/services/analyseLedger';
+import { forgetParkedAnalyse } from './src/services/analyseHandoff';
 import { generateMaterialsForQuote } from './src/services/materialsPipeline';
-import { loadTemplates } from './src/services/sectionTemplateService';
+import { loadTemplatesFromLocal } from './src/services/sectionTemplateService';
 import { canAnalysePhotos } from './src/store/planGates';
 import { trackWebEvent } from './src/utils/webAnalytics';
 import {
@@ -473,9 +474,11 @@ function App() {
             unsettled: (nowMs) => listUnsettledAnalyses(nowMs),
             settled: (requestId) => recordAnalyseSettled(requestId),
             findQuote: (quoteId) => useStore.getState().quotes.find((q) => q.id === quoteId),
+            currentQuoteId: () => useStore.getState().currentQuote?.id,
             applyParked: async (quote, resume) => {
               const { businessSettings, getEffectivePlan } = useStore.getState();
-              const templates = await loadTemplates().catch(() => []);
+              // The device's copy: a network read per resumed entry is not worth it here.
+              const templates = await loadTemplatesFromLocal().catch(() => []);
               const result = await generateMaterialsForQuote({
                 quote,
                 businessSettings,
@@ -485,7 +488,11 @@ function App() {
               });
               return result.updatedQuote;
             },
-            saveDraft: (quote) => useStore.getState().saveDraft(quote),
+            // A background write: it must not become the wizard's current quote.
+            persist: (quote) => useStore.getState().saveDraft(quote, { makeCurrent: false }),
+            forgetParked: (requestId) => forgetParkedAnalyse(requestId),
+          }).catch(() => {
+            // Best-effort. A resume that throws must never surface at launch.
           }),
         );
 

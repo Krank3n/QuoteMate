@@ -17,18 +17,29 @@ vi.mock('firebase-admin', () => ({
 import { analyseHandoffWriter, HANDOFF_WRITE_TIMEOUT_MS } from './analyseHandoff';
 import { ANALYSE_HANDOFF_TTL_MS } from './shared/pricing/analyseRunDoc';
 
-function fakeDb(onSet?: (path: string, record: any) => void) {
-  const writes: Array<{ path: string; record: any }> = [];
+function fakeDb(onSet?: (path: string, record: any) => void, config: Record<string, unknown> | null = null) {
+  const writes: Array<{ path: string; record: any; merge?: boolean; create?: boolean }> = [];
+  /** What each handoff document holds after the writes so far — create() needs to know. */
+  const docs = new Map<string, any>();
   const db = () =>
     ({
       doc: (path: string) => ({
-        set: async (record: any) => {
+        // The kill-switch read; every other path is a handoff document.
+        get: async () => (path === 'config/pipeline' ? { exists: config !== null, data: () => config } : { exists: docs.has(path), data: () => docs.get(path) }),
+        set: async (record: any, options?: { merge?: boolean }) => {
           onSet?.(path, record);
-          writes.push({ path, record });
+          writes.push({ path, record, ...(options?.merge ? { merge: true } : {}) });
+          docs.set(path, options?.merge ? { ...(docs.get(path) || {}), ...record } : record);
+        },
+        create: async (record: any) => {
+          onSet?.(path, record);
+          if (docs.has(path)) throw new Error('ALREADY_EXISTS');
+          writes.push({ path, record, create: true });
+          docs.set(path, record);
         },
       }),
     }) as any;
-  return { db, writes };
+  return { db, writes, docs };
 }
 
 let warn: ReturnType<typeof vi.spyOn>;
@@ -52,6 +63,7 @@ describe('analyseHandoffWriter', () => {
       'users/u1/analyseRuns/req-1',
     ]);
     expect(writes[0].record.status).toBe('running');
+    expect(writes[0].create).toBe(true);
     expect(writes[1].record.status).toBe('done');
     expect(writes[1].record.result.estimatedHours).toBe(64);
     expect(writes[1].record.finishedAt).toBeTruthy();
@@ -105,7 +117,7 @@ describe('analyseHandoffWriter', () => {
   it('gives up on a hung write rather than spending the analyse’s remaining budget', async () => {
     vi.useFakeTimers();
     try {
-      const db = () => ({ doc: () => ({ set: () => new Promise(() => {}) }) }) as any;
+      const db = () => ({ doc: () => ({ get: async () => ({ exists: false, data: () => null }), create: () => new Promise(() => {}), set: () => new Promise(() => {}) }) }) as any;
       const pending = analyseHandoffWriter('u1', 'req-1', db).done({ materials: [] });
       // The payload write times out, then the result-less marker gets its own
       // bounded go — so a dead Firestore costs at most 2 × the timeout here,
@@ -141,6 +153,8 @@ describe('analyseHandoffWriter', () => {
     const db = () =>
       ({
         doc: () => ({
+          get: async () => ({ exists: false, data: () => null }),
+          create: async () => {},
           set: async (record: any) => {
             calls += 1;
             if (calls === 1) throw new Error('document too large');
@@ -152,6 +166,61 @@ describe('analyseHandoffWriter', () => {
     expect(writes).toHaveLength(1);
     expect(writes[0].status).toBe('done');
     expect('result' in writes[0]).toBe(false);
+  });
+
+  it('MERGES the marker so a payload write that acks after the race is not erased', async () => {
+    // The payload write timed out but is still in flight. A plain set of the
+    // marker would overwrite a result that lands a moment later; merge keeps it.
+    let calls = 0;
+    const { db, writes } = fakeDb(() => {
+      calls += 1;
+      if (calls === 1) throw new Error('slow');
+    });
+    await analyseHandoffWriter('u1', 'req-1', db).done({ materials: [] });
+    const marker = writes.find((w) => w.record.status === 'done' && !('result' in w.record));
+    expect(marker?.merge).toBe(true);
+  });
+
+  it('a late `started` cannot turn a finished document back into running', async () => {
+    // done() landed first (the started write was slow and the race gave up
+    // on it). When started's write finally arrives it must fail, not clobber.
+    const { db, docs } = fakeDb();
+    const handoff = analyseHandoffWriter('u1', 'req-1', db);
+    await handoff.done({ materials: [{ name: 'x' }] });
+    await handoff.started();
+    expect(docs.get('users/u1/analyseRuns/req-1').status).toBe('done');
+    expect(docs.get('users/u1/analyseRuns/req-1').result.materials).toHaveLength(1);
+  });
+
+  it('a merged marker keeps a payload that landed after the race', async () => {
+    // Model the race losing: the payload write "fails" from attempt's point of
+    // view but has in fact landed. The marker must not erase the result.
+    const { db, docs } = fakeDb((path, record) => {
+      if (record.result) {
+        docs.set(path, record);
+        throw new Error('handoff write timed out');
+      }
+    });
+    await analyseHandoffWriter('u1', 'req-1', db).done({ materials: [{ name: 'x' }] });
+    const final = docs.get('users/u1/analyseRuns/req-1');
+    expect(final.status).toBe('done');
+    expect(final.result.materials).toHaveLength(1);
+  });
+
+  it('writes nothing when the kill switch is off, and stays off for the whole run', async () => {
+    const { db, writes } = fakeDb(undefined, { analyseHandoff: false });
+    const handoff = analyseHandoffWriter('u1', 'req-1', db);
+    await handoff.started();
+    await handoff.done({ materials: [{ name: 'x' }] });
+    await handoff.failed('boom');
+    expect(writes).toEqual([]);
+  });
+
+  it('treats a missing config document as ON', async () => {
+    const { db, writes } = fakeDb(undefined, null);
+    const handoff = analyseHandoffWriter('u1', 'req-1', db);
+    await handoff.started();
+    expect(writes.map((w) => w.record.status)).toEqual(['running']);
   });
 
   it('swallows a Firestore failure instead of failing the analyse', async () => {

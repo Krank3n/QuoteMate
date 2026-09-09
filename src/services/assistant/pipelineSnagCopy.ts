@@ -5,8 +5,8 @@
  * The bug this exists to fix: the snag note always said "tap Fetch Prices in
  * the wizard", but MaterialsListScreen only renders that button when the
  * quote has rows on it (`materials.length > 0`). A pipeline that dies in the
- * ANALYSE phase leaves zero rows — which is exactly what happened to quote
- * 1788778288262-9vrghsoj6 on 7 Sep 2026 — so the tradie was sent looking for
+ * ANALYSE phase leaves zero rows — which is exactly what happened on
+ * 7 Sep 2026 — so the tradie was sent looking for
  * a button that isn't on the screen. With no rows the empty state's hero card
  * is what's there, and it reads "Build my list".
  *

@@ -49,6 +49,18 @@ describe('generateMaterialsForQuote — phone-only fields reach the analyse dep'
     expect('resume' in seen[0]).toBe(false);
   });
 
+  it('withholds the quote id when the caller will rework the result — no ledger, no resume', async () => {
+    const seen: AnalyzeRequest[] = [];
+    await generateMaterialsForQuote(depsCapturing(seen), {
+      quote,
+      businessSettings: null,
+      isPro: false,
+      templates: [],
+      resumable: false,
+    });
+    expect('quoteId' in seen[0]).toBe(false);
+  });
+
   it('passes the parked payload through on a resume, and still builds the rows from it', async () => {
     const seen: AnalyzeRequest[] = [];
     const resume = { requestId: 'req-1', result: { materials: [], estimatedHours: 64 } };

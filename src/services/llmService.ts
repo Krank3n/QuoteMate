@@ -16,7 +16,7 @@ export { convertLLMMaterialsToMaterials } from '../../shared/pricing/llmMaterial
 import { Platform } from 'react-native';
 import { auth } from '../config/firebase';
 import { generateId } from '../utils/generateId';
-import { HANDOFF_FETCH_BACKSTOP_MS } from '../../shared/pricing/analyseRunDoc';
+import { HANDOFF_FAST_FAIL_MS, HANDOFF_FETCH_BACKSTOP_MS } from '../../shared/pricing/analyseRunDoc';
 import { forgetParkedAnalyse, waitForParkedAnalyse } from './analyseHandoff';
 import { recordAnalyseSent, recordAnalyseSettled } from './analyseLedger';
 
@@ -158,8 +158,9 @@ async function analyzeViaFirebaseFunction(
   // A previous process already did the asking and this one has collected the
   // answer (analyseResume). Nothing goes on the wire; the caller's post-analyse
   // steps run over the parked payload exactly as they would over a fresh one.
+  // The parked copy is NOT deleted here: the caller owns the draft's
+  // persistence and deletes only once that has succeeded.
   if (options.resume) {
-    forgetParkedAnalyse(options.resume.requestId);
     return normaliseAnalyzeResponse(options.resume.result);
   }
 
@@ -190,12 +191,14 @@ async function analyzeViaFirebaseFunction(
   // requestId, so a dead socket costs a Firestore read instead of the job.
   // See src/services/analyseHandoff.ts for the whole story.
   const requestId = generateId();
+  const idToken = await auth.currentUser?.getIdToken();
   const sentAt = Date.now();
   // Remembered outside this process's memory, so an app kill mid-analyse
-  // leaves a way back to the parked result. Settled in the finally below on
-  // every outcome this process lives to see.
+  // leaves a way back to the parked result. Written AFTER the token fetch —
+  // a token failure throws before this and must not strand an entry for a
+  // request that was never sent. Settled in the finally below on every
+  // outcome this process could actually judge.
   if (options.quoteId) await recordAnalyseSent({ requestId, quoteId: options.quoteId, sentAt });
-  const idToken = await auth.currentUser?.getIdToken();
   // Stop holding a socket open forever if the request never settles. Set well
   // past the slowest real analyse — the parked copy, not this timer, is what
   // makes letting go safe.
@@ -203,6 +206,10 @@ async function analyzeViaFirebaseFunction(
   const backstop = setTimeout(() => controller.abort(), HANDOFF_FETCH_BACKSTOP_MS);
 
   let data: any;
+  // Set when this process gave up WITHOUT the server's verdict — offline, or
+  // the read itself failed. The result may still be parked, so the ledger
+  // entry must outlive this process for the next launch to collect it.
+  let leaveInLedger = false;
   try {
     const response = await fetch(`${FIREBASE_FUNCTIONS_URL}/analyzeJobDescription`, {
       method: 'POST',
@@ -237,6 +244,17 @@ async function analyzeViaFirebaseFunction(
       forgetParkedAnalyse(requestId);
       throw new Error(err.message);
     }
+    // Our own backstop firing reads as a bare "Aborted" in Mate's detail
+    // line; say what actually happened.
+    const transportError: Error =
+      err?.name === 'AbortError' ? new Error('The analyse took too long to answer.') : err;
+    // Failed this soon after sending, the request never left the phone.
+    // Nothing can be parked yet; don't stall 20 s looking. The ledger entry
+    // stays so a later launch still checks, in case it did get out.
+    if (Date.now() - sentAt < HANDOFF_FAST_FAIL_MS) {
+      leaveInLedger = true;
+      throw transportError;
+    }
     // The response never made it home — a locked phone, a suspended app, a
     // dropped socket, or our own backstop. The analyse itself may well have
     // finished; go and see.
@@ -249,12 +267,20 @@ async function analyzeViaFirebaseFunction(
       forgetParkedAnalyse(requestId);
       throw new Error(parked.error);
     }
-    throw err;
+    // Every give-up except a server-confirmed one keeps the entry: "never
+    // reached" can be a started() write that failed, "still running" and
+    // "could not read" are this process's patience and connectivity, not the
+    // server's verdict. A later launch re-checks; a stale entry costs one
+    // read. Only "could not be parked" is the server saying nothing is coming.
+    leaveInLedger = parked.reason !== 'the result could not be parked';
+    throw transportError;
   } finally {
     clearTimeout(backstop);
-    // Every branch above is terminal for this process. The one case the
-    // entry must outlive is the process dying — where this never runs.
-    if (options.quoteId) recordAnalyseSettled(requestId).catch(() => {});
+    // Settled on every outcome this process could actually judge. Not on
+    // "could not read": that is the phone's failure, not the server's, and
+    // settling there made the launch-time resume unreachable for exactly the
+    // offline case it exists for.
+    if (options.quoteId && !leaveInLedger) recordAnalyseSettled(requestId).catch(() => {});
   }
 
   forgetParkedAnalyse(requestId);

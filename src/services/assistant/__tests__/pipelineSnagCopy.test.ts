@@ -3,8 +3,8 @@
  *
  * Every degraded apply said "tap Fetch Prices in the wizard". MaterialsList
  * only renders that button when the quote has rows on it — a pipeline that
- * dies in the ANALYSE phase leaves none. That is what quote
- * 1788778288262-9vrghsoj6 hit on 7 Sep 2026: the analyse fetch lost its
+ * dies in the ANALYSE phase leaves none. That is what a draft hit on
+ * 7 Sep 2026: the analyse fetch lost its
  * response, the draft was parked with zero materials, and the tradie was told
  * to tap something that does not exist on an empty materials list. What IS
  * there is the empty state's hero card, "Build my list".

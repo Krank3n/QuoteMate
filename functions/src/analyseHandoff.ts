@@ -12,6 +12,11 @@
  * request it is instrumenting. A phone that can't find a parked result is
  * exactly as badly off as it was before this module existed.
  *
+ * Kill switch: `config/pipeline { analyseHandoff: false }` makes every writer
+ * a no-op without a deploy — the phone then finds nothing, gives up after its
+ * grace period, and behaves exactly as it did before the feature. Missing
+ * document or a failed read both mean ON, same as serverRuns.
+ *
  * TTL: `expiresAt` is reaped by a Firestore TTL policy on the analyseRuns
  * collection group (the same arrangement websiteFormRateLimits uses):
  *   gcloud firestore fields ttls update expiresAt \
@@ -56,6 +61,20 @@ function asStorable(result: Record<string, unknown>): Record<string, unknown> {
 }
 
 /**
+ * The remote kill switch. Read once per run, before the first write; a
+ * missing document or a failed read leaves the feature ON.
+ */
+async function handoffEnabled(db: admin.firestore.Firestore): Promise<boolean> {
+  try {
+    const snap = await db.doc('config/pipeline').get();
+    const raw = snap.exists ? (snap.data() as { analyseHandoff?: unknown }).analyseHandoff : undefined;
+    return raw !== false;
+  } catch {
+    return true;
+  }
+}
+
+/**
  * A writer for this uid + request id, or a no-op when the caller didn't ask
  * for one. The server-side pricing run passes no request id: it already owns
  * a durable run document, so parking a second copy would be dead weight.
@@ -68,6 +87,9 @@ export function analyseHandoffWriter(
   if (!isValidAnalyseRequestId(requestId)) return NO_HANDOFF;
 
   const startedAt = new Date().toISOString();
+  // Flipped by started() when the kill switch is off; every later write
+  // checks it, so a run that began disabled stays disabled.
+  let disabled = false;
   const ref = () => db().doc(`users/${uid}/analyseRuns/${requestId}`);
   const expiresAt = () =>
     admin.firestore.Timestamp.fromMillis(Date.now() + ANALYSE_HANDOFF_TTL_MS);
@@ -76,11 +98,22 @@ export function analyseHandoffWriter(
   // — `done` is awaited before the response goes out, so a write that hung
   // would spend the analyse's remaining budget and lose the very run this
   // module exists to save.
-  const attempt = async (what: string, build: () => AnalyseRunRecord): Promise<boolean> => {
+  const attempt = async (
+    what: string,
+    build: () => AnalyseRunRecord | Partial<AnalyseRunRecord>,
+    options: { mode?: 'set' | 'merge' | 'create' } = {},
+  ): Promise<boolean> => {
+    if (disabled) return false;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    const write = () => {
+      const record = build();
+      if (options.mode === 'merge') return ref().set(record, { merge: true });
+      if (options.mode === 'create') return ref().create(record);
+      return ref().set(record);
+    };
     try {
       await Promise.race([
-        ref().set(build()),
+        write(),
         new Promise((_, reject) => {
           timer = setTimeout(() => reject(new Error('handoff write timed out')), HANDOFF_WRITE_TIMEOUT_MS);
         }),
@@ -94,22 +127,35 @@ export function analyseHandoffWriter(
       if (timer) clearTimeout(timer);
     }
   };
-  const finished = () => ({ startedAt, finishedAt: new Date().toISOString(), expiresAt: expiresAt() });
+  const finished = () => ({ finishedAt: new Date().toISOString(), expiresAt: expiresAt() });
 
   return {
     started: async () => {
-      await attempt('started', () => ({ status: 'running', startedAt, expiresAt: expiresAt() }));
+      if (!(await handoffEnabled(db()))) {
+        disabled = true;
+        return;
+      }
+      // CREATE, not set: a `started` write that acks late — after the race
+      // gave up on it and `done` has already landed — must not turn a
+      // finished document back into `running`. If anything is there, this
+      // write fails, and that is the right outcome.
+      await attempt('started', () => ({ status: 'running', startedAt, expiresAt: expiresAt() }), { mode: 'create' });
     },
     done: async (result) => {
-      const parked = await attempt('done', () => ({ status: 'done', result: asStorable(result), ...finished() }));
-      // Couldn't park the payload. Leave the marker anyway: a phone that finds
-      // `running` waits out the whole deadline, while `done` with no result
-      // tells it at once that nothing is coming — so the failure surfaces as
-      // fast as it did before this module existed, not slower.
-      if (!parked) await attempt('done-marker', () => ({ status: 'done', ...finished() }));
+      const parked = await attempt('done', () => ({ status: 'done', result: asStorable(result), startedAt, ...finished() }));
+      // Couldn't park the payload within the budget. Leave the marker anyway:
+      // a phone that finds `running` waits out the whole deadline, while
+      // `done` with no result tells it at once that nothing is coming — so
+      // the failure surfaces as fast as it did before this module existed.
+      //
+      // MERGED, not replaced: the timed-out payload write is still in flight
+      // and may yet ack. A plain set here would erase a result that landed a
+      // moment later; a merge keeps `result` if it's there, and if the
+      // payload lands after the marker its full write wins anyway.
+      if (!parked) await attempt('done-marker', () => ({ status: 'done', ...finished() }), { mode: 'merge' });
     },
     failed: async (message) => {
-      await attempt('failed', () => ({ status: 'failed', error: message, ...finished() }));
+      await attempt('failed', () => ({ status: 'failed', error: message, startedAt, ...finished() }));
     },
   };
 }
