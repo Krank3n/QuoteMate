@@ -588,7 +588,7 @@ function App() {
               // Take the tradie to whatever the notification was about, but only
               // once RootNavigator is mounted (post-onboarding) — otherwise the
               // route resolves to null and we leave them be. Fresh-read the gate.
-              const mainAppMounted = useStore.getState().isOnboarded;
+              const mainAppMounted = useStore.getState().isOnboarded === true;
               const route = resolvableNotificationRoute(
                 response?.notification?.request?.content?.data,
                 mainAppMounted
