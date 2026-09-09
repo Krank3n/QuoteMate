@@ -6,7 +6,6 @@
 import { PdfMaterial, LaborSection, QuotePdfData, InvoicePdfData, BusinessPdfData, PdfTemplateId, ReportPdfData } from './types';
 import { formatCurrency } from './formatCurrency';
 import { printMediaCSS, getTemplateCSS } from './templates';
-import { PASSTHROUGH_SURCHARGE_PCT } from './squareFees';
 import { resolveGstMode, NO_GST_NOTE } from '../document/gstMode';
 import { isPdfUrl } from '../media/pdfUrl';
 import {
@@ -471,18 +470,14 @@ export function generateScopeHTML(
  * Generate HTML for the Square "Pay Now" block. Rendered above the rest of
  * the payment methods when a hosted-checkout URL is available. The plain-text
  * URL underneath the styled button is the printed-PDF fallback so paper-mail
- * recipients can still type the link in. When the tradie has opted into
- * surchargePaymentFees, a subtle disclosure sits below the URL so the
- * customer isn't surprised when checkout charges them PASSTHROUGH_SURCHARGE_PCT
- * more than the quoted total.
+ * recipients can still type the link in. The checkout amount is the quoted
+ * amount — card surcharging was retired ahead of the RBA's 1 October 2026
+ * ban, so there is no fee disclosure to print here.
  */
-function generateSquarePayNowHTML(url: string, surchargeOn: boolean): string {
+function generateSquarePayNowHTML(url: string): string {
   // Square-minted, but escaped like everything else — a quote in the URL
   // would otherwise break out of the href attribute.
   const safeUrl = escapeHtml(url).replace(/"/g, '&quot;');
-  const surchargeLine = surchargeOn
-    ? `<div style="margin-top: 4px; font-size: 10px; color: #888; font-style: italic;">Card payments include a ${PASSTHROUGH_SURCHARGE_PCT}% processing fee.</div>`
-    : '';
   return `
     <div class="payment-method square-pay-now">
       <strong>Pay Online</strong><br>
@@ -490,7 +485,6 @@ function generateSquarePayNowHTML(url: string, surchargeOn: boolean): string {
         Pay with Square
       </a>
       <div style="margin-top: 6px; font-size: 11px; color: #555;">${safeUrl}</div>
-      ${surchargeLine}
     </div>
   `;
 }
@@ -515,13 +509,11 @@ export function generatePaymentMethodsHTML(
   options?: {
     plan?: 'trial' | 'free' | 'pro';
     squarePaymentLinkUrl?: string;
-    surchargePaymentFees?: boolean;
     infoHtml?: string;
   }
 ): string {
   const plan = options?.plan;
   const squareUrl = options?.squarePaymentLinkUrl;
-  const surchargeOn = options?.surchargePaymentFees === true;
   const isFree = plan === 'free';
 
   // showOnDocuments is the user's "render the payment-methods section" toggle.
@@ -535,7 +527,7 @@ export function generatePaymentMethodsHTML(
   // Square Pay Now — rendered first (priority placement) so the customer
   // sees the online-payment CTA before bank/PayID/etc.
   if (squareUrl) {
-    sections.push(generateSquarePayNowHTML(squareUrl, surchargeOn));
+    sections.push(generateSquarePayNowHTML(squareUrl));
   }
 
   // The remaining methods are Pro-only; suppressed on the free plan.
@@ -998,7 +990,7 @@ export function buildQuotePdfHtml(
 
       ${quote.notes ? `<div class="info-section"><h3>Notes</h3><p>${formatMultiline(quote.notes)}</p></div>` : ''}
 
-      ${generatePaymentMethodsHTML(quote.paymentMethods, { plan: quote.plan, squarePaymentLinkUrl: quote.squarePaymentLinkUrl, surchargePaymentFees: quote.surchargePaymentFees })}
+      ${generatePaymentMethodsHTML(quote.paymentMethods, { plan: quote.plan, squarePaymentLinkUrl: quote.squarePaymentLinkUrl })}
 
       ${quote.terms?.trim() ? '' : `
       <div class="summary-note" style="margin-top: 24px;">
@@ -1250,7 +1242,6 @@ export function buildInvoicePdfHtml(
   const methodsHtml = generatePaymentMethodsHTML(invoice.paymentMethods, {
     plan: invoice.plan,
     squarePaymentLinkUrl: invoice.squarePaymentLinkUrl,
-    surchargePaymentFees: invoice.surchargePaymentFees,
     infoHtml: paymentInfoHtml,
   });
   const paymentBlockHtml = methodsHtml || `

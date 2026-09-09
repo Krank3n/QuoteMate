@@ -199,19 +199,32 @@ describe('quote email — accept / decline', () => {
     expect(html).toContain('Deposit to get started (25%)');
   });
 
-  it('only discloses the surcharge and terms when a card payment is actually offered', () => {
+  it('only discloses the terms when a card payment is actually offered', () => {
     const withCard = quote({
       depositAmount: 2029.64,
       depositPayNowUrl: 'https://square.link/u/demo',
-      surchargePaymentFees: true,
       hasTerms: true,
     });
-    expect(withCard).toMatch(/processing fee/);
     expect(withCard).toContain('By paying you accept the Terms');
 
-    const noCard = quote({ depositAmount: 2029.64, surchargePaymentFees: true, hasTerms: true });
-    expect(noCard).not.toMatch(/processing fee/);
+    const noCard = quote({ depositAmount: 2029.64, hasTerms: true });
     expect(noCard).not.toContain('By paying you accept the Terms');
+  });
+
+  // Card surcharging was retired ahead of the RBA's 1 October 2026 ban. A
+  // business settings document written before that can still carry
+  // `surchargePaymentFees: true`; the email must not print the old
+  // "processing fee" disclosure because of it — there is no fee to disclose.
+  it('never prints a card processing fee, even if a caller still passes the retired surcharge flag', () => {
+    const html = quote({
+      depositAmount: 2029.64,
+      depositPayNowUrl: 'https://square.link/u/demo',
+      hasTerms: true,
+      surchargePaymentFees: true,
+    });
+    expect(html).not.toMatch(/processing fee/i);
+    expect(html).not.toMatch(/surcharge/i);
+    expect(html).toContain('Pay Deposit');
   });
 
   it('names the business in the reassurance line', () => {

@@ -49,7 +49,7 @@ export function isPaymentAlreadyApplied(
 }
 
 export interface SquarePaymentApplication {
-  /** Portion of the payment credited to the invoice (surcharge excluded). */
+  /** Portion of the payment credited to the invoice (any overpayment excluded). */
   paidAgainstInvoice: number;
   newPaidAmount: number;
   newStatus: 'paid' | 'partial';
@@ -59,8 +59,9 @@ export interface SquarePaymentApplication {
 /**
  * Accumulate a Square payment onto the invoice's paid amount. Additive — a
  * second part payment stacks on the first instead of replacing it. The
- * credited portion is capped at the remaining balance so a surcharged charge
- * (balance + card fee) never reports the invoice as overpaid.
+ * credited portion is capped at the remaining balance so an overpayment (a
+ * pay link minted before the 2026 surcharge retirement still carries its
+ * 2.9% uplift) never reports the invoice as overpaid.
  */
 export function applySquarePaymentToInvoice(input: {
   total: number;

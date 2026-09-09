@@ -41,7 +41,7 @@ export type InAppPaymentTarget =
 
 interface TakeInAppPaymentArgs {
   target: InAppPaymentTarget;
-  amountCents: number;       // cents — final amount charged to the customer (incl. any passthrough surcharge)
+  amountCents: number;       // cents — final amount charged to the customer (exactly what is owed)
   /**
    * QuoteMate platform fee in cents, deducted from the tradie's payout via
    * Square's appFeeMoney mechanism. Callers should compute this from the
@@ -218,9 +218,9 @@ export async function takeInAppPayment({
 
   const paymentParameters: PaymentParameters = {
     amountMoney: { amount: amountCents, currencyCode: CurrencyCode.AUD },
-    // QuoteMate platform fee routed to our Square developer account. The
-    // passthrough surcharge (if any) is baked into amountCents upstream, so
-    // Square's own allowCardSurcharge prompt stays off.
+    // QuoteMate platform fee routed to our Square developer account. Card
+    // surcharging is banned in AU from 1 October 2026, so Square's own
+    // allowCardSurcharge prompt stays off and nothing is added upstream.
     appFeeMoney: { amount: appFeeCents, currencyCode: CurrencyCode.AUD },
     processingMode: ProcessingMode.ONLINE_ONLY,
     idempotencyKey,

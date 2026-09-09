@@ -516,7 +516,6 @@ export function buildQuotePdfHtmlForQuote(
       showLaborBreakdown: quote.showLaborBreakdown !== false,
       paymentMethods: business.paymentMethods,
       squarePaymentLinkUrl: options.squarePaymentLinkUrl ?? quote.squarePaymentLinkUrl,
-      surchargePaymentFees: business.surchargePaymentFees === true,
       terms: options.terms,
     },
     {
@@ -871,7 +870,6 @@ async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailRes
     depositPercentage: depositPctForEmail || undefined,
     depositPayNowUrl,
     hasTerms: !!termsToSend,
-    surchargePaymentFees: business.surchargePaymentFees === true,
     priceDetail: emailPriceDetail,
     business: businessData,
   };
@@ -1046,7 +1044,6 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
     payNowUrl,
     depositCredit: Number(invoice.depositCredit) > 0 ? Number(invoice.depositCredit) : undefined,
     hasTerms: !!termsToSend,
-    surchargePaymentFees: business.surchargePaymentFees === true,
     priceDetail: emailPriceDetail,
     paymentMethods: business.paymentMethods,
     plan,
@@ -1095,7 +1092,6 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
       showLaborBreakdown: invoice.showLaborBreakdown !== false,
       paymentMethods: business.paymentMethods,
       squarePaymentLinkUrl: payNowUrl || invoice.squarePaymentLinkUrl,
-      surchargePaymentFees: business.surchargePaymentFees === true,
       terms: termsToSend || undefined,
     },
     {

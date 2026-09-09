@@ -102,10 +102,11 @@ export function SubscriptionSettingsScreen() {
         You've got full access to Pro features for your {TRIAL_DAYS}-day trial.
         {'\n\n'}
         Once it ends, the Free plan kicks in. You can still collect online payments
-        seamlessly via Square, with a small platform fee added to the customer's bill.
+        via Square. QuoteMate's platform fee comes out of your payout, on top of
+        Square's processing fee. Your customer only ever pays the quoted amount.
         {'\n\n'}
-        Want to help your clients avoid card surcharges? Go Pro to unlock Bank
-        Transfer options and score discounted card rates.
+        Go Pro to lower that platform fee and unlock Bank Transfer and PayID on
+        your documents.
       </Text>
 
       <Button
