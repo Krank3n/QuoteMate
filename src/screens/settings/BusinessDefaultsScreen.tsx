@@ -27,6 +27,7 @@ import {
 } from 'react-native-paper';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 
+import type { BusinessSettings } from '../../types';
 import { useStore } from '../../store/useStore';
 import { makeStyles, useThemeColors } from '../../theme';
 import { WebContainer } from '../../components/WebContainer';
@@ -160,8 +161,12 @@ export function BusinessDefaultsScreen() {
   const handleSave = async (opts?: { silent?: boolean }): Promise<boolean> => {
     try {
       setIsLoading(true);
+      // Strip the retired card-surcharge flag so a save from this build never
+      // writes a stale `true` back for an older installed build to act on.
+      const { surchargePaymentFees: _retiredSurcharge, ...currentSettings } =
+        businessSettings! as BusinessSettings & { surchargePaymentFees?: boolean };
       await setBusinessSettings({
-        ...businessSettings!,
+        ...currentSettings,
         defaultLaborRate: parseFloat(laborRate) || 85,
         defaultMarkup: parseFloat(markup) || 30,
         defaultLaborMarkup: parseFloat(laborMarkup) || 0,

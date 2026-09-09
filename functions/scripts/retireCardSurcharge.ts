@@ -9,8 +9,13 @@
  *
  * Read-only by default; prints who would change, nothing else.
  *
- *   npx tsx scripts/retireCardSurcharge.ts            # dry run
- *   npx tsx scripts/retireCardSurcharge.ts --apply    # delete the field
+ *   cd functions
+ *   npx ts-node scripts/retireCardSurcharge.ts            # dry run
+ *   npx ts-node scripts/retireCardSurcharge.ts --apply    # delete the field
+ *
+ * Re-run it while installed builds older than the retirement OTA are still
+ * out there: those builds carry the flag in their own save payload, so a
+ * tradie on one who opens Business Defaults writes it straight back.
  */
 
 import * as admin from 'firebase-admin';
@@ -21,7 +26,9 @@ async function main() {
   if (!admin.apps.length) admin.initializeApp({ projectId });
   const db = admin.firestore();
 
-  const snap = await db.collectionGroup('settings').get();
+  // Projection: `settings` subcollections also hold Square/Xero OAuth token
+  // docs. Select only the one field so none of that leaves Firestore.
+  const snap = await db.collectionGroup('settings').select('surchargePaymentFees').get();
   let scanned = 0;
   const flagged: FirebaseFirestore.DocumentReference[] = [];
   for (const d of snap.docs) {

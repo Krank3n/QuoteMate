@@ -31,6 +31,23 @@ export interface SquarePricing {
  * freemium model's revenue source). Trial users get the Pro rate while in
  * their trial window. Percentages live in shared/pdf/squareFees.ts.
  */
+/**
+ * Card surcharging is prohibited in Australia from this instant (RBA,
+ * 1 October 2026, Sydney time). A Square pay link minted before it may have
+ * been grossed up by the retired 2.9% surcharge, and Square cannot reprice a
+ * link, so such a link must never be handed to a customer again: the minters
+ * treat it as stale and issue a fresh one at the amount owed. Links minted
+ * after this instant were priced by the surcharge-free helper above.
+ */
+export const SURCHARGE_RETIRED_AT_MS = Date.parse('2026-10-01T00:00:00+10:00');
+
+export function mintedBeforeSurchargeRetirement(createdAtMs: number | undefined | null): boolean {
+  const t = Number(createdAtMs);
+  // No stamp at all: the link predates stamping, so it predates the retirement.
+  if (!Number.isFinite(t) || t <= 0) return true;
+  return t < SURCHARGE_RETIRED_AT_MS;
+}
+
 export function computeSquarePricing(
   baseDollars: number,
   channel: SquareChannel,

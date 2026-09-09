@@ -253,11 +253,10 @@ reproduced here — it is a bearer token and this repo is public.
    User Flow video. The only remaining app-side blocker.
 2. **A connected AU Square seller account** with Tap to Pay enabled, plus a real
    contactless card. The account used for the videos must genuinely be able to take money.
-3. **AU surcharging** — Apple wants the surcharge disclosed on its own screen via a
-   surcharge API. `mobile-payments-sdk-react-native` exposes none, and QuoteMate instead
-   grosses up `amountCents` and sets `allowCardSurcharge: false`. Ask Square whether the
-   RN SDK will expose `surchargeAmount`; if it will not, the honest answer on the
-   checklist is that surcharging is off for in-person payments in AU.
+3. **AU surcharging** — resolved by events. The RBA removed card surcharging on eftpos,
+   Mastercard and Visa from 1 October 2026 and QuoteMate retired its 2.9% passthrough in
+   September 2026. `amountCents` is exactly the amount owed and `allowCardSurcharge` is
+   `false`; the honest answer on the checklist is that surcharging is off.
 
 ## Marketing is gated on GA — and the guidelines are public
 
@@ -318,13 +317,10 @@ to be true *before* the videos are shot, because the videos are the evidence.
 ### Australia-specific
 
 - **PIN entry in education** applies everywhere except JP and TW, so it applies here.
-- **Surcharging** applies to AU and BR only, and it is a live conflict. Apple requires the
-  surcharge be shown on its own Tap to Pay screen via the surcharge API. QuoteMate instead
-  bakes `PASSTHROUGH_SURCHARGE_PCT` into `amountCents` and passes
-  `allowCardSurcharge: false`, so Apple's screen shows a grossed-up total with no surcharge
-  note. `mobile-payments-sdk-react-native` exposes no `surchargeAmount`. Resolve with Square
-  before building anything else — the answer changes either `shared/pdf/squareFees.ts` or
-  the in-person feature set.
+- **Surcharging** applies to AU and BR only, and for AU it is no longer a conflict: card
+  surcharging is banned from 1 October 2026 and QuoteMate does not surcharge. `amountCents`
+  is the amount owed and `allowCardSurcharge` is `false`, so Apple's screen shows the
+  quoted total. Nothing to build here.
 - **Fallback payment method** is CA/GL/IE/IM/JE/UK only — not required here.
 
 ### Marketing is gated too

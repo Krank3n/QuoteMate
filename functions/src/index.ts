@@ -261,13 +261,7 @@ import {
   materialAnchorFactor,
   FloorplanAnalysis,
 } from './floorplanScale';
-import { computeSquarePricing } from './squarePricing.helpers';
-import {
-  QM_APP_FEE_PCT_ONLINE,
-  QM_APP_FEE_PCT_ONLINE_FREE,
-  QM_APP_FEE_PCT_IN_PERSON,
-  QM_APP_FEE_PCT_IN_PERSON_FREE,
-} from './shared/pdf/squareFees';
+import { computeSquarePricing, mintedBeforeSurchargeRetirement } from './squarePricing.helpers';
 // (All resolve via the functions/src/shared symlink → shared/)
 
 // Initialize Firebase Admin
@@ -14649,7 +14643,8 @@ async function createSquareDepositPaymentLinkInternal(
         ? quote.depositPaymentLinkCreatedAt
         : quote.depositPaymentLinkCreatedAt?.toMillis?.() ?? Date.parse(String(quote.depositPaymentLinkCreatedAt)))
     : undefined;
-  const linkFresh = linkCreatedAt && (Date.now() - linkCreatedAt) < SQUARE_LINK_TTL_MS;
+  const linkFresh = linkCreatedAt && (Date.now() - linkCreatedAt) < SQUARE_LINK_TTL_MS
+    && !mintedBeforeSurchargeRetirement(linkCreatedAt);
   // Also re-mint if the deposit amount changed since the link was issued —
   // the tradie can edit the deposit from the take-payment sheet, and Square
   // has no API to reprice an existing link, so the old URL would collect the
@@ -14785,7 +14780,8 @@ async function createSquareFullQuotePaymentLinkInternal(
         ? quote.fullPaymentLinkCreatedAt
         : quote.fullPaymentLinkCreatedAt?.toMillis?.() ?? Date.parse(String(quote.fullPaymentLinkCreatedAt)))
     : undefined;
-  const linkFresh = linkCreatedAt && (Date.now() - linkCreatedAt) < SQUARE_LINK_TTL_MS;
+  const linkFresh = linkCreatedAt && (Date.now() - linkCreatedAt) < SQUARE_LINK_TTL_MS
+    && !mintedBeforeSurchargeRetirement(linkCreatedAt);
   const amountMatchesLink = Number(quote.fullPaymentLinkAmount) === amount;
   if (quote.fullPaymentLinkId && quote.fullPaymentLinkUrl && linkFresh && amountMatchesLink) {
     return {
@@ -15037,11 +15033,7 @@ export const squareWebhook = functions.https.onRequest(async (req, res) => {
         const paidCents = Number(payment?.amount_money?.amount) || 0;
         const channel: 'in_person' | 'online' = idx.source === 'in_app' ? 'in_person' : 'online';
         const plan = await getUserPlanServerSide(userId);
-        const isFree = plan === 'free';
-        const feePct = channel === 'in_person'
-          ? (isFree ? QM_APP_FEE_PCT_IN_PERSON_FREE : QM_APP_FEE_PCT_IN_PERSON)
-          : (isFree ? QM_APP_FEE_PCT_ONLINE_FREE : QM_APP_FEE_PCT_ONLINE);
-        const appFeeCents = Math.max(0, dollarsToCents(centsToDollars(paidCents) * (feePct / 100)));
+        const { appFeeCents } = computeSquarePricing(centsToDollars(paidCents), channel, plan);
         await firestore.doc(`squarePayments/${payment.id}`).set({
           userId,
           quoteId,
@@ -15184,11 +15176,7 @@ export const squareWebhook = functions.https.onRequest(async (req, res) => {
       const paidCents = Number(payment?.amount_money?.amount) || 0;
       const channel: 'in_person' | 'online' = idx.source === 'in_app' ? 'in_person' : 'online';
       const plan = await getUserPlanServerSide(userId);
-      const isFree = plan === 'free';
-      const feePct = channel === 'in_person'
-        ? (isFree ? QM_APP_FEE_PCT_IN_PERSON_FREE : QM_APP_FEE_PCT_IN_PERSON)
-        : (isFree ? QM_APP_FEE_PCT_ONLINE_FREE : QM_APP_FEE_PCT_ONLINE);
-      const appFeeCents = Math.max(0, dollarsToCents(centsToDollars(paidCents) * (feePct / 100)));
+      const { appFeeCents } = computeSquarePricing(centsToDollars(paidCents), channel, plan);
       await firestore.doc(`squarePayments/${payment.id}`).set({
         userId,
         invoiceId,

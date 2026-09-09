@@ -7,8 +7,10 @@
  * than a wall.
  *
  * Two paths:
- *   • Send instantly (free) — connect Square. 1.7% platform fee added on
- *     top of Square's standard card processing rate.
+ *   • Send instantly (free) — connect Square. QuoteMate's 1.7% platform fee
+ *     comes out of the tradie's payout, on top of Square's processing fee;
+ *     the customer pays the quoted amount (no surcharge — banned in AU from
+ *     1 Oct 2026).
  *   • Upgrade to Pro — $49/mo. Send unlimited, any payment method.
  */
 
@@ -57,7 +59,7 @@ export function SendGateModal({
             </View>
             <Text style={styles.optionBody}>
               Connect Square — your customer pays online with a card or Apple Pay.
-              A small platform fee (1.7%) is added to their bill on payment.
+              A small platform fee (1.7%) comes out of your payout, on top of Square's fee.
             </Text>
             <Button
               mode="contained" buttonColor={themeColors.accent} textColor={themeColors.onAccent}
