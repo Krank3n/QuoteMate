@@ -17,8 +17,23 @@ export interface SentryBug {
   environment: string;
   release: string;
   platform: string;
+  /** Sentry severity ("error", "warning", …); '' when the payload has none. */
+  level: string;
   /** "file:function:line" strings for the most relevant in-app frames. */
   topFrames: string[];
+}
+
+/**
+ * Only crashes are worth an agent run. Anything the app reports on purpose
+ * at warning level (`reportIssue()` → `Sentry.captureMessage`, e.g. "auth
+ * bootstrap timed out", "notification navigation failed") trips the same
+ * issue alert, and each one became a "fix the crash" ticket the agent could
+ * only close as not-a-bug (#84, #126, #131, #163). An absent level is let
+ * through: a payload shape we don't know must not silently drop a real crash.
+ */
+export function isActionableLevel(level: string): boolean {
+  if (!level) return true;
+  return level === 'error' || level === 'fatal';
 }
 
 /**
@@ -72,6 +87,7 @@ export function parseSentryAlert(payload: any, orgSlug: string): SentryBug | nul
       environment: String(event.environment || ''),
       release: String(event.release || ''),
       platform: String(event.platform || ''),
+      level: String(event.level || '').toLowerCase(),
       topFrames: framesFromEvent(event),
     };
   }
@@ -88,6 +104,7 @@ export function parseSentryAlert(payload: any, orgSlug: string): SentryBug | nul
       environment: '',
       release: '',
       platform: String(issue.platform || ''),
+      level: String(issue.level || '').toLowerCase(),
       topFrames: [],
     };
   }

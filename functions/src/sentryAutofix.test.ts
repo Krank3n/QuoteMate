@@ -6,6 +6,7 @@ import {
   buildIssueTitle,
   buildIssueBody,
   dailyKey,
+  isActionableLevel,
   SentryBug,
 } from './sentryAutofix.helpers';
 
@@ -125,6 +126,41 @@ describe('parseSentryAlert', () => {
   it('returns null when the event has no issue id (nothing to dedupe on)', () => {
     expect(parseSentryAlert({ action: 'triggered', data: { event: { title: 'x' } } }, ORG)).toBeNull();
   });
+
+  it('carries the severity level through from both payload shapes, lower-cased', () => {
+    expect(
+      parseSentryAlert(
+        { action: 'triggered', data: { event: { issue_id: '1', title: 'reportIssue', level: 'Warning' } } },
+        ORG,
+      )!.level,
+    ).toBe('warning');
+    expect(
+      parseSentryAlert({ action: 'created', data: { issue: { id: '2', title: 'x', level: 'error' } } }, ORG)!
+        .level,
+    ).toBe('error');
+    expect(
+      parseSentryAlert({ action: 'triggered', data: { event: { issue_id: '3', title: 'x' } } }, ORG)!.level,
+    ).toBe('');
+  });
+});
+
+describe('isActionableLevel', () => {
+  it('dispatches on crashes', () => {
+    expect(isActionableLevel('error')).toBe(true);
+    expect(isActionableLevel('fatal')).toBe(true);
+  });
+
+  it('skips the deliberate reportIssue() warnings and anything quieter', () => {
+    // The four "[Sentry] reportIssue" tickets (#84, #126, #131, #163) were all
+    // warning-level captureMessage calls the app sends on purpose.
+    expect(isActionableLevel('warning')).toBe(false);
+    expect(isActionableLevel('info')).toBe(false);
+    expect(isActionableLevel('debug')).toBe(false);
+  });
+
+  it('lets an event with no level through rather than dropping an unknown crash', () => {
+    expect(isActionableLevel('')).toBe(true);
+  });
 });
 
 describe('buildIssueTitle / buildIssueBody', () => {
@@ -136,6 +172,7 @@ describe('buildIssueTitle / buildIssueBody', () => {
     environment: 'production',
     release: '1.47.0',
     platform: 'javascript',
+    level: 'error',
     topFrames: ['src/screens/JobPreview.tsx : renderTotals : line 214'],
   };
 
