@@ -57,12 +57,22 @@ export function shouldEnableSentry(dsn: string, isDev: boolean): boolean {
  * our onAuthStateChanged handler never sees it. Only the exact observed
  * phrasing is matched so genuine IndexedDB faults (quota exceeded, corruption,
  * permission denial, forced deletion) still report.
+ *
+ * Reason-less abort (sentry-7720476730, ticket #176): "AbortError: signal is
+ * aborted without reason" is thrown by the ElevenLabs/LiveKit voice-session
+ * SDK's own WebRTC teardown (@elevenlabs/client over livekit-client) calling
+ * controller.abort() with no reason during disconnect/reconnect on the web
+ * voice path. No first-party frame — our only AbortController (fetchWithTimeout
+ * in services/assistant/liveSession.ts) catches its own abort — so this is a
+ * dangling rejection from the SDK's internals. Scoped to the exact reason-less
+ * phrasing so a genuine first-party AbortError still reports.
  */
 export const SENTRY_IGNORE_ERRORS: (string | RegExp)[] = [
   /Failed to execute '(set|release)PointerCapture' on 'Element'/,
   /AbortError: The user aborted a request/,
   /undefined is not an object \(evaluating 'chrome\.storage[^']*\.(get|set|remove)'\)/,
   /Database is closing(\/hidden)?/,
+  /signal is aborted without reason/i,
 ];
 
 export function initSentry(): void {

@@ -69,6 +69,10 @@ describe('SENTRY_IGNORE_ERRORS', () => {
     expect(matchesIgnoreList('UnknownError: Internal error opening backing store.')).toBe(false);
   });
 
+  it('filters the reason-less WebRTC teardown AbortError seen in production (#176)', () => {
+    expect(matchesIgnoreList('AbortError: signal is aborted without reason')).toBe(true);
+  });
+
   it('does not swallow other NotFoundErrors or unrelated crashes', () => {
     expect(matchesIgnoreList('NotFoundError: The object can not be found here.')).toBe(false);
     expect(
@@ -84,6 +88,8 @@ describe('SENTRY_IGNORE_ERRORS', () => {
       matchesIgnoreList("TypeError: undefined is not an object (evaluating 'this.storage.get')"),
     ).toBe(false);
     expect(matchesIgnoreList('Error: chrome storage quota exceeded')).toBe(false);
+    // Only the reason-less phrasing is filtered, not every AbortError.
+    expect(matchesIgnoreList('AbortError: request timed out after 30s')).toBe(false);
   });
 
   it('is passed to Sentry.init in enabled builds', () => {
