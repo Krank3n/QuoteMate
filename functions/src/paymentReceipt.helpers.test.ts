@@ -53,7 +53,7 @@ describe('applySquarePaymentToInvoice — additive accumulation (regression: Mat
     expect(r.newStatus).toBe('partial');
     expect(r.balanceDue).toBe(500);
   });
-  it('caps a surcharged payment (balance + card fee) at the remaining balance so the invoice never reads overpaid', () => {
+  it('caps an overpayment (a pre-retirement surcharged link: balance + card fee) at the remaining balance so the invoice never reads overpaid', () => {
     const r = applySquarePaymentToInvoice({ total: 1000, existingPaidAmount: 400, paymentDollars: 611.4 });
     expect(r.paidAgainstInvoice).toBe(600);
     expect(r.newPaidAmount).toBe(1000);

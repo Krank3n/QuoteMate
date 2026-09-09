@@ -549,14 +549,9 @@ export interface BusinessSettings {
   // ISO timestamp of the last edit; used to prompt re-review if the business
   // hasn't touched their terms in >12 months.
   termsUpdatedAt?: string;
-  // When true, bump the Square pay-link amount by the standard passthrough
-  // percentage (see shared/pdf/squareFees.ts → PASSTHROUGH_SURCHARGE_PCT) so
-  // the customer covers both Square's processing fee and QuoteMate's platform
-  // fee rather than the tradie eating them. Legal in AU with disclosure; the
-  // email + hosted checkout surface the surcharge line. Default false.
-  // The percentage is NOT tradie-editable — ACCC rules require surcharges to
-  // stay at or under the actual cost of acceptance.
-  surchargePaymentFees?: boolean;
+  // `surchargePaymentFees` used to live here (an opt-in 2.9% card surcharge).
+  // Retired September 2026 ahead of the RBA's 1 October 2026 surcharge ban;
+  // nothing reads it any more and scripts/retireCardSurcharge.ts clears it.
   // Legacy fields (kept for backwards compatibility)
   hardwareStores?: string[]; // DEPRECATED - use selectedStore instead
   customStores?: string[]; // DEPRECATED - Custom store URLs added by user

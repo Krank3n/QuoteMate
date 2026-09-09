@@ -42,10 +42,7 @@ import {
 import { useTapToPayEnabled } from '../hooks/useTapToPayEnabled';
 import { useTapToPayReadiness } from '../hooks/useTapToPayReadiness';
 import { dollarsToCents, centsToDollars } from '../../shared/pdf/money';
-import {
-  QM_APP_FEE_PCT_IN_PERSON,
-  PASSTHROUGH_SURCHARGE_PCT,
-} from '../../shared/pdf/squareFees';
+import { QM_APP_FEE_PCT_IN_PERSON } from '../../shared/pdf/squareFees';
 import { useStore } from '../store/useStore';
 import { useAlertModal } from '../hooks/useAlertModal';
 import { buildDeclineRecord } from '../utils/paymentDeclineRecord';
@@ -197,7 +194,6 @@ export function TakePaymentSheet({
   // Apple req 3.9.1 / 5.7 — only subscribed while the sheet is open.
   const tapToPayReadiness = useTapToPayReadiness(visible && tapToPay.enabled);
   const { businessSettings, getDocumentById, saveDocument } = useStore();
-  const surchargeOn = businessSettings?.surchargePaymentFees === true;
 
   // The quote's deposit is a starting point, not a rule — on the day the
   // tradie agrees whatever gets the job started ("give us $500 and we'll
@@ -413,16 +409,10 @@ export function TakePaymentSheet({
         onDismiss();
         return;
       }
-      // Bake the passthrough surcharge (if opted in) into the charged amount
-      // so the customer sees/pays the inflated total. The app fee (our cut)
-      // is computed off the CHARGED amount so we also earn on the surcharge.
-      const baseCents = dollarsToCents(amounts.remaining);
-      const surchargeCents = surchargeOn
-        ? dollarsToCents(
-            centsToDollars(baseCents) * (PASSTHROUGH_SURCHARGE_PCT / 100),
-          )
-        : 0;
-      const amountCents = baseCents + surchargeCents;
+      // The customer is charged exactly what is owed. The old opt-in card
+      // surcharge was retired ahead of the RBA's 1 October 2026 ban; our
+      // platform fee comes out of the tradie's payout, never the customer.
+      const amountCents = dollarsToCents(amounts.remaining);
       chargedCents = amountCents;
       const appFeeCents = dollarsToCents(
         centsToDollars(amountCents) * (QM_APP_FEE_PCT_IN_PERSON / 100),
@@ -581,12 +571,6 @@ export function TakePaymentSheet({
         {editingDeposit && amounts.alreadyPaid > 0 && (
           <Text style={styles.sheetNote}>
             Taking {formatCurrency(amounts.remaining)} now.
-          </Text>
-        )}
-
-        {surchargeOn && amounts.remaining > 0 && (
-          <Text style={styles.sheetNote}>
-            Customer pays {formatCurrency(amounts.remaining * (1 + PASSTHROUGH_SURCHARGE_PCT / 100))} on card (incl. {PASSTHROUGH_SURCHARGE_PCT}% surcharge).
           </Text>
         )}
 

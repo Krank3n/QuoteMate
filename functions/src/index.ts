@@ -261,13 +261,7 @@ import {
   materialAnchorFactor,
   FloorplanAnalysis,
 } from './floorplanScale';
-import {
-  QM_APP_FEE_PCT_ONLINE,
-  QM_APP_FEE_PCT_ONLINE_FREE,
-  QM_APP_FEE_PCT_IN_PERSON,
-  QM_APP_FEE_PCT_IN_PERSON_FREE,
-  PASSTHROUGH_SURCHARGE_PCT,
-} from './shared/pdf/squareFees';
+import { computeSquarePricing, mintedBeforeSurchargeRetirement } from './squarePricing.helpers';
 // (All resolve via the functions/src/shared symlink → shared/)
 
 // Initialize Firebase Admin
@@ -11453,7 +11447,6 @@ export const customerInvoiceFollowUp = functions
             payNowUrl,
             paymentMethods: settings.paymentMethods,
             plan,
-            surchargePaymentFees: settings.surchargePaymentFees === true,
             followUpNumber,
             business: {
               name: businessName,
@@ -14260,55 +14253,6 @@ async function getUserPlanServerSide(userId: string): Promise<'trial' | 'free' |
 }
 
 /**
- * Compute Square pricing for a payment: the amount charged to the customer
- * (incl. optional passthrough surcharge), the QuoteMate app fee we take via
- * Square's app_fee_money mechanism, and the surcharge portion for display.
- *
- * Pro users pay the lower platform fee; free users pay the higher rate (the
- * freemium model's revenue source). Trial users get the Pro rate while in
- * their trial window (see TRIAL_DURATION_MS).
- *
- * All percentages are hardcoded in shared/pdf/squareFees.ts — not editable
- * per-tradie because the passthrough is bounded by ACCC cost-of-acceptance
- * rules and our platform cut is a business decision, not a setting.
- */
-function computeSquarePricing(
-  baseDollars: number,
-  business: any,
-  channel: 'online' | 'in_person',
-  plan: 'trial' | 'free' | 'pro' = 'pro',
-): {
-  chargedDollars: number;
-  surchargeDollars: number;
-  appFeeCents: number;
-  surchargeSuffix: string;
-} {
-  const surchargeOn = business?.surchargePaymentFees === true;
-  const surchargePct = surchargeOn ? PASSTHROUGH_SURCHARGE_PCT : 0;
-  const surchargeCents = surchargePct > 0
-    ? dollarsToCents(baseDollars * (surchargePct / 100))
-    : 0;
-  const chargedCents = dollarsToCents(baseDollars) + surchargeCents;
-
-  // App fee is computed off the CHARGED amount so we get our cut on the
-  // surcharge portion too (which otherwise would only benefit Square).
-  const isFree = plan === 'free';
-  const appFeePct = channel === 'in_person'
-    ? (isFree ? QM_APP_FEE_PCT_IN_PERSON_FREE : QM_APP_FEE_PCT_IN_PERSON)
-    : (isFree ? QM_APP_FEE_PCT_ONLINE_FREE : QM_APP_FEE_PCT_ONLINE);
-  const appFeeCents = Math.max(0, dollarsToCents(
-    centsToDollars(chargedCents) * (appFeePct / 100),
-  ));
-
-  return {
-    chargedDollars: centsToDollars(chargedCents),
-    surchargeDollars: centsToDollars(surchargeCents),
-    appFeeCents,
-    surchargeSuffix: surchargeOn ? ` (incl. ${PASSTHROUGH_SURCHARGE_PCT}% card surcharge)` : '',
-  };
-}
-
-/**
  * Create a Square hosted payment link for an invoice.
  * Called server-side from sendInvoiceEmail when the tradie has Square connected.
  * Also exposed as an HTTP endpoint so the client can regenerate on demand.
@@ -14332,13 +14276,12 @@ async function createSquarePaymentLinkInternal(
   const amountDue = invoiceLinkAmountDue(invoice);
   if (amountDue <= 0) return null;
 
-  // Apply the business's card surcharge (if any) so the customer pays
-  // balance + surcharge and Square's fee doesn't eat the tradie's margin.
-  const businessDoc = await firestore.doc(`users/${userId}/settings/business`).get();
-  const businessSettings = businessDoc.exists ? businessDoc.data() : {};
+  // The customer pays exactly the balance; the platform fee comes out of
+  // the tradie's payout. Business settings are deliberately not consulted —
+  // the retired surcharge flag must not resurface from an old document.
   const plan = await getUserPlanServerSide(userId);
-  const { chargedDollars, appFeeCents, surchargeSuffix } =
-    computeSquarePricing(amountDue, businessSettings, 'online', plan);
+  const { chargedDollars, appFeeCents } =
+    computeSquarePricing(amountDue, 'online', plan);
 
   const amountCents = dollarsToCents(chargedDollars);
   const jobName = invoice.job?.name || 'Job';
@@ -14348,14 +14291,14 @@ async function createSquarePaymentLinkInternal(
   const body: any = {
     idempotency_key: idempotencyKey,
     quick_pay: {
-      name: `Invoice ${invoiceNumber} — ${jobName}${surchargeSuffix}`.slice(0, 250),
+      name: `Invoice ${invoiceNumber} — ${jobName}`.slice(0, 250),
       price_money: { amount: amountCents, currency: 'AUD' },
       location_id: tokens.locationId,
       // QuoteMate platform fee — deducted from the tradie's payout and sent
       // to our Square developer account automatically.
       app_fee_money: { amount: appFeeCents, currency: 'AUD' },
     },
-    payment_note: `QuoteMate invoice ${invoiceNumber}${surchargeSuffix}`,
+    payment_note: `QuoteMate invoice ${invoiceNumber}`,
     checkout_options: {
       allow_tipping: false,
     },
@@ -14700,7 +14643,8 @@ async function createSquareDepositPaymentLinkInternal(
         ? quote.depositPaymentLinkCreatedAt
         : quote.depositPaymentLinkCreatedAt?.toMillis?.() ?? Date.parse(String(quote.depositPaymentLinkCreatedAt)))
     : undefined;
-  const linkFresh = linkCreatedAt && (Date.now() - linkCreatedAt) < SQUARE_LINK_TTL_MS;
+  const linkFresh = linkCreatedAt && (Date.now() - linkCreatedAt) < SQUARE_LINK_TTL_MS
+    && !mintedBeforeSurchargeRetirement(linkCreatedAt);
   // Also re-mint if the deposit amount changed since the link was issued —
   // the tradie can edit the deposit from the take-payment sheet, and Square
   // has no API to reprice an existing link, so the old URL would collect the
@@ -14722,11 +14666,9 @@ async function createSquareDepositPaymentLinkInternal(
   const tokens = await getSquareTokens(userId);
   if (!tokens) return null;
 
-  const businessDoc = await firestore.doc(`users/${userId}/settings/business`).get();
-  const businessSettings = businessDoc.exists ? businessDoc.data() : {};
   const plan = await getUserPlanServerSide(userId);
-  const { chargedDollars, appFeeCents, surchargeSuffix } =
-    computeSquarePricing(depositAmount, businessSettings, 'online', plan);
+  const { chargedDollars, appFeeCents } =
+    computeSquarePricing(depositAmount, 'online', plan);
 
   const amountCents = dollarsToCents(chargedDollars);
   const jobName = quote.job?.name || 'Job';
@@ -14736,12 +14678,12 @@ async function createSquareDepositPaymentLinkInternal(
   const body: any = {
     idempotency_key: idempotencyKey,
     quick_pay: {
-      name: `Deposit for Quote ${quoteNumber} — ${jobName}${surchargeSuffix}`.slice(0, 250),
+      name: `Deposit for Quote ${quoteNumber} — ${jobName}`.slice(0, 250),
       price_money: { amount: amountCents, currency: 'AUD' },
       location_id: tokens.locationId,
       app_fee_money: { amount: appFeeCents, currency: 'AUD' },
     },
-    payment_note: `QuoteMate deposit on quote ${quoteNumber}${surchargeSuffix}`,
+    payment_note: `QuoteMate deposit on quote ${quoteNumber}`,
     checkout_options: { allow_tipping: false },
   };
 
@@ -14838,7 +14780,8 @@ async function createSquareFullQuotePaymentLinkInternal(
         ? quote.fullPaymentLinkCreatedAt
         : quote.fullPaymentLinkCreatedAt?.toMillis?.() ?? Date.parse(String(quote.fullPaymentLinkCreatedAt)))
     : undefined;
-  const linkFresh = linkCreatedAt && (Date.now() - linkCreatedAt) < SQUARE_LINK_TTL_MS;
+  const linkFresh = linkCreatedAt && (Date.now() - linkCreatedAt) < SQUARE_LINK_TTL_MS
+    && !mintedBeforeSurchargeRetirement(linkCreatedAt);
   const amountMatchesLink = Number(quote.fullPaymentLinkAmount) === amount;
   if (quote.fullPaymentLinkId && quote.fullPaymentLinkUrl && linkFresh && amountMatchesLink) {
     return {
@@ -14851,11 +14794,9 @@ async function createSquareFullQuotePaymentLinkInternal(
   const tokens = await getSquareTokens(userId);
   if (!tokens) return null;
 
-  const businessDoc = await firestore.doc(`users/${userId}/settings/business`).get();
-  const businessSettings = businessDoc.exists ? businessDoc.data() : {};
   const plan = await getUserPlanServerSide(userId);
-  const { chargedDollars, appFeeCents, surchargeSuffix } =
-    computeSquarePricing(amount, businessSettings, 'online', plan);
+  const { chargedDollars, appFeeCents } =
+    computeSquarePricing(amount, 'online', plan);
 
   const amountCents = dollarsToCents(chargedDollars);
   const jobName = quote.job?.name || 'Job';
@@ -14865,12 +14806,12 @@ async function createSquareFullQuotePaymentLinkInternal(
   const body: any = {
     idempotency_key: idempotencyKey,
     quick_pay: {
-      name: `Quote ${quoteNumber} — ${jobName}${surchargeSuffix}`.slice(0, 250),
+      name: `Quote ${quoteNumber} — ${jobName}`.slice(0, 250),
       price_money: { amount: amountCents, currency: 'AUD' },
       location_id: tokens.locationId,
       app_fee_money: { amount: appFeeCents, currency: 'AUD' },
     },
-    payment_note: `QuoteMate full payment on quote ${quoteNumber}${surchargeSuffix}`,
+    payment_note: `QuoteMate full payment on quote ${quoteNumber}`,
     checkout_options: { allow_tipping: false },
   };
 
@@ -15039,8 +14980,9 @@ export const squareWebhook = functions.https.onRequest(async (req, res) => {
 
       const paidAmountDollars = centsToDollars(Number(payment?.amount_money?.amount) || 0);
       // For deposits: cap at the expected depositAmount; for full-quote
-      // payments: cap at the quote total. Keeps surcharge from inflating
-      // the "paid" bucket beyond what the quote line says.
+      // payments: cap at the quote total. A payment link minted before the
+      // 2026 surcharge retirement can still carry a 2.9% uplift, and an
+      // overpayment must not inflate the "paid" bucket beyond the quote line.
       const expectedCap = idx.kind === 'quote_full'
         ? Number(quote.total) || 0
         : Number(quote.depositAmount) || paidAmountDollars;
@@ -15091,11 +15033,7 @@ export const squareWebhook = functions.https.onRequest(async (req, res) => {
         const paidCents = Number(payment?.amount_money?.amount) || 0;
         const channel: 'in_person' | 'online' = idx.source === 'in_app' ? 'in_person' : 'online';
         const plan = await getUserPlanServerSide(userId);
-        const isFree = plan === 'free';
-        const feePct = channel === 'in_person'
-          ? (isFree ? QM_APP_FEE_PCT_IN_PERSON_FREE : QM_APP_FEE_PCT_IN_PERSON)
-          : (isFree ? QM_APP_FEE_PCT_ONLINE_FREE : QM_APP_FEE_PCT_ONLINE);
-        const appFeeCents = Math.max(0, dollarsToCents(centsToDollars(paidCents) * (feePct / 100)));
+        const { appFeeCents } = computeSquarePricing(centsToDollars(paidCents), channel, plan);
         await firestore.doc(`squarePayments/${payment.id}`).set({
           userId,
           quoteId,
@@ -15192,9 +15130,10 @@ export const squareWebhook = functions.https.onRequest(async (req, res) => {
     const paidAmountDollars = centsToDollars(Number(payment?.amount_money?.amount) || 0);
     const total = Number(invoice.total) || 0;
     // Additive: a Square payment stacks on whatever is already paid (manual
-    // part payments included), capped at the remaining balance so a
-    // surcharged payment (balance + 1.9%) doesn't report as "overpaid". The
-    // actual received amount is on Square's side for payout reports.
+    // part payments included), capped at the remaining balance so an
+    // overpayment (e.g. a pay link minted before the 2026 surcharge
+    // retirement) doesn't report as "overpaid". The actual received amount
+    // is on Square's side for payout reports.
     const { newPaidAmount, newStatus, balanceDue } = applySquarePaymentToInvoice({
       total,
       existingPaidAmount: Number(invoice.paidAmount) || 0,
@@ -15237,11 +15176,7 @@ export const squareWebhook = functions.https.onRequest(async (req, res) => {
       const paidCents = Number(payment?.amount_money?.amount) || 0;
       const channel: 'in_person' | 'online' = idx.source === 'in_app' ? 'in_person' : 'online';
       const plan = await getUserPlanServerSide(userId);
-      const isFree = plan === 'free';
-      const feePct = channel === 'in_person'
-        ? (isFree ? QM_APP_FEE_PCT_IN_PERSON_FREE : QM_APP_FEE_PCT_IN_PERSON)
-        : (isFree ? QM_APP_FEE_PCT_ONLINE_FREE : QM_APP_FEE_PCT_ONLINE);
-      const appFeeCents = Math.max(0, dollarsToCents(centsToDollars(paidCents) * (feePct / 100)));
+      const { appFeeCents } = computeSquarePricing(centsToDollars(paidCents), channel, plan);
       await firestore.doc(`squarePayments/${payment.id}`).set({
         userId,
         invoiceId,

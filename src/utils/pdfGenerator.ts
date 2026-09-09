@@ -325,7 +325,6 @@ export async function generateDocumentPDF(
       paymentMethods: businessSettings?.paymentMethods,
       plan,
       squarePaymentLinkUrl,
-      surchargePaymentFees: businessSettings?.surchargePaymentFees === true,
       terms: doc.termsSnapshot || businessSettings?.termsAndConditions,
     };
     return buildInvoicePdfHtml(pdfData, business, pdfOptions);
@@ -371,7 +370,6 @@ export async function generateDocumentPDF(
     paymentMethods: businessSettings?.paymentMethods,
     plan,
     squarePaymentLinkUrl,
-    surchargePaymentFees: businessSettings?.surchargePaymentFees === true,
     terms: doc.termsSnapshot || businessSettings?.termsAndConditions,
   };
   return buildQuotePdfHtml(pdfData, business, pdfOptions);

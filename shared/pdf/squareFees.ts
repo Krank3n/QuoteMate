@@ -6,14 +6,14 @@
  *  2. QuoteMate takes a platform fee (app_fee_money on the Square API call,
  *     automatically deducted from the tradie's payout to our developer account).
  *
- * When the tradie opts into surchargePaymentFees, we bump the amount the
- * customer pays by PASSTHROUGH_SURCHARGE_PCT — enough to cover both fees so
- * the tradie nets their full quoted amount. When off, both fees come out of
- * the tradie's margin.
+ * Both come out of the tradie's payout. Nothing is ever added to what the
+ * customer is charged: the RBA removed card surcharging on eftpos, Mastercard
+ * and Visa from 1 October 2026, so the old opt-in passthrough surcharge
+ * (PASSTHROUGH_SURCHARGE_PCT, 2.9% on top of the invoice) was retired in
+ * September 2026. The customer pays the quoted amount, full stop.
  *
- * Fees are hardcoded (not tradie-editable) because:
- *  - ACCC rules forbid surcharges above the actual cost of acceptance.
- *  - QuoteMate's cut is a business decision, not a per-tenant setting.
+ * Fees are hardcoded (not tradie-editable): QuoteMate's cut is a business
+ * decision, not a per-tenant setting.
  */
 
 /**
@@ -27,18 +27,8 @@ export const QM_APP_FEE_PCT_ONLINE_FREE = 1.7;
 
 /**
  * Our platform cut on in-person Tap-to-Pay payments. Slightly higher than
- * online because Square's in-person rate is lower than their online rate, so
- * the combined cost of acceptance still sits under the 2.9% passthrough.
+ * online because Square's in-person rate is lower than their online rate.
  * Free-tier in-person matches free-tier online (1.7%) for simplicity.
  */
 export const QM_APP_FEE_PCT_IN_PERSON = 1.5;
 export const QM_APP_FEE_PCT_IN_PERSON_FREE = 1.7;
-
-/**
- * Surcharge added to the customer-facing price when surchargePaymentFees is
- * enabled. Covers Square's ~1.9% online + QuoteMate's 1% online, with a
- * small buffer. Also labelled on the payment page so the customer sees it.
- * Capped at 2.9% so we stay under the ACCC "excessive surcharge" threshold
- * for any realistic card type.
- */
-export const PASSTHROUGH_SURCHARGE_PCT = 2.9;

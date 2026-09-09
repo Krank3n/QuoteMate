@@ -15,6 +15,7 @@
  */
 
 import * as admin from 'firebase-admin';
+import { mintedBeforeSurchargeRetirement } from './squarePricing.helpers';
 
 import { isAlreadyInvoiced, type ConvertCandidate } from './shared/document/convertGuard';
 import * as functions from 'firebase-functions/v1';
@@ -516,7 +517,6 @@ export function buildQuotePdfHtmlForQuote(
       showLaborBreakdown: quote.showLaborBreakdown !== false,
       paymentMethods: business.paymentMethods,
       squarePaymentLinkUrl: options.squarePaymentLinkUrl ?? quote.squarePaymentLinkUrl,
-      surchargePaymentFees: business.surchargePaymentFees === true,
       terms: options.terms,
     },
     {
@@ -871,7 +871,6 @@ async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailRes
     depositPercentage: depositPctForEmail || undefined,
     depositPayNowUrl,
     hasTerms: !!termsToSend,
-    surchargePaymentFees: business.surchargePaymentFees === true,
     priceDetail: emailPriceDetail,
     business: businessData,
   };
@@ -1046,7 +1045,6 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
     payNowUrl,
     depositCredit: Number(invoice.depositCredit) > 0 ? Number(invoice.depositCredit) : undefined,
     hasTerms: !!termsToSend,
-    surchargePaymentFees: business.surchargePaymentFees === true,
     priceDetail: emailPriceDetail,
     paymentMethods: business.paymentMethods,
     plan,
@@ -1095,7 +1093,6 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
       showLaborBreakdown: invoice.showLaborBreakdown !== false,
       paymentMethods: business.paymentMethods,
       squarePaymentLinkUrl: payNowUrl || invoice.squarePaymentLinkUrl,
-      surchargePaymentFees: business.surchargePaymentFees === true,
       terms: termsToSend || undefined,
     },
     {
@@ -1527,12 +1524,16 @@ export async function createOrRotatePaymentLink(
   const active = doc.activePaymentLink as DocumentPaymentLink | undefined;
   // Reuse the active link only if its kind AND amount still satisfy the
   // current need. Square's API doesn't let us update a link's price, so any
-  // amount drift forces a fresh mint.
+  // amount drift forces a fresh mint. A link minted before card surcharging
+  // was retired may have been grossed up by 2.9% at Square while recording
+  // the base amount here, so it can match on amount and still overcharge —
+  // never reuse one.
   if (
     active &&
     !active.consumedAt &&
     active.kind === decision.kind &&
-    Math.abs(Number(active.amount || 0) - Number(decision.amount || 0)) < 0.005
+    Math.abs(Number(active.amount || 0) - Number(decision.amount || 0)) < 0.005 &&
+    !mintedBeforeSurchargeRetirement(active.createdAt)
   ) {
     return {
       url: active.url,

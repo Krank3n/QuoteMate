@@ -4,7 +4,7 @@
  * Default rates + Terms & Conditions applied to new quotes/invoices. Lifted
  * out of BusinessProfileScreen so the "who you are" (name, logo, contact
  * details) stays separate from "how you price" (labour rate, markup, deposit,
- * card surcharge, terms). Easier to find and less to scroll past.
+ * terms). Easier to find and less to scroll past.
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -27,6 +27,7 @@ import {
 } from 'react-native-paper';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 
+import type { BusinessSettings } from '../../types';
 import { useStore } from '../../store/useStore';
 import { makeStyles, useThemeColors } from '../../theme';
 import { WebContainer } from '../../components/WebContainer';
@@ -37,7 +38,6 @@ import { checkSquareConnection } from '../../services/squareService';
 import { resolveAutoStartMic } from '../assistant/shouldAutoStartMic';
 import { resolveAutoCustomerFollowUp } from '../../../shared/document/autoFollowUp';
 import { defaultAuTradieTerms, hashTerms, isUnmodifiedStarterTerms } from '../../../shared/pdf/terms/defaultAuTradie';
-import { PASSTHROUGH_SURCHARGE_PCT } from '../../../shared/pdf/squareFees';
 import {
   resolveGstMode,
   GstMode,
@@ -68,7 +68,6 @@ export function BusinessDefaultsScreen() {
   const [defaultDepositPercentage, setDefaultDepositPercentage] = useState('0');
   const [requireDepositByDefault, setRequireDepositByDefault] = useState(false);
   const [transportMarkupEnabled, setTransportMarkupEnabled] = useState(true);
-  const [surchargePaymentFees, setSurchargePaymentFees] = useState(false);
   const [gstMode, setGstMode] = useState<GstMode>('exclusive');
   const [showMarkup, setShowMarkup] = useState(false);
   const [priceDetail, setPriceDetail] = useState<PriceDetail>('itemised');
@@ -90,7 +89,6 @@ export function BusinessDefaultsScreen() {
     const dp = (businessSettings.defaultDepositPercentage ?? 0).toString();
     const rd = businessSettings.requireDepositByDefault === true;
     const tm = businessSettings.transportMarkupEnabled !== false;
-    const sf = businessSettings.surchargePaymentFees === true;
     const gm = resolveGstMode(businessSettings);
     const sm = businessSettings.showMarkup === true;
     // Resolved, never read raw — an account that only ever set the legacy
@@ -106,7 +104,6 @@ export function BusinessDefaultsScreen() {
     setDefaultDepositPercentage(dp);
     setRequireDepositByDefault(rd);
     setTransportMarkupEnabled(tm);
-    setSurchargePaymentFees(sf);
     setGstMode(gm);
     setShowMarkup(sm);
     setPriceDetail(pd);
@@ -114,10 +111,10 @@ export function BusinessDefaultsScreen() {
     setAutoStartMic(asm);
     setTermsAndConditions(tc);
 
-    setInitialSnapshot(JSON.stringify({ lr, mk, lm, dp, rd, tm, sf, gm, sm, pd, acf, asm, tc }));
+    setInitialSnapshot(JSON.stringify({ lr, mk, lm, dp, rd, tm, gm, sm, pd, acf, asm, tc }));
   }, [businessSettings]);
 
-  // Re-check on focus so the deposit + surcharge toggles unlock the moment
+  // Re-check on focus so the deposit toggle unlocks the moment
   // the tradie connects Square from an adjacent screen.
   useFocusEffect(
     useCallback(() => {
@@ -138,7 +135,6 @@ export function BusinessDefaultsScreen() {
       dp: defaultDepositPercentage,
       rd: requireDepositByDefault,
       tm: transportMarkupEnabled,
-      sf: surchargePaymentFees,
       gm: gstMode,
       sm: showMarkup,
       pd: priceDetail,
@@ -149,7 +145,7 @@ export function BusinessDefaultsScreen() {
     return current !== initialSnapshot;
   }, [
     laborRate, markup, laborMarkup, defaultDepositPercentage, requireDepositByDefault,
-    transportMarkupEnabled, surchargePaymentFees, gstMode,
+    transportMarkupEnabled, gstMode,
     showMarkup, priceDetail, autoCustomerFollowUp, autoStartMic, termsAndConditions,
     initialSnapshot,
   ]);
@@ -165,15 +161,18 @@ export function BusinessDefaultsScreen() {
   const handleSave = async (opts?: { silent?: boolean }): Promise<boolean> => {
     try {
       setIsLoading(true);
+      // Strip the retired card-surcharge flag so a save from this build never
+      // writes a stale `true` back for an older installed build to act on.
+      const { surchargePaymentFees: _retiredSurcharge, ...currentSettings } =
+        businessSettings! as BusinessSettings & { surchargePaymentFees?: boolean };
       await setBusinessSettings({
-        ...businessSettings!,
+        ...currentSettings,
         defaultLaborRate: parseFloat(laborRate) || 85,
         defaultMarkup: parseFloat(markup) || 30,
         defaultLaborMarkup: parseFloat(laborMarkup) || 0,
         defaultDepositPercentage: Math.max(0, Math.min(100, parseFloat(defaultDepositPercentage) || 0)),
         requireDepositByDefault,
         transportMarkupEnabled,
-        surchargePaymentFees,
         pricesIncludeGst: gstMode === 'inclusive',
         gstRegistered: gstMode !== 'none',
         showMarkup,
@@ -374,11 +373,11 @@ export function BusinessDefaultsScreen() {
           </Surface>
 
           <Surface style={styles.card}>
-            <Title style={styles.sectionTitle}>Deposits &amp; Card Fees (Square)</Title>
+            <Title style={styles.sectionTitle}>Deposits (Square)</Title>
             <Text style={styles.helperText}>
               {squareConnected === false
-                ? 'Connect Square to accept card payments, deposits, and surcharges.'
-                : 'Powered by Square. Both can be overridden per quote.'}
+                ? 'Connect Square to accept card payments and deposits.'
+                : 'Powered by Square. Can be overridden per quote.'}
             </Text>
 
             <View style={styles.toggleRow}>
@@ -419,25 +418,6 @@ export function BusinessDefaultsScreen() {
                 placeholder="30"
               />
             )}
-
-            <View style={styles.toggleRow}>
-              <View style={styles.toggleLabel}>
-                <Text style={[styles.toggleTitle, squareConnected === false && { color: themeColors.textMuted }]}>
-                  Pass Card Fees to Customer
-                </Text>
-                <Text style={styles.toggleDescription}>
-                  {surchargePaymentFees && squareConnected === true
-                    ? `Customer pays an extra ${PASSTHROUGH_SURCHARGE_PCT}% on card payments. Covers processing fees so you keep the full quoted amount.`
-                    : `You absorb the ~${PASSTHROUGH_SURCHARGE_PCT}% card processing fee. Customer only sees the quoted amount.`}
-                </Text>
-              </View>
-              <Switch
-                value={surchargePaymentFees && squareConnected !== false}
-                onValueChange={setSurchargePaymentFees}
-                color={themeColors.accentText}
-                disabled={squareConnected !== true}
-              />
-            </View>
           </Surface>
 
           <Surface style={styles.card}>
