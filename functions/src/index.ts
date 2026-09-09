@@ -100,6 +100,7 @@ export { elevenLabsPostCallWebhook } from './elevenLabsWebhook';
 export { reportPriceFetchUsage } from './featureUsage';
 import { applyFeatureUsagePatch, buildPriceFetchPatch, recordMaterialsRecommend } from './featureUsage';
 import { firestorePricingRunStore, runPricingRun, PRICING_RUN_TIMEOUT_SECONDS } from './pricingRun';
+import { analyseHandoffWriter } from './analyseHandoff';
 import type { PipelineDeps } from './shared/pricing/pipeline';
 import { normaliseAnalyzeResponse } from './shared/pricing/llmMaterials';
 import { normaliseEstimateResponse } from './shared/pricing/estimate';
@@ -2161,6 +2162,10 @@ async function analyzeJobDescriptionCore(uid: string, body: any): Promise<Record
   // Recommend-run telemetry clock — started after auth so it measures the
   // actual analyse work, not the auth round-trip. See recordMaterialsRecommend.
   const t0 = Date.now();
+  // Somewhere the phone can still find this run if the HTTP response doesn't
+  // make it home. A no-op unless the caller sent a requestId — the
+  // server-side pricing run already has a durable document of its own.
+  const handoff = analyseHandoffWriter(uid, body?.requestId);
 
   try {
     const { jobDescription, tradeContext, photoBase64: photoBase64Input, photoUrls, existingMaterials, availableTemplates, userSavedRates } = body;
@@ -2171,6 +2176,10 @@ async function analyzeJobDescriptionCore(uid: string, body: any): Promise<Record
     if (jobDescription.length > 50000) {
       throw new BadRequestError('jobDescription exceeds maximum length');
     }
+
+    // Marked before any attachment fetch or LLM call, so a phone that finds
+    // no document at all can tell "never landed" from "still working".
+    await handoff.started();
 
     // Effective attachment set: any client-provided base64 (native local
     // files) plus Storage URLs fetched server-side (the usual case, and what
@@ -2491,7 +2500,7 @@ async function analyzeJobDescriptionCore(uid: string, body: any): Promise<Record
       latencyMs: Date.now() - t0,
     }).catch(() => {});
 
-    return {
+    const payload = {
       materials: anchoredMaterials,
       estimatedHours: parsed.estimatedHours || 8,
       jobSummary: parsed.jobSummary || '',
@@ -2502,9 +2511,14 @@ async function analyzeJobDescriptionCore(uid: string, body: any): Promise<Record
       // from a genuinely plan-less one instead of silently pricing blind.
       ...(dropped.length > 0 && { droppedAttachments: dropped }),
     };
+    // Parked BEFORE the response goes out. If it never arrives, the gear list
+    // is a Firestore read away instead of gone with the socket.
+    await handoff.done(payload);
+    return payload;
   } catch (error: any) {
     // A rejected request isn't a failed analyse: no telemetry, no error email.
     if (error instanceof BadRequestError) throw error;
+    await handoff.failed(error?.message || 'The analyse failed on the server.');
     recordMaterialsRecommend({
       uid,
       success: false,

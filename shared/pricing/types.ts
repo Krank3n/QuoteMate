@@ -362,6 +362,19 @@ export interface ReeceCandidate {
 /** What the analyse step sends to analyzeJobDescription. */
 export interface AnalyzeRequest {
   jobDescription: string;
+  /**
+   * The quote this analyse is for. Phone-only: lets the analyse ledger tie
+   * the request id to a draft so a later process can collect the result
+   * after an app kill (src/services/analyseLedger.ts). Never sent to the
+   * server; the server-side pipeline ignores it.
+   */
+  quoteId?: string;
+  /**
+   * Phone-only. A result a PREVIOUS process parked and this one has already
+   * collected: return it instead of asking the server. Set only by
+   * analyseResume; the server-side pipeline never sees it.
+   */
+  resume?: { requestId: string; result: Record<string, unknown> };
   tradeContext?: {
     categoryName?: string;
     nicheName?: string;

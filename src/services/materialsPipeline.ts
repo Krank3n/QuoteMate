@@ -41,6 +41,7 @@ export const phonePipelineDeps: PipelineDeps = {
       req.existingMaterials,
       req.availableTemplates,
       req.userSavedRates,
+      { quoteId: req.quoteId, resume: req.resume },
     ),
   reconcilePricedMaterials: (items, context) => reconcilePricedMaterials(items, context),
   estimateMaterialPrice: (term, stores) => searchMaterialPrice(term, stores),

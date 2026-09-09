@@ -62,6 +62,7 @@ import { ensureJobForDocument, ensureJobForQuote, useJobStore } from './useJobSt
 import { canAnalysePhotos, canRunMatePipeline } from './planGates';
 import { markPricingStarted, markPricingFinished, isPricingInFlight } from '../services/assistant/pricingInFlight';
 import { canUpdateScope } from '../services/assistant/scopeEditable';
+import { pipelineSnagNote } from '../services/assistant/pipelineSnagCopy';
 import { runPipelineOnServer } from '../services/serverPricingRun';
 import { PRICING_RUN_LEDGER_KEY } from '../services/pricingRunLedger';
 
@@ -390,6 +391,12 @@ export type ApplyProposalResult =
        * the card underneath read "Couldn't finish pricing that one."
        */
       pipelineDegraded?: true;
+      /**
+       * Rows on the quote when the pipeline degraded. Zero means the analyse
+       * itself never landed, and the wizard step it was parked on shows
+       * "Build my list", not "Fetch Prices" — see pipelineSnagCopy.
+       */
+      materialCount?: number;
       review?: QuoteReview;
       /** How much of this quote the tradie's own supplier rates could price. */
       supplierGap?: SupplierGapSummary;
@@ -3408,7 +3415,7 @@ export const useStore = create<AppState>((set, get) => ({
     type ScopePipelineRun =
       | { kind: 'done'; review: QuoteReview; supplierGap: SupplierGapSummary }
       | { kind: 'cancelled' }
-      | { kind: 'degraded'; error: string };
+      | { kind: 'degraded'; error: string; materialCount: number };
     const runScopePipeline = async (
       quoteId: string,
       initial: WorkingStatus,
@@ -3631,6 +3638,14 @@ export const useStore = create<AppState>((set, get) => ({
         // eslint-disable-next-line no-console
         console.warn('[Mate] pipeline failed', err);
         const serverSide = err instanceof ServerRunFailed;
+        // A getter, not a value: it has to be read AFTER the quote below has
+        // been parked. Counts exactly what MaterialsListScreen counts, because
+        // that row count is what decides whether the button the snag note
+        // names is on the screen at all.
+        const rowsOnQuote = () => {
+          const q = get().currentQuote;
+          return q && q.id === quoteId ? (q.materials?.length ?? 0) : 0;
+        };
         onProgress?.({
           phase: 'failed',
           status: "Couldn't finish pricing that one.",
@@ -3654,7 +3669,7 @@ export const useStore = create<AppState>((set, get) => ({
             const parked = get().currentQuote;
             if (parked && parked.id === quoteId) get().updateQuote({ ...parked, draftStep: 'MaterialsList' });
           }
-          return { kind: 'degraded', error: err?.message || 'unknown' };
+          return { kind: 'degraded', error: err?.message || 'unknown', materialCount: rowsOnQuote() };
         }
         // The draft exists but its prices don't. Park it on the wizard step
         // that carries Fetch Prices so the dashboard banner can resume it.
@@ -3663,7 +3678,7 @@ export const useStore = create<AppState>((set, get) => ({
           get().updateQuote({ ...parked, draftStep: 'MaterialsList' });
           await get().saveDraft(get().currentQuote!).catch(() => {});
         }
-        return { kind: 'degraded', error: err?.message || 'unknown' };
+        return { kind: 'degraded', error: err?.message || 'unknown', materialCount: rowsOnQuote() };
       } finally {
         // Clear on every exit — success, snag, or cancellation. A quote left
         // flagged would have show_quote refusing it forever.
@@ -3925,7 +3940,8 @@ export const useStore = create<AppState>((set, get) => ({
               ok: true,
               navigate: { kind: 'job_preview', quoteId },
               pipelineDegraded: true,
-              note: `Pipeline snag — opened the draft, tap Fetch Prices in the wizard. (${run.error})`,
+              materialCount: run.materialCount,
+              note: pipelineSnagNote({ stage: 'draft', materialCount: run.materialCount, error: run.error }),
             };
           }
           const { review, supplierGap } = run;
@@ -4032,7 +4048,8 @@ export const useStore = create<AppState>((set, get) => ({
               ok: true,
               navigate: { kind: 'job_preview', quoteId },
               pipelineDegraded: true,
-              note: `Pipeline snag — the scope's updated but pricing didn't finish; tap Fetch Prices in the wizard. (${run.error})`,
+              materialCount: run.materialCount,
+              note: pipelineSnagNote({ stage: 'scope', materialCount: run.materialCount, error: run.error }),
             };
           }
           return {

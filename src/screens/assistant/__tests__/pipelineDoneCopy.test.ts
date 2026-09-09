@@ -89,6 +89,29 @@ describe('buildPipelineDonePrompt — apply succeeded but pricing did not', () =
     expect(prompt).toContain('Fetch Prices');
   });
 
+  it('names Build my list when the analyse never landed, not a button with no rows to render it', () => {
+    // 7 Sep 2026: the analyse fetch lost its response, the draft was parked
+    // with zero materials, and MaterialsList renders Fetch Prices only when
+    // materials.length > 0. Naming it sent the tradie looking for nothing.
+    const noRows = buildPipelineDonePrompt({
+      jobLabel: 'Interior repaint', ok: true, pipelineDegraded: true, materialCount: 0,
+    });
+    expect(noRows).toContain('Build my list');
+    expect(noRows).not.toContain('Fetch Prices');
+    expect(noRows).toMatch(/no gear list/i);
+    // Still not allowed to round the outcome up.
+    expect(affirmative(noRows)).not.toMatch(DONE_WORDS);
+    expect(noRows).toMatch(/Do NOT say it's done, drafted, sorted, ready, or finished/);
+  });
+
+  it('keeps the priced wording when there are rows waiting on prices', () => {
+    const withRows = buildPipelineDonePrompt({
+      jobLabel: 'Raised deck', ok: true, pipelineDegraded: true, materialCount: 18,
+    });
+    expect(withRows).toContain('Fetch Prices');
+    expect(withRows).toMatch(/no prices/i);
+  });
+
   it('does not read as the clean-run prompt', () => {
     const clean = buildPipelineDonePrompt({ jobLabel: 'Raised deck', ok: true });
     expect(prompt).not.toBe(clean);
