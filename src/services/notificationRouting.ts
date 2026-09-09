@@ -60,3 +60,14 @@ export function routeForNotification(data: unknown): PushRoute | null {
 
   return null;
 }
+
+/**
+ * Resolve a notification tap to a route, but only once it's safe to act on
+ * one — RootNavigator (home of every screen this can return) mounts only
+ * after onboarding finishes; navigating before then throws "not handled by
+ * any navigator" (the production bug this guards, Sentry #163).
+ */
+export function resolvableNotificationRoute(data: unknown, mainAppMounted: boolean): PushRoute | null {
+  if (!mainAppMounted) return null;
+  return routeForNotification(data);
+}
