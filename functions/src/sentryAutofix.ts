@@ -22,6 +22,7 @@ import * as admin from 'firebase-admin';
 import {
   verifySentrySignature,
   parseSentryAlert,
+  isActionableLevel,
   buildIssueTitle,
   buildIssueBody,
   dailyKey,
@@ -84,6 +85,18 @@ export const sentryAutofix = functions.https.onRequest(async (req, res) => {
   const bug = parseSentryAlert(req.body, SENTRY_ORG_SLUG);
   if (!bug) {
     res.status(200).json({ skipped: 'not an issue alert' });
+    return;
+  }
+
+  // Deliberate warning-level reports (reportIssue → captureMessage) are not
+  // crashes; ticketing them only produces "not a bug" write-ups.
+  if (!isActionableLevel(bug.level)) {
+    functions.logger.info('sentryAutofix: skipping non-crash event', {
+      issueId: bug.issueId,
+      level: bug.level,
+      title: bug.title,
+    });
+    res.status(200).json({ skipped: `level ${bug.level} is not a crash` });
     return;
   }
 
