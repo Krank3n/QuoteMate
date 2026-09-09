@@ -7,7 +7,7 @@
  * nowhere else — same reason as pricingRunDoc.
  *
  * Why it exists: analyzeJobDescription routinely runs 40–150 s (featureUsage
- * says so). On 7 Sep 2026 one ran 108.8 s, finished 200, and the tradie got
+ * says so). On 7 Sep 2026 one ran close to two minutes, finished 200, and the tradie got
  * nothing — iOS had suspended the app during the wait and dropped the socket,
  * so the phone raised "Network request failed" and binned a gear list the
  * server had already generated and billed for. The result is now parked here
@@ -54,6 +54,22 @@ export const HANDOFF_DEADLINE_MS = 450_000;
  */
 export const HANDOFF_FETCH_BACKSTOP_MS = 300_000;
 
+/**
+ * A fetch that fails this soon after sending never left the phone — DNS,
+ * airplane mode, no route. Waiting 20 s for a parked result that cannot
+ * exist turned every offline tap into a 20 s stall; the ledger entry is
+ * kept instead, so a later launch still checks.
+ */
+export const HANDOFF_FAST_FAIL_MS = 5_000;
+
+/**
+ * How long the IN-PROCESS wait will sit on a run the server says is still
+ * running. The tradie is watching a card and the screen is held awake for
+ * it; past this the entry is left in the ledger for a later launch, which
+ * may wait to the server's own deadline with nobody staring at it.
+ */
+export const HANDOFF_INPROCESS_WAIT_MS = 120_000;
+
 export type AnalyseHandoffVerdict =
   | { kind: 'wait' }
   | { kind: 'done'; result: Record<string, unknown> }
@@ -62,16 +78,26 @@ export type AnalyseHandoffVerdict =
   | { kind: 'give-up'; reason: string };
 
 /**
+ * The two clocks a verdict needs. They answer different questions:
+ *   sinceSentMs — how much of the server's 420 s budget is gone. A phone that
+ *                 woke up four minutes after sending has spent most of it.
+ *   sinceWaitMs — how long THIS phone has been looking. A document that is
+ *                 absent has to be absent for a while before that means
+ *                 anything; judged on the send clock, a phone that woke up
+ *                 late got no window at all and gave up on the first read.
+ */
+export interface HandoffClocks {
+  sinceSentMs: number;
+  sinceWaitMs: number;
+}
+
+/**
  * What to do with the handoff document as it stands. Pure so the waiting
  * logic can be tested without Firestore or a device.
- *
- * `elapsedMs` is measured from when the REQUEST was sent, not from when the
- * phone started waiting — the server's 420 s clock started then, and a phone
- * that woke up four minutes later has already spent most of it.
  */
 export function readAnalyseHandoff(
   record: AnalyseRunRecord | null | undefined,
-  elapsedMs: number,
+  clocks: HandoffClocks,
 ): AnalyseHandoffVerdict {
   if (record?.status === 'done' && record.result) {
     return { kind: 'done', result: record.result };
@@ -87,11 +113,11 @@ export function readAnalyseHandoff(
     return { kind: 'give-up', reason: 'the result could not be parked' };
   }
   if (!record) {
-    return elapsedMs >= HANDOFF_GRACE_MS
+    return clocks.sinceWaitMs >= HANDOFF_GRACE_MS
       ? { kind: 'give-up', reason: 'the analyse never reached the server' }
       : { kind: 'wait' };
   }
-  return elapsedMs >= HANDOFF_DEADLINE_MS
+  return clocks.sinceSentMs >= HANDOFF_DEADLINE_MS
     ? { kind: 'give-up', reason: 'the analyse ran out of time' }
     : { kind: 'wait' };
 }

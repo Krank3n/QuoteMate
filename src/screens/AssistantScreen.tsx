@@ -817,6 +817,7 @@ export function AssistantScreen() {
       io: defaultServerRunIo,
       now: () => Date.now(),
       quoteTotal: (quoteId) => useStore.getState().quotes.find((q) => q.id === quoteId)?.total,
+      materialCount: (quoteId) => useStore.getState().quotes.find((q) => q.id === quoteId)?.materials?.length,
       appendMessage: (message) => appendMessage(convoId, message),
       updateMessage: (messageId, patch) => updateMessage(convoId, messageId, patch),
       noteToMate: (text) => noteToMate(convoId, text),

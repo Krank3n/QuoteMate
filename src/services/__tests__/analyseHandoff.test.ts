@@ -22,6 +22,7 @@ import {
 import {
   HANDOFF_DEADLINE_MS,
   HANDOFF_GRACE_MS,
+  HANDOFF_INPROCESS_WAIT_MS,
   type AnalyseRunRecord,
 } from '../../../shared/pricing/analyseRunDoc';
 
@@ -29,7 +30,7 @@ const RESULT = { materials: [{ name: 'Dulux Wash & Wear 10L', quantity: 6 }], es
 
 function fakeIo(overrides: Partial<AnalyseHandoffIo> = {}) {
   let clock = 0;
-  let publish: ((r: AnalyseRunRecord | null) => void) | null = null;
+  let publish: ((r: AnalyseRunRecord | null, meta: { fromCache: boolean }) => void) | null = null;
   let fail: ((e: unknown) => void) | null = null;
   const forgotten: string[] = [];
   let unsubscribed = 0;
@@ -53,8 +54,10 @@ function fakeIo(overrides: Partial<AnalyseHandoffIo> = {}) {
   return {
     io,
     server: {
-      /** Firestore answering — with a record, or with "no such document". */
-      say: (record: AnalyseRunRecord | null) => publish?.(record),
+      /** Firestore answering from the SERVER — with a record, or with "no such document". */
+      say: (record: AnalyseRunRecord | null) => publish?.(record, { fromCache: false }),
+      /** The SDK answering from its local cache before it has heard from the server. */
+      sayFromCache: (record: AnalyseRunRecord | null) => publish?.(record, { fromCache: true }),
       erupt: (e: unknown) => fail?.(e),
       /** Move the injected clock without running any timers. */
       set: (ms: number) => {
@@ -125,9 +128,37 @@ describe('waitForParkedAnalyse', () => {
     });
   });
 
-  it('gives up on a run still marked running past the function timeout', async () => {
+  it('stops waiting on a still-running run after the in-process cap — the ledger keeps it', async () => {
+    // A stuck `running` doc used to hold the card (and the keep-awake) for
+    // the full 450 s. In-process patience is shorter; a later launch may
+    // wait to the server's deadline with nobody watching.
     const { io, server } = fakeIo();
     const pending = waitForParkedAnalyse('req-1', 0, io);
+    server.say({ status: 'running', startedAt: 'x' });
+    server.set(HANDOFF_INPROCESS_WAIT_MS);
+    await vi.advanceTimersByTimeAsync(HANDOFF_TICK_MS + 10);
+    await expect(pending).resolves.toEqual({ kind: 'gone', reason: 'still running' });
+  });
+
+  it('lets a caller with nobody watching wait to the server deadline instead', async () => {
+    const { io, server } = fakeIo();
+    const pending = waitForParkedAnalyse('req-1', 0, io, { maxWaitMs: HANDOFF_DEADLINE_MS });
+    server.say({ status: 'running', startedAt: 'x' });
+    server.set(HANDOFF_INPROCESS_WAIT_MS + 1_000);
+    await vi.advanceTimersByTimeAsync(HANDOFF_TICK_MS + 10);
+    let settled = false;
+    void pending.then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    server.say({ status: 'done', startedAt: 'x', result: RESULT });
+    await expect(pending).resolves.toEqual({ kind: 'done', result: RESULT });
+  });
+
+  it('gives up on a run still marked running past the function timeout', async () => {
+    const { io, server } = fakeIo();
+    const pending = waitForParkedAnalyse('req-1', 0, io, { maxWaitMs: HANDOFF_DEADLINE_MS });
     server.say({ status: 'running', startedAt: 'x' });
     server.set(HANDOFF_DEADLINE_MS);
     await vi.advanceTimersByTimeAsync(HANDOFF_TICK_MS + 10);
@@ -155,6 +186,45 @@ describe('waitForParkedAnalyse', () => {
       kind: 'gone',
       reason: 'could not read the parked result',
     });
+  });
+
+  it('ignores a cached "does not exist" — an offline SDK has not heard from the server', async () => {
+    // The 7 Sep shape again, but the phone wakes up offline: the SDK answers
+    // from cache that it has never seen the document. That is not the server
+    // saying the request never landed, and past the grace period it used to
+    // be read as exactly that — discarding a result parked on the server.
+    const { io, server } = fakeIo();
+    server.set(234_000);
+    const pending = waitForParkedAnalyse('req-1', 0, io);
+    server.sayFromCache(null);
+    await vi.advanceTimersByTimeAsync(HANDOFF_TICK_MS);
+    let settled = false;
+    void pending.then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    // The server comes back with the real answer.
+    server.say({ status: 'done', startedAt: 'x', result: RESULT });
+    await expect(pending).resolves.toEqual({ kind: 'done', result: RESULT });
+  });
+
+  it('still gives up as unreadable when only the cache ever answers', async () => {
+    const { io, server } = fakeIo();
+    const pending = waitForParkedAnalyse('req-1', 0, io);
+    server.sayFromCache(null);
+    server.set(HANDOFF_GRACE_MS);
+    await vi.advanceTimersByTimeAsync(HANDOFF_TICK_MS + 10);
+    // "could not read", NOT "never reached the server" — the caller keeps the ledger entry.
+    await expect(pending).resolves.toEqual({ kind: 'gone', reason: 'could not read the parked result' });
+  });
+
+  it('accepts a cached RECORD — it came from the server once', async () => {
+    const { io, server } = fakeIo();
+    const pending = waitForParkedAnalyse('req-1', 0, io);
+    server.sayFromCache({ status: 'done', startedAt: 'x', result: RESULT });
+    await expect(pending).resolves.toEqual({ kind: 'done', result: RESULT });
   });
 
   it('unsubscribes a watch that answers during subscribe — the signed-out path', async () => {

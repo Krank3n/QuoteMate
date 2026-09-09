@@ -1,10 +1,11 @@
 /**
  * Regression test for the 7 Sep 2026 lost analyse.
  *
- * On an interior-repaint draft, analyzeJobDescription started 10:51:31Z and
- * finished 200 after 108,834 ms — users/{uid}/featureUsage/20260907 recorded
- * the run as a success. The tradie got nothing. iOS had suspended the app during the wait, the socket died,
- * and at 10:55:26Z the phone raised `TypeError: Network request failed` and
+ * On an interior-repaint draft, analyzeJobDescription ran close to two
+ * minutes and finished 200 — the server's own usage counter recorded the run
+ * as a success. The tradie got nothing. iOS had suspended the app during the
+ * wait, the socket died, and some four minutes after sending the phone raised
+ * `TypeError: Network request failed` and
  * threw away a finished gear list. The quote was never written again: zero
  * materials, no draftStep, and Mate told them to tap a button that isn't on
  * screen when there are no rows.
@@ -39,12 +40,12 @@ vi.mock('firebase/firestore', () => ({
   },
   onSnapshot: (
     ref: { id: string },
-    next: (snap: { exists: () => boolean; data: () => any }) => void,
+    next: (snap: { exists: () => boolean; data: () => any; metadata: { fromCache: boolean } }) => void,
     _err: (e: unknown) => void,
   ) => {
     const timer = setTimeout(() => {
       const record = parked.get(ref.id);
-      next({ exists: () => !!record, data: () => record });
+      next({ exists: () => !!record, data: () => record, metadata: { fromCache: false } });
     }, snapshotDelayMs);
     return () => clearTimeout(timer);
   },
@@ -53,9 +54,8 @@ vi.mock('firebase/firestore', () => ({
 const fetchMock = vi.fn();
 
 const SCOPE =
-  'Interior repaint of a single-storey 4-bedroom, 2-bathroom house including theatre room, ' +
-  'hallway, and open-plan kitchen/living. Paint walls, ceilings and trims throughout, two coats, ' +
-  'standard white colour scheme. Includes small patch works throughout, sanding and gapping.';
+  'Interior repaint of a three-bedroom house: walls, ceilings and trims throughout, two coats, ' +
+  'standard whites, minor patching and sanding.';
 
 const SERVER_PAYLOAD = {
   materials: [
@@ -96,18 +96,22 @@ afterEach(() => {
 describe('analyzeJobDescription when the response never comes home', () => {
   it('collects the parked result instead of throwing "Network request failed"', async () => {
     // The server finished and parked its answer; the phone's socket is dead.
+    vi.useFakeTimers();
     fetchMock.mockImplementation((_url: string, init: any) => {
       parked.set(JSON.parse(init.body).requestId, {
         status: 'done',
-        startedAt: '2026-09-07T10:51:31.886Z',
-        finishedAt: '2026-09-07T10:53:20.721Z',
+        startedAt: '2026-09-07T10:00:00.000Z',
+        finishedAt: '2026-09-07T10:02:00.000Z',
         result: SERVER_PAYLOAD,
       });
-      return Promise.reject(new TypeError('Network request failed'));
+      // A dead socket, noticed minutes later — not an offline tap.
+      return new Promise((_r, reject) => setTimeout(() => reject(new TypeError('Network request failed')), 234_000));
     });
 
     const { analyzeJobDescription } = await importFresh();
-    const result = await analyzeJobDescription(SCOPE);
+    const pending = analyzeJobDescription(SCOPE);
+    await vi.advanceTimersByTimeAsync(234_000 + 100);
+    const result = await pending;
 
     expect(result.materials).toHaveLength(2);
     expect(result.materials[0].name).toBe('Dulux Wash & Wear Low Sheen White 10L');
@@ -134,28 +138,43 @@ describe('analyzeJobDescription when the response never comes home', () => {
 
   it('still fails when the request never reached the server', async () => {
     vi.useFakeTimers();
-    fetchMock.mockRejectedValue(new TypeError('Network request failed'));
+    // Rejects late enough to be a dead socket, not an offline tap.
+    fetchMock.mockImplementation(() => new Promise((_r, reject) => setTimeout(() => reject(new TypeError('Network request failed')), 10_000)));
     const { analyzeJobDescription } = await importFresh();
 
     const pending = analyzeJobDescription(SCOPE);
     const assertion = expect(pending).rejects.toThrow('Network request failed');
     // Nothing was ever parked, so the wait runs out its grace period.
-    await vi.advanceTimersByTimeAsync(30_000);
+    await vi.advanceTimersByTimeAsync(10_000 + 30_000);
+    await assertion;
+  });
+
+  it('fails at once when the fetch dies within the fast-fail window — an offline tap', async () => {
+    vi.useFakeTimers();
+    fetchMock.mockRejectedValue(new TypeError('Network request failed'));
+    const { analyzeJobDescription } = await importFresh();
+    const pending = analyzeJobDescription(SCOPE);
+    const assertion = expect(pending).rejects.toThrow('Network request failed');
+    await vi.advanceTimersByTimeAsync(50);
     await assertion;
   });
 
   it('surfaces a genuine server-side failure rather than the transport error', async () => {
+    vi.useFakeTimers();
     fetchMock.mockImplementation((_url: string, init: any) => {
       parked.set(JSON.parse(init.body).requestId, {
         status: 'failed',
         error: 'Claude returned 529',
-        startedAt: '2026-09-07T10:51:31.886Z',
+        startedAt: '2026-09-07T10:00:00.000Z',
       });
-      return Promise.reject(new TypeError('Network request failed'));
+      return new Promise((_r, reject) => setTimeout(() => reject(new TypeError('Network request failed')), 10_000));
     });
 
     const { analyzeJobDescription } = await importFresh();
-    await expect(analyzeJobDescription(SCOPE)).rejects.toThrow('Claude returned 529');
+    const pending = analyzeJobDescription(SCOPE);
+    const assertion = expect(pending).rejects.toThrow('Claude returned 529');
+    await vi.advanceTimersByTimeAsync(10_000 + 100);
+    await assertion;
   });
 
   it('does not go looking for a parked result when the server answered and refused', async () => {
@@ -166,6 +185,21 @@ describe('analyzeJobDescription when the response never comes home', () => {
     // No timers are advanced: a refusal must resolve immediately, not sit in
     // the handoff wait for its grace period.
     await expect(analyzeJobDescription(SCOPE)).rejects.toThrow('Too many requests');
+  });
+
+  it('names a request that never settled and had nothing parked, instead of a bare "Aborted"', async () => {
+    vi.useFakeTimers();
+    fetchMock.mockImplementation(
+      (_url: string, init: any) =>
+        new Promise((_resolve, reject) => {
+          init.signal.addEventListener('abort', () => reject(Object.assign(new Error('Aborted'), { name: 'AbortError' })));
+        }),
+    );
+    const { analyzeJobDescription } = await importFresh();
+    const pending = analyzeJobDescription(SCOPE);
+    const assertion = expect(pending).rejects.toThrow(/took too long/);
+    await vi.advanceTimersByTimeAsync(310_000 + 30_000);
+    await assertion;
   });
 
   it('lets go of a request that never settles and reads the result instead', async () => {

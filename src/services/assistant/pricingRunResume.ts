@@ -19,6 +19,7 @@ import { summarisePriceCounts } from '../../../shared/pricing/progress';
 import { formatCurrency } from '../../utils/quoteCalculator';
 import { generateId } from '../../utils/generateId';
 import type { LedgerEntry } from '../pricingRunLedger';
+import { snagStepLabel } from './pipelineSnagCopy';
 import { STALE_TIMEOUT_MS, watchServerRun, type ServerRunIo, type ServerRunOutcome } from '../serverPricingRun';
 
 export type ResumePlan =
@@ -56,8 +57,11 @@ function doneCard(entry: LedgerEntry, record: PricingRunRecord, quoteTotal: numb
   };
 }
 
-function snagCard(entry: LedgerEntry, reason: string, cancel = false): ResumePlan {
+function snagCard(entry: LedgerEntry, reason: string, cancel = false, materialCount?: number): ResumePlan {
   const job = jobLabel(entry);
+  // A server run that died in the analyse phase left no rows, and the step
+  // it parked on then shows "Build my list", not "Fetch Prices".
+  const step = snagStepLabel(materialCount);
   return {
     kind: 'card',
     working: {
@@ -70,7 +74,7 @@ function snagCard(entry: LedgerEntry, reason: string, cancel = false): ResumePla
     ctaLabel: 'Open the quote',
     note:
       `[context] Pricing for quote ${entry.quoteId} ("${job}") did not finish while the app was closed (${reason}). ` +
-      `The draft and its gear list are saved on the Fetch Prices step. Reference this id; do NOT draft a new quote ` +
+      `The draft is saved on the ${step} step. Reference this id; do NOT draft a new quote ` +
       `for the same job — offer propose_reprice on ${entry.quoteId} if they want another go.`,
     cancel,
   };
@@ -79,24 +83,24 @@ function snagCard(entry: LedgerEntry, reason: string, cancel = false): ResumePla
 export function resumePlanFor(
   entry: LedgerEntry,
   record: PricingRunRecord | null,
-  context: { nowMs: number; quoteTotal?: number },
+  context: { nowMs: number; quoteTotal?: number; materialCount?: number },
 ): ResumePlan {
   if (!record) return { kind: 'drop' };
   switch (record.status) {
     case 'done':
       return doneCard(entry, record, context.quoteTotal);
     case 'failed':
-      return snagCard(entry, record.error || 'the server reported a failure');
+      return snagCard(entry, record.error || 'the server reported a failure', false, context.materialCount);
     case 'cancelled':
-      return snagCard(entry, 'the run was cancelled');
+      return snagCard(entry, 'the run was cancelled', false, context.materialCount);
     case 'queued':
       // The phone died before its queue watchdog could fall back, and no
       // function ever claimed it.
-      return snagCard(entry, 'nothing picked the run up', true);
+      return snagCard(entry, 'nothing picked the run up', true, context.materialCount);
     case 'running': {
       const lastHeard = Date.parse(record.updatedAt || record.startedAt || record.createdAt);
       const quiet = Number.isFinite(lastHeard) ? context.nowMs - lastHeard : Number.POSITIVE_INFINITY;
-      return quiet > STALE_TIMEOUT_MS ? snagCard(entry, 'the server stopped reporting progress') : { kind: 'watch' };
+      return quiet > STALE_TIMEOUT_MS ? snagCard(entry, 'the server stopped reporting progress', false, context.materialCount) : { kind: 'watch' };
     }
     default:
       return { kind: 'drop' };
@@ -104,12 +108,12 @@ export function resumePlanFor(
 }
 
 /** The card the watcher's outcome becomes, once a re-attached run settles. */
-export function planForOutcome(entry: LedgerEntry, outcome: ServerRunOutcome, quoteTotal: number | undefined): ResumePlan {
+export function planForOutcome(entry: LedgerEntry, outcome: ServerRunOutcome, quoteTotal: number | undefined, materialCount?: number): ResumePlan {
   if (outcome.kind === 'done') {
     return doneCard(entry, { status: 'done', result: outcome.result } as PricingRunRecord, quoteTotal);
   }
-  if (outcome.kind === 'failed') return snagCard(entry, outcome.error);
-  return snagCard(entry, outcome.reason);
+  if (outcome.kind === 'failed') return snagCard(entry, outcome.error, false, materialCount);
+  return snagCard(entry, outcome.reason, false, materialCount);
 }
 
 export interface ResumeDeps {
@@ -117,6 +121,8 @@ export interface ResumeDeps {
   now(): number;
   /** The quote's total as the phone currently knows it, for the card's money line. */
   quoteTotal(quoteId: string): number | undefined;
+  /** Rows on the quote as the phone has it — decides which wizard button the note names. */
+  materialCount?(quoteId: string): number | undefined;
   appendMessage(message: ChatMessage): void;
   updateMessage(messageId: string, patch: Partial<ChatMessage>): void;
   noteToMate(text: string): void;
@@ -176,7 +182,7 @@ export async function resumeUnfinishedPricingRuns(deps: ResumeDeps): Promise<num
       // Offline: leave the ledger entry for next time.
       continue;
     }
-    const plan = resumePlanFor(entry, record, { nowMs: deps.now(), quoteTotal: deps.quoteTotal(entry.quoteId) });
+    const plan = resumePlanFor(entry, record, { nowMs: deps.now(), quoteTotal: deps.quoteTotal(entry.quoteId), materialCount: deps.materialCount?.(entry.quoteId) });
     if (plan.kind === 'drop') {
       deps.io.ledger.settled(entry.runId).catch(() => {});
       continue;

@@ -65,6 +65,8 @@ import { canUpdateScope } from '../services/assistant/scopeEditable';
 import { pipelineSnagNote } from '../services/assistant/pipelineSnagCopy';
 import { runPipelineOnServer } from '../services/serverPricingRun';
 import { PRICING_RUN_LEDGER_KEY } from '../services/pricingRunLedger';
+import { ANALYSE_LEDGER_KEY } from '../services/analyseLedger';
+import { resetAnalyseResume } from '../services/analyseResume';
 
 /**
  * A run the server owned failed (or went quiet). The server has already
@@ -143,7 +145,13 @@ interface AppState {
   createNewQuote: (source?: 'new_quote' | 'mate') => void;
   setCurrentQuote: (quote: Quote | null) => void;
   saveQuote: (quote: Quote) => Promise<void>;
-  saveDraft: (quote: Quote) => Promise<void>;
+  /**
+   * Persist a quote. By default it also becomes currentQuote — every wizard
+   * and chat caller wants that. A BACKGROUND caller (the launch-time analyse
+   * resume) passes makeCurrent:false, or it would swap the quote the tradie
+   * is looking at for one they aren't.
+   */
+  saveDraft: (quote: Quote, options?: { makeCurrent?: boolean }) => Promise<void>;
   deleteQuote: (quoteId: string) => Promise<void>;
   duplicateQuote: (quote: Quote) => Promise<void>;
   updateQuote: (quote: Quote) => void;
@@ -792,7 +800,7 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   // Save draft to storage (lightweight, no quota check or number assignment)
-  saveDraft: async (quote: Quote) => {
+  saveDraft: async (quote: Quote, options: { makeCurrent?: boolean } = {}) => {
     try {
       // Forward-only TYPE guard. If the unified Document with this id has
       // already been promoted to type='invoice' (via Phase-5
@@ -862,8 +870,10 @@ export const useStore = create<AppState>((set, get) => ({
         JSON.stringify(updatedQuotes)
       );
 
-      // Update state
-      set({ quotes: updatedQuotes, currentQuote: calculatedQuote });
+      // Update state. A background save keeps whatever is current — unless
+      // the current quote IS this one, which must not be left stale.
+      const makeCurrent = options.makeCurrent !== false || get().currentQuote?.id === calculatedQuote.id;
+      set(makeCurrent ? { quotes: updatedQuotes, currentQuote: calculatedQuote } : { quotes: updatedQuotes });
 
       // Sync to Firestore in background
       if (auth.currentUser) {
@@ -3577,6 +3587,9 @@ export const useStore = create<AppState>((set, get) => ({
             businessSettings: get().businessSettings,
             isPro,
             templates,
+            // The two modes below rework the analyse after the fact; a
+            // launch-time resume would land the raw list instead.
+            resumable: !options.labourOnly && rateLineCount === 0,
           },
           {
             onEvent: (event) => {
@@ -3643,8 +3656,12 @@ export const useStore = create<AppState>((set, get) => ({
         // that row count is what decides whether the button the snag note
         // names is on the screen at all.
         const rowsOnQuote = () => {
-          const q = get().currentQuote;
-          return q && q.id === quoteId ? (q.materials?.length ?? 0) : 0;
+          // By id, not via currentQuote: Mate keeps talking during the run and
+          // the tradie may have moved on, which read as "no rows" and named
+          // the wrong button.
+          const current = get().currentQuote;
+          const q = current && current.id === quoteId ? current : get().quotes.find((x) => x.id === quoteId);
+          return q?.materials?.length ?? 0;
         };
         onProgress?.({
           phase: 'failed',
@@ -4834,6 +4851,7 @@ export const useStore = create<AppState>((set, get) => ({
         STORAGE_KEYS.CONTACTS_MIGRATED,
         STORAGE_KEYS.CONVERSATIONS,
         PRICING_RUN_LEDGER_KEY,
+        ANALYSE_LEDGER_KEY,
         // The Supplier Book cache (materialFavorites.ts, which can't be
         // imported here without a cycle). It is user data: left behind, the
         // next account on this phone would be priced off this one's rates,
@@ -4844,6 +4862,8 @@ export const useStore = create<AppState>((set, get) => ({
         // reasoning as appearance, which also survives sign-out. Don't "fix"
         // this by adding it.
       ]);
+      // A new account in the same process gets its own resume pass.
+      resetAnalyseResume();
       // Reset store state to initial values
       set({
         businessSettings: null,

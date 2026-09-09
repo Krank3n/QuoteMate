@@ -145,6 +145,13 @@ export interface GenerateMaterialsArgs<Q extends PricingQuote = PricingQuote> {
    * call (rates, sections, hours) runs exactly as it would have.
    */
   resume?: { requestId: string; result: Record<string, unknown> };
+  /**
+   * Phone-only. False when the caller post-processes the analyse in a way
+   * a launch-time resume can't reproduce — labour-only drafts and rate-card
+   * runs strip or drop the gear list afterwards — so the request is not put
+   * in the analyse ledger and a resume can never land the full list on them.
+   */
+  resumable?: boolean;
 }
 
 export interface GenerateMaterialsCallbacks {
@@ -247,7 +254,7 @@ export async function generateMaterialsForQuote<Q extends PricingQuote>(
     existingMaterials: existingMatsForAi,
     availableTemplates: templateDataForAi,
     userSavedRates: userSavedRatesForAi,
-    quoteId: quote.id,
+    ...(args.resumable === false ? {} : { quoteId: quote.id }),
     ...(args.resume ? { resume: args.resume } : {}),
   });
 

@@ -23,7 +23,7 @@ function memoryStorage(seed: Record<string, string> = {}) {
   return { storage, raw: () => store.get(ANALYSE_LEDGER_KEY) ?? null };
 }
 
-const NOW = 1_788_778_288_262; // 7 Sep 2026 10:51:28Z — when the incident's draft was minted.
+const NOW = 1_800_000_000_000; // an arbitrary fixed instant
 
 describe('analyse ledger', () => {
   it('remembers a request until it is settled', async () => {

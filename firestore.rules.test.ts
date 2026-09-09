@@ -192,8 +192,8 @@ describe('users/{uid}/analyseRuns (parked analyse results)', () => {
   const RUN_PATH = 'users/alice/analyseRuns/req-1';
   const parked = {
     status: 'done',
-    startedAt: '2026-09-07T10:51:31.886Z',
-    finishedAt: '2026-09-07T10:53:20.721Z',
+    startedAt: '2026-09-07T10:00:00.000Z',
+    finishedAt: '2026-09-07T10:02:00.000Z',
     result: { materials: [{ name: 'Ceiling White 15L' }], estimatedHours: 64 },
   };
 
