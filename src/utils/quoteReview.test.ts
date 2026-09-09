@@ -82,6 +82,19 @@ describe('reviewQuoteMaterials', () => {
     expect(review.issues[0].detail).toMatch(/low-confidence/i);
   });
 
+  it('does not crash when description is a non-string value from unvalidated pipeline output', () => {
+    // Regression for Sentry #7686809678: LLM reconciliation output isn't
+    // schema-validated, so `description` can occasionally be a non-string
+    // truthy value (e.g. a number), which used to throw `TypeError: .trim is
+    // not a function` inside reviewQuoteMaterials.
+    const review = reviewQuoteMaterials([
+      mat({ id: 'n', name: 'Bracket', price: 5, totalPrice: 5, priceConfidence: 'low', pricingSource: 'scraper', description: 42 as unknown as string }),
+    ]);
+    expect(review.issues[0].kind).toBe('low_confidence');
+    // Non-string description falls back to the default detail.
+    expect(review.issues[0].detail).toBe('Low-confidence price — worth a quick check.');
+  });
+
   it('does not flag confident, real-priced rows', () => {
     const review = reviewQuoteMaterials([
       mat({ id: 'd', price: 12, priceConfidence: 'high', pricingSource: 'scraper' }),
