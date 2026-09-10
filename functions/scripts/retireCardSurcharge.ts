@@ -30,14 +30,21 @@ async function main() {
   // docs. Select only the one field so none of that leaves Firestore.
   const snap = await db.collectionGroup('settings').select('surchargePaymentFees').get();
   let scanned = 0;
+  let wasOn = 0;
   const flagged: FirebaseFirestore.DocumentReference[] = [];
   for (const d of snap.docs) {
     if (d.id !== 'business') continue;
     scanned++;
-    if (d.get('surchargePaymentFees') !== undefined) flagged.push(d.ref);
+    const v = d.get('surchargePaymentFees');
+    if (v === undefined) continue;
+    flagged.push(d.ref);
+    if (v === true) wasOn++;
   }
   const on = flagged.length;
-  console.log(`business settings scanned: ${scanned}; carrying the field: ${on}`);
+  console.log(
+    `business settings scanned: ${scanned}; carrying the field: ${on} ` +
+    `(switched ON: ${wasOn}, off: ${on - wasOn})`,
+  );
 
   if (!apply) {
     console.log(on ? 'dry run — re-run with --apply to delete the field' : 'nothing to do');
