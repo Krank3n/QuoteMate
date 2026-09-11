@@ -9,7 +9,35 @@ import {
   feeSavingLabel,
   squareCollectedLast30d,
   FEE_SAVING_CLAIM_THRESHOLD_AUD,
+  FOUNDING_COUNT_VISIBLE_AT,
+  showFoundingSpotCount,
 } from './pricingConfig';
+
+describe('founding spot count visibility', () => {
+  it('holds the tally back while plenty of spots remain', () => {
+    // 92 of 100 left says "eight people have paid" — never publish that.
+    expect(showFoundingSpotCount(92)).toBe(false);
+    expect(showFoundingSpotCount(FOUNDING_COUNT_VISIBLE_AT + 1)).toBe(false);
+  });
+
+  it('shows the tally once spots are genuinely scarce', () => {
+    expect(showFoundingSpotCount(FOUNDING_COUNT_VISIBLE_AT)).toBe(true);
+    expect(showFoundingSpotCount(19)).toBe(true);
+    expect(showFoundingSpotCount(1)).toBe(true);
+  });
+
+  it('never shows a zero or invalid count', () => {
+    // A filled cap suppresses the whole offer upstream (capActive false);
+    // this guards the tally line on its own.
+    expect(showFoundingSpotCount(0)).toBe(false);
+    expect(showFoundingSpotCount(-3)).toBe(false);
+    expect(showFoundingSpotCount(NaN)).toBe(false);
+  });
+
+  it('keeps the threshold well below the cap so it only fires near the end', () => {
+    expect(FOUNDING_COUNT_VISIBLE_AT).toBe(25);
+  });
+});
 
 describe('pricingConfig', () => {
   it('keeps the charged prices at the current $49 / $328 AUD', () => {

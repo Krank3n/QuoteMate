@@ -1,6 +1,8 @@
 /**
  * Paywall Screen
- * Shows subscription options when free quote limit is reached
+ * Shows what Pro adds and the subscription options. Free and Pro are both
+ * unlimited on quotes; the copy comes from paywallCopy.ts so every line is a
+ * concrete feature or fee statement rather than a nudge.
  */
 
 import React, { useState, useEffect, useMemo } from 'react';
@@ -31,31 +33,17 @@ import {
   yearlyVsMonthlySavingsPercent,
   feeSavingLabel,
   squareCollectedLast30d,
+  showFoundingSpotCount,
 } from '../config/pricingConfig';
 import { trackEvent } from '../services/analyticsService';
 import { resolvePurchaseAnalytics } from '../services/paywallAnalytics.helpers';
 import { ReceiptOutcome } from '../utils/purchaseValidation';
 import { validatePurchase, purchaseKey, claimPurchase, releasePurchase } from '../services/receiptEntitlement';
 import { GridBackground } from '../components/GridBackground';
+import { PRO_FEATURES, paywallSubtitle, paywallHeaderNote, PaywallPlanState } from './paywallCopy';
 
-const PRO_NUDGES = [
-  "Your quotes deserve the VIP treatment",
-  "Free is nice, but Pro is where the money's at",
-  "Even your ute has a paid rego",
-  "Time to give your business the upgrade it deserves",
-  "Pro tip: go Pro",
-  "Your competitors aren't using the free version",
-  "Less than a smashed avo a week",
-];
-
-const MAYBE_LATER_QUIPS = [
-  "Your quotes will miss you",
-  "The crown will be here when you're ready",
-  "No pressure... but your competitors just upgraded",
-  "We'll keep the light on for you",
-  "That's what they all say... then they come back",
-  "Sure, but don't say we didn't warn you",
-];
+const PRO_ON_MESSAGE =
+  'Pro is switched on. Materials and pricing, every payment method and your logo are all unlocked.';
 
 export function PaywallScreen() {
   const styles = useStyles();
@@ -67,8 +55,6 @@ export function PaywallScreen() {
   // falls through to 'unknown'.
   const paywallSource: string = route.params?.source ?? 'unknown';
   const insets = useSafeAreaInsets();
-  const proNudge = useMemo(() => PRO_NUDGES[Math.floor(Math.random() * PRO_NUDGES.length)], []);
-  const maybeLaterQuip = useMemo(() => MAYBE_LATER_QUIPS[Math.floor(Math.random() * MAYBE_LATER_QUIPS.length)], []);
   const { subscriptionStatus, loadSubscription, documents } = useStore();
   const { quoteCount, setPremium } = useSubscriptionStore();
   const [isUpgrading, setIsUpgrading] = useState(false);
@@ -265,8 +251,8 @@ export function PaywallScreen() {
                 );
                 await billingService.finishTransaction(purchase);
                 Alert.alert(
-                  'Success!',
-                  'Welcome to QuoteMate Pro! You now have unlimited quotes.',
+                  'Welcome to Pro',
+                  PRO_ON_MESSAGE,
                   [{ text: 'OK', onPress: () => navigation.goBack() }]
                 );
               } else if (outcome === 'rejected') {
@@ -487,8 +473,8 @@ export function PaywallScreen() {
       // Show success message with period end date
       const periodEndDate = new Date(data.periodEnd).toLocaleDateString();
       Alert.alert(
-        '✅ Subscription Canceled',
-        `Your subscription has been canceled. You'll continue to have Pro access until ${periodEndDate}.\n\nThank you for your feedback!`,
+        'Subscription cancelled',
+        `Your subscription has been cancelled. You'll keep Pro access until ${periodEndDate}.\n\nThank you for your feedback!`,
         [{ text: 'OK' }]
       );
     } catch (error: any) {
@@ -562,6 +548,12 @@ export function PaywallScreen() {
 
   // Check if user is Pro
   const isPro = subscriptionStatus?.isPro || false;
+  const planState: PaywallPlanState = isPro
+    ? { kind: 'pro' }
+    : trialExpired
+      ? { kind: 'free' }
+      : { kind: 'trial', daysRemaining: trialDaysRemaining };
+  const headerNote = paywallHeaderNote(planState);
 
   const handleCheckoutSuccess = async () => {
     setShowCheckoutModal(false);
@@ -601,8 +593,8 @@ export function PaywallScreen() {
 
         // Show success message
         Alert.alert(
-          '🎉 Welcome to Pro!',
-          'Your subscription is now active. You now have unlimited quote analyses!',
+          'Welcome to Pro',
+          PRO_ON_MESSAGE,
           [
             {
               text: 'Get Started',
@@ -671,16 +663,9 @@ export function PaywallScreen() {
           />
         </View>
         <Title style={styles.title}>{isPro ? 'Manage Subscription' : 'Upgrade to Pro'}</Title>
-        <Text style={styles.subtitle}>
-          {isPro
-            ? 'You have unlimited quote analyses'
-            : trialExpired
-              ? 'Your free trial has ended'
-              : `${trialDaysRemaining} day${trialDaysRemaining !== 1 ? 's' : ''} left in your free trial`
-          }
-        </Text>
-        {!isPro && (
-          <Text style={styles.proNudge}>{proNudge}</Text>
+        <Text style={styles.subtitle}>{paywallSubtitle(planState)}</Text>
+        {headerNote && (
+          <Text style={styles.headerNote}>{headerNote}</Text>
         )}
       </View>
 
@@ -693,14 +678,14 @@ export function PaywallScreen() {
               <Text style={styles.proStatusTitle}>Pro Member</Text>
             </View>
             <Text style={styles.proStatusText}>
-              Thank you for your support! You have unlimited access to all Pro features.
+              Thanks for backing QuoteMate. Everything below is switched on.
             </Text>
 
             {subscriptionStatus?.currentPeriodEnd && (
               <View style={styles.billingInfo}>
                 <MaterialCommunityIcons name="calendar-clock" size={20} color={themeColors.accentText} />
                 <Text style={styles.billingText}>
-                  Next billing date: {subscriptionStatus.currentPeriodEnd.toLocaleDateString('en-US', {
+                  Next billing date: {subscriptionStatus.currentPeriodEnd.toLocaleDateString('en-AU', {
                     year: 'numeric',
                     month: 'long',
                     day: 'numeric',
@@ -710,18 +695,12 @@ export function PaywallScreen() {
             )}
 
             <View style={styles.proFeatures}>
-              <View style={styles.proFeature}>
-                <MaterialCommunityIcons name="infinity" size={20} color={themeColors.accentText} />
-                <Text style={styles.proFeatureText}>Unlimited quote analyses</Text>
-              </View>
-              <View style={styles.proFeature}>
-                <MaterialCommunityIcons name="headset" size={20} color={themeColors.accentText} />
-                <Text style={styles.proFeatureText}>Priority support</Text>
-              </View>
-              <View style={styles.proFeature}>
-                <MaterialCommunityIcons name="palette" size={20} color={themeColors.accentText} />
-                <Text style={styles.proFeatureText}>Custom branding</Text>
-              </View>
+              {PRO_FEATURES.map((feature) => (
+                <View key={feature.text} style={styles.proFeature}>
+                  <MaterialCommunityIcons name={feature.icon as any} size={20} color={themeColors.accentText} />
+                  <Text style={styles.proFeatureText}>{feature.text}</Text>
+                </View>
+              ))}
             </View>
 
             <Button
@@ -735,7 +714,7 @@ export function PaywallScreen() {
 
             <Text style={styles.cancelHint}>
               {subscriptionStatus?.currentPeriodEnd
-                ? `Your subscription will remain active until ${subscriptionStatus.currentPeriodEnd.toLocaleDateString('en-US', {
+                ? `Your subscription will remain active until ${subscriptionStatus.currentPeriodEnd.toLocaleDateString('en-AU', {
                     year: 'numeric',
                     month: 'long',
                     day: 'numeric',
@@ -782,13 +761,17 @@ export function PaywallScreen() {
               no personal countdowns anywhere (nothing enforces one yet).
               Cap filled or status unknown → no offer framing at all: the
               struck-through anchor is a FUTURE price, only honest while the
-              founding cap is verifiably open. */}
+              founding cap is verifiably open. The running tally is held back
+              until spots are scarce (showFoundingSpotCount): "92 of 100 left"
+              tells a tradie eight people have paid, which sells nothing. */}
           <Text style={styles.launchOffer}>
-            Founding member price · {founding.spotsLeft} of {founding.cap} spots left
+            {showFoundingSpotCount(founding.spotsLeft)
+              ? `Founding member price · ${founding.spotsLeft} of ${founding.cap} spots left`
+              : 'Founding member price'}
           </Text>
           <Text style={styles.foundingNote}>
             {getProductPrice(SUBSCRIPTION_SKUS.MONTHLY)}/mo locked for life — the price goes to{' '}
-            {regularPriceLabel('monthly')}/mo for new members once the {founding.cap} spots fill.
+            {regularPriceLabel('monthly')}/mo for new members once the founding spots fill.
           </Text>
         </>
       )}
@@ -800,33 +783,15 @@ export function PaywallScreen() {
       {/* Upgrade Section for Free Users */}
       {!isPro && (
       <View style={styles.planCard}>
-        <Text style={styles.includesLabel}>Everything you need:</Text>
+        <Text style={styles.includesLabel}>What Pro adds:</Text>
 
         <View style={styles.features}>
-          <View style={styles.feature}>
-            <MaterialCommunityIcons name="check-circle" size={22} color={themeColors.money} />
-            <Text style={styles.featureText}>Unlimited quotes and invoices</Text>
-          </View>
-
-          <View style={styles.feature}>
-            <MaterialCommunityIcons name="check-circle" size={22} color={themeColors.money} />
-            <Text style={styles.featureText}>Any payment method — bank, PayID, PayPal, Square</Text>
-          </View>
-
-          <View style={styles.feature}>
-            <MaterialCommunityIcons name="check-circle" size={22} color={themeColors.money} />
-            <Text style={styles.featureText}>Your business logo on quotes and invoices</Text>
-          </View>
-
-          <View style={styles.feature}>
-            <MaterialCommunityIcons name="check-circle" size={22} color={themeColors.money} />
-            <Text style={styles.featureText}>Priority customer support</Text>
-          </View>
-
-          <View style={styles.feature}>
-            <MaterialCommunityIcons name="check-circle" size={22} color={themeColors.money} />
-            <Text style={styles.featureText}>All future features included</Text>
-          </View>
+          {PRO_FEATURES.map((feature) => (
+            <View key={feature.text} style={styles.feature}>
+              <MaterialCommunityIcons name="check-circle" size={22} color={themeColors.money} />
+              <Text style={styles.featureText}>{feature.text}</Text>
+            </View>
+          ))}
         </View>
 
         {/* Show non-blocking warning if products failed to load on iOS/Android */}
@@ -867,7 +832,6 @@ export function PaywallScreen() {
 
       {!isPro && (
         <View style={styles.bottomSection}>
-          <Text style={styles.maybeLaterQuip}>{maybeLaterQuip}</Text>
           <Button
             mode="text"
             onPress={() => {
@@ -969,13 +933,13 @@ const useStyles = makeStyles((t) => ({
     color: t.colors.textSecondary,
     textAlign: 'center',
   },
-  proNudge: {
+  headerNote: {
     fontSize: 13,
-    fontStyle: 'italic',
     color: t.colors.textMuted,
     textAlign: 'center',
     marginTop: 8,
-    opacity: 0.85,
+    marginHorizontal: 12,
+    lineHeight: 18,
   },
   planToggleContainer: {
     flexDirection: 'row',
@@ -1114,14 +1078,6 @@ const useStyles = makeStyles((t) => ({
     color: t.colors.textMuted,
     textAlign: 'center',
     lineHeight: 16,
-  },
-  maybeLaterQuip: {
-    fontSize: 13,
-    fontStyle: 'italic',
-    color: t.colors.textMuted,
-    textAlign: 'center',
-    marginBottom: 4,
-    opacity: 0.7,
   },
   backButton: {
     marginBottom: 16,
