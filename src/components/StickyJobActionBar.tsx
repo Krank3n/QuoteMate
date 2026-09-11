@@ -12,7 +12,9 @@
  *   quote sent         → Take Deposit (primary) + Mark Approved (secondary)
  *   accepted, any job  → the money step (Take Deposit while the deposit
  *     stage, no invoice   asked for is unpaid, else Create Invoice) + the
- *     yet                 stage's step (Pick a Date / Start Job / Mark Complete)
+ *     yet                 stage's step (Pick a Date / Start Job / Mark Complete);
+ *                         except a booked job with nothing owing, which leads
+ *                         with Start Job and keeps Create Invoice second
  *   invoice unpaid     → Take Final Payment + Send Invoice
  *   paid (work still   → Edit Date + Close Job
  *     booked ahead)
@@ -320,7 +322,15 @@ export function resolveJobActions(
       ? { id: 'takeDeposit', label: paymentCopy.takeDeposit, icon: 'credit-card-outline', tone: 'primary' }
       : { id: 'generateInvoice', label: 'Create Invoice', icon: 'receipt', tone: 'primary' };
     if (stage === 'scheduled') {
-      return [money, { id: 'startJob', label: 'Start Job', icon: 'hammer-wrench', tone: 'ghost' }];
+      // A booked job with nothing owing is waiting on the tradie to turn up,
+      // not on an invoice: Start Job stays first and the invoice rides
+      // second. An unpaid deposit still leads, whatever the date says.
+      return money.id === 'takeDeposit'
+        ? [money, { id: 'startJob', label: 'Start Job', icon: 'hammer-wrench', tone: 'ghost' }]
+        : [
+            { id: 'startJob', label: 'Start Job', icon: 'hammer-wrench', tone: 'primary' },
+            { ...money, tone: 'ghost' },
+          ];
     }
     if (stage === 'in_progress') {
       return [money, { id: 'markComplete', label: 'Mark Complete', icon: 'flag-checkered', tone: 'ghost' }];

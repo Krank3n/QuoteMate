@@ -28,7 +28,7 @@ vi.mock('../utils/haptics', () => ({
   successTap: () => {},
 }));
 
-import { resolveJobActions, isUnfinishedDraftQuote } from './StickyJobActionBar';
+import { resolveJobActions, isUnfinishedDraftQuote, depositOwed } from './StickyJobActionBar';
 import type { Document } from '../types/document';
 
 function quoteDoc(overrides: Partial<Document>): Document {
@@ -124,16 +124,26 @@ describe('resolveJobActions — accepted quote leads with the money', () => {
   });
 
   it('with no deposit owed the invoice leads and the stage step rides second', () => {
-    expect(resolveJobActions('scheduled', accepted).map((a) => a.id)).toEqual(['generateInvoice', 'startJob']);
     expect(resolveJobActions('in_progress', accepted).map((a) => a.id)).toEqual(['generateInvoice', 'markComplete']);
     expect(resolveJobActions('completed', accepted).map((a) => a.id)).toEqual(['generateInvoice']);
   });
 
-  it('never leads an accepted quote with anything but the money step', () => {
+  it('a booked job with nothing owing leads with Start Job and keeps the invoice second', () => {
+    const actions = resolveJobActions('scheduled', accepted);
+    expect(actions.map((a) => a.id)).toEqual(['startJob', 'generateInvoice']);
+    expect(actions[0].tone).toBe('primary');
+    expect(actions[1]).toMatchObject({ label: 'Create Invoice', tone: 'ghost' });
+    expect(resolveJobActions('scheduled', depositPaid).map((a) => a.id)).toEqual(['startJob', 'generateInvoice']);
+  });
+
+  it('never leads an accepted quote with anything but the money step, bar a booked job with nothing owing', () => {
     for (const stage of ['accepted', 'scheduled', 'in_progress', 'completed'] as const) {
       for (const doc of [accepted, depositOwing, depositPaid]) {
         const [primary] = resolveJobActions(stage, doc);
-        expect(['takeDeposit', 'generateInvoice']).toContain(primary.id);
+        const expected = stage === 'scheduled' && !depositOwed(doc)
+          ? ['startJob']
+          : ['takeDeposit', 'generateInvoice'];
+        expect(expected).toContain(primary.id);
         expect(primary.tone).toBe('primary');
       }
     }
