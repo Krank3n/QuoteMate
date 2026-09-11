@@ -1,4 +1,5 @@
 import * as admin from 'firebase-admin';
+import { subPlanLabel, subPriceInfo, type SubPriceInfo } from './subscription.helpers';
 import fetch from 'node-fetch';
 import { isPdfUrl } from './shared/media/pdfUrl';
 import { normaliseTimestamp } from './timestamps.helpers';
@@ -3262,6 +3263,8 @@ export function sendNewProSubscriptionEmail(
   platform: string,
   productId: string,
   businessName: string,
+  /** What the store says this subscriber is billed; list price if omitted. */
+  price?: SubPriceInfo | null,
 ): Promise<boolean> {
   const platformLabels: Record<string, string> = {
     ios: 'iOS (App Store)',
@@ -3270,8 +3273,7 @@ export function sendNewProSubscriptionEmail(
   };
   const platformDisplay = platformLabels[platform] || platform || 'Unknown';
 
-  const isYearly = productId.includes('yearly');
-  const planDisplay = isYearly ? 'Yearly ($328/yr)' : 'Monthly ($49/mo)';
+  const planDisplay = subPlanLabel(price || subPriceInfo({ productId }));
 
   const content = wrapEmailTemplate(`
     <p style="color:#6b7280;font-size:14px;margin:0 0 8px;">New Pro Subscription 💰</p>

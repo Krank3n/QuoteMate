@@ -151,7 +151,7 @@ import { receiptVerdict, isFirstGrantOfTransaction, isNewSubscriber } from './re
 import { fetchGooglePlaySubscription } from './iapStoreStatus';
 import { verifyAppleJws } from './appleJws.helpers';
 import { verifySquareWebhookSignature } from './squareWebhookSignature';
-import { resolveServerPlan, storePricePatch, subInterval } from './subscription.helpers';
+import { resolveServerPlan, storePricePatch, subInterval, subPriceInfo } from './subscription.helpers';
 import {
   SQUARE_OAUTH_STATES_COLLECTION,
   SQUARE_OAUTH_STATE_TTL_MS,
@@ -1127,20 +1127,21 @@ async function handleSubscriptionUpdate(subscription: Stripe.Subscription) {
     const isActive = subscription.status === 'active' || subscription.status === 'trialing';
 
     const stripePrice = subscription.items.data[0]?.price;
+    // Bill-accurate MRR: the amount on the price the customer is actually on,
+    // not whatever the current list price happens to be.
+    const stripePricePatch = storePricePatch({
+      micros: stripePrice?.unit_amount == null ? null : stripePrice.unit_amount * 10000,
+      currency: stripePrice?.currency || null,
+      interval: stripePrice?.recurring?.interval === 'year' ? 'yearly' : 'monthly',
+      source: 'stripe',
+    });
     await subscriptionRef.set({
       isPro: isActive,
       platform: 'web',
       productId: stripePrice?.id || null,
       subscriptionId: subscription.id,
       customerId,
-      // Bill-accurate MRR: the amount on the price the customer is actually on,
-      // not whatever the current list price happens to be.
-      ...storePricePatch({
-        micros: stripePrice?.unit_amount == null ? null : stripePrice.unit_amount * 10000,
-        currency: stripePrice?.currency || null,
-        interval: stripePrice?.recurring?.interval === 'year' ? 'yearly' : 'monthly',
-        source: 'stripe',
-      }),
+      ...stripePricePatch,
       validatedAt: admin.firestore.FieldValue.serverTimestamp(),
       currentPeriodStart: new Date(subscription.current_period_start * 1000),
       currentPeriodEnd: new Date(subscription.current_period_end * 1000),
@@ -1163,7 +1164,7 @@ async function handleSubscriptionUpdate(subscription: Stripe.Subscription) {
         const userProfile = await firestore.doc(`users/${userId}/settings/business`).get();
         const businessName = userProfile.data()?.businessName || '';
         const productId = subscription.items.data[0]?.price?.id || '';
-        await sendNewProSubscriptionEmail(userEmail, userId, 'web', productId, businessName);
+        await sendNewProSubscriptionEmail(userEmail, userId, 'web', productId, businessName, subPriceInfo({ ...stripePricePatch, productId }));
       } catch (emailError) {
         // silently ignore
       }
@@ -1671,7 +1672,7 @@ export const validateAppleReceipt = functions.https.onRequest((req, res) => {
             const iosFirestore = admin.firestore();
             const userProfile = await iosFirestore.doc(`users/${userId}/settings/business`).get();
             const businessName = userProfile.data()?.businessName || '';
-            await sendNewProSubscriptionEmail(userEmail, userId, 'ios', signedProductId, businessName);
+            await sendNewProSubscriptionEmail(userEmail, userId, 'ios', signedProductId, businessName, subPriceInfo({ ...applePricePatch, productId: signedProductId }));
           } catch (emailError) {
             // silently ignore
           }
@@ -1759,6 +1760,12 @@ export const validateGoogleReceipt = functions.https.onRequest((req, res) => {
 
       const firestore = admin.firestore();
       const subscriptionRef = firestore.doc(`users/${userId}/profile/subscription`);
+      const googlePricePatch = storePricePatch({
+        micros: googlePriceMicros,
+        currency: googlePriceCurrency,
+        interval: subInterval({ productId }),
+        source: 'google',
+      });
 
       // Atomic decide-and-write — see the iOS handler for why this is a
       // transaction and not a read followed by a set.
@@ -1774,12 +1781,7 @@ export const validateGoogleReceipt = functions.https.onRequest((req, res) => {
           productId,
           transactionId,
           purchaseToken: purchaseToken || null,
-          ...storePricePatch({
-            micros: googlePriceMicros,
-            currency: googlePriceCurrency,
-            interval: subInterval({ productId }),
-            source: 'google',
-          }),
+          ...googlePricePatch,
           googleValidated,
           validatedAt: admin.firestore.FieldValue.serverTimestamp(),
           currentPeriodStart: now,
@@ -1807,7 +1809,7 @@ export const validateGoogleReceipt = functions.https.onRequest((req, res) => {
             const userEmail = await getUserEmail(userId) || 'unknown';
             const userProfile = await firestore.doc(`users/${userId}/settings/business`).get();
             const businessName = userProfile.data()?.businessName || '';
-            await sendNewProSubscriptionEmail(userEmail, userId, 'android', productId, businessName);
+            await sendNewProSubscriptionEmail(userEmail, userId, 'android', productId, businessName, subPriceInfo({ ...googlePricePatch, productId }));
           } catch (emailError) {
             // silently ignore
           }

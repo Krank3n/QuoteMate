@@ -163,6 +163,26 @@ export function subPriceInfo(sub: any): SubPriceInfo {
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
+/** "A$29/mo", "A$328/yr", "A$49.90/mo", "12.50 NZD/mo". */
+export function formatSubPrice(p: SubPriceInfo): string {
+  const amount = round2(p.amount);
+  const digits = Number.isInteger(amount) ? String(amount) : amount.toFixed(2);
+  const money = p.currency === 'AUD' ? `A$${digits}` : `${digits} ${p.currency}`;
+  return `${money}/${p.interval === 'yearly' ? 'yr' : 'mo'}`;
+}
+
+/**
+ * Plan line for the admin "new Pro subscriber" email. The old label was a
+ * hardcoded list price, which called a grandfathered A$29 Android subscriber
+ * a "$49/mo" sale. Store-reported amounts are stated as fact; a list-price
+ * fallback says so, because it is a guess.
+ */
+export function subPlanLabel(p: SubPriceInfo): string {
+  const name = p.interval === 'yearly' ? 'Yearly' : 'Monthly';
+  if (p.source === 'store') return `${name} (${formatSubPrice(p)})`;
+  return `${name} (list price ${formatSubPrice(p)} — store sent no amount)`;
+}
+
 /**
  * Fields to merge onto a subscription doc so the price a subscriber is REALLY
  * charged is recorded at the moment the store tells us, instead of being
