@@ -205,6 +205,8 @@ import {
   logShimInvocation,
   resolveTradieReplyEmail,
   buildQuotePdfHtmlForQuote,
+  hasCustomerResponded,
+  describeCustomerResponse,
   type SquareLinkMinter,
 } from './documentHandlers';
 export { getStageViolationCounts, convertDocumentToInvoice } from './documentHandlers';
@@ -6620,12 +6622,15 @@ export const getQuoteForAcceptance = functions.https.onRequest((req, res) => {
         return;
       }
 
-      // Check if already responded
-      if (foundQuote.respondedAt) {
+      // Check if already responded. A re-sent quote is back at status 'sent'
+      // and answerable again even though respondedAt survives from the
+      // earlier answer — see hasCustomerResponded.
+      if (hasCustomerResponded(foundQuote)) {
         res.status(200).json({
           success: true,
           alreadyResponded: true,
           status: foundQuote.status,
+          responseLabel: describeCustomerResponse(foundQuote.status),
           respondedAt: foundQuote.respondedAt,
         });
         return;
@@ -6784,8 +6789,8 @@ export const respondToQuote = functions.https.onRequest((req, res) => {
         return;
       }
 
-      // Check if already responded
-      if (foundQuote.respondedAt) {
+      // Check if already responded (a re-sent quote is answerable again).
+      if (hasCustomerResponded(foundQuote)) {
         res.status(400).json({ success: false, error: 'This quote has already been responded to' });
         return;
       }
@@ -6928,11 +6933,11 @@ export const quoteAcceptancePage = functions.https.onRequest(async (req, res) =>
     const brandColor = businessSettings?.brandColor || null;
     const logoUrl = remoteLogoUrl(businessSettings?.logoStorageUrl || businessSettings?.logoUri) || null;
 
-    // Check if already responded
-    if (foundQuote.respondedAt) {
+    // Check if already responded (a re-sent quote is answerable again).
+    if (hasCustomerResponded(foundQuote)) {
       res.status(200).send(generateConfirmationPage(
         'already',
-        `This quote has already been ${foundQuote.status}.`,
+        `This quote has already been ${describeCustomerResponse(foundQuote.status)}.`,
         businessName, brandColor, logoUrl
       ));
       return;
@@ -7584,7 +7589,7 @@ export function generateAcceptancePage(token: string): string {
           return;
         }
         if (data.alreadyResponded) {
-          showAlreadyResponded(data.status);
+          showAlreadyResponded(data.responseLabel || data.status);
           return;
         }
         renderQuote(data.quote, data.business);
