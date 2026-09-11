@@ -164,7 +164,13 @@ export function isUnfinishedDraftQuote(doc: Document | null): boolean {
   );
 }
 
-function depositOwed(doc: Document | null): boolean {
+/**
+ * A deposit the tradie asked for on this quote and hasn't been paid. Exported
+ * because the "job won" sheet picks its primary money action the same way the
+ * bar does — the amount is always the one on the quote, never a percentage
+ * this app decided on.
+ */
+export function depositOwed(doc: Document | null): boolean {
   if (!doc || doc.type !== 'quote') return false;
   const required = Number(doc.depositAmount ?? 0);
   const paid = Number(doc.depositPaid ?? 0);

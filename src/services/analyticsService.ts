@@ -115,12 +115,21 @@ export type AnalyticsEvent =
   // (send_gate / trial_banner / dashboard / job_won / unknown).
   | 'paywall_viewed'
   | 'paywall_dismissed'
-  // The "job won" sheet — the offer shown right after a quote is marked
-  // accepted, the first moment the app has visibly earned its keep. `shown`
-  // fires once per sheet (non-Pro only, capped once per doc / once per 7 days);
-  // `tapped` carries `outcome` (see_pro / not_now) so take-rate is measurable.
+  // The "job won" sheet — shown right after a quote is marked accepted, the
+  // first moment the app has visibly earned its keep. `shown` fires once per
+  // sheet (non-Pro only, capped once per doc / once per 7 days) and carries
+  // which money step was offered (`collect`: deposit / invoice) plus whether
+  // Pro was relevant enough to mention (`pro_offered`). `tapped` carries
+  // `outcome` — deposit / invoice / see_pro / not_now — so take-rate on the
+  // collection action is measurable against the old Pro-first sheet.
   | 'won_prompt_shown'
   | 'won_prompt_tapped'
+  // The dashboard's state-based action card (src/utils/nextBestAction.ts).
+  // `action` is the selected key — take_deposit / send_first_quote /
+  // follow_up / continuity_choice / fee_comparison / keep_pro_tools /
+  // complete_via_square — so each state's pull can be read separately.
+  | 'next_action_shown'
+  | 'next_action_tapped'
   // Purchase flow: started → completed | failed | unconfirmed. User-cancels are
   // not failures and are never tracked as such.
   | 'checkout_started'
