@@ -74,6 +74,21 @@ describe('generateAcceptancePage', () => {
     expect(html).toMatch(/\.line-items th\.num, \.line-items td\.num \{[^}]*padding-right/);
   });
 
+  it('renders the payment offer respondToQuote answers with, for either kind', () => {
+    // The in-page Accept used to call showSuccess with no link at all, so a
+    // customer accepting here never saw a pay button — even on a deposit
+    // quote. The POST now returns payment: { kind, url, amount } | null and
+    // the page renders the same block the email's confirmation page does.
+    const script = inlineScript(generateAcceptancePage('a'.repeat(64)));
+    expect(script).toContain('showSuccess(response, data.payment || null)');
+    expect(script).toContain('Pay now if you like');
+    expect(script).toContain('Pay by card');
+    expect(script).toContain('Deposit to get started');
+    expect(script).toContain('Pay deposit securely');
+    // Customer-facing strings only — a code comment in the script isn't copy.
+    expect(script.replace(/\/\/.*$/gm, '')).not.toMatch(/\bAI\b/);
+  });
+
   it('drives the three presentation modes from priceDetail', () => {
     const script = inlineScript(generateAcceptancePage('a'.repeat(64)));
     expect(script).toContain("quote.priceDetail || 'itemised'");

@@ -6654,6 +6654,134 @@ export const getQuoteForAcceptance = functions.https.onRequest((req, res) => {
 });
 
 /**
+ * What the customer can pay right after accepting a quote, if anything.
+ *
+ * A quote that asks for a deposit offers the deposit (the customer must pay
+ * it to lock the job in). Any other quote offers the whole amount still owed
+ * as an optional "Pay now" — 97% of sent quotes carry no deposit, and until
+ * this existed those customers accepted and then saw no way to pay at all.
+ */
+export interface AcceptedQuotePaymentOffer {
+  kind: 'deposit' | 'full';
+  url: string;
+  amount: number;
+}
+
+export interface AcceptedQuotePaymentDeps {
+  loadDocument: (userId: string, quoteId: string) => Promise<{ [key: string]: any } | null>;
+  mint: (
+    userId: string,
+    quoteId: string,
+    kind: 'deposit' | 'quote_full',
+  ) => Promise<{ paymentLinkUrl: string } | null>;
+}
+
+// Square hosted links expire after 24h; the legacy minters treat >23h as
+// stale for the same reason (a customer clicking a dead link gets a 404).
+const ACCEPTANCE_LINK_TTL_MS = 23 * 60 * 60 * 1000;
+/** How long an acceptance waits on Square for a link before showing the plain thank-you. */
+export const ACCEPTANCE_MINT_TIMEOUT_MS = 8_000;
+
+/**
+ * A payment-link URL safe to put in an href on a customer-facing page: https
+ * only, and none of the characters that could break out of the attribute.
+ * The same rule on both acceptance pages.
+ */
+export function isSafePaymentLinkUrl(url: unknown): url is string {
+  return typeof url === 'string' && /^https:\/\/[^\s"'<>\\]+$/.test(url);
+}
+
+/**
+ * Resolve the payment offer for a freshly accepted quote. Best effort: any
+ * failure (Square not connected, mint error, Firestore hiccup) returns null
+ * and the acceptance still stands — the customer is never blocked on paying.
+ *
+ * Prefers the unified document's live `activePaymentLink` when it is the
+ * right kind, unconsumed, fresh and priced at the amount owed; otherwise
+ * mints through the rotation path so the ledger sees the new link.
+ *
+ * Exported for acceptedQuotePaymentOffer.test.ts; `deps` is injected so the
+ * tests need neither Firestore nor Square.
+ */
+export async function paymentOfferForAcceptedQuote(
+  userId: string,
+  quoteId: string,
+  quote: any,
+  deps: AcceptedQuotePaymentDeps = { loadDocument: loadDocumentForQuoteId, mint: mintAndRotate },
+): Promise<AcceptedQuotePaymentOffer | null> {
+  const total = Number(quote?.total) || 0;
+  const depositRequired = quote?.requireDeposit === true;
+  const depositPct = depositRequired ? (Number(quote?.depositPercentage) || 0) : 0;
+
+  let kind: AcceptedQuotePaymentOffer['kind'];
+  let linkKind: 'deposit' | 'quote_full';
+  let amount: number;
+  if (depositRequired && depositPct > 0) {
+    kind = 'deposit';
+    linkKind = 'deposit';
+    amount = Number(quote.depositAmount) || total * (depositPct / 100);
+  } else {
+    kind = 'full';
+    linkKind = 'quote_full';
+    amount = Math.max(0, total - (Number(quote?.depositPaid) || 0));
+  }
+  if (amount <= 0) return null;
+
+  try {
+    const unifiedDoc = await deps.loadDocument(userId, quoteId);
+    const active = unifiedDoc?.activePaymentLink as
+      { url?: string; kind?: string; amount?: number; createdAt?: number; consumedAt?: number } | undefined;
+    const activeFresh = !!active
+      && Number.isFinite(Number(active.createdAt))
+      && Date.now() - Number(active.createdAt) < ACCEPTANCE_LINK_TTL_MS
+      && !mintedBeforeSurchargeRetirement(active.createdAt);
+    if (
+      active && active.url && active.kind === linkKind && !active.consumedAt && activeFresh
+      && Math.abs(Number(active.amount || 0) - amount) < 0.005
+    ) {
+      return isSafePaymentLinkUrl(active.url) ? { kind, url: active.url, amount } : null;
+    }
+    // The acceptance is already committed by the time this runs. Square has
+    // no timeout of its own in this file, so a hung mint would hold the
+    // response open to the function deadline and the customer's page would
+    // report a failure for an acceptance that succeeded. Bounded instead.
+    const minted = await Promise.race([
+      deps.mint(userId, quoteId, linkKind),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), ACCEPTANCE_MINT_TIMEOUT_MS)),
+    ]);
+    if (!minted) {
+      console.warn('[square] payment link mint returned null on acceptance', { userId, quoteId, kind });
+      return null;
+    }
+    if (!isSafePaymentLinkUrl(minted.paymentLinkUrl)) return null;
+    return { kind, url: minted.paymentLinkUrl, amount };
+  } catch (err: any) {
+    console.error('[square] payment link mint threw on acceptance', {
+      userId, quoteId, kind, message: err?.message,
+    });
+    return null;
+  }
+}
+
+/**
+ * JSON the hosted acceptance page reads after POST /respondToQuote. The
+ * page's showSuccess renders `payment` when present, so its shape is pinned
+ * by acceptedQuotePaymentOffer.test.ts. Exported for that test.
+ */
+export function respondToQuoteResponseBody(
+  response: 'accepted' | 'rejected',
+  payment: AcceptedQuotePaymentOffer | null,
+): { success: true; message: string; payment: AcceptedQuotePaymentOffer | null } {
+  return {
+    success: true,
+    message: response === 'accepted'
+      ? 'Thank you! The quote has been accepted. The business will be in touch soon.'
+      : 'The quote has been declined. The business has been notified.',
+    payment: response === 'accepted' ? payment : null,
+  };
+}
+
+/**
  * Handle quote acceptance or rejection
  * Updates quote status, records response, sends notifications
  */
@@ -6839,12 +6967,14 @@ export const respondToQuote = functions.https.onRequest((req, res) => {
         // Push is best-effort; sendExpoPushToUser logs gateway failures.
       }
 
-      res.status(200).json({
-        success: true,
-        message: response === 'accepted'
-          ? 'Thank you! The quote has been accepted. The business will be in touch soon.'
-          : 'The quote has been declined. The business has been notified.',
-      });
+      // The hosted page's in-page Accept used to answer with no payment link
+      // at all — even a deposit quote accepted here never saw a pay button;
+      // only the email's GET path minted one. Same offer on both paths now.
+      const payment = response === 'accepted'
+        ? await paymentOfferForAcceptedQuote(foundUserId, foundQuoteRef.id, foundQuote)
+        : null;
+
+      res.status(200).json(respondToQuoteResponseBody(response, payment));
     } catch (error: any) {
       res.status(500).json({ success: false, error: error.message });
     }
@@ -7034,43 +7164,12 @@ export const quoteAcceptancePage = functions.https.onRequest(async (req, res) =>
 
     // Show confirmation page
     if (responseType === 'accepted') {
-      // If the quote has a deposit configured and the tradie has Square
-      // connected, mint a hosted payment link and show a Pay Deposit button on
-      // the confirmation page. Best-effort: if anything fails we still show the
-      // standard "thank you" so the customer isn't blocked.
-      let depositPayment: { url: string; amount: number } | null = null;
-      const depositRequired = foundQuote.requireDeposit === true;
-      const depositPct = depositRequired ? (Number(foundQuote.depositPercentage) || 0) : 0;
-      if (depositRequired && depositPct > 0) {
-        try {
-          // Prefer the doc's active link; mint via the rotation path so the
-          // unified ledger picks up any new link rather than going around it.
-          const unifiedDoc = await loadDocumentForQuoteId(foundUserId, foundQuote.id);
-          const active = unifiedDoc?.activePaymentLink as
-            { id: string; url: string; kind: string; amount: number; consumedAt?: number } | undefined;
-          if (active && active.kind === 'deposit' && !active.consumedAt) {
-            depositPayment = { url: active.url, amount: active.amount };
-          } else {
-            const linkResult = await mintAndRotate(foundUserId, foundQuote.id, 'deposit');
-            if (linkResult) {
-              const depositAmount = Number(foundQuote.depositAmount)
-                || ((Number(foundQuote.total) || 0) * (depositPct / 100));
-              depositPayment = { url: linkResult.paymentLinkUrl, amount: depositAmount };
-            } else {
-              console.warn('[square] deposit link mint returned null on acceptance', {
-                userId: foundUserId, quoteId: foundQuote.id,
-              });
-            }
-          }
-        } catch (err: any) {
-          console.error('[square] deposit link mint threw on acceptance', {
-            userId: foundUserId, quoteId: foundQuote.id, message: err?.message,
-          });
-          // Show standard thank-you instead.
-        }
-      }
+      // Deposit quote → Pay deposit; anything else → an optional Pay now for
+      // the amount owed, when the tradie has Square connected. Best-effort:
+      // a null offer still shows the standard "thank you".
+      const payment = await paymentOfferForAcceptedQuote(foundUserId, tokenData.quoteId, foundQuote);
 
-      const acceptedMessage = depositPayment
+      const acceptedMessage = payment?.kind === 'deposit'
         ? `Thank you! To lock in your spot, please pay your deposit below. ${businessName} will start work once it clears.`
         : `Thank you! ${businessName} has been notified and will be in touch soon.`;
 
@@ -7078,7 +7177,7 @@ export const quoteAcceptancePage = functions.https.onRequest(async (req, res) =>
         'accepted',
         acceptedMessage,
         businessName, brandColor, logoUrl,
-        depositPayment,
+        payment,
       ));
     } else {
       res.status(200).send(generateConfirmationPage(
@@ -7173,9 +7272,13 @@ export function generateConfirmationPage(
   businessName?: string,
   brandColor?: string | null,
   logoUrl?: string | null,
-  depositPayment?: { url: string; amount: number } | null
+  payment?: AcceptedQuotePaymentOffer | null
 ): string {
   const esc = escapeHtml;
+  // Only a link that passes the href rule is ever rendered; the offer helper
+  // already enforces this, and the page enforces it again for its callers.
+  const safePayment = payment && isSafePaymentLinkUrl(payment.url) ? payment : null;
+  const depositPayment = safePayment?.kind === 'deposit' ? safePayment : null;
   // Match the email's default brand colour so an unbranded business doesn't
   // get a green email followed by an orange confirmation page.
   const accent = safeBrandColor(brandColor);
@@ -7280,11 +7383,19 @@ export function generateConfirmationPage(
       ${
         depositPayment && type === 'accepted'
           ? `
-      <div class="deposit">
+      <div class="deposit" data-kind="deposit">
         <div class="deposit-label">Deposit to get started</div>
         <div class="deposit-amount">${formatMoney(depositPayment.amount)}</div>
         <a href="${esc(depositPayment.url)}" class="btn">Pay deposit securely</a>
         <div class="deposit-note">Secure card payment through Square. ${who} is notified the moment it clears.</div>
+      </div>`
+          : safePayment?.kind === 'full' && type === 'accepted'
+          ? `
+      <div class="deposit" data-kind="full">
+        <div class="deposit-label">Pay now if you like</div>
+        <div class="deposit-amount">${formatMoney(safePayment.amount)}</div>
+        <a href="${esc(safePayment.url)}" class="btn">Pay by card</a>
+        <div class="deposit-note">Secure card payment through Square. Or ${who} will invoice you when the job&#8217;s done.</div>
       </div>`
           : ''
       }
@@ -7492,6 +7603,26 @@ export function generateAcceptancePage(token: string): string {
     }
     .state-icon-ring.neutral { background: var(--muted); }
     .state-icon-ring.warn { background: #dc2626; }
+
+    /* ---- Pay after accepting (same block as the email's confirmation page) ---- */
+    .pay-offer {
+      margin: 26px auto 0; max-width: 420px; padding: 22px 20px; text-align: center;
+      background: #f8fafc; border: 1px solid var(--line); border-radius: 12px;
+    }
+    .pay-offer-label {
+      color: var(--muted); font-size: 11px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 6px;
+    }
+    .pay-offer-amount {
+      font-size: 32px; font-weight: 800; letter-spacing: -0.5px; margin-bottom: 18px;
+      font-variant-numeric: tabular-nums; color: var(--ink);
+    }
+    .pay-offer .btn-pay {
+      display: block; background: var(--accent); color: #fff;
+      padding: 15px 24px; border-radius: 10px; font-weight: 700;
+      text-decoration: none; font-size: 16px; line-height: 1.2;
+    }
+    .pay-offer-note { color: var(--muted); font-size: 12px; line-height: 1.6; margin-top: 14px; }
 
     @media (max-width: 480px) {
       body { padding-left: 10px; padding-right: 10px; }
@@ -7798,7 +7929,7 @@ export function generateAcceptancePage(token: string): string {
         });
         var data = await resp.json();
         if (data.success) {
-          showSuccess(response);
+          showSuccess(response, data.payment || null);
         } else {
           showError(data.error || 'Failed to submit your response');
           buttons.forEach(function(btn) { btn.disabled = false; });
@@ -7814,16 +7945,41 @@ export function generateAcceptancePage(token: string): string {
       if (bar) bar.style.display = 'none';
     }
 
-    function showSuccess(response) {
+    // Pay-after-accept block: { kind: 'deposit' | 'full', url, amount } from
+    // respondToQuote, or null when there is nothing to offer. Mirrors the
+    // block on the email's confirmation page (generateConfirmationPage).
+    function renderPaymentOffer(payment) {
+      // https only, and nothing that could break out of the href attribute —
+      // the page's escapeHtml (textContent → innerHTML) leaves quotes alone.
+      if (!payment || typeof payment.url !== 'string' || !/^https:\\/\\/[^\\s"'<>\\\\]+$/.test(payment.url)) return '';
+      var who = escapeHtml(BUSINESS_NAME || 'The business');
+      var isDeposit = payment.kind === 'deposit';
+      return '<div class="pay-offer" data-kind="' + (isDeposit ? 'deposit' : 'full') + '">' +
+          '<div class="pay-offer-label">' + (isDeposit ? 'Deposit to get started' : 'Pay now if you like') + '</div>' +
+          '<div class="pay-offer-amount">' + formatCurrency(payment.amount) + '</div>' +
+          '<a class="btn-pay" href="' + escapeHtml(payment.url) + '">' + (isDeposit ? 'Pay deposit securely' : 'Pay by card') + '</a>' +
+          '<div class="pay-offer-note">' + (isDeposit
+            ? 'Secure card payment through Square. ' + who + ' is notified the moment it clears.'
+            : 'Secure card payment through Square. Or ' + who + ' will invoice you when the job’s done.') + '</div>' +
+        '</div>';
+    }
+
+    function showSuccess(response, payment) {
       hideActionBar();
       var isAccepted = response === 'accepted';
+      var offer = isAccepted ? renderPaymentOffer(payment) : '';
+      var who = escapeHtml(BUSINESS_NAME || 'The business');
+      var acceptedLine = payment && payment.kind === 'deposit' && offer
+        ? 'Thanks for accepting. To lock in your spot, please pay your deposit below. ' + who + ' will start work once it clears.'
+        : 'Thanks for accepting. ' + who + ' has been notified and will be in touch to lock in a date.';
       document.getElementById('content').innerHTML =
         '<div class="state success">' +
           '<div class="state-icon-ring">' + (isAccepted ? '&#10003;' : '&#9998;') + '</div>' +
           '<h2>' + (isAccepted ? 'Quote accepted — nice one!' : 'Response sent') + '</h2>' +
           '<p>' + (isAccepted
-            ? 'Thanks for accepting. ' + escapeHtml(BUSINESS_NAME || 'The business') + ' has been notified and will be in touch to lock in a date.'
+            ? acceptedLine
             : 'Your response has been recorded and ' + escapeHtml(BUSINESS_NAME || 'the business') + ' has been notified.') + '</p>' +
+          offer +
         '</div>';
       window.scrollTo(0, 0);
     }
