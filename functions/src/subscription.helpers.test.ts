@@ -12,6 +12,8 @@ import {
   rollupRevenue,
   RevenueEntry,
   TRIAL_MS,
+  formatSubPrice,
+  subPlanLabel,
 } from './subscription.helpers';
 
 // Build a StoreKit 2-style JWS: header.payload.signature with base64url segments.
@@ -390,3 +392,29 @@ describe('rollupRevenue', () => {
 });
 
 const round = (n: number) => Math.round(n * 100) / 100;
+
+describe('subPlanLabel (admin new-subscriber email)', () => {
+  it('REGRESSION: a grandfathered A$29 Android sub is labelled at its real billed price, not the $49 list price', () => {
+    // Tech Flow Electrical, 11 Sep 2026: Play reported priceAmountMicros
+    // 29000000 AUD; the email said "Monthly ($49/mo)".
+    const patch = storePricePatch({ micros: 29_000_000, currency: 'AUD', interval: 'monthly', source: 'google' });
+    expect(subPlanLabel(subPriceInfo({ ...patch, productId: 'quotemate_premium_monthly' }))).toBe('Monthly (A$29/mo)');
+  });
+
+  it('a yearly store price', () => {
+    const patch = storePricePatch({ micros: 328_000_000, currency: 'AUD', interval: 'yearly', source: 'apple' });
+    expect(subPlanLabel(subPriceInfo({ ...patch, productId: 'quotemate_pro_yearly' }))).toBe('Yearly (A$328/yr)');
+  });
+
+  it('says so when it had to fall back to the list price', () => {
+    expect(subPlanLabel(subPriceInfo({ productId: 'quotemate_pro_monthly' })))
+      .toBe('Monthly (list price A$49/mo — store sent no amount)');
+    expect(subPlanLabel(subPriceInfo({ productId: 'quotemate_premium_yearly' })))
+      .toBe('Yearly (list price A$328/yr — store sent no amount)');
+  });
+
+  it('formats cents and foreign currencies', () => {
+    expect(formatSubPrice({ amount: 49.9, currency: 'AUD', interval: 'monthly', source: 'store' })).toBe('A$49.90/mo');
+    expect(formatSubPrice({ amount: 12.5, currency: 'NZD', interval: 'monthly', source: 'store' })).toBe('12.50 NZD/mo');
+  });
+});

@@ -100,6 +100,7 @@ beforeAll(async () => {
     ['social-sign-in', () => e.sendSocialSignInReminderEmail('a@b.co', 'Google', U)],
     ['admin-new-user', () => e.sendNewUserNotificationEmail('a@b.co', 'ios', 'google', 'Hansen Fencing')],
     ['admin-new-pro', () => e.sendNewProSubscriptionEmail('a@b.co', U, 'ios', 'pro_monthly', 'Hansen Fencing')],
+    ['admin-new-pro-real-price', () => e.sendNewProSubscriptionEmail('a@b.co', U, 'android', 'quotemate_premium_monthly', 'Hansen Fencing', { amount: 29, currency: 'AUD', interval: 'monthly', source: 'store' })],
     ['admin-feedback', () => e.sendFeedbackEmail('a@b.co', U, 'quoting', 'Materials list is slow.')],
   ];
 
@@ -113,7 +114,7 @@ beforeAll(async () => {
 
 describe('tradie-facing email shell', () => {
   it('sends every email in the fixture list', () => {
-    expect(sent).toHaveLength(31);
+    expect(sent).toHaveLength(32);
   });
 
   it('renders each one on the light card, not the retired slate one', () => {
