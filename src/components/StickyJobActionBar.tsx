@@ -10,13 +10,11 @@
  *   draft (mid-wizard) → Continue Quote (resumes at the step they left)
  *   draft (ready)      → Send Quote
  *   quote sent         → Take Deposit (primary) + Mark Approved (secondary)
- *   accepted (deposit  → Take Deposit + Schedule
- *     still owed)
- *   accepted (deposit  → Schedule
- *     settled)
- *   scheduled          → Start Job + Edit date
- *   in_progress / no   → Generate Invoice + Mark Complete
- *     invoice yet
+ *   accepted, any job  → the money step (Take Deposit while the deposit
+ *     stage, no invoice   asked for is unpaid, else Create Invoice) + the
+ *     yet                 stage's step (Pick a Date / Start Job / Mark Complete);
+ *                         except a booked job with nothing owing, which keeps
+ *                         Start Job + Edit Date (the invoice waits for the work)
  *   invoice unpaid     → Take Final Payment + Send Invoice
  *   paid (work still   → Edit Date + Close Job
  *     booked ahead)
@@ -42,6 +40,7 @@ import { makeStyles, useThemeColors } from '../theme';
 import { selectionTap, lightTap } from '../utils/haptics';
 import { isStillBooked } from '../utils/jobBuckets';
 import { paymentCopy } from '../constants/paymentCopy';
+import { depositOwed } from '../utils/nextBestAction';
 
 export type JobActionId =
   | 'createQuote'
@@ -164,18 +163,9 @@ export function isUnfinishedDraftQuote(doc: Document | null): boolean {
   );
 }
 
-/**
- * A deposit the tradie asked for on this quote and hasn't been paid. Exported
- * because the "job won" sheet picks its primary money action the same way the
- * bar does — the amount is always the one on the quote, never a percentage
- * this app decided on.
- */
-export function depositOwed(doc: Document | null): boolean {
-  if (!doc || doc.type !== 'quote') return false;
-  const required = Number(doc.depositAmount ?? 0);
-  const paid = Number(doc.depositPaid ?? 0);
-  return required > 0 && paid < required;
-}
+// The "job won" sheet and the dashboard's next-action card pick the money
+// step the same way the bar does; the rule lives with the money-state model.
+export { depositOwed };
 
 function invoiceBalanceOwed(doc: Document | null): boolean {
   if (!doc || doc.type !== 'invoice') return false;
@@ -320,36 +310,44 @@ export function resolveJobActions(
     ];
   }
   if (isQuoteAccepted) {
-    const actions: ActionSpec[] = [];
+    // The customer said yes: the next move is the money, whatever the job's
+    // own stage. The deposit the tradie asked for comes first; with none
+    // owing, the invoice. Same rule the "job won" sheet and the dashboard's
+    // next-action card use (depositOwed), so a tradie arriving from either
+    // finds the button they were promised. The job step for the stage rides
+    // in the second slot. It used to lead with "Pick a Date" — ten of the
+    // eleven accounts that ever paid had an accepted quote first, and
+    // thirty-eight with one never collected a cent.
+    const money: ActionSpec = depositOwed(primaryDoc)
+      ? { id: 'takeDeposit', label: paymentCopy.takeDeposit, icon: 'credit-card-outline', tone: 'primary' }
+      : { id: 'generateInvoice', label: 'Create Invoice', icon: 'receipt', tone: 'primary' };
     if (stage === 'scheduled') {
-      actions.push({ id: 'startJob', label: 'Start Job', icon: 'hammer-wrench', tone: 'primary' });
-      actions.push({ id: 'schedule', label: 'Edit Date', icon: 'calendar-edit', tone: 'ghost' });
-      return actions;
+      // A booked job with nothing owing is waiting on the tradie to turn up,
+      // not on an invoice: Start Job stays first and the invoice rides
+      // second. An unpaid deposit still leads, whatever the date says.
+      return money.id === 'takeDeposit'
+        ? [money, { id: 'startJob', label: 'Start Job', icon: 'hammer-wrench', tone: 'ghost' }]
+        : [
+            { id: 'startJob', label: 'Start Job', icon: 'hammer-wrench', tone: 'primary' },
+            { id: 'schedule', label: 'Edit Date', icon: 'calendar-edit', tone: 'ghost' },
+          ];
     }
     if (stage === 'in_progress') {
-      actions.push({ id: 'generateInvoice', label: 'Generate Invoice', icon: 'receipt', tone: 'primary' });
-      actions.push({ id: 'markComplete', label: 'Mark Complete', icon: 'flag-checkered', tone: 'ghost' });
-      return actions;
+      // Mid-job the invoice is the way to the money, so it stays one tap
+      // away even while an unpaid deposit leads.
+      return money.id === 'takeDeposit'
+        ? [money, { id: 'generateInvoice', label: 'Create Invoice', icon: 'receipt', tone: 'ghost' }]
+        : [money, { id: 'markComplete', label: 'Mark Complete', icon: 'flag-checkered', tone: 'ghost' }];
     }
     if (stage === 'completed') {
-      actions.push({ id: 'generateInvoice', label: 'Generate Invoice', icon: 'receipt', tone: 'primary' });
-      if (depositOwed(primaryDoc)) {
-        actions.push({ id: 'takeDeposit', label: 'Take Deposit', icon: 'credit-card-outline', tone: 'ghost' });
-      }
-      return actions;
+      // Work's done and a deposit is still owed: the invoice is the other
+      // way to the money, so it keeps the second slot.
+      return money.id === 'takeDeposit'
+        ? [money, { id: 'generateInvoice', label: 'Create Invoice', icon: 'receipt', tone: 'ghost' }]
+        : [money];
     }
-    // stage === 'accepted' (or any unexpected value): schedule is the
-    // priority; money collection beats conversion when a deposit is owed.
-    // Otherwise offer Generate Invoice here too — plenty of tradies
-    // invoice straight off an acceptance without ever scheduling, and
-    // hiding conversion until in_progress forced stage gymnastics.
-    actions.push({ id: 'schedule', label: 'Pick a Date', icon: 'calendar-plus', tone: 'primary' });
-    if (depositOwed(primaryDoc)) {
-      actions.push({ id: 'takeDeposit', label: 'Take Deposit', icon: 'credit-card-outline', tone: 'ghost' });
-    } else {
-      actions.push({ id: 'generateInvoice', label: 'Generate Invoice', icon: 'receipt', tone: 'ghost' });
-    }
-    return actions;
+    // stage === 'accepted' (or any unexpected value).
+    return [money, { id: 'schedule', label: 'Pick a Date', icon: 'calendar-plus', tone: 'ghost' }];
   }
 
   return [];

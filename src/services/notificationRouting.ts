@@ -61,13 +61,85 @@ export function routeForNotification(data: unknown): PushRoute | null {
   return null;
 }
 
+export interface NotificationTapNavigatorDeps {
+  /**
+   * RootNavigator — home of every screen a push can name — is mounted. It
+   * mounts only after onboarding finishes; navigating before then throws
+   * "not handled by any navigator" (Sentry #163).
+   */
+  isMainAppMounted: () => boolean;
+  navigate: (screen: string, params?: Record<string, unknown>) => void;
+  /** A navigate that threw, for reporting. The tap is dropped either way. */
+  onError?: (err: unknown, route: PushRoute) => void;
+}
+
+export type NotificationTapOutcome = 'navigated' | 'held' | 'ignored';
+
+export interface NotificationTapNavigator {
+  /**
+   * Act on a tapped notification's data payload. Navigates now when the main
+   * app is up; otherwise holds the route until flush(). `key` de-duplicates
+   * one tap that reaches us twice — the live listener and the launch-response
+   * lookup can both report the tap that started the process.
+   */
+  handle(data: unknown, key?: string): NotificationTapOutcome;
+  /** Once the main app has mounted: navigate the held route, if any. */
+  flush(): boolean;
+}
+
 /**
- * Resolve a notification tap to a route, but only once it's safe to act on
- * one — RootNavigator (home of every screen this can return) mounts only
- * after onboarding finishes; navigating before then throws "not handled by
- * any navigator" (the production bug this guards, Sentry #163).
+ * Where a notification tap goes, and WHEN.
+ *
+ * A "Quote accepted" push that arrives while the phone is in a pocket is
+ * opened cold. The live response listener is registered after sign-in, and
+ * whether the OS replays a launch tap to it differs by platform, so the app
+ * also asks for the launch response outright (getLaunchNotificationResponse).
+ * That lookup used to be attribution-only: the tradie who tapped "{customer}
+ * accepted your quote" landed on the dashboard and had to find the job
+ * themselves. Now both paths land here, a tap that arrives before
+ * RootNavigator is mounted is held until it is, and a tap seen from both
+ * sides navigates once.
  */
-export function resolvableNotificationRoute(data: unknown, mainAppMounted: boolean): PushRoute | null {
-  if (!mainAppMounted) return null;
-  return routeForNotification(data);
+export function createNotificationTapNavigator(
+  deps: NotificationTapNavigatorDeps,
+): NotificationTapNavigator {
+  const seen = new Set<string>();
+  let held: PushRoute | null = null;
+
+  const go = (route: PushRoute): boolean => {
+    try {
+      deps.navigate(route.screen, route.params);
+      return true;
+    } catch (err) {
+      deps.onError?.(err, route);
+      return false;
+    }
+  };
+
+  return {
+    handle(data, key) {
+      if (key) {
+        if (seen.has(key)) return 'ignored';
+        seen.add(key);
+      }
+      const route = routeForNotification(data);
+      if (!route) return 'ignored';
+      if (!deps.isMainAppMounted()) {
+        // The newest tap wins: it is the one the tradie is asking for.
+        held = route;
+        return 'held';
+      }
+      // A tap that navigates now supersedes anything still held from before
+      // the app was up — otherwise a later gate toggle would replay it.
+      held = null;
+      go(route);
+      return 'navigated';
+    },
+    flush() {
+      if (!held || !deps.isMainAppMounted()) return false;
+      const route = held;
+      held = null;
+      return go(route);
+    },
+  };
 }

@@ -1,7 +1,9 @@
 /**
  * JobWonSheet — the "job won" moment.
  *
- * Shown once, right after a tradie marks a quote accepted (see ViewJobScreen).
+ * Shown once per won quote (see ViewJobScreen): right after a tradie marks it
+ * accepted, or on their first open of a job the customer accepted remotely —
+ * from the email, the hosted quote page, or by paying the deposit.
  * The next thing that happens on a won job is money: the deposit they asked
  * for, or the invoice. That is the primary button, and it runs the same flows
  * the sticky job bar runs — the sheet owns no navigation of its own, it calls

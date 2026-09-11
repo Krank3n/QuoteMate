@@ -117,3 +117,82 @@ describe('convertDocumentToInvoice legacy stamp', () => {
     expect(useStore.getState().documents.find((d) => d.id === DOC_ID)?.type).toBe('invoice');
   });
 });
+
+// A deposit the customer already paid on the quote must come off the invoice
+// as a credit, on both conversion paths. This is the invoice a tradie creates
+// from the "job won" sheet / sticky bar's Create Invoice straight after a
+// deposit landed — billing the full total again would double-charge the
+// customer for the deposit they just paid.
+describe('a paid deposit is carried as a credit on the invoice', () => {
+  const NOW = 1_700_000_000_000;
+  const quoteWithDeposit = (): Quote =>
+    legacyQuote({
+      status: 'accepted',
+      total: 960,
+      materials: [],
+      job: { id: 'job-1', name: 'Test job' },
+      depositAmount: 300,
+      depositPaid: 300,
+      depositPaidAt: new Date(NOW),
+    } as Partial<Quote>);
+  const acceptedDoc = (): Document =>
+    ({ ...quoteDoc(), stage: 'quote_accepted', materials: [], depositAmount: 300, depositPaid: 300 }) as Document;
+
+  it('legacy createInvoiceFromQuote: total drops by the deposit and the credit is stamped', async () => {
+    // No unified doc for this id → the legacy mint path runs.
+    useStore.setState({ documents: [], quotes: [quoteWithDeposit()], saveQuote: vi.fn(async () => {}) } as any);
+
+    const invoice = await useStore.getState().createInvoiceFromQuote(quoteWithDeposit());
+
+    expect(invoice.total).toBe(660);
+    expect(invoice.depositCredit).toBe(300);
+    expect(invoice.depositCreditFromQuoteId).toBe(DOC_ID);
+    expect(invoice.sourceQuoteId).toBe(DOC_ID);
+  });
+
+  it('legacy createInvoiceFromQuote: credits only money actually received, not the deposit asked for', async () => {
+    useStore.setState({ documents: [], quotes: [], saveQuote: vi.fn(async () => {}) } as any);
+    const unpaid = legacyQuote({
+      status: 'accepted',
+      total: 960,
+      materials: [],
+      job: { id: 'job-1', name: 'Test job' },
+      depositAmount: 300,
+      depositPaid: 0,
+    } as Partial<Quote>);
+
+    const invoice = await useStore.getState().createInvoiceFromQuote(unpaid);
+
+    expect(invoice.total).toBe(960);
+    expect(invoice.depositCredit).toBeUndefined();
+  });
+
+  it('unified convertDocumentToInvoice: total drops by the deposit and the deposit stays on the doc', async () => {
+    useStore.setState({
+      documents: [acceptedDoc()],
+      quotes: [quoteWithDeposit()],
+      saveQuote: vi.fn(async () => {}),
+    } as any);
+
+    const converted = await useStore.getState().convertDocumentToInvoice(DOC_ID);
+
+    expect(converted.type).toBe('invoice');
+    expect(converted.total).toBe(660);
+    expect(converted.depositPaid).toBe(300);
+    // The undo stash keeps the pre-credit total so a revert restores it.
+    expect(converted.convertedFromQuote?.total).toBe(960);
+  });
+
+  it('createInvoiceFromQuote routes an accepted quote with a unified doc through the same credit', async () => {
+    useStore.setState({
+      documents: [acceptedDoc()],
+      quotes: [quoteWithDeposit()],
+      saveQuote: vi.fn(async () => {}),
+    } as any);
+
+    const invoice = await useStore.getState().createInvoiceFromQuote(quoteWithDeposit());
+
+    expect(invoice.total).toBe(660);
+    expect(useStore.getState().documents.find((d) => d.id === DOC_ID)?.total).toBe(660);
+  });
+});

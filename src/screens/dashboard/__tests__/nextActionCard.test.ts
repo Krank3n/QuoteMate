@@ -41,14 +41,42 @@ describe('key → action mapping', () => {
     expect(card?.tone).toBe('money');
   });
 
-  it('take_deposit names the invoice only while it is still to be sent', () => {
-    const accepted = buildCard(action('take_deposit'), [doc({ stage: 'quote_accepted' })])!;
-    expect(accepted.subtitle).toContain('send the invoice');
-    const invoiced = buildCard(action('take_deposit'), [doc({ stage: 'invoice_sent' })])!;
-    expect(invoiced.subtitle).not.toContain('send the invoice');
+  // The card names the one step the job screen's primary button will offer
+  // on landing (resolveJobActions reads the same depositOwed), so the tradie
+  // is never promised one thing and shown another.
+  it('take_deposit on an accepted quote names the deposit while one is owed, else the invoice', () => {
+    const owing = buildCard(action('take_deposit'), [
+      doc({ stage: 'quote_accepted', type: 'quote', depositAmount: 200, depositPaid: 0 }),
+    ])!;
+    expect(owing.subtitle).toContain('take the deposit');
+    expect(owing.subtitle).not.toContain('invoice');
+
+    const depositIn = buildCard(action('take_deposit'), [
+      doc({ stage: 'quote_accepted', type: 'quote', depositAmount: 200, depositPaid: 200 }),
+    ])!;
+    expect(depositIn.subtitle).toContain('create the invoice');
+    expect(depositIn.subtitle).not.toContain('deposit');
+
+    const noDeposit = buildCard(action('take_deposit'), [doc({ stage: 'quote_accepted', type: 'quote' })])!;
+    expect(noDeposit.subtitle).toContain('create the invoice');
+  });
+
+  it('take_deposit on a sent invoice names the payment', () => {
+    const invoiced = buildCard(action('take_deposit'), [doc({ stage: 'invoice_sent', type: 'invoice' })])!;
     expect(invoiced.subtitle).toContain('invoice is out');
-    const partial = buildCard(action('take_deposit'), [doc({ stage: 'partially_paid' })])!;
+    expect(invoiced.subtitle).not.toContain('create the invoice');
+    const partial = buildCard(action('take_deposit'), [doc({ stage: 'partially_paid', type: 'invoice' })])!;
     expect(partial.subtitle).toContain('invoice is out');
+  });
+
+  it('take_deposit lands on the most recent accepted job, not a list', () => {
+    const docs = [
+      doc({ stage: 'quote_accepted', type: 'quote', id: 'a', jobId: 'job-a', updatedAt: 10 }),
+      doc({ stage: 'quote_accepted', type: 'quote', id: 'b', jobId: 'job-b', updatedAt: 20, depositAmount: 50 }),
+    ];
+    const card = buildCard(action('take_deposit'), docs)!;
+    expect(card.route).toEqual({ screen: 'ViewJob', params: { jobId: 'job-b' } });
+    expect(card.subtitle).toContain('take the deposit');
   });
 
   it('take_deposit picks the most recent unpaid job and skips Square-settled ones', () => {
