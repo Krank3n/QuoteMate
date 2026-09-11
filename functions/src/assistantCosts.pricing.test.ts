@@ -464,7 +464,7 @@ describe('reportAssistantVoiceUsage: OpenAI daily-doc aggregation', () => {
     expect(store.writes).toHaveLength(0);
   });
 
-  it('clamps a client claiming more tokens than an hour of audio could produce', async () => {
+  it('clamps a client claiming more output tokens than hours of speech could produce', async () => {
     await runVoiceReport({
       model: OA_MODEL, conversationId: 'oa_1', durationSeconds: 90,
       usage: { outputAudioTokens: 50_000_000 },
@@ -472,6 +472,29 @@ describe('reportAssistantVoiceUsage: OpenAI daily-doc aggregation', () => {
     // Capped at 5M tokens @ $64/M = $320, not the $3,200 it asked for.
     expect(incOf(patchAt(USAGE_PATH), 'models.openai_gpt-realtime-2_1.voiceCostMicros'))
       .toBe(320_000_000);
+  });
+
+  it('does not clip the re-billed input of a long, chatty session', async () => {
+    // Every Realtime response re-bills the whole conversation as input, so a
+    // 45-minute session at a turn every ~10 s sums past 5M input tokens,
+    // almost all cached. That is real spend, not a bug, and must land whole.
+    await runVoiceReport({
+      model: OA_MODEL, conversationId: 'oa_1', durationSeconds: 2_700,
+      usage: { inputAudioTokens: 8_000_000, cachedInputAudioTokens: 7_500_000 },
+    });
+    // 500k fresh @ $32/M = $16 + 7.5M cached @ $0.40/M = $3 → $19.
+    expect(incOf(patchAt(USAGE_PATH), 'models.openai_gpt-realtime-2_1.voiceCostMicros'))
+      .toBe(19_000_000);
+  });
+
+  it('still clamps input past the point any conversation could reach', async () => {
+    await runVoiceReport({
+      model: OA_MODEL, conversationId: 'oa_1', durationSeconds: 2_700,
+      usage: { inputAudioTokens: 200_000_000 },
+    });
+    // 20M @ $32/M = $640, not the $6,400 it asked for.
+    expect(incOf(patchAt(USAGE_PATH), 'models.openai_gpt-realtime-2_1.voiceCostMicros'))
+      .toBe(640_000_000);
   });
 });
 

@@ -741,20 +741,30 @@ export const reportAssistantVoiceUsage = functions.https.onCall(async (data, con
   const payload: VoiceUsagePayload = data || {};
   const conversationId = String(payload.conversationId || '').trim();
   const requestedModel = String(payload.model || 'elevenlabs/claude-sonnet-5');
-  // Same clamp, and the same reasoning, as reportAssistantLiveUsage: a
-  // misbehaving client must not be able to poison the cost dashboard. 5M
-  // tokens is already about an hour of realtime audio.
-  const CAP = 5_000_000;
-  const clamp = (n: unknown) => Math.max(0, Math.min(CAP, Math.floor(Number(n) || 0)));
+  // Same idea as reportAssistantLiveUsage's clamp: a misbehaving client must
+  // not be able to poison the cost dashboard. The two sides get different
+  // ceilings because Realtime bills them differently. OUTPUT is produced once,
+  // so 5M output tokens is already hours of speech. INPUT is re-billed on
+  // every response — each turn charges the whole conversation so far — so a
+  // long, chatty Pro session legitimately sums to several million input
+  // tokens (a 45-minute session at a turn every ~10 s passes 5M, mostly
+  // cached). Clipping that would under-count the exact sessions that cost
+  // the most, so input gets 20M. Above that it is a bug, not a conversation.
+  const INPUT_CAP = 20_000_000;
+  const OUTPUT_CAP = 5_000_000;
+  const clampTo = (cap: number) => (n: unknown) =>
+    Math.max(0, Math.min(cap, Math.floor(Number(n) || 0)));
+  const clampIn = clampTo(INPUT_CAP);
+  const clampOut = clampTo(OUTPUT_CAP);
   const reported = payload.usage;
   const usage: OpenAiRealtimeUsagePayload | undefined = reported
     ? {
-      inputTextTokens: clamp(reported.inputTextTokens),
-      inputAudioTokens: clamp(reported.inputAudioTokens),
-      cachedInputTextTokens: clamp(reported.cachedInputTextTokens),
-      cachedInputAudioTokens: clamp(reported.cachedInputAudioTokens),
-      outputTextTokens: clamp(reported.outputTextTokens),
-      outputAudioTokens: clamp(reported.outputAudioTokens),
+      inputTextTokens: clampIn(reported.inputTextTokens),
+      inputAudioTokens: clampIn(reported.inputAudioTokens),
+      cachedInputTextTokens: clampIn(reported.cachedInputTextTokens),
+      cachedInputAudioTokens: clampIn(reported.cachedInputAudioTokens),
+      outputTextTokens: clampOut(reported.outputTextTokens),
+      outputAudioTokens: clampOut(reported.outputAudioTokens),
     }
     : undefined;
   const date = todayKey();
