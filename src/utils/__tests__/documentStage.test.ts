@@ -45,6 +45,11 @@ describe('documentStage', () => {
       }
     });
 
+    it('lets an accepted quote settle when the customer pays the whole amount', () => {
+      // "Pay now" on the acceptance page: accept first, pay a moment later.
+      expect(canTransition('quote_accepted', 'paid')).toBe(true);
+    });
+
     it('rejects key illegal jumps explicitly', () => {
       // Jumping straight from draft to paid skips invoice_sent
       expect(canTransition('draft', 'paid')).toBe(false);

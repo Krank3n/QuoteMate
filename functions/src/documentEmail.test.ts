@@ -754,7 +754,7 @@ describe('generateConfirmationPage', () => {
   it('shows the deposit CTA with formatted money on acceptance', () => {
     const html = generateConfirmationPage(
       'accepted', 'Thanks!', 'Hansen Fencing', null, null,
-      { url: 'https://square.link/u/demo', amount: 2029.64 },
+      { kind: 'deposit', url: 'https://square.link/u/demo', amount: 2029.64 },
     );
     expect(html).toContain('$2,029.64');
     expect(html).toContain('https://square.link/u/demo');
@@ -763,7 +763,7 @@ describe('generateConfirmationPage', () => {
   it('never shows a deposit CTA on a decline', () => {
     const html = generateConfirmationPage(
       'declined', 'Recorded.', 'Hansen Fencing', null, null,
-      { url: 'https://square.link/u/demo', amount: 2029.64 },
+      { kind: 'deposit', url: 'https://square.link/u/demo', amount: 2029.64 },
     );
     expect(html).not.toContain('https://square.link/u/demo');
   });

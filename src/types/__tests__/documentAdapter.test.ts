@@ -97,6 +97,27 @@ describe('deriveStage', () => {
       expect(deriveStage(makeQuote({ status: 'partial' as any }), 'quote')).toBe('quote_accepted');
     });
 
+    it('a won quote paid in full is paid, not merely accepted', () => {
+      // The Square webhook stamps paidTotal on the legacy row when the
+      // customer pays the whole amount from the acceptance page; the mirror
+      // must not project quote_accepted back over the ledger's paid stage.
+      expect(
+        deriveStage({ ...makeQuote({ status: 'accepted', total: 1056 }), paidTotal: 1056 } as any, 'quote'),
+      ).toBe('paid');
+      expect(
+        deriveStage({ ...makeQuote({ status: 'completed', total: 1056 }), paidTotal: 1056 } as any, 'quote'),
+      ).toBe('paid');
+    });
+
+    it('a deposit alone leaves a won quote at quote_accepted, and only a won quote can settle', () => {
+      expect(
+        deriveStage({ ...makeQuote({ status: 'accepted', total: 1056 }), paidTotal: 264 } as any, 'quote'),
+      ).toBe('quote_accepted');
+      expect(
+        deriveStage({ ...makeQuote({ status: 'sent', total: 1056 }), paidTotal: 1056 } as any, 'quote'),
+      ).toBe('quote_sent');
+    });
+
     it('treats legacy overdue quote status as quote_sent', () => {
       expect(deriveStage(makeQuote({ status: 'overdue' as any }), 'quote')).toBe('quote_sent');
     });
