@@ -1012,6 +1012,9 @@ function App() {
               theme={navigationTheme}
               linking={linking}
               ref={navigationRef}
+              // A tap held because the navigator wasn't ready yet is released
+              // here; the showMainApp effect covers the other half of the gate.
+              onReady={() => notificationTaps.flush()}
             >
               <StatusBar style={statusBarStyle(appTheme)} />
               {showAuthScreen ? (

@@ -106,6 +106,16 @@ describe('createNotificationTapNavigator', () => {
     expect(navigate).toHaveBeenCalledWith('ViewJob', { jobId: 'job-new' });
   });
 
+  it('a tap that navigates directly clears a stale hold, so a later flush replays nothing', () => {
+    const { nav, navigate, state } = navigator(false);
+    expect(nav.handle({ ...accepted, jobId: 'job-A' }, 'k1')).toBe('held');
+    state.mounted = true;
+    expect(nav.handle({ ...accepted, jobId: 'job-B' }, 'k2')).toBe('navigated');
+    expect(nav.flush()).toBe(false);
+    expect(navigate).toHaveBeenCalledTimes(1);
+    expect(navigate).toHaveBeenCalledWith('ViewJob', { jobId: 'job-B' });
+  });
+
   it('ignores a payload with nowhere to go, and a keyless tap is not de-duplicated', () => {
     const { nav, navigate } = navigator();
     expect(nav.handle({ type: 'milestone' })).toBe('ignored');

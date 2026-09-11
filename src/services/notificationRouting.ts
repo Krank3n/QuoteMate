@@ -129,6 +129,9 @@ export function createNotificationTapNavigator(
         held = route;
         return 'held';
       }
+      // A tap that navigates now supersedes anything still held from before
+      // the app was up — otherwise a later gate toggle would replay it.
+      held = null;
       go(route);
       return 'navigated';
     },

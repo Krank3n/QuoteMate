@@ -13,8 +13,8 @@
  *   accepted, any job  → the money step (Take Deposit while the deposit
  *     stage, no invoice   asked for is unpaid, else Create Invoice) + the
  *     yet                 stage's step (Pick a Date / Start Job / Mark Complete);
- *                         except a booked job with nothing owing, which leads
- *                         with Start Job and keeps Create Invoice second
+ *                         except a booked job with nothing owing, which keeps
+ *                         Start Job + Edit Date (the invoice waits for the work)
  *   invoice unpaid     → Take Final Payment + Send Invoice
  *   paid (work still   → Edit Date + Close Job
  *     booked ahead)
@@ -329,11 +329,15 @@ export function resolveJobActions(
         ? [money, { id: 'startJob', label: 'Start Job', icon: 'hammer-wrench', tone: 'ghost' }]
         : [
             { id: 'startJob', label: 'Start Job', icon: 'hammer-wrench', tone: 'primary' },
-            { ...money, tone: 'ghost' },
+            { id: 'schedule', label: 'Edit Date', icon: 'calendar-edit', tone: 'ghost' },
           ];
     }
     if (stage === 'in_progress') {
-      return [money, { id: 'markComplete', label: 'Mark Complete', icon: 'flag-checkered', tone: 'ghost' }];
+      // Mid-job the invoice is the way to the money, so it stays one tap
+      // away even while an unpaid deposit leads.
+      return money.id === 'takeDeposit'
+        ? [money, { id: 'generateInvoice', label: 'Create Invoice', icon: 'receipt', tone: 'ghost' }]
+        : [money, { id: 'markComplete', label: 'Mark Complete', icon: 'flag-checkered', tone: 'ghost' }];
     }
     if (stage === 'completed') {
       // Work's done and a deposit is still owed: the invoice is the other

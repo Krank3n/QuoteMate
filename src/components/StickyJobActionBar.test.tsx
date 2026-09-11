@@ -119,7 +119,7 @@ describe('resolveJobActions — accepted quote leads with the money', () => {
 
   it('a deposit asked for but never paid stays first on every job stage', () => {
     expect(resolveJobActions('scheduled', depositOwing).map((a) => a.id)).toEqual(['takeDeposit', 'startJob']);
-    expect(resolveJobActions('in_progress', depositOwing).map((a) => a.id)).toEqual(['takeDeposit', 'markComplete']);
+    expect(resolveJobActions('in_progress', depositOwing).map((a) => a.id)).toEqual(['takeDeposit', 'generateInvoice']);
     expect(resolveJobActions('completed', depositOwing).map((a) => a.id)).toEqual(['takeDeposit', 'generateInvoice']);
   });
 
@@ -128,12 +128,12 @@ describe('resolveJobActions — accepted quote leads with the money', () => {
     expect(resolveJobActions('completed', accepted).map((a) => a.id)).toEqual(['generateInvoice']);
   });
 
-  it('a booked job with nothing owing leads with Start Job and keeps the invoice second', () => {
+  it('a booked job with nothing owing keeps Start Job and Edit Date — the invoice waits for the work', () => {
     const actions = resolveJobActions('scheduled', accepted);
-    expect(actions.map((a) => a.id)).toEqual(['startJob', 'generateInvoice']);
+    expect(actions.map((a) => a.id)).toEqual(['startJob', 'schedule']);
     expect(actions[0].tone).toBe('primary');
-    expect(actions[1]).toMatchObject({ label: 'Create Invoice', tone: 'ghost' });
-    expect(resolveJobActions('scheduled', depositPaid).map((a) => a.id)).toEqual(['startJob', 'generateInvoice']);
+    expect(actions[1]).toMatchObject({ label: 'Edit Date', tone: 'ghost' });
+    expect(resolveJobActions('scheduled', depositPaid).map((a) => a.id)).toEqual(['startJob', 'schedule']);
   });
 
   it('never leads an accepted quote with anything but the money step, bar a booked job with nothing owing', () => {

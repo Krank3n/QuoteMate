@@ -10,7 +10,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { View, StyleSheet, Pressable, Linking, Platform, TouchableOpacity } from 'react-native';
 import { NestableScrollContainer } from 'react-native-draggable-flatlist';
-import { Text, Card, Button, Snackbar } from 'react-native-paper';
+import { Text, Card, Button, Snackbar, ActivityIndicator } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { formatDistanceToNow } from 'date-fns';
@@ -84,6 +84,7 @@ export function ViewJobScreen() {
   const jobId: string = route.params?.jobId;
 
   const job = useJobStore((s) => s.jobs.find((j) => j.id === jobId));
+  const jobsLoaded = useJobStore((s) => s.jobsLoaded);
   const saveJob = useJobStore((s) => s.saveJob);
   const deleteJob = useJobStore((s) => s.deleteJob);
 
@@ -250,9 +251,26 @@ export function ViewJobScreen() {
     // `pendingAction`: an in-app acceptance is mid-flight from the sticky bar
     // (markApproved runs its own offer once the review ask has answered), so
     // this one stands down rather than racing it.
+    // Any sheet or dialog already up wins: the acceptance can land from the
+    // Firestore listener while the tradie is mid-send or mid-payment.
     if (!remoteWinDoc || wonSheetState || pendingAction) return;
+    if (
+      sendDialogDoc || takePaymentTarget || followUpState
+      || scheduleSheetVisible || stageSheetVisible || actionsSheetVisible
+    ) return;
     void offerWonPromptRef.current?.(remoteWinDoc, false);
   }, [remoteWinDoc?.id, remoteWinDoc?.respondedAt]);
+
+  if (!job && !jobsLoaded) {
+    // A push tapped with the app closed navigates here before the first jobs
+    // fetch has answered; "Job not found" with a Back button would be a lie
+    // for the length of that round trip.
+    return (
+      <View style={[styles.container, styles.centered]}>
+        <ActivityIndicator animating color={themeColors.accent} />
+      </View>
+    );
+  }
 
   if (!job) {
     return (
