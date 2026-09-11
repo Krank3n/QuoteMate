@@ -53,6 +53,12 @@ import { useIsAppActive } from '../hooks/useIsAppActive';
 import { lightTap, successTap } from '../utils/haptics';
 import { trackEvent } from '../services/analyticsService';
 import { pressMateDoor, pressWizardDoor } from './dashboard/doorActions';
+import {
+  nextActionCard,
+  pressNextAction,
+  hasSquareEvidence,
+} from './dashboard/nextActionCard';
+import { nextBestAction } from '../utils/nextBestAction';
 import { TrialBanner } from '../components/TrialBanner';
 import { LeadsPromoCard } from '../components/LeadsPromoCard';
 import { TRIAL_MS } from '../utils/trialConfig';
@@ -294,6 +300,7 @@ export function DashboardScreen() {
   const deleteQuote = useStore((s) => s.deleteQuote);
   const saveQuote = useStore((s) => s.saveQuote);
   const canCreateQuote = useStore((s) => s.canCreateQuote);
+  const getEffectivePlan = useStore((s) => s.getEffectivePlan);
   const createInvoiceFromQuote = useStore((s) => s.createInvoiceFromQuote);
   const saveInvoice = useStore((s) => s.saveInvoice);
   const loadQuotes = useStore((s) => s.loadQuotes);
@@ -484,6 +491,54 @@ export function DashboardScreen() {
       ? { accent: themeColors.accent, accentBg: themeColors.accentSubtle }
       : { accent: themeColors.warning, accentBg: themeColors.warningSubtle };
 
+  // The one state-based action (nextBestAction) rendered on the home screen.
+  // The selector picks a single primary move from durable document state —
+  // money owing beats everything, activation states never get a price — and
+  // nextActionCard turns that into a card pointing at a screen the app
+  // already has. It only appears when the banner slot above is free: the
+  // draft banner and the follow-up nudge are more specific versions of the
+  // same intent, and `nudgeSnoozes === null` means the nudge hasn't been
+  // resolved yet, so the card waits rather than flashing and vanishing.
+  const nextAction = useMemo(
+    () =>
+      nextBestAction({
+        plan: getEffectivePlan(),
+        trialStartedAt: subscriptionStatus?.trialStartedAt
+          ? new Date(subscriptionStatus.trialStartedAt).getTime()
+          : null,
+        docs: documentsForStats,
+        hasSquareConnection: hasSquareEvidence(documentsForStats),
+        // Nothing counts Pro-feature opens or records a "happy on Free"
+        // choice yet, so the two states they gate (keep_pro_tools, and the
+        // suppression of every generic ask) simply never fire from here.
+        proFeatureUses: 0,
+        happyOnFree: false,
+        now: Date.now(),
+      }),
+    [getEffectivePlan, subscriptionStatus, documentsForStats],
+  );
+
+  const nextCard = useMemo(
+    () =>
+      nextActionCard(nextAction, documentsForStats, {
+        slotTaken: !!inProgressDraft || !!followUpNudge || nudgeSnoozes === null,
+      }),
+    [nextAction, documentsForStats, inProgressDraft, followUpNudge, nudgeSnoozes],
+  );
+
+  // One impression per surfaced action, keyed on the action itself so
+  // re-renders don't spam analytics (same rule as the nudge banner).
+  useEffect(() => {
+    if (nextCard) trackEvent('next_action_shown', { action: nextCard.key });
+  }, [nextCard?.key]);
+
+  const nextCardTone =
+    nextCard?.tone === 'money'
+      ? { accent: themeColors.money, accentBg: themeColors.moneySubtle }
+      : nextCard?.tone === 'warning'
+        ? { accent: themeColors.warning, accentBg: themeColors.warningSubtle }
+        : { accent: themeColors.accent, accentBg: themeColors.accentSubtle };
+
   const [stageSheetJob, setStageSheetJob] = useState<Job | null>(null);
   const [scheduleSheetJob, setScheduleSheetJob] = useState<Job | null>(null);
   // Stable identities — these go into memo'd JobCards; fresh closures every
@@ -572,6 +627,18 @@ export function DashboardScreen() {
   };
   const handleMateDoor = () => pressMateDoor(doorDeps);
   const handleNewJob = () => pressWizardDoor(doorDeps);
+
+  // The next-action card taps through to whatever screen its route names —
+  // the job, the send dialog, the paywall or the Square settings (see
+  // nextActionCard for the mapping and the tests that pin it).
+  const handleNextAction = () => {
+    if (!nextCard) return;
+    pressNextAction(nextCard, {
+      navigate: doorDeps.navigate,
+      lightTap,
+      track: trackEvent,
+    });
+  };
 
   const handleViewQuote = (quoteId: string) => {
     // Post-UX-collapse: ViewQuote/ViewInvoice are gone. Look up the
@@ -843,6 +910,42 @@ export function DashboardScreen() {
           onPress={handleNudgePress}
           onDismiss={handleNudgeDismiss}
         />
+      )}
+
+      {/* The one state-based action, when the banner slot above is free.
+          Same card language as the draft banner and the nudge. */}
+      {nextCard && (
+        <TouchableOpacity
+          onPress={handleNextAction}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel={`${nextCard.title}. ${nextCard.subtitle}`}
+        >
+          <Surface style={[styles.draftBanner, { borderLeftColor: nextCardTone.accent }]}>
+            <View style={styles.draftBannerContent}>
+              <View style={[styles.draftIconCircle, { backgroundColor: nextCardTone.accentBg }]}>
+                <MaterialCommunityIcons
+                  name={nextCard.icon as any}
+                  size={20}
+                  color={nextCardTone.accent}
+                />
+              </View>
+              <View style={styles.draftBannerText}>
+                <Text style={styles.draftBannerTitle} numberOfLines={1}>
+                  {nextCard.title}
+                </Text>
+                <Text style={styles.draftBannerSubtitle} numberOfLines={2}>
+                  {nextCard.subtitle}
+                </Text>
+              </View>
+              <MaterialCommunityIcons
+                name="chevron-right"
+                size={24}
+                color={nextCardTone.accent}
+              />
+            </View>
+          </Surface>
+        </TouchableOpacity>
       )}
 
       {/* The two doors — Mate primary, wizard secondary */}

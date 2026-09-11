@@ -47,6 +47,7 @@ import {
   StickyJobActionBar,
   pickPrimaryDoc,
   isUnfinishedDraftQuote,
+  depositOwed,
   type JobActionId,
 } from '../components/StickyJobActionBar';
 import { TakePaymentSheet, type TakePaymentTarget } from '../components/TakePaymentSheet';
@@ -54,7 +55,11 @@ import { getReeceConnectionStatus } from '../services/reeceApi';
 import { SendDocumentDialog } from '../components/SendDocumentDialog';
 import { warmEmailDraft } from '../utils/emailDraft';
 import { FollowUpSheet, type FollowUpTone } from '../components/FollowUpSheet';
-import { JobWonSheet } from '../components/JobWonSheet';
+import {
+  JobWonSheet,
+  hasNonSquarePaymentMethod,
+  type WonCollectAction,
+} from '../components/JobWonSheet';
 import type { Document, DocumentStage } from '../types/document';
 import { documentToQuote, documentToInvoice } from '../types/documentAdapter';
 import { applyStageChange } from '../utils/applyStageChange';
@@ -131,6 +136,8 @@ export function ViewJobScreen() {
     doc: Document;
     /** Days left when the offer was made, or null for a free user. */
     trialDaysRemaining: number | null;
+    /** The money step this win is up to — the sheet's primary button. */
+    collect: WonCollectAction;
   } | null>(null);
   const [pendingAction, setPendingAction] = useState<JobActionId | null>(null);
   const [reeceConnected, setReeceConnected] = useState<boolean | null>(null);
@@ -321,6 +328,36 @@ export function ViewJobScreen() {
       setWonSheetState({
         doc,
         trialDaysRemaining: plan === 'trial' ? trialDaysRemaining : null,
+        // The deposit the tradie actually asked for on this quote comes
+        // first; with none owing, the invoice is the next money step.
+        collect: depositOwed(doc) ? 'deposit' : 'invoice',
+      });
+    }
+  };
+
+  /**
+   * The money step on a won job, run from the "job won" sheet. Both branches
+   * are the flows the sticky bar already runs (Take Deposit / Generate
+   * Invoice), pointed at the quote the sheet is about rather than at whatever
+   * the bar happens to consider actionable.
+   */
+  const collectOnWonQuote = async (doc: Document, action: WonCollectAction) => {
+    if (action === 'deposit') {
+      openTakePaymentForDoc(doc);
+      return;
+    }
+    try {
+      await applyStageChange(doc, 'invoice_sent', {
+        saveQuote,
+        saveInvoice,
+        createInvoiceFromQuote,
+        navigation,
+      });
+    } catch {
+      showAlert({
+        type: 'error',
+        title: 'Something went wrong',
+        message: "That didn't go through. Try again?",
       });
     }
   };
@@ -1152,6 +1189,13 @@ export function ViewJobScreen() {
           name={job.customerName || job.name || 'the job'}
           total={Number(wonSheetState.doc.total)}
           trialDaysRemaining={wonSheetState.trialDaysRemaining}
+          collect={wonSheetState.collect}
+          hasOtherPaymentMethod={hasNonSquarePaymentMethod(businessSettings?.paymentMethods)}
+          onCollect={() => {
+            const { doc, collect } = wonSheetState;
+            setWonSheetState(null);
+            void collectOnWonQuote(doc, collect);
+          }}
         />
       ) : null}
 
