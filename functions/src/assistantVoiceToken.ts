@@ -143,6 +143,20 @@ export const OA_VOICE_MODEL_LABEL = 'openai/gpt-realtime-2.1';
 // rather than a prompt to tune.
 export const OA_REALTIME_MODEL = 'gpt-realtime-2.1';
 
+/**
+ * A session id for an OpenAI voice open.
+ *
+ * ElevenLabs hands us a conversation id at mint and everything downstream —
+ * the voiceSessions row, idempotent settlement, the post-call webhook — hangs
+ * off it. OpenAI's client-secret mint returns no such id, so we make one. It
+ * buys the same two things: the settle call can be made exactly once, and the
+ * plan and hold it settles against come from our own record rather than from
+ * the device.
+ */
+export function newOpenAiSessionId(): string {
+  return `oa_${crypto.randomBytes(16).toString('hex')}`;
+}
+
 export interface MintedOpenAiToken {
   token: string;
   expiresAt: number;

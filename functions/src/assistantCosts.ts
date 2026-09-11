@@ -1,6 +1,6 @@
 // Mate assistant — token-usage + cost recorder and admin query surface.
 //
-// Two write paths feed `users/{uid}/assistantUsage/{yyyymmdd}`:
+// Three write paths feed `users/{uid}/assistantUsage/{yyyymmdd}`:
 //   1. `recordChatUsage` — called from assistantChat after every Gemini
 //      generateContent reply. Reads usageMetadata verbatim from Gemini and
 //      converts it to USD micros using PRICING below.
@@ -8,6 +8,10 @@
 //      WebSocket's per-turn usageMetadata frames here. The server can't see
 //      them directly because the WS runs device→Gemini with an ephemeral
 //      token, so this is the only way to know what voice actually cost.
+//   3. `reportAssistantVoiceUsage` (callable) — the same job for the two
+//      non-Gemini voice providers, which additionally settle the budget hold
+//      their mint parked. ElevenLabs bills connected minutes; OpenAI Realtime
+//      bills tokens and sends them in the same payload.
 //
 // `adminAssistantCosts` is the read side for /admin/ai-costs. It scans the
 // `assistantUsage` collectionGroup over a date window, rolls daily totals, and
@@ -22,6 +26,21 @@ import {
   MAX_SESSION_SECONDS,
   Plan,
 } from './assistantQuota.helpers';
+
+/**
+ * The OpenAI voice session's SECOND bill: input audio transcription runs on
+ * its own model and is charged apart from the Realtime one.
+ *
+ * Declared HERE, beside its PRICING row, rather than imported from
+ * assistantVoiceToken — that module exists to keep vendor code (it pulls in
+ * node-fetch) off the path assistantChat takes, and assistantChat imports this
+ * file for recordChatUsage. A string constant is not worth putting the mint
+ * module in text chat's cold start.
+ *
+ * Must be kept in step with OA_TRANSCRIBE_MODEL in openAiVoiceSession.ts,
+ * whose own comment notes the model has to move before Feb 2027.
+ */
+export const OA_TRANSCRIBE_MODEL_LABEL = 'openai/gpt-4o-transcribe';
 
 const db = () => admin.firestore();
 
@@ -45,6 +64,11 @@ export interface ModelPricing {
   inputAudioPerM?: number;
   /** USD per 1M output audio tokens. Only set for Live audio models. */
   outputAudioPerM?: number;
+  /** USD per 1M CACHED input audio tokens. Only set where a platform prices
+   *  cached audio apart from cached text (OpenAI Realtime discounts audio by
+   *  80x on a cache hit); unset means cached audio bills at cachedInputPerM,
+   *  which is what every pre-existing row does. */
+  cachedInputAudioPerM?: number;
   /**
    * USD per MINUTE of connected conversation. Set only for per-minute platforms
    * (ElevenLabs Agents), where audio is not billed per token at all.
@@ -123,6 +147,52 @@ export const PRICING: Record<string, ModelPricing> = {
     // write dominates the LLM bill. Trimming the prompt or the tool schemas
     // would cut this directly — it is 20.5k tokens of fixed overhead per call.
     perSessionUsd: 0.062,
+  },
+  // Voice via OpenAI Realtime — the model openAiVoiceSession opens the socket
+  // with (assistantVoiceToken.OA_REALTIME_MODEL), under the compound label
+  // OA_VOICE_MODEL_LABEL. Compound for the same reason as the ElevenLabs row:
+  // spend on this provider has to stay separable on the daily doc.
+  //
+  // Rates per 1M tokens, confirmed 11 Sep 2026 against
+  // https://developers.openai.com/api/docs/models/gpt-realtime-2.1
+  //   text  $4.00 in / $0.40 cached in / $24.00 out
+  //   audio $32.00 in / $0.40 cached in / $64.00 out
+  //
+  // Audio is the whole bill in practice. At OpenAI's own conversion — user
+  // audio ~1 token per 100ms, model audio ~1 per 50ms — a minute of the tradie
+  // talking is ~$0.019 and a minute of Mate answering ~$0.077, which is why
+  // this row is not optional if the assistant figure is meant to be true.
+  //
+  // NOTE there is no perMinuteUsd here on purpose: this platform bills tokens,
+  // not connected minutes, so platformCostMicros returns 0 for it and the cost
+  // comes entirely from costMicrosForOpenAiRealtime.
+  'openai/gpt-realtime-2.1': {
+    inputPerM: 4.00,
+    outputPerM: 24.00,
+    cachedInputPerM: 0.40,
+    inputAudioPerM: 32.00,
+    outputAudioPerM: 64.00,
+    cachedInputAudioPerM: 0.40,
+  },
+  // The OpenAI voice session's second bill: input audio transcription runs on
+  // its own model and is charged apart from the Realtime model above. Its
+  // usage never appears in response.usage — it arrives on
+  // conversation.item.input_audio_transcription.completed, as a DURATION.
+  //
+  // So this row is priced per minute, not per token. $0.006/min is OpenAI's
+  // published duration-equivalent of the token rates below ($2.50/1M audio in,
+  // $10.00/1M text out —
+  // https://developers.openai.com/api/docs/models/gpt-4o-transcribe), and is
+  // the same figure openAiVoiceSession's model note already quotes when it
+  // compares this model against gpt-live-transcribe at $0.017/min.
+  //
+  // The token rates are recorded for reconciliation only; nothing multiplies
+  // them, because the client reports seconds.
+  'openai/gpt-4o-transcribe': {
+    inputPerM: 2.50,
+    outputPerM: 10.00,
+    cachedInputPerM: 2.50,
+    perMinuteUsd: 0.006,
   },
   // Voice Live model used by assistantToken → client WS.
   'gemini-3.1-flash-live-preview': {
@@ -283,6 +353,126 @@ export function platformCostMicros(
   // and only for a session that actually happened.
   const perSession = seconds > 0 ? (p.perSessionUsd ?? 0) : 0;
   return Math.round((perMinute + perSession) * 1_000_000);
+}
+
+// ---------------------------------------------------------------------------
+// OpenAI Realtime token cost
+// ---------------------------------------------------------------------------
+
+/**
+ * What an OpenAI Realtime session reported using, summed over the session by
+ * the client (accumulateOpenAiUsage in openAiVoiceSession.ts). The server never
+ * sees these frames: the socket runs device→OpenAI on an ephemeral client
+ * secret, exactly as the Gemini Live one does.
+ *
+ * THE FIELDS ARE TOTALS, CACHE INCLUDED. That is how OpenAI reports them —
+ * response.usage.input_token_details.text_tokens counts the cached part too,
+ * and cached_tokens_details says how much of it was cached — and it matches
+ * costMicrosForChat and costMicrosForLive, which both subtract the cached
+ * portion here rather than trusting the caller to have done it. Sending
+ * pre-subtracted totals instead would bill cached audio at the fresh rate: an
+ * 80x error on the single largest line.
+ */
+export interface OpenAiRealtimeUsagePayload {
+  inputTextTokens?: number;
+  inputAudioTokens?: number;
+  cachedInputTextTokens?: number;
+  cachedInputAudioTokens?: number;
+  outputTextTokens?: number;
+  outputAudioTokens?: number;
+}
+
+/**
+ * USD micros for one OpenAI Realtime session's tokens.
+ *
+ * Same identity every other cost function in this file leans on:
+ * tokens * pricePerM === micros.
+ */
+export function costMicrosForOpenAiRealtime(
+  model: string,
+  u: OpenAiRealtimeUsagePayload,
+): number {
+  const p = pricingFor(model);
+  const inputText = Math.max(0, u.inputTextTokens || 0);
+  const inputAudio = Math.max(0, u.inputAudioTokens || 0);
+  // Clamped to the modality's own total: a cached count larger than the input
+  // it came from would otherwise credit tokens that were never billed.
+  const cachedText = Math.min(Math.max(0, u.cachedInputTextTokens || 0), inputText);
+  const cachedAudio = Math.min(Math.max(0, u.cachedInputAudioTokens || 0), inputAudio);
+  const usd =
+    ((inputText - cachedText) * p.inputPerM) +
+    (cachedText * p.cachedInputPerM) +
+    ((inputAudio - cachedAudio) * (p.inputAudioPerM ?? p.inputPerM)) +
+    (cachedAudio * (p.cachedInputAudioPerM ?? p.cachedInputPerM)) +
+    (Math.max(0, u.outputTextTokens || 0) * p.outputPerM) +
+    (Math.max(0, u.outputAudioTokens || 0) * (p.outputAudioPerM ?? p.outputPerM));
+  return Math.round(usd);
+}
+
+/**
+ * Whether this model's voice spend is measured in TOKENS rather than connected
+ * minutes — i.e. whether a `usage` payload means anything for it at all.
+ *
+ * Load-bearing, not a convenience. The ElevenLabs row carries full Sonnet
+ * token rates for reconciliation against their charging breakdown, and nothing
+ * else stops those rates being multiplied by numbers a client supplied. A
+ * per-minute session that also accepted a token payload would bill twice, at
+ * up to 600x, under a model key whose cost is supposed to be duration.
+ */
+export function billsTokens(model: string): boolean {
+  return !pricingFor(model).perMinuteUsd;
+}
+
+/** One model's share of a voice session's cost. */
+export interface VoiceCostLine {
+  /** Raw PRICING key — sanitiseKey is applied at the Firestore field path. */
+  model: string;
+  costMicros: number;
+}
+
+/**
+ * Everything one voice session bills, split by model, session model first.
+ *
+ * A session is not necessarily one model. ElevenLabs is a single per-minute
+ * line. An OpenAI session is two: the Realtime model's tokens, plus the
+ * separately-charged transcription model that turns the tradie's audio into
+ * the text the reply gate reads. Keeping them as separate lines is what lets
+ * /admin/ai-costs say which of the two is costing money, the same argument the
+ * compound model keys exist for.
+ */
+export function voiceSessionCostLines(args: {
+  model: string;
+  seconds: number;
+  usage?: OpenAiRealtimeUsagePayload;
+  transcriptionModel?: string;
+  transcriptionSeconds?: number;
+}): VoiceCostLine[] {
+  // A session of no length is one that never happened, and nothing it claims
+  // to have used can be true. Held to for the TOKEN side as well as the
+  // per-minute side, which platformCostMicros has always done: without it, a
+  // zero-second report is an unbounded write onto the day's cost that costs
+  // its caller no talk-time budget at all, because the duration clamp that
+  // bounds every other number here no longer touches the total.
+  //
+  // The client only ever sends usage once a turn has completed, which cannot
+  // happen inside the half-second that rounds to zero, so nothing real is lost.
+  if (args.seconds <= 0) return [{ model: args.model, costMicros: 0 }];
+
+  // Each shape's cost comes from its own measure and never both: tokens for a
+  // platform that bills tokens, connected minutes for one that bills minutes.
+  // See billsTokens — crossing them is a 600x error a client could ask for.
+  const primary = billsTokens(args.model)
+    ? (args.usage ? costMicrosForOpenAiRealtime(args.model, args.usage) : 0)
+    : platformCostMicros(args.model, args.seconds);
+  const lines: VoiceCostLine[] = [{ model: args.model, costMicros: primary }];
+  const transcriptionSeconds = Math.max(0, args.transcriptionSeconds || 0);
+  if (args.transcriptionModel && transcriptionSeconds > 0) {
+    lines.push({
+      model: args.transcriptionModel,
+      costMicros: platformCostMicros(args.transcriptionModel, transcriptionSeconds),
+    });
+  }
+  return lines;
 }
 
 export const reportAssistantLiveUsage = functions.https.onCall(async (data, context) => {
@@ -508,7 +698,8 @@ export const adminAssistantCosts = functions
   });
 
 // ---------------------------------------------------------------------------
-// Voice (ElevenLabs Agents) — settle the budget hold and record the spend.
+// Voice (ElevenLabs Agents and OpenAI Realtime) — settle the budget hold and
+// record the spend.
 //
 // A sibling of reportAssistantLiveUsage, not an overload of it. That one is
 // called by every shipped build and its payload contract has to survive the
@@ -519,6 +710,14 @@ export const adminAssistantCosts = functions
 // Without this, assistantToken's 120s hold is parked at mint and never given
 // back. On the free tier that is 300s a day: two sessions and the tradie is
 // locked out until midnight UTC regardless of how briefly they actually spoke.
+//
+// BOTH non-Gemini providers land here, because both park that same hold at
+// mint and both are invisible to the server once the socket is open. What
+// differs is only what they cost: ElevenLabs bills connected minutes, so
+// duration IS the bill, while OpenAI bills tokens, so the client also sends
+// what the session reported using. The alternative — a third onCall for the
+// OpenAI shape — would have meant two settlement paths against one hold, which
+// is the one thing this function exists to keep single.
 // ---------------------------------------------------------------------------
 
 interface VoiceUsagePayload {
@@ -527,6 +726,12 @@ interface VoiceUsagePayload {
   durationSeconds?: number;
   holdSeconds?: number;
   endReason?: string;
+  /** OpenAI Realtime only — token totals for the session. Absent means the
+   *  provider bills by the minute and duration already says the cost. */
+  usage?: OpenAiRealtimeUsagePayload;
+  /** OpenAI Realtime only — seconds of audio the transcription model billed,
+   *  from the transcription events' own usage blocks. */
+  transcriptionSeconds?: number;
 }
 
 export const reportAssistantVoiceUsage = functions.https.onCall(async (data, context) => {
@@ -535,7 +740,23 @@ export const reportAssistantVoiceUsage = functions.https.onCall(async (data, con
 
   const payload: VoiceUsagePayload = data || {};
   const conversationId = String(payload.conversationId || '').trim();
-  const model = String(payload.model || 'elevenlabs/claude-sonnet-5');
+  const requestedModel = String(payload.model || 'elevenlabs/claude-sonnet-5');
+  // Same clamp, and the same reasoning, as reportAssistantLiveUsage: a
+  // misbehaving client must not be able to poison the cost dashboard. 5M
+  // tokens is already about an hour of realtime audio.
+  const CAP = 5_000_000;
+  const clamp = (n: unknown) => Math.max(0, Math.min(CAP, Math.floor(Number(n) || 0)));
+  const reported = payload.usage;
+  const usage: OpenAiRealtimeUsagePayload | undefined = reported
+    ? {
+      inputTextTokens: clamp(reported.inputTextTokens),
+      inputAudioTokens: clamp(reported.inputAudioTokens),
+      cachedInputTextTokens: clamp(reported.cachedInputTextTokens),
+      cachedInputAudioTokens: clamp(reported.cachedInputAudioTokens),
+      outputTextTokens: clamp(reported.outputTextTokens),
+      outputAudioTokens: clamp(reported.outputAudioTokens),
+    }
+    : undefined;
   const date = todayKey();
   const usageRef = db().doc(`users/${uid}/assistantUsage/${date}`);
 
@@ -562,6 +783,10 @@ export const reportAssistantVoiceUsage = functions.https.onCall(async (data, con
     }
 
     const plan: Plan = (session?.plan as Plan) || 'free';
+    // The session doc records which model was actually minted, so it beats the
+    // client's word on what to price — the device could otherwise name a
+    // cheaper row than the one it was served.
+    const model = String(session?.model || requestedModel);
     const ceiling = MAX_SESSION_SECONDS[plan];
     // Clamp before anything lands. This single line is what stops a
     // misbehaving client inflating the day's usage past what the agent's own
@@ -573,36 +798,86 @@ export const reportAssistantVoiceUsage = functions.https.onCall(async (data, con
     const holdSeconds = Number(session?.heldSeconds ?? payload.holdSeconds ?? 0);
 
     const update = settleVoiceSecondsUpdate(usageSnap.data(), { plan, holdSeconds, actualSeconds });
-    const costMicros = platformCostMicros(model, actualSeconds);
+    const lines = voiceSessionCostLines({
+      model,
+      seconds: actualSeconds,
+      usage,
+      // Server-decided, never taken from the client — see
+      // OA_TRANSCRIBE_MODEL_LABEL. Transcribed audio cannot exceed the time
+      // the socket was connected, so the settled duration is its ceiling.
+      transcriptionModel: model.startsWith('openai/') ? OA_TRANSCRIBE_MODEL_LABEL : undefined,
+      transcriptionSeconds: Math.min(
+        Math.max(0, Math.round(Number(payload.transcriptionSeconds) || 0)),
+        actualSeconds,
+      ),
+    });
+    const costMicros = lines.reduce((sum, line) => sum + line.costMicros, 0);
     const inc = admin.firestore.FieldValue.increment;
 
+    // A token-billed report of zero seconds is a settle-only one: the OpenAI
+    // transport is condemned before a word is said often enough to have its
+    // own error class, and each of those opens still parked a hold. Counting
+    // them would put the failed halves of "OpenAI died, Gemini answered" in
+    // the session tally twice over.
+    //
+    // A per-minute provider cannot say the same thing with a zero. Its client
+    // only ever reports after connect, so zero there is a real conversation
+    // that rounded down — and the ElevenLabs webhook only back-fills the count
+    // for a session that never reported at all, so skipping it here would lose
+    // that conversation from the tally permanently.
+    const tokenBilled = billsTokens(model);
+    const sessionDelta = tokenBilled && actualSeconds === 0 ? 0 : 1;
+
     const patch: Record<string, unknown> = {
-      voiceSessions: inc(1),
+      voiceSessions: inc(sessionDelta),
       voiceDurationSeconds: inc(actualSeconds),
       costMicros: inc(costMicros),
-      [`models.${sanitiseKey(model)}.voiceCostMicros`]: inc(costMicros),
-      [`models.${sanitiseKey(model)}.voiceSessions`]: inc(1),
+      [`models.${sanitiseKey(model)}.voiceSessions`]: inc(sessionDelta),
       [`models.${sanitiseKey(model)}.voiceDurationSeconds`]: inc(actualSeconds),
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     };
+    const globalPatch: Record<string, unknown> = {
+      voiceSessions: inc(sessionDelta),
+      voiceDurationSeconds: inc(actualSeconds),
+      costMicros: inc(costMicros),
+      [`activeUsers.${uid}`]: true,
+      date,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
+    // One field per model the session billed. For ElevenLabs that is the one
+    // line it has always been; an OpenAI session also carries its transcriber.
+    for (const line of lines) {
+      const key = `models.${sanitiseKey(line.model)}.voiceCostMicros`;
+      patch[key] = inc(line.costMicros);
+      globalPatch[key] = inc(line.costMicros);
+    }
+    // Token counters, under the SAME field names reportAssistantLiveUsage
+    // writes — so the per-modality totals on the daily doc, and the columns
+    // adminAssistantCosts already sums out of them, cover every voice provider
+    // that bills tokens rather than needing a second set of fields.
+    //
+    // Gated exactly as the cost above is. A per-minute provider reports no
+    // tokens, so a payload claiming some is a client that should be ignored,
+    // not believed; and a session of zero seconds used none.
+    if (usage && tokenBilled && actualSeconds > 0) {
+      const voiceTokens: Record<string, unknown> = {
+        voiceInputTextTokens: inc(usage.inputTextTokens || 0),
+        voiceOutputTextTokens: inc(usage.outputTextTokens || 0),
+        voiceInputAudioTokens: inc(usage.inputAudioTokens || 0),
+        voiceOutputAudioTokens: inc(usage.outputAudioTokens || 0),
+        voiceCachedTokens: inc(
+          (usage.cachedInputTextTokens || 0) + (usage.cachedInputAudioTokens || 0),
+        ),
+      };
+      Object.assign(patch, voiceTokens);
+      Object.assign(globalPatch, voiceTokens);
+    }
     // voiceSeconds is a settled value, not an increment — it has to ride the
     // same transaction as the read it was computed from.
     if (update) patch.voiceSeconds = update.voiceSeconds;
 
     tx.set(usageRef, patch, { merge: true });
-    tx.set(
-      db().doc(`assistantCostsDaily/${date}`),
-      {
-        voiceSessions: inc(1),
-        voiceDurationSeconds: inc(actualSeconds),
-        costMicros: inc(costMicros),
-        [`models.${sanitiseKey(model)}.voiceCostMicros`]: inc(costMicros),
-        [`activeUsers.${uid}`]: true,
-        date,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      },
-      { merge: true },
-    );
+    tx.set(db().doc(`assistantCostsDaily/${date}`), globalPatch, { merge: true });
     if (sessionRef) {
       tx.set(sessionRef, {
         settledAt: admin.firestore.FieldValue.serverTimestamp(),

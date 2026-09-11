@@ -110,9 +110,23 @@ export interface OpenAiMintedToken {
   provider: 'openai';
   /** Ephemeral client secret — the API key never reaches the device. */
   token: string;
+  /** What the socket connects with, e.g. `gpt-realtime-2.1`. */
   model: string;
+  /**
+   * How the same model is keyed in cost records — `openai/<model>`, compound
+   * so voice spend stays separable on the daily doc. The settle call sends
+   * this, not `model`; the server prefers its own recorded label anyway.
+   */
+  modelLabel?: string;
   /** OpenAI's own TTS voice name for the session. */
   voice?: string;
+  /**
+   * Server-minted session id. OpenAI returns none of its own, so assistantToken
+   * makes one and writes the voiceSessions row against it — which is what makes
+   * the end-of-session settle idempotent and lets the server settle the hold
+   * against the plan it actually minted under.
+   */
+  conversationId?: string;
   maxDurationSeconds: number;
   heldSeconds: number;
   remainingVoiceSeconds: number;
