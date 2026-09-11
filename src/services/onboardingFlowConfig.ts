@@ -26,13 +26,36 @@ export function parseLongFlowFlag(raw: unknown): boolean {
   return raw === true;
 }
 
-/** One read of config/onboarding.longFlow. Never throws. */
-export async function readLongFlowFlag(): Promise<boolean> {
-  try {
+/**
+ * How long the read may hold onboarding up. Firestore's getDoc waits on the
+ * server with no deadline of its own, and this read sits in front of draft
+ * hydration: a tradie on one bar of reception would otherwise be typing into
+ * a screen whose saved draft could land on top of them seconds later. Past
+ * this, the short flow wins.
+ */
+export const LONG_FLOW_READ_TIMEOUT_MS = 3000;
+
+/** One read of config/onboarding.longFlow, bounded. Never throws. */
+export async function readLongFlowFlag(
+  timeoutMs: number = LONG_FLOW_READ_TIMEOUT_MS,
+): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<boolean>((resolve) => {
+    timer = setTimeout(() => resolve(false), timeoutMs);
+  });
+  const read = (async () => {
     const snap = await getDoc(doc(db, 'config', 'onboarding'));
     if (!snap.exists()) return false;
     return parseLongFlowFlag((snap.data() as { longFlow?: unknown } | undefined)?.longFlow);
+  })();
+  try {
+    return await Promise.race([read, timeout]);
   } catch {
     return false;
+  } finally {
+    if (timer) clearTimeout(timer);
+    // A read that loses the race and then rejects must not surface as an
+    // unhandled rejection.
+    void read.catch(() => undefined);
   }
 }

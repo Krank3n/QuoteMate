@@ -105,10 +105,13 @@ describe('buildSendDetailsPrompt', () => {
     );
   });
 
-  it('explains the ABN in terms of the money, not the paperwork', () => {
+  it('explains the ABN in terms of the money, without overstating who withholds', () => {
     const message = buildSendDetailsPrompt(['abn'], 'invoice')!.message;
     expect(message).toContain('tax invoice');
-    expect(message).toContain('47%');
+    expect(message).toContain('business customer');
+    // Withholding is a duty on business payers, not on a homeowner paying a
+    // tradie. Naming a rate at every customer would be wrong for most of them.
+    expect(message).not.toContain('47%');
   });
 
   it('names the document type in the copy', () => {

@@ -4,10 +4,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // does not exist at all, which is the state on the day this ships.
 let onboardingDoc: Record<string, unknown> | null = null;
 let readThrows = false;
+// A read that never comes back — one bar of reception, no server, no error.
+let readHangs = false;
 
 vi.mock('firebase/firestore', () => ({
   doc: vi.fn(() => ({})),
   getDoc: vi.fn(async () => {
+    if (readHangs) return new Promise(() => undefined);
     if (readThrows) throw new Error('offline');
     return {
       exists: () => onboardingDoc !== null,
@@ -21,6 +24,7 @@ import { parseLongFlowFlag, readLongFlowFlag } from './onboardingFlowConfig';
 beforeEach(() => {
   onboardingDoc = null;
   readThrows = false;
+  readHangs = false;
 });
 
 describe('parseLongFlowFlag', () => {
@@ -59,6 +63,14 @@ describe('readLongFlowFlag', () => {
   it('stays short when the field holds a non-boolean', async () => {
     onboardingDoc = { longFlow: 'true' };
     await expect(readLongFlowFlag()).resolves.toBe(false);
+  });
+
+  it('fails short when the read hangs past the deadline', async () => {
+    // getDoc has no deadline of its own. The flag sits in front of draft
+    // hydration, so a read that never returns must not hold onboarding up.
+    readHangs = true;
+    onboardingDoc = { longFlow: true };
+    await expect(readLongFlowFlag(20)).resolves.toBe(false);
   });
 
   it('fails short rather than throwing when the read fails', async () => {

@@ -9,10 +9,11 @@
  * Two things are worth interrupting a send for:
  *
  *   ABN, on an invoice. An invoice without an ABN is not a valid tax invoice
- *   (shared/pdf/htmlBuilders.ts titles it "TAX INVOICE" regardless), the
- *   customer can't claim the GST credit, and a payer is technically obliged
- *   to withhold 47% of the payment. A quote asks for money later, so it is
- *   left alone.
+ *   (shared/pdf/htmlBuilders.ts titles it "TAX INVOICE" regardless), a
+ *   business customer can't claim the GST credit, and a business payer is
+ *   obliged to withhold from the payment when no ABN is quoted. Homeowners
+ *   have no such duty, so the copy says "business customer" and "may", not
+ *   a rate. A quote asks for money later, so it is left alone.
  *
  *   A way to reply. buildBusinessHeaderHTML drops the contact line entirely
  *   when there's no phone and no email, so the document reaches the customer
@@ -70,7 +71,7 @@ const LINES: Record<MissingSendDetail, (kind: 'quote' | 'invoice') => string> = 
   businessName: (kind) =>
     `This ${kind} goes out with no business name on it.`,
   abn: () =>
-    "Without your ABN this isn't a valid tax invoice, so your customer can't claim the GST back — and whoever pays it is meant to hold back 47%.",
+    "Without your ABN it isn't a valid tax invoice. A business customer can't claim the GST on it, and may hold back part of the payment until they have your ABN.",
   contact: (kind) =>
     `There's no phone number or email on it, so nobody reading this ${kind} has a way to get back to you.`,
 };
