@@ -51,14 +51,14 @@ export function receiptVerdict(params: {
 }
 
 /**
- * Is this validation the FIRST grant of a given store transaction?
+ * Is this validation the FIRST time we grant Pro for this sale?
  *
  * Both stores hand a LIVE subscription back on every launch — StoreKit's
  * currentEntitlements (via getAvailablePurchases) and Play's equivalent — and
  * the launch-time sweep re-posts whatever they hand back. So these endpoints
  * routinely re-validate a receipt they entitled weeks ago. Writing the
  * entitlement again is harmless and should keep happening; the side effects
- * that mean "someone just upgraded" must not.
+ * that mean "someone just paid" (referral commission) must not.
  *
  * Before this gate a single yearly subscriber generated a "💰 New Pro
  * subscriber" admin email every time they opened the app, and re-entered
@@ -68,13 +68,137 @@ export function receiptVerdict(params: {
  * A renewal mints a NEW transactionId, so real recurring revenue still reads
  * as a new grant. When either id is missing we return true: failing open
  * costs a duplicate alert, failing closed silently swallows a real sale.
+ *
+ * Sep 2026: a subscriber whose Play renewal the nightly sweep had NOT seen
+ * (they hadn't opened the app for 3 days after it) was flipped to isPro:false,
+ * then re-validated the very same transaction on their next launch. Because
+ * the prior doc was no longer Pro, that re-grant read as a first grant: a
+ * fresh "new subscriber" email and a second pass through commission. So a
+ * prior doc that carries an expiry/revoke marker for the SAME sale is a
+ * re-grant, not a first grant. A doc with the same id but no marker is still
+ * a first grant — that is the charged-but-never-entitled shape
+ * recoverStuckPurchases.ts heals, and it MUST keep alerting.
+ *
+ * `purchaseToken` is the Play token (stable for the life of a subscription)
+ * or the StoreKit JWS (unique per transaction) — either way, a match means
+ * the same sale.
  */
 export function isFirstGrantOfTransaction(
-  priorSub: { isPro?: unknown; transactionId?: unknown } | undefined | null,
+  priorSub: PriorSub | undefined | null,
   transactionId: string,
+  purchaseToken?: string | null,
 ): boolean {
-  if (!priorSub || priorSub.isPro !== true) return true;
-  if (typeof priorSub.transactionId !== 'string' || !priorSub.transactionId) return true;
-  if (!transactionId) return true;
-  return priorSub.transactionId !== transactionId;
+  if (!priorSub) return true;
+  const sameSale = sameSaleAsPrior(priorSub, { transactionId, purchaseToken });
+  if (priorSub.isPro === true) return !sameSale;
+  return !(sameSale && wasEntitledBefore(priorSub));
+}
+
+export type PriorSub = {
+  isPro?: unknown;
+  transactionId?: unknown;
+  originalTransactionId?: unknown;
+  purchaseToken?: unknown;
+  expiredAt?: unknown;
+  expiredReason?: unknown;
+  revokedAt?: unknown;
+};
+
+function nonEmpty(v: unknown): v is string {
+  return typeof v === 'string' && v.length > 0;
+}
+
+function sameSaleAsPrior(
+  prior: PriorSub,
+  cur: { transactionId?: string | null; purchaseToken?: string | null },
+): boolean {
+  if (nonEmpty(prior.transactionId) && nonEmpty(cur.transactionId) && prior.transactionId === cur.transactionId) return true;
+  if (nonEmpty(prior.purchaseToken) && nonEmpty(cur.purchaseToken) && prior.purchaseToken === cur.purchaseToken) return true;
+  return false;
+}
+
+/** The doc was Pro once and something (sweep, admin) switched it off. */
+function wasEntitledBefore(prior: PriorSub): boolean {
+  return prior.expiredAt != null || prior.expiredReason != null || prior.revokedAt != null;
+}
+
+/**
+ * Is this a subscriber we have never seen before — as opposed to a renewal
+ * or a re-grant of a subscription already on the doc?
+ *
+ * The "💰 New Pro subscriber" admin email must fire once per SUBSCRIPTION,
+ * not once per billing period: Apple mints a new transactionId on every
+ * renewal (so isFirstGrantOfTransaction rightly says "new money" for
+ * commission), but the subscriber is the same person on the same plan.
+ * Apple's originalTransactionId and Play's purchaseToken are both stable for
+ * the life of a subscription, so a match on either — whatever isPro says —
+ * means we already alerted on this one.
+ */
+export function isNewSubscriber(
+  priorSub: PriorSub | undefined | null,
+  cur: { originalTransactionId?: string | null; purchaseToken?: string | null; transactionId?: string | null },
+): boolean {
+  if (!priorSub) return true;
+  const priorOriginal = priorSub.originalTransactionId;
+  if (nonEmpty(priorOriginal) && nonEmpty(cur.originalTransactionId) && priorOriginal === cur.originalTransactionId) return false;
+  return !sameSaleAsPrior(priorSub, cur);
+}
+
+// ---------------------------------------------------------------------------
+// Nightly expiry sweep — what to do with a sub whose period end has passed.
+// ---------------------------------------------------------------------------
+
+/** Renewal lag we tolerate before asking the store what happened. */
+export const IAP_GRACE_MS = 3 * 24 * 60 * 60 * 1000;
+/**
+ * If the store can't tell us (API down, key lacks access), how long past the
+ * period end we keep a sub alive before cutting it off anyway. Long enough
+ * that a paying subscriber who simply hasn't opened the app is not locked
+ * out; short enough that a genuinely lapsed sub does not stay Pro forever.
+ */
+export const IAP_UNVERIFIED_BACKSTOP_MS = 14 * 24 * 60 * 60 * 1000;
+
+export type StoreStatus = {
+  outcome: ValidationOutcome;
+  /** The store's own expiry for the subscription, when it reported one. */
+  expiryDate: Date | null;
+  priceMicros?: number | null;
+  currency?: string | null;
+  /** Short machine-readable note for logs. */
+  detail: string;
+};
+
+export type StaleAction =
+  | { action: 'keep'; reason: 'not_stale' | 'store_live_no_expiry' | 'store_unavailable_within_backstop' }
+  | { action: 'renew'; expiryDate: Date }
+  | { action: 'expire'; reason: 'store_confirmed' | 'unchecked' | 'unverified_backstop' };
+
+/**
+ * Decide the sweep's action for one store subscription. Pure so it can be
+ * tested without Firestore or the stores.
+ *
+ * - Not past period end + grace → keep (the caller need not ask the store).
+ * - Store says live with a later expiry → renew: record the new period end.
+ *   This is the Sep-2026 case — Play renewed, nobody told us.
+ * - Store says live but can't give an expiry → keep; re-asked next night.
+ * - Store says lapsed/expired/revoked → expire.
+ * - Store unreachable → keep until the backstop, then expire anyway.
+ * - No store credentials/token to check (`store` null) → expire, as before.
+ */
+export function staleSubscriptionAction(params: {
+  periodEndMs: number | null;
+  nowMs: number;
+  store: StoreStatus | null | undefined;
+}): StaleAction {
+  const { periodEndMs, nowMs, store } = params;
+  if (!periodEndMs || periodEndMs + IAP_GRACE_MS > nowMs) return { action: 'keep', reason: 'not_stale' };
+  if (!store) return { action: 'expire', reason: 'unchecked' };
+  if (store.outcome === 'valid') {
+    if (!store.expiryDate) return { action: 'keep', reason: 'store_live_no_expiry' };
+    if (store.expiryDate.getTime() > nowMs) return { action: 'renew', expiryDate: store.expiryDate };
+    return { action: 'expire', reason: 'store_confirmed' };
+  }
+  if (store.outcome === 'invalid') return { action: 'expire', reason: 'store_confirmed' };
+  if (periodEndMs + IAP_UNVERIFIED_BACKSTOP_MS <= nowMs) return { action: 'expire', reason: 'unverified_backstop' };
+  return { action: 'keep', reason: 'store_unavailable_within_backstop' };
 }

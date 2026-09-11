@@ -147,7 +147,8 @@ import {
   describeProviders,
   evaluateThrottle,
 } from './passwordReset.helpers';
-import { receiptVerdict, isFirstGrantOfTransaction } from './receiptValidation.helpers';
+import { receiptVerdict, isFirstGrantOfTransaction, isNewSubscriber } from './receiptValidation.helpers';
+import { fetchGooglePlaySubscription } from './iapStoreStatus';
 import { verifyAppleJws } from './appleJws.helpers';
 import { verifySquareWebhookSignature } from './squareWebhookSignature';
 import { resolveServerPlan, storePricePatch, subInterval } from './subscription.helpers';
@@ -1518,6 +1519,17 @@ export const checkAndIncrementQuota = functions.https.onRequest((req, res) => {
  * Called from the iOS app after a successful IAP purchase
  * Validates receipt with Apple's servers and writes subscription record to Firestore
  */
+/**
+ * Fields the nightly expiry sweep / adminRevokePro stamp when they switch a
+ * sub off. A fresh grant removes them so the doc never reads as Pro AND
+ * expired at once (and so isFirstGrantOfTransaction sees a clean doc next
+ * time round).
+ */
+function clearExpiryMarkers() {
+  const del = admin.firestore.FieldValue.delete();
+  return { expiredAt: del, expiredReason: del, revokedAt: del, revokedBy: del };
+}
+
 export const validateAppleReceipt = functions.https.onRequest((req, res) => {
   corsHandler(req, res, async () => {
     if (req.method !== 'POST') {
@@ -1603,9 +1615,14 @@ export const validateAppleReceipt = functions.https.onRequest((req, res) => {
       // paywall listener and the sweep can post the same NEW receipt at once.
       // A plain read-then-write loses that race: both see "not entitled yet"
       // and both alert, which is how one 8 Jul purchase sent two emails.
-      const firstGrant = await firestore.runTransaction(async (tx) => {
+      const { firstGrant, newSubscriber } = await firestore.runTransaction(async (tx) => {
         const priorSub = (await tx.get(subscriptionRef)).data();
-        const isFirst = isFirstGrantOfTransaction(priorSub, resolvedTransactionId);
+        const isFirst = isFirstGrantOfTransaction(priorSub, resolvedTransactionId, purchaseToken);
+        const isNew = isNewSubscriber(priorSub, {
+          originalTransactionId: jwsResult.originalTransactionId,
+          transactionId: resolvedTransactionId,
+          purchaseToken,
+        });
         tx.set(subscriptionRef, {
           isPro: true,
           platform: 'ios',
@@ -1625,8 +1642,11 @@ export const validateAppleReceipt = functions.https.onRequest((req, res) => {
           currentPeriodStart: now,
           currentPeriodEnd: expiryDate,
           quotesThisMonth: 0,
+          // A re-grant after the expiry sweep (or an admin revoke) is live
+          // again — don't leave the doc saying both isPro and expired.
+          ...clearExpiryMarkers(),
         }, { merge: true });
-        return isFirst;
+        return { firstGrant: isFirst, newSubscriber: isNew };
       });
 
 
@@ -1643,15 +1663,18 @@ export const validateAppleReceipt = functions.https.onRequest((req, res) => {
           // silently ignore
         }
 
-        // Notify admin of new Pro subscription
-        try {
-          const userEmail = await getUserEmail(userId) || 'unknown';
-          const iosFirestore = admin.firestore();
-          const userProfile = await iosFirestore.doc(`users/${userId}/settings/business`).get();
-          const businessName = userProfile.data()?.businessName || '';
-          await sendNewProSubscriptionEmail(userEmail, userId, 'ios', signedProductId, businessName);
-        } catch (emailError) {
-          // silently ignore
+        // Notify admin of a NEW subscriber — a renewal is new money for
+        // commission above, but not a new subscriber.
+        if (newSubscriber) {
+          try {
+            const userEmail = await getUserEmail(userId) || 'unknown';
+            const iosFirestore = admin.firestore();
+            const userProfile = await iosFirestore.doc(`users/${userId}/settings/business`).get();
+            const businessName = userProfile.data()?.businessName || '';
+            await sendNewProSubscriptionEmail(userEmail, userId, 'ios', signedProductId, businessName);
+          } catch (emailError) {
+            // silently ignore
+          }
         }
       }
 
@@ -1703,70 +1726,16 @@ export const validateGoogleReceipt = functions.https.onRequest((req, res) => {
       let googlePriceMicros: number | null = null;
       let googlePriceCurrency: string | null = null;
 
-      // Validate with Google Play Developer API if service account is configured
-      const googleServiceAccount = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
-      const googlePackageName = process.env.GOOGLE_PACKAGE_NAME || 'com.quotemate.app';
-
-      if (googleServiceAccount && purchaseToken) {
-        try {
-          // Get access token using service account
-          const serviceAccount = typeof googleServiceAccount === 'string'
-            ? JSON.parse(googleServiceAccount) : googleServiceAccount;
-
-          // Call the Play Developer API over REST via google-auth-library
-          // rather than `googleapis` — that package was never a dependency of
-          // functions/, so this block threw MODULE_NOT_FOUND the moment a
-          // service account was configured.
-          const { JWT } = require('google-auth-library');
-          const authClient = new JWT({
-            email: serviceAccount.client_email,
-            key: serviceAccount.private_key,
-            scopes: ['https://www.googleapis.com/auth/androidpublisher'],
-          });
-          const { token: accessToken } = await authClient.getAccessToken();
-
-          const url = 'https://androidpublisher.googleapis.com/androidpublisher/v3/applications/' +
-            `${encodeURIComponent(googlePackageName)}/purchases/subscriptions/` +
-            `${encodeURIComponent(productId)}/tokens/${encodeURIComponent(purchaseToken)}`;
-          const googleRes = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
-
-          if (googleRes.ok) {
-            const data = await googleRes.json() as any;
-            // Play reports what THIS subscriber is billed — which is not the
-            // current SKU price for anyone grandfathered on an older one.
-            googlePriceMicros = Number(data?.priceAmountMicros);
-            googlePriceCurrency = data?.priceCurrencyCode || null;
-            const expiryTimeMs = parseInt(data?.expiryTimeMillis || '0', 10);
-            if (expiryTimeMs > Date.now()) {
-              googleOutcome = 'valid';
-              googleExpiryDate = new Date(expiryTimeMs);
-            } else {
-              googleOutcome = 'invalid'; // Google confirmed the sub has lapsed
-            }
-          } else {
-            // 401/403 mean OUR service account lacks Play Console access — a
-            // config fault, not a verdict on the buyer's purchase. Treating it
-            // as 'invalid' would hard-reject (402) a genuine payment and let
-            // the client finish the transaction. Keep those retryable so the
-            // purchase survives until the permission is granted. Only a true
-            // 4xx about the token itself (400/404/410) is an actual rejection.
-            googleOutcome = (googleRes.status === 401 || googleRes.status === 403 || googleRes.status >= 500)
-              ? 'unavailable'
-              : 'invalid';
-            console.warn('[receipts] Google subscriptions.get failed', {
-              userId,
-              httpStatus: googleRes.status,
-              outcome: googleOutcome,
-              body: (await googleRes.text().catch(() => '')).slice(0, 300),
-            });
-          }
-        } catch (googleError: any) {
-          // Network/JWT failure — never a verdict on the purchase.
-          googleOutcome = 'unavailable';
-          console.warn('[receipts] Google validation threw', { userId, error: String(googleError) });
-        }
+      // Validate with the Play Developer API (shared with the nightly expiry
+      // sweep, which asks the same question before cutting anyone off).
+      if (purchaseToken) {
+        const play = await fetchGooglePlaySubscription({ productId, purchaseToken, userId });
+        googleOutcome = play.outcome;
+        googleExpiryDate = play.outcome === 'valid' ? play.expiryDate : null;
+        googlePriceMicros = play.priceMicros ?? null;
+        googlePriceCurrency = play.currency ?? null;
       } else {
-        console.warn('[receipts] Google validation skipped — missing service account or purchase token', { userId });
+        console.warn('[receipts] Google validation skipped — missing purchase token', { userId });
       }
 
       // PAY-01: no validation, no entitlement. Never write isPro from an
@@ -1793,9 +1762,12 @@ export const validateGoogleReceipt = functions.https.onRequest((req, res) => {
 
       // Atomic decide-and-write — see the iOS handler for why this is a
       // transaction and not a read followed by a set.
-      const firstGrant = await firestore.runTransaction(async (tx) => {
+      const { firstGrant, newSubscriber } = await firestore.runTransaction(async (tx) => {
         const priorSub = (await tx.get(subscriptionRef)).data();
-        const isFirst = isFirstGrantOfTransaction(priorSub, transactionId);
+        const isFirst = isFirstGrantOfTransaction(priorSub, transactionId, purchaseToken);
+        // Play's purchase token is stable for the life of a subscription, so
+        // it is the "same subscriber" key on Android.
+        const isNew = isNewSubscriber(priorSub, { transactionId, purchaseToken });
         tx.set(subscriptionRef, {
           isPro: true,
           platform: 'android',
@@ -1813,8 +1785,9 @@ export const validateGoogleReceipt = functions.https.onRequest((req, res) => {
           currentPeriodStart: now,
           currentPeriodEnd: expiryDate,
           quotesThisMonth: 0,
+          ...clearExpiryMarkers(),
         }, { merge: true });
-        return isFirst;
+        return { firstGrant: isFirst, newSubscriber: isNew };
       });
 
 
@@ -1828,14 +1801,16 @@ export const validateGoogleReceipt = functions.https.onRequest((req, res) => {
           // silently ignore
         }
 
-        // Notify admin of new Pro subscription
-        try {
-          const userEmail = await getUserEmail(userId) || 'unknown';
-          const userProfile = await firestore.doc(`users/${userId}/settings/business`).get();
-          const businessName = userProfile.data()?.businessName || '';
-          await sendNewProSubscriptionEmail(userEmail, userId, 'android', productId, businessName);
-        } catch (emailError) {
-          // silently ignore
+        // Notify admin of a NEW subscriber only — see the iOS handler.
+        if (newSubscriber) {
+          try {
+            const userEmail = await getUserEmail(userId) || 'unknown';
+            const userProfile = await firestore.doc(`users/${userId}/settings/business`).get();
+            const businessName = userProfile.data()?.businessName || '';
+            await sendNewProSubscriptionEmail(userEmail, userId, 'android', productId, businessName);
+          } catch (emailError) {
+            // silently ignore
+          }
         }
       }
 
