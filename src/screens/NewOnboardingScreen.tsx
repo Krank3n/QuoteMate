@@ -1,13 +1,34 @@
 /**
- * New Onboarding Screen - 6-Step Flow
+ * Onboarding — one step: your business name and your trade, then your first
+ * quote.
  *
- * Steps:
- * 1. Company Name
- * 2. Trade Category (multi-select)
- * 3. Contact Details (skippable)
- * 4. Branding - logo + brand colour (skippable)
- * 5. Rates (skippable)
- * 6. Payments - Square connection (skippable)
+ * It used to be seven steps (eight for plumbers), and every one of them asked
+ * for a decision before the tradie had seen the app do a single useful thing.
+ * Everything that isn't a business name or a trade now gets asked where it
+ * actually means something:
+ *
+ *   Rates      → Mate asks "a set rate, or work it up?" on the first job
+ *                (services/assistant/readTools.ts HOW_YOU_PRICE_QUESTION),
+ *                and Settings → Trade & Pricing has the How-you-quote card.
+ *                The 85/hr + 30% defaults are written here as before.
+ *   Suppliers  → Mate asks for a price list or a photo the moment it can't
+ *                price something (services/assistant/systemPrompt.ts), and
+ *                Settings → Supplier Book takes one any time.
+ *   Reece      → Settings → Reece Plumbing, the Connect badge on Trade &
+ *                Pricing, and the banner in the materials list.
+ *   Contact + ABN → asked at the first send, where they're the difference
+ *                between a valid tax invoice and one the customer can't claim
+ *                on (components/SendDocumentDialog.tsx, utils/sendBusinessDetails.ts).
+ *   Branding   → Settings → Business Profile; the PDF is where it shows.
+ *   Payments   → the money moment: Take Payment, the free-plan send gate,
+ *                Settings → Square Payments.
+ *
+ * The old flow is still in this file, behind the config/onboarding `longFlow`
+ * kill switch (services/onboardingFlowConfig.ts), so the whole change can be
+ * pulled back over the air without a store build. It is NOT the default: an
+ * absent document, an absent field or a failed read all mean the one-step
+ * flow. `flowSteps(short)` in utils/onboardingStepNav.ts builds whichever list
+ * applies, and every step below is keyed off that list rather than a number.
  */
 
 import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
@@ -47,7 +68,7 @@ import { useTapToPayEnabled } from '../hooks/useTapToPayEnabled';
 import { acceptTapToPayTermsAndEducate } from '../services/squarePayments';
 import { BusinessSettings } from '../types';
 import { makeStyles, useThemeColors } from '../theme';
-import { OnboardingProgress, OnboardingStep } from '../components/OnboardingProgress';
+import { OnboardingProgress, type OnboardingStep } from '../components/OnboardingProgress';
 import { CelebrationAnimation } from '../components/CelebrationAnimation';
 import { AlertModal } from '../components/AlertModal';
 import { WebContainer } from '../components/WebContainer';
@@ -64,7 +85,8 @@ import {
     progressFor,
     stepPropsFor,
 } from '../utils/onboardingTelemetry';
-import { canJumpToStep } from '../utils/onboardingStepNav';
+import { canJumpToStep, flowSteps, resumeDraft } from '../utils/onboardingStepNav';
+import { readLongFlowFlag } from '../services/onboardingFlowConfig';
 import { runReeceConnectFlow } from '../services/reeceConnect';
 import { getReeceConnectionStatus } from '../services/reeceApi';
 import { uploadBusinessLogo } from '../services/photoService';
@@ -83,26 +105,21 @@ const ONBOARDING_MAX_WIDTH = 600;
 // framing on every platform, so one honest line covers all three.
 const LOGO_UPLOAD_HINT = 'Any shape — crop it on the next screen';
 
-// The static base of the onboarding flow. The Reece step is inserted
-// dynamically inside the component when the user picks plumbing, so it isn't
-// shown to other trades.
-const BASE_STEPS: Array<Omit<OnboardingStep, 'id'> & { key: string }> = [
-    { key: 'company', label: 'Company', icon: 'office-building' },
-    { key: 'trade', label: 'Trade', icon: 'hammer-wrench' },
-    { key: 'contact', label: 'Contact', icon: 'card-account-details' },
-    { key: 'branding', label: 'Branding', icon: 'palette' },
-    { key: 'rates', label: 'Rates', icon: 'currency-usd' },
-];
-
 export function NewOnboardingScreen() {
   const styles = useStyles();
   const themeColors = useThemeColors();
     const { setBusinessSettings, setOnboarded } = useStore();
     const insets = useSafeAreaInsets();
 
+    // The kill switch. False — the one-step flow — until a read of
+    // config/onboarding says otherwise, and it stays false if that read fails.
+    // Resolved before `hydrated` flips, so the step list is settled before any
+    // telemetry fires or a saved draft is clamped into it.
+    const [longFlow, setLongFlow] = useState(false);
+
     // Current step, plus the furthest step reached — the progress bar lets the
     // user jump back to anywhere they've already been, but never ahead into a
-    // step they haven't seen.
+    // step they haven't seen. Both are 1 in the short flow, forever.
     const [currentStep, setCurrentStep] = useState(1);
     const [maxStepReached, setMaxStepReached] = useState(1);
     const [isLoading, setIsLoading] = useState(false);
@@ -159,22 +176,18 @@ export function NewOnboardingScreen() {
         setAddedSuppliers(prev => [...prev, s]);
     }, []);
 
-    const ONBOARDING_STEPS: OnboardingStep[] = useMemo(() => {
-        const items = [...BASE_STEPS];
-        if (selectedCategories.includes('plumbing')) {
-            items.push({ key: 'reece', label: 'Reece', icon: 'pipe' });
-        }
-        // Always offer the supplier price-book step. Sits after Reece (when
-        // shown) so plumbers can layer their local hardware store on top of
-        // their maX trade prices, and before Payments so the wow moment
-        // happens before the monetisation ask.
-        items.push({ key: 'suppliers', label: 'Suppliers', icon: 'truck-delivery' });
-        items.push({ key: 'payments', label: 'Payments', icon: 'credit-card-outline' });
-        return items.map((s, i) => ({ id: i + 1, key: s.key, label: s.label, icon: s.icon }));
-    }, [selectedCategories]);
+    const ONBOARDING_STEPS: OnboardingStep[] = useMemo(
+        () =>
+            flowSteps(!longFlow, { plumbing: selectedCategories.includes('plumbing') })
+                .map((s, i) => ({ id: i + 1, key: s.key, label: s.label, icon: s.icon })),
+        [longFlow, selectedCategories],
+    );
 
     const TOTAL_STEPS = ONBOARDING_STEPS.length;
     const currentStepKey = ONBOARDING_STEPS[currentStep - 1]?.key;
+    // The one-step flow puts the business name and the trade picker on the
+    // same screen, so `company` has to satisfy both gates before it advances.
+    const isShortFlow = TOTAL_STEPS === 1;
 
     // Inline validation (replaces Alert popups)
     const [showBusinessNameError, setShowBusinessNameError] = useState(false);
@@ -215,30 +228,33 @@ export function NewOnboardingScreen() {
     const laborRateRef = useRef<RNTextInput>(null);
     const markupRef = useRef<RNTextInput>(null);
 
-    // Hydrate draft from AsyncStorage on mount (resume where user left off)
+    // Resolve the flow shape, then hydrate the draft into it (resume where the
+    // user left off). One effect, in that order, because a draft written by the
+    // old seven-step flow can name a step this flow doesn't have: clamped, it
+    // resumes at the last step that still exists instead of rendering nothing.
     useEffect(() => {
         (async () => {
             try {
+                const isLong = await readLongFlowFlag();
+                if (isLong) setLongFlow(true);
+
                 const raw = await AsyncStorage.getItem(STORAGE_KEY);
                 if (raw) {
                     const d = JSON.parse(raw);
-                    if (typeof d.currentStep === 'number') {
-                        setCurrentStep(d.currentStep);
-                        // A resumed draft has already been at least this far,
-                        // so the bar stays navigable across a restart.
-                        setMaxStepReached(prev => Math.max(prev, d.currentStep));
-                        // Anything past step 1 means they'd already started and
-                        // came back — tracked so resume rate is measurable.
-                        resumedRef.current = d.currentStep > 1;
-                    }
-                    if (typeof d.maxStepReached === 'number') {
-                        setMaxStepReached(prev => Math.max(prev, d.maxStepReached));
-                    }
+                    // Position, resolved against the flow that's actually
+                    // running — see resumeDraft for what an old draft does.
+                    const at = resumeDraft(d, { longFlow: isLong });
+                    setCurrentStep(at.currentStep);
+                    // A resumed draft has already been at least this far, so
+                    // the bar stays navigable across a restart.
+                    setMaxStepReached(prev => Math.max(prev, at.maxStepReached));
+                    // Anything past step 1 means they'd already started and
+                    // came back — tracked so resume rate is measurable.
+                    resumedRef.current = at.resumed;
+                    skippedKeysRef.current = at.skippedStepKeys;
+                    setSkippedStepKeys(at.skippedStepKeys);
+
                     if (typeof d.startedAt === 'number') setStartedAt(d.startedAt);
-                    if (Array.isArray(d.skippedStepKeys)) {
-                        skippedKeysRef.current = d.skippedStepKeys;
-                        setSkippedStepKeys(d.skippedStepKeys);
-                    }
                     if (typeof d.businessName === 'string') setBusinessName(d.businessName);
                     if (Array.isArray(d.selectedCategories)) setSelectedCategories(d.selectedCategories);
                     if (typeof d.phone === 'string') setPhone(d.phone);
@@ -354,9 +370,11 @@ export function NewOnboardingScreen() {
             if (cancelled) return;
             focusTimer = setTimeout(() => {
                 if (cancelled) return;
-                if (currentStep === 1) businessNameRef.current?.focus();
-                else if (currentStep === 3) phoneRef.current?.focus();
-                else if (currentStep === 5) laborRateRef.current?.focus();
+                // Keyed on the step, not its position: the short flow's only
+                // step and the long flow's first are both `company`.
+                if (currentStepKey === 'company') businessNameRef.current?.focus();
+                else if (currentStepKey === 'contact') phoneRef.current?.focus();
+                else if (currentStepKey === 'rates') laborRateRef.current?.focus();
             }, 450);
         });
 
@@ -364,7 +382,7 @@ export function NewOnboardingScreen() {
             cancelled = true;
             if (focusTimer) clearTimeout(focusTimer);
         };
-    }, [currentStep]);
+    }, [currentStep, currentStepKey]);
 
     // Android hardware back — go to previous step instead of exiting
     useEffect(() => {
@@ -379,13 +397,6 @@ export function NewOnboardingScreen() {
         return () => sub.remove();
     }, [currentStep]);
 
-    // Validation — whether the current step is allowed to advance.
-    const isCurrentStepValid = (): boolean => {
-        if (currentStep === 1) return businessName.trim().length > 0;
-        if (currentStep === 2) return selectedCategories.length > 0;
-        return true;
-    };
-
     // Advance to the next step (or complete)
     const advance = () => {
         if (currentStep < TOTAL_STEPS) {
@@ -395,15 +406,17 @@ export function NewOnboardingScreen() {
         }
     };
 
-    // Handle next step
+    // Handle next step. The two gates live on `company` and `trade`; in the
+    // short flow both sit on the one screen, so both are checked at once and
+    // every unmet one is marked rather than the first.
     const handleNext = () => {
-        if (currentStep === 1 && !businessName.trim()) {
-            setShowBusinessNameError(true);
-            errorTap();
-            return;
-        }
-        if (currentStep === 2 && selectedCategories.length === 0) {
-            setShowCategoryError(true);
+        const needsName = currentStepKey === 'company' && !businessName.trim();
+        const needsTrade =
+            (currentStepKey === 'trade' || (isShortFlow && currentStepKey === 'company'))
+            && selectedCategories.length === 0;
+        if (needsName || needsTrade) {
+            if (needsName) setShowBusinessNameError(true);
+            if (needsTrade) setShowCategoryError(true);
             errorTap();
             return;
         }
@@ -616,12 +629,12 @@ export function NewOnboardingScreen() {
     };
 
     // Render step content. Keyed on the dynamic step list's `key` field, not
-    // the numeric position, since plumbers and other trades have different
-    // step counts.
+    // the numeric position, since the short flow, other trades and plumbers
+    // all have different step counts.
     const renderStepContent = () => {
         switch (currentStepKey) {
             case 'company':
-                return renderStep1CompanyName();
+                return isShortFlow ? renderSetupStep() : renderStep1CompanyName();
             case 'trade':
                 return renderStep2TradeCategory();
             case 'contact':
@@ -758,6 +771,62 @@ export function NewOnboardingScreen() {
         </View>
     );
 
+    // The business-name field. Shared: it is the whole of the long flow's
+    // step 1 and the top half of the short flow's only step.
+    const renderBusinessNameField = () => (
+        <Surface style={styles.card}>
+            <TextInput
+                label="Business Name"
+                value={businessName}
+                onChangeText={(t) => {
+                    setBusinessName(t);
+                    if (showBusinessNameError && t.trim().length > 0) setShowBusinessNameError(false);
+                }}
+                mode="outlined"
+                style={styles.input}
+                placeholder="e.g., Smith's Plumbing"
+                ref={businessNameRef}
+                returnKeyType="next"
+                onSubmitEditing={handleNext}
+                autoComplete="off"
+                textContentType="organizationName"
+                error={showBusinessNameError}
+            />
+            {showBusinessNameError && (
+                <Text style={styles.fieldError}>Please enter your business name</Text>
+            )}
+        </Surface>
+    );
+
+    // The one step: business name and trade, together, and that's the lot.
+    const renderSetupStep = () => (
+        <View style={styles.stepContainer}>
+            <View style={styles.stepHeader}>
+                <MaterialCommunityIcons
+                    name="hammer-wrench"
+                    size={64}
+                    color={themeColors.accentText}
+                    style={styles.stepIcon}
+                />
+                <Title style={styles.stepTitle}>Let's get you quoting</Title>
+                <Paragraph style={styles.stepDescription}>
+                    Two things and you're away. Everything else can wait until it matters.
+                </Paragraph>
+            </View>
+
+            <Text style={styles.sectionLabel}>Your business name</Text>
+            <Text style={styles.sectionHint}>Goes on every quote and invoice you send</Text>
+            {renderBusinessNameField()}
+
+            <Text style={styles.sectionLabel}>Your trade</Text>
+            <Text style={styles.sectionHint}>Pick every one you do — it shapes how jobs get priced</Text>
+            {showCategoryError && (
+                <Text style={styles.fieldError}>Please select at least one category</Text>
+            )}
+            {renderTradeGrid()}
+        </View>
+    );
+
     // Step 1: Company Name
     const renderStep1CompanyName = () => (
         <View style={styles.stepContainer}>
@@ -774,28 +843,7 @@ export function NewOnboardingScreen() {
                 </Paragraph>
             </View>
 
-            <Surface style={styles.card}>
-                <TextInput
-                    label="Business Name"
-                    value={businessName}
-                    onChangeText={(t) => {
-                        setBusinessName(t);
-                        if (showBusinessNameError && t.trim().length > 0) setShowBusinessNameError(false);
-                    }}
-                    mode="outlined"
-                    style={styles.input}
-                    placeholder="e.g., Smith's Plumbing"
-                    ref={businessNameRef}
-                    returnKeyType="next"
-                    onSubmitEditing={handleNext}
-                    autoComplete="off"
-                    textContentType="organizationName"
-                    error={showBusinessNameError}
-                />
-                {showBusinessNameError && (
-                    <Text style={styles.fieldError}>Please enter your business name</Text>
-                )}
-            </Surface>
+            {renderBusinessNameField()}
         </View>
     );
 
@@ -818,6 +866,13 @@ export function NewOnboardingScreen() {
                 )}
             </View>
 
+            {renderTradeGrid()}
+        </View>
+    );
+
+    // The multi-select trade picker. Shared by both flows.
+    const renderTradeGrid = () => (
+        <>
             {/* No inner ScrollView. It carried no height constraint, so on web it
                 just expanded to its full content height inside the page
                 scroller — a second, pointless overflow container. Every other
@@ -863,7 +918,7 @@ export function NewOnboardingScreen() {
                     );
                 })}
             </View>
-        </View>
+        </>
     );
 
     // Step 3: Contact Details
@@ -1228,8 +1283,10 @@ export function NewOnboardingScreen() {
 
     const skipLabel = 'Skip';
     const isFinalStep = currentStep === TOTAL_STEPS;
-    const nextLabel = isFinalStep ? 'Finish' : 'Next';
-    const nextIcon = isFinalStep ? 'check' : 'arrow-right';
+    // The short flow's button says where it lands, because that's the point of
+    // it: the next thing the tradie sees is their first quote.
+    const nextLabel = isShortFlow ? 'Start quoting' : isFinalStep ? 'Finish' : 'Next';
+    const nextIcon = !isShortFlow && isFinalStep ? 'check' : 'arrow-right';
 
     return (
         <KeyboardAvoidingView
@@ -1238,22 +1295,32 @@ export function NewOnboardingScreen() {
             keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top : 0}
         >
       <GridBackground />
-            {/* Progress Indicator */}
-            <WebContainer maxWidth={ONBOARDING_MAX_WIDTH}>
-                <OnboardingProgress
-                    currentStep={currentStep}
-                    totalSteps={TOTAL_STEPS}
-                    steps={ONBOARDING_STEPS}
-                    onStepPress={handleStepPress}
-                    isStepReachable={isStepReachable}
-                />
-            </WebContainer>
+            {/* Progress indicator — only when there is progress to show. A
+                "Step 1 of 1" breadcrumb is noise, and the bar itself divides
+                by (totalSteps - 1). */}
+            {!isShortFlow && (
+                <WebContainer maxWidth={ONBOARDING_MAX_WIDTH}>
+                    <OnboardingProgress
+                        currentStep={currentStep}
+                        totalSteps={TOTAL_STEPS}
+                        steps={ONBOARDING_STEPS}
+                        onStepPress={handleStepPress}
+                        isStepReachable={isStepReachable}
+                    />
+                </WebContainer>
+            )}
 
             {/* Step Content - Scrollable */}
             <ScrollView
                 ref={scrollRef}
                 style={styles.scrollView}
-                contentContainerStyle={styles.scrollContent}
+                // Without the progress bar above it there is nothing between
+                // the title and the status bar, so the short flow carries the
+                // top inset itself.
+                contentContainerStyle={[
+                    styles.scrollContent,
+                    isShortFlow && { paddingTop: Math.max(insets.top, 12) },
+                ]}
                 keyboardShouldPersistTaps="handled"
                 keyboardDismissMode="interactive"
             >
@@ -1420,6 +1487,19 @@ const useStyles = makeStyles((t) => ({
         fontSize: 13,
         color: t.colors.error,
         marginTop: 4,
+    },
+    // Section headings on the one-step flow, where two questions share a
+    // screen and each still needs its own label.
+    sectionLabel: {
+        fontSize: 17,
+        fontWeight: '700',
+        color: t.colors.text,
+        marginBottom: 2,
+    },
+    sectionHint: {
+        fontSize: 13,
+        color: t.colors.textMuted,
+        marginBottom: 10,
     },
     gridContainer: {
         flexDirection: 'row',

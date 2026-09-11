@@ -17,6 +17,10 @@
  *      settings. The Pay Now link now just arrives: the server attaches it
  *      to email sends, and the non-email channels fetch it below.
  *
+ * Sep 2026 — onboarding stopped asking for an ABN and contact details up
+ * front, so this dialog asks for them instead, once, before a channel is
+ * chosen: see utils/sendBusinessDetails.ts for what counts as missing and why.
+ *
  * SendDocumentButton itself wraps this dialog — nothing changes for callers.
  */
 
@@ -40,8 +44,17 @@ import {
   type DeliveryDoc,
 } from '../utils/quoteDeliveryGuard';
 import { ActionSheet, ActionSheetOption } from './ActionSheet';
+import { AlertModal } from './AlertModal';
 import { DocumentEmailPreviewModal } from './DocumentEmailPreviewModal';
 import { SendGateModal } from './SendGateModal';
+import {
+  buildSendDetailsPrompt,
+  missingBusinessDetailsForSend,
+  readDismissedSendDetails,
+  rememberDismissedSendDetails,
+  shouldAskForSendDetails,
+  type SendDetailsPrompt,
+} from '../utils/sendBusinessDetails';
 import { trackEvent } from '../services/analyticsService';
 import {
   buildEmailBodySource,
@@ -143,6 +156,10 @@ export function SendDocumentDialog({
   // Pay Now link (and, for a quote SMS, the acceptance link) is fetched, so
   // a tap never looks ignored, and a second tap can't start it twice.
   const [preparing, setPreparing] = useState<'sms' | 'share' | 'export_pdf' | null>(null);
+  // The business details this document still needs (ABN on an invoice, some
+  // way for the customer to reply). Asked here, once, because this is the
+  // moment they matter — onboarding no longer demands them up front.
+  const [detailsPrompt, setDetailsPrompt] = useState<SendDetailsPrompt | null>(null);
   // Set by the preview modal on a successful send; stops us re-writing the
   // doc once it has left.
   const emailSentRef = useRef(false);
@@ -389,13 +406,31 @@ export function SendDocumentDialog({
     }
   };
 
-  // Mirror external `visible` → the send flow. A doc with an address on file
-  // skips the sheet entirely (email is the dominant path); without one, the
-  // sheet is still the right place to start.
+  /**
+   * Start the send itself. A doc with an address on file skips the sheet
+   * entirely (email is the dominant path); without one, the sheet is still
+   * the right place to start.
+   *
+   * A free-plan doc with money on it keeps the sheet:
+   * its delivery gate does a Square round-trip (and may mint a payment link)
+   * before anything can go out, so routing straight through would leave the
+   * tradie tapping Send and watching an unchanged screen. On the sheet, that
+   * wait happens with the UI already up. A plain quote is never gated, so it
+   * goes straight to the preview on every plan.
+   */
+  const openSendFlow = () => {
+    const gated =
+      getEffectivePlan() === 'free' && carriesPayableAmount(deliveryTarget(quote));
+    if (!gated && hasCustomerEmail(doc)) void handleEmailOption();
+    else setActionSheetVisible(true);
+  };
+
+  // Mirror external `visible` → the send flow.
   useEffect(() => {
     if (!visible) {
       setActionSheetVisible(false);
       setEmailPreviewVisible(false);
+      setDetailsPrompt(null);
       // Drop the settled figures with the flow that settled them. The next
       // open re-derives them from whatever the doc looks like by then.
       setSettled(null);
@@ -403,21 +438,35 @@ export function SendDocumentDialog({
       seededDocIdRef.current = null;
       return;
     }
-    const plan = getEffectivePlan();
     trackEvent('send_sheet_opened', {
       doc_type: docType,
       has_customer_email: hasCustomerEmail(doc),
-      plan,
+      plan: getEffectivePlan(),
     });
-    // A free-plan doc with money on it keeps the sheet: its delivery gate
-    // does a Square round-trip (and may mint a payment link) before anything
-    // can go out, so routing straight through would leave the tradie tapping
-    // Send and watching an unchanged screen. On the sheet, that wait happens
-    // with the UI already up. A plain quote is never gated, so it goes
-    // straight to the preview on every plan.
-    const gated = plan === 'free' && carriesPayableAmount(deliveryTarget(quote));
-    if (!gated && hasCustomerEmail(doc)) void handleEmailOption();
-    else setActionSheetVisible(true);
+
+    // Before any channel is chosen, check the document carries what it has to
+    // carry: an ABN if it's an invoice, and some way for the customer to
+    // reply. Asked at most once per gap — reading that memory is the only
+    // reason this is async, and a closed dialog mid-read must not reopen.
+    let cancelled = false;
+    const prompt = buildSendDetailsPrompt(
+      missingBusinessDetailsForSend(businessSettings, docType),
+      docType,
+    );
+    void (async () => {
+      const dismissed = prompt ? await readDismissedSendDetails() : null;
+      if (cancelled) return;
+      if (prompt && shouldAskForSendDetails(prompt, dismissed)) {
+        trackEvent('send_details_prompted', {
+          doc_type: docType,
+          missing: prompt.signature,
+        });
+        setDetailsPrompt(prompt);
+        return;
+      }
+      openSendFlow();
+    })();
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
 
@@ -706,6 +755,37 @@ export function SendDocumentDialog({
 
   return (
     <>
+      {/* Business details, asked at the one moment they matter: a document
+          with the tradie's name on it is about to reach a customer. It never
+          blocks the send — plenty of sole traders are mid-ABN-application —
+          and "Send anyway" records the gap so it doesn't nag again. */}
+      <AlertModal
+        visible={detailsPrompt !== null}
+        onDismiss={() => {
+          setDetailsPrompt(null);
+          onDismiss();
+        }}
+        type="info"
+        icon="card-account-details-outline"
+        title={detailsPrompt?.title || ''}
+        message={detailsPrompt?.message || ''}
+        primaryButtonText="Send anyway"
+        primaryButtonAction={() => {
+          const signature = detailsPrompt?.signature;
+          trackEvent('send_details_resolved', { doc_type: docType, action: 'send_anyway' });
+          if (signature) void rememberDismissedSendDetails(signature);
+          setDetailsPrompt(null);
+          openSendFlow();
+        }}
+        secondaryButtonText="Add details"
+        secondaryButtonAction={() => {
+          trackEvent('send_details_resolved', { doc_type: docType, action: 'add_details' });
+          setDetailsPrompt(null);
+          onDismiss();
+          navigation.navigate('BusinessProfile' as never);
+        }}
+      />
+
       <ActionSheet
         visible={actionSheetVisible}
         onDismiss={closeAll}
