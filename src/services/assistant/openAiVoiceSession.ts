@@ -25,6 +25,9 @@ import { ALL_TOOL_DECLARATIONS } from './toolSchemas';
 import { systemPromptWithProfile } from './quotingProfileContext';
 import { OpenAiMintedToken, LiveOfflineError, VoiceTransportUnavailableError } from './liveSession';
 import { base64ToBytes, bytesToBase64 } from './audioCodec';
+import { elapsedVoiceSeconds } from './voiceMinutes';
+import { httpsCallable } from 'firebase/functions';
+import { functions } from '../../config/firebase';
 import type { VoiceSession, VoiceSessionCallbacks, VoiceSessionOptions } from './voiceSession';
 import { isMeaningfulTranscript, shouldAnswerYet } from './heardSomething';
 // The trade vocabulary is shared with the ElevenLabs agent so the two can't
@@ -171,11 +174,221 @@ export const OA_TRANSCRIPT_WAIT_MS = 2_000;
  */
 export const OA_TRANSCRIBE_MODEL = 'gpt-4o-transcribe';
 
+// ---------------------------------------------------------------------------
+// Usage metering
+//
+// The socket runs device→OpenAI on an ephemeral client secret, so the server
+// never sees a frame of it — exactly the Gemini Live problem, and solved the
+// same way: accumulate here, report once at the end. Until this existed an
+// OpenAI voice session cost the business real money and recorded none of it,
+// which understates the whole assistant figure by however much of the rollout
+// is on this provider.
+// ---------------------------------------------------------------------------
+
+/** What a whole session used, in the shape reportAssistantVoiceUsage prices. */
+export interface OpenAiUsageTotals {
+  /** Input tokens INCLUDING the cached ones — see accumulateOpenAiUsage. */
+  inputTextTokens: number;
+  inputAudioTokens: number;
+  cachedInputTextTokens: number;
+  cachedInputAudioTokens: number;
+  outputTextTokens: number;
+  outputAudioTokens: number;
+  /** Audio seconds the separately-billed transcription model charged for. */
+  transcriptionSeconds: number;
+  /** Model turns seen. Only used to tell "nothing happened" from "free". */
+  responses: number;
+}
+
+export function emptyOpenAiUsageTotals(): OpenAiUsageTotals {
+  return {
+    inputTextTokens: 0,
+    inputAudioTokens: 0,
+    cachedInputTextTokens: 0,
+    cachedInputAudioTokens: 0,
+    outputTextTokens: 0,
+    outputAudioTokens: 0,
+    transcriptionSeconds: 0,
+    responses: 0,
+  };
+}
+
+const nonNegative = (v: unknown): number => {
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+};
+
+/**
+ * Fold one `response.done` event into the running totals.
+ *
+ * Realtime reports per RESPONSE, and every response re-bills the conversation
+ * so far as input — that is how the platform charges, so summing the events is
+ * summing the bill, not double-counting it.
+ *
+ * `input_token_details` splits the input by modality and `cached_tokens_details`
+ * splits the cached subset the same way; the modality totals INCLUDE their
+ * cached part, and the server subtracts it. Both are kept rather than
+ * pre-netted here because audio is 80x dearer than a cache hit and text is 10x
+ * — flattening the split would be the most expensive rounding error available.
+ *
+ * The two fallbacks lean in OPPOSITE directions, which is worth stating
+ * plainly in a money path: a payload with no modality split bills the lot as
+ * text, which UNDER-counts audio eightfold ($4/M against $32/M), while a bare
+ * `cached_tokens` with no split is credited against text only and so
+ * OVER-counts. Both beat recording the turn as zero, which is the bug this
+ * replaces, but neither is a safe direction to assume on the dashboard.
+ */
+export function accumulateOpenAiUsage(totals: OpenAiUsageTotals, event: any): void {
+  const u = event?.response?.usage;
+  if (!u || typeof u !== 'object') return;
+  totals.responses += 1;
+
+  const input = u.input_token_details || {};
+  const output = u.output_token_details || {};
+  const cachedDetails = input.cached_tokens_details || {};
+
+  let inputText = nonNegative(input.text_tokens);
+  const inputAudio = nonNegative(input.audio_tokens);
+  // No modality split at all (an older or partial payload): bill the bare
+  // total as text rather than losing the turn entirely.
+  if (!inputText && !inputAudio) inputText = nonNegative(u.input_tokens);
+  totals.inputTextTokens += inputText;
+  totals.inputAudioTokens += inputAudio;
+
+  const cachedText = nonNegative(cachedDetails.text_tokens);
+  const cachedAudio = nonNegative(cachedDetails.audio_tokens);
+  if (!cachedText && !cachedAudio) {
+    totals.cachedInputTextTokens += Math.min(nonNegative(input.cached_tokens), inputText);
+  } else {
+    totals.cachedInputTextTokens += Math.min(cachedText, inputText);
+    totals.cachedInputAudioTokens += Math.min(cachedAudio, inputAudio);
+  }
+
+  let outputText = nonNegative(output.text_tokens);
+  const outputAudio = nonNegative(output.audio_tokens);
+  if (!outputText && !outputAudio) outputText = nonNegative(u.output_tokens);
+  totals.outputTextTokens += outputText;
+  totals.outputAudioTokens += outputAudio;
+}
+
+/**
+ * Fold one `conversation.item.input_audio_transcription.completed` event in.
+ *
+ * Transcription is a separate model on a separate bill and its usage is NOT in
+ * response.usage — it rides on this event, reported as a duration. A payload
+ * that reports tokens instead is skipped rather than guessed at: that arm
+ * under-counts a cheap line, where a guess could misstate an expensive one.
+ */
+export function accumulateOpenAiTranscriptionUsage(
+  totals: OpenAiUsageTotals,
+  event: any,
+): void {
+  totals.transcriptionSeconds += nonNegative(event?.usage?.seconds);
+}
+
+/**
+ * The session's meter: what it used, how long it ran, and the one report that
+ * settles both.
+ *
+ * Owned OUT here rather than inside the session body so the open can be
+ * wrapped in it. The budget hold is parked by the MINT, before this file runs
+ * at all, so every throw between here and a live session leaves 120 seconds
+ * parked — on the free tier, 40% of the day's talk time gone for a session
+ * that never started. Keeping the meter outside the body is what lets the
+ * wrapper guarantee "reported exactly once, on every terminal path", instead
+ * of the three specific paths someone remembered to wire.
+ */
+function createUsageReporter(minted: OpenAiMintedToken) {
+  const totals = emptyOpenAiUsageTotals();
+  let connectedAtMs: number | null = null;
+  let reported = false;
+
+  return {
+    totals,
+
+    /**
+     * Billing starts where the session becomes usable, not at socket open —
+     * the mint and the config round trip are not conversation. The same line
+     * the ElevenLabs path draws at onConnect.
+     */
+    markConnected: () => {
+      if (connectedAtMs === null) connectedAtMs = Date.now();
+    },
+
+    /**
+     * Report the spend and settle the hold. First caller wins, so a path with
+     * a specific reason keeps it and the wrapper's catch-all is a backstop.
+     *
+     * Best-effort, like the ElevenLabs path: a failed report must never
+     * surface to the tradie.
+     *
+     * Where the parity stops: ElevenLabs has a post-call webhook that tells
+     * the server what a session really cost even when the client never
+     * reports. OpenAI has no such callback, so this is the ONLY witness. A
+     * session the OS kills outright therefore keeps its hold until midnight
+     * UTC — the same way the ElevenLabs hold expires, and the safe direction
+     * to fail — but also records no cost at all, which the ElevenLabs webhook
+     * would have caught. Closing that would mean polling OpenAI's usage API by
+     * day, not by session.
+     */
+    flush: (endReason: string) => {
+      if (reported) return;
+      reported = true;
+      const durationSeconds = elapsedVoiceSeconds(connectedAtMs, Date.now());
+      try {
+        void httpsCallable(functions, 'reportAssistantVoiceUsage')({
+          model: minted.modelLabel || `openai/${minted.model}`,
+          conversationId: minted.conversationId,
+          durationSeconds,
+          holdSeconds: minted.heldSeconds,
+          endReason,
+          // Omitted entirely when no turn ever completed, so a session that
+          // only ever needed its hold back doesn't write a row of zeroes
+          // across the daily doc's token counters.
+          usage: totals.responses
+            ? {
+              inputTextTokens: totals.inputTextTokens,
+              inputAudioTokens: totals.inputAudioTokens,
+              cachedInputTextTokens: totals.cachedInputTextTokens,
+              cachedInputAudioTokens: totals.cachedInputAudioTokens,
+              outputTextTokens: totals.outputTextTokens,
+              outputAudioTokens: totals.outputAudioTokens,
+            }
+            : undefined,
+          transcriptionSeconds: Math.round(totals.transcriptionSeconds),
+        }).catch(() => { /* best-effort */ });
+      } catch { /* best-effort */ }
+    },
+  };
+}
+
+type UsageReporter = ReturnType<typeof createUsageReporter>;
+
 export async function openOpenAiVoiceSession(
   minted: OpenAiMintedToken,
   history: ChatMessage[],
   cb: VoiceSessionCallbacks,
   _opts: VoiceSessionOptions = {},
+): Promise<VoiceSession> {
+  const usage = createUsageReporter(minted);
+  try {
+    return await openRealtimeSession(minted, history, cb, _opts, usage);
+  } catch (err) {
+    // Nothing below the mint is allowed to keep the tradie's talk time. The
+    // prompt build, the seed, the socket, the config round trip — any of them
+    // can throw, and every one of them happens with 120 seconds already
+    // parked. Idempotent, so a path that reported its own reason keeps it.
+    usage.flush('open-failed');
+    throw err;
+  }
+}
+
+async function openRealtimeSession(
+  minted: OpenAiMintedToken,
+  history: ChatMessage[],
+  cb: VoiceSessionCallbacks,
+  _opts: VoiceSessionOptions,
+  usage: UsageReporter,
 ): Promise<VoiceSession> {
   const tools = buildClientTools(cb);
   const transcriptionPrompt = buildTranscriptionPrompt(_opts.asrKeywordNames || []);
@@ -191,11 +404,12 @@ export async function openOpenAiVoiceSession(
     alive = false;
     connected = false;
     clearTranscriptFallback();
+    usage.flush(err ? 'error' : 'ended');
     if (err) cb.onError?.(err);
     cb.onClose?.(undefined);
   };
 
-  const ws: WebSocket = await new Promise((resolve, reject) => {
+  const connect = new Promise<WebSocket>((resolve, reject) => {
     let socket: WebSocket;
     try {
       const WS = WebSocket as unknown as new (
@@ -215,6 +429,17 @@ export async function openOpenAiVoiceSession(
     socket.onopen = () => { clearTimeout(timer); resolve(socket); };
     socket.onerror = () => { clearTimeout(timer); reject(new LiveOfflineError('Voice connection failed.')); };
   });
+
+  let ws: WebSocket;
+  try {
+    ws = await connect;
+  } catch (err) {
+    // The mint already parked a hold against today's talk-time budget and this
+    // socket never opened. Give it back rather than charging a tradie two
+    // minutes for a dead connection.
+    usage.flush('connect-failed');
+    throw err;
+  }
 
   // Per-turn state for the reply gate: what the transcriber has heard so far,
   // and whether this turn has already been answered.
@@ -354,6 +579,8 @@ export async function openOpenAiVoiceSession(
       // contract all accepted. Only now is this transport known to work.
       case 'session.updated':
         clearTimeout(readyTimer);
+        // Where the billable conversation starts — see markConnected.
+        usage.markConnected();
         markReady();
         break;
 
@@ -385,6 +612,9 @@ export async function openOpenAiVoiceSession(
       // The finished transcript is what the tradie sees they said. It also
       // catches a turn that produced no deltas at all.
       case 'conversation.item.input_audio_transcription.completed': {
+        // Before the noise check: the transcriber billed for that audio
+        // whether or not what it heard was worth answering.
+        accumulateOpenAiTranscriptionUsage(usage.totals, msg);
         const heard = String(msg.transcript || '');
         if (!isMeaningfulTranscript(heard)) break;   // room noise; stay quiet
         cb.onInputTranscription?.(heard, true);
@@ -430,6 +660,8 @@ export async function openOpenAiVoiceSession(
       case 'response.done': {
         if (speaking) { speaking = false; cb.onModeChange?.('listening'); }
         responseInFlight = false;
+        // The only place the tokens this turn cost are ever visible.
+        accumulateOpenAiUsage(usage.totals, msg);
         // Tool calls arrive as output items rather than a dedicated event.
         const calls = (msg.response?.output || []).filter((o: any) => o.type === 'function_call');
         for (const call of calls) {
@@ -491,6 +723,11 @@ export async function openOpenAiVoiceSession(
     clearTimeout(readyTimer);
     alive = false;
     closedOnce = true;   // this socket never became a session; no onClose is owed
+    // A hold is still parked against today's budget. Settle it at zero
+    // seconds so a provider outage costs the tradie nothing — this is the
+    // path the whole Gemini fallback runs through, so it is the common case,
+    // not the rare one.
+    usage.flush('transport-unavailable');
     try { ws.close(); } catch { /* already gone */ }
     throw err;
   }

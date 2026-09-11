@@ -7,10 +7,23 @@
  * session down and surfaced as an error bubble. Capture stays at the rate the
  * recorder actually delivers and the conversion happens here.
  */
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+// The usage report is the only thing that gives a session's budget hold back,
+// so the tests below need to see it rather than let it fail into the void the
+// way the real stub does.
+const reported = vi.hoisted(() => ({ calls: [] as Array<{ name: string; payload: any }> }));
+vi.mock('firebase/functions', () => ({
+  httpsCallable: (_functions: unknown, name: string) => (payload: any) => {
+    reported.calls.push({ name, payload });
+    return Promise.resolve({ data: { ok: true } });
+  },
+}));
+
 import {
   upsample16kTo24k, toOpenAiTools, openOpenAiVoiceSession, buildTranscriptionPrompt,
   OA_READY_TIMEOUT_MS,
+  emptyOpenAiUsageTotals, accumulateOpenAiUsage, accumulateOpenAiTranscriptionUsage,
 } from '../openAiVoiceSession';
 import { VoiceTransportUnavailableError } from '../liveSession';
 import { bytesToBase64, base64ToBytes } from '../audioCodec';
@@ -490,5 +503,233 @@ describe('an OpenAI transport that opens but cannot serve', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+/**
+ * What the session cost.
+ *
+ * The socket runs device→OpenAI on an ephemeral secret, so this accumulator is
+ * the ONLY place the tokens are ever visible — get it wrong and the assistant
+ * spend figure is wrong, silently, in whichever direction the bug leans. The
+ * cases below are the three that decide the number: the cached split (audio
+ * cache hits are 80x cheaper than fresh audio), the missing-detail fallbacks,
+ * and the separately-billed transcriber.
+ */
+describe('accumulateOpenAiUsage', () => {
+  const TURN = {
+    total_tokens: 4_200,
+    input_tokens: 3_500,
+    output_tokens: 700,
+    input_token_details: {
+      text_tokens: 1_200,
+      audio_tokens: 2_300,
+      cached_tokens: 2_000,
+      cached_tokens_details: { text_tokens: 900, audio_tokens: 1_100 },
+    },
+    output_token_details: { text_tokens: 40, audio_tokens: 660 },
+  };
+  const done = (usage: unknown) => ({ type: 'response.done', response: { usage } });
+
+  it('sums every response.done in the session', () => {
+    const totals = emptyOpenAiUsageTotals();
+    accumulateOpenAiUsage(totals, done(TURN));
+    accumulateOpenAiUsage(totals, done(TURN));
+    expect(totals).toMatchObject({
+      inputTextTokens: 2_400,
+      inputAudioTokens: 4_600,
+      cachedInputTextTokens: 1_800,
+      cachedInputAudioTokens: 2_200,
+      outputTextTokens: 80,
+      outputAudioTokens: 1_320,
+      responses: 2,
+    });
+  });
+
+  it('keeps the cached tokens INSIDE the modality totals, as OpenAI reports them', () => {
+    // The server subtracts them. Pre-netting here would hide the cache hit
+    // from the one place that knows the rates, and bill it at 80x.
+    const totals = emptyOpenAiUsageTotals();
+    accumulateOpenAiUsage(totals, done(TURN));
+    expect(totals.inputAudioTokens).toBe(2_300);
+    expect(totals.cachedInputAudioTokens).toBe(1_100);
+  });
+
+  it('records nothing for an event with no usage block', () => {
+    const totals = emptyOpenAiUsageTotals();
+    accumulateOpenAiUsage(totals, { type: 'response.done', response: {} });
+    accumulateOpenAiUsage(totals, undefined);
+    accumulateOpenAiUsage(totals, { type: 'response.done' });
+    expect(totals).toEqual(emptyOpenAiUsageTotals());
+  });
+
+  it('bills a payload with no modality split as text rather than losing it', () => {
+    // This UNDER-counts if the tokens were really audio ($4/M against $32/M).
+    // It is still the right call — dropping the turn entirely is the bug this
+    // whole accumulator exists to fix — but the direction is worth naming.
+    const totals = emptyOpenAiUsageTotals();
+    accumulateOpenAiUsage(totals, done({ input_tokens: 500, output_tokens: 200 }));
+    expect(totals.inputTextTokens).toBe(500);
+    expect(totals.outputTextTokens).toBe(200);
+    expect(totals.inputAudioTokens).toBe(0);
+    expect(totals.outputAudioTokens).toBe(0);
+  });
+
+  it('credits a flat cached_tokens against text only, never audio', () => {
+    // Without the per-modality split we cannot know which side was cached.
+    // Guessing "audio" would discount the expensive line on no evidence.
+    const totals = emptyOpenAiUsageTotals();
+    accumulateOpenAiUsage(totals, done({
+      input_token_details: { text_tokens: 800, audio_tokens: 4_000, cached_tokens: 600 },
+    }));
+    expect(totals.cachedInputTextTokens).toBe(600);
+    expect(totals.cachedInputAudioTokens).toBe(0);
+  });
+
+  it('never credits more cached tokens than the turn actually carried', () => {
+    const totals = emptyOpenAiUsageTotals();
+    accumulateOpenAiUsage(totals, done({
+      input_token_details: { text_tokens: 100, audio_tokens: 0, cached_tokens: 9_999 },
+    }));
+    expect(totals.cachedInputTextTokens).toBe(100);
+  });
+
+  it('ignores negative and non-numeric counts instead of going backwards', () => {
+    const totals = emptyOpenAiUsageTotals();
+    accumulateOpenAiUsage(totals, done({
+      input_token_details: { text_tokens: -50, audio_tokens: 'lots' },
+      output_token_details: { audio_tokens: 120 },
+    }));
+    expect(totals.inputTextTokens).toBe(0);
+    expect(totals.inputAudioTokens).toBe(0);
+    expect(totals.outputAudioTokens).toBe(120);
+  });
+});
+
+/**
+ * The budget hold.
+ *
+ * assistantToken parks 120 seconds against the day's talk time BEFORE this
+ * file runs, and the usage report is the only thing that gives it back. On the
+ * free tier that is 300 seconds a day, so two unreported opens lock a tradie
+ * out of voice until midnight UTC — and the open that fails before a word is
+ * said is the COMMON one here, since it is how the fallback to Gemini is
+ * reached.
+ */
+describe('the budget hold always comes back', () => {
+  const MINTED = {
+    provider: 'openai', token: 't', model: 'gpt-realtime-2.1',
+    modelLabel: 'openai/gpt-realtime-2.1', conversationId: 'oa_1', heldSeconds: 120,
+  } as any;
+
+  const voiceReports = () => reported.calls.filter((c) => c.name === 'reportAssistantVoiceUsage');
+
+  beforeEach(() => { reported.calls.length = 0; });
+
+  it('reports a zero-second session when the transport is condemned', async () => {
+    const Sock = class {
+      sent: any[] = [];
+      closed = false;
+      onopen?: () => void;
+      onmessage?: (e: { data: string }) => void;
+      onclose?: () => void;
+      onerror?: () => void;
+      constructor() { setTimeout(() => this.onopen?.(), 0); }
+      send() {
+        setTimeout(() => this.onmessage?.({
+          data: JSON.stringify({ type: 'error', error: { message: 'no credits' } }),
+        }), 0);
+      }
+      close() { this.closed = true; }
+    };
+    const prev = (globalThis as any).WebSocket;
+    (globalThis as any).WebSocket = Sock;
+    try {
+      await expect(openOpenAiVoiceSession(MINTED, [], {})).rejects.toThrow();
+    } finally {
+      (globalThis as any).WebSocket = prev;
+    }
+
+    expect(voiceReports()).toHaveLength(1);
+    const payload = voiceReports()[0].payload;
+    // Zero seconds is what makes the server hand the whole 120s back, and the
+    // session id is what lets it settle against the plan it minted under.
+    expect(payload.durationSeconds).toBe(0);
+    expect(payload.conversationId).toBe('oa_1');
+    expect(payload.holdSeconds).toBe(120);
+    expect(payload.model).toBe('openai/gpt-realtime-2.1');
+    // Nothing was said, so no token row is written for a session that never ran.
+    expect(payload.usage).toBeUndefined();
+  });
+
+  it('reports even when the open throws before a socket exists', async () => {
+    // The hold is parked by the MINT, so every line of this function runs with
+    // 120 seconds already spent — including the prompt and vocabulary prep
+    // that happens before the socket is constructed. Wiring the report to the
+    // three exits someone remembered is not the same as "every terminal path".
+    await expect(
+      openOpenAiVoiceSession(MINTED, [], {}, { asrKeywordNames: 5 as any }),
+    ).rejects.toThrow();
+    expect(voiceReports()).toHaveLength(1);
+    expect(voiceReports()[0].payload.durationSeconds).toBe(0);
+    // Pins the path: this is the wrapper's catch-all, not one of the three
+    // exits inside the body, so the prep stretch really is covered.
+    expect(voiceReports()[0].payload.endReason).toBe('open-failed');
+  });
+
+  it('reports once per session, never twice', async () => {
+    // A double report would settle the hold twice and double-count the cost.
+    const Sock = class {
+      static last: any;
+      sent: any[] = [];
+      closed = false;
+      onopen?: () => void;
+      onmessage?: (e: { data: string }) => void;
+      onclose?: () => void;
+      onerror?: () => void;
+      constructor() { (this.constructor as any).last = this; setTimeout(() => this.onopen?.(), 0); }
+      send(raw: string) {
+        if (JSON.parse(raw).type !== 'session.update') return;
+        setTimeout(() => this.onmessage?.({ data: JSON.stringify({ type: 'session.updated' }) }), 0);
+      }
+      close() { this.closed = true; }
+    };
+    const prev = (globalThis as any).WebSocket;
+    (globalThis as any).WebSocket = Sock;
+    try {
+      const session = await openOpenAiVoiceSession(MINTED, [], {});
+      session.close();
+      // The socket's own close event lands after ours, as it does on device.
+      (Sock as any).last.onclose?.();
+      session.close();
+    } finally {
+      (globalThis as any).WebSocket = prev;
+    }
+    expect(voiceReports()).toHaveLength(1);
+  });
+});
+
+describe('accumulateOpenAiTranscriptionUsage', () => {
+  it('adds up the seconds the transcriber billed', () => {
+    // A second model on a second bill: its usage never appears in
+    // response.usage, and it is not free ($0.006/min).
+    const totals = emptyOpenAiUsageTotals();
+    const event = (seconds: number) => ({
+      type: 'conversation.item.input_audio_transcription.completed',
+      transcript: 'quote for Karl van Leishout',
+      usage: { type: 'duration', seconds },
+    });
+    accumulateOpenAiTranscriptionUsage(totals, event(4.2));
+    accumulateOpenAiTranscriptionUsage(totals, event(7.8));
+    expect(totals.transcriptionSeconds).toBeCloseTo(12);
+  });
+
+  it('skips an event that reports tokens instead of a duration', () => {
+    // Under-counting a cheap line beats converting tokens to minutes on a
+    // guess, which would misstate it in an unknown direction.
+    const totals = emptyOpenAiUsageTotals();
+    accumulateOpenAiTranscriptionUsage(totals, { usage: { type: 'tokens', input_tokens: 400 } });
+    accumulateOpenAiTranscriptionUsage(totals, { transcript: 'no usage block at all' });
+    expect(totals.transcriptionSeconds).toBe(0);
   });
 });

@@ -30,6 +30,7 @@ import { decideVoiceProvider, VoiceConfigDoc } from './assistantVoiceProvider';
 import {
   mintElevenLabsConversationToken,
   mintOpenAiRealtimeToken,
+  newOpenAiSessionId,
   participantNameForUid,
   EL_VOICE_MODEL_LABEL,
   OA_VOICE_MODEL_LABEL,
@@ -270,6 +271,11 @@ export async function refundVoiceSeconds(uid: string, seconds: number): Promise<
  * The ElevenLabs post-call webhook carries a conversation id and no Firebase
  * identity, so without this row there is nothing to reconcile a session's real
  * duration and cost against. Server-only collection.
+ *
+ * The OpenAI branch writes one too, against an id we generate. It has no
+ * webhook, but the row is what makes the client's settle call idempotent and
+ * what supplies the plan and the hold it settles against — neither of which
+ * the device is trusted for.
  */
 async function recordVoiceSession(args: {
   uid: string;
@@ -277,13 +283,14 @@ async function recordVoiceSession(args: {
   conversationId: string;
   heldSeconds: number;
   maxDurationSeconds: number;
+  model?: string;
 }): Promise<void> {
   if (!args.conversationId) return;
   try {
     await db().doc(`voiceSessions/${args.conversationId}`).set({
       uid: args.uid,
       plan: args.plan,
-      model: EL_VOICE_MODEL_LABEL,
+      model: args.model || EL_VOICE_MODEL_LABEL,
       heldSeconds: args.heldSeconds,
       maxDurationSeconds: args.maxDurationSeconds,
       mintedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -362,6 +369,20 @@ export const assistantToken = functions
         }
         try {
           const minted = await mintOpenAiRealtimeToken({ apiKey: oaKey });
+          // Our own id, because OpenAI's mint returns none. Without it the
+          // 120s hold parked two lines up has nothing to settle against and
+          // sits there until midnight UTC — two opens and a free-tier tradie
+          // is locked out of voice regardless of how briefly they spoke.
+          const conversationId = newOpenAiSessionId();
+          const maxDurationSeconds = MAX_SESSION_SECONDS[plan];
+          await recordVoiceSession({
+            uid,
+            plan,
+            conversationId,
+            heldSeconds: held.heldSeconds,
+            maxDurationSeconds,
+            model: OA_VOICE_MODEL_LABEL,
+          });
           const usage = await db().doc(`users/${uid}/assistantUsage/${todayKey()}`).get();
           res.status(200).json({
             provider: 'openai',
@@ -369,7 +390,8 @@ export const assistantToken = functions
             model: OA_REALTIME_MODEL,
             voice: process.env.OPENAI_REALTIME_VOICE || 'cedar',
             modelLabel: OA_VOICE_MODEL_LABEL,
-            maxDurationSeconds: MAX_SESSION_SECONDS[plan],
+            conversationId,
+            maxDurationSeconds,
             heldSeconds: held.heldSeconds,
             remainingVoiceSeconds: remainingVoiceSeconds(usage.data(), plan),
           });
