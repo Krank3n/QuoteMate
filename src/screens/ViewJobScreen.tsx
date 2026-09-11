@@ -267,7 +267,7 @@ export function ViewJobScreen() {
     // for the length of that round trip.
     return (
       <View style={[styles.container, styles.centered]}>
-        <ActivityIndicator animating color={themeColors.accent} />
+        <ActivityIndicator animating color={themeColors.accentText} />
       </View>
     );
   }
