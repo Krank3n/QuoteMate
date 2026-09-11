@@ -41,6 +41,16 @@ describe('key → action mapping', () => {
     expect(card?.tone).toBe('money');
   });
 
+  it('take_deposit names the invoice only while it is still to be sent', () => {
+    const accepted = buildCard(action('take_deposit'), [doc({ stage: 'quote_accepted' })])!;
+    expect(accepted.subtitle).toContain('send the invoice');
+    const invoiced = buildCard(action('take_deposit'), [doc({ stage: 'invoice_sent' })])!;
+    expect(invoiced.subtitle).not.toContain('send the invoice');
+    expect(invoiced.subtitle).toContain('invoice is out');
+    const partial = buildCard(action('take_deposit'), [doc({ stage: 'partially_paid' })])!;
+    expect(partial.subtitle).toContain('invoice is out');
+  });
+
   it('take_deposit picks the most recent unpaid job and skips Square-settled ones', () => {
     const docs = [
       doc({

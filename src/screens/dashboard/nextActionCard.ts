@@ -112,6 +112,16 @@ export function pickSentQuoteDoc(docs: NextActionDoc[]): NextActionDoc | null {
   return newest(docs.filter((d) => d.stage === 'quote_sent'));
 }
 
+/**
+ * What the money step is, from where the job stands: an accepted quote still
+ * needs the deposit or the invoice, an invoice already out needs the payment.
+ */
+export function owedSubtitle(stage: DocumentStage): string {
+  return stage === 'quote_accepted'
+    ? 'The customer said yes — take the deposit or send the invoice.'
+    : 'The invoice is out — take the payment or chase it up.';
+}
+
 /** "in 2 days" / "today" — the same counting the trial banner does. */
 function trialEnding(daysRemaining: number | null): string {
   if (daysRemaining === null) return 'Your trial is ending';
@@ -190,7 +200,7 @@ export function buildCard(
       return {
         key: action.key,
         title: 'Money owing on a job',
-        subtitle: "It's been said yes to — take the payment or send the invoice.",
+        subtitle: owedSubtitle(doc.stage),
         icon: 'cash-fast',
         tone: 'money',
         route: { screen: 'ViewJob', params: { jobId: doc.jobId } },
