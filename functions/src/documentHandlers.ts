@@ -380,6 +380,42 @@ export function customerResponseResetPatch(): AnyData {
 }
 
 /**
+ * Per-send audit for the unified row. `sentAt` is first-send-only (the
+ * mirror and setDocumentStage both protect it), so without these two fields
+ * a follow-up or edit-and-resend is invisible outside the email log. Every
+ * real send — manual or scheduled reminder — stamps lastSentAt and bumps
+ * sendCount; the admin reads both. Pure apart from the increment sentinel.
+ */
+export function sendAuditPatch(now: number = Date.now()): AnyData {
+  return { lastSentAt: now, sendCount: admin.firestore.FieldValue.increment(1) };
+}
+
+/**
+ * Stamp the send audit for a scheduled customer reminder, which goes out
+ * via the legacy quotes/invoices rows rather than sendDocumentEmail. Resolves
+ * the unified row the same way loadDocumentForInvoiceId does (an invoice's
+ * mirror lives under its source quote id) and only touches a row that
+ * exists — a sparse documents doc must never be minted from here.
+ */
+export async function recordReminderSend(
+  userId: string,
+  legacyId: string,
+  kind: 'quote' | 'invoice',
+): Promise<boolean> {
+  const firestore = db();
+  let mirrorId = legacyId;
+  if (kind === 'invoice') {
+    const invoiceSnap = await firestore.doc(`users/${userId}/invoices/${legacyId}`).get();
+    const sourceQuoteId = invoiceSnap.data()?.sourceQuoteId;
+    if (typeof sourceQuoteId === 'string' && sourceQuoteId) mirrorId = sourceQuoteId;
+  }
+  const ref = firestore.doc(`users/${userId}/documents/${mirrorId}`);
+  if (!(await ref.get()).exists) return false;
+  await ref.set(sendAuditPatch(), { merge: true });
+  return true;
+}
+
+/**
  * Pair the delivery channel with the first-send timestamp. Returns
  * `{ sendMethod }` only when this transition actually stamped a `sentAt`
  * (a real quote_sent/invoice_sent move) AND a sendMethod was supplied —
@@ -796,6 +832,7 @@ async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailRes
         aiEmailBody: emailBody,
         acceptanceTokenCreatedAt: Date.now(),
         ...customerResponseResetPatch(),
+        ...sendAuditPatch(),
       },
     });
   }
@@ -1031,6 +1068,7 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
         aiEmailBody: emailBody,
         termsSnapshot: termsToSend ?? undefined,
         termsVersionHash: termsVersionHash ?? undefined,
+        ...sendAuditPatch(),
       },
     });
   }

@@ -208,6 +208,7 @@ import {
   buildQuotePdfHtmlForQuote,
   hasCustomerResponded,
   describeCustomerResponse,
+  recordReminderSend,
   type SquareLinkMinter,
 } from './documentHandlers';
 export { getStageViolationCounts, convertDocumentToInvoice } from './documentHandlers';
@@ -11447,6 +11448,10 @@ export const customerQuoteFollowUp = functions
               acceptanceTokenHash: tokenHash,
               acceptanceTokenCreatedAt: admin.firestore.FieldValue.serverTimestamp(),
             });
+            // Admin visibility: a reminder is a send too.
+            await recordReminderSend(userDoc.id, quoteDoc.id, 'quote').catch((err) => {
+              console.warn(`customerQuoteFollowUp: send audit failed for ${quoteDoc.id}`, (err as Error)?.message);
+            });
           }
         } catch (err) {
           console.error(
@@ -11602,6 +11607,10 @@ export const customerInvoiceFollowUp = functions
             await invoiceDoc.ref.update({
               customerFollowUpCount: invoice.followUpCount + 1,
               customerFollowUpLastAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+            // Admin visibility: a reminder is a send too.
+            await recordReminderSend(userDoc.id, invoiceDoc.id, 'invoice').catch((err) => {
+              console.warn(`customerInvoiceFollowUp: send audit failed for ${invoiceDoc.id}`, (err as Error)?.message);
             });
           }
         } catch (err) {

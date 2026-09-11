@@ -1697,6 +1697,7 @@ export const adminListDocuments = functions
         const createdAt = tsMs(doc.createdAt);
         const updatedAt = tsMs(doc.updatedAt);
         const sentAt = tsMs(doc.sentAt);
+        const lastSentAt = tsMs(doc.lastSentAt);
         const respondedAt = tsMs(doc.respondedAt);
         const firstViewedAt = tsMs(doc.firstViewedAt);
         const lastViewedAt = tsMs(doc.lastViewedAt);
@@ -1761,6 +1762,10 @@ export const adminListDocuments = functions
           firstViewedAt,
           lastViewedAt,
           viewCount: Number(doc.viewCount) || 0,
+          // Re-send audit (stamped on every real send since 2026-09-11;
+          // older docs carry neither). sentAt stays first-send-only.
+          lastSentAt,
+          sendCount: Number(doc.sendCount) || 0,
           acceptedAt,
           invoicedAt,
           paidInFullAt,
@@ -1840,7 +1845,7 @@ export const adminGetDocument = functions.https.onCall(async (data, context) => 
   const doc = docSnap.data() as any;
   // Convert known date fields to ms epochs so the client doesn't have to.
   const dateFields = [
-    'createdAt', 'updatedAt', 'sentAt', 'respondedAt',
+    'createdAt', 'updatedAt', 'sentAt', 'lastSentAt', 'respondedAt',
     'acceptanceTokenCreatedAt', 'syncedAt', 'firstViewedAt', 'lastViewedAt',
     'acceptedAt', 'invoicedAt', 'paidInFullAt', 'issueDate', 'dueDate',
     'depositPaidAt', 'squarePaidAt', 'xeroSyncedAt',
