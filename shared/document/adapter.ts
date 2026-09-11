@@ -83,16 +83,6 @@ export function deriveStage(
   // Quote-side: post-narrowing the legacy enum is draft|sent|accepted|
   // rejected|completed|cancelled — but data on disk may still carry
   // paid/partial/overdue, so handle them defensively.
-  //
-  // A won quote the customer has paid in full (the Square webhook stamps
-  // `paidTotal` on the legacy row for both a deposit and a "Pay now" full
-  // payment) is `paid`, not merely accepted. Without this the mirror would
-  // project quote_accepted straight over the ledger's paid stage whenever the
-  // legacy row was re-written, and the job would sit in the app as "accepted,
-  // money to collect" with the money already in the tradie's Square account.
-  const quotePaidTotal = Number(source.paidTotal ?? 0);
-  const quoteTotal = Number(source.total ?? 0);
-  const quoteSettled = quoteTotal > 0 && quotePaidTotal + 0.005 >= quoteTotal;
   switch (status) {
     case 'cancelled':
       return 'cancelled';
@@ -102,7 +92,7 @@ export function deriveStage(
     case 'completed':
     case 'paid':
     case 'partial':
-      return quoteSettled ? 'paid' : 'quote_accepted';
+      return 'quote_accepted';
     case 'sent':
     case 'overdue':
       return 'quote_sent';

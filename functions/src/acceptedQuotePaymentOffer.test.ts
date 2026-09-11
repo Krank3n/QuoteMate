@@ -11,6 +11,8 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  ACCEPTANCE_MINT_TIMEOUT_MS,
+  isSafePaymentLinkUrl,
   generateConfirmationPage,
   paymentOfferForAcceptedQuote,
   respondToQuoteResponseBody,
@@ -43,6 +45,22 @@ afterEach(() => {
 });
 
 describe('paymentOfferForAcceptedQuote', () => {
+  it('a mint that never answers gives way to the plain thank-you instead of holding the acceptance', async () => {
+    vi.useFakeTimers();
+    const d = deps({ mint: vi.fn(() => new Promise(() => {})) });
+    const pending = paymentOfferForAcceptedQuote('u1', 'q1', plainQuote, d);
+    await vi.advanceTimersByTimeAsync(ACCEPTANCE_MINT_TIMEOUT_MS + 1);
+    expect(await pending).toBeNull();
+  });
+
+  it('never hands the page a link that is not a plain https URL', async () => {
+    for (const url of ['javascript:alert(1)', 'https://x/" onfocus=alert(1) autofocus x="', 'http://square.link/u/x']) {
+      const d = deps({ mint: vi.fn(async () => ({ paymentLinkUrl: url })) });
+      expect(await paymentOfferForAcceptedQuote('u1', 'q1', plainQuote, d)).toBeNull();
+    }
+    expect(isSafePaymentLinkUrl('https://square.link/u/abc?x=1&y=2')).toBe(true);
+  });
+
   it('deposit quote: offers the deposit through a deposit link', async () => {
     const d = deps();
     const offer = await paymentOfferForAcceptedQuote('u1', 'q1', depositQuote, d);

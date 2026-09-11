@@ -5,7 +5,7 @@
  *
  *   draft               → quote_sent | invoice_sent | quote_accepted | cancelled
  *   quote_sent          → quote_accepted | quote_rejected | paid | cancelled | draft
- *   quote_accepted      → draft | invoice_sent | paid | cancelled
+ *   quote_accepted      → draft | invoice_sent | cancelled
  *   quote_rejected      → quote_sent | quote_accepted | cancelled   (re-pitch path)
  *   invoice_sent        → partially_paid | paid | cancelled
  *   partially_paid      → paid | cancelled
@@ -16,9 +16,6 @@
  *   - draft → quote_accepted: customer paid a deposit on the first draft.
  *   - quote_rejected → quote_accepted: un-reject without re-pitching.
  *   - quote_sent → paid: customer paid the full quote amount directly.
- *   - quote_accepted → paid: the acceptance page offers "Pay now" on a quote
- *     with no deposit, so the customer accepts first and pays the whole
- *     amount a moment later; the doc has to be able to settle from there.
  *
  * Mistake-recovery edges:
  *   - cancelled → draft: a cancelled doc drops back to draft so the tradie
@@ -38,7 +35,7 @@ import type { DocumentStage } from './types';
 export const LEGAL_TRANSITIONS: Readonly<Record<DocumentStage, ReadonlyArray<DocumentStage>>> = {
   draft: ['quote_sent', 'invoice_sent', 'quote_accepted', 'cancelled'],
   quote_sent: ['quote_accepted', 'quote_rejected', 'paid', 'cancelled', 'draft'],
-  quote_accepted: ['draft', 'invoice_sent', 'paid', 'cancelled'],
+  quote_accepted: ['draft', 'invoice_sent', 'cancelled'],
   quote_rejected: ['quote_sent', 'quote_accepted', 'cancelled'],
   invoice_sent: ['partially_paid', 'paid', 'cancelled'],
   partially_paid: ['paid', 'cancelled'],

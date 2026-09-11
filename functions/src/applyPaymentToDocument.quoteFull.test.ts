@@ -1,11 +1,12 @@
 /**
  * Where a quote lands after the customer pays the whole amount from the
  * acceptance page ("Pay now"). The Square webhook routes a quote_full payment
- * through applyPaymentToDocument; it used to leave the document at
- * quote_accepted with a zero balance, so the Job never read as paid and the
- * money the customer had already handed over still looked like something to
- * collect. A full payment that covers the total now settles the document
- * (stage paid) and the Job follows.
+ * through applyPaymentToDocument: the money lands on the ledger as a Square
+ * balance payment, the balance reads zero, and the document stays at
+ * quote_accepted — the same state the tradie-side "Full amount" link has
+ * always produced. (A quote reaching `paid` directly was tried and reverted:
+ * the client has no handling for a paid quote — the status sheet grew a dead
+ * "Mark as Paid" row and the job screen lost its action bar.)
  *
  * Firestore is an in-memory map: this is about the ledger arithmetic and
  * the stage the doc ends up in, not about Firestore.
@@ -70,10 +71,10 @@ function fullPayment(amountCents: number, paymentId = 'PAY-1') {
 describe('applyPaymentToDocument — quote_full from the acceptance page', () => {
   beforeEach(() => seed());
 
-  it('a full payment on an accepted quote settles it: stage paid, zero balance, Square on the ledger', async () => {
+  it('a full payment on an accepted quote lands on the ledger: zero balance, Square on the ledger, still accepted', async () => {
     await fullPayment(100_000);
     const doc = store.get('users/u1/documents/q1')!;
-    expect(doc.stage).toBe('paid');
+    expect(doc.stage).toBe('quote_accepted');
     expect(doc.paidTotal).toBe(1000);
     expect(doc.balanceDue).toBe(0);
     expect(doc.payments).toHaveLength(1);
@@ -85,16 +86,16 @@ describe('applyPaymentToDocument — quote_full from the acceptance page', () =>
     expect(doc.activePaymentLink.consumedAt).toBeGreaterThan(0);
   });
 
-  it('the Job follows the document to paid', async () => {
+  it('the Job stays accepted — the invoice is still the tradie\'s step', async () => {
     await fullPayment(100_000);
-    expect(store.get('users/u1/jobs/j1')!.stage).toBe('paid');
+    expect(store.get('users/u1/jobs/j1')!.stage).toBe('accepted');
   });
 
-  it('paying the full amount straight off a sent quote is both acceptance and settlement', async () => {
+  it('paying the full amount straight off a sent quote is the acceptance', async () => {
     seed({ stage: 'quote_sent' });
     await fullPayment(100_000);
-    expect(store.get('users/u1/documents/q1')!.stage).toBe('paid');
-    expect(store.get('users/u1/jobs/j1')!.stage).toBe('paid');
+    expect(store.get('users/u1/documents/q1')!.stage).toBe('quote_accepted');
+    expect(store.get('users/u1/jobs/j1')!.stage).toBe('accepted');
   });
 
   it('caps an overpayment at the total rather than reporting overpaid', async () => {
@@ -102,10 +103,9 @@ describe('applyPaymentToDocument — quote_full from the acceptance page', () =>
     const doc = store.get('users/u1/documents/q1')!;
     expect(doc.paidTotal).toBe(1000);
     expect(doc.balanceDue).toBe(0);
-    expect(doc.stage).toBe('paid');
   });
 
-  it('a short payment still counts as acceptance but not settlement', async () => {
+  it('a short payment still counts as acceptance', async () => {
     seed({ stage: 'quote_sent' });
     await fullPayment(40_000);
     const doc = store.get('users/u1/documents/q1')!;

@@ -172,6 +172,12 @@ describe('acceptance page — after pressing Accept', () => {
     expect(doc.querySelector('.state.success p')?.textContent).toContain('will be in touch to lock in a date');
   });
 
+  it('a link that could break out of the href is not rendered either', async () => {
+    const doc = await acceptWith({ kind: 'full', url: 'https://x/" onfocus=alert(1) autofocus x="', amount: 10 });
+    expect(doc.querySelector('.pay-offer')).toBeNull();
+    expect(doc.body.innerHTML).not.toContain('onfocus');
+  });
+
   it('only an https link is ever rendered as a button', async () => {
     const doc = await acceptWith({ kind: 'full', url: 'javascript:alert(1)', amount: 10 });
     expect(doc.querySelector('.pay-offer')).toBeNull();

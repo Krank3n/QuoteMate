@@ -6677,6 +6677,17 @@ export interface AcceptedQuotePaymentDeps {
 // Square hosted links expire after 24h; the legacy minters treat >23h as
 // stale for the same reason (a customer clicking a dead link gets a 404).
 const ACCEPTANCE_LINK_TTL_MS = 23 * 60 * 60 * 1000;
+/** How long an acceptance waits on Square for a link before showing the plain thank-you. */
+export const ACCEPTANCE_MINT_TIMEOUT_MS = 8_000;
+
+/**
+ * A payment-link URL safe to put in an href on a customer-facing page: https
+ * only, and none of the characters that could break out of the attribute.
+ * The same rule on both acceptance pages.
+ */
+export function isSafePaymentLinkUrl(url: unknown): url is string {
+  return typeof url === 'string' && /^https:\/\/[^\s"'<>\\]+$/.test(url);
+}
 
 /**
  * Resolve the payment offer for a freshly accepted quote. Best effort: any
@@ -6726,13 +6737,21 @@ export async function paymentOfferForAcceptedQuote(
       active && active.url && active.kind === linkKind && !active.consumedAt && activeFresh
       && Math.abs(Number(active.amount || 0) - amount) < 0.005
     ) {
-      return { kind, url: active.url, amount };
+      return isSafePaymentLinkUrl(active.url) ? { kind, url: active.url, amount } : null;
     }
-    const minted = await deps.mint(userId, quoteId, linkKind);
+    // The acceptance is already committed by the time this runs. Square has
+    // no timeout of its own in this file, so a hung mint would hold the
+    // response open to the function deadline and the customer's page would
+    // report a failure for an acceptance that succeeded. Bounded instead.
+    const minted = await Promise.race([
+      deps.mint(userId, quoteId, linkKind),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), ACCEPTANCE_MINT_TIMEOUT_MS)),
+    ]);
     if (!minted) {
       console.warn('[square] payment link mint returned null on acceptance', { userId, quoteId, kind });
       return null;
     }
+    if (!isSafePaymentLinkUrl(minted.paymentLinkUrl)) return null;
     return { kind, url: minted.paymentLinkUrl, amount };
   } catch (err: any) {
     console.error('[square] payment link mint threw on acceptance', {
@@ -7254,7 +7273,10 @@ export function generateConfirmationPage(
   payment?: AcceptedQuotePaymentOffer | null
 ): string {
   const esc = escapeHtml;
-  const depositPayment = payment?.kind === 'deposit' ? payment : null;
+  // Only a link that passes the href rule is ever rendered; the offer helper
+  // already enforces this, and the page enforces it again for its callers.
+  const safePayment = payment && isSafePaymentLinkUrl(payment.url) ? payment : null;
+  const depositPayment = safePayment?.kind === 'deposit' ? safePayment : null;
   // Match the email's default brand colour so an unbranded business doesn't
   // get a green email followed by an orange confirmation page.
   const accent = safeBrandColor(brandColor);
@@ -7365,12 +7387,12 @@ export function generateConfirmationPage(
         <a href="${esc(depositPayment.url)}" class="btn">Pay deposit securely</a>
         <div class="deposit-note">Secure card payment through Square. ${who} is notified the moment it clears.</div>
       </div>`
-          : payment?.kind === 'full' && type === 'accepted'
+          : safePayment?.kind === 'full' && type === 'accepted'
           ? `
       <div class="deposit" data-kind="full">
         <div class="deposit-label">Pay now if you like</div>
-        <div class="deposit-amount">${formatMoney(payment.amount)}</div>
-        <a href="${esc(payment.url)}" class="btn">Pay by card</a>
+        <div class="deposit-amount">${formatMoney(safePayment.amount)}</div>
+        <a href="${esc(safePayment.url)}" class="btn">Pay by card</a>
         <div class="deposit-note">Secure card payment through Square. Or ${who} will invoice you when the job&#8217;s done.</div>
       </div>`
           : ''
@@ -7925,7 +7947,9 @@ export function generateAcceptancePage(token: string): string {
     // respondToQuote, or null when there is nothing to offer. Mirrors the
     // block on the email's confirmation page (generateConfirmationPage).
     function renderPaymentOffer(payment) {
-      if (!payment || !payment.url || !/^https:\\/\\//.test(payment.url)) return '';
+      // https only, and nothing that could break out of the href attribute —
+      // the page's escapeHtml (textContent → innerHTML) leaves quotes alone.
+      if (!payment || typeof payment.url !== 'string' || !/^https:\\/\\/[^\\s"'<>\\\\]+$/.test(payment.url)) return '';
       var who = escapeHtml(BUSINESS_NAME || 'The business');
       var isDeposit = payment.kind === 'deposit';
       return '<div class="pay-offer" data-kind="' + (isDeposit ? 'deposit' : 'full') + '">' +

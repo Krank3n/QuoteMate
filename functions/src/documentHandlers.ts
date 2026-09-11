@@ -1270,15 +1270,7 @@ export async function applyPaymentToDocument(
       squarePaymentId: paymentId,
       method: 'square',
     };
-    // A full-quote payment that covers the total settles the document — the
-    // customer accepted (or is accepting by paying) AND paid, so leaving it
-    // at quote_accepted read as money still to collect. Anything short of
-    // the total (a capped overpayment aside, that only happens when the
-    // total moved after the link was minted) still counts as acceptance.
-    const settledTotal = (Number(doc.paidTotal) || 0) + cappedAmount;
-    if (total > 0 && settledTotal + 0.005 >= total) {
-      nextStage = 'paid';
-    } else if (doc.stage === 'quote_sent' || doc.stage === 'draft') {
+    if (doc.stage === 'quote_sent' || doc.stage === 'draft') {
       nextStage = 'quote_accepted';
     }
   } else {
