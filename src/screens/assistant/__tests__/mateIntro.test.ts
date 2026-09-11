@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getMateIntro, isBlankSlate } from '../mateIntro';
+import { getMateIntro, isBlankSlate, isUnfinishedStem } from '../mateIntro';
 
 const NOON = new Date('2026-08-21T12:00:00');
 
@@ -119,5 +119,34 @@ describe('isBlankSlate', () => {
   it('false once any substantive message exists', () => {
     expect(isBlankSlate([{ errorMessage: 'offline' }, {}])).toBe(false);
     expect(isBlankSlate([{}])).toBe(false);
+  });
+});
+
+describe('isUnfinishedStem', () => {
+  it('blocks a chip stem that was sent without being finished', () => {
+    // Both real cases from the conversation log: the tradie tapped the chip,
+    // the send button lit, they sent the half-sentence and bounced on Mate's
+    // "for who, and what's the job?"
+    expect(isUnfinishedStem('Quote a job for ')).toBe(true);
+    expect(isUnfinishedStem('Quote a job for')).toBe(true);
+    expect(isUnfinishedStem('Invoice ')).toBe(true);
+  });
+
+  it('lets a finished sentence through, including the whole-question chip', () => {
+    expect(isUnfinishedStem('Quote a job for Nbconcreting')).toBe(false);
+    expect(isUnfinishedStem('Invoice the deck job')).toBe(false);
+    expect(isUnfinishedStem('Who still owes me money on sent invoices?')).toBe(false);
+  });
+
+  it('never claims an empty box is a stem — that gate belongs to canSend', () => {
+    expect(isUnfinishedStem('')).toBe(false);
+    expect(isUnfinishedStem('   ')).toBe(false);
+  });
+
+  it('every chip stem that ends mid-sentence is covered, so a new chip cannot regress this', () => {
+    const intro = getMateIntro([], NOON);
+    for (const chip of intro.chips) {
+      expect(isUnfinishedStem(chip.prefill)).toBe(chip.prefill.endsWith(' '));
+    }
   });
 });

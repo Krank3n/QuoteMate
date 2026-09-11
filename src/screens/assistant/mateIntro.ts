@@ -37,6 +37,17 @@ const CHIPS: MateIntroChip[] = [
   { label: 'Who owes me?', prefill: 'Who still owes me money on sent invoices?' },
 ];
 
+// A chip stem sent untouched is not a message. "Quote a job for" reaches Mate
+// as a half-sentence, Mate asks who and what, and most tradies never answer:
+// 22 conversations opened that way in the chips' first three weeks and 14
+// died on Mate's question. Only stems that end mid-sentence count — "Who
+// still owes me money on sent invoices?" is a whole question and sends fine.
+export function isUnfinishedStem(text: string): boolean {
+  const t = text.trim();
+  if (!t) return false;
+  return CHIPS.some((c) => c.prefill.endsWith(' ') && c.prefill.trim() === t);
+}
+
 export function getMateIntro(
   quotes: { status: string; updatedAt: Date; job?: { name?: string }; customerName?: string }[],
   now: Date = new Date(),
