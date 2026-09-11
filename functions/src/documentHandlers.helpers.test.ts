@@ -5,9 +5,60 @@ import { fileURLToPath } from 'url';
 import {
   buildSelfCopyBcc,
   buildQuotePdfHtmlForQuote,
+  customerResponseResetPatch,
+  describeCustomerResponse,
+  hasCustomerResponded,
   sendMethodPatch,
   stageTransitionTimestamps,
 } from './documentHandlers';
+
+describe('hasCustomerResponded — a re-sent quote is answerable again', () => {
+  it('is false with no respondedAt at all', () => {
+    expect(hasCustomerResponded({ status: 'sent' })).toBe(false);
+    expect(hasCustomerResponded(null)).toBe(false);
+    expect(hasCustomerResponded(undefined)).toBe(false);
+  });
+
+  it('is true once the customer has accepted or declined', () => {
+    expect(hasCustomerResponded({ respondedAt: 1, status: 'accepted' })).toBe(true);
+    expect(hasCustomerResponded({ respondedAt: 1, status: 'rejected' })).toBe(true);
+  });
+
+  it('is false after an edit-and-resend puts the quote back at sent (QU-178805)', () => {
+    // Declined 02:19, re-sent 02:26: respondedAt survived, status went back
+    // to 'sent'. The new link must be live.
+    expect(hasCustomerResponded({ respondedAt: 1, status: 'sent' })).toBe(false);
+    expect(hasCustomerResponded({ respondedAt: 1, status: 'draft' })).toBe(false);
+  });
+});
+
+describe('describeCustomerResponse', () => {
+  it('speaks the customer-facing word, never the raw status', () => {
+    expect(describeCustomerResponse('accepted')).toBe('accepted');
+    expect(describeCustomerResponse('rejected')).toBe('declined');
+    expect(describeCustomerResponse('declined')).toBe('declined');
+    // Never "This quote has already been sent."
+    expect(describeCustomerResponse('sent')).toBe('responded to');
+    expect(describeCustomerResponse(undefined)).toBe('responded to');
+  });
+});
+
+describe('customerResponseResetPatch', () => {
+  it('deletes all three response fields and wins over client overrides', () => {
+    const patch = customerResponseResetPatch();
+    expect(Object.keys(patch).sort()).toEqual(['clientNotes', 'respondedAt', 'respondedBy']);
+    // The app posts its whole quote (stale respondedAt included) as
+    // overrides; the reset is applied after, so it must replace them.
+    const update: Record<string, unknown> = { respondedAt: '2026-08-30T02:19:35Z', respondedBy: 'Farrell' };
+    Object.assign(update, patch);
+    expect(update.respondedAt).toBe(patch.respondedAt);
+    expect(update.respondedBy).toBe(patch.respondedBy);
+    for (const v of Object.values(patch)) {
+      expect(typeof v).toBe('object');
+      expect(v).not.toEqual(undefined);
+    }
+  });
+});
 
 describe('sendMethodPatch', () => {
   it('returns {sendMethod} only on a sent transition', () => {

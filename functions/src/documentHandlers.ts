@@ -188,6 +188,10 @@ export async function writeDocumentUpdate(
 
 function stripUndefined(value: any): any {
   if (Array.isArray(value)) return value.map(stripUndefined).filter((v) => v !== undefined);
+  // A FieldValue sentinel (delete / serverTimestamp) has no enumerable own
+  // keys, so recursing into it would flatten it to `{}` and write an empty
+  // map where a delete was meant. Pass it through untouched.
+  if (value instanceof admin.firestore.FieldValue) return value;
   if (value && typeof value === 'object' && !(value instanceof Date)) {
     const out: AnyData = {};
     for (const [k, v] of Object.entries(value)) {
@@ -338,6 +342,41 @@ export function stageTransitionTimestamps(
     default:
       return {};
   }
+}
+
+/**
+ * Has the customer answered this quote, as it stands now? A quote the
+ * customer declined (or accepted) keeps its respondedAt when the tradie edits
+ * and re-sends it, but the re-send puts the status back to 'sent' — the quote
+ * is open for a fresh answer. Keying the customer-facing guards on the
+ * timestamp alone made a re-sent link viewable but never acceptable
+ * (QU-178805, 2026-08-30: declined 02:19, re-sent 02:26, new link dead).
+ * Pure; takes the legacy quotes-row shape.
+ */
+export function hasCustomerResponded(
+  quote: { respondedAt?: unknown; status?: unknown } | null | undefined,
+): boolean {
+  if (!quote?.respondedAt) return false;
+  return quote.status !== 'sent' && quote.status !== 'draft';
+}
+
+/** Customer-facing word for a recorded response: "accepted" / "declined". */
+export function describeCustomerResponse(status: unknown): string {
+  if (status === 'accepted') return 'accepted';
+  if (status === 'rejected' || status === 'declined') return 'declined';
+  return 'responded to';
+}
+
+/**
+ * The fields a real quote send clears so the new link starts clean. Applied
+ * AFTER the client's overrides, because the app posts its whole quote object
+ * (respondedAt included) as overrides and would otherwise restore the stale
+ * answer in the same batch. Returned fresh each call — FieldValue sentinels
+ * are safe to share, but callers spread the result into merge writes.
+ */
+export function customerResponseResetPatch(): AnyData {
+  const del = admin.firestore.FieldValue.delete();
+  return { respondedAt: del, respondedBy: del, clientNotes: del };
 }
 
 /**
@@ -737,6 +776,10 @@ async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailRes
     // Server-stamped updatedAt forces the client's mergeRemoteQuotes to
     // accept the 'sent' snapshot over its own in-flight saveDraft write.
     quoteUpdate.updatedAt = admin.firestore.FieldValue.serverTimestamp();
+    // A re-send after a decline (or accept) re-opens the quote: drop the old
+    // answer so the new link is live and the admin row stops saying
+    // "responded". Must land after the overrides spread above.
+    Object.assign(quoteUpdate, customerResponseResetPatch());
   }
   batch.set(quoteRef, quoteUpdate, { merge: true });
   // Step 7 — auto-flip stage on send. For real sends only.
@@ -752,6 +795,7 @@ async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailRes
       extraUpdates: {
         aiEmailBody: emailBody,
         acceptanceTokenCreatedAt: Date.now(),
+        ...customerResponseResetPatch(),
       },
     });
   }
