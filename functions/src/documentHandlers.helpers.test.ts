@@ -8,9 +8,20 @@ import {
   customerResponseResetPatch,
   describeCustomerResponse,
   hasCustomerResponded,
+  sendAuditPatch,
   sendMethodPatch,
   stageTransitionTimestamps,
 } from './documentHandlers';
+
+describe('sendAuditPatch', () => {
+  it('stamps the send time and increments the count without touching sentAt', () => {
+    const patch = sendAuditPatch(1_700_000_000_000);
+    expect(patch.lastSentAt).toBe(1_700_000_000_000);
+    expect(patch.sendCount).toBeDefined();
+    expect(typeof patch.sendCount).toBe('object'); // FieldValue.increment sentinel
+    expect('sentAt' in patch).toBe(false);
+  });
+});
 
 describe('hasCustomerResponded — a re-sent quote is answerable again', () => {
   it('is false with no respondedAt at all', () => {
