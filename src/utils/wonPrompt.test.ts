@@ -15,8 +15,10 @@ import {
   parseWonPromptState,
   recordWonPromptShown,
   maybeShowWonPrompt,
+  isRemoteAcceptance,
   WON_PROMPT_KEY,
 } from './wonPrompt';
+import type { Document } from '../types/document';
 
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 const NOW = 1_700_000_000_000;
@@ -107,6 +109,61 @@ describe('shouldShowWonPrompt frequency', () => {
     expect(
       decide({ shownDocIds: state.shownDocIds, lastShownAt: state.lastShownAt }),
     ).toBe(true);
+  });
+});
+
+// The customer can accept without the tradie being anywhere near the app —
+// the email button, the hosted quote page, or paying the deposit through the
+// pay link. Every one of those stamps respondedAt on the server; nothing the
+// tradie does in the app ever does. The job screen offers the same "job won"
+// sheet on the first open of such a job, through the same once-per-doc gate.
+describe('isRemoteAcceptance', () => {
+  const doc = (over: Partial<Document>): Document =>
+    ({ id: 'q1', type: 'quote', stage: 'quote_accepted', total: 770, ...over }) as Document;
+
+  it('is true for an accepted quote the customer answered', () => {
+    expect(isRemoteAcceptance(doc({ respondedAt: NOW, respondedBy: 'Sam' }))).toBe(true);
+    // The Square webhook stamps respondedAt on a deposit that flips the quote too.
+    expect(isRemoteAcceptance(doc({ respondedAt: NOW, depositAmount: 200, depositPaid: 200 }))).toBe(true);
+  });
+
+  it('is false for a quote the tradie marked accepted in the app (no respondedAt)', () => {
+    expect(isRemoteAcceptance(doc({ acceptedAt: NOW }))).toBe(false);
+  });
+
+  it('is false once the money step has been taken (the doc is an invoice)', () => {
+    expect(isRemoteAcceptance(doc({ type: 'invoice', stage: 'draft', respondedAt: NOW }))).toBe(false);
+    expect(isRemoteAcceptance(doc({ type: 'invoice', stage: 'invoice_sent', respondedAt: NOW }))).toBe(false);
+  });
+
+  it('is false for a re-sent quote that kept its old answer', () => {
+    // A declined-then-edited quote goes back to quote_sent with respondedAt
+    // intact; it is open for a fresh answer, not won.
+    expect(isRemoteAcceptance(doc({ stage: 'quote_sent', respondedAt: NOW }))).toBe(false);
+    expect(isRemoteAcceptance(doc({ stage: 'quote_rejected', respondedAt: NOW }))).toBe(false);
+  });
+
+  it('is false for nothing, and for a blank or broken respondedAt', () => {
+    expect(isRemoteAcceptance(null)).toBe(false);
+    expect(isRemoteAcceptance(undefined)).toBe(false);
+    expect(isRemoteAcceptance(doc({ respondedAt: 0 }))).toBe(false);
+    expect(isRemoteAcceptance(doc({ respondedAt: NaN }))).toBe(false);
+  });
+
+  it('feeds the existing gate, so a remote win is offered once and then never again', async () => {
+    const remote = doc({ respondedAt: NOW });
+    expect(isRemoteAcceptance(remote)).toBe(true);
+    let stored: string | null = null;
+    const io = {
+      getItem: async () => stored,
+      setItem: async (_k: string, v: string) => {
+        stored = v;
+      },
+    };
+    const offer = () =>
+      maybeShowWonPrompt({ doc: remote, plan: 'free', trialDaysRemaining: null, reviewShown: false, now: NOW, ...io });
+    expect(await offer()).toBe(true); // first open of the job
+    expect(await offer()).toBe(false); // every open after that
   });
 });
 

@@ -89,6 +89,22 @@ export function docHasRealSquarePayment(doc: NextBestActionDoc | null | undefine
   return payments.some((p) => p && (p.method === 'square' || typeof p.squarePaymentId === 'string'));
 }
 
+/**
+ * A deposit the tradie asked for on this quote that hasn't been paid. One rule
+ * for every surface that names the next money step on a won job — the sticky
+ * job bar, the "job won" sheet and the dashboard's next-action card — so they
+ * never disagree about whether it's the deposit or the invoice. The amount is
+ * always the one on the quote, never a percentage this app decided on.
+ */
+export function depositOwed(
+  doc: { type?: string; depositAmount?: number; depositPaid?: number } | null | undefined,
+): boolean {
+  if (!doc || doc.type !== 'quote') return false;
+  const required = Number(doc.depositAmount ?? 0);
+  const paid = Number(doc.depositPaid ?? 0);
+  return required > 0 && paid < required;
+}
+
 export interface NextBestActionInput {
   /** From useStore.getEffectivePlan() — expiry already resolved to 'free'. */
   plan: EffectivePlan;

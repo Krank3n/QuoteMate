@@ -97,6 +97,25 @@ export function shouldShowWonPrompt(args: {
   return true;
 }
 
+/**
+ * A quote the CUSTOMER accepted — from the email button, the hosted quote
+ * page, or by paying the deposit through the pay link — as opposed to one the
+ * tradie marked accepted in the app. The server stamps respondedAt on every
+ * one of those paths and on nothing the tradie does, so it is the mark. The
+ * tradie was never in the app for that win, so the job screen offers the same
+ * "job won" sheet the first time they open the job; the once-per-doc cap in
+ * maybeShowWonPrompt keeps it to once. Only while the quote is still sitting
+ * at quote_accepted: once it's an invoice the money step has been taken, and
+ * a re-sent quote (back to quote_sent) keeps its old respondedAt but is open
+ * for a fresh answer.
+ */
+export function isRemoteAcceptance(
+  doc: Pick<Document, 'type' | 'stage' | 'respondedAt'> | null | undefined,
+): boolean {
+  if (!doc || doc.type !== 'quote' || doc.stage !== 'quote_accepted') return false;
+  return Number(doc.respondedAt) > 0;
+}
+
 /** Fold a freshly-shown win into the state to persist back. */
 export function recordWonPromptShown(
   state: WonPromptState,

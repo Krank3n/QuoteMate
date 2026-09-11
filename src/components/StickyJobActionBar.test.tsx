@@ -89,33 +89,54 @@ describe('resolveJobActions — draft quote', () => {
   });
 });
 
-// Regression (Jul 2026): an accepted quote had NO conversion affordance
-// anywhere on the job screen — Generate Invoice only appeared once the job
-// reached in_progress, forcing stage gymnastics to invoice an accepted job.
-describe('resolveJobActions — accepted quote conversion access', () => {
-  it('offers Generate Invoice alongside scheduling when no deposit is owed', () => {
-    const actions = resolveJobActions(
-      'accepted',
-      quoteDoc({ stage: 'quote_accepted' }),
-    );
-    expect(actions.map((a) => a.id)).toEqual(['schedule', 'generateInvoice']);
+// Sep 2026: ten of the eleven accounts that ever paid had an accepted quote
+// first, and 38 accounts with one never collected a cent. The bar used to
+// lead an accepted job with "Pick a Date" and park the money in the ghost
+// slot. The customer said yes — the next move is the deposit they asked for,
+// else the invoice, the same step the "job won" sheet and the dashboard's
+// next-action card name (all three read depositOwed).
+describe('resolveJobActions — accepted quote leads with the money', () => {
+  const accepted = quoteDoc({ stage: 'quote_accepted' });
+  const depositOwing = quoteDoc({ stage: 'quote_accepted', depositAmount: 100, depositPaid: 0 });
+  const depositPaid = quoteDoc({ stage: 'quote_accepted', depositAmount: 100, depositPaid: 100 });
+
+  it('leads with Create Invoice when no deposit is owed, date second', () => {
+    const actions = resolveJobActions('accepted', accepted);
+    expect(actions.map((a) => a.id)).toEqual(['generateInvoice', 'schedule']);
+    expect(actions[0]).toMatchObject({ label: 'Create Invoice', tone: 'primary' });
     expect(actions[1].tone).toBe('ghost');
   });
 
-  it('keeps money first: deposit owed still shows Take Deposit, not convert', () => {
-    const actions = resolveJobActions(
-      'accepted',
-      quoteDoc({ stage: 'quote_accepted', depositAmount: 100, depositPaid: 0 }),
-    );
-    expect(actions.map((a) => a.id)).toEqual(['schedule', 'takeDeposit']);
+  it('leads with Take Deposit while the deposit asked for is unpaid', () => {
+    const actions = resolveJobActions('accepted', depositOwing);
+    expect(actions.map((a) => a.id)).toEqual(['takeDeposit', 'schedule']);
+    expect(actions[0]).toMatchObject({ label: 'Take Deposit', tone: 'primary' });
   });
 
-  it('in_progress still leads with Generate Invoice (unchanged)', () => {
-    const actions = resolveJobActions(
-      'in_progress',
-      quoteDoc({ stage: 'quote_accepted' }),
-    );
-    expect(actions.map((a) => a.id)).toEqual(['generateInvoice', 'markComplete']);
+  it('goes back to Create Invoice once the deposit is in', () => {
+    expect(resolveJobActions('accepted', depositPaid)[0].id).toBe('generateInvoice');
+  });
+
+  it('a deposit asked for but never paid stays first on every job stage', () => {
+    expect(resolveJobActions('scheduled', depositOwing).map((a) => a.id)).toEqual(['takeDeposit', 'startJob']);
+    expect(resolveJobActions('in_progress', depositOwing).map((a) => a.id)).toEqual(['takeDeposit', 'markComplete']);
+    expect(resolveJobActions('completed', depositOwing).map((a) => a.id)).toEqual(['takeDeposit', 'generateInvoice']);
+  });
+
+  it('with no deposit owed the invoice leads and the stage step rides second', () => {
+    expect(resolveJobActions('scheduled', accepted).map((a) => a.id)).toEqual(['generateInvoice', 'startJob']);
+    expect(resolveJobActions('in_progress', accepted).map((a) => a.id)).toEqual(['generateInvoice', 'markComplete']);
+    expect(resolveJobActions('completed', accepted).map((a) => a.id)).toEqual(['generateInvoice']);
+  });
+
+  it('never leads an accepted quote with anything but the money step', () => {
+    for (const stage of ['accepted', 'scheduled', 'in_progress', 'completed'] as const) {
+      for (const doc of [accepted, depositOwing, depositPaid]) {
+        const [primary] = resolveJobActions(stage, doc);
+        expect(['takeDeposit', 'generateInvoice']).toContain(primary.id);
+        expect(primary.tone).toBe('primary');
+      }
+    }
   });
 });
 

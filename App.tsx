@@ -88,7 +88,7 @@ import { stripeService } from './src/services/stripeService';
 import { firestoreService } from './src/services/firestoreService';
 import { documentService } from './src/services/documentService';
 import { notificationService } from './src/services/notificationService';
-import { resolvableNotificationRoute } from './src/services/notificationRouting';
+import { createNotificationTapNavigator } from './src/services/notificationRouting';
 import { checkForUpdate, snoozeUpdate, AppUpdateInfo, releaseKey } from './src/services/appUpdateService';
 import { checkDeferredLink } from './src/services/supplierDiscoveryService';
 import { applyPendingReferral, storePendingReferral } from './src/services/pendingReferral';
@@ -102,6 +102,26 @@ import { SplashOverlay } from './src/components/SplashOverlay';
 registerQuotingProfileSource(() => useStore.getState().businessSettings);
 
 const navigationRef = createNavigationContainerRef<any>();
+
+// Whether RootNavigator is on screen — set from the launch gate on every
+// render, read by notification taps that can arrive before it is mounted.
+let mainAppMounted = false;
+
+// Where a tapped push goes (see notificationRouting). One instance for the
+// process so the live listener and the launch-response lookup de-duplicate
+// against each other, and a held launch tap survives until the app is up.
+const notificationTaps = createNotificationTapNavigator({
+  isMainAppMounted: () => mainAppMounted && navigationRef.isReady(),
+  // The route name is resolved at runtime from the push payload, so it can't
+  // be checked against RootStackParamList here.
+  navigate: (screen, params) =>
+    (navigationRef.navigate as (s: string, p?: Record<string, unknown>) => void)(screen, params),
+  onError: (err, route) =>
+    reportIssue('notification navigation failed', {
+      screen: route.screen,
+      message: (err as Error)?.message,
+    }),
+});
 
 // iOS-only keyboard accessory (prev/next/Done). Kept off the Mate tab: the
 // chat composer sits flush above the keyboard there, and the toolbar would
@@ -592,41 +612,31 @@ function App() {
             undefined,
             (response) => {
               appOpenTracker.notePushTap(pushTypeOf(response), pushTapKey(response));
-              // Take the tradie to whatever the notification was about, but only
-              // once RootNavigator is mounted (post-onboarding) — otherwise the
-              // route resolves to null and we leave them be. Fresh-read the gate.
-              const mainAppMounted = useStore.getState().isOnboarded === true;
-              const route = resolvableNotificationRoute(
+              // Take the tradie to whatever the notification was about. A tap
+              // that lands before RootNavigator is mounted is held and flushed
+              // once it is (see the showMainApp effect).
+              notificationTaps.handle(
                 response?.notification?.request?.content?.data,
-                mainAppMounted
+                pushTapKey(response),
               );
-              if (!route || !navigationRef.isReady()) return;
-              try {
-                // The route name is resolved at runtime from the push payload,
-                // so it can't be checked against RootStackParamList here.
-                const navigate = navigationRef.navigate as (
-                  screen: string,
-                  params?: Record<string, unknown>,
-                ) => void;
-                navigate(route.screen, route.params);
-              } catch (err) {
-                reportIssue('notification navigation failed', {
-                  screen: route.screen,
-                  message: (err as Error)?.message,
-                });
-              }
               void notificationService.clearBadge();
             }
           );
 
           // A tap that launched the process may or may not reach the listener
           // above; ask for it outright. Same key as the listener path, so it
-          // is attributed once either way. Attribution only — navigation for
-          // launch taps is unchanged.
+          // is attributed once and navigates once either way. "Quote accepted"
+          // is opened cold more often than not, and until this went through
+          // the same door the tradie landed on the dashboard instead of the job.
           notificationService
             .getLaunchNotificationResponse()
             .then((response) => {
-              if (response) appOpenTracker.notePushTap(pushTypeOf(response), pushTapKey(response));
+              if (!response) return;
+              appOpenTracker.notePushTap(pushTypeOf(response), pushTapKey(response));
+              notificationTaps.handle(
+                (response as any)?.notification?.request?.content?.data,
+                pushTapKey(response),
+              );
             })
             .catch(() => {});
         }
@@ -974,6 +984,15 @@ function App() {
     isOnboarded,
     hasLocalBusiness,
   });
+  mainAppMounted = showMainApp;
+
+  // A notification tap held while the app was still starting (a launch tap,
+  // or one that landed mid-onboarding) goes through once RootNavigator is up.
+  // Children's effects run before this one, so the navigator has registered
+  // its screens by the time it fires.
+  useEffect(() => {
+    if (showMainApp) notificationTaps.flush();
+  }, [showMainApp]);
 
   return (
     <GestureHandlerRootView style={appStyles.flex}>

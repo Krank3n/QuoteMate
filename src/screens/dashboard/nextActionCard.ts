@@ -22,6 +22,7 @@
 
 import type { DocumentStage } from '../../types/document';
 import {
+  depositOwed,
   docHasRealSquarePayment,
   type NextBestAction,
   type NextBestActionDoc,
@@ -32,6 +33,10 @@ import {
 export interface NextActionDoc extends NextBestActionDoc {
   id: string;
   jobId?: string;
+  type?: string;
+  /** The deposit asked for on a quote and what's been paid of it (depositOwed). */
+  depositAmount?: number;
+  depositPaid?: number;
   /** Epoch ms of the last write — "most recent" is measured on this. */
   updatedAt?: number;
   /** Square link fields, read only as evidence of a connection (below). */
@@ -114,12 +119,16 @@ export function pickSentQuoteDoc(docs: NextActionDoc[]): NextActionDoc | null {
 
 /**
  * What the money step is, from where the job stands: an accepted quote still
- * needs the deposit or the invoice, an invoice already out needs the payment.
+ * needs the deposit the tradie asked for, or else the invoice; an invoice
+ * already out needs the payment. Names the one step the job screen's primary
+ * button will offer on landing (resolveJobActions uses the same depositOwed),
+ * so the card and the button never disagree.
  */
-export function owedSubtitle(stage: DocumentStage): string {
-  return stage === 'quote_accepted'
-    ? 'The customer said yes — take the deposit or send the invoice.'
-    : 'The invoice is out — take the payment or chase it up.';
+export function owedSubtitle(doc: Pick<NextActionDoc, 'stage' | 'type' | 'depositAmount' | 'depositPaid'>): string {
+  if (doc.stage !== 'quote_accepted') return 'The invoice is out — take the payment or chase it up.';
+  return depositOwed(doc)
+    ? "The customer said yes — take the deposit and you're underway."
+    : 'The customer said yes — create the invoice and get paid.';
 }
 
 /** "in 2 days" / "today" — the same counting the trial banner does. */
@@ -200,7 +209,7 @@ export function buildCard(
       return {
         key: action.key,
         title: 'Money owing on a job',
-        subtitle: owedSubtitle(doc.stage),
+        subtitle: owedSubtitle(doc),
         icon: 'cash-fast',
         tone: 'money',
         route: { screen: 'ViewJob', params: { jobId: doc.jobId } },
