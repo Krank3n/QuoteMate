@@ -59,7 +59,7 @@ import {
 import { describeThrown } from '../services/assistant/describeThrown';
 import { activateKeepAwakeAsync } from 'expo-keep-awake';
 import { shouldAutoStartMic, resolveAutoStartMic } from './assistant/shouldAutoStartMic';
-import { getMateIntro, isBlankSlate } from './assistant/mateIntro';
+import { getMateIntro, isBlankSlate, isUnfinishedStem } from './assistant/mateIntro';
 import { buildPipelineDonePrompt } from './assistant/pipelineDoneCopy';
 import { buildSendOfferNote, sendOfferFactsForQuote, shouldOfferSendTurn } from './assistant/sendOfferNote';
 import { reviewBlockForChat } from '../utils/reviewChatFormat';
@@ -2351,6 +2351,9 @@ export function AssistantScreen() {
       // sends what the send button correctly refuses and the tradie gets the
       // server's own error back.
       if ((!text && !pending.some((a) => a.status !== 'failed')) || sending) return;
+      // An untouched chip stem ("Quote a job for") is not a message either —
+      // the Return key must refuse it the same way the send button does.
+      if (isUnfinishedStem(text) && !pending.some((a) => a.status !== 'failed')) return;
       // Resolve the active conversation against the current store, not the
       // closure — `currentConversationId` can point at a missing conversation
       // (e.g. right after newChat replaced the array). Always validate first.
@@ -3512,8 +3515,13 @@ export function AssistantScreen() {
   // A staged photo is enough to send on its own — a caption is optional. A
   // photo whose upload FAILED is not: with no text it would build an empty
   // request, and the tradie would be shown the server's own 400 string.
+  // An untouched chip stem is not text to send either: the chip fills the
+  // box and the send button lit up, so tradies tapped it and shipped
+  // "Quote a job for" to Mate. The button stays grey until they finish the
+  // sentence.
   const canSend =
-    !!input.trim() || pendingAttachments.some((a) => a.status !== 'failed');
+    (!!input.trim() && !isUnfinishedStem(input)) ||
+    pendingAttachments.some((a) => a.status !== 'failed');
   const voiceActive = voiceState !== 'idle';
   const voiceAccent = voiceState === 'thinking' ? themeColors.accent : themeColors.error;
   const voiceLabel =
