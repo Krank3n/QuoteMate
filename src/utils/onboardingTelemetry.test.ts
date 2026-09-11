@@ -7,27 +7,15 @@ import {
   type CompletionInput,
 } from './onboardingTelemetry';
 
-// Mirrors the two real shapes the screen builds: the standard flow and the
-// plumber flow, which inserts a Reece step and shifts everything after it.
-const STANDARD = [
-  { key: 'company' },
-  { key: 'trade' },
-  { key: 'contact' },
-  { key: 'branding' },
-  { key: 'rates' },
-  { key: 'suppliers' },
-  { key: 'payments' },
-];
-const PLUMBER = [
-  { key: 'company' },
-  { key: 'trade' },
-  { key: 'contact' },
-  { key: 'branding' },
-  { key: 'rates' },
-  { key: 'reece' },
-  { key: 'suppliers' },
-  { key: 'payments' },
-];
+import { flowSteps } from './onboardingStepNav';
+
+// The real shapes the screen builds. SHORT is what every new signup gets from
+// Sep 2026; STANDARD and PLUMBER only exist behind the config/onboarding
+// longFlow kill switch, and the funnel keeps reading them for as long as
+// there are unfinished drafts and flipped accounts out there.
+const SHORT = flowSteps(true);
+const STANDARD = flowSteps(false);
+const PLUMBER = flowSteps(false, { plumbing: true });
 
 describe('stepPropsFor', () => {
   it('describes the step at a 1-based position', () => {
@@ -64,6 +52,20 @@ describe('stepPropsFor', () => {
     expect(stepPropsFor(STANDARD, 8)).toBeNull();
     expect(stepPropsFor(STANDARD, -1)).toBeNull();
     expect(stepPropsFor([], 1)).toBeNull();
+  });
+});
+
+describe('stepPropsFor — the one-step flow', () => {
+  it('keeps the company key, so the funnel still lines up with the old step 1', () => {
+    expect(stepPropsFor(SHORT, 1)).toEqual({
+      step_key: 'company',
+      step_index: 1,
+      steps_total: 1,
+    });
+  });
+
+  it('has no second step to describe', () => {
+    expect(stepPropsFor(SHORT, 2)).toBeNull();
   });
 });
 
@@ -174,5 +176,43 @@ describe('completionProps', () => {
 
   it('emits an empty skipped_keys string when nothing was skipped', () => {
     expect(completionProps(baseCompletion).skipped_keys).toBe('');
+  });
+});
+
+describe('completionProps — the one-step flow', () => {
+  // What a finish looks like from Sep 2026: one step, nothing to skip, and
+  // the email that came off the signed-in account.
+  const shortFlowFinish = completionProps({
+    ...baseCompletion,
+    stepsTotal: SHORT.length,
+    skippedStepKeys: [],
+    laborRate: 85,
+    markup: 30,
+  });
+
+  it('reports one step with nothing skipped', () => {
+    expect(shortFlowFinish.steps_total).toBe(1);
+    expect(shortFlowFinish.steps_skipped).toBe(0);
+    // skipped_keys stays a valid, groupable string — it is simply empty now.
+    expect(shortFlowFinish.skipped_keys).toBe('');
+  });
+
+  it('reports the untouched defaults honestly rather than as a customisation', () => {
+    // The rates step is gone, so nobody sets these during onboarding; the
+    // funnel must not read the shipped 85/30 as a decision anyone made.
+    expect(shortFlowFinish.rates_customised).toBe(false);
+  });
+
+  it('still counts whatever optional fields the defaults filled in', () => {
+    // The signed-in email is written as before, so a completion can carry a
+    // contact field without the contact step ever existing.
+    const withEmail = completionProps({
+      ...baseCompletion,
+      stepsTotal: 1,
+      hasPhone: false,
+      hasAbn: false,
+    });
+    expect(withEmail.optional_fields_filled).toBe(0);
+    expect(withEmail.has_abn).toBe(false);
   });
 });

@@ -28,7 +28,17 @@ vi.mock('react-native', () => ({
     select: (o: any) => o[rn.platformOS] ?? o.default,
   },
 }));
-vi.mock('@react-navigation/native', () => ({ useNavigation: () => ({ navigate: vi.fn() }) }));
+const nav = vi.hoisted(() => ({ navigate: vi.fn() }));
+vi.mock('@react-navigation/native', () => ({ useNavigation: () => nav }));
+
+// The device's memory of a business-details gap already sent past.
+const storage = vi.hoisted(() => ({ items: new Map<string, string>() }));
+vi.mock('@react-native-async-storage/async-storage', () => ({
+  default: {
+    getItem: vi.fn(async (k: string) => storage.items.get(k) ?? null),
+    setItem: vi.fn(async (k: string, v: string) => { storage.items.set(k, v); }),
+  },
+}));
 
 const sms = vi.hoisted(() => ({
   openSmsComposer: vi.fn(async () => 'sent' as const),
@@ -173,12 +183,23 @@ function doc(overrides: Partial<Document> = {}): Document {
   } as Document;
 }
 
+// A business with everything a document legally needs on it. Complete on
+// purpose: anything missing here is interrupted before a channel is chosen
+// (see "business details before a send" below), which would otherwise stand
+// in front of every other test in this file.
+const COMPLETE_BUSINESS = {
+  businessName: 'Hansen Decks',
+  abn: '51 824 753 556',
+  phone: '0400 000 000',
+  email: 'jo@hansendecks.com.au',
+};
+
 function renderDialog(overrides: Partial<React.ComponentProps<typeof SendDocumentDialog>> = {}) {
   const props = {
     visible: true,
     onDismiss: vi.fn(),
     doc: doc(),
-    businessSettings: { businessName: 'Hansen Decks' } as any,
+    businessSettings: COMPLETE_BUSINESS as any,
     ...overrides,
   };
   return { ...render(<SendDocumentDialog {...props} />), props };
@@ -191,6 +212,7 @@ function eventProps(name: string) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  storage.items.clear();
   resetWarmedEmailDrafts();
   // Reset here, not at the end of the test that changes it: a failure there
   // used to leak an expired trial into every test after it.
@@ -967,5 +989,105 @@ describe('the free-tier gate settles first too', () => {
 
     await waitFor(() => expect(guard.ensureCanDeliver).toHaveBeenCalled());
     expect(guard.ensureCanDeliver.mock.calls[0][0].doc.total).toBe(770);
+  });
+});
+
+describe('business details before a send', () => {
+  // Onboarding stopped asking for an ABN and contact details up front in Sep
+  // 2026, so this is where they get asked for: once, before a channel is
+  // chosen, and never blocking the send.
+  const noAbn = { ...COMPLETE_BUSINESS, abn: undefined };
+
+  it('asks for the ABN before an invoice goes out, and shows no channel yet', async () => {
+    renderDialog({ doc: doc({ type: 'invoice' }), businessSettings: noAbn as any });
+
+    await waitFor(() => expect(screen.getByTestId('alert')).toBeTruthy());
+    expect(screen.getByText('Add your ABN?')).toBeTruthy();
+    expect(screen.queryByTestId('preview')).toBeNull();
+    expect(screen.queryByTestId('sheet')).toBeNull();
+  });
+
+  it('leaves a quote alone over a missing ABN', async () => {
+    renderDialog({ businessSettings: noAbn as any });
+
+    await waitFor(() => expect(screen.getByTestId('preview')).toBeTruthy());
+    expect(screen.queryByTestId('alert')).toBeNull();
+  });
+
+  it('asks when the business has no phone and no email at all', async () => {
+    renderDialog({ businessSettings: { businessName: 'Hansen Decks' } as any });
+
+    await waitFor(() => expect(screen.getByText('Add your contact details?')).toBeTruthy());
+  });
+
+  it('never stands in the way: Send anyway carries on into the send', async () => {
+    renderDialog({ doc: doc({ type: 'invoice' }), businessSettings: noAbn as any });
+    await waitFor(() => expect(screen.getByTestId('alert')).toBeTruthy());
+
+    await act(async () => { fireEvent.click(screen.getByText('Send anyway')); });
+
+    await waitFor(() => expect(screen.getByTestId('preview')).toBeTruthy());
+  });
+
+  it('does not ask a second time about a gap already sent past', async () => {
+    const { unmount } = renderDialog({
+      doc: doc({ type: 'invoice' }),
+      businessSettings: noAbn as any,
+    });
+    await waitFor(() => expect(screen.getByTestId('alert')).toBeTruthy());
+    await act(async () => { fireEvent.click(screen.getByText('Send anyway')); });
+    await waitFor(() => expect(screen.getByTestId('preview')).toBeTruthy());
+    unmount();
+
+    renderDialog({ doc: doc({ type: 'invoice' }), businessSettings: noAbn as any });
+
+    await waitFor(() => expect(screen.getByTestId('preview')).toBeTruthy());
+    expect(screen.queryByTestId('alert')).toBeNull();
+  });
+
+  it('speaks up again when the gap grows', async () => {
+    storage.items.set('@quotemate:send_details_dismissed', 'abn');
+
+    renderDialog({
+      doc: doc({ type: 'invoice' }),
+      businessSettings: { businessName: 'Hansen Decks' } as any,
+    });
+
+    await waitFor(() => expect(screen.getByText('Add your business details?')).toBeTruthy());
+  });
+
+  it('sends the tradie to their business profile on Add details, and stops there', async () => {
+    const { props } = renderDialog({
+      doc: doc({ type: 'invoice' }),
+      businessSettings: noAbn as any,
+    });
+    await waitFor(() => expect(screen.getByTestId('alert')).toBeTruthy());
+
+    await act(async () => { fireEvent.click(screen.getByText('Add details')); });
+
+    expect(nav.navigate).toHaveBeenCalledWith('BusinessProfile');
+    expect(props.onDismiss).toHaveBeenCalled();
+    expect(screen.queryByTestId('preview')).toBeNull();
+  });
+
+  it('reports the gap and how it ended', async () => {
+    renderDialog({ doc: doc({ type: 'invoice' }), businessSettings: noAbn as any });
+    await waitFor(() => expect(screen.getByTestId('alert')).toBeTruthy());
+    expect(eventProps('send_details_prompted')).toMatchObject({
+      doc_type: 'invoice',
+      missing: 'abn',
+    });
+
+    await act(async () => { fireEvent.click(screen.getByText('Send anyway')); });
+
+    expect(eventProps('send_details_resolved')).toMatchObject({ action: 'send_anyway' });
+  });
+
+  it('says nothing at all when the business is complete', async () => {
+    renderDialog({ doc: doc({ type: 'invoice' }) });
+
+    await waitFor(() => expect(screen.getByTestId('preview')).toBeTruthy());
+    expect(screen.queryByTestId('alert')).toBeNull();
+    expect(tracked.mock.calls.some(([e]) => e === 'send_details_prompted')).toBe(false);
   });
 });

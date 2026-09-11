@@ -83,6 +83,13 @@ export type AnalyticsEvent =
   // doc_type + has_customer_email + plan; has_customer_email is what decides
   // between the sheet and going straight to the email preview.
   | 'send_sheet_opened'
+  // The document was about to go out without something it needs on it — an
+  // ABN on an invoice, or any way at all for the customer to reply. Onboarding
+  // stopped asking for these up front in Sep 2026, so this is where they get
+  // asked for. `missing` carries the gap (e.g. "abn", "abn,contact").
+  | 'send_details_prompted'
+  // How that prompt ended: `action` is send_anyway or add_details.
+  | 'send_details_resolved'
   // The send flow re-costed the quote and landed on a different total than
   // the screen was showing, so the tradie was asked to confirm before it
   // went out. Every one of these is a quote that would previously have gone

@@ -44,7 +44,10 @@ export function OnboardingProgress({
 }: OnboardingProgressProps) {
   const styles = useStyles();
   const themeColors = useThemeColors();
-  const progressPercentage = ((currentStep - 1) / (totalSteps - 1)) * 100;
+  // A single-step flow has no progress to draw, and dividing by (1 - 1)
+  // would put a NaN width on the fill.
+  const progressPercentage =
+    totalSteps > 1 ? ((currentStep - 1) / (totalSteps - 1)) * 100 : 100;
 
   return (
     <View style={styles.container}>

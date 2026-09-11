@@ -1115,8 +1115,11 @@ export function DashboardScreen() {
           <Text style={styles.emptyText}>
             Knock off early or get cracking
           </Text>
+          {/* Names the button that's actually on this screen. It used to say
+              "New Job", which hasn't existed since the two doors landed —
+              and this is the first thing a tradie sees after onboarding. */}
           <Text style={styles.emptySubtext}>
-            Hit "New Job" and she'll be right
+            Tap "Quote it for me" and she'll be right
           </Text>
         </View>
       )}
