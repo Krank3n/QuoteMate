@@ -30,6 +30,8 @@ import {
   RevenueEntry,
 } from './subscription.helpers';
 import { listAllAuthUsers as drainAuthUsers } from './authUsers.helpers';
+import { staleSubscriptionAction, type StoreStatus } from './receiptValidation.helpers';
+import { fetchGooglePlaySubscription, fetchAppleSubscriptionStatus } from './iapStoreStatus';
 import {
   computeFunnelStats,
   isActivatingDoc,
@@ -3583,12 +3585,15 @@ export const adminBackfillActivity = functions
 // RTDN, so expired IAP subscriptions stay marked active forever. The Stripe
 // webhook already handles web-platform cancellations, so we only sweep iOS/Android.
 
-async function expireStaleIapSubscriptions(): Promise<{ expired: number; checked: number }> {
+async function expireStaleIapSubscriptions(): Promise<{
+  expired: number; renewed: number; kept: number; checked: number;
+}> {
   const firestore = db();
   const subsMap = await fetchAllSubscriptions();
   const now = Date.now();
-  const gracePeriodMs = 3 * 24 * 60 * 60 * 1000; // 3-day grace to survive brief IAP renewal lag
   let expired = 0;
+  let renewed = 0;
+  let kept = 0;
   let checked = 0;
   for (const [uid, raw] of subsMap) {
     checked++;
@@ -3596,18 +3601,63 @@ async function expireStaleIapSubscriptions(): Promise<{ expired: number; checked
     const platform = raw?.platform;
     if (platform !== 'ios' && platform !== 'android') continue; // Stripe handled elsewhere
     const end = ts(raw?.currentPeriodEnd);
-    if (!end || end + gracePeriodMs > now) continue;
-    await firestore.doc(`users/${uid}/profile/subscription`).set(
+    // Cheap pre-check so we only ask the stores about subs that look stale.
+    if (staleSubscriptionAction({ periodEndMs: end, nowMs: now, store: null }).action === 'keep') continue;
+
+    // Sep 2026: a Play sub renewed on the 3rd, the phone wasn't opened, and
+    // this sweep cut a paying subscriber off on the 6th. Ask the store first.
+    const store = await storeStatusFor(uid, platform, raw);
+    const decision = staleSubscriptionAction({ periodEndMs: end, nowMs: now, store });
+    const ref = firestore.doc(`users/${uid}/profile/subscription`);
+
+    if (decision.action === 'renew') {
+      await ref.set(
+        {
+          currentPeriodEnd: decision.expiryDate,
+          storeCheckedAt: admin.firestore.FieldValue.serverTimestamp(),
+          storeCheckDetail: store?.detail || null,
+        },
+        { merge: true }
+      );
+      renewed++;
+      continue;
+    }
+    if (decision.action === 'keep') {
+      console.warn('expireStaleSubscriptions: keeping stale sub pending store answer', {
+        uid, platform, reason: decision.reason, store: store?.detail,
+      });
+      kept++;
+      continue;
+    }
+    await ref.set(
       {
         isPro: false,
         expiredAt: admin.firestore.FieldValue.serverTimestamp(),
         expiredReason: `iap-period-ended-${platform}`,
+        expiredCheck: decision.reason,
+        storeCheckedAt: admin.firestore.FieldValue.serverTimestamp(),
+        storeCheckDetail: store?.detail || null,
       },
       { merge: true }
     );
     expired++;
   }
-  return { expired, checked };
+  return { expired, renewed, kept, checked };
+}
+
+/** Store lookup for one doc; null when the doc holds nothing we can ask about. */
+async function storeStatusFor(uid: string, platform: 'ios' | 'android', raw: any): Promise<StoreStatus | null> {
+  if (platform === 'android') {
+    const purchaseToken = typeof raw?.purchaseToken === 'string' ? raw.purchaseToken : '';
+    const productId = typeof raw?.productId === 'string' ? raw.productId : '';
+    if (!purchaseToken || !productId) return null;
+    return fetchGooglePlaySubscription({ productId, purchaseToken, userId: uid });
+  }
+  const transactionId =
+    (typeof raw?.originalTransactionId === 'string' && raw.originalTransactionId) ||
+    (typeof raw?.transactionId === 'string' && raw.transactionId) || '';
+  if (!transactionId) return null;
+  return fetchAppleSubscriptionStatus({ transactionId, environment: raw?.environment, userId: uid });
 }
 
 export const expireStaleSubscriptions = functions.pubsub
