@@ -4,6 +4,7 @@ import {
   isFirstGrantOfTransaction,
   isNewSubscriber,
   staleSubscriptionAction,
+  lapsedCompAction,
   IAP_GRACE_MS,
   IAP_UNVERIFIED_BACKSTOP_MS,
 } from './receiptValidation.helpers';
@@ -200,5 +201,66 @@ describe('staleSubscriptionAction', () => {
   it('nothing to ask the store with → expires as the old sweep did', () => {
     expect(staleSubscriptionAction({ periodEndMs: RENEWED_ON_3RD, nowMs: NOW, store: null }))
       .toEqual({ action: 'expire', reason: 'unchecked' });
+  });
+});
+
+/**
+ * Sep 2026 money reconciliation: the sweep only ever looked at ios/android
+ * docs, so an admin comp or an incident goodwill grant whose end date had
+ * passed stayed Pro forever. Comps have nobody to ask, so the doc's own end
+ * date decides — after the same grace the store path gets.
+ */
+describe('lapsedCompAction', () => {
+  const NOW = Date.parse('2026-09-12T14:00:00Z');
+  const DAY = 24 * 60 * 60 * 1000;
+  const LAPSED = new Date(NOW - IAP_GRACE_MS - DAY);
+  const CURRENT = new Date(NOW + 20 * DAY);
+
+  it('a lapsed admin grant expires as admin_grant_lapsed', () => {
+    expect(lapsedCompAction({ isPro: true, platform: 'admin_grant', currentPeriodEnd: LAPSED }, NOW))
+      .toEqual({ action: 'expire', reason: 'admin_grant_lapsed' });
+    // Firestore's serialised timestamp shape is read, not treated as "no end date".
+    expect(lapsedCompAction({ isPro: true, platform: 'admin_grant', currentPeriodEnd: { _seconds: Math.floor(LAPSED.getTime() / 1000) } }, NOW).action)
+      .toBe('expire');
+  });
+
+  it('a current admin grant is kept, and so is one still inside the grace window', () => {
+    expect(lapsedCompAction({ isPro: true, platform: 'admin_grant', currentPeriodEnd: CURRENT }, NOW))
+      .toEqual({ action: 'keep' });
+    expect(lapsedCompAction({ isPro: true, platform: 'admin_grant', currentPeriodEnd: new Date(NOW - IAP_GRACE_MS + 60_000) }, NOW))
+      .toEqual({ action: 'keep' });
+  });
+
+  it('a lapsed incident goodwill grant with no store behind it expires as goodwill_lapsed', () => {
+    const goodwill = {
+      isPro: true,
+      platform: 'unknown',
+      plan: 'goodwill',
+      restoredFromIncident: 'incident-2026-07',
+      incidentProUntil: LAPSED.toISOString(),
+      currentPeriodEnd: LAPSED,
+    };
+    expect(lapsedCompAction(goodwill, NOW)).toEqual({ action: 'expire', reason: 'goodwill_lapsed' });
+    expect(lapsedCompAction({ ...goodwill, incidentProUntil: CURRENT.toISOString() }, NOW)).toEqual({ action: 'keep' });
+    // A restored payer who has since re-subscribed through Stripe is that
+    // webhook's business — the stale goodwill stamp must not cut them off.
+    expect(lapsedCompAction({ ...goodwill, platform: 'web', subscriptionId: 'sub_123' }, NOW)).toEqual({ action: 'keep' });
+  });
+
+  it('never touches a doc with no end date at all — bare isPro is the owner/demo account', () => {
+    expect(lapsedCompAction({ isPro: true }, NOW)).toEqual({ action: 'keep' });
+    expect(lapsedCompAction({ isPro: true, platform: 'admin_grant' }, NOW)).toEqual({ action: 'keep' });
+    expect(lapsedCompAction({ isPro: true, platform: 'admin_grant', currentPeriodEnd: 'not a date' }, NOW)).toEqual({ action: 'keep' });
+    expect(lapsedCompAction({ isPro: true, restoredFromIncident: 'incident-2026-07', platform: 'unknown' }, NOW)).toEqual({ action: 'keep' });
+    expect(lapsedCompAction({ isPro: false, platform: 'admin_grant', currentPeriodEnd: LAPSED }, NOW)).toEqual({ action: 'keep' });
+  });
+
+  it('leaves ios/android docs to the store path, incident restores included', () => {
+    for (const platform of ['ios', 'android']) {
+      expect(lapsedCompAction({ isPro: true, platform, currentPeriodEnd: LAPSED }, NOW)).toEqual({ action: 'keep' });
+      expect(lapsedCompAction({
+        isPro: true, platform, restoredFromIncident: 'incident-2026-07', incidentProUntil: LAPSED.toISOString(),
+      }, NOW)).toEqual({ action: 'keep' });
+    }
   });
 });

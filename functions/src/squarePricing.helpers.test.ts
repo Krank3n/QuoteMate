@@ -11,6 +11,7 @@ import { describe, it, expect } from 'vitest';
 import {
   computeSquarePricing,
   mintedBeforeSurchargeRetirement,
+  squareFeeFieldsFromPayment,
   SURCHARGE_RETIRED_AT_MS,
 } from './squarePricing.helpers';
 
@@ -68,5 +69,80 @@ describe('computeSquarePricing', () => {
     expect(chargedDollars).toBe(33.33);
     expect(Number.isInteger(appFeeCents)).toBe(true);
     expect(computeSquarePricing(0, 'online', 'free').appFeeCents).toBe(0);
+  });
+
+  it('a free tradie pays 1.7% in person and a Pro or trial tradie 1.5% — the schedule the phone must match', () => {
+    expect(computeSquarePricing(1200, 'in_person', 'free').appFeeCents).toBe(2040);
+    expect(computeSquarePricing(1200, 'in_person', 'pro').appFeeCents).toBe(1800);
+    expect(computeSquarePricing(1200, 'in_person', 'trial').appFeeCents).toBe(1800);
+  });
+});
+
+/**
+ * Sep 2026 money reconciliation: every squarePayments row carried only a
+ * RECOMPUTED appFeeCents, so nobody could tell from the ledger whether Square
+ * had actually deducted the platform fee. The webhook now stores Square's own
+ * figures beside ours.
+ */
+describe('squareFeeFieldsFromPayment', () => {
+  it('reads app_fee_money and a single processing fee, and flags no mismatch when they agree', () => {
+    const payment = {
+      amount_money: { amount: 120000, currency: 'AUD' },
+      app_fee_money: { amount: 1800, currency: 'AUD' },
+      processing_fee: [
+        { amount_money: { amount: 2028, currency: 'AUD' }, type: 'INITIAL', effective_at: '2026-09-12T01:00:00Z' },
+      ],
+    };
+    expect(squareFeeFieldsFromPayment(payment, 1800)).toEqual({
+      squareAppFeeCents: 1800,
+      squareProcessingFeeCents: 2028,
+      feeMismatch: false,
+    });
+  });
+
+  it('sums several processing-fee entries (Square adds an ADJUSTMENT row on a partial refund)', () => {
+    const payment = {
+      app_fee_money: { amount: 1800, currency: 'AUD' },
+      processing_fee: [
+        { amount_money: { amount: 2028, currency: 'AUD' }, type: 'INITIAL' },
+        { amount_money: { amount: -500, currency: 'AUD' }, type: 'ADJUSTMENT' },
+      ],
+    };
+    expect(squareFeeFieldsFromPayment(payment, 1800).squareProcessingFeeCents).toBe(1528);
+  });
+
+  it('absent fee fields store null on both sides and no verdict on the mismatch', () => {
+    expect(squareFeeFieldsFromPayment({ amount_money: { amount: 120000 } }, 1800)).toEqual({
+      squareAppFeeCents: null,
+      squareProcessingFeeCents: null,
+      feeMismatch: null,
+    });
+    expect(squareFeeFieldsFromPayment(undefined, 1800).squareAppFeeCents).toBeNull();
+  });
+
+  it('malformed fee fields never throw — a webhook must not fail over an unreadable fee', () => {
+    const payment = {
+      app_fee_money: { amount: 'eighteen dollars' },
+      processing_fee: 'not-an-array',
+    };
+    expect(squareFeeFieldsFromPayment(payment, 1800)).toEqual({
+      squareAppFeeCents: null,
+      squareProcessingFeeCents: null,
+      feeMismatch: null,
+    });
+    // A broken entry inside an otherwise good list is skipped, not fatal.
+    const mixed = { processing_fee: [{ amount_money: { amount: 2028 } }, null, { amount_money: {} }, { amount_money: { amount: 1.5 } }] };
+    expect(squareFeeFieldsFromPayment(mixed, 1800).squareProcessingFeeCents).toBe(2028);
+    // Square's JSON can carry an integer as a string; that still counts.
+    expect(squareFeeFieldsFromPayment({ app_fee_money: { amount: '1800' } }, 1800).squareAppFeeCents).toBe(1800);
+  });
+
+  it('flags feeMismatch when Square took a different platform fee than the ledger recomputed', () => {
+    // The Sep 2026 case: the phone sent the Pro rate (1.5%) for a free tradie
+    // whose ledger row recomputes at 1.7%.
+    const payment = { app_fee_money: { amount: 1800, currency: 'AUD' } };
+    expect(squareFeeFieldsFromPayment(payment, 2040)).toMatchObject({ squareAppFeeCents: 1800, feeMismatch: true });
+    // No recomputed figure to compare against → no verdict.
+    expect(squareFeeFieldsFromPayment(payment, null).feeMismatch).toBeNull();
   });
 });

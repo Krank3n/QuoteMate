@@ -116,6 +116,8 @@ const store = vi.hoisted(() => ({
   businessSettings: null as any,
   getDocumentById: vi.fn((id: string) => ({ id, type: 'quote', total: 1200 })),
   saveDocument: vi.fn(async (_doc: any) => {}),
+  // The in-person platform fee follows the tradie's plan (free pays more).
+  getEffectivePlan: vi.fn((): 'trial' | 'free' | 'pro' => 'pro'),
 }));
 vi.mock('../store/useStore', () => ({
   useStore: () => store,
@@ -172,6 +174,7 @@ beforeEach(() => {
     total: 1200,
   }));
   store.saveDocument.mockImplementation(async () => {});
+  store.getEffectivePlan.mockImplementation(() => 'pro');
 });
 
 /**
@@ -272,6 +275,37 @@ describe('TakePaymentSheet Square rows gate themselves', () => {
         target: { kind: 'invoice', invoiceId: 'inv-42' },
       }),
     );
+  });
+});
+
+/**
+ * Sep 2026 money reconciliation: Tap to Pay always told Square to take the
+ * Pro in-person rate (1.5%) whatever the tradie's plan, while the server's
+ * ledger recomputed the fee by plan — so a free tradie's row said 1.7% and
+ * Square had taken 1.5%. The sheet now reads the same shared schedule.
+ */
+describe('TakePaymentSheet Tap to Pay platform fee follows the plan', () => {
+  async function chargeAndReadFee(plan: 'trial' | 'free' | 'pro'): Promise<number> {
+    store.getEffectivePlan.mockImplementation(() => plan);
+    tapToPay.state = { enabled: true };
+    const { getByText } = renderSheet({ ensureSquareConnected: vi.fn(async () => true) });
+    fireEvent.click(getByText('Tap to Pay / Card Entry'));
+    await waitFor(() => expect(squarePayments.takeInAppPayment).toHaveBeenCalled());
+    const call = (squarePayments.takeInAppPayment as any).mock.calls[0][0];
+    expect(call.amountCents).toBe(120000);
+    return call.appFeeCents;
+  }
+
+  it('a free tradie sends the 1.7% free rate — $20.40 on a $1,200 invoice', async () => {
+    expect(await chargeAndReadFee('free')).toBe(2040);
+  });
+
+  it('a Pro tradie sends the 1.5% Pro rate — $18.00 on a $1,200 invoice', async () => {
+    expect(await chargeAndReadFee('pro')).toBe(1800);
+  });
+
+  it('a tradie still in trial gets the Pro rate, as the ledger assumes', async () => {
+    expect(await chargeAndReadFee('trial')).toBe(1800);
   });
 });
 

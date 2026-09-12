@@ -265,7 +265,11 @@ import {
   materialAnchorFactor,
   FloorplanAnalysis,
 } from './floorplanScale';
-import { computeSquarePricing, mintedBeforeSurchargeRetirement } from './squarePricing.helpers';
+import {
+  computeSquarePricing,
+  mintedBeforeSurchargeRetirement,
+  squareFeeFieldsFromPayment,
+} from './squarePricing.helpers';
 // (All resolve via the functions/src/shared symlink → shared/)
 
 // Initialize Firebase Admin
@@ -15188,6 +15192,9 @@ export const squareWebhook = functions.https.onRequest(async (req, res) => {
           orderId,
           amountCents: paidCents,
           appFeeCents,
+          // What Square says it took, beside what we expected — the only way
+          // to tell from the ledger whether the platform fee was collected.
+          ...squareFeeFieldsFromPayment(payment, appFeeCents),
           channel,
           plan,
           currency: payment?.amount_money?.currency || 'AUD',
@@ -15331,6 +15338,9 @@ export const squareWebhook = functions.https.onRequest(async (req, res) => {
         kind: 'invoice',
         amountCents: paidCents,
         appFeeCents,
+        // What Square says it took, beside what we expected — the only way
+        // to tell from the ledger whether the platform fee was collected.
+        ...squareFeeFieldsFromPayment(payment, appFeeCents),
         channel,
         plan,
         currency: payment?.amount_money?.currency || 'AUD',

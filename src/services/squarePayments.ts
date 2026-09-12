@@ -45,8 +45,8 @@ interface TakeInAppPaymentArgs {
   /**
    * QuoteMate platform fee in cents, deducted from the tradie's payout via
    * Square's appFeeMoney mechanism. Callers should compute this from the
-   * charged amount using QM_APP_FEE_PCT_IN_PERSON in shared/pdf/squareFees.ts
-   * so server + client stay in lockstep.
+   * charged amount with squareAppFeePct('in_person', plan) from
+   * shared/pdf/squareFees.ts so server + client stay in lockstep.
    */
   appFeeCents: number;
   note?: string;

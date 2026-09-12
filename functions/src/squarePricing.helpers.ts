@@ -1,13 +1,8 @@
-import {
-  QM_APP_FEE_PCT_ONLINE,
-  QM_APP_FEE_PCT_ONLINE_FREE,
-  QM_APP_FEE_PCT_IN_PERSON,
-  QM_APP_FEE_PCT_IN_PERSON_FREE,
-} from './shared/pdf/squareFees';
+import { squareAppFeePct, type SquareFeeChannel, type SquareFeePlan } from './shared/pdf/squareFees';
 import { dollarsToCents, centsToDollars } from './shared/pdf/money';
 
-export type SquareChannel = 'online' | 'in_person';
-export type SquarePlan = 'trial' | 'free' | 'pro';
+export type SquareChannel = SquareFeeChannel;
+export type SquarePlan = SquareFeePlan;
 
 export interface SquarePricing {
   /** What the customer is charged. Always exactly the amount owed. */
@@ -54,12 +49,63 @@ export function computeSquarePricing(
   plan: SquarePlan = 'pro',
 ): SquarePricing {
   const chargedCents = dollarsToCents(baseDollars);
-  const isFree = plan === 'free';
-  const appFeePct = channel === 'in_person'
-    ? (isFree ? QM_APP_FEE_PCT_IN_PERSON_FREE : QM_APP_FEE_PCT_IN_PERSON)
-    : (isFree ? QM_APP_FEE_PCT_ONLINE_FREE : QM_APP_FEE_PCT_ONLINE);
+  const appFeePct = squareAppFeePct(channel, plan);
   const appFeeCents = Math.max(0, dollarsToCents(
     centsToDollars(chargedCents) * (appFeePct / 100),
   ));
   return { chargedDollars: centsToDollars(chargedCents), appFeeCents };
+}
+
+// ---------------------------------------------------------------------------
+// What Square itself reported on a completed payment.
+// ---------------------------------------------------------------------------
+
+export interface SquareFeeFields {
+  /** Square's own `app_fee_money.amount` on the payment, when it carried one. */
+  squareAppFeeCents: number | null;
+  /** Sum of Square's `processing_fee[].amount_money.amount` entries, when any parsed. */
+  squareProcessingFeeCents: number | null;
+  /**
+   * True when Square's platform fee and our recomputed `appFeeCents` are both
+   * known and disagree; false when both are known and agree; null when Square
+   * gave no figure to compare against.
+   */
+  feeMismatch: boolean | null;
+}
+
+/** A Square money amount as an integer number of cents, or null if it isn't one. */
+function moneyCents(money: any): number | null {
+  const raw = money?.amount;
+  if (typeof raw !== 'number' && typeof raw !== 'string') return null;
+  if (typeof raw === 'string' && raw.trim() === '') return null;
+  const n = Number(raw);
+  return Number.isInteger(n) ? n : null;
+}
+
+/**
+ * Read the fees Square says it applied from a `payment.updated` webhook
+ * payload, so the ledger records what was actually taken rather than only
+ * what we asked for. Sep 2026 reconciliation: every `squarePayments` row held
+ * a RECOMPUTED `appFeeCents`, so nobody could tell whether the platform fee
+ * had been collected at all. Tolerant of a missing or malformed payload — a
+ * webhook must never fail over an unreadable fee field.
+ */
+export function squareFeeFieldsFromPayment(
+  payment: any,
+  appFeeCents: number | null | undefined,
+): SquareFeeFields {
+  const squareAppFeeCents = moneyCents(payment?.app_fee_money);
+  let squareProcessingFeeCents: number | null = null;
+  if (Array.isArray(payment?.processing_fee)) {
+    for (const entry of payment.processing_fee) {
+      const cents = moneyCents(entry?.amount_money);
+      if (cents === null) continue;
+      squareProcessingFeeCents = (squareProcessingFeeCents ?? 0) + cents;
+    }
+  }
+  const feeMismatch =
+    typeof appFeeCents === 'number' && Number.isFinite(appFeeCents) && squareAppFeeCents !== null
+      ? squareAppFeeCents !== appFeeCents
+      : null;
+  return { squareAppFeeCents, squareProcessingFeeCents, feeMismatch };
 }

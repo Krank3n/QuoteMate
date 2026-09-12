@@ -42,7 +42,7 @@ import {
 import { useTapToPayEnabled } from '../hooks/useTapToPayEnabled';
 import { useTapToPayReadiness } from '../hooks/useTapToPayReadiness';
 import { dollarsToCents, centsToDollars } from '../../shared/pdf/money';
-import { QM_APP_FEE_PCT_IN_PERSON } from '../../shared/pdf/squareFees';
+import { squareAppFeePct } from '../../shared/pdf/squareFees';
 import { useStore } from '../store/useStore';
 import { useAlertModal } from '../hooks/useAlertModal';
 import { buildDeclineRecord } from '../utils/paymentDeclineRecord';
@@ -193,7 +193,7 @@ export function TakePaymentSheet({
   const { showAlert, alertNode } = useAlertModal();
   // Apple req 3.9.1 / 5.7 — only subscribed while the sheet is open.
   const tapToPayReadiness = useTapToPayReadiness(visible && tapToPay.enabled);
-  const { businessSettings, getDocumentById, saveDocument } = useStore();
+  const { businessSettings, getDocumentById, saveDocument, getEffectivePlan } = useStore();
 
   // The quote's deposit is a starting point, not a rule — on the day the
   // tradie agrees whatever gets the job started ("give us $500 and we'll
@@ -412,10 +412,14 @@ export function TakePaymentSheet({
       // The customer is charged exactly what is owed. The old opt-in card
       // surcharge was retired ahead of the RBA's 1 October 2026 ban; our
       // platform fee comes out of the tradie's payout, never the customer.
+      // The fee follows the tradie's plan (free pays more than Pro) from the
+      // same shared schedule the server's ledger recomputes with — until Sep
+      // 2026 this always sent the Pro rate, so a free tradie's ledger row and
+      // what Square actually took disagreed.
       const amountCents = dollarsToCents(amounts.remaining);
       chargedCents = amountCents;
       const appFeeCents = dollarsToCents(
-        centsToDollars(amountCents) * (QM_APP_FEE_PCT_IN_PERSON / 100),
+        centsToDollars(amountCents) * (squareAppFeePct('in_person', getEffectivePlan()) / 100),
       );
       await takeInAppPayment({
         target:
