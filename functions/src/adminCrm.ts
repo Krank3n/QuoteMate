@@ -30,7 +30,7 @@ import {
   RevenueEntry,
 } from './subscription.helpers';
 import { listAllAuthUsers as drainAuthUsers } from './authUsers.helpers';
-import { staleSubscriptionAction, type StoreStatus } from './receiptValidation.helpers';
+import { staleSubscriptionAction, lapsedCompAction, type StoreStatus } from './receiptValidation.helpers';
 import { fetchGooglePlaySubscription, fetchAppleSubscriptionStatus } from './iapStoreStatus';
 import {
   computeFunnelStats,
@@ -3588,7 +3588,9 @@ export const adminBackfillActivity = functions
 // Background: validateAppleReceipt / validateGoogleReceipt write isPro:true but
 // there's no server-side listener for App Store Server Notifications or Google
 // RTDN, so expired IAP subscriptions stay marked active forever. The Stripe
-// webhook already handles web-platform cancellations, so we only sweep iOS/Android.
+// webhook already handles web-platform cancellations, so the store sweep is
+// iOS/Android only. Comps with an end date (admin grants, incident goodwill
+// grants) have no store or webhook behind them, so they are swept here too.
 
 async function expireStaleIapSubscriptions(): Promise<{
   expired: number; renewed: number; kept: number; checked: number;
@@ -3603,6 +3605,23 @@ async function expireStaleIapSubscriptions(): Promise<{
   for (const [uid, raw] of subsMap) {
     checked++;
     if (!raw?.isPro) continue;
+    // Comps end too: an admin grant past its end date, or an incident goodwill
+    // grant with no store behind it past incidentProUntil. Until Sep 2026 the
+    // sweep only looked at store subs, so these stayed Pro forever. A doc with
+    // no end date at all is left alone (bare isPro = owner/demo account).
+    const comp = lapsedCompAction(raw, now);
+    if (comp.action === 'expire') {
+      await firestore.doc(`users/${uid}/profile/subscription`).set(
+        {
+          isPro: false,
+          expiredAt: admin.firestore.FieldValue.serverTimestamp(),
+          expiredReason: comp.reason,
+        },
+        { merge: true }
+      );
+      expired++;
+      continue;
+    }
     const platform = raw?.platform;
     if (platform !== 'ios' && platform !== 'android') continue; // Stripe handled elsewhere
     const end = ts(raw?.currentPeriodEnd);

@@ -11,16 +11,22 @@
  *     unknown — may or may not be a real payer; needs a human look.
  *   - restored_expired: incident grant has lapsed but isPro is still true and
  *     no billing record ever arrived — access should probably be revoked.
+ *   - admin_grant_lapsed: an admin comp whose currentPeriodEnd has passed but
+ *     isPro is still true — named the night it lapses; the expiry sweep
+ *     clears it after its grace.
+ *   - sandbox: an App Store sandbox purchase (Apple App Review's test account)
+ *     — bills $0 and is not a leak, just not a customer.
  *   - bare_ispro: isPro with no platform, no billing ids, and no incident
  *     marker — a potential free-Pro leak.
- * Admin comps (platform 'admin_grant') are counted but not listed as issues.
+ * Current admin comps (platform 'admin_grant') are counted but not listed.
  *
  * Results land in adminStats/subscriptionAudit; adminSubscriptionAudit serves
  * them to the dashboard (computing live when the doc is missing/stale).
  */
 import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
-import { isBilledSub, isRestoredStorePro } from './subscription.helpers';
+import { isBilledSub } from './subscription.helpers';
+import { classify, type AuditReason } from './subscriptionAudit.helpers';
 
 const AUDIT_DOC = () => admin.firestore().collection('adminStats').doc('subscriptionAudit');
 const STALE_MS = 26 * 60 * 60 * 1000; // recompute in the callable if older than ~a day
@@ -28,7 +34,7 @@ const STALE_MS = 26 * 60 * 60 * 1000; // recompute in the callable if older than
 export interface AuditIssue {
   uid: string;
   email: string | null;
-  reason: 'restored_awaiting_receipt' | 'restored_unknown_platform' | 'restored_expired' | 'bare_ispro';
+  reason: AuditReason;
   platform: string | null;
   incidentProUntil: string | null;
 }
@@ -40,20 +46,6 @@ interface AuditPayload {
   billed: number;
   scanned: number;
   generatedAt: number;
-}
-
-function classify(sub: any, nowMs: number): AuditIssue['reason'] | null {
-  if (!sub?.isPro) return null;
-  if (isBilledSub(sub)) return null;
-  if (sub.platform === 'admin_grant') return null;
-
-  if (sub.restoredFromIncident) {
-    if (isRestoredStorePro(sub, nowMs)) return 'restored_awaiting_receipt';
-    const until = typeof sub.incidentProUntil === 'string' ? Date.parse(sub.incidentProUntil) : NaN;
-    if (Number.isFinite(until) && until <= nowMs) return 'restored_expired';
-    return 'restored_unknown_platform';
-  }
-  return 'bare_ispro';
 }
 
 async function runAudit(): Promise<AuditPayload> {

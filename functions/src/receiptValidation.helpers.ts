@@ -15,6 +15,7 @@
  * caller leaves the store transaction unfinished for later re-validation
  * instead of burning a real buyer's purchase during a store outage.
  */
+import { isBilledSub, ts } from './subscription.helpers';
 
 export type ValidationOutcome = 'valid' | 'invalid' | 'unavailable';
 
@@ -201,4 +202,37 @@ export function staleSubscriptionAction(params: {
   if (store.outcome === 'invalid') return { action: 'expire', reason: 'store_confirmed' };
   if (periodEndMs + IAP_UNVERIFIED_BACKSTOP_MS <= nowMs) return { action: 'expire', reason: 'unverified_backstop' };
   return { action: 'keep', reason: 'store_unavailable_within_backstop' };
+}
+
+export type CompAction =
+  | { action: 'keep' }
+  | { action: 'expire'; reason: 'admin_grant_lapsed' | 'goodwill_lapsed' };
+
+/**
+ * Decide the sweep's action for a comped sub — one with no store or Stripe
+ * behind it, so there is nobody to ask and the end date on the doc is the
+ * whole truth. Same grace as the store path. Pure, like the one above.
+ *
+ * - platform 'admin_grant' with `currentPeriodEnd` past + grace → expire.
+ * - An incident goodwill grant (`restoredFromIncident`) on a NON-store
+ *   platform with `incidentProUntil` past + grace → expire. Store-platform
+ *   restores are the store path's business (see isRestoredStorePro).
+ * - A doc with no end date at all is never touched: bare `isPro: true` with
+ *   no platform is the owner/demo account.
+ * - A doc with a real billing record (a restored payer who has since
+ *   re-subscribed through Stripe) belongs to that webhook, not to this.
+ */
+export function lapsedCompAction(sub: any, nowMs: number): CompAction {
+  if (!sub?.isPro || isBilledSub(sub)) return { action: 'keep' };
+  const platform = String(sub.platform || '').toLowerCase();
+  if (platform === 'admin_grant') {
+    const end = ts(sub.currentPeriodEnd);
+    if (end !== null && end + IAP_GRACE_MS <= nowMs) return { action: 'expire', reason: 'admin_grant_lapsed' };
+    return { action: 'keep' };
+  }
+  if (sub.restoredFromIncident && platform !== 'ios' && platform !== 'android') {
+    const until = typeof sub.incidentProUntil === 'string' ? Date.parse(sub.incidentProUntil) : NaN;
+    if (Number.isFinite(until) && until + IAP_GRACE_MS <= nowMs) return { action: 'expire', reason: 'goodwill_lapsed' };
+  }
+  return { action: 'keep' };
 }

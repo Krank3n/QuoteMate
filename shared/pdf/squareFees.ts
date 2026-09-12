@@ -32,3 +32,20 @@ export const QM_APP_FEE_PCT_ONLINE_FREE = 1.7;
  */
 export const QM_APP_FEE_PCT_IN_PERSON = 1.5;
 export const QM_APP_FEE_PCT_IN_PERSON_FREE = 1.7;
+
+export type SquareFeeChannel = 'online' | 'in_person';
+export type SquareFeePlan = 'trial' | 'free' | 'pro';
+
+/**
+ * The platform-fee percentage for a channel on a plan. Trial users get the
+ * Pro rate while in their trial window. This is the ONE place the schedule
+ * is resolved: the server's ledger (`computeSquarePricing`) and the phone's
+ * Tap to Pay call both read it, so what the client sends Square as
+ * `app_fee_money` is what the ledger expects to see.
+ */
+export function squareAppFeePct(channel: SquareFeeChannel, plan: SquareFeePlan): number {
+  const isFree = plan === 'free';
+  return channel === 'in_person'
+    ? (isFree ? QM_APP_FEE_PCT_IN_PERSON_FREE : QM_APP_FEE_PCT_IN_PERSON)
+    : (isFree ? QM_APP_FEE_PCT_ONLINE_FREE : QM_APP_FEE_PCT_ONLINE);
+}
