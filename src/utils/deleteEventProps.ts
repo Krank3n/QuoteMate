@@ -107,3 +107,68 @@ export function describeDeletedDoc(
     record_found: true,
   };
 }
+
+/** Where a job delete was triggered. */
+export type JobDeleteSource =
+  // "Delete job" on the job actions sheet (after its attached docs cascade).
+  | 'job_actions_sheet'
+  // Mate deleted a quote and the parent job had nothing left on it.
+  | 'mate_cascade'
+  | 'unknown';
+
+export interface DeletableJob {
+  id: string;
+  createdAt?: number | string | Date;
+  stage?: string;
+  name?: string;
+  customerEmail?: string;
+  customerPhone?: string;
+  documentIds?: string[];
+}
+
+export interface JobDeletedProps {
+  job_id: string;
+  source: JobDeleteSource;
+  stage: string;
+  /** Docs still linked when the job went — the cascade deletes them first, so this is usually 0. */
+  attached_doc_count: number;
+  has_name: boolean;
+  has_customer_email: boolean;
+  has_customer_phone: boolean;
+  age_hours: number | null;
+  record_found: boolean;
+  [key: string]: string | number | boolean | null | undefined;
+}
+
+export function describeDeletedJob(
+  id: string,
+  job: DeletableJob | null | undefined,
+  source: JobDeleteSource,
+  now: number = Date.now(),
+): JobDeletedProps {
+  if (!job) {
+    return {
+      job_id: id,
+      source,
+      stage: 'unknown',
+      attached_doc_count: 0,
+      has_name: false,
+      has_customer_email: false,
+      has_customer_phone: false,
+      age_hours: null,
+      record_found: false,
+    };
+  }
+  const created = toMs(job.createdAt);
+  return {
+    job_id: job.id || id,
+    source,
+    stage: job.stage || 'unknown',
+    attached_doc_count: Array.isArray(job.documentIds) ? job.documentIds.length : 0,
+    has_name: !!(job.name && job.name.trim()),
+    has_customer_email: !!(job.customerEmail && job.customerEmail.trim()),
+    has_customer_phone: !!(job.customerPhone && job.customerPhone.trim()),
+    age_hours: created === null ? null : Math.max(0, Math.round(((now - created) / 3600e3) * 10) / 10),
+    record_found: true,
+  };
+}

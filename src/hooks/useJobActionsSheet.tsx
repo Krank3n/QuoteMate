@@ -421,7 +421,7 @@ export function useJobActionsSheet(
               await cascadeDeleteJob(job, attached, {
                 deleteQuote: (id) => deleteQuote(id, 'job_cascade'),
                 deleteInvoice: (id) => deleteInvoice(id, 'job_cascade'),
-                deleteJob,
+                deleteJob: (id) => deleteJob(id, 'job_actions_sheet'),
               });
             } catch {
               showAlert({
