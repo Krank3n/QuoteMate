@@ -603,7 +603,7 @@ export function DashboardScreen() {
   const confirmDeleteDraft = async () => {
     if (inProgressDraft) {
       try {
-        await deleteQuote(inProgressDraft.id);
+        await deleteQuote(inProgressDraft.id, 'dashboard_draft_card');
       } catch (error) {
         Alert.alert('Error', 'Failed to delete draft. Please try again.');
       }
@@ -698,7 +698,7 @@ export function DashboardScreen() {
   const handleDeleteQuote = async (quoteId: string) => {
     // QuoteCard already shows its own confirmation modal, so just delete directly
     try {
-      await deleteQuote(quoteId);
+      await deleteQuote(quoteId, 'dashboard_quote_card');
     } catch (error) {
       Alert.alert('Error', 'Failed to delete quote. Please try again.');
     }
@@ -707,7 +707,7 @@ export function DashboardScreen() {
   const confirmDeleteQuote = async () => {
     if (quoteToDelete) {
       try {
-        await deleteQuote(quoteToDelete);
+        await deleteQuote(quoteToDelete, 'dashboard_delete_modal');
       } catch (error) {
         Alert.alert('Error', 'Failed to delete quote. Please try again.');
       }

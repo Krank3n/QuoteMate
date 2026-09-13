@@ -419,8 +419,8 @@ export function useJobActionsSheet(
           primaryButtonAction: async () => {
             try {
               await cascadeDeleteJob(job, attached, {
-                deleteQuote,
-                deleteInvoice,
+                deleteQuote: (id) => deleteQuote(id, 'job_cascade'),
+                deleteInvoice: (id) => deleteInvoice(id, 'job_cascade'),
                 deleteJob,
               });
             } catch {

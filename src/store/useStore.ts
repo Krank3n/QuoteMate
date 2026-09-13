@@ -57,6 +57,7 @@ import { documentService } from '../services/documentService';
 import * as xeroService from '../services/xeroService';
 import { TRIAL_MS } from '../utils/trialConfig';
 import { trackEvent } from '../services/analyticsService';
+import { describeDeletedDoc, type DeletableRecord, type QuoteDeleteSource } from '../utils/deleteEventProps';
 import { maybeRequestReview } from '../services/storeReviewService';
 import { ensureJobForDocument, ensureJobForQuote, useJobStore } from './useJobStore';
 import { canAnalysePhotos, canRunMatePipeline } from './planGates';
@@ -152,7 +153,7 @@ interface AppState {
    * is looking at for one they aren't.
    */
   saveDraft: (quote: Quote, options?: { makeCurrent?: boolean }) => Promise<void>;
-  deleteQuote: (quoteId: string) => Promise<void>;
+  deleteQuote: (quoteId: string, source?: QuoteDeleteSource) => Promise<void>;
   duplicateQuote: (quote: Quote) => Promise<void>;
   updateQuote: (quote: Quote) => void;
   loadQuotes: () => Promise<void>;
@@ -218,7 +219,7 @@ interface AppState {
   setCurrentInvoice: (invoice: Invoice | null) => void;
   updateInvoice: (invoice: Invoice) => void;
   saveInvoice: (invoice: Invoice) => Promise<void>;
-  deleteInvoice: (invoiceId: string) => Promise<void>;
+  deleteInvoice: (invoiceId: string, source?: QuoteDeleteSource) => Promise<void>;
   loadInvoices: () => Promise<void>;
   /** Mirror of mergeRemoteQuotes for invoices. */
   mergeRemoteInvoices: (remote: Invoice[]) => void;
@@ -1127,9 +1128,13 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   // Delete quote
-  deleteQuote: async (quoteId: string) => {
+  deleteQuote: async (quoteId: string, source: QuoteDeleteSource = 'unknown') => {
     try {
       const { quotes } = get();
+      // Before anything is removed: the row says which screen deleted what,
+      // and it must not depend on the delete succeeding.
+      const record = quotes.find((q) => q.id === quoteId) || get().documents.find((d) => d.id === quoteId);
+      trackEvent('quote_deleted', describeDeletedDoc('quote', quoteId, record as DeletableRecord | undefined, source));
       const updatedQuotes = quotes.filter((q) => q.id !== quoteId);
 
       await AsyncStorage.setItem(
@@ -1997,9 +2002,11 @@ export const useStore = create<AppState>((set, get) => ({
     set({ invoices: stable, nextInvoiceNumber: reconciledNextNumber });
   },
 
-  deleteInvoice: async (invoiceId: string) => {
+  deleteInvoice: async (invoiceId: string, source: QuoteDeleteSource = 'unknown') => {
     try {
       const { invoices } = get();
+      const record = invoices.find((i) => i.id === invoiceId) || get().documents.find((d) => d.id === invoiceId);
+      trackEvent('quote_deleted', describeDeletedDoc('invoice', invoiceId, record as DeletableRecord | undefined, source));
       const updatedInvoices = invoices.filter((i) => i.id !== invoiceId);
 
       await AsyncStorage.setItem(
@@ -4429,9 +4436,9 @@ export const useStore = create<AppState>((set, get) => ({
             // cleared. Then belt-and-braces wipe the unified mirror in case
             // the trigger hasn't caught up.
             if (target.type === 'invoice') {
-              await get().deleteInvoice(target.id);
+              await get().deleteInvoice(target.id, 'mate_proposal');
             } else {
-              await get().deleteQuote(target.id);
+              await get().deleteQuote(target.id, 'mate_proposal');
             }
             try {
               await documentService.deleteDocument(target.id);
@@ -4448,13 +4455,13 @@ export const useStore = create<AppState>((set, get) => ({
           // arrays (very fresh draft, not yet mirrored).
           const legacyQuote = get().quotes.find((q) => q.id === proposal.quoteId);
           if (legacyQuote) {
-            await get().deleteQuote(legacyQuote.id);
+            await get().deleteQuote(legacyQuote.id, 'mate_proposal');
             await cascadeParentJobIfOrphaned(legacyQuote.id);
             return { ok: true };
           }
           const legacyInvoice = get().invoices.find((i) => i.id === proposal.quoteId);
           if (legacyInvoice) {
-            await get().deleteInvoice(legacyInvoice.id);
+            await get().deleteInvoice(legacyInvoice.id, 'mate_proposal');
             await cascadeParentJobIfOrphaned(legacyInvoice.id);
             return { ok: true };
           }
