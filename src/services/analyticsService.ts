@@ -200,7 +200,11 @@ export type AnalyticsEvent =
   // `age_hours` how long it lived. Added after the 13 Sep 2026 case where a
   // new tradie's first two Mate quotes vanished 11 s after a foreground and
   // nothing in the data could say which of the four delete paths did it.
-  | 'quote_deleted';
+  | 'quote_deleted'
+  // A job was deleted. `source` is job_actions_sheet or mate_cascade (Mate
+  // deleted the last quote on it). Attached docs write their own
+  // quote_deleted rows first, so attached_doc_count is normally 0.
+  | 'job_deleted';
 
 interface BaseProps {
   // Free-form per-event payload. Keep it flat (Firestore indexes flat fields

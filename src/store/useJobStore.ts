@@ -9,6 +9,8 @@
 import { create } from 'zustand';
 import { auth } from '../config/firebase';
 import { jobService } from '../services/jobService';
+import { trackEvent } from '../services/analyticsService';
+import { describeDeletedJob, type JobDeleteSource } from '../utils/deleteEventProps';
 import { generateId } from '../utils/generateId';
 import { preserveSnapshotIdentity } from '../utils/snapshotIdentity';
 import { mergeTruncatedSnapshot } from '../utils/mergeTruncatedSnapshot';
@@ -22,7 +24,7 @@ interface JobState {
   loadJobs: () => Promise<void>;
   listenToJobs: () => void;
   saveJob: (job: Job) => Promise<void>;
-  deleteJob: (jobId: string) => Promise<void>;
+  deleteJob: (jobId: string, source?: JobDeleteSource) => Promise<void>;
 
   /**
    * Materialise a Job from minimal input. Returns the created Job (with id,
@@ -146,7 +148,10 @@ export const useJobStore = create<JobState>((set, get) => ({
     }
   },
 
-  deleteJob: async (jobId: string) => {
+  deleteJob: async (jobId: string, source: JobDeleteSource = 'unknown') => {
+    // One row per deleted job, written before anything is removed and
+    // whether or not the cloud delete goes through.
+    trackEvent('job_deleted', describeDeletedJob(jobId, get().jobs.find((j) => j.id === jobId), source));
     set((state) => ({ jobs: state.jobs.filter((j) => j.id !== jobId) }));
     if (auth.currentUser) {
       await jobService.deleteJob(jobId);

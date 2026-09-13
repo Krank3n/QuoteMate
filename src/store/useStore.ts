@@ -4423,7 +4423,7 @@ export const useStore = create<AppState>((set, get) => ({
                 if (id !== deletedDocId) remaining.add(id);
               });
               if (remaining.size === 0) {
-                await useJobStore.getState().deleteJob(parentJobId);
+                await useJobStore.getState().deleteJob(parentJobId, 'mate_cascade');
               }
             } catch {
               // best-effort — the doc was deleted, that's the main ask.
