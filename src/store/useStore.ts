@@ -10,6 +10,7 @@ import { generateId } from '../utils/generateId';
 import { withOrigin } from '../utils/materialOrigin';
 import { Quote, BusinessSettings, Material, QuoteSection, SubscriptionStatus, Invoice, PaymentMethod, ReferralInfo, XeroConnection, XeroSyncStatus, Contact, QuotePhoto } from '../types';
 import { Document, DocumentPayment, DocumentPaymentMethod } from '../types/document';
+import { documentToInvoice } from '../types/documentAdapter';
 import { ChatMessage, Conversation, Proposal, ProposalStatus, WorkingStatus, DraftQuoteProposal } from '../types/assistant';
 import {
   generateMaterialsForQuote,
@@ -1716,15 +1717,20 @@ export const useStore = create<AppState>((set, get) => ({
     // been invoiced — that's a re-open, not a new draft).
     const matchingDoc = get().getDocumentByLegacyId(quote.id);
     if (matchingDoc && matchingDoc.type === 'quote' && !matchingDoc.invoicedAt) {
-      try {
-        const converted = await get().convertDocumentToInvoice(matchingDoc.id);
-        const invoice: Invoice = (await import('../types/documentAdapter')).documentToInvoice(converted);
-        set({ currentInvoice: invoice });
-        trackEvent('quote_started', { source: 'from_quote' });
-        return invoice;
-      } catch {
-        // Fall through to the legacy path on failure.
-      }
+      // No legacy fallback from here. Until Sep 2026 a throw anywhere in this
+      // block fell through to the legacy mint below, which builds a brand-new
+      // invoice with no jobId — so the server's job-sync safety net
+      // materialised a second Job for it, the unified doc was repointed to
+      // that Job, and the tradie's real job was left showing "No quote yet"
+      // the moment they tapped Create Invoice. Two ghost jobs on the founder
+      // account came from exactly this on 13 Sep 2026. If the unified
+      // conversion fails, fail loudly; the caller shows the error and the
+      // tradie can retry, with the job intact.
+      const converted = await get().convertDocumentToInvoice(matchingDoc.id);
+      const invoice: Invoice = documentToInvoice(converted);
+      set({ currentInvoice: invoice });
+      trackEvent('quote_started', { source: 'from_quote' });
+      return invoice;
     }
 
     // Idempotency: if this quote has already been invoiced, return the
@@ -1761,6 +1767,9 @@ export const useStore = create<AppState>((set, get) => ({
       customerEmail: quote.customerEmail,
       customerPhone: quote.customerPhone,
       jobAddress: quote.jobAddress,
+      // Stay on the quote's Job. Without this the mirrored document arrives
+      // with no jobId and the server materialises a new Job for it.
+      ...(quote.jobId ? { jobId: quote.jobId } : {}),
       job: {
         ...quote.job,
         id: generateId(),

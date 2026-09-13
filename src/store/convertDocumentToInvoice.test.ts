@@ -196,3 +196,57 @@ describe('a paid deposit is carried as a credit on the invoice', () => {
     expect(useStore.getState().documents.find((d) => d.id === DOC_ID)?.total).toBe(660);
   });
 });
+
+describe('createInvoiceFromQuote never mints a ghost job', () => {
+  // 13 Sep 2026: a throw inside the unified branch fell through to the legacy
+  // mint, whose invoice carries no jobId. The server's job-sync safety net then
+  // materialised a second Job, repointed the document to it, and the tradie's
+  // real job showed "No quote yet" right after they tapped Create Invoice.
+  const accepted = (): Quote =>
+    legacyQuote({ status: 'accepted', total: 960, materials: [], jobId: 'job-real', job: { id: 'job-1', name: 'Test job' } } as Partial<Quote>);
+
+  it('surfaces a unified-path failure instead of falling back to the legacy mint', async () => {
+    const saveInvoice = vi.fn(async () => {});
+    useStore.setState({
+      documents: [{ ...quoteDoc(), stage: 'quote_accepted', materials: [] } as Document],
+      quotes: [accepted()],
+      invoices: [],
+      currentInvoice: null,
+      saveQuote: vi.fn(async () => {}),
+      saveInvoice,
+      getNextInvoiceNumber: async () => { throw new Error('numbering service down'); },
+    } as any);
+
+    await expect(useStore.getState().createInvoiceFromQuote(accepted())).rejects.toThrow('numbering service down');
+
+    // Nothing minted on the side: no legacy invoice, no currentInvoice, and
+    // the unified document is still the quote it was.
+    expect(saveInvoice).not.toHaveBeenCalled();
+    expect(useStore.getState().currentInvoice).toBeNull();
+    expect(useStore.getState().documents.find((d) => d.id === DOC_ID)?.type).toBe('quote');
+  });
+
+  it('the adapter copes with a quote that has never taken a payment (the throw that triggered the fallback)', async () => {
+    useStore.setState({
+      documents: [{ ...quoteDoc(), stage: 'quote_accepted', materials: [], payments: undefined } as unknown as Document],
+      quotes: [accepted()],
+      invoices: [],
+      currentInvoice: null,
+      saveQuote: vi.fn(async () => {}),
+      getNextInvoiceNumber: async () => 'INV-9',
+    } as any);
+
+    const invoice = await useStore.getState().createInvoiceFromQuote(accepted());
+
+    expect(invoice.id).toBe(DOC_ID);
+    expect(useStore.getState().documents.find((d) => d.id === DOC_ID)?.type).toBe('invoice');
+  });
+
+  it('the legacy mint (no unified doc) stays on the quote\'s Job', async () => {
+    useStore.setState({ documents: [], quotes: [accepted()], saveQuote: vi.fn(async () => {}) } as any);
+
+    const invoice = await useStore.getState().createInvoiceFromQuote(accepted());
+
+    expect(invoice.jobId).toBe('job-real');
+  });
+});
