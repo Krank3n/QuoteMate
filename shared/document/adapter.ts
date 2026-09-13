@@ -454,7 +454,7 @@ function stageToInvoiceStatus(stage: DocumentStage): string {
 export { stageToQuoteStatus, stageToInvoiceStatus };
 
 export function documentRecordToQuoteRecord(doc: DocumentRecord): LegacyDocumentRecord {
-  const depositPayment = doc.payments.find((p) => p.kind === 'deposit');
+  const depositPayment = (doc.payments ?? []).find((p) => p.kind === 'deposit');
   const active = doc.activePaymentLink as DocumentPaymentLink | undefined;
   // The unified link supersedes the legacy fields when set; otherwise the
   // doc's own legacy field copies (kept by older writers) are returned.
@@ -549,10 +549,10 @@ export function documentRecordToQuoteRecord(doc: DocumentRecord): LegacyDocument
 }
 
 export function documentRecordToInvoiceRecord(doc: DocumentRecord): LegacyDocumentRecord {
-  const balancePayment = doc.payments.find((p) => p.kind === 'balance');
-  const manualPayment = doc.payments.find((p) => p.kind === 'manual');
+  const balancePayment = (doc.payments ?? []).find((p) => p.kind === 'balance');
+  const manualPayment = (doc.payments ?? []).find((p) => p.kind === 'manual');
   const paid = balancePayment ?? manualPayment;
-  const depositCredit = doc.payments
+  const depositCredit = (doc.payments ?? [])
     .filter((p) => p.kind === 'deposit')
     .reduce((acc, p) => acc + p.amount, 0);
   const active = doc.activePaymentLink as DocumentPaymentLink | undefined;

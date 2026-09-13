@@ -67,3 +67,17 @@ describe('documentRecordToInvoiceRecord — paidAmount', () => {
     expect(documentRecordToInvoiceRecord(invoiceRecord([], 0)).paidAmount).toBe(0);
   });
 });
+
+describe('documentRecordToInvoiceRecord — a document with no payments ledger', () => {
+  // A quote that has never taken a payment carries no `payments` array. Until
+  // 13 Sep 2026 the adapter threw on it, which the client's Create Invoice
+  // path swallowed by minting a legacy invoice with no jobId — and the server
+  // then materialised a ghost Job for it.
+  it('REGRESSION: converts without a payments array, reporting nothing paid', () => {
+    const record = invoiceRecord([], 0);
+    delete record.payments;
+    const invoice = documentRecordToInvoiceRecord(record);
+    expect(invoice.paidAmount ?? 0).toBe(0);
+    expect(invoice.depositCredit ?? 0).toBe(0);
+  });
+});
