@@ -193,7 +193,14 @@ export type AnalyticsEvent =
   | 'report_shared'
   // Emailed to the customer with the PDF attached — distinct from
   // report_shared, which is the OS share sheet / print dialog.
-  | 'report_sent';
+  | 'report_sent'
+  // — Deletes —
+  // A quote or invoice was deleted from the app. `source` names the screen
+  // (see utils/deleteEventProps.ts), `was_sent` whether a customer had it,
+  // `age_hours` how long it lived. Added after the 13 Sep 2026 case where a
+  // new tradie's first two Mate quotes vanished 11 s after a foreground and
+  // nothing in the data could say which of the four delete paths did it.
+  | 'quote_deleted';
 
 interface BaseProps {
   // Free-form per-event payload. Keep it flat (Firestore indexes flat fields
