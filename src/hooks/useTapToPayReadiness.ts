@@ -22,16 +22,29 @@ import {
 } from '../services/squarePayments';
 
 export interface TapToPayReadinessState {
-  readiness: TapToPayReadiness;
+  /**
+   * `'idle'` while not subscribed (the row is disabled, or the sheet is
+   * closed). Callers must not read it as "preparing": before Sep 2026 the
+   * hook sat on its initial 'preparing' whenever it was inactive, so every
+   * tradie whose Tap to Pay row was disabled (entitlement pending with
+   * Apple) saw a spinner that never stopped.
+   */
+  readiness: TapToPayReadiness | 'idle';
   /** Merchant-facing status line. Null once ready — nothing to report. */
   label: string | null;
 }
 
 export function useTapToPayReadiness(active: boolean): TapToPayReadinessState {
-  const [readiness, setReadiness] = useState<TapToPayReadiness>('preparing');
+  const [readiness, setReadiness] = useState<TapToPayReadiness | 'idle'>('idle');
 
   useEffect(() => {
-    if (!active) return;
+    if (!active) {
+      setReadiness('idle');
+      return;
+    }
+    // Fresh subscription, fresh start: a re-opened sheet must not show the
+    // previous session's 'ready' before the reader has answered.
+    setReadiness('preparing');
     const stop = observeTapToPayReadiness(setReadiness);
     return stop;
   }, [active]);

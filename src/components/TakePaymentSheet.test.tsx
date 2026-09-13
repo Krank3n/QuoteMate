@@ -857,3 +857,27 @@ describe('req 5.10 — a receipt after an approved payment', () => {
     share.mockRestore();
   });
 });
+
+describe('TakePaymentSheet Tap to Pay row spinner', () => {
+  // The readiness observer is only wired while the row is enabled; before the
+  // fix the hook's initial 'preparing' leaked into a disabled row as a spinner
+  // that never stopped — the state every tradie was in while the entitlement
+  // sat with Apple.
+  const spinners = (container: HTMLElement) => container.querySelectorAll('[role="progressbar"]').length;
+
+  it('shows no spinner on a disabled row even though the reader would report preparing', () => {
+    readiness.state = 'preparing';
+    tapToPay.state = { enabled: false, reason: 'pending_apple' };
+    const { container, getByText } = renderSheet();
+    expect(getByText('Not enabled for your account yet.')).toBeTruthy();
+    expect(spinners(container)).toBe(0);
+  });
+
+  it('still spins while an enabled row is genuinely preparing (Apple req 3.9.1)', () => {
+    readiness.state = 'preparing';
+    tapToPay.state = { enabled: true };
+    const { container, getByText } = renderSheet();
+    expect(getByText(/not ready to take a card yet/)).toBeTruthy();
+    expect(spinners(container)).toBe(1);
+  });
+});
