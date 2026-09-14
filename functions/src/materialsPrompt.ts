@@ -103,6 +103,12 @@ EXCLUSIONS AND REPLACEMENT-ONLY SCOPE ARE HARD CONSTRAINTS:
 - Include every explicitly requested supporting cost/item: demolition labour, rubbish removal, tip/disposal fees, fixings/clips, blades and other named consumables. A demolition/disposal section may use the explicit tip/disposal allowance as its row and carry the demolition sectionLaborHours; do not invent structural materials just to give that labour a section.
 - Do not emit builder's margin, markup or GST as material rows — the app applies those after materials and labour.
 
+TOOLS, EQUIPMENT AND PPE THE TRADIE ALREADY OWNS ARE NEVER MATERIALS:
+- NEVER list tools, equipment, hire or PPE that a tradie in this trade owns and brings to every job: hammers, mallets, pry/wrecking bars, brooms, dustpans, mops, mop buckets, extension poles, squeegees, gernis/pressure washers, drills, drivers, saws, ladders, wheelbarrows, shovels, trowels, gloves, safety glasses, hearing protection, boots. These are the cost of being in the trade and are already covered by the labour rate; a customer who sees "club hammer" or "stiff bristle broom" on a quote assumes they are being charged for the tradie's toolbox.
+- CONSUMABLES that are used up on THIS job stay: paint, sandpaper, blades and drill bits, cleaning chemicals, fasteners, adhesives, sealants, drop sheets, masking tape, disposable gloves, rubbish bags, bin/tip fees.
+- HIRE stays ONLY when the job description explicitly asks for it, or it is genuinely a hire item for that trade and job — a scissor lift, a skip bin, a concrete pump, a plate compactor for a paved patio, a stump grinder. A half-day hire of something the tradie would own is padding, not a material.
+- When the job description or the tradie's standing rules say they use their own materials, gear or chemicals ("using my materials", "I bring my own gear", "chemicals included"), treat consumables as included in their rate and list NOTHING for them — no cleaning products, no cloths, no sprays. List only what the customer is genuinely paying for on top of labour.
+
 DECK-BOARD REPLACEMENT CHECK:
 - Derive board quantity from deck area, installed board cover width (board width + gap), available stock length and sensible cutting layout, then add only 10–15% waste. State the calculation in reasoning.
 - Hidden clips/fixings must be derived from deck area or joist intersections and emitted as individual each-counts; the pricing layer converts them into packs.
@@ -156,7 +162,7 @@ WORKED EXAMPLE — 25m² (5m × 5m) paver patio, a previously-broken case the sy
 - Bedding sand @ 30mm: 25 × 0.03 × 1700 = 1275. quantity 1275, unit "kg".
 - Jointing sand for 400x400 pavers: ~1 kg/m² → 25 kg. quantity 25, unit "kg".
 - Geotextile / weed mat: 25 × 1.2 = 30. quantity 30, unit "m²". reasoning: "25m² + 20% overlap = 30m²".
-- Plate compactor hire (half day): quantity 1, unit "each".
+- Plate compactor hire (half day): quantity 1, unit "each" — a genuine hire item for a paved patio (a paver does not own one). Do NOT add a hammer, broom, wheelbarrow, gloves or glasses alongside it; those are the tradie's own gear.
 WRONG outputs to avoid: "1575 each" of crusher dust, "1050 each" of bedding sand, "100 each" of jointing sand, "430 each" of pavers — these label bulk quantities as "each" and inflate cost ~20×.
 
 WORKED EXAMPLE — 30 m² (15m × 2m) merbau deck, no handrails — a previously-broken case that inflated to ~$75k off a single decking line. Correct outputs:
@@ -188,7 +194,7 @@ Guidelines:
 - Use common material specifications: timber grades (H3/H4), dimensions, thread sizes, capacities
 - Include all materials needed: primary materials, fasteners, adhesives, finishes, etc.
 - Be realistic with quantities - round up for waste (typically 10-15% extra)
-- Include safety/prep materials if relevant (sandpaper, drop sheets, cleaning supplies, etc.)
+- Include prep consumables that get used up on this job if relevant (sandpaper, drop sheets, masking tape, cleaning chemicals) — never the tools or PPE the tradie already owns (see the owned-gear rule above)
 - Estimate labor hours realistically for an experienced tradie in this specialty
 - Consider the suggested materials but don't limit yourself to only those
 - Think about what a professional ${tradeContext?.nicheName || 'tradie'} would need for this job

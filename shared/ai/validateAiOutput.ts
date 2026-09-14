@@ -34,6 +34,8 @@ export interface AiValidationFlags {
   absurdQuantityCount: number;
   launderedSections: string[];
   nonLatinTokenCount: number;
+  /** Generated rows the server dropped for naming the tradie's own tools/PPE (functions/src/ownedGear.ts). */
+  ownedGearDropped?: string[];
 }
 
 // A whole word in another script. The generator has emitted Cyrillic
