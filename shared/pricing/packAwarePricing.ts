@@ -81,6 +81,26 @@ export function applyPackAwarePricing(
     }
   }
 
+  // A product priced BY the requirement's own unit — "(per cubic metre, bulk
+  // delivery)", "per tonne", "per lineal metre" — states what one purchase
+  // contains as plainly as a "20kg bag" does, but states no FIGURE, so
+  // parsePackInfo reads nothing from the title. An estimator that also called
+  // the load "1 each" then left a pack the branches below cannot map onto the
+  // requirement, and the fallthrough collapsed the row to ONE purchase: a
+  // 3 m³ bulk mulch requirement was quoted as a single load, with a note
+  // asking the tradie to check that it covered 3 m³. Only steps in when
+  // nothing compatible was read, so a stated "0.5m³ bag" still wins.
+  const soldPerUnit = perUnitSale(product.productName);
+  if (
+    soldPerUnit &&
+    requiredUnitNormalised &&
+    PACK_UNIT_EQUIVALENT[soldPerUnit.packUnit] === requiredUnitNormalised &&
+    (!packSize || !packUnit || PACK_UNIT_EQUIVALENT[packUnit] !== requiredUnitNormalised)
+  ) {
+    packSize = soldPerUnit.packSize;
+    packUnit = soldPerUnit.packUnit;
+  }
+
   const packUnitNormalised = packUnit ? PACK_UNIT_EQUIVALENT[packUnit] : undefined;
   const nominalLengthPerEach = firstMetreLength(`${material.name} ${material.searchTerm || ''}`);
   const lengthEachToMetres =
@@ -109,8 +129,15 @@ export function applyPackAwarePricing(
 
   // Does the product say it's a pack at all, in ANY unit? Distinguishes "this
   // is a pack we couldn't map onto the requirement" from "we know nothing about
-  // how this is sold", which want opposite fallbacks below.
-  const knownToBeAPack = !!packSize || !!parsePackInfo(product.productName);
+  // how this is sold", which want opposite fallbacks below. A size of ONE in a
+  // count unit is not a pack statement — "1 each" says nothing about how much
+  // of a measured requirement one purchase covers, which is why readPack
+  // discards that reading from a title too — yet a bare `!!packSize` counted
+  // it as one, and against a 3 m³ bulk requirement it collapsed the row to a
+  // single purchase at the per-cubic-metre price.
+  const knownToBeAPack =
+    (!!packSize && (packSize > 1 || (!!packUnit && MEASUREMENT_UNITS.has(packUnit)))) ||
+    !!parsePackInfo(product.productName);
 
   if (packSizeUsable && packSize && packUnit && unitsCompatible) {
     const packsNeeded = Math.max(1, Math.ceil(effectiveRequired / packSize));
@@ -158,6 +185,59 @@ export function applyPackAwarePricing(
   material.packSize = undefined;
   material.packUnit = undefined;
   material.totalPrice = roundToTwoDecimals(material.quantity * material.price);
+}
+
+/**
+ * "per <unit>" / "by the <unit>" / "$39/m2" wording in a product title, for
+ * goods a supplier prices by a measured unit rather than in a container: bulk
+ * mulch and soil per cubic metre, aggregate per tonne, framing per lineal
+ * metre, tiles per m². Group order matches the alternation: m³, m², a tonne,
+ * kg, m, L.
+ *
+ * Group 1 is the trap this has to dodge. A figure and unit sitting immediately
+ * before the "per" makes it a CONSUMPTION rate, not a price basis — "5kg per
+ * m²" is how much adhesive a square metre eats, not what one purchase buys —
+ * so that shape is captured and the reading rejected. Reading it as a one-m²
+ * purchase would buy a whole bag per square metre of floor.
+ *
+ * Bare "m" and "l" are anchored by the trailing lookahead so "per month" and
+ * "per length" read as nothing, and the slash form demands a price in front of
+ * it so a coverage rate like "20kg/m²" is not mistaken for one.
+ */
+const PER_UNIT_RE = new RegExp(
+  String.raw`(\d+(?:\.\d+)?\s*(?:kgs?|grams?|g|ml|litres?|liters?|lt|l|m²|m2|m³|m3|sqm|m)\s*)?` +
+    String.raw`(?:\bper[\s-]+(?:the\s+)?(?:1\s*)?|\bby\s+the\s+|\$\s*\d+(?:\.\d+)?\s*\/\s*)` +
+    String.raw`(?:(cubic[\s-]+met(?:re|er)s?|m³|m3|cube)` +
+    String.raw`|(square[\s-]+met(?:re|er)s?|sq\s*m|sqm|m²|m2)` +
+    String.raw`|(tonnes?|tons?)` +
+    String.raw`|(kilo(?:gram)?s?|kgs?)` +
+    String.raw`|((?:lineal|linear|running)[\s-]+met(?:re|er)s?|met(?:re|er)s?|lm|m)` +
+    String.raw`|(litres?|liters?|lt|l))(?![\w²³])`,
+  'i',
+);
+
+/**
+ * What ONE purchase contains when the title says the product is sold per unit
+ * of measure, or null when it says no such thing. A per-tonne price is a
+ * 1000 kg pack so a kg requirement can divide by it; every other unit is a
+ * pack of one in that unit, which is exactly what "priced per metre" means.
+ *
+ * Total on purpose, exactly like parsePackInfo: the callers sit inside
+ * best-effort regions guarded by bare catches, so a throw here would not
+ * surface as a parse failure — it would silently take the whole surrounding
+ * pricing pass with it, which is how the scraper's ARRAY-shaped field once
+ * killed reconcile on 23 of 24 quotes for twelve days with nothing logged.
+ */
+export function perUnitSale(productName?: string): { packSize: number; packUnit: Material['unit'] } | null {
+  if (typeof productName !== 'string') return null;
+  const m = productName.match(PER_UNIT_RE);
+  if (!m || m[1]) return null;
+  if (m[2]) return { packSize: 1, packUnit: 'm³' };
+  if (m[3]) return { packSize: 1, packUnit: 'm²' };
+  if (m[4]) return { packSize: 1000, packUnit: 'kg' };
+  if (m[5]) return { packSize: 1, packUnit: 'kg' };
+  if (m[6]) return { packSize: 1, packUnit: 'm' };
+  return { packSize: 1, packUnit: 'L' };
 }
 
 /** Units that measure an amount rather than count purchasable items. */
