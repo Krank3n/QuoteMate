@@ -135,6 +135,7 @@ import { correctionsClause, createPricingCorrections } from './assistant/pricing
 import { setRenderableQuoteProbe } from '../services/assistant/showQuoteGate';
 import { scopeStatusOf } from '../services/assistant/scopeEditable';
 import { createBubbleContinuity, joinFragments } from './assistant/bubbleContinuity';
+import { createUnansweredTurn, unansweredTurnBubble } from './assistant/unansweredTurn';
 import { formatCurrency } from '../utils/documentCalculator';
 import { setPendingProposalProbe } from '../services/assistant/pendingProposalGate';
 import { findSupersededProposals } from './assistant/proposalSupersede';
@@ -614,6 +615,9 @@ export function AssistantScreen() {
   // One bubble per reply, however many pieces the transport hands it over in
   // — see screens/assistant/bubbleContinuity.ts.
   const bubbleContinuityRef = useRef(createBubbleContinuity());
+  // Which conversation is owed a reply to a spoken turn — settled with an
+  // error bubble if the session ends first. See screens/assistant/unansweredTurn.ts.
+  const unansweredTurnRef = useRef(createUnansweredTurn());
   // What the tradie says while a pipeline apply runs — handed to Mate the
   // moment pricing lands. See screens/assistant/pricingCorrections.ts.
   const pricingCorrectionsRef = useRef(createPricingCorrections());
@@ -2423,6 +2427,10 @@ export function AssistantScreen() {
     voiceModeRef.current = null;
     setVoiceMode(null);
     matePlayingRef.current = false;
+    // A spoken turn Mate never answered would otherwise vanish with the
+    // session — no reply, no error, just a bare user message.
+    const owedTo = unansweredTurnRef.current.takeOwed();
+    if (owedTo) appendMessage(owedTo, unansweredTurnBubble(generateId()));
     if (pacerTickRef.current) { clearInterval(pacerTickRef.current); pacerTickRef.current = null; }
     pacingEnabledRef.current = false;
     pendingBubbleCloseRef.current = false;
@@ -2460,7 +2468,7 @@ export function AssistantScreen() {
     if (session) {
       try { session.close(); } catch { /* noop */ }
     }
-  }, []);
+  }, [appendMessage]);
 
   // Clear the chat and start fresh. Tears down any live voice session first so
   // the mic doesn't keep streaming into a discarded conversation.
@@ -2630,6 +2638,7 @@ export function AssistantScreen() {
       // prefix `paint` prepends, and assistantBubbleTextRef holds only this
       // fragment. Returns the proposals the bubble already carries.
       const startOrContinueBubble = (text: string, rendered: string | null): Proposal[] => {
+        unansweredTurnRef.current.answered();
         const cont = bubbleContinuityRef.current.takeContinuation();
         pacedRenderRef.current = rendered ?? text;
         assistantBubbleTextRef.current = text;
@@ -2682,6 +2691,10 @@ export function AssistantScreen() {
           assistantBubbleTextRef.current = '';
           assistantBubblePrefixRef.current = '';
           bubbleContinuityRef.current.userTurn();
+          // The reseeded session won't answer a turn the drop swallowed —
+          // tell the tradie so, rather than leaving their words hanging.
+          const owedTo = unansweredTurnRef.current.takeOwed();
+          if (owedTo) appendMessage(owedTo, unansweredTurnBubble(generateId()));
           const staleQueue = audioQueueRef.current;
           audioQueueRef.current = null;
           matePlayingRef.current = false;
@@ -2704,6 +2717,7 @@ export function AssistantScreen() {
             const id = generateId();
             userBubbleIdRef.current = id;
             userBubbleTextRef.current = text;
+            unansweredTurnRef.current.spoken(convoId!);
             appendMessage(convoId!, {
               id,
               role: 'user',
@@ -2959,6 +2973,7 @@ export function AssistantScreen() {
           // tradie gets a full timeout window to respond before we
           // auto-close.
           touchVoiceActivity();
+          unansweredTurnRef.current.answered();
           finishAssistantBubble();
           // Read before the reset — the narrated-call nudge at the bottom of
           // this handler needs to know whether the turn produced a real card.
