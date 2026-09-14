@@ -38,6 +38,7 @@ import { ServiceReport } from '../../shared/report/types';
 // per-doc override / business default / fallback chain used to be written
 // out by hand at every one of these mapping sites.
 import { resolvePriceDetail } from '../../shared/document/priceDetail';
+import { paidInFullAtMs } from '../../shared/document/paidInFull';
 import { useStore } from '../store/useStore';
 import { checkSquareConnection } from '../services/squareService';
 import { carriesPayableAmount } from './quoteDeliveryGuard';
@@ -296,6 +297,10 @@ export async function generateDocumentPDF(
       dueDate: format(new Date(doc.dueDate ?? doc.createdAt), 'dd MMMM yyyy'),
       paymentTerms: formatPaymentTerms(doc.paymentTerms ?? 'net_14', doc.customPaymentDays),
       paidAmount: doc.paidTotal,
+      paidDate: (() => {
+        const paidMs = paidInFullAtMs(doc);
+        return paidMs ? format(new Date(paidMs), 'dd MMMM yyyy') : undefined;
+      })(),
       job: doc.job,
       materials: toPdfMaterials(doc.materials),
       materialsSubtotal: doc.materialsSubtotal,

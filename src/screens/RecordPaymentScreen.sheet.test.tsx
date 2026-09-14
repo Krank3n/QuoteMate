@@ -18,8 +18,20 @@
 import React from 'react';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, fireEvent, waitFor, act } from '@testing-library/react';
-import { Alert } from 'react-native';
+import { Alert, Share } from 'react-native';
 import { isYesterday, isSameDay } from 'date-fns';
+
+const clipboard = vi.hoisted(() => ({ setStringAsync: vi.fn(async () => {}) }));
+vi.mock('expo-clipboard', () => clipboard);
+
+// jsdom reports Platform.OS === 'web' with no Web Share API, which is exactly
+// desktop Chrome. Tests that want the native share sheet install one.
+function withWebShare<T>(fn: () => Promise<T>): Promise<T> {
+  Object.defineProperty(navigator, 'share', { value: vi.fn(), configurable: true });
+  return fn().finally(() => {
+    delete (navigator as any).share;
+  });
+}
 
 vi.mock('@expo/vector-icons/MaterialCommunityIcons', () => ({ default: () => null }));
 
@@ -113,6 +125,7 @@ const state = vi.hoisted(() => ({
   pushPaymentToXero: vi.fn(async () => {}),
   updateDocumentPayment: vi.fn(async () => {}),
   deleteDocumentPayment: vi.fn(async () => {}),
+  businessSettings: { businessName: 'Coastal Air' } as any,
 }));
 vi.mock('../store/useStore', () => ({
   useStore: (selector: (s: typeof state) => unknown) => selector(state),
@@ -175,6 +188,66 @@ describe('RecordPaymentScreen sheet-screen', () => {
     expect(isYesterday(date)).toBe(true);
 
     expect(lastAlert()).toMatchObject({ type: 'success', title: 'Payment recorded' });
+  });
+
+  it('offers Send receipt on the success dialog and shares the receipt for the recorded payment', () => withWebShare(async () => {
+    const share = vi.spyOn(Share, 'share').mockResolvedValue({ action: 'sharedAction' } as any);
+    const { baseElement, getByText, getByRole } = render(<RecordPaymentScreen />);
+
+    setAmount(baseElement, '800');
+    fireEvent.click(getByText('Cheque'));
+    fireEvent.click(getByRole('button', { name: /Record Payment/ }));
+    await waitFor(() => expect(lastAlert()).toMatchObject({ type: 'success', title: 'Payment recorded' }));
+
+    const alert = lastAlert();
+    expect(alert.secondaryButtonText).toBe('Send receipt');
+    // Done stays primary — the receipt is an offer, not a step.
+    expect(alert.primaryButtonText).toBe('Done');
+
+    await act(async () => alert.secondaryButtonAction());
+    expect(share).toHaveBeenCalledTimes(1);
+    const message: string = share.mock.calls[0][0].message;
+    expect(message.split('\n')[0]).toBe('Coastal Air');
+    expect(message).toContain('For: Invoice INV-005');
+    expect(message).toContain('Amount paid: $800.00');
+    // From the form's pick, not the ledger vocabulary (which stores cheque as "other").
+    expect(message).toContain('Paid by: cheque');
+    // 2606.26 − 1303.13 owing − 800 → 503.13 still to come.
+    expect(message).toContain('Balance remaining: $503.13');
+    expect(message).not.toMatch(/quotemate/i);
+    // Sharing a receipt never closes the sheet on its own.
+    expect(sheet.props.visible).toBe(true);
+  }));
+
+  it('a share-sheet dismissal is not an error', () => withWebShare(async () => {
+    vi.spyOn(Share, 'share').mockRejectedValue(new Error('cancelled'));
+    const { getByRole } = render(<RecordPaymentScreen />);
+    fireEvent.click(getByRole('button', { name: /Record Payment/ }));
+    await waitFor(() => expect(lastAlert()).toMatchObject({ type: 'success' }));
+    const calls = alertSpy.showAlert.mock.calls.length;
+    await act(async () => lastAlert().secondaryButtonAction());
+    expect(alertSpy.showAlert.mock.calls.length).toBe(calls);
+  }));
+
+  it('copies the receipt to the clipboard on a browser with no share sheet', async () => {
+    const share = vi.spyOn(Share, 'share');
+    const nativeAlert = vi.spyOn(Alert, 'alert').mockImplementation(() => {});
+    const { getByRole } = render(<RecordPaymentScreen />);
+    fireEvent.click(getByRole('button', { name: /Record Payment/ }));
+    await waitFor(() => expect(lastAlert()).toMatchObject({ type: 'success' }));
+    await act(async () => lastAlert().secondaryButtonAction());
+    expect(share).not.toHaveBeenCalled();
+    expect(clipboard.setStringAsync).toHaveBeenCalledTimes(1);
+    expect(clipboard.setStringAsync.mock.calls[0][0]).toContain('Payment received');
+    expect(nativeAlert).toHaveBeenCalledWith('Receipt copied', expect.any(String));
+  });
+
+  it('does not offer a receipt when editing an existing payment', async () => {
+    routeParams.current = { invoiceId: 'doc-1', paymentId: 'pay-1' };
+    const { getByRole } = render(<RecordPaymentScreen />);
+    fireEvent.click(getByRole('button', { name: /Save Changes/ }));
+    await waitFor(() => expect(lastAlert()).toMatchObject({ type: 'success' }));
+    expect(lastAlert().secondaryButtonText).toBeUndefined();
   });
 
   it('rejects an amount above the ceiling with the themed dialog and does not write', async () => {

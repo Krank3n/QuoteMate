@@ -72,3 +72,5 @@ export {
   stageToQuoteStatus,
   stageToInvoiceStatus,
 } from './adapter';
+
+export { paidInFullAtMs } from './paidInFull';

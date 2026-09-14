@@ -46,6 +46,7 @@ import {
   workItemsTotal,
 } from './shared/document/lumpSum';
 import { resolvePriceDetail } from './shared/document/priceDetail';
+import { paidInFullAtMs } from './shared/document/paidInFull';
 import { dollarsToCents, centsToDollars } from './shared/pdf/money';
 import {
   quoteRecordToDocumentRecord,
@@ -1146,6 +1147,13 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
       dueDate: fmtAuDate(invoice.dueDate),
       paymentTerms: invoice.paymentTerms,
       paidAmount: invoice.paidAmount || 0,
+      // From the unified doc, not invoice.paidDate: the adapter picks one
+      // representative payment, which on a multi-payment invoice is the
+      // wrong (earliest) date. Same helper the phone uses, same format.
+      paidDate: (() => {
+        const paidMs = paidInFullAtMs(doc as DocumentRecord);
+        return paidMs ? fmtAuDate(paidMs) : undefined;
+      })(),
       depositCredit: Number(invoice.depositCredit) > 0 ? Number(invoice.depositCredit) : undefined,
       job: invoice.job || { name: 'Job', description: '' },
       materials: toPdfMaterials(invoice.materials),

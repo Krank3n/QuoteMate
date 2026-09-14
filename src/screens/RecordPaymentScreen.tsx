@@ -11,7 +11,8 @@
  */
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { View, Pressable } from 'react-native';
+import { View, Pressable, Platform, Share, Alert } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 import { Text, Button, TextInput } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -28,6 +29,9 @@ import { CurrencyInput } from '../components/CurrencyInput';
 import { DueDateSheet } from '../components/DueDateSheet';
 import { useAlertModal } from '../hooks/useAlertModal';
 import { paymentCopy } from '../constants/paymentCopy';
+import { buildPaymentReceipt } from '../utils/paymentReceipt';
+
+const IS_WEB = Platform.OS === 'web';
 
 /**
  * Ledger method → the form option that represents it. Lossy on purpose:
@@ -68,6 +72,7 @@ export function RecordPaymentScreen() {
   const recordPayment = useStore((s) => s.recordPayment);
   const recordDocumentPayment = useStore((s) => s.recordDocumentPayment);
   const pushPaymentToXero = useStore((s) => s.pushPaymentToXero);
+  const businessSettings = useStore((s) => s.businessSettings);
   const updateDocumentPayment = useStore((s) => s.updateDocumentPayment);
   const deleteDocumentPayment = useStore((s) => s.deleteDocumentPayment);
 
@@ -262,12 +267,16 @@ export function RecordPaymentScreen() {
         }
       }
 
+      // Done stays primary: the money is banked, the receipt is an offer.
+      // Edited entries (above) never offer one — an edit isn't a payment.
       showAlert({
         type: 'success',
         title: paymentCopy.paymentRecordedTitle,
         message: `${formatCurrency(paymentAmount)} recorded against this invoice.`,
         primaryButtonText: 'Done',
         primaryButtonAction: dismiss,
+        secondaryButtonText: paymentCopy.sendReceipt,
+        secondaryButtonAction: () => shareReceipt(paymentAmount, paymentMethod, paymentDate),
       });
     } catch (error) {
       showAlert({
@@ -277,6 +286,45 @@ export function RecordPaymentScreen() {
       });
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  /**
+   * A receipt the tradie can text or share after recording a payment by
+   * hand. The server already emails the customer a branded receipt whenever
+   * an invoice with an email address takes a payment — but the tradie never
+   * sees that go out, and plenty of invoices only carry a mobile. Same share
+   * sheet and same text as the Tap to Pay receipt, so a customer can't tell
+   * which way they paid from the shape of the confirmation.
+   *
+   * Built from the form's method, not the stored ledger entry: the ledger
+   * vocabulary collapses card and cheque into "other".
+   */
+  const shareReceipt = async (amount: number, method: PaymentMethod, paidAt: Date) => {
+    const message = buildPaymentReceipt({
+      businessName: businessSettings?.businessName,
+      reference: invoice?.invoiceNumber ? `Invoice ${invoice.invoiceNumber}` : document?.job?.name,
+      amount,
+      method,
+      balanceDue: Math.max(0, amountDue - amount),
+      at: paidAt,
+    });
+    // Desktop browsers have no Web Share API; the clipboard is the fallback
+    // the rest of the app uses (see FollowUpSheet).
+    if (IS_WEB && typeof navigator !== 'undefined' && !(navigator as any).share) {
+      try {
+        await Clipboard.setStringAsync(message);
+        Alert.alert('Receipt copied', 'The receipt is on your clipboard.');
+      } catch {
+        Alert.alert('Error', 'Could not copy the receipt.');
+      }
+      return;
+    }
+    try {
+      await Share.share({ message });
+    } catch {
+      // Dismissing the share sheet rejects on some platforms. The payment is
+      // already recorded; nothing here may look like it failed.
     }
   };
 

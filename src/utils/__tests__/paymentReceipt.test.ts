@@ -63,4 +63,30 @@ describe('buildPaymentReceipt', () => {
     const out = buildPaymentReceipt({ amount: 1, at });
     expect(out).toMatch(/When: 4 Sept? 2026, 11:13 am/);
   });
+
+  it('defaults the method to card so the Tap to Pay path is unchanged', () => {
+    const out = buildPaymentReceipt({ amount: 1, at });
+    expect(out).toContain('Paid by: card');
+  });
+
+  it.each([
+    ['cash', 'Paid by: cash'],
+    ['bank_transfer', 'Paid by: bank transfer'],
+    ['cheque', 'Paid by: cheque'],
+    ['card', 'Paid by: card'],
+    ['other', 'Paid by: other'],
+  ] as const)('names the real payment method: %s', (method, expected) => {
+    const out = buildPaymentReceipt({ amount: 1, method, at });
+    expect(out).toContain(expected);
+  });
+
+  it('says what is still owed after a part payment', () => {
+    const out = buildPaymentReceipt({ amount: 100, balanceDue: 420, at });
+    expect(out).toContain('Balance remaining: $420.00');
+  });
+
+  it('prints no balance line once the invoice is settled', () => {
+    expect(buildPaymentReceipt({ amount: 100, balanceDue: 0, at })).not.toMatch(/balance/i);
+    expect(buildPaymentReceipt({ amount: 100, at })).not.toMatch(/balance/i);
+  });
 });

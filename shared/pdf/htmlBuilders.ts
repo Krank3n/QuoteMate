@@ -51,7 +51,11 @@ const sumRoundedLineTotals = (materials: PdfMaterial[], multiplier: number) =>
  * a watermarked PDF only appears when the user is exporting locally and
  * trying to bypass the gate.
  */
-function buildWatermarkCSS(): string {
+const WATERMARK_RED = '220, 38, 38';
+/** #059669 — the green the paid-in-full receipt email already uses. */
+const PAID_GREEN = '5, 150, 105';
+
+function buildWatermarkCSS(rgb: string = WATERMARK_RED): string {
   return `
     .pdf-watermark {
       position: fixed;
@@ -71,7 +75,7 @@ function buildWatermarkCSS(): string {
       font-size: 140px;
       font-weight: 900;
       letter-spacing: 8px;
-      color: rgba(220, 38, 38, 0.18);
+      color: rgba(${rgb}, 0.18);
       text-align: center;
       line-height: 1;
     }
@@ -79,18 +83,18 @@ function buildWatermarkCSS(): string {
       display: block;
       font-size: 22px;
       letter-spacing: 3px;
-      color: rgba(220, 38, 38, 0.32);
+      color: rgba(${rgb}, 0.32);
       margin-top: 12px;
     }
   `;
 }
 
-function buildWatermarkHTML(text: string): string {
+function buildWatermarkHTML(headline: string, sub: string): string {
   return `
     <div class="pdf-watermark">
       <div>
-        <div class="pdf-watermark-text">DRAFT</div>
-        <div class="pdf-watermark-sub">${escapeHtml(text)}</div>
+        <div class="pdf-watermark-text">${escapeHtml(headline)}</div>
+        <div class="pdf-watermark-sub">${escapeHtml(sub)}</div>
       </div>
     </div>
   `;
@@ -948,7 +952,7 @@ export function buildQuotePdfHtml(
       </style>
     </head>
     <body>
-      ${watermark ? buildWatermarkHTML(watermark) : ''}
+      ${watermark ? buildWatermarkHTML('DRAFT', watermark) : ''}
       <div class="content-wrapper">
       <div class="header document-header">
         ${buildBusinessHeaderHTML(business, { omitCredentials: showcasesCredentials(templateId) })}
@@ -1230,6 +1234,18 @@ export function buildInvoicePdfHtml(
 
   const paidAmount = invoice.paidAmount || 0;
   const amountDue = invoice.total - paidAmount;
+  // A settled invoice reads as settled at a glance: a diagonal PAID stamp
+  // dated the day the money landed. The call sites only set paidDate at
+  // stage 'paid', so its presence is the flag — no arithmetic here. A paid
+  // doc is never a draft, so the gate watermark and the stamp can't both
+  // render; the stamp wins regardless.
+  const paidStamp = invoice.paidDate;
+  const overlayCss = paidStamp
+    ? buildWatermarkCSS(PAID_GREEN)
+    : watermark ? buildWatermarkCSS() : '';
+  const overlayHtml = paidStamp
+    ? buildWatermarkHTML('PAID', `Paid ${paidStamp}`)
+    : watermark ? buildWatermarkHTML('DRAFT', watermark) : '';
 
   // One payment box, not two. When the payment-methods section renders, the
   // amount-due / due-date lines ride inside it; a separate "Payment
@@ -1241,10 +1257,19 @@ export function buildInvoicePdfHtml(
         ${invoice.invoiceNumber ? `<p>Please reference invoice number ${escapeHtml(invoice.invoiceNumber)} with your payment.</p>` : ''}`;
   const methodsHtml = generatePaymentMethodsHTML(invoice.paymentMethods, {
     plan: invoice.plan,
-    squarePaymentLinkUrl: invoice.squarePaymentLinkUrl,
+    // Never invite a second payment into a still-live Square link.
+    squarePaymentLinkUrl: paidStamp ? undefined : invoice.squarePaymentLinkUrl,
     infoHtml: paymentInfoHtml,
   });
-  const paymentBlockHtml = methodsHtml || `
+  // A settled invoice must not ask to be paid: no bank details, no due date,
+  // no "reference this number with your payment". One line saying it's done.
+  const paymentBlockHtml = paidStamp
+    ? `
+      <div class="payment-box">
+        <h3>Paid in full</h3>
+        <p>Payment received ${escapeHtml(paidStamp)}. Nothing owing on this invoice.</p>
+      </div>`
+    : methodsHtml || `
       <div class="payment-box">
         <h3>Payment Information</h3>${paymentInfoHtml}
       </div>`;
@@ -1258,11 +1283,11 @@ export function buildInvoicePdfHtml(
       <style>
         ${printMediaCSS}
         ${getTemplateCSS(templateId, business.brandColor)}
-        ${watermark ? buildWatermarkCSS() : ''}
+        ${overlayCss}
       </style>
     </head>
     <body>
-      ${watermark ? buildWatermarkHTML(watermark) : ''}
+      ${overlayHtml}
       <div class="content-wrapper">
       <div class="header document-header">
         ${buildBusinessHeaderHTML(business, { omitCredentials: showcasesCredentials(templateId) })}
