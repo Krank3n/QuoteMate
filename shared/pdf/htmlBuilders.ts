@@ -101,6 +101,69 @@ function buildWatermarkHTML(headline: string, sub: string): string {
 }
 
 /**
+ * The PAID stamp on a settled invoice.
+ *
+ * NOT the fixed-position watermark above: `position: fixed` centres on the
+ * whole document, so on a three-page invoice the stamp landed on page 2
+ * while the totals sat on page 3 (seen on the iOS print preview). Anchoring
+ * it to the totals box puts it across the figures wherever they fall, and
+ * `break-inside: avoid` keeps the box and its stamp on one page.
+ */
+function buildPaidStampCSS(): string {
+  return `
+    .paid-stamp-anchor {
+      position: relative;
+      page-break-inside: avoid;
+      break-inside: avoid;
+    }
+    .paid-stamp {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+      z-index: 5;
+      transform: rotate(-18deg);
+      transform-origin: center center;
+    }
+    .paid-stamp .paid-stamp-text {
+      font-size: 84px;
+      font-weight: 900;
+      letter-spacing: 6px;
+      color: rgba(${PAID_GREEN}, 0.18);
+      text-align: center;
+      line-height: 1;
+    }
+    .paid-stamp .paid-stamp-sub {
+      display: block;
+      font-size: 16px;
+      letter-spacing: 2px;
+      color: rgba(${PAID_GREEN}, 0.38);
+      margin-top: 8px;
+      text-align: center;
+    }
+  `;
+}
+
+function wrapWithPaidStamp(summaryHtml: string, paidDate: string): string {
+  return `
+    <div class="paid-stamp-anchor">
+      ${summaryHtml}
+      <div class="paid-stamp">
+        <div>
+          <div class="paid-stamp-text">PAID</div>
+          <div class="paid-stamp-sub">Paid ${escapeHtml(paidDate)}</div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+/**
  * The number always prints, even beside badge artwork that may carry it
  * baked-in: `label`, `number` and the uploaded logo are independent fields,
  * so nothing guarantees the artwork shows the licence number — and a licence
@@ -1240,12 +1303,9 @@ export function buildInvoicePdfHtml(
   // doc is never a draft, so the gate watermark and the stamp can't both
   // render; the stamp wins regardless.
   const paidStamp = invoice.paidDate;
-  const overlayCss = paidStamp
-    ? buildWatermarkCSS(PAID_GREEN)
-    : watermark ? buildWatermarkCSS() : '';
-  const overlayHtml = paidStamp
-    ? buildWatermarkHTML('PAID', `Paid ${paidStamp}`)
-    : watermark ? buildWatermarkHTML('DRAFT', watermark) : '';
+  const overlayCss = !paidStamp && watermark ? buildWatermarkCSS() : '';
+  const overlayHtml = !paidStamp && watermark ? buildWatermarkHTML('DRAFT', watermark) : '';
+  const summaryHtml = buildSummaryHTML(invoice, paidAmount, amountDue, invoice.depositCredit);
 
   // One payment box, not two. When the payment-methods section renders, the
   // amount-due / due-date lines ride inside it; a separate "Payment
@@ -1284,6 +1344,7 @@ export function buildInvoicePdfHtml(
         ${printMediaCSS}
         ${getTemplateCSS(templateId, business.brandColor)}
         ${overlayCss}
+        ${paidStamp ? buildPaidStampCSS() : ''}
       </style>
     </head>
     <body>
@@ -1324,7 +1385,7 @@ export function buildInvoicePdfHtml(
 
       ${showLineItems && !labourInScopeTable ? buildLaborHTML(invoice) : ''}
 
-      ${buildSummaryHTML(invoice, paidAmount, amountDue, invoice.depositCredit)}
+      ${paidStamp ? wrapWithPaidStamp(summaryHtml, paidStamp) : summaryHtml}
 
       ${invoice.notes ? `<div class="info-section"><h3>Notes</h3><p>${formatMultiline(invoice.notes)}</p></div>` : ''}
 

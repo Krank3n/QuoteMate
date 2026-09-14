@@ -44,8 +44,10 @@ function invoiceData(over: Partial<InvoicePdfData> = {}): InvoicePdfData {
   };
 }
 
-const stampText = (html: string) => html.match(/pdf-watermark-text">([^<]*)</)?.[1];
-const stampSub = (html: string) => html.match(/pdf-watermark-sub">([^<]*)</)?.[1];
+const stampText = (html: string) => html.match(/paid-stamp-text">([^<]*)</)?.[1];
+const stampSub = (html: string) => html.match(/paid-stamp-sub">([^<]*)</)?.[1];
+const wmText = (html: string) => html.match(/pdf-watermark-text">([^<]*)</)?.[1];
+const wmSub = (html: string) => html.match(/pdf-watermark-sub">([^<]*)</)?.[1];
 
 describe('PAID stamp', () => {
   it('stamps a settled invoice with PAID and the date the money landed', () => {
@@ -63,10 +65,13 @@ describe('PAID stamp', () => {
     expect(html).not.toContain('rgba(220, 38, 38');
   });
 
-  it('leaves the totals on the page beside the stamp', () => {
+  it('anchors the stamp to the totals box, not the page — a 3-page invoice stamped page 2 while the totals sat on page 3', () => {
     const html = buildInvoicePdfHtml(invoiceData({ paidAmount: 110, paidDate: '14 September 2026' }), business);
-    expect(html).toContain('Amount Paid');
-    expect(html).toContain('$110.00');
+    const anchor = html.match(/<div class="paid-stamp-anchor">([\s\S]*?)<div class="paid-stamp">/)?.[1] ?? '';
+    expect(anchor).toContain('Amount Paid');
+    expect(anchor).toContain('$110.00');
+    expect(html).toContain('break-inside: avoid');
+    expect(html).not.toContain('position: fixed');
   });
 
   it('drops the live Pay Now link once the invoice is paid', () => {
@@ -101,15 +106,15 @@ describe('PAID stamp', () => {
   });
 
   it('does not stamp an unpaid or part-paid invoice — money alone is not the trigger', () => {
-    expect(buildInvoicePdfHtml(invoiceData(), business)).not.toContain('pdf-watermark');
-    expect(buildInvoicePdfHtml(invoiceData({ paidAmount: 50 }), business)).not.toContain('pdf-watermark');
+    expect(buildInvoicePdfHtml(invoiceData(), business)).not.toContain('paid-stamp');
+    expect(buildInvoicePdfHtml(invoiceData({ paidAmount: 50 }), business)).not.toContain('paid-stamp');
     // Even a paidAmount equal to the total: the stage decides, via paidDate.
-    expect(buildInvoicePdfHtml(invoiceData({ paidAmount: 110 }), business)).not.toContain('pdf-watermark');
+    expect(buildInvoicePdfHtml(invoiceData({ paidAmount: 110 }), business)).not.toContain('paid-stamp');
   });
 
   it('never stamps a quote', () => {
     const html = buildQuotePdfHtml(quoteData(), business);
-    expect(html).not.toContain('pdf-watermark');
+    expect(html).not.toContain('paid-stamp');
   });
 
   it('escapes the date text like any other customer-visible string', () => {
@@ -122,15 +127,15 @@ describe('PAID stamp', () => {
 describe('gate watermark after the stamp landed', () => {
   it('still renders DRAFT with the gate text on an unpaid invoice', () => {
     const html = buildInvoicePdfHtml(invoiceData(), business, { watermark: 'UPGRADE TO SEND' });
-    expect(stampText(html)).toBe('DRAFT');
-    expect(stampSub(html)).toBe('UPGRADE TO SEND');
+    expect(wmText(html)).toBe('DRAFT');
+    expect(wmSub(html)).toBe('UPGRADE TO SEND');
     expect(html).toContain('rgba(220, 38, 38, 0.18)');
   });
 
   it('still renders DRAFT with the gate text on a quote', () => {
     const html = buildQuotePdfHtml(quoteData(), business, { watermark: 'UPGRADE TO SEND' });
-    expect(stampText(html)).toBe('DRAFT');
-    expect(stampSub(html)).toBe('UPGRADE TO SEND');
+    expect(wmText(html)).toBe('DRAFT');
+    expect(wmSub(html)).toBe('UPGRADE TO SEND');
   });
 
   it('renders one overlay, the stamp, if both are ever asked for', () => {
@@ -139,7 +144,8 @@ describe('gate watermark after the stamp landed', () => {
       business,
       { watermark: 'UPGRADE TO SEND' },
     );
-    expect(html.split('class="pdf-watermark"').length - 1).toBe(1);
+    expect(html).not.toContain('pdf-watermark');
+    expect(html.split('class="paid-stamp"').length - 1).toBe(1);
     expect(stampText(html)).toBe('PAID');
   });
 });
