@@ -112,3 +112,21 @@ describe('describeDeletedJob', () => {
     expect(blob).toContain('"attached_doc_count":2');
   });
 });
+
+describe('every delete surface names itself', () => {
+  // 13 Sep 2026: the first job_deleted row in production read source=unknown
+  // because the View Job screen passed the bare store actions into the
+  // cascade. Any screen that deletes must hand the cascade a named source.
+  it('the three screens that delete jobs all pass a source into cascadeDeleteJob', () => {
+    const { readFileSync } = require('fs') as typeof import('fs');
+    const { join } = require('path') as typeof import('path');
+    for (const rel of ['screens/ViewJobScreen.tsx', 'hooks/useJobActionsSheet.tsx']) {
+      const src = readFileSync(join(__dirname, '..', rel), 'utf8');
+      const call = src.slice(src.indexOf('cascadeDeleteJob('));
+      const block = call.slice(0, call.indexOf('});') + 3);
+      expect(block, rel).toMatch(/deleteQuote: \(id\) => deleteQuote\(id, 'job_cascade'\)/);
+      expect(block, rel).toMatch(/deleteInvoice: \(id\) => deleteInvoice\(id, 'job_cascade'\)/);
+      expect(block, rel).toMatch(/deleteJob: \(id\) => deleteJob\(id, '(view_job_screen|job_actions_sheet)'\)/);
+    }
+  });
+});

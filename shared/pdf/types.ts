@@ -138,6 +138,10 @@ export interface InvoicePdfData extends QuotePdfData {
   dueDate: string; // Pre-formatted date string
   paymentTerms?: string; // Pre-formatted payment terms string
   paidAmount?: number;
+  // Pre-formatted date the invoice was settled. Present ONLY when the
+  // document is at stage 'paid' — its presence is the "paid in full" flag
+  // that puts the PAID stamp on the page. Derive it with paidInFullAtMs.
+  paidDate?: string;
   // Deposit credit carried over from the source quote. Rendered as a
   // "Deposit already paid" row so the customer sees why the total differs.
   depositCredit?: number;

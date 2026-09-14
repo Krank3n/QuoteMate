@@ -112,6 +112,8 @@ export function describeDeletedDoc(
 export type JobDeleteSource =
   // "Delete job" on the job actions sheet (after its attached docs cascade).
   | 'job_actions_sheet'
+  // "Delete job" on the View Job screen itself.
+  | 'view_job_screen'
   // Mate deleted a quote and the parent job had nothing left on it.
   | 'mate_cascade'
   | 'unknown';

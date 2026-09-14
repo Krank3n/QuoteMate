@@ -794,9 +794,9 @@ export function ViewJobScreen() {
       primaryButtonAction: async () => {
         try {
           await cascadeDeleteJob(job, attachedDocs, {
-            deleteQuote,
-            deleteInvoice,
-            deleteJob,
+            deleteQuote: (id) => deleteQuote(id, 'job_cascade'),
+            deleteInvoice: (id) => deleteInvoice(id, 'job_cascade'),
+            deleteJob: (id) => deleteJob(id, 'view_job_screen'),
           });
           navigation.goBack();
         } catch {

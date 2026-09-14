@@ -18,6 +18,16 @@
  */
 
 import { formatCurrency } from './quoteCalculator';
+import type { PaymentMethod } from '../types';
+
+/** Lowercase on purpose — it reads as prose after "Paid by:". */
+const METHOD_LABEL: Record<PaymentMethod, string> = {
+  card: 'card',
+  cash: 'cash',
+  bank_transfer: 'bank transfer',
+  cheque: 'cheque',
+  other: 'other',
+};
 
 export interface PaymentReceiptInput {
   /** The tradie's business name. The only identity a customer should see. */
@@ -26,6 +36,19 @@ export interface PaymentReceiptInput {
   reference?: string | null;
   /** Amount actually charged, in dollars. */
   amount: number;
+  /**
+   * How the money arrived. Defaults to card — the Tap to Pay path that this
+   * receipt was written for. Record Payment passes the method the tradie
+   * picked on the form (not the stored ledger method, which collapses card
+   * and cheque into "other").
+   */
+  method?: PaymentMethod;
+  /**
+   * What the customer still owes after this payment. A part payment must not
+   * read as the invoice being closed — when this is above zero the receipt
+   * says so. Omitted or zero means nothing is printed.
+   */
+  balanceDue?: number;
   /** Defaults to now. Injectable so the text is testable. */
   at?: Date;
 }
@@ -58,6 +81,8 @@ export function buildPaymentReceipt({
   businessName,
   reference,
   amount,
+  method = 'card',
+  balanceDue,
   at = new Date(),
 }: PaymentReceiptInput): string {
   const lines: string[] = [];
@@ -71,8 +96,11 @@ export function buildPaymentReceipt({
   const ref = (reference || '').trim();
   if (ref) lines.push(`For: ${ref}`);
   lines.push(`Amount paid: ${formatCurrency(amount)}`);
-  lines.push(`Paid by: card`);
+  lines.push(`Paid by: ${METHOD_LABEL[method] ?? METHOD_LABEL.other}`);
   lines.push(`When: ${formatWhen(at)}`);
+  if (typeof balanceDue === 'number' && balanceDue > 0.005) {
+    lines.push(`Balance remaining: ${formatCurrency(balanceDue)}`);
+  }
 
   return lines.join('\n');
 }
