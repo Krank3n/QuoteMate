@@ -1306,6 +1306,13 @@ export function AssistantScreen() {
           if (typeof proposal.laborMarkup === 'number') parts.push(`labour markup ${proposal.laborMarkup}%`);
           if (typeof proposal.laborRate === 'number') parts.push(`labour rate $${proposal.laborRate}/h`);
           if (typeof proposal.laborHours === 'number') parts.push(`labour hours ${proposal.laborHours}`);
+          if (typeof proposal.travelAdjustment === 'number') {
+            parts.push(
+              proposal.travelAdjustment > 0
+                ? `travel ${formatCurrency(proposal.travelAdjustment)}`
+                : 'travel taken off',
+            );
+          }
           note(`[context] Updated rates on quote ${proposal.quoteId}: ${parts.join(', ')}.${totalClause}`);
           break;
         }

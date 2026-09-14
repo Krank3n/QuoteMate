@@ -31,11 +31,14 @@ vi.mock('expo-mail-composer', () => ({ composeAsync: vi.fn(), isAvailableAsync: 
 vi.mock('../services/sectionTemplateService', () => ({ loadTemplates: vi.fn(async () => []) }));
 vi.mock('../services/materialsPipeline', () => ({
   PipelineCancelled: class PipelineCancelled extends Error {},
+  // Read off every priced row when the supplier gap is summarised.
+  LAST_RESORT_GUESS_PREFIX: 'Rough guess',
   generateMaterialsForQuote: vi.fn(async ({ quote }: any) => ({ updatedQuote: quote, generatedMaterialCount: 0 })),
   fetchPricesForQuote: vi.fn(async ({ quote }: any) => ({ updatedQuote: quote, fetchedCount: 0, failedCount: 0, skippedCount: 0 })),
 }));
 
 import { useStore } from './useStore';
+import { fetchPricesForQuote } from '../services/materialsPipeline';
 import { __resetPricingInFlight } from '../services/assistant/pricingInFlight';
 import type { Contact, Quote } from '../types';
 import type { DraftQuoteProposal } from '../types/assistant';
@@ -139,5 +142,80 @@ describe('one customer, one contact', () => {
     expect(useStore.getState().contacts).toHaveLength(1);
     expect(c.email).toBe('diane@example.com');
     expect(c.phone).toBe('0477 535 423');
+  });
+});
+
+describe('a travel charge stated before the job is drafted', () => {
+  /**
+   * Travel is a share of the subtotal, so it can only go on once pricing has
+   * settled one. The figure the tradie said rides on the draft card and lands
+   * at the END of the pipeline — and not at all when the run came back
+   * degraded, because a share of totals that aren't real is the wrong money.
+   */
+  const priceAt = (dollars: number) =>
+    vi.mocked(fetchPricesForQuote).mockImplementationOnce(async ({ quote }: any) => ({
+      updatedQuote: {
+        ...quote,
+        materials: [
+          { id: 'm1', name: 'Concrete N20', quantity: 4, unit: 'each', price: dollars / 4, totalPrice: dollars },
+        ],
+      },
+      fetchedCount: 1,
+      failedCount: 0,
+      skippedCount: 0,
+    }) as any);
+
+  beforeEach(() => {
+    // A quote with every money field set, so the totals are arithmetic and
+    // not NaN — the minimal stub the other tests here use never adds up.
+    useStore.setState({
+      createNewQuote: () => {
+        useStore.setState({
+          currentQuote: {
+            id: 'quote-travel',
+            status: 'draft',
+            job: { id: 'job-travel', name: '', description: '' },
+            materials: [],
+            laborHours: 0,
+            laborRate: 0,
+            markup: 0,
+            laborMarkup: 0,
+            gstRegistered: false,
+            pricesIncludeGst: false,
+            updatedAt: new Date(),
+          } as unknown as Quote,
+        } as any);
+      },
+    } as any);
+  });
+
+  it('lands the stated dollars on the priced draft and moves the total by that much', async () => {
+    priceAt(1000);
+    const result = await useStore.getState().applyProposal(draft({ travelAdjustment: 80 }));
+    expect(result.ok).toBe(true);
+    const q = useStore.getState().currentQuote!;
+    expect(q.subtotal).toBe(1000);
+    // $80 of a $1,000 subtotal is 8% — the same field the labour screen edits.
+    expect(q.travelAdjustment).toBe(8);
+    expect(q.total).toBe(1080);
+    // And it is saved, not just held in memory.
+    expect(useStore.getState().quotes.find((x) => x.id === 'quote-travel')!.total).toBe(1080);
+  });
+
+  it('leaves travel off a draft where the tradie named no figure', async () => {
+    priceAt(1000);
+    await useStore.getState().applyProposal(draft());
+    const q = useStore.getState().currentQuote!;
+    expect(q.travelAdjustment).toBeUndefined();
+    expect(q.total).toBe(1000);
+  });
+
+  it('puts no travel on a draft the pipeline could not price, and says so', async () => {
+    vi.mocked(fetchPricesForQuote).mockImplementationOnce(async () => {
+      throw new Error('pricing unavailable');
+    });
+    const result = await useStore.getState().applyProposal(draft({ travelAdjustment: 80 }));
+    expect(useStore.getState().currentQuote!.travelAdjustment).toBeUndefined();
+    expect(result.ok && result.pipelineDegraded).toBe(true);
   });
 });

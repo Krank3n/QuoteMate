@@ -8,7 +8,7 @@
  */
 
 import { Quote } from '../types';
-import { recalculateQuoteTotals } from '../../shared/pricing/documentTotals';
+import { recalculateQuoteTotals, travelPercentForCharge } from '../../shared/pricing/documentTotals';
 
 export {
   formatCurrency,
@@ -31,4 +31,20 @@ export function updateQuoteCalculations(quote: Quote): Quote {
     ...recalculateQuoteTotals(quote),
     updatedAt: new Date(),
   };
+}
+
+/**
+ * Put a travel charge the tradie stated in DOLLARS onto a quote as the same
+ * travel adjustment the Labour & Markup screen edits, and re-run the totals.
+ *
+ * The charge is read against the quote's settled subtotal, so call this after
+ * any other rate change on the same card and after pricing has landed —
+ * a percent worked out against a half-priced quote is the wrong money.
+ * Null when the quote has no subtotal to carry a charge yet.
+ */
+export function landTravelCharge(quote: Quote, dollars: number): Quote | null {
+  const settled = updateQuoteCalculations(quote);
+  const travelAdjustment = travelPercentForCharge(dollars, settled.subtotal);
+  if (travelAdjustment === null) return null;
+  return updateQuoteCalculations({ ...settled, travelAdjustment });
 }

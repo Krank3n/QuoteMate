@@ -54,6 +54,13 @@ export interface DraftQuoteProposal extends BaseProposal {
    * generated or priced on top and no labour is added.
    */
   rateLines?: RateLine[];
+  /**
+   * A travel charge in DOLLARS, as the tradie said it (the drive, a callout,
+   * fuel). Lands once pricing has settled a subtotal: the document stores
+   * travel as a percent of the subtotal, and apply works out the percent that
+   * yields this figure — see landTravelCharge.
+   */
+  travelAdjustment?: number;
 }
 
 /** A standing rule about how the tradie quotes, saved to their settings on Apply. */
@@ -289,6 +296,10 @@ export interface UpdateQuoteRatesProposal extends BaseProposal {
   laborMarkup?: number;
   laborRate?: number;
   laborHours?: number;
+  // A travel charge in DOLLARS (the tradie's figure), unlike the document's
+  // own travelAdjustment, which is a percent of the subtotal — apply converts.
+  // 0 takes travel off.
+  travelAdjustment?: number;
   // Display-only — name the doc on the card without a re-fetch.
   displayName?: string;
 }

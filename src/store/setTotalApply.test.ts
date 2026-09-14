@@ -54,6 +54,7 @@ const remember = vi.hoisted(() => ({ rememberMaterialPrice: vi.fn(async () => tr
 vi.mock('../services/priceMemory', () => ({ rememberMaterialPrice: remember.rememberMaterialPrice }));
 
 import { useStore } from './useStore';
+import { calculateQuote } from '../../shared/pricing/documentTotals';
 import { DISCOUNT_NAME } from '../utils/setTotal';
 import type { Document } from '../types/document';
 import type { Contact, Material, QuoteSection } from '../types';
@@ -364,6 +365,101 @@ describe('propose_update_quote_rates on a sectioned document', () => {
     await useStore.getState().applyProposal({ ...base, type: 'propose_update_quote_rates', quoteId: DOC_ID, laborRate: 100 });
     expect(stored().sections!.find((s) => s.id === 'l')!.laborTotal).toBe(300);
     expect(stored().sections!.find((s) => s.id === 'a')!.laborTotal).toBe(450);
+  });
+});
+
+describe('a travel charge through propose_update_quote_rates', () => {
+  /**
+   * Travel is money on a quote and Mate had no way to put it on: a tradie who
+   * said the job was a fair drive out of town was told it wouldn't affect the
+   * quote. The tradie states dollars; the document stores travel as a percent
+   * of the subtotal, the way the Labour & Markup screen's stepper does — so
+   * the charge is converted on apply and has to come back out as the same
+   * dollars on that screen.
+   */
+  const rates = (over: Record<string, unknown>) =>
+    useStore.getState().applyProposal({ ...base, type: 'propose_update_quote_rates', quoteId: DOC_ID, ...over } as any);
+
+  /** The dollars the Labour & Markup screen prints on its Travel Adjustment row. */
+  const travelRow = (doc: Document) =>
+    calculateQuote(
+      doc.materials,
+      doc.laborRate,
+      doc.laborHours,
+      doc.markup,
+      doc.travelAdjustment ?? 0,
+      doc.sections,
+      doc.laborMarkup ?? doc.markup,
+      doc.laborExtraHours ?? 0,
+      doc.pricesIncludeGst === true,
+      doc.gstRegistered !== false,
+    ).travelAdjustmentAmount;
+
+  it('lands $80 on INV-004 and moves the total by exactly $80', async () => {
+    const result = await rates({ travelAdjustment: 80 });
+    expect(result.ok).toBe(true);
+    // $1,251 subtotal + $164.70 markup + $80 travel, not GST registered.
+    expect(result.ok && result.appliedTotal).toBe(1495.7);
+    expect(stored().total).toBe(1495.7);
+    // Stored as a percent, and it reads back on the labour screen as $80.
+    expect(stored().travelAdjustment).toBeGreaterThan(0);
+    expect(travelRow(stored())).toBe(80);
+  });
+
+  it('keeps a round charge a round percent, because the customer sees the percent', async () => {
+    // $125.10 is exactly 10% of the $1,251 subtotal.
+    await rates({ travelAdjustment: 125.1 });
+    expect(stored().travelAdjustment).toBe(10);
+    expect(travelRow(stored())).toBe(125.1);
+  });
+
+  it('is added beside the markup, never marked up itself', async () => {
+    await rates({ travelAdjustment: 125.1 });
+    // The markup is still the one the lines earn — travel is not in its base.
+    expect(stored().markupAmount).toBe(164.7);
+    expect(stored().subtotal).toBe(1251);
+    expect(stored().total).toBe(1251 + 164.7 + 125.1);
+  });
+
+  it('goes inside the GST base, so a registered business charges GST on the travel too', async () => {
+    useStore.setState({ documents: [inv004({ gstRegistered: true, pricesIncludeGst: false })] } as any);
+    const before = await rates({ markup: 30 });
+    expect(before.ok && before.appliedTotal).toBe(1557.27); // (1251 + 164.7) × 1.1
+    const after = await rates({ travelAdjustment: 125.1 });
+    // (1251 + 164.7 + 125.1) × 1.1 — the travel is grossed up with everything else.
+    expect(after.ok && after.appliedTotal).toBe(1694.88);
+    expect(stored().gst).toBe(154.08);
+  });
+
+  it('is charged on the subtotal the same card leaves behind, not the one it found', async () => {
+    // Labour drops to 2 h in the same card: $549 + $180 = $729 subtotal.
+    const result = await rates({ laborHours: 2, travelAdjustment: 80 });
+    expect(stored().subtotal).toBe(729);
+    expect(travelRow(stored())).toBe(80);
+    expect(result.ok && result.appliedTotal).toBe(973.7); // 729 + 164.7 + 80
+  });
+
+  it('0 takes travel back off and the total goes back to what it was', async () => {
+    await rates({ travelAdjustment: 125.1 });
+    expect(stored().total).toBe(1540.8);
+    const off = await rates({ travelAdjustment: 0 });
+    expect(stored().travelAdjustment).toBe(0);
+    expect(off.ok && off.appliedTotal).toBe(1415.7);
+  });
+
+  it('leaves an existing travel charge alone when the card only changes a rate', async () => {
+    await rates({ travelAdjustment: 125.1 });
+    await rates({ markup: 0 });
+    expect(stored().travelAdjustment).toBe(10);
+    expect(stored().total).toBe(1251 + 125.1);
+  });
+
+  it('refuses travel on a document with nothing priced to charge it against, and changes nothing', async () => {
+    useStore.setState({ documents: [inv004({ materials: [], sections: [], laborHours: 0, laborTotal: 0 })] } as any);
+    const result = await rates({ travelAdjustment: 80 });
+    expect(result.ok).toBe(false);
+    expect(!result.ok && result.error).toContain('nothing priced');
+    expect(stored().travelAdjustment).toBeUndefined();
   });
 });
 

@@ -23,8 +23,8 @@ import type { SupplierGapSummary } from '../services/assistant/supplierGapNote';
 import { reviewQuoteMaterials, isFlaggedRow, priceResettableIds, topLinesSummary, wipeStillImplausibleRows, withIntegrityIssues, QuoteReview } from '../utils/quoteReview';
 import { checkDocumentIntegrity } from '../../shared/document/integrityCheck';
 import { loadTemplates } from '../services/sectionTemplateService';
-import { updateQuoteCalculations, healBrokenLabourSections } from '../utils/quoteCalculator';
-import { finiteNumber, updateAllMaterialPrices, updateDocumentCalculations } from '../utils/documentCalculator';
+import { updateQuoteCalculations, healBrokenLabourSections, landTravelCharge } from '../utils/quoteCalculator';
+import { finiteNumber, formatCurrency, updateAllMaterialPrices, updateDocumentCalculations } from '../utils/documentCalculator';
 import { applySetTotal, describeSetTotalPlan } from '../utils/setTotal';
 import { normalizePhoneTail } from '../utils/textMatch';
 import { normaliseLabourToHours } from '../../shared/document/labourUnits';
@@ -3979,6 +3979,21 @@ export const useStore = create<AppState>((set, get) => ({
           }
           const { review, supplierGap } = run;
 
+          // The travel charge the tradie stated, now that pricing has settled
+          // the subtotal it is a share of. A degraded run returned above: its
+          // totals aren't real, so a share of them would be the wrong money.
+          let travelNote: string | undefined;
+          if (proposal.travelAdjustment) {
+            const priced = get().currentQuote;
+            const landed = priced && priced.id === quoteId ? landTravelCharge(priced, proposal.travelAdjustment) : null;
+            if (landed) {
+              get().updateQuote(landed);
+              await get().saveDraft(get().currentQuote!);
+            } else {
+              travelNote = `Couldn't put the ${formatCurrency(proposal.travelAdjustment)} travel on — there's nothing priced on it to charge it against yet.`;
+            }
+          }
+
           // If the tradie asked for an invoice up front, auto-convert at the
           // end of the pipeline so they don't have to do a second Apply.
           if (proposal.documentType === 'invoice') {
@@ -3989,6 +4004,7 @@ export const useStore = create<AppState>((set, get) => ({
                 navigate: { kind: 'open_invoice', invoiceId: converted.id },
                 review,
                 supplierGap,
+                ...(travelNote ? { note: travelNote } : {}),
               };
             } catch (err: any) {
               // eslint-disable-next-line no-console
@@ -4004,6 +4020,7 @@ export const useStore = create<AppState>((set, get) => ({
             navigate: { kind: 'job_preview', quoteId },
             review,
             supplierGap,
+            ...(travelNote ? { note: travelNote } : {}),
           };
         }
 
@@ -4142,7 +4159,20 @@ export const useStore = create<AppState>((set, get) => ({
                 }
               : {}),
           };
-          const recalced = updateQuoteCalculations(nextQuote);
+          // Travel is stored as a share of the subtotal, so a stated dollar
+          // figure is read against the subtotal this card LEAVES BEHIND — new
+          // hours or a new rate move it, and the charge has to follow.
+          let recalced = updateQuoteCalculations(nextQuote);
+          if (proposal.travelAdjustment !== undefined) {
+            const landed = landTravelCharge(recalced, proposal.travelAdjustment);
+            if (!landed) {
+              return {
+                ok: false,
+                error: "There's nothing priced on this one to charge travel against yet — get the materials or labour on it first.",
+              };
+            }
+            recalced = landed;
+          }
           const nextDoc: Document = {
             ...target,
             laborRate: recalced.laborRate,
@@ -4157,6 +4187,9 @@ export const useStore = create<AppState>((set, get) => ({
             subtotal: recalced.subtotal,
             gst: recalced.gst,
             total: recalced.total,
+            ...(proposal.travelAdjustment !== undefined
+              ? { travelAdjustment: recalced.travelAdjustment ?? 0 }
+              : {}),
           };
           await get().saveDocument(nextDoc);
           return { ok: true, navigate: { kind: 'job_preview', quoteId: target.id }, appliedTotal: recalced.total };
