@@ -127,6 +127,9 @@ function Body({ proposal }: { proposal: Proposal }) {
                       : ''
                   }`}
           </Text>
+          {typeof proposal.travelAdjustment === 'number' && proposal.travelAdjustment > 0 && (
+            <Text style={styles.dim}>Travel: {formatCurrency(proposal.travelAdjustment)}</Text>
+          )}
         </View>
       );
     case 'propose_remember_preference':
@@ -347,6 +350,13 @@ function Body({ proposal }: { proposal: Proposal }) {
           )}
           {typeof proposal.laborHours === 'number' && (
             <Text style={styles.dim}>Labour hours → {proposal.laborHours} h</Text>
+          )}
+          {typeof proposal.travelAdjustment === 'number' && (
+            <Text style={styles.dim}>
+              {proposal.travelAdjustment > 0
+                ? `Travel: ${formatCurrency(proposal.travelAdjustment)}`
+                : 'Travel: taken off'}
+            </Text>
           )}
           <Text style={styles.dim}>Updates the quote and re-does the totals.</Text>
         </View>
