@@ -28,6 +28,7 @@ import type { Material, RateLine } from '../../types';
 import { resolveQuoteId } from './quoteRefMap';
 import { resolveKnownQuoteId } from './showQuoteGate';
 import { isPricingInFlight } from './pricingInFlight';
+import { isClaimWording } from './claimWording';
 import { canUpdateScope } from './scopeEditable';
 import { sanitizeJobDescription } from '../../utils/sanitizeJobDescription';
 import { MAX_LABEL_CHARS, RATE_CARD_UNITS, normalisePreference, normaliseRateUnit } from '../quotingProfile';
@@ -346,6 +347,22 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
       }
       const rateLines = parseRateLines(input.rateLines);
       if (rateLines.error) return { error: rateLines.error };
+      // A claim has a figure, not a scope. Drafting one without an all-in
+      // rate line sends it through the materials engine (no lines, or a
+      // labour-only line), which invents hours and gear for work that's
+      // already priced. Backstop for the prompt rule.
+      if (
+        input.documentType === 'invoice' &&
+        !rateLines.lines?.every((line) => line.includesMaterials) &&
+        isClaimWording(`${input.jobName} ${input.jobDescription}`)
+      ) {
+        return {
+          error:
+            'This invoice is a claim — the amount is the whole document, so nothing gets generated. ' +
+            'Ask how much the claim is for (ex or inc GST, as they say it) and draft it as ONE rateLines entry: ' +
+            "label naming the claim, quantity 1, unit 'job', unitPrice = the figure, includesMaterials true. Never run the materials engine on a claim.",
+        };
+      }
       const proposal: DraftQuoteProposal = {
         id,
         toolUseId,

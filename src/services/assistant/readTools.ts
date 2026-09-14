@@ -35,6 +35,7 @@ import { buildWordWeights, scoreName, NICHE_MATCH_FLOOR } from './nicheMatch';
 import { isSpecialistSupplyNiche } from '../../data/specialistSupplyNiches';
 import { coversProbes, type SupplierBookSnapshot } from '../supplierBookCoverage';
 import { registeredBusinessSettings } from './quotingProfileContext';
+import { CLAIM_AMOUNT_QUESTION, hasStatedFigure, isClaimWording } from './claimWording';
 // Folding rules are shared with the jobs-list search — see src/utils/textMatch.
 // If they drift, a name is findable by Mate and not by the jobs list.
 import {
@@ -650,6 +651,12 @@ export interface JobRequirementsResult {
   /** True when documentType was 'invoice': the questions are the invoice pair and the supply flags are off. */
   invoiceFastPath: boolean;
   /**
+   * True when the invoice is a claim, deposit or stage payment, or already
+   * carries a dollar figure: the amount is the whole document, so Mate drafts
+   * ONE rate line at that figure and the materials engine never runs.
+   */
+  lumpSum: boolean;
+  /**
    * True when mustAskQuestions are the generic fallback rather than a niche's
    * own. Mate should still ask them, but shouldn't imply this trade was
    * recognised — and shouldn't promise niche-specific pricing off them.
@@ -890,11 +897,21 @@ function buildRequirements(
   // supplier-list offer. The niche match still rides along so the pricing
   // engine knows the trade.
   if (input.documentType === 'invoice') {
+    // A claim ("final claim for the slab", "progress claim 2", "deposit") is
+    // a figure, not a scope: the amount joins the pair unless it was already
+    // said. Either way the draft is one lump-sum line and nothing is generated.
+    const claim = isClaimWording(input.freeText);
+    const figure = hasStatedFigure(input.freeText);
     return {
       matched: { categoryId: resolvedCategoryId, nicheId: resolvedNicheId, templateName: template?.name },
-      // The work is done, so only these two.
-      mustAskQuestions: ['What work was done — enough for a line or two the customer will recognise', 'Who it is for'],
+      // The work is done, so only these two — plus the amount when it's a claim.
+      mustAskQuestions: [
+        'What work was done — enough for a line or two the customer will recognise',
+        'Who it is for',
+        ...(claim && !figure ? [CLAIM_AMOUNT_QUESTION] : []),
+      ],
       invoiceFastPath: true,
+      lumpSum: claim || figure,
       genericScope: false,
       pricingMethod,
       measurementDriven: false,
@@ -923,6 +940,7 @@ function buildRequirements(
     },
     mustAskQuestions,
     invoiceFastPath: false,
+    lumpSum: false,
     genericScope,
     pricingMethod,
     measurementDriven,
