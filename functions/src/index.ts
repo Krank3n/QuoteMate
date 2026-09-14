@@ -2148,6 +2148,11 @@ async function analyzeJobDescriptionCore(uid: string, body: any): Promise<Record
 
   try {
     const { jobDescription, tradeContext, photoBase64: photoBase64Input, photoUrls, existingMaterials, availableTemplates, userSavedRates } = body;
+    // The hours the tradie stated, when the caller carried them — see
+    // AnalyzeRequest.targetHours. Anything that isn't a real positive number
+    // of hours is "not stated", and the prompt keeps its soft rule.
+    const statedHours = Number(body?.targetHours);
+    const targetHours = Number.isFinite(statedHours) && statedHours > 0 ? statedHours : undefined;
 
     if (!isNonEmptyString(jobDescription)) {
       throw new BadRequestError('Missing or invalid jobDescription');
@@ -2281,6 +2286,7 @@ async function analyzeJobDescriptionCore(uid: string, body: any): Promise<Record
       savedRatesSection,
       reeceCatalogueSection,
       tradeContext,
+      targetHours,
     });
 
     const finalPrompt = attachments.length > 0

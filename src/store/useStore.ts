@@ -3454,6 +3454,13 @@ export const useStore = create<AppState>((set, get) => ({
         rateLines?: RateLine[];
         ratesCoverMaterials?: boolean;
         labourOnly?: boolean;
+        /**
+         * The total labour hours the tradie stated, when they did. Pinned on
+         * the finished quote whichever side prices it — see holdStatedHours
+         * in shared/pricing/pipeline.ts. Absent means the engine's estimate
+         * stands, exactly as before.
+         */
+        statedHours?: number;
         /** Recorded on the server-side run — a first draft or a scope correction. */
         kind?: 'draft' | 'scope';
       } = {},
@@ -3571,7 +3578,11 @@ export const useStore = create<AppState>((set, get) => ({
           {
             quoteId,
             kind: options.kind ?? 'draft',
-            options: { stripLabour: rateLineCount > 0, labourOnly: !!options.labourOnly },
+            options: {
+              stripLabour: rateLineCount > 0,
+              labourOnly: !!options.labourOnly,
+              ...(options.statedHours ? { statedHours: options.statedHours } : {}),
+            },
             jobName: get().currentQuote?.job?.name,
           },
           { onProgress: (status) => reportProgress(status) },
@@ -3603,6 +3614,7 @@ export const useStore = create<AppState>((set, get) => ({
             businessSettings: get().businessSettings,
             isPro,
             templates,
+            statedHours: options.statedHours,
             // The two modes below rework the analyse after the fact; a
             // launch-time resume would land the raw list instead.
             resumable: !options.labourOnly && rateLineCount === 0,
@@ -3963,7 +3975,14 @@ export const useStore = create<AppState>((set, get) => ({
           const run = await runScopePipeline(
             quoteId,
             { phase: 'preflight', status: 'Getting ready…', done: false },
-            { rateLines, ratesCoverMaterials, labourOnly },
+            {
+              rateLines,
+              ratesCoverMaterials,
+              labourOnly,
+              // Rate lines carry the labour themselves (the seed above is 0),
+              // so there are no hours to hold onto the quote.
+              statedHours: rateLines.length ? undefined : proposal.estimatedDurationHours,
+            },
           );
           if (run.kind === 'cancelled') {
             return { ok: false, error: 'Pipeline was cancelled.' };
@@ -4088,7 +4107,7 @@ export const useStore = create<AppState>((set, get) => ({
           const run = await runScopePipeline(
             quoteId,
             { phase: 'preflight', status: 'Redoing the materials…', done: false },
-            { kind: 'scope' },
+            { kind: 'scope', statedHours: proposal.estimatedDurationHours },
           );
           if (run.kind === 'cancelled') {
             return { ok: false, error: 'Pipeline was cancelled.' };

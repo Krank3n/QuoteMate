@@ -323,6 +323,14 @@ export interface PricingQuote {
   materials: Material[];
   sections?: QuoteSection[];
   laborHours: number;
+  /**
+   * Hours on top of (or, when negative, off) the sections' sum — the same
+   * buffer the labour screen writes, and what the calculator adds at the
+   * top-level rate. The analyse step writes it when the tradie stated the
+   * total hours, so the engine's section split can stand while the total
+   * stays the tradie's number (see holdStatedHours).
+   */
+  laborExtraHours?: number;
   /** Job-level quality tier inferred at analysis time — see candidateRanker. */
   qualityTier?: 'budget' | 'standard' | 'premium';
   photos?: Array<{ storageUrl?: string; isPlan?: boolean }>;
@@ -375,6 +383,13 @@ export interface AnalyzeRequest {
    * analyseResume; the server-side pipeline never sees it.
    */
   resume?: { requestId: string; result: Record<string, unknown> };
+  /**
+   * The total labour hours the tradie stated for this job. A hard target for
+   * the generator's section split, not an estimate for it to revise. The
+   * finished quote is pinned to it regardless (see holdStatedHours); this
+   * only keeps the split it hands back sensible. Absent when nobody said.
+   */
+  targetHours?: number;
   tradeContext?: {
     categoryName?: string;
     nicheName?: string;

@@ -29,6 +29,8 @@ import { recordAnalyseSent, recordAnalyseSettled } from './analyseLedger';
 export interface AnalyzeOptions {
   quoteId?: string;
   resume?: { requestId: string; result: Record<string, unknown> };
+  /** The total labour hours the tradie stated — see AnalyzeRequest.targetHours. */
+  targetHours?: number;
 }
 // Lazy-import FileSystem (only available on native). try/catch so the module
 // stays importable where the native package can't load (e.g. unit tests) —
@@ -227,6 +229,7 @@ async function analyzeViaFirebaseFunction(
         existingMaterials,
         availableTemplates,
         userSavedRates,
+        targetHours: options.targetHours,
       }),
     });
 

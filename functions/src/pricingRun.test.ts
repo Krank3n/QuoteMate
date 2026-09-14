@@ -295,6 +295,59 @@ describe('runPricingRun', () => {
     expect(store.record?.progress?.summary).toMatch(/Labour only/);
   });
 
+  // The tradie said "40 hours"; the model draws four sections at 31.5 h and
+  // estimates 32. The quote the run writes carries the tradie's number.
+  const fourSectionAnalysis = async () => ({
+    materials: [
+      { name: 'Rough-in labour', searchTerm: '', quantity: 1, unit: 'each', section: 'Rough-in', sectionMultiplier: 3, sectionLaborHours: 2.5 },
+      { name: 'Fit-off labour', searchTerm: '', quantity: 1, unit: 'each', section: 'Fit-off', sectionMultiplier: 3, sectionLaborHours: 6 },
+      { name: 'Testing', searchTerm: '', quantity: 1, unit: 'each', section: 'Testing', sectionMultiplier: 1, sectionLaborHours: 3 },
+      { name: 'Clean-up', searchTerm: '', quantity: 1, unit: 'each', section: 'Clean-up', sectionMultiplier: 2, sectionLaborHours: 1.5 },
+    ],
+    estimatedHours: 32,
+    jobSummary: '',
+  });
+
+  it('labour-only with stated hours: 40 h stated over a 31.5 h split writes 40 h and 40 × rate', async () => {
+    const store = fakeStore(
+      run({ options: { stripLabour: false, labourOnly: true, statedHours: 40 } }),
+      { q1: quote({ laborHours: 40, markup: 0 }) },
+    );
+    const analyze = vi.fn(fourSectionAnalysis);
+    expect(await runPricingRun({ store, deps: fakeDeps({ analyzeJobDescription: analyze }), log: silent })).toBe('done');
+    const final = store.quoteWrites[0].patch as StoredQuote;
+    const sectionHours = (final.sections ?? []).reduce((sum, s) => sum + s.laborHours * s.multiplier, 0);
+    expect(sectionHours).toBeCloseTo(31.5, 5);
+    expect(final.laborHours).toBe(40);
+    expect(final.laborExtraHours).toBeCloseTo(8.5, 5);
+    expect(final.laborTotal).toBeCloseTo(40 * 90, 5);
+    expect((final.job as { estimatedHours?: number }).estimatedHours).toBe(40);
+    expect(analyze.mock.calls[0][0]).toMatchObject({ targetHours: 40 });
+  });
+
+  it('a priced run with stated hours still lands the stated total after pricing', async () => {
+    const store = fakeStore(
+      run({ options: { stripLabour: false, labourOnly: false, statedHours: 40 } }),
+      { q1: quote({ laborHours: 40, markup: 0 }) },
+    );
+    expect(await runPricingRun({ store, deps: fakeDeps({ analyzeJobDescription: fourSectionAnalysis }), log: silent })).toBe('done');
+    const final = store.quoteWrites[1].patch as StoredQuote;
+    expect(final.laborHours).toBe(40);
+    expect(final.laborExtraHours).toBeCloseTo(8.5, 5);
+    expect(final.laborTotal).toBeCloseTo(40 * 90, 5);
+  });
+
+  it("no stated hours: the engine's hours are kept and no adjustment is written", async () => {
+    const store = fakeStore(run({ options: { stripLabour: false, labourOnly: true } }), { q1: quote({ markup: 0 }) });
+    const analyze = vi.fn(fourSectionAnalysis);
+    expect(await runPricingRun({ store, deps: fakeDeps({ analyzeJobDescription: analyze }), log: silent })).toBe('done');
+    const final = store.quoteWrites[0].patch as StoredQuote;
+    expect(final.laborHours).toBe(32);
+    expect('laborExtraHours' in final).toBe(false);
+    expect(final.laborTotal).toBeCloseTo(31.5 * 90, 5);
+    expect('targetHours' in analyze.mock.calls[0][0]).toBe(false);
+  });
+
   it('strips the analysed labour when rate lines already charge for it', async () => {
     const store = fakeStore(run({ options: { stripLabour: true, labourOnly: false } }), { q1: quote() });
     expect(await runPricingRun({ store, deps: fakeDeps(), log: silent })).toBe('done');

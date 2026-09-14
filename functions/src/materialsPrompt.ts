@@ -25,6 +25,12 @@ export interface MaterialsPromptOptions {
   savedRatesSection: string;
   reeceCatalogueSection: string;
   tradeContext?: { nicheName?: string } | null;
+  /**
+   * The total labour hours the tradie stated — a fixed target to split
+   * between the sections, not an estimate to revise. Omitted when nobody
+   * stated any, which leaves the original soft rule in place.
+   */
+  targetHours?: number;
 }
 
 const MAX_QUOTING_PREFERENCES = 20;
@@ -58,7 +64,12 @@ export function buildMaterialsPrompt(o: MaterialsPromptOptions): string {
     savedRatesSection,
     reeceCatalogueSection,
     tradeContext,
+    targetHours,
   } = o;
+  const hasTarget = typeof targetHours === 'number' && Number.isFinite(targetHours) && targetHours > 0;
+  const sectionHoursRule = hasTarget
+    ? `The tradie has STATED the total labour as ${targetHours} hours: set "estimatedHours" to exactly ${targetHours} and make the sum of (sectionLaborHours × sectionMultiplier) across all sections equal ${targetHours}. Split that number between the sections — never re-estimate the total.`
+    : 'The sum of (sectionLaborHours × sectionMultiplier) across all sections should roughly equal estimatedHours.';
   return `You are an expert Australian tradie assistant specializing in construction and trade work. ${hasExisting ? 'Some materials have already been added from templates. Analyze the job and suggest only the ADDITIONAL materials needed to complete the job.' : 'Analyze the following job description and generate a detailed materials list with generic search terms that work across multiple hardware stores.'}
 
 Job Description: "${jobDescription}"${contextSection}${existingMaterialsSection}${templateReferenceSection}${savedRatesSection}${reeceCatalogueSection}
@@ -114,7 +125,7 @@ DECK-BOARD REPLACEMENT CHECK:
 - Hidden clips/fixings must be derived from deck area or joist intersections and emitted as individual each-counts; the pricing layer converts them into packs.
 - Keep demolition/disposal labour separate from installation labour when both are requested.
 
-- "sectionLaborHours" is the estimated labor hours PER UNIT of that section (e.g. 1.5 hours per fence bay). All materials in the same section should have the same sectionLaborHours value. The sum of (sectionLaborHours × sectionMultiplier) across all sections should roughly equal estimatedHours.
+- "sectionLaborHours" is the estimated labor hours PER UNIT of that section (e.g. 1.5 hours per fence bay). All materials in the same section should have the same sectionLaborHours value. ${sectionHoursRule}
 
 QUALITY TIER DETECTION — read the job description for tier qualifiers and set both "jobQualityTier" (top-level, one per job) and "qualityTier" (per-material, inherits jobQualityTier when omitted). The downstream pricing layer uses this to pick the RIGHT product out of the supplier search results instead of always grabbing the cheapest hit. This is high-leverage — a wrong tier turns a $400 "premium mixer tap" job into an $86 budget tap quote.
 - "premium", "high quality", "high-end", "luxury", "designer", "architectural", "top of the range", "custom", "bespoke", brand names like Phoenix / Miele / Fisher & Paykel / Caesarstone → jobQualityTier: "premium". Search terms for fittings/finishes in these jobs should include words like "premium" or "professional" (e.g. "premium stainless steel undermount sink", not just "sink").
