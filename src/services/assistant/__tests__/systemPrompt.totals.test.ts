@@ -57,6 +57,16 @@ describe('invoice fast path', () => {
     const tool = TOOL_DECLARATIONS.find((t) => t.name === 'get_job_requirements')!;
     expect((tool.parameters.properties as any).documentType.enum).toEqual(['quote', 'invoice']);
   });
+
+  it('a claim is one rate line at the stated figure, never a materials run', () => {
+    expect(section).toContain('A claim is a figure, not a scope.');
+    expect(section).toContain('Ask what, who and how much in the same one line');
+    expect(section).toContain("quantity 1, unit 'job', unitPrice = the figure, includesMaterials true, pricesIncludeGst per what they said");
+    expect(section).toContain('Never let the materials engine run on a claim');
+    expectHouseTone(section);
+    const tool = TOOL_DECLARATIONS.find((t) => t.name === 'get_job_requirements')!;
+    expect(tool.description).toContain('returns lumpSum true');
+  });
 });
 
 describe('contacts off the phone', () => {

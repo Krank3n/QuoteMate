@@ -58,4 +58,19 @@ describe('ProposalCard — rate lines', () => {
     const line = screen.getByText(/40 m² × \$220\.00 per m² = \$8,800\.00/);
     expect(line.textContent).not.toMatch(/GST/);
   });
+
+  it('reads as a lump sum on an invoice claim, not a rate-card price', () => {
+    registerQuotingProfileSource(() => ({ businessName: 'x', defaultLaborRate: 85, defaultMarkup: 30, pricesIncludeGst: true, gstRegistered: true }));
+    const claim: DraftQuoteProposal = {
+      ...draft,
+      jobName: 'Final claim — carport slab',
+      jobDescription: 'Final claim for the completed carport slab.',
+      documentType: 'invoice',
+      rateLines: [{ label: 'Final claim — carport slab', quantity: 1, unit: 'job', unitPrice: 4500, pricesIncludeGst: true, includesMaterials: true }],
+    };
+    render(<ProposalCard proposal={claim} status="pending" onApply={() => {}} onDismiss={() => {}} />);
+    expect(screen.getByText(/1 job × \$4,500\.00 per job = \$4,500\.00 inc GST/)).toBeTruthy();
+    expect(screen.getByText('Goes on the invoice as a lump sum — no materials list, no extra labour.')).toBeTruthy();
+    expect(screen.queryByText(/work out the materials/)).toBeNull();
+  });
 });

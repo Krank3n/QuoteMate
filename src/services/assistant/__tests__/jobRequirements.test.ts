@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { HOW_YOU_PRICE_QUESTION, resolveJobRequirements, SUPPLY_OR_REPLACE_QUESTION } from '../readTools';
+import { CLAIM_AMOUNT_QUESTION } from '../claimWording';
 import { NICHE_TEMPLATES } from '../../../data/nicheTemplates';
 import { TRADE_CATEGORIES } from '../../../../shared/pricing/tradeCategories';
 import { buildSupplierBookSnapshot } from '../../supplierBookCoverage';
@@ -227,6 +228,58 @@ describe('resolveJobRequirements — invoice fast path', () => {
     expect(result.invoiceFastPath).toBe(false);
     expect(result.mustAskQuestions.length).toBeGreaterThan(0);
     expect(result.specialistSupply).toBe(true);
+  });
+});
+
+// A claim is a figure, not a scope. A "final claim" invoice with no amount
+// went through the materials engine, which invented four hours of labour,
+// patching mortar and a yard broom for a slab that was already priced.
+describe('resolveJobRequirements — invoice claims carry the amount', () => {
+  it('a final claim with no figure adds the amount to the invoice pair', () => {
+    const result = resolveJobRequirements({ freeText: 'final claim for the completed carport slab', documentType: 'invoice' });
+    expect(result.invoiceFastPath).toBe(true);
+    expect(result.lumpSum).toBe(true);
+    expect(result.mustAskQuestions).toHaveLength(3);
+    expect(result.mustAskQuestions[2]).toBe(CLAIM_AMOUNT_QUESTION);
+    expect(result.mustAskQuestions[2].toLowerCase()).toContain('how much');
+    expect(result.mustAskQuestions[2].toLowerCase()).toContain('gst');
+  });
+
+  it('a progress claim, a deposit and a stage payment all count as claims', () => {
+    for (const wording of ['progress claim 2 on the bathroom reno', 'deposit for the deck', 'stage payment for the frame']) {
+      const result = resolveJobRequirements({ freeText: wording, documentType: 'invoice' });
+      expect(result.lumpSum, wording).toBe(true);
+      expect(result.mustAskQuestions, wording).toContain(CLAIM_AMOUNT_QUESTION);
+    }
+  });
+
+  it('does not ask the amount when a figure was already stated, but still flags the lump sum', () => {
+    for (const wording of ['final claim for the slab, $4,500 inc GST', 'invoice them for $2,000', 'deposit of 1500 dollars for the reno']) {
+      const result = resolveJobRequirements({ freeText: wording, documentType: 'invoice' });
+      expect(result.lumpSum, wording).toBe(true);
+      expect(result.mustAskQuestions, wording).toHaveLength(2);
+      expect(result.mustAskQuestions, wording).not.toContain(CLAIM_AMOUNT_QUESTION);
+    }
+  });
+
+  it('a plain invoice for work that still needs pricing is unchanged', () => {
+    const result = resolveJobRequirements({ freeText: 'invoice Sarah for the 20 m² deck', documentType: 'invoice' });
+    expect(result.invoiceFastPath).toBe(true);
+    expect(result.lumpSum).toBe(false);
+    expect(result.mustAskQuestions).toHaveLength(2);
+    expect(result.mustAskQuestions).not.toContain(CLAIM_AMOUNT_QUESTION);
+  });
+
+  it('an insurance claim is a job with a scope, not a payment claim', () => {
+    const result = resolveJobRequirements({ freeText: 'insurance claim repair — replace the storm-damaged gutter', documentType: 'invoice' });
+    expect(result.lumpSum).toBe(false);
+    expect(result.mustAskQuestions).not.toContain(CLAIM_AMOUNT_QUESTION);
+  });
+
+  it('a quote never carries the claim question or the lump-sum flag', () => {
+    const result = resolveJobRequirements({ freeText: 'final claim for the carport slab', documentType: 'quote' });
+    expect(result.lumpSum).toBe(false);
+    expect(result.mustAskQuestions).not.toContain(CLAIM_AMOUNT_QUESTION);
   });
 });
 
