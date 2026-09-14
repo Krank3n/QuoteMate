@@ -2,9 +2,11 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   fetchPricesForQuote,
   generateMaterialsForQuote,
+  holdStatedHours,
   LAST_RESORT_GUESS_PREFIX,
   type PipelineDeps,
 } from './pipeline';
+import { recalculateQuoteTotals } from './documentTotals';
 import type { Material, PricingQuote, ScraperProduct } from './types';
 
 /**
@@ -226,5 +228,123 @@ describe('generateMaterialsForQuote through PipelineDeps', () => {
     expect(result.updatedQuote.laborHours).toBe(6);
     // The request carried the tradie's saved rates for the prompt.
     expect(analyze.mock.calls[0][0].userSavedRates).toHaveLength(1);
+  });
+});
+
+/**
+ * A tradie who says "40 hours" gets a 40-hour quote.
+ *
+ * The analyse used to take the model's own estimate over the hours seeded on
+ * the quote, so a labour-only job stated at 40 h came back at 32 h with four
+ * sections summing to 31.5 h — and the price moved with them. The engine's
+ * split stands; the total is the tradie's.
+ */
+describe('generateMaterialsForQuote — stated hours are held', () => {
+  // Four sections whose hours × multiplier sum to 31.5 h, under a 32 h estimate.
+  const fourSections = () => ({
+    materials: [
+      { name: 'Rough-in labour', searchTerm: '', quantity: 1, unit: 'each', section: 'Rough-in', sectionMultiplier: 3, sectionLaborHours: 2.5 },
+      { name: 'Fit-off labour', searchTerm: '', quantity: 1, unit: 'each', section: 'Fit-off', sectionMultiplier: 3, sectionLaborHours: 6 },
+      { name: 'Testing', searchTerm: '', quantity: 1, unit: 'each', section: 'Testing', sectionMultiplier: 1, sectionLaborHours: 3 },
+      { name: 'Clean-up', searchTerm: '', quantity: 1, unit: 'each', section: 'Clean-up', sectionMultiplier: 2, sectionLaborHours: 1.5 },
+    ],
+    estimatedHours: 32,
+    jobSummary: '',
+  });
+  const sectionSum = (q: PricingQuote) =>
+    (q.sections ?? []).reduce((sum, s) => sum + s.laborHours * s.multiplier, 0);
+  const rated = (q: PricingQuote) => ({ ...q, laborRate: 90, markup: 0, laborMarkup: 0 });
+
+  it('stated 40 h over a 31.5 h split → 40 h on the quote and labour billed at 40 × rate', async () => {
+    const analyze = vi.fn(fourSections);
+    const result = await generateMaterialsForQuote(deps({ analyzeJobDescription: analyze }), {
+      quote: { ...quote([]), laborHours: 40 },
+      businessSettings: { defaultLaborRate: 90 },
+      isPro: false,
+      templates: [],
+      statedHours: 40,
+    });
+    const out = result.updatedQuote;
+    expect(sectionSum(out)).toBeCloseTo(31.5, 5);
+    expect(out.laborHours).toBe(40);
+    expect(out.laborExtraHours).toBeCloseTo(8.5, 5);
+    expect(out.job.estimatedHours).toBe(40);
+    expect(recalculateQuoteTotals(rated(out)).laborTotal).toBeCloseTo(40 * 90, 5);
+    expect(result.estimatedHours).toBe(40);
+    // The model was told the number too, as a hard target for its split.
+    expect(analyze.mock.calls[0][0]).toMatchObject({ targetHours: 40 });
+  });
+
+  it('stated hours BELOW the split ride as a negative adjustment, so the total still holds', async () => {
+    const result = await generateMaterialsForQuote(deps({ analyzeJobDescription: async () => fourSections() }), {
+      quote: { ...quote([]), laborHours: 20 },
+      businessSettings: { defaultLaborRate: 90 },
+      isPro: false,
+      templates: [],
+      statedHours: 20,
+    });
+    const out = result.updatedQuote;
+    expect(out.laborHours).toBe(20);
+    expect(out.laborExtraHours).toBeCloseTo(-11.5, 5);
+    expect(recalculateQuoteTotals(rated(out)).laborTotal).toBeCloseTo(20 * 90, 5);
+  });
+
+  it("no stated hours → the engine's estimate stands, nothing is pinned and the model gets no target", async () => {
+    const analyze = vi.fn(fourSections);
+    const result = await generateMaterialsForQuote(deps({ analyzeJobDescription: analyze }), {
+      quote: quote([]),
+      businessSettings: { defaultLaborRate: 90 },
+      isPro: false,
+      templates: [],
+    });
+    const out = result.updatedQuote;
+    expect(out.laborHours).toBe(32);
+    expect('laborExtraHours' in out).toBe(false);
+    expect(out.job.estimatedHours).toBe(32);
+    expect(recalculateQuoteTotals(rated(out)).laborTotal).toBeCloseTo(31.5 * 90, 5);
+    expect('targetHours' in analyze.mock.calls[0][0]).toBe(false);
+  });
+
+  it('a zero or nonsense figure is not a stated total — it changes nothing', async () => {
+    for (const statedHours of [0, -3, Number.NaN, Number.POSITIVE_INFINITY]) {
+      const analyze = vi.fn(fourSections);
+      const result = await generateMaterialsForQuote(deps({ analyzeJobDescription: analyze }), {
+        quote: quote([]),
+        businessSettings: { defaultLaborRate: 90 },
+        isPro: false,
+        templates: [],
+        statedHours,
+      });
+      expect(result.updatedQuote.laborHours).toBe(32);
+      expect('laborExtraHours' in result.updatedQuote).toBe(false);
+      expect('targetHours' in analyze.mock.calls[0][0]).toBe(false);
+    }
+  });
+
+  it('holds the stated total over an existing list too, where the analyse would have ADDED its estimate', async () => {
+    const existing = material({ id: 'mine', name: 'Skip bin', section: 'Site', manualPriceOverride: true, price: 250, totalPrice: 250 });
+    const result = await generateMaterialsForQuote(deps({ analyzeJobDescription: async () => fourSections() }), {
+      quote: {
+        ...quote([existing]),
+        laborHours: 12,
+        sections: [{ id: 's0', name: 'Site', multiplier: 1, laborHours: 1, laborHoursTotal: 1, laborRate: 90, laborUnit: 'hours', laborTotal: 90, sortOrder: 0 }],
+      },
+      businessSettings: { defaultLaborRate: 90 },
+      isPro: false,
+      templates: [],
+      statedHours: 12,
+    });
+    const out = result.updatedQuote;
+    // Without the hold this would have been 12 + 32 = 44 h.
+    expect(out.laborHours).toBe(12);
+    expect(out.laborExtraHours).toBeCloseTo(12 - 32.5, 5);
+    expect(recalculateQuoteTotals(rated(out)).laborTotal).toBeCloseTo(12 * 90, 5);
+  });
+
+  it('holdStatedHours without sections just sets the hours — the top-level figure IS the labour there', () => {
+    const out = holdStatedHours({ ...quote([]), laborHours: 3 }, 40);
+    expect(out.laborHours).toBe(40);
+    expect('laborExtraHours' in out).toBe(false);
+    expect(recalculateQuoteTotals(rated(out)).laborTotal).toBeCloseTo(40 * 90, 5);
   });
 });

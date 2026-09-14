@@ -12,7 +12,9 @@
  * what the tradie put their own hand to: rows they added (`origin: 'manual'`)
  * or priced themselves (`manualPriceOverride`). Sections survive only while a
  * kept row still points at them. Labour restarts from the corrected hours (or
- * zero, so the pipeline's own estimate stands, exactly as on a fresh draft).
+ * zero, so the pipeline's own estimate stands, exactly as on a fresh draft) —
+ * including the extra-hours adjustment, which was the LAST run's difference
+ * between a stated total and its sections, not this run's.
  */
 import type { Material, Quote, QuoteSection } from '../types';
 
@@ -31,5 +33,6 @@ export function resetGeneratedScope(quote: Quote, hours?: number): Quote {
     materials,
     ...(sections !== undefined ? { sections } : {}),
     laborHours: typeof hours === 'number' && hours > 0 ? hours : 0,
+    laborExtraHours: 0,
   };
 }

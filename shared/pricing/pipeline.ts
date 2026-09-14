@@ -146,6 +146,14 @@ export interface GenerateMaterialsArgs<Q extends PricingQuote = PricingQuote> {
    */
   resume?: { requestId: string; result: Record<string, unknown> };
   /**
+   * The total labour hours the tradie stated, when they did. Handed to the
+   * analyse as a hard target AND pinned onto the result by holdStatedHours,
+   * so the finished quote's labour is this number whatever split the model
+   * drew. Absent when nobody stated hours: the analyse's own estimate stands,
+   * exactly as it always has.
+   */
+  statedHours?: number;
+  /**
    * Phone-only. False when the caller post-processes the analyse in a way
    * a launch-time resume can't reproduce — labour-only drafts and rate-card
    * runs strip or drop the gear list afterwards — so the request is not put
@@ -191,6 +199,7 @@ export async function generateMaterialsForQuote<Q extends PricingQuote>(
 ): Promise<GenerateMaterialsResult<Q>> {
   const { quote, businessSettings, isPro, templates } = args;
   const { onEvent, shouldCancel } = callbacks;
+  const statedHours = isStatedHours(args.statedHours) ? args.statedHours : undefined;
 
   if (!quote.job?.description) {
     throw new Error('Quote has no job description — add a scope first.');
@@ -254,6 +263,7 @@ export async function generateMaterialsForQuote<Q extends PricingQuote>(
     existingMaterials: existingMatsForAi,
     availableTemplates: templateDataForAi,
     userSavedRates: userSavedRatesForAi,
+    ...(statedHours !== undefined ? { targetHours: statedHours } : {}),
     ...(args.resumable === false ? {} : { quoteId: quote.id }),
     ...(args.resume ? { resume: args.resume } : {}),
   });
@@ -370,7 +380,7 @@ export async function generateMaterialsForQuote<Q extends PricingQuote>(
   });
 
   const hasExistingMaterials = quote.materials.length > 0;
-  const updatedQuote: Q = {
+  const analysedQuote: Q = {
     ...quote,
     job: {
       ...quote.job,
@@ -390,6 +400,11 @@ export async function generateMaterialsForQuote<Q extends PricingQuote>(
       ? quote.laborHours + (analysis.estimatedHours || 0)
       : analysis.estimatedHours,
   };
+  // The tradie's number beats the model's. "40 hours, labour only" came back
+  // as 32 h because the line above takes the analysis's estimate over the
+  // hours seeded on the quote, and the sections were drawn at 31.5 h — the
+  // price moved with them. Nothing to hold when nobody stated any.
+  const updatedQuote: Q = statedHours !== undefined ? holdStatedHours(analysedQuote, statedHours) : analysedQuote;
 
   onEvent?.({
     phase: 'done',
@@ -399,7 +414,43 @@ export async function generateMaterialsForQuote<Q extends PricingQuote>(
   return {
     updatedQuote,
     generatedMaterialCount: generatedMaterials.length,
-    estimatedHours: analysis.estimatedHours,
+    estimatedHours: statedHours ?? analysis.estimatedHours,
+  };
+}
+
+/** A real number of hours someone actually said — anything else is "not stated". */
+function isStatedHours(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0;
+}
+
+/**
+ * Pin a quote's total labour to the hours the tradie stated.
+ *
+ * The engine's section split stands — it is how the work is shown — and the
+ * difference rides in laborExtraHours, the same mechanism the labour screen
+ * and Mate's rates change already use to carry a total that differs from the
+ * sections' sum. A negative difference is fine: the calculator adds
+ * laborExtraHours × rate to the sections, so it subtracts, and the labour
+ * views render it as an adjustment. Without sections the top-level hours ARE
+ * the labour, so they simply become the stated total.
+ */
+export function holdStatedHours<Q extends PricingQuote>(quote: Q, statedHours: number): Q {
+  const sections = quote.sections ?? [];
+  const sectionHours = sections.reduce(
+    (sum, s) =>
+      sum +
+      (typeof s.laborHoursTotal === 'number' && Number.isFinite(s.laborHoursTotal)
+        ? s.laborHoursTotal
+        : (Number(s.laborHours) || 0) * (Number(s.multiplier) || 1)),
+    0,
+  );
+  return {
+    ...quote,
+    job: { ...quote.job, estimatedHours: statedHours },
+    laborHours: statedHours,
+    ...(sections.length > 0
+      ? { laborExtraHours: Math.round((statedHours - sectionHours) * 10000) / 10000 }
+      : {}),
   };
 }
 
