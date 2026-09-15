@@ -212,7 +212,7 @@ export async function sendAssistantTurn({
     );
     // Slots are threaded like chars: the trailing run can span several user
     // messages (a hidden [context] note splits one), and a per-message reset
-    // would let 2 photos through per message instead of 2 per request.
+    // would let maxPerTurn photos through per message instead of per request.
     const built = buildAttachmentParts(resolved, { remainingChars, remainingSlots });
     remainingChars -= built.usedChars;
     remainingSlots -= built.usedSlots;

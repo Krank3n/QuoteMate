@@ -2,6 +2,7 @@
 // and no retry on quota / rate-limit. Drives a mocked global fetch.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { ATTACHMENT_LIMITS } from '../attachmentParts';
 import { auth } from '../../../config/firebase';
 import { sendAssistantTurn, stripLeakedToolJson } from '../../assistantService';
 import {
@@ -383,17 +384,19 @@ describe('attachment transport', () => {
   it('caps images per request, not per message, across a split user run', async () => {
     // A hidden [context] note (or an error bubble) splits the trailing user
     // run into two messages. Resetting the slot budget per message would put
-    // four photos on one request and re-POST them on every tool hop.
+    // twice maxPerTurn photos on one request and re-POST them on every tool hop.
     fetchMock.mockResolvedValueOnce(okChatResponse('righto'));
+    const perTurn = ATTACHMENT_LIMITS.maxPerTurn;
+    const batch = (from: number) => Array.from({ length: perTurn }, (_, i) => photo(`p${from + i}`));
     await sendAssistantTurn({
       history: [
-        { id: '1', role: 'user', text: 'these two', createdAt: '', attachments: [photo('p1'), photo('p2')] },
-        { id: '2', role: 'user', text: 'and these', createdAt: '', attachments: [photo('p3'), photo('p4')] },
+        { id: '1', role: 'user', text: 'this lot', createdAt: '', attachments: batch(0) },
+        { id: '2', role: 'user', text: 'and these', createdAt: '', attachments: batch(perTurn) },
       ],
       resolveAttachment,
     });
     const parts = contentsOf().flatMap((c: any) => c.parts);
-    expect(parts.filter((p: any) => p.inlineData)).toHaveLength(2);
+    expect(parts.filter((p: any) => p.inlineData)).toHaveLength(perTurn);
   });
 
   it('sends an image-only user turn as a single inlineData part', async () => {
