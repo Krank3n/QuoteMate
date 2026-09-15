@@ -112,9 +112,11 @@ function buildWatermarkHTML(headline: string, sub: string): string {
 function buildPaidStampCSS(): string {
   return `
     .paid-stamp-anchor {
-      position: relative;
       page-break-inside: avoid;
       break-inside: avoid;
+    }
+    .paid-stamp-target {
+      position: relative;
     }
     .paid-stamp {
       position: absolute;
@@ -149,15 +151,27 @@ function buildPaidStampCSS(): string {
   `;
 }
 
+/**
+ * The stamp overlays the totals box only (the target); the paid-in-full note
+ * rides along inside the same unbreakable group so it can never be pushed
+ * onto a page of its own — on a three-page invoice it was the sole content
+ * of page 3.
+ */
 function wrapWithPaidStamp(summaryHtml: string, paidDate: string): string {
   return `
     <div class="paid-stamp-anchor">
-      ${summaryHtml}
-      <div class="paid-stamp">
-        <div>
-          <div class="paid-stamp-text">PAID</div>
-          <div class="paid-stamp-sub">Paid ${escapeHtml(paidDate)}</div>
+      <div class="paid-stamp-target">
+        ${summaryHtml}
+        <div class="paid-stamp">
+          <div>
+            <div class="paid-stamp-text">PAID</div>
+            <div class="paid-stamp-sub">Paid ${escapeHtml(paidDate)}</div>
+          </div>
         </div>
+      </div>
+      <div class="payment-box">
+        <h3>Paid in full</h3>
+        <p>Payment received ${escapeHtml(paidDate)}. Nothing owing on this invoice.</p>
       </div>
     </div>
   `;
@@ -1322,13 +1336,11 @@ export function buildInvoicePdfHtml(
     infoHtml: paymentInfoHtml,
   });
   // A settled invoice must not ask to be paid: no bank details, no due date,
-  // no "reference this number with your payment". One line saying it's done.
+  // no "reference this number with your payment". The paid-in-full note
+  // renders inside the stamp group (wrapWithPaidStamp) so it stays with the
+  // totals, so nothing renders here.
   const paymentBlockHtml = paidStamp
-    ? `
-      <div class="payment-box">
-        <h3>Paid in full</h3>
-        <p>Payment received ${escapeHtml(paidStamp)}. Nothing owing on this invoice.</p>
-      </div>`
+    ? ''
     : methodsHtml || `
       <div class="payment-box">
         <h3>Payment Information</h3>${paymentInfoHtml}
