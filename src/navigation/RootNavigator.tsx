@@ -11,6 +11,7 @@ import { createBottomTabNavigator, BottomTabBarProps } from '@react-navigation/b
 import { createStackNavigator } from '@react-navigation/stack';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { renderHeaderBackChevron } from './HeaderBackChevron';
 
 import { DashboardScreen } from '../screens/DashboardScreen';
 import { JobsListScreen } from '../screens/JobsListScreen';
@@ -113,6 +114,10 @@ function NewQuoteNavigator() {
         ),
         headerTintColor: themeColors.text,
         headerTitleStyle: { fontFamily: 'Archivo-Bold' },
+        // Our own chevron, not the library's bundled PNG (which never draws on
+        // iPad), and no "Main" label next to it — see HeaderBackChevron.tsx.
+        headerBackImage: renderHeaderBackChevron,
+        headerBackButtonDisplayMode: 'minimal',
         cardStyle: { backgroundColor: themeColors.bg },
         ...(Platform.OS === 'web' && {
           headerMode: 'float' as any,
@@ -180,6 +185,10 @@ function NewInvoiceNavigator() {
         ),
         headerTintColor: themeColors.text,
         headerTitleStyle: { fontFamily: 'Archivo-Bold' },
+        // Our own chevron, not the library's bundled PNG (which never draws on
+        // iPad), and no "Main" label next to it — see HeaderBackChevron.tsx.
+        headerBackImage: renderHeaderBackChevron,
+        headerBackButtonDisplayMode: 'minimal',
         cardStyle: { backgroundColor: themeColors.bg },
         ...(Platform.OS === 'web' && {
           headerMode: 'float' as any,
@@ -486,6 +495,9 @@ export function RootNavigator() {
         // to a tradie. Show the chevron on its own instead. Applies to Contacts,
         // About, Customer, DiscoverSuppliers and anything added later.
         headerBackButtonDisplayMode: 'minimal',
+        // And draw that chevron ourselves: the library's bundled back-icon PNG
+        // never renders on iPad, leaving an invisible (but focusable) button.
+        headerBackImage: renderHeaderBackChevron,
         cardStyle: { backgroundColor: themeColors.bg },
         // On web, use float header mode so CardContent uses flex:1 instead of
         // minHeight:100% (pageOverflowEnabled=false), allowing ScrollViews to scroll
