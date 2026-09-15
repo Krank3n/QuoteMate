@@ -10,12 +10,22 @@ import type { ChatMessage } from '../../types/assistant';
 
 export const ATTACHMENT_LIMITS = {
   /** Photos inlined per message. A hi-res plan counts double. */
-  maxPerTurn: 2,
-  /** Photos the tradie can attach across one conversation. */
-  maxPerChat: 5,
+  maxPerTurn: 4,
+  /**
+   * Photos the tradie can attach across one conversation. Matches MAX_PHOTOS
+   * on a quote (src/components/jobPhotoLimits.ts) so everything sent in a chat
+   * can ride onto the draft it produces.
+   */
+  maxPerChat: 30,
   /** ~2.1 MB of image once decoded — past this the 1st-gen request cap bites. */
   maxBase64CharsEach: 2_800_000,
-  /** Whole-request ceiling, shared across every message in the window. */
+  /**
+   * Whole-request ceiling, shared across every message in the window. This is
+   * the real 1st-gen Cloud Function limit and it wins over the count caps: four
+   * photos each near maxBase64CharsEach add up to twice this, so the count cap
+   * only ever applies to photos small enough to fit. buildAttachmentParts
+   * reports the overflow as budget_spent rather than posting a body that 413s.
+   */
   maxBase64CharsTotal: 5_600_000,
 } as const;
 

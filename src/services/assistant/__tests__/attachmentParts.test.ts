@@ -86,23 +86,62 @@ describe('buildAttachmentParts', () => {
     expect(skipped).toEqual([]);
   });
 
-  it('drops the third image and reports it skipped', () => {
-    const { parts, skipped } = buildAttachmentParts([
+  it('keeps four images on one turn and drops the fifth as skipped', () => {
+    const { parts, skipped, usedSlots } = buildAttachmentParts([
       { id: 'p1', bytes: bytes(10) },
       { id: 'p2', bytes: bytes(10) },
+      { id: 'p3', bytes: bytes(10) },
+      { id: 'p4', bytes: bytes(10) },
+      { id: 'p5', bytes: bytes(10) },
+    ]);
+    expect(parts).toHaveLength(ATTACHMENT_LIMITS.maxPerTurn);
+    expect(usedSlots).toBe(4);
+    expect(skipped).toEqual([{ id: 'p5', reason: 'per_turn_limit' }]);
+  });
+
+  it('counts a hi-res plan double against the per-turn allowance', () => {
+    // plan (2) + p2 (1) + p3 (1) fills the four slots; p4 has nowhere to go.
+    const { parts, skipped, usedSlots } = buildAttachmentParts([
+      { id: 'plan', isPlan: true, bytes: bytes(10) },
+      { id: 'p2', bytes: bytes(10) },
+      { id: 'p3', bytes: bytes(10) },
+      { id: 'p4', bytes: bytes(10) },
+    ]);
+    expect(parts).toHaveLength(3);
+    expect(usedSlots).toBe(4);
+    expect(skipped).toEqual([{ id: 'p4', reason: 'per_turn_limit' }]);
+  });
+
+  it('two plans fill a turn on their own', () => {
+    const { parts, skipped } = buildAttachmentParts([
+      { id: 'plan1', isPlan: true, bytes: bytes(10) },
+      { id: 'plan2', isPlan: true, bytes: bytes(10) },
       { id: 'p3', bytes: bytes(10) },
     ]);
     expect(parts).toHaveLength(2);
     expect(skipped).toEqual([{ id: 'p3', reason: 'per_turn_limit' }]);
   });
 
-  it('counts a hi-res plan double against the per-turn allowance', () => {
-    const { parts, skipped } = buildAttachmentParts([
-      { id: 'plan', isPlan: true, bytes: bytes(10) },
-      { id: 'p2', bytes: bytes(10) },
+  it('the request byte ceiling still beats the count cap', () => {
+    // Four photos at the per-file cap are twice the request ceiling: the
+    // 1st-gen function limit is what actually bounds a turn, not the count.
+    expect(ATTACHMENT_LIMITS.maxBase64CharsEach).toBe(2_800_000);
+    expect(ATTACHMENT_LIMITS.maxBase64CharsTotal).toBe(5_600_000);
+    expect(ATTACHMENT_LIMITS.maxPerTurn * ATTACHMENT_LIMITS.maxBase64CharsEach).toBeGreaterThan(
+      ATTACHMENT_LIMITS.maxBase64CharsTotal,
+    );
+    const { parts, skipped, usedChars } = buildAttachmentParts([
+      { id: 'p1', bytes: bytes(ATTACHMENT_LIMITS.maxBase64CharsEach) },
+      { id: 'p2', bytes: bytes(ATTACHMENT_LIMITS.maxBase64CharsEach) },
+      { id: 'p3', bytes: bytes(ATTACHMENT_LIMITS.maxBase64CharsEach) },
+      { id: 'p4', bytes: bytes(ATTACHMENT_LIMITS.maxBase64CharsEach) },
     ]);
-    expect(parts).toHaveLength(1);
-    expect(skipped).toEqual([{ id: 'p2', reason: 'per_turn_limit' }]);
+    expect(parts).toHaveLength(2);
+    expect(usedChars).toBe(ATTACHMENT_LIMITS.maxBase64CharsTotal);
+    expect(skipped).toEqual([
+      { id: 'p3', reason: 'budget_spent' },
+      { id: 'p4', reason: 'budget_spent' },
+    ]);
   });
 
   it('drops an image over the per-file cap', () => {

@@ -5,8 +5,9 @@
  * the camera, the image picker and Storage). Every alert and counter in
  * JobPhotos derives from MAX_PHOTOS, so the copy follows when the cap moves.
  *
- * Mate's per-message chat limit is a separate rule and stays where it is
- * (src/screens/assistant/chatAttachments.ts).
+ * Mate's chat caps live in src/services/assistant/attachmentParts.ts; its
+ * per-chat cap is meant to equal MAX_PHOTOS, and collectQuotePhotos clamps to
+ * MAX_PHOTOS regardless so a drafted quote never opens over this limit.
  */
 
 /** Photos (site photos and plans together) allowed on one quote. */

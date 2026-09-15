@@ -115,6 +115,7 @@ import {
   UnsupportedPhotoError,
 } from '../services/photoService';
 import { detectIsPlan } from '../services/planDetection';
+import { ATTACHMENT_LIMITS } from '../services/assistant/attachmentParts';
 import {
   ATTACH_LIMIT_COPY,
   canAttachMore,
@@ -3859,13 +3860,13 @@ export function AssistantScreen() {
             setCaptureModalVisible(false);
             await attachUris(uris);
           }}
-          maxPhotos={2}
+          maxPhotos={ATTACHMENT_LIMITS.maxPerTurn}
           counterLabel="photos"
           tips={[
             'Step back for the whole area, then step in for the detail',
             'Snap anything with a measurement written on it',
             'Watch the shadows — Mate reads what it can see',
-            "Two at a time; send them and I'll take the next lot",
+            ATTACH_LIMIT_COPY.cameraTip,
           ]}
         />
 
