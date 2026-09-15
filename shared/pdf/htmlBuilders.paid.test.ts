@@ -99,6 +99,16 @@ describe('PAID stamp', () => {
     );
     expect(paid).toContain('Paid in full');
     expect(paid).toContain('Payment received 14 September 2026');
+    // The note lives inside the unbreakable group with the totals — it was
+    // the sole content of page 3 on a real three-page invoice — and the
+    // stamp overlays only the totals box, not the note.
+    const target = paid.match(/<div class="paid-stamp-target">([\s\S]*?)<div class="payment-box">/)?.[1] ?? '';
+    expect(target).toContain('BALANCE DUE');
+    expect(target).toContain('paid-stamp-text');
+    expect(target).not.toContain('Paid in full');
+    const anchorHtml = paid.slice(paid.indexOf('<div class="paid-stamp-anchor">'));
+    expect(anchorHtml.indexOf('Paid in full')).toBeGreaterThan(anchorHtml.indexOf('</div>')); // after the target closes
+    expect(paid.split('Paid in full').length - 1).toBe(1);
     expect(paid).not.toContain('Payment Information');
     expect(paid).not.toContain('Due Date:');
     expect(paid).not.toContain('with your payment');
