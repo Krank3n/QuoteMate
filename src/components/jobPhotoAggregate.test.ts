@@ -1,8 +1,8 @@
 /**
  * The job screen shows job photos and attached-document photos as one strip.
  * These pin the rules the strip relies on: job photos first, then documents,
- * de-duplicated; PDFs stay in the strip but out of the lightbox; only
- * job-owned photos may be edited.
+ * de-duplicated; PDFs stay in the strip but out of the lightbox; job-owned
+ * photos are always editable, document-owned ones only with a write path.
  */
 import { describe, it, expect } from 'vitest';
 import type { Document } from '../types/document';
@@ -14,6 +14,7 @@ import {
   defaultStageForJob,
   documentOwnedCount,
   documentPhotoLabel,
+  documentPhotoRemoveMessage,
   groupPhotosByStage,
   lightboxPhotos,
   photoStage,
@@ -88,10 +89,28 @@ describe('lightboxPhotos', () => {
 });
 
 describe('canEditPhoto', () => {
-  it('allows job-owned photos and blocks document-owned ones', () => {
+  it('allows job-owned photos and blocks document-owned ones without a document write path', () => {
     const all = aggregatePhotos([photo('j1')], [doc('d1', 'QU-1', [photo('a')])]);
     expect(canEditPhoto(all[0])).toBe(true);
     expect(canEditPhoto(all[1])).toBe(false);
+    expect(canEditPhoto(all[1], false)).toBe(false);
+  });
+
+  it('allows document-owned photos once the strip can write documents', () => {
+    const all = aggregatePhotos([photo('j1')], [doc('d1', 'QU-1', [photo('a')])]);
+    expect(canEditPhoto(all[0], true)).toBe(true);
+    expect(canEditPhoto(all[1], true)).toBe(true);
+  });
+});
+
+describe('documentPhotoRemoveMessage', () => {
+  it('warns that the photo leaves the online copy, naming the document kind', () => {
+    expect(documentPhotoRemoveMessage({ type: 'quote' })).toBe(
+      "This photo also comes off the quote's online copy. Remove it?",
+    );
+    expect(documentPhotoRemoveMessage({ type: 'invoice' })).toBe(
+      "This photo also comes off the invoice's online copy. Remove it?",
+    );
   });
 });
 

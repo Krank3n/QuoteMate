@@ -3,9 +3,10 @@
  *
  * A job's photos come from two places: `job.photos` (added from the job
  * screen, or migrated at backfill) and every attached document's `photos`
- * (added in the quote wizard). The strip shows both, but only job-owned
- * photos can be annotated or removed there — a customer has already seen the
- * sent quote, so a document's photos never change from the job screen.
+ * (added in the quote wizard). The strip shows both. Job-owned photos are
+ * always editable there; document-owned ones only when the caller hands the
+ * strip a way to write the owning document back (the job screen does), and
+ * that write touches nothing on the document but its `photos`.
  *
  * Pure so the ordering, de-duplication and ownership rules are testable
  * without rendering the strip.
@@ -74,9 +75,24 @@ export function lightboxPhotos(aggregated: AggregatedPhoto[]): AggregatedPhoto[]
   return aggregated.filter(a => !a.photo.uploading && !!a.photo.storageUrl && !isPdfUrl(a.photo.storageUrl));
 }
 
-/** Only job-owned photos may be annotated or removed from the job screen. */
-export function canEditPhoto(entry: AggregatedPhoto): boolean {
-  return entry.owner.kind === 'job';
+/**
+ * Whether a photo may be flipped, annotated or removed from the job screen.
+ * Job-owned photos always can; document-owned ones only when the strip has
+ * been given a document write path (`documentsEditable`). Without one they
+ * stay view-only, so callers other than the job screen are unchanged.
+ */
+export function canEditPhoto(entry: AggregatedPhoto, documentsEditable = false): boolean {
+  return entry.owner.kind === 'job' || documentsEditable;
+}
+
+/**
+ * The remove confirm for a document-owned photo. Removing it from the job
+ * page also takes it off the quote (or invoice) the customer can open
+ * online, and the tradie should know that before tapping Remove.
+ */
+export function documentPhotoRemoveMessage(doc: Pick<Document, 'type'>): string {
+  const kind = doc.type === 'invoice' ? 'invoice' : 'quote';
+  return `This photo also comes off the ${kind}'s online copy. Remove it?`;
 }
 
 /** How many photos live on documents rather than the job (counted against the cap). */
