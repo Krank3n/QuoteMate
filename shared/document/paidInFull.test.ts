@@ -5,15 +5,25 @@ const T1 = 1_757_000_000_000;
 const T2 = T1 + 86_400_000;
 
 describe('paidInFullAtMs', () => {
-  it('prefers the ledger stamp on a paid doc', () => {
-    expect(paidInFullAtMs({ stage: 'paid', paidInFullAt: T2, payments: [{ paidAt: T1 }], updatedAt: T1 })).toBe(T2);
+  it('dates the settlement by the payment that closed the balance, not the ledger stamp', () => {
+    // INV-017 live: paid on the 13th, un-paid (the stamp survived the merge
+    // write), paid again on the 15th — the stamp read "Paid 13 September".
+    expect(paidInFullAtMs({ stage: 'paid', paidInFullAt: T1, payments: [{ paidAt: T2 }], updatedAt: T2 })).toBe(T2);
   });
 
-  it('falls back to the latest payment when the stamp is missing (legacy-rebuilt docs)', () => {
-    expect(paidInFullAtMs({ stage: 'paid', payments: [{ paidAt: T1 }, { paidAt: T2 }], updatedAt: T1 })).toBe(T2);
+  it('uses the latest of several payments', () => {
+    expect(paidInFullAtMs({ stage: 'paid', payments: [{ paidAt: T2 }, { paidAt: T1 }], updatedAt: T1 })).toBe(T2);
   });
 
-  it('falls back to updatedAt when there are no dated payments', () => {
+  it('honours a backdated closing payment over a stamp written today', () => {
+    expect(paidInFullAtMs({ stage: 'paid', paidInFullAt: T2, payments: [{ paidAt: T1 }], updatedAt: T2 })).toBe(T1);
+  });
+
+  it('falls back to the ledger stamp when no payment carries a date', () => {
+    expect(paidInFullAtMs({ stage: 'paid', paidInFullAt: T1, payments: [{ paidAt: undefined }], updatedAt: T2 })).toBe(T1);
+  });
+
+  it('falls back to updatedAt when there is neither', () => {
     expect(paidInFullAtMs({ stage: 'paid', payments: [], updatedAt: T1 })).toBe(T1);
   });
 
