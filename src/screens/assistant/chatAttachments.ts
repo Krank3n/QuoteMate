@@ -11,9 +11,31 @@ import { ATTACHMENT_LIMITS } from '../../services/assistant/attachmentParts';
 import type { ChatAttachment, ChatMessage } from '../../types/assistant';
 import type { QuotePhoto } from '../../types';
 
+const ONES = [
+  'zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten',
+  'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen',
+];
+const TENS = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
+
+/**
+ * "four", "thirty", "twenty-one" — so the limit copy reads like Mate talking
+ * rather than an error code, while still following ATTACHMENT_LIMITS when the
+ * caps move. Anything past ninety-nine falls back to digits.
+ */
+export function numberWord(n: number): string {
+  if (!Number.isInteger(n) || n < 0 || n > 99) return String(n);
+  if (n < 20) return ONES[n];
+  const rest = n % 10;
+  return rest ? `${TENS[Math.floor(n / 10)]}-${ONES[rest]}` : TENS[Math.floor(n / 10)];
+}
+
+const capitalise = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
 export const ATTACH_LIMIT_COPY = {
-  perMessage: "Two photos at a time — send these first and I'll take the next lot.",
-  perChat: "That's five photos this chat — plenty to go on. Start a new chat if you've got more.",
+  perMessage: `${capitalise(numberWord(ATTACHMENT_LIMITS.maxPerTurn))} photos at a time — send these first and I'll take the next lot.`,
+  perChat: `That's ${numberWord(ATTACHMENT_LIMITS.maxPerChat)} photos this chat — plenty to go on. Start a new chat if you've got more.`,
+  /** Last tip on the in-chat camera sheet. */
+  cameraTip: `${capitalise(numberWord(ATTACHMENT_LIMITS.maxPerTurn))} at a time; send them and I'll take the next lot`,
   oversize:
     "That one's too big to send. Try a photo of the section you want me to look at instead of the whole sheet.",
   pdf:

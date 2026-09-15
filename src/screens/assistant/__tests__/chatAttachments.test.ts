@@ -2,12 +2,15 @@
 
 import { describe, it, expect } from 'vitest';
 import {
+  ATTACH_LIMIT_COPY,
   canAttachMore,
   collectQuotePhotos,
   markAttachmentConsumedBy,
   markAttachmentsConsumed,
   mostRecentUnconsumedAttachment,
+  numberWord,
 } from '../chatAttachments';
+import { ATTACHMENT_LIMITS } from '../../../services/assistant/attachmentParts';
 import type { ChatAttachment, ChatMessage } from '../../../types/assistant';
 
 function att(id: string, extra: Partial<ChatAttachment> = {}): ChatAttachment {
@@ -18,20 +21,85 @@ function msg(id: string, attachments?: ChatAttachment[]): ChatMessage {
   return { id, role: 'user', text: 'here', createdAt: '', ...(attachments ? { attachments } : {}) };
 }
 
-describe('canAttachMore', () => {
-  it('blocks a third photo on one message', () => {
-    const res = canAttachMore({ pending: [{}, {}], messages: [] });
-    expect(res.ok).toBe(false);
-    expect(res.ok === false && res.reason).toBe('per_message');
-    expect(res.ok === false && res.message).toContain('Two photos at a time');
+/** `count` single photos spread over messages of `perMessage` each. */
+function sentPhotos(count: number, perMessage = ATTACHMENT_LIMITS.maxPerTurn): ChatMessage[] {
+  const out: ChatMessage[] = [];
+  for (let i = 0; i < count; i += perMessage) {
+    const batch = Array.from({ length: Math.min(perMessage, count - i) }, (_, j) => att(`p${i + j}`));
+    out.push(msg(`m${out.length}`, batch));
+  }
+  return out;
+}
+
+describe('the caps themselves', () => {
+  // Decided 16 Sep 2026 alongside the quote cap going to 30. The byte
+  // ceilings are the 1st-gen Cloud Function request limit and do not move.
+  it('allow four photos a message and thirty a chat', () => {
+    expect(ATTACHMENT_LIMITS.maxPerTurn).toBe(4);
+    expect(ATTACHMENT_LIMITS.maxPerChat).toBe(30);
+  });
+});
+
+describe('numberWord', () => {
+  it('spells the caps out the way Mate would say them', () => {
+    expect(numberWord(4)).toBe('four');
+    expect(numberWord(30)).toBe('thirty');
+    expect(numberWord(21)).toBe('twenty-one');
+    expect(numberWord(0)).toBe('zero');
   });
 
-  it('blocks a sixth in one chat', () => {
-    const messages = [msg('m1', [att('a'), att('b')]), msg('m2', [att('c'), att('d')]), msg('m3', [att('e')])];
-    const res = canAttachMore({ pending: [], messages });
+  it('falls back to digits outside what it can spell', () => {
+    expect(numberWord(100)).toBe('100');
+    expect(numberWord(-1)).toBe('-1');
+    expect(numberWord(2.5)).toBe('2.5');
+  });
+});
+
+describe('ATTACH_LIMIT_COPY', () => {
+  it('states the per-message cap from ATTACHMENT_LIMITS', () => {
+    expect(ATTACH_LIMIT_COPY.perMessage).toBe(
+      "Four photos at a time — send these first and I'll take the next lot.",
+    );
+    expect(ATTACH_LIMIT_COPY.perMessage.toLowerCase()).toContain(numberWord(ATTACHMENT_LIMITS.maxPerTurn));
+    expect(ATTACH_LIMIT_COPY.cameraTip).toBe("Four at a time; send them and I'll take the next lot");
+  });
+
+  it('states the per-chat cap from ATTACHMENT_LIMITS', () => {
+    expect(ATTACH_LIMIT_COPY.perChat).toBe(
+      "That's thirty photos this chat — plenty to go on. Start a new chat if you've got more.",
+    );
+    expect(ATTACH_LIMIT_COPY.perChat).toContain(numberWord(ATTACHMENT_LIMITS.maxPerChat));
+  });
+
+  it('never says "AI" or the old numbers', () => {
+    for (const line of Object.values(ATTACH_LIMIT_COPY)) {
+      expect(line).not.toMatch(/\bAI\b/);
+      expect(line).not.toMatch(/\b(two|five) photos\b/i);
+    }
+  });
+});
+
+describe('canAttachMore', () => {
+  it('lets a fourth photo onto one message and blocks the fifth', () => {
+    expect(canAttachMore({ pending: [{}, {}, {}], messages: [] }).ok).toBe(true);
+    const res = canAttachMore({ pending: [{}, {}, {}, {}], messages: [] });
+    expect(res.ok).toBe(false);
+    expect(res.ok === false && res.reason).toBe('per_message');
+    expect(res.ok === false && res.message).toBe(ATTACH_LIMIT_COPY.perMessage);
+  });
+
+  it('lets the thirtieth photo into a chat and blocks the thirty-first', () => {
+    expect(canAttachMore({ pending: [], messages: sentPhotos(29) }).ok).toBe(true);
+    const res = canAttachMore({ pending: [], messages: sentPhotos(30) });
     expect(res.ok).toBe(false);
     expect(res.ok === false && res.reason).toBe('per_chat');
-    expect(res.ok === false && res.message).toContain('five photos this chat');
+    expect(res.ok === false && res.message).toBe(ATTACH_LIMIT_COPY.perChat);
+  });
+
+  it('counts photos already in the tray against the chat cap too', () => {
+    // 28 sent + 2 pending = 30; one more tips it over the chat, not the message.
+    const res = canAttachMore({ pending: [{}, {}], messages: sentPhotos(28) });
+    expect(res.ok === false && res.reason).toBe('per_chat');
   });
 
   it('does not let a failed upload burn a chat slot', () => {
@@ -46,16 +114,22 @@ describe('canAttachMore', () => {
   });
 
   it('charges a sent plan two slots against the chat cap', () => {
-    const messages = [msg('m1', [att('a', { isPlan: true }), att('b')]), msg('m2', [att('c')])];
-    // 2 + 1 + 1 = 4 spent, so one more single photo fits and a plan does not.
+    // 27 singles + one plan = 29 spent, so one more single photo fits and a
+    // plan does not.
+    const messages = [...sentPhotos(27), msg('plan', [att('plan', { isPlan: true })])];
     expect(canAttachMore({ pending: [], messages }).ok).toBe(true);
-    expect(canAttachMore({ pending: [], messages, isPlan: true }).ok).toBe(false);
+    const res = canAttachMore({ pending: [], messages, isPlan: true });
+    expect(res.ok === false && res.reason).toBe('per_chat');
   });
 
-  it('counts a hi-res plan double', () => {
-    expect(canAttachMore({ pending: [{ isPlan: true }], messages: [] }).ok).toBe(false);
-    expect(canAttachMore({ pending: [], messages: [], isPlan: true }).ok).toBe(true);
-    expect(canAttachMore({ pending: [{}], messages: [] }).ok).toBe(true);
+  it('counts a hi-res plan double on one message', () => {
+    // Two plans fill the four slots; a plan plus two photos leaves one.
+    expect(canAttachMore({ pending: [{ isPlan: true }], messages: [], isPlan: true }).ok).toBe(true);
+    expect(canAttachMore({ pending: [{ isPlan: true }, { isPlan: true }], messages: [] }).ok).toBe(false);
+    expect(canAttachMore({ pending: [{ isPlan: true }, {}, {}], messages: [] }).ok).toBe(false);
+    expect(canAttachMore({ pending: [{ isPlan: true }, {}], messages: [] }).ok).toBe(true);
+    const res = canAttachMore({ pending: [{ isPlan: true }, {}], messages: [], isPlan: true });
+    expect(res.ok === false && res.reason).toBe('per_message');
   });
 });
 
@@ -97,13 +171,16 @@ describe('collectQuotePhotos', () => {
     expect(collectQuotePhotos(messages).map((p) => p.id)).toEqual(['a', 'b']);
   });
 
-  it('dedupes and caps at five', () => {
-    const messages = [
-      msg('m1', [att('a'), att('a'), att('b'), att('c')]),
-      msg('m2', [att('d'), att('e'), att('f')]),
-    ];
-    const ids = collectQuotePhotos(messages).map((p) => p.id);
-    expect(ids).toEqual(['a', 'b', 'c', 'd', 'e']);
+  it('dedupes by id', () => {
+    const messages = [msg('m1', [att('a'), att('a'), att('b')]), msg('m2', [att('b'), att('c')])];
+    expect(collectQuotePhotos(messages).map((p) => p.id)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('carries a full chat of thirty onto the draft', () => {
+    const ids = collectQuotePhotos(sentPhotos(30)).map((p) => p.id);
+    expect(ids).toHaveLength(30);
+    expect(ids[0]).toBe('p0');
+    expect(ids[29]).toBe('p29');
   });
 });
 
