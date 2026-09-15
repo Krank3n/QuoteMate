@@ -118,6 +118,11 @@ import {
   MAX_PDF_ATTACHMENT_BYTES,
   normalizeLlmAttachments,
 } from './llmAttachments';
+import {
+  selectEmailPhotoUrls,
+  buildEmailPhotoAttachments,
+  type FetchedPhotoFile,
+} from './emailPhotoAttachments';
 import { userRateLimitKey } from './rateLimitKey';
 import {
   APPLY_CODE_MESSAGES,
@@ -6236,11 +6241,13 @@ export const generateQuoteAcceptanceLink = functions.https.onRequest((req, res) 
 async function fetchPhotoAttachments(
   photoUrls: string[]
 ): Promise<Array<{ name: string; content: string }>> {
-  // Only fetch remote URLs — legacy quotes may carry local file:// URIs
-  const remoteUrls = photoUrls.filter((url) => /^https?:\/\//i.test(url));
+  // Plans first, then site photos in order, capped at the attachment count
+  // and pre-sorted by URL so only what can be attached is fetched. The
+  // fetched content-type decides the final plan/photo split and naming.
+  const selectedUrls = selectEmailPhotoUrls(photoUrls);
 
   const results = await Promise.allSettled(
-    remoteUrls.map(async (url) => {
+    selectedUrls.map(async (url): Promise<FetchedPhotoFile | null> => {
       const response = await fetch(url);
       if (!response.ok) return null;
 
@@ -6255,32 +6262,11 @@ async function fetchPhotoAttachments(
     })
   );
 
-  // Photos and plans get their own counters, and attaching stops at the email
-  // budget — Brevo rejects the whole send around 10MB of attachments, and a
-  // quote that arrives without one photo beats a quote that never arrives.
-  const MAX_EMAIL_ATTACHMENT_BYTES = 7_000_000;
-  const attachments: Array<{ name: string; content: string }> = [];
-  let photoCount = 0;
-  let planCount = 0;
-  let totalBytes = 0;
-  for (const result of results) {
-    if (result.status !== 'fulfilled' || !result.value) continue;
-    const file = result.value;
-    if (totalBytes + file.bytes > MAX_EMAIL_ATTACHMENT_BYTES) {
-      console.warn('[email attachments] skipping attachment over email budget', {
-        bytes: file.bytes,
-        totalBytes,
-      });
-      continue;
-    }
-    totalBytes += file.bytes;
-    attachments.push({
-      name: file.isPdf ? `Plan_${++planCount}.pdf` : `Job_Photo_${++photoCount}.${file.ext}`,
-      content: file.content,
-    });
-  }
-
-  return attachments;
+  const files = results
+    .filter((r): r is PromiseFulfilledResult<FetchedPhotoFile | null> => r.status === 'fulfilled')
+    .map(r => r.value)
+    .filter((f): f is FetchedPhotoFile => !!f);
+  return buildEmailPhotoAttachments(files);
 }
 
 /**
