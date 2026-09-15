@@ -67,6 +67,7 @@ export function BusinessProfileScreen() {
   const [businessName, setBusinessName] = useState('');
   const [abn, setAbn] = useState('');
   const [email, setEmail] = useState('');
+  const [accountantEmail, setAccountantEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [website, setWebsite] = useState('');
   const [address, setAddress] = useState('');
@@ -90,6 +91,7 @@ export function BusinessProfileScreen() {
       const name = businessSettings.businessName;
       const a = businessSettings.abn || '';
       const e = businessSettings.email || '';
+      const acct = businessSettings.accountantEmail || '';
       const p = businessSettings.phone || '';
       const w = businessSettings.website || '';
       const addr = businessSettings.address || '';
@@ -109,6 +111,7 @@ export function BusinessProfileScreen() {
       setBusinessName(name);
       setAbn(a);
       setEmail(e);
+      setAccountantEmail(acct);
       setPhone(p);
       setWebsite(w);
       setAddress(addr);
@@ -131,7 +134,7 @@ export function BusinessProfileScreen() {
       );
 
       setInitialSnapshot(
-        JSON.stringify({ name, a, e, p, w, addr, logo, credentials: savedCredentials, brand, noBg }),
+        JSON.stringify({ name, a, e, acct, p, w, addr, logo, credentials: savedCredentials, brand, noBg }),
       );
     }
   }, [businessSettings]);
@@ -142,6 +145,7 @@ export function BusinessProfileScreen() {
       name: businessName,
       a: abn,
       e: email,
+      acct: accountantEmail,
       p: phone,
       w: website,
       addr: address,
@@ -151,7 +155,7 @@ export function BusinessProfileScreen() {
       noBg: useNoBackground,
     });
     return current !== initialSnapshot;
-  }, [businessName, abn, email, phone, website, address, logoUri, credentials, brandColor, useNoBackground, initialSnapshot]);
+  }, [businessName, abn, email, accountantEmail, phone, website, address, logoUri, credentials, brandColor, useNoBackground, initialSnapshot]);
 
   const { unsavedModalProps } = useUnsavedChangesGuard({
     isDirty,
@@ -302,6 +306,7 @@ export function BusinessProfileScreen() {
         businessName: businessName.trim(),
         abn: abn.trim() || undefined,
         email: email.trim() || undefined,
+        accountantEmail: accountantEmail.trim() || undefined,
         phone: phone.trim() || undefined,
         website: website.trim() || undefined,
         address: address.trim() || undefined,
@@ -385,6 +390,17 @@ export function BusinessProfileScreen() {
               style={styles.input}
               keyboardType="email-address"
               autoCapitalize="none"
+            />
+
+            <TextInput
+              label="Accountant email"
+              value={accountantEmail}
+              onChangeText={setAccountantEmail}
+              mode="outlined"
+              style={styles.input}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              placeholder="Where your statement goes when you send it from Insights"
             />
 
             <TextInput

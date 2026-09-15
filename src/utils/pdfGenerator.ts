@@ -26,6 +26,7 @@ import {
   buildQuotePdfHtml,
   buildInvoicePdfHtml,
   buildReportPdfHtml,
+  buildStatementPdfHtml,
   toPdfMaterials,
   toPdfSections,
   QuotePdfData,
@@ -34,6 +35,8 @@ import {
   BusinessPdfData,
 } from '../../shared/pdf';
 import { ServiceReport } from '../../shared/report/types';
+import { isoDateInZone } from '../../shared/statement/buildStatement';
+import type { StatementData } from '../../shared/statement/buildStatement';
 // One resolver for "how much of the money does the customer see" — the
 // per-doc override / business default / fallback chain used to be written
 // out by hand at every one of these mapping sites.
@@ -772,6 +775,74 @@ export async function exportReportPDF(
     // while the caller went on to announce success. Alerting AND throwing
     // would fix web but double up on native, where the alert does render and
     // every caller already shows its own message — so leave it to them.
+    reserved?.close();
+    throw error;
+  }
+}
+
+export interface StatementPdfExportOptions {
+  isPro?: boolean;
+  /** Tab reserved during the tap — see reservePrintWindow. Web only. */
+  printWindow?: Window | null;
+  /** Inclusive start of the period, ms epoch. */
+  fromMs: number;
+  /** Exclusive end of the period, ms epoch. */
+  toMs: number;
+  /** IANA zone the dates print in. Defaults to the device's. */
+  timeZone?: string;
+}
+
+/**
+ * Share the accountant statement as a PDF, without the send. Same platform
+ * handling as exportReportPDF's share path — a print tab on web, expo-print
+ * plus the OS share sheet on a phone — and the same business chrome every
+ * other document gets, so the statement carries the tradie's logo, brand
+ * colour and template.
+ */
+export async function exportStatementPDF(
+  data: StatementData,
+  businessSettings: BusinessSettings | null,
+  options: StatementPdfExportOptions,
+): Promise<void> {
+  const reserved = options.printWindow ?? reservePrintWindow();
+  try {
+    const timeZone = options.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const business = await prepareBusinessPdfData(businessSettings, options.isPro);
+    const html = buildStatementPdfHtml(data, business, {
+      fromMs: options.fromMs,
+      toMs: options.toMs,
+      generatedAtMs: Date.now(),
+      timeZone,
+    });
+
+    // Dates first so a folder of statements sorts itself. sanitizeForFilename
+    // would turn the business name into under_scores, which reads badly on a
+    // document handed to an accountant — strip only what a path can't carry.
+    const businessName = (businessSettings?.businessName || '').replace(/[^a-zA-Z0-9 &'-]/g, '').trim();
+    const filename = `Statement ${isoDateInZone(options.fromMs, timeZone)} to ${isoDateInZone(options.toMs - 1, timeZone)}${businessName ? ` ${businessName}` : ''}.pdf`;
+
+    if (Platform.OS === 'web') {
+      writeToPrintWindow(reserved, html, filename, true);
+      return;
+    }
+
+    const { uri } = await Print.printToFileAsync({ html });
+    const newUri = `${FileSystem.cacheDirectory}${filename}`;
+    await FileSystem.copyAsync({ from: uri, to: newUri });
+
+    const isAvailable = await Sharing.isAvailableAsync();
+    if (isAvailable) {
+      await Sharing.shareAsync(newUri, {
+        UTI: Platform.OS === 'ios' ? 'com.adobe.pdf' : undefined,
+        mimeType: 'application/pdf',
+        dialogTitle: filename,
+      });
+    } else {
+      Alert.alert('PDF Created', `${filename} saved successfully`);
+    }
+  } catch (error) {
+    // Same contract as the exports above: close the reserved tab and rethrow
+    // so the caller shows the message (Alert is a no-op on web).
     reserved?.close();
     throw error;
   }

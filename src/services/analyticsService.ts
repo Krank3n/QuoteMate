@@ -194,6 +194,11 @@ export type AnalyticsEvent =
   // Emailed to the customer with the PDF attached — distinct from
   // report_shared, which is the OS share sheet / print dialog.
   | 'report_sent'
+  // — Accountant statement —
+  // A period statement (PDF + CSV) was emailed to an accountant from
+  // Insights. `preset` names the range chip it came from, so we can see
+  // whether anyone besides the tradie who asked for it uses the feature.
+  | 'statement_sent'
   // — Deletes —
   // A quote or invoice was deleted from the app. `source` names the screen
   // (see utils/deleteEventProps.ts), `was_sent` whether a customer had it,
