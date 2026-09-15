@@ -8,6 +8,7 @@
 // claim, and getting it wrong puts someone else's site photo on a quote.
 
 import { ATTACHMENT_LIMITS } from '../../services/assistant/attachmentParts';
+import { MAX_PHOTOS } from '../../components/jobPhotoLimits';
 import type { ChatAttachment, ChatMessage } from '../../types/assistant';
 import type { QuotePhoto } from '../../types';
 
@@ -87,6 +88,13 @@ function isCarryable(a: ChatAttachment): boolean {
 }
 
 /**
+ * Most photos one drafted quote can inherit from the chat. The chat cap and
+ * the quote cap are meant to be equal; if they ever drift, the quote cap must
+ * still hold or the JobPhotos grid opens over its own limit.
+ */
+export const MAX_CARRIED_PHOTOS = Math.min(ATTACHMENT_LIMITS.maxPerChat, MAX_PHOTOS);
+
+/**
  * The photos a freshly drafted quote should be seeded with. Storage URLs only —
  * materialsPipeline reads photos[].storageUrl on its first analyse pass, so a
  * local uri here would be invisible to it.
@@ -104,7 +112,7 @@ export function collectQuotePhotos(messages: ChatMessage[]): QuotePhoto[] {
         annotated: false,
         ...(a.isPlan ? { isPlan: true } : {}),
       });
-      if (out.length >= ATTACHMENT_LIMITS.maxPerChat) return out;
+      if (out.length >= MAX_CARRIED_PHOTOS) return out;
     }
   }
   return out;

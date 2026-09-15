@@ -3,6 +3,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   ATTACH_LIMIT_COPY,
+  MAX_CARRIED_PHOTOS,
   canAttachMore,
   collectQuotePhotos,
   markAttachmentConsumedBy,
@@ -11,6 +12,7 @@ import {
   numberWord,
 } from '../chatAttachments';
 import { ATTACHMENT_LIMITS } from '../../../services/assistant/attachmentParts';
+import { MAX_PHOTOS } from '../../../components/jobPhotoLimits';
 import type { ChatAttachment, ChatMessage } from '../../../types/assistant';
 
 function att(id: string, extra: Partial<ChatAttachment> = {}): ChatAttachment {
@@ -37,6 +39,11 @@ describe('the caps themselves', () => {
   it('allow four photos a message and thirty a chat', () => {
     expect(ATTACHMENT_LIMITS.maxPerTurn).toBe(4);
     expect(ATTACHMENT_LIMITS.maxPerChat).toBe(30);
+  });
+
+  it('keep the chat cap in step with the quote cap', () => {
+    expect(ATTACHMENT_LIMITS.maxPerChat).toBe(MAX_PHOTOS);
+    expect(MAX_CARRIED_PHOTOS).toBeLessThanOrEqual(MAX_PHOTOS);
   });
 });
 
@@ -181,6 +188,15 @@ describe('collectQuotePhotos', () => {
     expect(ids).toHaveLength(30);
     expect(ids[0]).toBe('p0');
     expect(ids[29]).toBe('p29');
+  });
+
+  it('never exceeds the quote cap, even if the chat somehow holds more', () => {
+    // The chat gate should stop this ever happening, but a stale message list
+    // or a future cap bump must not open the JobPhotos grid over MAX_PHOTOS.
+    const photos = collectQuotePhotos(sentPhotos(MAX_PHOTOS + 7));
+    expect(photos).toHaveLength(MAX_PHOTOS);
+    expect(photos.length).toBeLessThanOrEqual(MAX_PHOTOS);
+    expect(photos.map((p) => p.id)).toEqual(Array.from({ length: MAX_PHOTOS }, (_, i) => `p${i}`));
   });
 });
 

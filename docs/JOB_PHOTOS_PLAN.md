@@ -73,4 +73,4 @@ Production check (read-only, 15 Sep): of 715 quote documents, 93 carry photos an
 
 - A separate photo gallery screen or album feature.
 - Sending after photos to customers automatically.
-- Changing Mate's 2-per-message chat limit.
+- Changing Mate's 2-per-message chat limit. (Done separately on 16 Sep: Mate now takes four photos a message and thirty a chat, matching `MAX_PHOTOS`; see `src/services/assistant/attachmentParts.ts`.)
