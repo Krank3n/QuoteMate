@@ -185,6 +185,84 @@ describe('propose_draft_quote description hygiene', () => {
   });
 });
 
+// A claim is a figure, not a scope. One drafted with no rate line goes through
+// the materials engine, which invents hours and gear for work already priced.
+// The prompt says to ask the amount; this is the deterministic backstop.
+describe('propose_draft_quote refuses a claim invoice with no amount', () => {
+  const claimLine = 'Final claim for the completed carport slab.';
+
+  it('refuses a claim invoice with no rateLines and tells the model to ask the amount', () => {
+    const { proposal, error } = buildProposal('propose_draft_quote', 'tool_claim_0', {
+      jobName: 'Final claim — carport slab',
+      customerDraft: { name: 'Priya' },
+      jobDescription: claimLine,
+      documentType: 'invoice',
+    });
+    expect(proposal).toBeUndefined();
+    expect(error).toMatch(/how much the claim is for/i);
+    expect(error).toMatch(/ONE rateLines entry/);
+  });
+
+  it('accepts the same claim once it carries the amount as one lump-sum rate line', () => {
+    const { proposal, error } = buildProposal('propose_draft_quote', 'tool_claim_1', {
+      jobName: 'Final claim — carport slab',
+      customerDraft: { name: 'Priya' },
+      jobDescription: claimLine,
+      documentType: 'invoice',
+      rateLines: [{ label: 'Final claim — carport slab', quantity: 1, unit: 'job', unitPrice: 4500, includesMaterials: true, pricesIncludeGst: true }],
+    });
+    expect(error).toBeUndefined();
+    expect((proposal as any).documentType).toBe('invoice');
+    expect((proposal as any).rateLines).toEqual([
+      { label: 'Final claim — carport slab', quantity: 1, unit: 'job', unitPrice: 4500, includesMaterials: true, pricesIncludeGst: true },
+    ]);
+  });
+
+  it('refuses a claim invoice whose only rate line is labour-only — materials would still be generated', () => {
+    const { proposal, error } = buildProposal('propose_draft_quote', 'tool_claim_5', {
+      jobName: 'Progress claim 2 — bathroom reno',
+      customerDraft: { name: 'Priya' },
+      jobDescription: 'Progress claim 2 for the bathroom renovation.',
+      documentType: 'invoice',
+      rateLines: [{ label: 'Progress claim 2', quantity: 1, unit: 'job', unitPrice: 3000, includesMaterials: false }],
+    });
+    expect(proposal).toBeUndefined();
+    expect(error).toMatch(/includesMaterials true/);
+  });
+
+  it('leaves a plain invoice for work that still needs pricing alone', () => {
+    const { proposal, error } = buildProposal('propose_draft_quote', 'tool_claim_2', {
+      jobName: 'Deck oil',
+      customerDraft: { name: 'Priya' },
+      jobDescription: 'Sand and oil a 20 m² merbau deck, two coats.',
+      documentType: 'invoice',
+    });
+    expect(error).toBeUndefined();
+    expect((proposal as any).documentType).toBe('invoice');
+  });
+
+  it('leaves an insurance-claim repair invoice alone — that one has a scope to price', () => {
+    const { proposal, error } = buildProposal('propose_draft_quote', 'tool_claim_4', {
+      jobName: 'Storm damage gutter repair',
+      customerDraft: { name: 'Priya' },
+      jobDescription: 'Insurance claim repair: replace 12 m of storm-damaged gutter and two downpipes.',
+      documentType: 'invoice',
+    });
+    expect(error).toBeUndefined();
+    expect((proposal as any).documentType).toBe('invoice');
+  });
+
+  it('leaves a quote alone even when the wording mentions a deposit', () => {
+    const { proposal, error } = buildProposal('propose_draft_quote', 'tool_claim_3', {
+      jobName: 'Bathroom reno',
+      customerDraft: { name: 'Priya' },
+      jobDescription: 'Full bathroom renovation, deposit payable on acceptance.',
+    });
+    expect(error).toBeUndefined();
+    expect((proposal as any).documentType).toBe('quote');
+  });
+});
+
 // This card exists to unblock a tradie whose prices are wrong. Refusing it
 // over a bad enum would be the worst possible moment to be pedantic, so the
 // validator never errors — it coerces.

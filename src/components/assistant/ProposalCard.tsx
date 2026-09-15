@@ -114,7 +114,9 @@ function Body({ proposal }: { proposal: Proposal }) {
           })}
           <Text style={styles.dim}>
             {rateLinesCoverMaterials(proposal.rateLines)
-              ? 'Priced off your rate card — no materials list, no extra labour.'
+              ? proposal.documentType === 'invoice'
+                ? 'Goes on the invoice as a lump sum — no materials list, no extra labour.'
+                : 'Priced off your rate card — no materials list, no extra labour.'
               : proposal.materialsMode === 'labour_only'
                 ? 'Labour only — hours and sections, no materials list.'
                 : `I'll work out the materials and price them up${
