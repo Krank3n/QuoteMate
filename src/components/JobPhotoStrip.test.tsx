@@ -7,7 +7,7 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
-import type { Job, JobPhoto } from '../../shared/job/types';
+import type { Job, JobPhoto, JobStage } from '../../shared/job/types';
 import type { Document } from '../types/document';
 
 vi.mock('../theme', async () => await import('../test/stubs/theme'));
@@ -70,9 +70,10 @@ vi.mock('./PhotoUploaderModals', async () => {
 import { JobPhotoStrip } from './JobPhotoStrip';
 import { MAX_PHOTOS } from './jobPhotoLimits';
 
-const jobPhoto = (id: string): JobPhoto => ({ id, storageUrl: `https://storage.example/${id}.jpg` });
-const makeJob = (photos?: JobPhoto[]): Job =>
-  ({ id: 'job-1', name: 'Fence', stage: 'quoted', documentIds: ['doc-1'], photos } as unknown as Job);
+const jobPhoto = (id: string, extra: Partial<JobPhoto> = {}): JobPhoto =>
+  ({ id, storageUrl: `https://storage.example/${id}.jpg`, ...extra });
+const makeJob = (photos?: JobPhoto[], stage: JobStage = 'quoted'): Job =>
+  ({ id: 'job-1', name: 'Fence', stage, documentIds: ['doc-1'], photos } as unknown as Job);
 const makeDoc = (photos: JobPhoto[]): Document =>
   ({ id: 'doc-1', number: 'QU-1042', type: 'quote', jobId: 'job-1', photos } as unknown as Document);
 
@@ -139,6 +140,116 @@ describe('JobPhotoStrip writes', () => {
     // The document's own photos are never part of the job write.
     expect(written.some(p => p.id === 'a')).toBe(false);
     expect(JSON.stringify(doc)).toBe(docBefore);
+  });
+
+  it('stamps stage and takenAt from the job stage on the new photo only', async () => {
+    picker.launchImageLibraryAsync.mockResolvedValueOnce({
+      canceled: false,
+      assets: [{ uri: 'file:///new.jpg' }],
+    });
+    const onJobPhotosChange = vi.fn();
+    const existing = jobPhoto('j1');
+    const before = Date.now();
+    render(
+      <JobPhotoStrip job={makeJob([existing], 'in_progress')} documents={[]} onJobPhotosChange={onJobPhotosChange} />,
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('job-photo-strip-add'));
+    });
+
+    const written = onJobPhotosChange.mock.calls[0][0] as JobPhoto[];
+    expect(written[0]).toEqual(existing);
+    expect(written[1].stage).toBe('after');
+    expect(written[1].takenAt).toBeGreaterThanOrEqual(before);
+    expect(written[1].takenAt).toBeLessThanOrEqual(Date.now());
+  });
+
+  it('stamps "before" while the job is still being quoted', async () => {
+    picker.launchImageLibraryAsync.mockResolvedValueOnce({
+      canceled: false,
+      assets: [{ uri: 'file:///new.jpg' }],
+    });
+    const onJobPhotosChange = vi.fn();
+    render(<JobPhotoStrip job={makeJob([], 'accepted')} documents={[]} onJobPhotosChange={onJobPhotosChange} />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('job-photo-strip-empty-add'));
+    });
+
+    const written = onJobPhotosChange.mock.calls[0][0] as JobPhoto[];
+    expect(written[0].stage).toBe('before');
+  });
+});
+
+describe('JobPhotoStrip before and after', () => {
+  it('shows a flip pill on job-owned tiles only, and tapping it flips the stage through job.photos', () => {
+    const onJobPhotosChange = vi.fn();
+    const j1 = jobPhoto('j1');
+    const j2 = jobPhoto('j2', { stage: 'after' });
+    render(
+      <JobPhotoStrip job={makeJob([j1, j2])} documents={[makeDoc([jobPhoto('a')])]} onJobPhotosChange={onJobPhotosChange} />,
+    );
+
+    // A photo with no stage reads as Before; the document tile has no pill.
+    expect(screen.getByTestId('job-photo-stage-0').textContent).toBe('Before');
+    expect(screen.getByTestId('job-photo-stage-1').textContent).toBe('After');
+    expect(screen.queryByTestId('job-photo-stage-2')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('job-photo-stage-0'));
+    expect(onJobPhotosChange).toHaveBeenCalledWith([{ ...j1, stage: 'after' }, j2]);
+    // The tap flips; it does not open the lightbox.
+    expect(screen.queryByTestId('lightbox-counter')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('job-photo-stage-1'));
+    expect(onJobPhotosChange).toHaveBeenLastCalledWith([j1, { ...j2, stage: 'before' }]);
+  });
+
+  it('has no pill when the strip is read-only', () => {
+    render(<JobPhotoStrip job={makeJob([jobPhoto('j1')])} documents={[]} />);
+    expect(screen.getByTestId('job-photo-thumb-0')).toBeTruthy();
+    expect(screen.queryByTestId('job-photo-stage-0')).toBeNull();
+  });
+
+  it('shows Before and After headings only when both groups have photos', () => {
+    const { rerender } = render(
+      <JobPhotoStrip job={makeJob([jobPhoto('b1'), jobPhoto('b2', { stage: 'before' })])} documents={[]} onJobPhotosChange={vi.fn()} />,
+    );
+    expect(screen.queryByTestId('job-photo-group-before')).toBeNull();
+    expect(screen.queryByTestId('job-photo-group-after')).toBeNull();
+
+    rerender(
+      <JobPhotoStrip job={makeJob([jobPhoto('b1'), jobPhoto('a1', { stage: 'after' })])} documents={[]} onJobPhotosChange={vi.fn()} />,
+    );
+    expect(screen.getByTestId('job-photo-group-before').textContent).toBe('Before');
+    expect(screen.getByTestId('job-photo-group-after').textContent).toBe('After');
+  });
+
+  it('pages the lightbox within the tapped group and names the group in the counter', () => {
+    render(
+      <JobPhotoStrip
+        job={makeJob([jobPhoto('b1'), jobPhoto('a1', { stage: 'after' }), jobPhoto('a2', { stage: 'after' })])}
+        documents={[]}
+        onJobPhotosChange={vi.fn()}
+      />,
+    );
+
+    // a1 is photos[1]; it is the first of two in the After group.
+    fireEvent.click(screen.getByTestId('job-photo-thumb-1'));
+    expect(screen.getByTestId('lightbox-counter').textContent).toBe('After · 1 / 2');
+    expect(screen.queryByTestId('lightbox-prev')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('lightbox-next'));
+    expect(screen.getByTestId('lightbox-counter').textContent).toBe('After · 2 / 2');
+    expect(screen.queryByTestId('lightbox-next')).toBeNull();
+  });
+
+  it('keeps the plain counter when there is only one group', () => {
+    render(
+      <JobPhotoStrip job={makeJob([jobPhoto('b1'), jobPhoto('b2')])} documents={[]} onJobPhotosChange={vi.fn()} />,
+    );
+    fireEvent.click(screen.getByTestId('job-photo-thumb-1'));
+    expect(screen.getByTestId('lightbox-counter').textContent).toBe('2 / 2');
   });
 });
 

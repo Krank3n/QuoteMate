@@ -11,6 +11,12 @@
  * to `job.photos` through that callback. Photos that live on an attached
  * document are view-only here (the customer has already seen that quote);
  * the lightbox captions them with the document number instead.
+ *
+ * Before and after: a photo added here is stamped with a stage picked from
+ * the job's stage (see defaultStageForJob), and a one-tap pill on the tile
+ * flips it. Once both stages have photos the strip splits into two labelled
+ * rows and the lightbox pages within the tapped row; with one stage nothing
+ * about the layout changes.
  */
 
 import React, { useMemo, useState } from 'react';
@@ -31,6 +37,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
 import type { Job, JobPhoto } from '../../shared/job/types';
 import type { Document } from '../types/document';
+import type { PhotoStage } from '../types';
 import { makeStyles, useThemeColors } from '../theme';
 import { selectionTap } from '../utils/haptics';
 import { isPdfUrl } from '../utils/imageMime';
@@ -39,8 +46,12 @@ import { PhotoUploaderModals } from './PhotoUploaderModals';
 import {
   aggregatePhotos,
   canEditPhoto,
+  defaultStageForJob,
   documentOwnedCount,
+  groupPhotosByStage,
   lightboxPhotos,
+  photoStage,
+  STAGE_LABEL,
   type AggregatedPhoto,
 } from './jobPhotoAggregate';
 
@@ -75,6 +86,7 @@ export function JobPhotoStrip({ job, documents, onJobPhotosChange }: JobPhotoStr
     photos: jobPhotos,
     onPhotosChange: onJobPhotosChange ?? noop,
     extraCount: docPhotoCount,
+    stageForNew: () => defaultStageForJob(job.stage),
   });
 
   // Job-owned photos (committed plus still-uploading) first, then documents.
@@ -84,7 +96,12 @@ export function JobPhotoStrip({ job, documents, onJobPhotosChange }: JobPhotoStr
   // The lightbox only pages through renderable images — PDF plans open in
   // the browser instead, so they'd be blank frames and dead chevrons there.
   const imagePhotos = lightboxPhotos(photos);
-  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+  // Two labelled rows once both stages have photos; one plain row otherwise.
+  const groups = groupPhotosByStage(photos);
+  // When grouped, the lightbox pages within the tapped group only.
+  const [lightbox, setLightbox] = useState<{ group: PhotoStage | null; index: number } | null>(null);
+  const lightboxList =
+    lightbox?.group && groups.showHeadings ? lightboxPhotos(groups[lightbox.group]) : imagePhotos;
 
   if (photos.length === 0 && !editable) return null;
 
@@ -96,15 +113,27 @@ export function JobPhotoStrip({ job, documents, onJobPhotosChange }: JobPhotoStr
       Linking.openURL(entry.photo.storageUrl).catch(() => {});
       return;
     }
-    const imageIndex = imagePhotos.indexOf(entry);
-    if (imageIndex >= 0) setLightboxIndex(imageIndex);
+    const group = groups.showHeadings ? photoStage(entry.photo) : null;
+    const list = group ? lightboxPhotos(groups[group]) : imagePhotos;
+    const imageIndex = list.indexOf(entry);
+    if (imageIndex >= 0) setLightbox({ group, index: imageIndex });
   };
-  const close = () => setLightboxIndex(null);
+  const close = () => setLightbox(null);
   const advance = (delta: number) => {
-    if (lightboxIndex == null) return;
-    const next = lightboxIndex + delta;
-    if (next < 0 || next >= imagePhotos.length) return;
-    setLightboxIndex(next);
+    if (!lightbox) return;
+    const next = lightbox.index + delta;
+    if (next < 0 || next >= lightboxList.length) return;
+    setLightbox({ ...lightbox, index: next });
+  };
+
+  // The pill on a job-owned tile. Pending uploads are not in job.photos yet,
+  // so they wait until the upload lands (the default stage is already right
+  // for them in the common case).
+  const flipStage = (entry: AggregatedPhoto) => {
+    if (!editable || !canEditPhoto(entry) || entry.photo.uploading) return;
+    selectionTap();
+    const next: PhotoStage = photoStage(entry.photo) === 'before' ? 'after' : 'before';
+    onJobPhotosChange?.(jobPhotos.map(p => (p.id === entry.photo.id ? { ...p, stage: next } : p)));
   };
 
   // Both actions close the lightbox first: the annotator and the confirm
@@ -121,6 +150,96 @@ export function JobPhotoStrip({ job, documents, onJobPhotosChange }: JobPhotoStr
   };
 
   const showAddTile = editable && !uploader.atCap;
+
+  const renderTile = (entry: AggregatedPhoto) => {
+    const { photo } = entry;
+    const idx = photos.indexOf(entry);
+    const isPdf = photo.localIsPdf || isPdfUrl(photo.storageUrl);
+    const stage = photoStage(photo);
+    const canFlip = editable && canEditPhoto(entry) && !photo.uploading;
+    return (
+      <Pressable
+        key={photo.id || photo.storageUrl}
+        testID={`job-photo-thumb-${idx}`}
+        onPress={() => open(idx)}
+        style={({ pressed }) => [styles.thumbWrap, pressed && styles.thumbPressed]}
+      >
+        {isPdf ? (
+          <View style={styles.pdfThumb}>
+            <MaterialCommunityIcons
+              name={'file-document-outline' as any}
+              size={24}
+              color={themeColors.textMuted}
+            />
+            <Text style={styles.pdfThumbLabel}>PDF</Text>
+          </View>
+        ) : (
+          <Image
+            source={{ uri: photo.localUri || photo.thumbnailUrl || photo.storageUrl }}
+            style={styles.thumb}
+            resizeMode="cover"
+          />
+        )}
+        {photo.uploading ? (
+          <View style={styles.uploadingOverlay}>
+            <ActivityIndicator size="small" color={themeColors.alwaysLight} />
+          </View>
+        ) : null}
+        {photo.annotated && !photo.uploading ? (
+          <View style={styles.annotatedBadge}>
+            <MaterialCommunityIcons
+              name={'pencil' as any}
+              size={10}
+              color={themeColors.alwaysLight}
+            />
+          </View>
+        ) : null}
+        {canFlip ? (
+          <Pressable
+            testID={`job-photo-stage-${idx}`}
+            accessibilityRole="button"
+            accessibilityLabel={`Mark as ${STAGE_LABEL[stage === 'before' ? 'after' : 'before']}`}
+            onPress={() => flipStage(entry)}
+            hitSlop={6}
+            style={styles.stagePill}
+          >
+            <Text style={styles.stagePillLabel}>{STAGE_LABEL[stage]}</Text>
+          </Pressable>
+        ) : null}
+      </Pressable>
+    );
+  };
+
+  const addTile = showAddTile ? (
+    <Pressable
+      testID="job-photo-strip-add"
+      accessibilityRole="button"
+      accessibilityLabel="Add photos"
+      onPress={uploader.showAddOptions}
+      disabled={uploader.hasAnyUploading}
+      style={({ pressed }) => [
+        styles.addTile,
+        pressed && styles.thumbPressed,
+        uploader.hasAnyUploading && styles.addTileDisabled,
+      ]}
+    >
+      <MaterialCommunityIcons name={'plus' as any} size={26} color={themeColors.textMuted} />
+    </Pressable>
+  ) : null;
+
+  const renderRow = (entries: AggregatedPhoto[], withAdd: boolean) => (
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      contentContainerStyle={styles.scroll}
+    >
+      {entries.map(renderTile)}
+      {withAdd ? addTile : null}
+    </ScrollView>
+  );
+
+  // The "+" sits on the row a new photo would land in.
+  const addStage = defaultStageForJob(job.stage);
 
   return (
     <View style={styles.container}>
@@ -150,78 +269,25 @@ export function JobPhotoStrip({ job, documents, onJobPhotosChange }: JobPhotoStr
             Site photos, plans and progress shots for this job.
           </Text>
         </Pressable>
+      ) : groups.showHeadings ? (
+        <>
+          <Text testID="job-photo-group-before" style={styles.groupHeading}>
+            {STAGE_LABEL.before}
+          </Text>
+          {renderRow(groups.before, addStage === 'before')}
+          <Text testID="job-photo-group-after" style={[styles.groupHeading, styles.groupHeadingAfter]}>
+            {STAGE_LABEL.after}
+          </Text>
+          {renderRow(groups.after, addStage === 'after')}
+        </>
       ) : (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.scroll}
-        >
-          {photos.map((entry, idx) => {
-            const { photo } = entry;
-            const isPdf = photo.localIsPdf || isPdfUrl(photo.storageUrl);
-            return (
-              <Pressable
-                key={photo.id || photo.storageUrl}
-                testID={`job-photo-thumb-${idx}`}
-                onPress={() => open(idx)}
-                style={({ pressed }) => [styles.thumbWrap, pressed && styles.thumbPressed]}
-              >
-                {isPdf ? (
-                  <View style={styles.pdfThumb}>
-                    <MaterialCommunityIcons
-                      name={'file-document-outline' as any}
-                      size={24}
-                      color={themeColors.textMuted}
-                    />
-                    <Text style={styles.pdfThumbLabel}>PDF</Text>
-                  </View>
-                ) : (
-                  <Image
-                    source={{ uri: photo.localUri || photo.thumbnailUrl || photo.storageUrl }}
-                    style={styles.thumb}
-                    resizeMode="cover"
-                  />
-                )}
-                {photo.uploading ? (
-                  <View style={styles.uploadingOverlay}>
-                    <ActivityIndicator size="small" color={themeColors.alwaysLight} />
-                  </View>
-                ) : null}
-                {photo.annotated && !photo.uploading ? (
-                  <View style={styles.annotatedBadge}>
-                    <MaterialCommunityIcons
-                      name={'pencil' as any}
-                      size={10}
-                      color={themeColors.alwaysLight}
-                    />
-                  </View>
-                ) : null}
-              </Pressable>
-            );
-          })}
-
-          {showAddTile ? (
-            <Pressable
-              testID="job-photo-strip-add"
-              accessibilityRole="button"
-              accessibilityLabel="Add photos"
-              onPress={uploader.showAddOptions}
-              disabled={uploader.hasAnyUploading}
-              style={({ pressed }) => [
-                styles.addTile,
-                pressed && styles.thumbPressed,
-                uploader.hasAnyUploading && styles.addTileDisabled,
-              ]}
-            >
-              <MaterialCommunityIcons name={'plus' as any} size={26} color={themeColors.textMuted} />
-            </Pressable>
-          ) : null}
-        </ScrollView>
+        renderRow(photos, true)
       )}
 
       <Lightbox
-        photos={imagePhotos}
-        index={lightboxIndex}
+        photos={lightboxList}
+        index={lightbox?.index ?? null}
+        stageLabel={lightbox?.group && groups.showHeadings ? STAGE_LABEL[lightbox.group] : undefined}
         onClose={close}
         onAdvance={advance}
         onAnnotate={editable ? annotate : undefined}
@@ -236,6 +302,7 @@ export function JobPhotoStrip({ job, documents, onJobPhotosChange }: JobPhotoStr
 function Lightbox({
   photos,
   index,
+  stageLabel,
   onClose,
   onAdvance,
   onAnnotate,
@@ -243,6 +310,8 @@ function Lightbox({
 }: {
   photos: AggregatedPhoto[];
   index: number | null;
+  /** "Before" / "After" when paging within one group; shown in the counter. */
+  stageLabel?: string;
   onClose: () => void;
   onAdvance: (delta: number) => void;
   onAnnotate?: (entry: AggregatedPhoto) => void;
@@ -279,7 +348,8 @@ function Lightbox({
         />
 
         <View style={styles.lightboxTopBar}>
-          <Text style={styles.lightboxCounter}>
+          <Text testID="lightbox-counter" style={styles.lightboxCounter}>
+            {stageLabel ? `${stageLabel} · ` : ''}
             {index + 1} / {photos.length}
           </Text>
           <Pressable onPress={onClose} hitSlop={10} style={styles.lightboxClose}>
@@ -289,6 +359,7 @@ function Lightbox({
 
         {canPrev ? (
           <Pressable
+            testID="lightbox-prev"
             onPress={() => onAdvance(-1)}
             hitSlop={20}
             style={[styles.lightboxNav, styles.lightboxNavLeft]}
@@ -302,6 +373,7 @@ function Lightbox({
         ) : null}
         {canNext ? (
           <Pressable
+            testID="lightbox-next"
             onPress={() => onAdvance(1)}
             hitSlop={20}
             style={[styles.lightboxNav, styles.lightboxNavRight]}
@@ -376,6 +448,31 @@ const useStyles = makeStyles((t) => ({
   scroll: {
     gap: 8,
     paddingRight: 4,
+  },
+  groupHeading: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
+    color: t.colors.textMuted,
+    marginBottom: 6,
+  },
+  groupHeadingAfter: {
+    marginTop: 12,
+  },
+  stagePill: {
+    position: 'absolute',
+    bottom: 4,
+    left: 4,
+    paddingVertical: 2,
+    paddingHorizontal: 6,
+    borderRadius: 8,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+  },
+  stagePillLabel: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: t.colors.alwaysLight,
   },
   thumbWrap: {
     width: THUMB_SIZE,
