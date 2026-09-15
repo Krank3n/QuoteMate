@@ -90,6 +90,7 @@ export { assistantToken } from './assistantToken';
 export { assistantChat } from './assistantChat';
 export { composeServiceReport } from './composeServiceReport';
 export { sendServiceReport } from './serviceReportEmail';
+export { sendAccountantStatement } from './accountantStatement';
 export { generatePresenterClip } from './generatePresenterClip';
 export {
   adminAssistantCosts,

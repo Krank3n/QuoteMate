@@ -78,6 +78,21 @@ export async function recordMaterialsRecommend(opts: {
 }
 
 // ---------------------------------------------------------------------------
+// Accountant statement (sendAccountantStatement) — one counter per send, so
+// we can see whether anyone beyond the tradie who asked for it uses it.
+// ---------------------------------------------------------------------------
+
+/** Pure: field → delta map for one statement send. */
+export function buildAccountantStatementPatch(): Record<string, number> {
+  return { accountantStatementsSent: 1 };
+}
+
+/** Best-effort — callers fire this with a `.catch(() => {})`. */
+export async function recordAccountantStatementSent(uid: string): Promise<void> {
+  await applyFeatureUsagePatch(uid, buildAccountantStatementPatch());
+}
+
+// ---------------------------------------------------------------------------
 // Price fetch (fetchPricesForQuote outcome) — reported by the RN client.
 // ---------------------------------------------------------------------------
 

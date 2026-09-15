@@ -38,6 +38,7 @@ import { formatAuDate } from './timestamps.helpers';
 import { shouldEmbedEmailOpenPixel } from './emailOpenPixel';
 import { hashTerms } from './shared/pdf/terms/defaultAuTradie';
 import { toPdfMaterials, toPdfSections } from './shared/pdf/mapMaterial';
+import { invoiceIssueDateMs } from './shared/statement/buildStatement';
 import {
   lineMarkupMultiplier,
   lumpSumLabourTotal,
@@ -453,6 +454,8 @@ interface BusinessSettings {
   showLaborHours?: boolean;
   paymentMethods?: any;
   termsAndConditions?: string;
+  // Remembered from the last accountant statement send (accountantStatement.ts).
+  accountantEmail?: string;
   [key: string]: any;
 }
 
@@ -505,7 +508,7 @@ function applyHideMarkupForDisplay(q: any, businessSettings?: any) {
   };
 }
 
-function businessLogoHtml(business: BusinessSettings): string {
+export function businessLogoHtml(business: BusinessSettings): string {
   // A device-local file:// path is unreachable from the PDF renderer, so it
   // would print a broken-image box on the customer's quote.
   const url = remoteLogoUrl(business.logoStorageUrl || business.logoUri);
@@ -513,7 +516,7 @@ function businessLogoHtml(business: BusinessSettings): string {
   return `<img src="${url}" alt="${business.businessName || 'Business'}" class="logo" />`;
 }
 
-function businessCredentials(business: BusinessSettings): Array<{
+export function businessCredentials(business: BusinessSettings): Array<{
   label: string;
   number?: string;
   logoHtml?: string;
@@ -1143,7 +1146,9 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
       quoteNumber: invoice.invoiceNumber,
       quoteDate: fmtAuDate(invoice.updatedAt),
       invoiceNumber: invoice.invoiceNumber,
-      issueDate: fmtAuDate(invoice.documentDate || invoice.issueDate || invoice.createdAt),
+      // Shared with the accountant statement so the two can never date an
+      // invoice differently: documentDate || issueDate || createdAt.
+      issueDate: fmtAuDate(invoiceIssueDateMs(invoice)),
       dueDate: fmtAuDate(invoice.dueDate),
       paymentTerms: invoice.paymentTerms,
       paidAmount: invoice.paidAmount || 0,

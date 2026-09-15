@@ -209,7 +209,7 @@ export function buildBusinessCredentialsHTML(business: BusinessPdfData): string 
  * template puts the badge at the top of the right-hand column) without ending
  * up with two copies in the header.
  */
-function buildBusinessHeaderHTML(
+export function buildBusinessHeaderHTML(
   business: BusinessPdfData,
   options?: { omitCredentials?: boolean },
 ): string {
