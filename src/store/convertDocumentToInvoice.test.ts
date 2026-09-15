@@ -118,6 +118,42 @@ describe('convertDocumentToInvoice legacy stamp', () => {
   });
 });
 
+// Mate's rate-card path finishes in under a second — no analyse, no pricing
+// run — so the auto-convert that follows a lump-sum invoice draft (a progress
+// or final claim) can overtake the documents sync. Before this, it threw
+// "Document not found": the tradie asked for an invoice, was told they had
+// one, and got a quote numbered Q-001. Verified on the simulator 15 Sep 2026.
+describe('a document saved moments ago still converts', () => {
+  it('re-reads the documents list once instead of throwing Document not found', async () => {
+    const loadDocuments = vi.fn(async () => {
+      useStore.setState({ documents: [quoteDoc()] } as any);
+    });
+    useStore.setState({ documents: [], saveQuote: vi.fn(async () => {}), loadDocuments } as any);
+
+    const converted = await useStore.getState().convertDocumentToInvoice(DOC_ID);
+
+    expect(loadDocuments).toHaveBeenCalledTimes(1);
+    expect(converted.type).toBe('invoice');
+  });
+
+  it('does not re-read when the document is already in memory', async () => {
+    const loadDocuments = vi.fn(async () => {});
+    useStore.setState({ saveQuote: vi.fn(async () => {}), loadDocuments } as any);
+
+    await useStore.getState().convertDocumentToInvoice(DOC_ID);
+
+    expect(loadDocuments).not.toHaveBeenCalled();
+  });
+
+  it('still throws when the document genuinely does not exist', async () => {
+    const loadDocuments = vi.fn(async () => {});
+    useStore.setState({ documents: [], saveQuote: vi.fn(async () => {}), loadDocuments } as any);
+
+    await expect(useStore.getState().convertDocumentToInvoice(DOC_ID)).rejects.toThrow('Document not found');
+    expect(loadDocuments).toHaveBeenCalledTimes(1);
+  });
+});
+
 // A deposit the customer already paid on the quote must come off the invoice
 // as a credit, on both conversion paths. This is the invoice a tradie creates
 // from the "job won" sheet / sticky bar's Create Invoice straight after a

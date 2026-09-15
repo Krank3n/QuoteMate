@@ -2931,7 +2931,18 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   convertDocumentToInvoice: async (documentId: string) => {
-    const existing = get().getDocumentById(documentId);
+    let existing = get().getDocumentById(documentId) ?? get().getDocumentByLegacyId(documentId);
+    if (!existing) {
+      // A document saved moments ago may not have reached the in-memory list
+      // yet. Mate's rate-card path finishes in well under a second — no
+      // analyse, no pricing run — so the auto-convert that follows a lump-sum
+      // invoice draft (a progress or final claim) overtook the documents sync
+      // and threw "Document not found". The tradie asked for an invoice, was
+      // told they had one, and got a quote numbered Q-001 instead. Re-read
+      // once before giving up.
+      await get().loadDocuments();
+      existing = get().getDocumentById(documentId) ?? get().getDocumentByLegacyId(documentId);
+    }
     if (!existing) {
       throw new Error('Document not found');
     }
