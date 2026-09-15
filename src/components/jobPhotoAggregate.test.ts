@@ -6,12 +6,17 @@
  */
 import { describe, it, expect } from 'vitest';
 import type { Document } from '../types/document';
+import type { JobStage } from '../../shared/job/types';
+import type { PhotoStage } from '../types';
 import {
   aggregatePhotos,
   canEditPhoto,
+  defaultStageForJob,
   documentOwnedCount,
   documentPhotoLabel,
+  groupPhotosByStage,
   lightboxPhotos,
+  photoStage,
   type StripPhoto,
 } from './jobPhotoAggregate';
 
@@ -97,6 +102,75 @@ describe('documentOwnedCount', () => {
       [doc('d1', 'QU-1', [photo('shared'), photo('a'), photo('b')])],
     );
     expect(documentOwnedCount(all)).toBe(2);
+  });
+});
+
+describe('defaultStageForJob', () => {
+  // A Record over JobStage so adding a stage fails to compile until it is
+  // classified here.
+  const expected: Record<JobStage, PhotoStage> = {
+    inquiry: 'before',
+    quoted: 'before',
+    accepted: 'before',
+    cancelled: 'before',
+    scheduled: 'after',
+    in_progress: 'after',
+    completed: 'after',
+    paid: 'after',
+    closed: 'after',
+  };
+
+  it.each(Object.entries(expected) as Array<[JobStage, PhotoStage]>)(
+    'maps %s to %s',
+    (jobStage, stage) => {
+      expect(defaultStageForJob(jobStage)).toBe(stage);
+    },
+  );
+
+  it('falls back to before for a stage value it has never seen', () => {
+    expect(defaultStageForJob('something_new' as JobStage)).toBe('before');
+  });
+});
+
+describe('photoStage', () => {
+  it('treats a missing stage as before', () => {
+    expect(photoStage(photo('legacy'))).toBe('before');
+    expect(photoStage({ stage: undefined })).toBe('before');
+  });
+
+  it('returns the stored stage when there is one', () => {
+    expect(photoStage(photo('b', { stage: 'before' }))).toBe('before');
+    expect(photoStage(photo('a', { stage: 'after' }))).toBe('after');
+  });
+});
+
+describe('groupPhotosByStage', () => {
+  it('shows headings only when both groups are non-empty', () => {
+    const both = groupPhotosByStage(aggregatePhotos([photo('b1'), photo('a1', { stage: 'after' })], []));
+    expect(both.showHeadings).toBe(true);
+    expect(both.before.map(e => e.photo.id)).toEqual(['b1']);
+    expect(both.after.map(e => e.photo.id)).toEqual(['a1']);
+
+    const onlyBefore = groupPhotosByStage(aggregatePhotos([photo('b1'), photo('b2', { stage: 'before' })], []));
+    expect(onlyBefore.showHeadings).toBe(false);
+    expect(onlyBefore.after).toEqual([]);
+
+    const onlyAfter = groupPhotosByStage(aggregatePhotos([photo('a1', { stage: 'after' })], []));
+    expect(onlyAfter.showHeadings).toBe(false);
+    expect(onlyAfter.before).toEqual([]);
+
+    expect(groupPhotosByStage([]).showHeadings).toBe(false);
+  });
+
+  it('keeps each group in strip order and puts document-owned photos under before', () => {
+    const groups = groupPhotosByStage(
+      aggregatePhotos(
+        [photo('a1', { stage: 'after' }), photo('b1'), photo('a2', { stage: 'after' })],
+        [doc('d1', 'QU-1', [photo('d')])],
+      ),
+    );
+    expect(groups.before.map(e => e.photo.id)).toEqual(['b1', 'd']);
+    expect(groups.after.map(e => e.photo.id)).toEqual(['a1', 'a2']);
   });
 });
 

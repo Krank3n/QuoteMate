@@ -140,6 +140,62 @@ describe('usePhotoUploader writes', () => {
     expect(result.current.alertConfig).toBeNull();
   });
 
+  it('stamps stageForNew and takenAt on each new photo and leaves existing photos untouched', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000);
+    const onPhotosChange = vi.fn();
+    const existing = photo('j1');
+    const { result } = renderHook(() =>
+      usePhotoUploader({ photos: [existing], onPhotosChange, stageForNew: () => 'after' }),
+    );
+
+    await act(async () => {
+      await result.current.uploadUris(['file:///a.jpg']);
+    });
+
+    const written = onPhotosChange.mock.calls[0][0] as QuotePhoto[];
+    expect(written[0]).toEqual(existing);
+    expect(written[0].stage).toBeUndefined();
+    expect(written[1]).toMatchObject({ stage: 'after', takenAt: 1_700_000_000_000, annotated: false });
+    vi.restoreAllMocks();
+  });
+
+  it('adds no stage when the caller gives no stageForNew (the wizard), but still records takenAt', async () => {
+    const onPhotosChange = vi.fn();
+    const { result } = renderHook(() => usePhotoUploader({ photos: [], onPhotosChange }));
+
+    await act(async () => {
+      await result.current.uploadUris(['file:///a.jpg']);
+    });
+
+    const written = onPhotosChange.mock.calls[0][0] as QuotePhoto[];
+    expect('stage' in written[0]).toBe(false);
+    expect(typeof written[0].takenAt).toBe('number');
+  });
+
+  it('carries stage and takenAt across an annotation re-upload', async () => {
+    const onPhotosChange = vi.fn();
+    const original: QuotePhoto = { ...photo('j1'), stage: 'after', takenAt: 123 };
+    const { result } = renderHook(() =>
+      usePhotoUploader({ photos: [original], onPhotosChange }),
+    );
+
+    act(() => {
+      result.current.setAnnotatingPhoto(original);
+    });
+    await act(async () => {
+      await result.current.handleAnnotationSave('file:///annotated.jpg');
+    });
+
+    const last = onPhotosChange.mock.calls.at(-1)?.[0] as QuotePhoto[];
+    expect(last[0]).toMatchObject({
+      id: 'j1',
+      storageUrl: 'https://storage.example/annotated.jpg',
+      annotated: true,
+      stage: 'after',
+      takenAt: 123,
+    });
+  });
+
   it('on web, Add picks straight from the library instead of opening the action sheet', async () => {
     const { result } = renderHook(() =>
       usePhotoUploader({ photos: [], onPhotosChange: vi.fn() }),

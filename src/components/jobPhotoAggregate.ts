@@ -11,8 +11,9 @@
  * without rendering the strip.
  */
 
-import type { JobPhoto } from '../../shared/job/types';
+import type { JobPhoto, JobStage } from '../../shared/job/types';
 import type { Document } from '../types/document';
+import type { PhotoStage } from '../types';
 import { isPdfUrl } from '../utils/imageMime';
 
 /** A job photo the strip may still be uploading (mirrors LocalPhoto). */
@@ -81,4 +82,49 @@ export function canEditPhoto(entry: AggregatedPhoto): boolean {
 /** How many photos live on documents rather than the job (counted against the cap). */
 export function documentOwnedCount(aggregated: AggregatedPhoto[]): number {
   return aggregated.filter(a => a.owner.kind === 'document').length;
+}
+
+/**
+ * The stage a photo gets when it is added from the job screen, with no
+ * prompt. Anything up to acceptance is still quoting, so "before"; from
+ * scheduling on the work is happening or done, so "after". A cancelled job
+ * has no work to photograph, so it stays "before"; a one-tap flip covers
+ * the exceptions.
+ */
+export function defaultStageForJob(stage: JobStage): PhotoStage {
+  switch (stage) {
+    case 'scheduled':
+    case 'in_progress':
+    case 'completed':
+    case 'paid':
+    case 'closed':
+      return 'after';
+    case 'inquiry':
+    case 'quoted':
+    case 'accepted':
+    case 'cancelled':
+    default:
+      return 'before';
+  }
+}
+
+/** A photo with no stage (wizard-added, document-owned or pre-dating the field) is "before". */
+export function photoStage(photo: Pick<JobPhoto, 'stage'>): PhotoStage {
+  return photo.stage === 'after' ? 'after' : 'before';
+}
+
+export const STAGE_LABEL: Record<PhotoStage, string> = { before: 'Before', after: 'After' };
+
+export interface StageGroups {
+  before: AggregatedPhoto[];
+  after: AggregatedPhoto[];
+  /** True only when both groups have something in them. */
+  showHeadings: boolean;
+}
+
+/** Splits the strip's photos by stage, keeping each group's relative order. */
+export function groupPhotosByStage(aggregated: AggregatedPhoto[]): StageGroups {
+  const before = aggregated.filter(a => photoStage(a.photo) === 'before');
+  const after = aggregated.filter(a => photoStage(a.photo) === 'after');
+  return { before, after, showHeadings: before.length > 0 && after.length > 0 };
 }

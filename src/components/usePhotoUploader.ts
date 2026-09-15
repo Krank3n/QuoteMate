@@ -21,7 +21,7 @@
 import { useState } from 'react';
 import { Linking, Platform } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import type { QuotePhoto } from '../types';
+import type { PhotoStage, QuotePhoto } from '../types';
 import {
   uploadQuotePhoto,
   deleteQuotePhoto,
@@ -69,6 +69,21 @@ export interface UsePhotoUploaderOptions {
   extraCount?: number;
   /** Cap on the total. Defaults to MAX_PHOTOS. */
   max?: number;
+  /**
+   * Stage to stamp on each newly added photo, read once per batch at add
+   * time. The job screen passes the job's current stage; the wizard leaves
+   * it out so quote photos carry no stage.
+   */
+  stageForNew?: () => PhotoStage;
+}
+
+/** The fields a re-upload (annotation) must carry across from the original. */
+function carriedFields(photo: Pick<QuotePhoto, 'isPlan' | 'stage' | 'takenAt'>): Partial<QuotePhoto> {
+  return {
+    ...(photo.isPlan ? { isPlan: true } : {}),
+    ...(photo.stage ? { stage: photo.stage } : {}),
+    ...(photo.takenAt != null ? { takenAt: photo.takenAt } : {}),
+  };
 }
 
 export interface PhotoUploader {
@@ -112,6 +127,7 @@ export function usePhotoUploader({
   onPhotosChange,
   extraCount = 0,
   max = MAX_PHOTOS,
+  stageForNew,
 }: UsePhotoUploaderOptions): PhotoUploader {
   const [localPhotos, setLocalPhotos] = useState<LocalPhoto[]>([]);
   const [annotatingPhoto, setAnnotatingPhoto] = useState<LocalPhoto | null>(null);
@@ -165,6 +181,10 @@ export function usePhotoUploader({
       Promise.all(uris.map(uri => sniffLocalPhotoMime(uri))),
     ]);
 
+    // Stage and time are fixed at add time for the whole batch, not when
+    // each upload lands — a slow batch should not straddle a stage change.
+    const takenAt = Date.now();
+    const stage = stageForNew?.();
     const pendingPhotos: LocalPhoto[] = uris.map((uri, i) => ({
       id: generateId(),
       storageUrl: '',
@@ -173,6 +193,8 @@ export function usePhotoUploader({
       annotated: false,
       isPlan: planFlags[i],
       localIsPdf: localMimes[i] === 'application/pdf',
+      takenAt,
+      ...(stage ? { stage } : {}),
     }));
 
     setLocalPhotos(prev => [...prev, ...pendingPhotos]);
@@ -192,7 +214,7 @@ export function usePhotoUploader({
       try {
         const storageUrl = await uploadQuotePhoto(userId, pending.localUri!, { isPlan: pending.isPlan });
         setLocalPhotos(prev => prev.filter(p => p.id !== pending.id));
-        committed = [...committed, { id: pending.id, storageUrl, annotated: false, ...(pending.isPlan ? { isPlan: true } : {}) }];
+        committed = [...committed, { id: pending.id, storageUrl, annotated: false, ...carriedFields(pending) }];
         onPhotosChange(committed);
       } catch (err) {
         setLocalPhotos(prev => prev.filter(p => p.id !== pending.id));
@@ -357,7 +379,7 @@ export function usePhotoUploader({
     try {
       const storageUrl = await uploadQuotePhoto(userId, annotatedUri, { isPlan: annotatingPhoto.isPlan });
       setLocalPhotos(prev => prev.filter(p => p.id !== photoId));
-      onPhotosChange([...photos.filter(p => p.id !== photoId), { id: photoId, storageUrl, annotated: true, ...(annotatingPhoto.isPlan ? { isPlan: true } : {}) }]);
+      onPhotosChange([...photos.filter(p => p.id !== photoId), { id: photoId, storageUrl, annotated: true, ...carriedFields(annotatingPhoto) }]);
 
       // Delete old version in background
       if (annotatingPhoto.storageUrl) {
@@ -366,7 +388,7 @@ export function usePhotoUploader({
     } catch (error) {
       // Restore original photo
       if (annotatingPhoto.storageUrl) {
-        onPhotosChange([...photos, { id: photoId, storageUrl: annotatingPhoto.storageUrl, annotated: annotatingPhoto.annotated }]);
+        onPhotosChange([...photos, { id: photoId, storageUrl: annotatingPhoto.storageUrl, annotated: annotatingPhoto.annotated, ...carriedFields(annotatingPhoto) }]);
       }
       setLocalPhotos(prev => prev.filter(p => p.id !== photoId));
       showAlert({

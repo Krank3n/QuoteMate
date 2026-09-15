@@ -102,7 +102,15 @@ export interface QuotePhoto {
   // Marked by the user as a plan/drawing → uploaded at higher resolution so the
   // gear generator can read its scale and dimensions.
   isPlan?: boolean;
+  // Before/after grouping on the job screen. Picked from the job's stage when
+  // the photo is added there; absent (treated as "before") for photos added
+  // in the quote wizard and for anything that predates the field.
+  stage?: PhotoStage;
+  // When the photo was added, ms epoch. Not read from EXIF.
+  takenAt?: number;
 }
+
+export type PhotoStage = 'before' | 'after';
 
 // AI-generated template suggestion for a quote
 export interface TemplateSuggestion {
