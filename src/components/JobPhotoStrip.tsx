@@ -162,6 +162,7 @@ export function JobPhotoStrip({ job, documents, onJobPhotosChange }: JobPhotoStr
             return (
               <Pressable
                 key={photo.id || photo.storageUrl}
+                testID={`job-photo-thumb-${idx}`}
                 onPress={() => open(idx)}
                 style={({ pressed }) => [styles.thumbWrap, pressed && styles.thumbPressed]}
               >
