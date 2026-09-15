@@ -16,7 +16,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import { formatDistanceToNow } from 'date-fns';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import type { Job, JobStage } from '../../shared/job/types';
+import type { Job, JobPhoto, JobStage } from '../../shared/job/types';
 import { useJobStore } from '../store/useJobStore';
 import { useStore } from '../store/useStore';
 import { makeStyles, useThemeColors } from '../theme';
@@ -1041,6 +1041,15 @@ export function ViewJobScreen() {
     job.stage === 'in_progress' ||
     job.stage === 'completed';
 
+  // Photos added on this screen live on the Job, never on a document the
+  // customer has already received. A batch commits one photo at a time, so
+  // spread the latest job from the store rather than this render's closure —
+  // a stage change landing mid-batch must not be undone by the next commit.
+  const handleJobPhotosChange = async (photos: JobPhoto[]) => {
+    const latest = useJobStore.getState().jobs.find((j) => j.id === job.id) ?? job;
+    await saveJob({ ...latest, photos });
+  };
+
   return (
     <View style={styles.container}>
       <GridBackground />
@@ -1067,6 +1076,13 @@ export function ViewJobScreen() {
                 params: { jobId: job.id, editing: true },
               });
             }}
+          />
+          {/* Photos sit right under the header so they are the first thing
+              to find when coming back to a job. Adds write to job.photos. */}
+          <JobPhotoStrip
+            job={job}
+            documents={attachedDocs}
+            onJobPhotosChange={handleJobPhotosChange}
           />
         </WebContainer>
 
@@ -1107,10 +1123,6 @@ export function ViewJobScreen() {
             extra={<>{serviceReportRows}{reeceOrderEntry}</>}
           />
         ) : null}
-
-        <WebContainer>
-          <JobPhotoStrip job={job} documents={attachedDocs} />
-        </WebContainer>
 
         {/* Notes hidden for now — same rationale as the checklist
             above. Data still persists on the Job; just no surface
