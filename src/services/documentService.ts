@@ -248,6 +248,14 @@ class DocumentService {
       updatedAt: document.updatedAt ?? Date.now(),
       syncedAt: new Date().toISOString(),
     });
+    // A merge write can't clear a field by omitting it, and stripUndefined
+    // has just omitted every undefined. The un-pay path sets
+    // `paidInFullAt: undefined` on purpose — without this, an invoice paid,
+    // un-paid and paid again kept its first settlement date (INV-017 read
+    // "Paid 13 September" on a payment recorded on the 15th).
+    if ('paidInFullAt' in document && document.paidInFullAt === undefined) {
+      payload.paidInFullAt = deleteField();
+    }
     await setDoc(docRef, payload, { merge: true });
 
     // Mirror back to the legacy collection so older client builds still see
