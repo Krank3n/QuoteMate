@@ -83,6 +83,7 @@ class ServerRunFailed extends Error {
   }
 }
 import { resetGeneratedScope } from '../utils/scopeReset';
+import { waitForMirroredDocument, MATE_INVOICE_MIRROR_WAIT } from './mirroredDocumentWait';
 import { headlineFor } from '../utils/reviewChatFormat';
 import type { CustomerEditPlan } from '../utils/customerEdit';
 import { auth } from '../config/firebase';
@@ -3992,22 +3993,42 @@ export const useStore = create<AppState>((set, get) => ({
 
           // If the tradie asked for an invoice up front, auto-convert at the
           // end of the pipeline so they don't have to do a second Apply.
+          let invoiceNote: string | undefined;
           if (proposal.documentType === 'invoice') {
-            try {
-              const converted = await get().convertDocumentToInvoice(quoteId);
-              return {
-                ok: true,
-                navigate: { kind: 'open_invoice', invoiceId: converted.id },
-                review,
-                supplierGap,
-              };
-            } catch (err: any) {
+            // The unified Document this converts by id is written by the
+            // server mirror AFTER the legacy quote save. A priced run gives
+            // it 15–40 s; the rate-card and labour-only paths give it under
+            // a second, so a lump-sum claim reached here before the copy
+            // existed and stayed a quote (numbered Q-001) while the chat
+            // said "Here's the invoice". Wait for the copy, bounded.
+            const mirrored = await waitForMirroredDocument(
+              () => resolveDocument(quoteId),
+              MATE_INVOICE_MIRROR_WAIT,
+            );
+            if (mirrored) {
+              try {
+                const converted = await get().convertDocumentToInvoice(quoteId);
+                return {
+                  ok: true,
+                  navigate: { kind: 'open_invoice', invoiceId: converted.id },
+                  review,
+                  supplierGap,
+                };
+              } catch (err: any) {
+                // eslint-disable-next-line no-console
+                console.warn('[Mate] auto-convert to invoice failed', err);
+              }
+            } else {
               // eslint-disable-next-line no-console
-              console.warn('[Mate] auto-convert to invoice failed', err);
-              // Fall through to opening the quote — the tradie can convert manually.
+              console.warn('[Mate] auto-convert to invoice skipped — document never mirrored', quoteId);
             }
+            // Fall through to opening the quote, and say so — the tradie asked
+            // for an invoice, so a silent quote is the one thing not to hand back.
+            invoiceNote =
+              "Drafted it as a quote for now — the invoice conversion didn't come through. Tap Create Invoice on the job to flip it.";
           }
 
+          const notes = [invoiceNote].filter((n): n is string => !!n);
           // Land on JobPreview (the final review screen) instead of
           // MaterialsList — pricing is already done.
           return {
@@ -4015,6 +4036,7 @@ export const useStore = create<AppState>((set, get) => ({
             navigate: { kind: 'job_preview', quoteId },
             review,
             supplierGap,
+            ...(notes.length ? { note: notes.join(' ') } : {}),
           };
         }
 
