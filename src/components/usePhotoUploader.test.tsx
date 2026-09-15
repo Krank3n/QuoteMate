@@ -196,6 +196,84 @@ describe('usePhotoUploader writes', () => {
     });
   });
 
+  it('removes from a target list with the target confirm copy and never touches the caller list', async () => {
+    const onPhotosChange = vi.fn();
+    const onTargetChange = vi.fn();
+    const target = {
+      photos: [photo('d1'), photo('d2')],
+      onPhotosChange: onTargetChange,
+      removeMessage: "This photo also comes off the quote's online copy. Remove it?",
+    };
+    const { result } = renderHook(() =>
+      usePhotoUploader({ photos: [photo('j1')], onPhotosChange }),
+    );
+
+    act(() => {
+      result.current.handleDelete('d1', target);
+    });
+    expect(result.current.alertConfig?.title).toBe('Remove Photo');
+    expect(result.current.alertConfig?.message).toBe(
+      "This photo also comes off the quote's online copy. Remove it?",
+    );
+    expect(result.current.alertConfig?.primaryButtonText).toBe('Remove');
+    expect(result.current.alertConfig?.secondaryButtonText).toBe('Cancel');
+
+    await act(async () => {
+      await result.current.alertConfig?.primaryButtonAction?.();
+    });
+
+    expect(onTargetChange).toHaveBeenCalledWith([photo('d2')]);
+    expect(onPhotosChange).not.toHaveBeenCalled();
+    expect(storage.deleteQuotePhoto).toHaveBeenCalledWith('https://storage.example/d1.jpg');
+  });
+
+  it('ignores a targeted delete for an id the target does not hold', () => {
+    const onTargetChange = vi.fn();
+    const { result } = renderHook(() =>
+      usePhotoUploader({ photos: [photo('j1')], onPhotosChange: vi.fn() }),
+    );
+
+    act(() => {
+      result.current.handleDelete('j1', { photos: [photo('d1')], onPhotosChange: onTargetChange });
+    });
+
+    expect(result.current.alertConfig).toBeNull();
+    expect(onTargetChange).not.toHaveBeenCalled();
+  });
+
+  it('saves an annotation back into the target list, replacing the entry and deleting the old file', async () => {
+    const onPhotosChange = vi.fn();
+    const onTargetChange = vi.fn();
+    const original: QuotePhoto = { ...photo('d1'), stage: 'after', takenAt: 123 };
+    const target = { photos: [original, photo('d2')], onPhotosChange: onTargetChange };
+    const { result } = renderHook(() =>
+      usePhotoUploader({ photos: [photo('j1')], onPhotosChange }),
+    );
+
+    act(() => {
+      result.current.setAnnotatingPhoto(original, target);
+    });
+    expect(result.current.annotatingPhoto).toEqual(original);
+
+    await act(async () => {
+      await result.current.handleAnnotationSave('file:///annotated.jpg');
+    });
+
+    // Pulled out while re-uploading, then put back annotated.
+    expect(onTargetChange.mock.calls[0][0]).toEqual([photo('d2')]);
+    const last = onTargetChange.mock.calls.at(-1)?.[0] as QuotePhoto[];
+    expect(last.map(p => p.id)).toEqual(['d2', 'd1']);
+    expect(last[1]).toMatchObject({
+      storageUrl: 'https://storage.example/annotated.jpg',
+      annotated: true,
+      stage: 'after',
+      takenAt: 123,
+    });
+    expect(onPhotosChange).not.toHaveBeenCalled();
+    expect(storage.deleteQuotePhoto).toHaveBeenCalledWith('https://storage.example/d1.jpg');
+    expect(result.current.annotatingPhoto).toBeNull();
+  });
+
   it('on web, Add picks straight from the library instead of opening the action sheet', async () => {
     const { result } = renderHook(() =>
       usePhotoUploader({ photos: [], onPhotosChange: vi.fn() }),
