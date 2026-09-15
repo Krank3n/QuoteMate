@@ -25,9 +25,24 @@ vi.mock('react-native-safe-area-context', () => ({
   initialWindowMetrics: { insets: { top: 0, bottom: 0, left: 0, right: 0 } },
 }));
 vi.mock('react-native-paper', () => {
-  const TextInput: any = ({ value, onChangeText, multiline, placeholder }: any) =>
+  // The caret props are surfaced as data attributes so the Android caret
+  // tests below can read what the editor actually hands the input.
+  const TextInput: any = ({
+    value,
+    onChangeText,
+    multiline,
+    placeholder,
+    cursorColor,
+    selectionColor,
+    selectionHandleColor,
+    selection,
+  }: any) =>
     React.createElement(multiline ? 'textarea' : 'input', {
       'data-multiline': multiline ? 'true' : undefined,
+      'data-cursor-color': cursorColor,
+      'data-selection-color': selectionColor,
+      'data-selection-handle-color': selectionHandleColor,
+      'data-selection': selection ? `${selection.start}-${selection.end}` : undefined,
       placeholder,
       value: value ?? '',
       onChange: (e: any) => onChangeText?.(e.target.value),
@@ -79,6 +94,7 @@ import { trackEvent } from '../services/analyticsService';
 // Resolves to src/test/stubs/firebase.ts via the vitest alias.
 import { auth } from '../config/firebase';
 import type { Document } from '../types/document';
+import { light, dark } from '../theme/semantic';
 
 const tracked = vi.mocked(trackEvent);
 const fetchMock = vi.fn();
@@ -212,6 +228,60 @@ describe('editing the body', () => {
     fireEvent.click(screen.getByText('Edit email'));
 
     expect(screen.getByText('Regenerate')).toBeTruthy();
+  });
+});
+
+// A paying Android tradie (Sep 2026): "very difficult to see where cursor
+// is, it's like a grayed area a line below where you want to edit". Paper
+// derives the caret and selection colours from `activeUnderlineColor` when
+// none are passed, and the editor sets that to "transparent" to hide the
+// flat-mode underline — so the Android caret was transparent and the
+// selection highlight a translucent black. These pin the explicit colours.
+describe('the caret in the body editor', () => {
+  const openEditor = () => {
+    const rendered = renderModal();
+    fireEvent.click(screen.getByText('Edit email'));
+    return rendered;
+  };
+
+  it('paints the caret in the theme text colour, never transparent', () => {
+    openEditor();
+
+    const caret = bodyEditor()!.getAttribute('data-cursor-color');
+    expect([light.text, dark.text]).toContain(caret);
+  });
+
+  it('paints the selection and its handle in the accent, never transparent', () => {
+    openEditor();
+
+    const highlight = bodyEditor()!.getAttribute('data-selection-color');
+    const handle = bodyEditor()!.getAttribute('data-selection-handle-color');
+    expect([light.accentText, dark.accentText]).toContain(highlight);
+    expect(handle).toBe(highlight);
+  });
+
+  it('leaves the caret uncontrolled while typing', () => {
+    openEditor();
+    expect(bodyEditor()!.getAttribute('data-selection')).toBeNull();
+
+    fireEvent.change(bodyEditor()!, { target: { value: 'Hi Sam, typed by hand' } });
+
+    expect(bodyEditor()!.getAttribute('data-selection')).toBeNull();
+  });
+
+  it('steers the caret only after a formatting insert, then lets go', async () => {
+    const { props } = openEditor();
+
+    fireEvent.click(screen.getByLabelText('Bold'));
+
+    // No selection was ever reported, so bold lands at the start with its
+    // placeholder selected: `**bold text**` → the caret wraps chars 2..11.
+    expect(props.onEmailBodyChange).toHaveBeenCalledWith(`**bold text**${EMAIL_BODY}`);
+    expect(bodyEditor()!.getAttribute('data-selection')).toBe('2-11');
+
+    // ...and the `selection` prop is released again on the next tick so the
+    // native caret is free to move (a held `selection` fights it on Android).
+    await waitFor(() => expect(bodyEditor()!.getAttribute('data-selection')).toBeNull());
   });
 });
 
