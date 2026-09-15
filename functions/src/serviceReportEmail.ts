@@ -89,7 +89,8 @@ export function fmtAuDate(value: any): string {
   return formatAuDate(value);
 }
 
-function esc(s: string): string {
+/** Minimal HTML escape for text a tradie typed. Shared with the statement send. */
+export function esc(s: string): string {
   return String(s ?? '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')

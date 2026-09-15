@@ -34,13 +34,16 @@ export interface StatementRange {
 }
 
 export interface StatementBusinessInput {
-  /** undefined/true = registered; false = not registered (no GST column). */
+  /**
+   * undefined/true = registered; false = not registered. A `false` here is
+   * only the setting as it stands TODAY — an invoice in the period that
+   * carried GST still wins, see `buildStatement`.
+   */
   gstRegistered?: boolean;
-  pricesIncludeGst?: boolean;
 }
 
 /** Stages that mean an invoice was actually issued to the customer. */
-export const ISSUED_INVOICE_STAGES: ReadonlySet<DocumentStage> = new Set<DocumentStage>([
+const ISSUED_INVOICE_STAGES: ReadonlySet<DocumentStage> = new Set<DocumentStage>([
   'invoice_sent',
   'partially_paid',
   'paid',
@@ -85,7 +88,7 @@ export interface StatementSummary {
   /** Present only when the business is GST-registered. */
   gstCollected?: number;
   receivedTotal: number;
-  /** Sum of balanceDue over invoices issued in the period. */
+  /** Sum of the in-period invoices' balances as at the last day of the period. */
   outstandingTotal: number;
   invoiceCount: number;
   paymentCount: number;
@@ -113,8 +116,6 @@ export interface StatementDocumentInput {
   subtotal?: number;
   gst?: number;
   total?: number;
-  paidTotal?: number;
-  balanceDue?: number;
   payments?: Array<{ amount?: number; paidAt?: unknown; method?: string }> | null;
   [key: string]: unknown;
 }
@@ -122,7 +123,14 @@ export interface StatementDocumentInput {
 const round2 = (n: number): number => Math.round((Number(n) || 0) * 100) / 100;
 
 const positiveMs = (value: unknown): number | undefined => {
-  const ms = toMs(value);
+  // A Firestore Timestamp that has been through JSON (the server reads a doc,
+  // serialises it, reads it back) arrives as {_seconds,_nanoseconds}, which
+  // `toMs` doesn't know — see normaliseTimestamp in
+  // functions/src/timestamps.helpers.ts for the full list of shapes.
+  const underscored = value as { _seconds?: unknown } | null;
+  const ms = underscored && typeof underscored === 'object' && typeof underscored._seconds === 'number'
+    ? underscored._seconds * 1000
+    : toMs(value);
   return typeof ms === 'number' && ms > 0 ? ms : undefined;
 };
 
@@ -160,8 +168,6 @@ export function buildStatement(
   range: StatementRange,
   business: StatementBusinessInput,
 ): StatementData {
-  const gstRegistered = business.gstRegistered !== false;
-
   const invoices: StatementInvoiceRow[] = [];
   const payments: StatementPaymentRow[] = [];
 
@@ -174,19 +180,29 @@ export function buildStatement(
     if (doc.type === 'invoice' && ISSUED_INVOICE_STAGES.has(doc.stage as DocumentStage)) {
       const dateMs = invoiceIssueDateMs(doc);
       if (dateMs && inRange(dateMs, range)) {
-        const row: StatementInvoiceRow = {
+        // Outstanding is AS AT the end of the period, so only money received
+        // by then counts. The stored paidTotal/balanceDue are today's figures
+        // and would backdate a later payment into this statement.
+        const paidToDate = round2(
+          (doc.payments || []).reduce((sum, payment) => {
+            const amount = Number(payment?.amount) || 0;
+            const paidAt = positiveMs(payment?.paidAt);
+            return amount > 0 && paidAt && paidAt < range.toMs ? sum + amount : sum;
+          }, 0),
+        );
+        const total = round2(doc.total ?? 0);
+        invoices.push({
           id: doc.id,
           dateMs,
           number,
           customerName,
           subtotal: round2(doc.subtotal ?? 0),
-          total: round2(doc.total ?? 0),
-          paid: round2(doc.paidTotal ?? 0),
-          balance: round2(doc.balanceDue ?? 0),
+          gst: round2(doc.gst ?? 0),
+          total,
+          paid: paidToDate,
+          balance: Math.max(0, round2(total - paidToDate)),
           stage: doc.stage as StatementInvoiceStage,
-        };
-        if (gstRegistered) row.gst = round2(doc.gst ?? 0);
-        invoices.push(row);
+        });
       }
     }
 
@@ -205,6 +221,11 @@ export function buildStatement(
       });
     }
   }
+
+  // The setting is today's; the documents are the period's. A business that
+  // deregistered after charging GST must still show the GST it collected.
+  const gstRegistered = business.gstRegistered !== false || invoices.some((r) => (r.gst || 0) > 0);
+  if (!gstRegistered) for (const row of invoices) delete row.gst;
 
   const byDate = <T extends { dateMs: number }>(a: T, b: T) => a.dateMs - b.dateMs;
   invoices.sort((a, b) => byDate(a, b) || a.number.localeCompare(b.number));
@@ -258,14 +279,13 @@ export const INVOICE_STAGE_LABELS: Record<StatementInvoiceStage, string> = {
 
 /** `YYYY-MM-DD` in the given zone — the form spreadsheets sort correctly. */
 export function isoDateInZone(ms: number, timeZone: string = DEFAULT_STATEMENT_TIME_ZONE): string {
-  const parts = new Intl.DateTimeFormat('en-AU', {
+  // en-CA formats as YYYY-MM-DD natively — the same trick email.ts uses.
+  return new Intl.DateTimeFormat('en-CA', {
     timeZone,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
-  }).formatToParts(new Date(ms));
-  const get = (type: string) => parts.find((p) => p.type === type)?.value || '';
-  return `${get('year')}-${get('month')}-${get('day')}`;
+  }).format(new Date(ms));
 }
 
 /** Australian long date, e.g. "1 July 2026", in the given zone. */
@@ -290,9 +310,17 @@ export function statementPeriodLabel(range: StatementRange, timeZone: string = D
 // CSV
 // ---------------------------------------------------------------------------
 
-/** RFC 4180: quote when the field holds a comma, quote, CR or LF; double quotes. */
+/**
+ * RFC 4180: quote when the field holds a comma, quote, CR or LF; double
+ * quotes. A text field that opens with a formula character also gets a
+ * leading apostrophe, so a customer name like `=HYPERLINK("...")` stays text
+ * when the accountant opens the CSV in Excel. Numbers are never touched, so
+ * a negative amount still reads as a number.
+ */
 export function csvField(value: string | number): string {
-  const s = typeof value === 'number' ? String(value) : String(value ?? '');
+  if (typeof value === 'number') return String(value);
+  const s = String(value ?? '');
+  if (/^[=+\-@\t\r]/.test(s)) return `"'${s.replace(/"/g, '""')}"`;
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 

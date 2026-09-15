@@ -4,8 +4,8 @@
  * business header, the user's pdfTemplate + brandColor, A4 print CSS.
  *
  * Multi-page rules (the PAID-stamp lesson): nothing is `position: fixed`,
- * every table row and the summary box carry `break-inside: avoid`, and the
- * table header repeats per page via the print CSS.
+ * and the shared print CSS keeps every table row and the summary box
+ * unbroken and repeats the table header per page.
  *
  * Customer-facing document: the tradie's business is the sender. No app
  * name appears beyond what invoices already carry (none).
@@ -14,7 +14,7 @@
 import type { BusinessPdfData, PdfTemplateId } from './types';
 import { formatCurrency } from './formatCurrency';
 import { printMediaCSS, getTemplateCSS } from './templates';
-import { buildBusinessHeaderHTML, buildBusinessCredentialsHTML, showcasesCredentials } from './htmlBuilders';
+import { buildBusinessHeaderHTML, buildBusinessCredentialsHTML, escapeHtml, showcasesCredentials } from './htmlBuilders';
 import {
   DEFAULT_STATEMENT_TIME_ZONE,
   INVOICE_STAGE_LABELS,
@@ -35,10 +35,7 @@ export interface StatementPdfOptions {
 export const STATEMENT_NOT_REGISTERED_LINE = 'Not registered for GST — no GST charged';
 export const STATEMENT_EMPTY_LINE = 'None in this period';
 export const STATEMENT_FOOTER_NOTE =
-  'Invoices issued lists invoices by issue date. Payments received lists money by the date it was recorded. Figures are as recorded in the app.';
-
-const escapeHtml = (s: string) =>
-  String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  'Invoices issued lists invoices by issue date. Payments received lists money by the date it was recorded. Where a deposit was taken on the quote, the invoice total is the amount invoiced after that deposit; the deposit itself appears under Payments received. Figures are as recorded in the app.';
 
 const money = (n: number) => formatCurrency(Number(n) || 0);
 
@@ -46,16 +43,16 @@ function emptyLine(): string {
   return `<p class="statement-empty">${STATEMENT_EMPTY_LINE}</p>`;
 }
 
-function buildSummaryHTML(data: StatementData): string {
+function buildSummaryHTML(data: StatementData, timeZone: string): string {
   const s = data.summary;
   const rows: Array<[string, string]> = [
     [`Invoices issued (${s.invoiceCount})`, money(s.invoicedTotal)],
     ...(data.gstRegistered ? [['GST collected', money(s.gstCollected || 0)] as [string, string]] : []),
     [`Payments received (${s.paymentCount})`, money(s.receivedTotal)],
-    ['Outstanding at period end', money(s.outstandingTotal)],
+    [`Outstanding at ${longDateInZone(data.range.toMs - 1, timeZone)}`, money(s.outstandingTotal)],
   ];
   return `
-      <div class="summary statement-summary">
+      <div class="summary">
         ${rows.map(([label, value]) => `
         <div class="summary-row">
           <span>${escapeHtml(label)}</span>
@@ -87,7 +84,7 @@ function buildInvoicesHTML(data: StatementData, timeZone: string): string {
         </thead>
         <tbody>
           ${data.invoices.map((row) => `
-          <tr class="statement-row">
+          <tr>
             <td>${escapeHtml(longDateInZone(row.dateMs, timeZone))}</td>
             <td>${escapeHtml(row.number)}</td>
             <td>${escapeHtml(row.customerName)}</td>
@@ -98,7 +95,7 @@ function buildInvoicesHTML(data: StatementData, timeZone: string): string {
             <td class="num">${money(row.balance)}</td>
             <td>${INVOICE_STAGE_LABELS[row.stage]}</td>
           </tr>`).join('')}
-          <tr class="total-row statement-row">
+          <tr class="total-row">
             <td colspan="3">Total</td>
             <td class="num">${money(subtotalSum)}</td>
             ${gst ? `<td class="num">${money(s.gstCollected || 0)}</td>` : ''}
@@ -126,7 +123,7 @@ function buildPaymentsHTML(data: StatementData, timeZone: string): string {
         </thead>
         <tbody>
           ${data.payments.map((row) => `
-          <tr class="statement-row">
+          <tr>
             <td>${escapeHtml(longDateInZone(row.dateMs, timeZone))}</td>
             <td>${escapeHtml(row.documentNumber)}</td>
             <td>${escapeHtml(row.customerName)}</td>
@@ -134,12 +131,12 @@ function buildPaymentsHTML(data: StatementData, timeZone: string): string {
             <td class="num">${money(row.amount)}</td>
           </tr>`).join('')}
           ${data.paymentsByMethod.map((entry) => `
-          <tr class="statement-row statement-method-subtotal">
+          <tr class="statement-method-subtotal">
             <td colspan="3"></td>
             <td>${PAYMENT_METHOD_LABELS[entry.method]} (${entry.count})</td>
             <td class="num">${money(entry.amount)}</td>
           </tr>`).join('')}
-          <tr class="total-row statement-row">
+          <tr class="total-row">
             <td colspan="4">Total received</td>
             <td class="num">${money(data.summary.receivedTotal)}</td>
           </tr>
@@ -166,11 +163,9 @@ export function buildStatementPdfHtml(
       <style>
         ${printMediaCSS}
         ${getTemplateCSS(templateId, business.brandColor)}
-        .statement-summary { page-break-inside: avoid; break-inside: avoid; }
         .statement-table { font-size: 11px; }
         .statement-table th, .statement-table td { padding: 6px 8px; white-space: nowrap; }
         .statement-table td:nth-child(3) { white-space: normal; }
-        .statement-row { page-break-inside: avoid; break-inside: avoid; }
         .statement-method-subtotal td { color: #4b5563; font-style: italic; border-bottom: none; }
         .statement-empty { color: #6b7280; font-size: 12px; margin: 4px 0 12px 0; }
         .statement-gst-line { font-size: 11px; color: #4b5563; margin-top: 6px; }
@@ -191,7 +186,7 @@ export function buildStatementPdfHtml(
         </div>
       </div>
 
-      ${buildSummaryHTML(data)}
+      ${buildSummaryHTML(data, timeZone)}
 
       <div class="section-wrapper">
         <h3>Invoices issued</h3>

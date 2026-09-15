@@ -14,7 +14,7 @@ const T = (y: number, m: number, d: number, h = 12) => Date.UTC(y, m - 1, d, h);
 
 // Last financial year: [1 Jul 2025, 1 Jul 2026)
 const FY = { fromMs: T(2025, 7, 1, 0), toMs: T(2026, 7, 1, 0) };
-const REGISTERED = { gstRegistered: true, pricesIncludeGst: true };
+const REGISTERED = { gstRegistered: true };
 const NOT_REGISTERED = { gstRegistered: false };
 
 function inv(over: Partial<StatementDocumentInput> & { id: string }): StatementDocumentInput {
@@ -27,8 +27,6 @@ function inv(over: Partial<StatementDocumentInput> & { id: string }): StatementD
     subtotal: 100,
     gst: 10,
     total: 110,
-    paidTotal: 0,
-    balanceDue: 110,
     payments: [],
     ...over,
   };
@@ -75,8 +73,6 @@ describe('buildStatement — invoices issued', () => {
         id: 'old',
         createdAt: T(2025, 5, 20),
         stage: 'paid',
-        paidTotal: 110,
-        balanceDue: 0,
         payments: [{ amount: 110, paidAt: T(2025, 8, 2), method: 'bank' }],
       })],
       FY,
@@ -105,6 +101,13 @@ describe('buildStatement — invoices issued', () => {
     expect(data.summary.invoicedTotal).toBe(110);
   });
 
+  it('keeps the GST column when an in-range invoice carried GST, whatever the setting says today', () => {
+    const data = buildStatement([inv({ id: 'g', subtotal: 1000, gst: 100, total: 1100 })], FY, NOT_REGISTERED);
+    expect(data.gstRegistered).toBe(true);
+    expect(data.invoices[0].gst).toBe(100);
+    expect(data.summary.gstCollected).toBe(100);
+  });
+
   it('registered inclusive pricing: the gst column equals doc.gst', () => {
     // Inclusive: $110 entered, $10 is the 1/11 component already extracted on the doc.
     const data = buildStatement([inv({ id: 'i', subtotal: 100, gst: 10, total: 110 })], FY, REGISTERED);
@@ -112,17 +115,18 @@ describe('buildStatement — invoices issued', () => {
     expect(data.summary.gstCollected).toBe(10);
   });
 
-  it('outstanding at period end equals the sum of balanceDue over in-range invoices', () => {
+  it('outstanding sums the balances of the in-range invoices only', () => {
     const data = buildStatement(
       [
-        inv({ id: '1', stage: 'partially_paid', paidTotal: 40, balanceDue: 70 }),
-        inv({ id: '2', stage: 'paid', paidTotal: 110, balanceDue: 0 }),
-        inv({ id: '3', balanceDue: 110 }),
-        inv({ id: 'out', createdAt: T(2024, 1, 1), balanceDue: 999 }), // before range: not counted
+        inv({ id: '1', stage: 'partially_paid', payments: [{ amount: 40, paidAt: T(2026, 3, 20), method: 'cash' }] }),
+        inv({ id: '2', stage: 'paid', payments: [{ amount: 110, paidAt: T(2026, 3, 20), method: 'bank' }] }),
+        inv({ id: '3' }),
+        inv({ id: 'out', createdAt: T(2024, 1, 1) }), // issued before the range: not counted
       ],
       FY,
       REGISTERED,
     );
+    expect(data.invoices.map((r) => r.balance)).toEqual([70, 0, 110]);
     expect(data.summary.outstandingTotal).toBe(180);
     expect(data.summary.invoiceCount).toBe(3);
   });
@@ -134,6 +138,46 @@ describe('buildStatement — invoices issued', () => {
       REGISTERED,
     );
     expect(data.invoices.map((r) => r.id)).toEqual(['early', 'late']);
+  });
+});
+
+describe('buildStatement — balances are as at the end of the period', () => {
+  it('a payment made after the period leaves the invoice outstanding inside it', () => {
+    const data = buildStatement(
+      [inv({
+        id: 'jun',
+        createdAt: T(2026, 6, 20),
+        subtotal: 1000,
+        gst: 100,
+        total: 1100,
+        payments: [{ amount: 1100, paidAt: T(2026, 7, 5), method: 'bank' }],
+      })],
+      FY,
+      REGISTERED,
+    );
+    expect(data.invoices[0]).toMatchObject({ paid: 0, balance: 1100 });
+    expect(data.summary.outstandingTotal).toBe(1100);
+    expect(data.summary.receivedTotal).toBe(0);
+  });
+
+  it('ignores a stale stored balanceDue and paidTotal', () => {
+    const data = buildStatement([inv({ id: 'stale', paidTotal: 110, balanceDue: 0 })], FY, REGISTERED);
+    expect(data.invoices[0]).toMatchObject({ paid: 0, balance: 110 });
+    expect(data.summary.outstandingTotal).toBe(110);
+  });
+
+  it('a legacy invoice with a total and no ledger is outstanding in full', () => {
+    const data = buildStatement([inv({ id: 'legacy', payments: undefined })], FY, REGISTERED);
+    expect(data.invoices[0]).toMatchObject({ paid: 0, balance: 110 });
+  });
+
+  it('never shows a negative balance when more was paid than invoiced', () => {
+    const data = buildStatement(
+      [inv({ id: 'over', payments: [{ amount: 150, paidAt: T(2026, 3, 20), method: 'cash' }] })],
+      FY,
+      REGISTERED,
+    );
+    expect(data.invoices[0]).toMatchObject({ paid: 150, balance: 0 });
   });
 });
 
@@ -214,7 +258,7 @@ describe('buildStatement — rounding and empties', () => {
   it('rounds every figure to 2dp', () => {
     const data = buildStatement(
       [
-        inv({ id: 'r', subtotal: 33.335, gst: 3.3335, total: 36.6685, balanceDue: 36.6685, paidTotal: 0 }),
+        inv({ id: 'r', subtotal: 33.335, gst: 3.3335, total: 36.6685 }),
         inv({
           id: 'pp',
           payments: [
@@ -271,6 +315,19 @@ describe('invoiceIssueDateMs — the date the invoice PDF prints', () => {
     expect(invoiceIssueDateMs({ issueDate: new Date(ms) })).toBe(ms);
     expect(invoiceIssueDateMs({ createdAt: { toDate: () => new Date(ms) } })).toBe(ms);
   });
+
+  it('accepts the JSON-round-tripped {_seconds} shape a server read hands back', () => {
+    const ms = T(2026, 2, 2);
+    expect(invoiceIssueDateMs({ issueDate: { _seconds: ms / 1000, _nanoseconds: 0 } })).toBe(ms);
+    // An invoice created in the new year but issued in February still lands
+    // in the period its issue date falls in.
+    const data = buildStatement(
+      [inv({ id: 'ts', createdAt: T(2026, 7, 3), issueDate: { _seconds: ms / 1000, _nanoseconds: 0 } })],
+      FY,
+      REGISTERED,
+    );
+    expect(data.invoices.map((r) => r.dateMs)).toEqual([ms]);
+  });
 });
 
 describe('statementToCsv', () => {
@@ -282,8 +339,6 @@ describe('statementToCsv', () => {
         customerName: 'Smith, "Bob"\nUnit 2',
         createdAt: T(2026, 3, 10),
         stage: 'partially_paid',
-        paidTotal: 50,
-        balanceDue: 60,
         payments: [{ amount: 50, paidAt: T(2026, 3, 12), method: 'bank' }],
       }),
     ],
@@ -326,7 +381,13 @@ describe('statementToCsv', () => {
     expect(isoDateInZone(ms, 'Australia/Sydney')).toBe('2026-07-01');
   });
 
-  it('csvField leaves plain values and numbers untouched', () => {
+  it('neutralises a text cell that opens with a formula character, and leaves numbers alone', () => {
+    expect(csvField('=HYPERLINK("x")')).toBe('"\'=HYPERLINK(""x"")"');
+    expect(csvField('+61400000000')).toBe('"\'+61400000000"');
+    expect(csvField('@SUM(1)')).toBe('"\'@SUM(1)"');
+    expect(csvField('-Bob')).toBe('"\'-Bob"');
+    // Only strings are protected: an amount is still a number to the software.
+    expect(csvField(-5)).toBe('-5');
     expect(csvField('IN-1')).toBe('IN-1');
     expect(csvField(12.5)).toBe('12.5');
   });

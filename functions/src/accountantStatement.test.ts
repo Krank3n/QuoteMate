@@ -10,16 +10,21 @@ const h = vi.hoisted(() => {
     documents: [] as Array<Record<string, unknown> & { id: string }>,
     sets: [] as Array<{ path: string; data: unknown; opts?: unknown }>,
     collectionGets: 0,
+    docGets: 0,
+    selected: [] as string[],
   };
   const docRef = (path: string) => ({
-    get: async () =>
-      path.endsWith('/settings/business')
+    get: async () => {
+      state.docGets += 1;
+      return path.endsWith('/settings/business')
         ? { exists: true, data: () => state.business }
-        : { exists: false, data: () => undefined },
+        : { exists: false, data: () => undefined };
+    },
     set: async (data: unknown, opts?: unknown) => { state.sets.push({ path, data, opts }); },
   });
   const collection = (_path: string) => {
-    const q: any = { _limit: 0, _after: null as any };
+    const q: any = { _limit: 0, _after: null as any, _select: [] as string[] };
+    q.select = (...fields: string[]) => { q._select = fields; state.selected = fields; return q; };
     q.orderBy = () => q;
     q.limit = (n: number) => { q._limit = n; return q; };
     q.startAfter = (last: any) => { q._after = last; return q; };
@@ -47,6 +52,7 @@ const h = vi.hoisted(() => {
     getUserEmail: vi.fn(),
     generatePdf: vi.fn(),
     recordUsage: vi.fn(),
+    checkRateLimit: vi.fn(),
   };
 });
 
@@ -65,6 +71,10 @@ vi.mock('./pdfGenerator', () => ({
   buildInvoicePdfHtml: () => '',
 }));
 vi.mock('./featureUsage', () => ({ recordAccountantStatementSent: h.recordUsage }));
+vi.mock('./assistantToken', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  checkRateLimit: h.checkRateLimit,
+}));
 
 import {
   handleSendAccountantStatement,
@@ -107,6 +117,8 @@ function invoiceDoc(id: string, over: Record<string, unknown> = {}) {
     subtotal: 100,
     gst: 0,
     total: 100,
+    // Stored on the real doc and deliberately ignored: balances come from the
+    // ledger, as at the end of the period.
     paidTotal: 0,
     balanceDue: 100,
     payments: [{ id: 'p1', kind: 'manual', amount: 40, paidAt: T(2026, 3, 12), method: 'bank' }],
@@ -119,11 +131,14 @@ beforeEach(() => {
   h.state.documents = [invoiceDoc('1'), invoiceDoc('2')];
   h.state.sets = [];
   h.state.collectionGets = 0;
+  h.state.docGets = 0;
+  h.state.selected = [];
   h.verifyIdToken.mockReset().mockResolvedValue({ uid: 'u1' });
   h.sendEmail.mockReset().mockResolvedValue(true);
   h.getUserEmail.mockReset().mockResolvedValue('leo@example.com');
   h.generatePdf.mockReset().mockResolvedValue(Buffer.from('%PDF-fake'));
   h.recordUsage.mockReset().mockResolvedValue(undefined);
+  h.checkRateLimit.mockReset().mockResolvedValue(true);
   vi.spyOn(console, 'error').mockImplementation(() => {});
   vi.spyOn(console, 'warn').mockImplementation(() => {});
 });
@@ -141,6 +156,20 @@ describe('handleSendAccountantStatement — request gate', () => {
     await handleSendAccountantStatement(fakeReq({ headers: {} }), res);
     expect(res.statusCode).toBe(401);
     expect(h.verifyIdToken).not.toHaveBeenCalled();
+    expect(h.sendEmail).not.toHaveBeenCalled();
+  });
+
+  it('429 when the hourly rate limit is spent, before any Firestore read', async () => {
+    h.checkRateLimit.mockImplementation(async (_key: string, _cfg: unknown, res: any) => {
+      res.status(429).json({ error: 'Too many requests. Please try again later.' });
+      return false;
+    });
+    const res = fakeRes();
+    await handleSendAccountantStatement(fakeReq(), res);
+    expect(res.statusCode).toBe(429);
+    expect(h.checkRateLimit.mock.calls[0][0]).toBe('stmt:u1');
+    expect(h.state.docGets).toBe(0);
+    expect(h.state.collectionGets).toBe(0);
     expect(h.sendEmail).not.toHaveBeenCalled();
   });
 
@@ -208,6 +237,11 @@ describe('handleSendAccountantStatement — happy path', () => {
     expect(html).toContain('Not registered for GST');
     expect(html).toContain('IN-1');
 
+    // Projected: a 1 GB function must not pull materials/sections/photos.
+    expect(h.state.selected).toContain('payments');
+    expect(h.state.selected).toContain('total');
+    expect(h.state.selected).not.toContain('materials');
+
     expect(h.state.sets).toEqual([
       { path: 'users/u1/settings/business', data: { accountantEmail: 'books@accountant.com.au' }, opts: { merge: true } },
     ]);
@@ -249,6 +283,15 @@ describe('handleSendAccountantStatement — happy path', () => {
     expect(h.recordUsage).not.toHaveBeenCalled();
   });
 
+  it('413 rather than emailing an attachment pair the provider will bounce', async () => {
+    h.generatePdf.mockResolvedValue(Buffer.alloc(9 * 1024 * 1024 + 1));
+    const res = fakeRes();
+    await handleSendAccountantStatement(fakeReq(), res);
+    expect(res.statusCode).toBe(413);
+    expect(res.body.error).toMatch(/shorter period/);
+    expect(h.sendEmail).not.toHaveBeenCalled();
+  });
+
   it('500 when the PDF render throws', async () => {
     h.generatePdf.mockRejectedValue(new Error('chromium died'));
     const res = fakeRes();
@@ -273,6 +316,14 @@ describe('parseStatementRequest', () => {
     expect(parseStatementRequest(base)).toMatchObject({ ok: true, value: { timeZone: 'Australia/Sydney' } });
     expect(parseStatementRequest({ ...base, timeZone: 'Mars/Olympus' })).toMatchObject({ ok: true, value: { timeZone: 'Australia/Sydney' } });
     expect(parseStatementRequest({ ...base, timeZone: 'Australia/Perth' })).toMatchObject({ ok: true, value: { timeZone: 'Australia/Perth' } });
+  });
+
+  it('rejects an over-long subject or message rather than posting a novel', () => {
+    const base = { ...FY, recipientEmail: 'a@b.co' };
+    expect(parseStatementRequest({ ...base, subject: 'x'.repeat(201) })).toEqual({ ok: false, error: 'Subject is too long.' });
+    expect(parseStatementRequest({ ...base, subject: 'x'.repeat(200) })).toMatchObject({ ok: true });
+    expect(parseStatementRequest({ ...base, emailBody: 'y'.repeat(4001) })).toEqual({ ok: false, error: 'Message is too long.' });
+    expect(parseStatementRequest({ ...base, emailBody: 'y'.repeat(4000) })).toMatchObject({ ok: true });
   });
 
   it('accepts exactly 24 months and trims the recipient', () => {

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { buildStatementPdfHtml, STATEMENT_EMPTY_LINE, STATEMENT_FOOTER_NOTE } from './statementHtml';
 import { buildStatement, type StatementDocumentInput } from '../statement/buildStatement';
+import { printMediaCSS } from './templates';
 import type { BusinessPdfData } from './types';
 
 const T = (y: number, m: number, d: number, h = 12) => Date.UTC(y, m - 1, d, h);
@@ -24,18 +25,18 @@ function inv(over: Partial<StatementDocumentInput> & { id: string }): StatementD
     subtotal: 100,
     gst: 10,
     total: 110,
-    paidTotal: 0,
-    balanceDue: 110,
     payments: [{ amount: 40, paidAt: T(2026, 3, 12), method: 'bank' }],
     ...over,
   };
 }
 
-const docs = [inv({ id: '101' }), inv({ id: '102', stage: 'paid', paidTotal: 110, balanceDue: 0 }), inv({ id: '103' })];
+const docs = [inv({ id: '101' }), inv({ id: '102', stage: 'paid' }), inv({ id: '103' })];
+// A business under the threshold: no GST on the setting and none on the docs.
+const gstFreeDocs = docs.map((d) => ({ ...d, subtotal: 110, gst: 0 }));
 
 describe('buildStatementPdfHtml', () => {
   it('says "Not registered for GST" and omits the GST column when gstRegistered is false', () => {
-    const data = buildStatement(docs, FY, { gstRegistered: false });
+    const data = buildStatement(gstFreeDocs, FY, { gstRegistered: false });
     const html = buildStatementPdfHtml(data, business, { ...FY, generatedAtMs: GENERATED, timeZone: 'UTC' });
     expect(html).toContain('Not registered for GST');
     expect(html).not.toContain('<th class="num">GST</th>');
@@ -43,11 +44,18 @@ describe('buildStatementPdfHtml', () => {
   });
 
   it('shows the GST column and GST collected for a registered business', () => {
-    const data = buildStatement(docs, FY, { gstRegistered: true, pricesIncludeGst: true });
+    const data = buildStatement(docs, FY, { gstRegistered: true });
     const html = buildStatementPdfHtml(data, business, { ...FY, generatedAtMs: GENERATED, timeZone: 'UTC' });
     expect(html).not.toContain('Not registered for GST');
     expect(html).toContain('<th class="num">GST</th>');
     expect(html).toContain('GST collected');
+  });
+
+  it('drops the "not registered" line when an invoice in the period did carry GST', () => {
+    const data = buildStatement(docs, FY, { gstRegistered: false });
+    const html = buildStatementPdfHtml(data, business, { ...FY, generatedAtMs: GENERATED, timeZone: 'UTC' });
+    expect(html).not.toContain('Not registered for GST');
+    expect(html).toContain('<th class="num">GST</th>');
   });
 
   it('lists every in-range invoice number and escapes the customer name', () => {
@@ -62,7 +70,10 @@ describe('buildStatementPdfHtml', () => {
     const data = buildStatement(docs, FY, { gstRegistered: true });
     const html = buildStatementPdfHtml(data, business, { ...FY, generatedAtMs: GENERATED, timeZone: 'UTC' });
     expect(html).not.toMatch(/position:\s*fixed/);
-    expect(html).toContain('.statement-row { page-break-inside: avoid; break-inside: avoid; }');
+    // Rows and the summary stay whole through the shared print CSS.
+    expect(html).toContain(printMediaCSS);
+    expect(printMediaCSS).toMatch(/tr \{\s*page-break-inside: avoid;/);
+    expect(printMediaCSS).toMatch(/\.summary[^{]*\{\s*page-break-inside: avoid;/);
   });
 
   it('renders "None in this period" for both empty tables', () => {
@@ -79,18 +90,9 @@ describe('buildStatementPdfHtml', () => {
     expect(html).toContain('12 345 678 901');
     expect(html).toContain('1 July 2025 – 30 June 2026');
     expect(html).toContain('Generated 15 September 2026');
+    expect(html).toContain('Outstanding at 30 June 2026');
     expect(html).toContain(STATEMENT_FOOTER_NOTE);
     expect(html).toContain('Bank transfer (3)');
     expect(html).not.toMatch(/QuoteMate|\bAI\b/);
-  });
-
-  it('honours the brand colour and template like the other builders', () => {
-    const data = buildStatement(docs, FY, { gstRegistered: true });
-    const html = buildStatementPdfHtml(
-      data,
-      { ...business, brandColor: '#123456', pdfTemplate: 'bold' },
-      { ...FY, generatedAtMs: GENERATED, timeZone: 'UTC' },
-    );
-    expect(html).toContain('--accent: #123456;');
   });
 });

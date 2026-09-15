@@ -18,25 +18,25 @@
 import * as admin from 'firebase-admin';
 import * as functions from 'firebase-functions/v1';
 import cors from 'cors';
-import { verifyAuth } from './assistantToken';
+import { verifyAuth, checkRateLimit } from './assistantToken';
 import { sendEmail, getUserEmail } from './email';
 import { generateQuotePdfBuffer } from './pdfGenerator';
 import { buildStatementPdfHtml } from './shared/pdf';
-import type { BusinessPdfData } from './shared/pdf';
 import {
   buildStatement,
   statementToCsv,
   statementPeriodLabel,
   isoDateInZone,
   DEFAULT_STATEMENT_TIME_ZONE,
-} from './shared/statement';
-import type { StatementDocumentInput } from './shared/statement';
+} from './shared/statement/buildStatement';
+import type { StatementDocumentInput } from './shared/statement/buildStatement';
 import {
   buildSelfCopyBcc,
   resolveTradieReplyEmail,
-  businessLogoHtml,
-  businessCredentials,
+  isLikelyValidEmail,
+  businessSettingsToPdfData,
 } from './documentHandlers';
+import { esc } from './serviceReportEmail';
 import { recordAccountantStatementSent } from './featureUsage';
 
 const db = () => admin.firestore();
@@ -54,7 +54,6 @@ interface BusinessSettings {
   brandColor?: string;
   pdfTemplate?: any;
   gstRegistered?: boolean;
-  pricesIncludeGst?: boolean;
   accountantEmail?: string;
   [key: string]: any;
 }
@@ -66,7 +65,13 @@ interface BusinessSettings {
 /** 24 months, allowing for a leap day. */
 export const MAX_STATEMENT_SPAN_MS = 731 * 24 * 60 * 60 * 1000;
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+/** Five statements an hour is far more than a real accountant ever needs. */
+const STATEMENT_RATE_LIMIT = { maxRequests: 5, windowMs: 60 * 60 * 1000 };
+
+// The subject and body go out over the tradie's own name; cap them so a
+// scripted client can't post a novel through the email provider.
+const MAX_SUBJECT_CHARS = 200;
+const MAX_EMAIL_BODY_CHARS = 4000;
 
 export interface StatementRequest {
   fromMs: number;
@@ -107,8 +112,16 @@ export function parseStatementRequest(body: unknown): ParsedStatementRequest {
     return { ok: false, error: 'The period can cover at most 24 months.' };
   }
   const recipientEmail = typeof b.recipientEmail === 'string' ? b.recipientEmail.trim() : '';
-  if (!recipientEmail || !EMAIL_RE.test(recipientEmail)) {
+  if (!recipientEmail || !isLikelyValidEmail(recipientEmail)) {
     return { ok: false, error: 'A valid recipient email is required.' };
+  }
+  const subject = typeof b.subject === 'string' ? b.subject.trim() : '';
+  if (subject.length > MAX_SUBJECT_CHARS) {
+    return { ok: false, error: 'Subject is too long.' };
+  }
+  const emailBody = typeof b.emailBody === 'string' ? b.emailBody.trim() : '';
+  if (emailBody.length > MAX_EMAIL_BODY_CHARS) {
+    return { ok: false, error: 'Message is too long.' };
   }
   return {
     ok: true,
@@ -116,19 +129,12 @@ export function parseStatementRequest(body: unknown): ParsedStatementRequest {
       fromMs,
       toMs,
       recipientEmail,
-      subject: typeof b.subject === 'string' && b.subject.trim() ? b.subject.trim() : undefined,
-      emailBody: typeof b.emailBody === 'string' && b.emailBody.trim() ? b.emailBody.trim() : undefined,
+      subject: subject || undefined,
+      emailBody: emailBody || undefined,
       sendCopyToSelf: b.sendCopyToSelf === true,
       timeZone: isUsableTimeZone(b.timeZone) ? b.timeZone : DEFAULT_STATEMENT_TIME_ZONE,
     },
   };
-}
-
-function esc(s: string): string {
-  return String(s ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
 }
 
 export interface AccountantStatementEmailArgs {
@@ -203,13 +209,26 @@ export function statementAttachmentBaseName(
 
 const DOCUMENTS_PAGE_SIZE = 500;
 
+/** Only the fields the statement reads — materials, sections and photos on
+ * years of documents would not fit in this function's memory. */
+const STATEMENT_FIELDS = [
+  'type', 'stage', 'number', 'customerName',
+  'createdAt', 'documentDate', 'issueDate',
+  'subtotal', 'gst', 'total', 'payments',
+] as const;
+
+/** The largest attachment pair the email provider will take, with headroom
+ * for base64 (the payload grows by a third on the way out). */
+const MAX_ATTACHMENT_BYTES = 9 * 1024 * 1024;
+
 /** Every document the user has, paged — no cap, unlike the app store. */
-export async function loadAllDocuments(userId: string): Promise<StatementDocumentInput[]> {
+async function loadAllDocuments(userId: string): Promise<StatementDocumentInput[]> {
   const out: StatementDocumentInput[] = [];
   let last: FirebaseFirestore.QueryDocumentSnapshot | null = null;
   while (true) {
     let query = db()
       .collection(`users/${userId}/documents`)
+      .select(...STATEMENT_FIELDS)
       .orderBy(admin.firestore.FieldPath.documentId())
       .limit(DOCUMENTS_PAGE_SIZE);
     if (last) query = query.startAfter(last);
@@ -222,21 +241,6 @@ export async function loadAllDocuments(userId: string): Promise<StatementDocumen
     if (page.size < DOCUMENTS_PAGE_SIZE) break;
   }
   return out;
-}
-
-function toBusinessPdfData(business: BusinessSettings): BusinessPdfData {
-  return {
-    businessName: business.businessName || 'Business',
-    email: business.email,
-    phone: business.phone,
-    website: business.website,
-    abn: business.abn,
-    address: business.address,
-    logoHtml: businessLogoHtml(business),
-    credentials: businessCredentials(business),
-    brandColor: business.brandColor,
-    pdfTemplate: business.pdfTemplate,
-  };
 }
 
 // ---------------------------------------------------------------------------
@@ -258,6 +262,10 @@ export async function handleSendAccountantStatement(
   if (!decoded) return;
   const userId = decoded.uid;
 
+  // A statement reads every document the user has and renders a PDF, so it
+  // is the most expensive thing an authed client can ask for.
+  if (!(await checkRateLimit(`stmt:${userId}`, STATEMENT_RATE_LIMIT, res))) return;
+
   const parsed = parseStatementRequest(req.body);
   if (!parsed.ok) { res.status(400).json({ error: parsed.error }); return; }
   const { fromMs, toMs, recipientEmail, sendCopyToSelf, timeZone } = parsed.value;
@@ -269,16 +277,17 @@ export async function handleSendAccountantStatement(
     const businessName = (business.businessName || '').trim();
 
     const documents = await loadAllDocuments(userId);
-    const data = buildStatement(documents, { fromMs, toMs }, {
-      gstRegistered: business.gstRegistered,
-      pricesIncludeGst: business.pricesIncludeGst,
-    });
+    const data = buildStatement(documents, { fromMs, toMs }, { gstRegistered: business.gstRegistered });
 
-    const pdfHtml = buildStatementPdfHtml(data, toBusinessPdfData(business), {
+    const pdfHtml = buildStatementPdfHtml(data, businessSettingsToPdfData(business), {
       fromMs, toMs, generatedAtMs: Date.now(), timeZone,
     });
     const pdfBuffer = await generateQuotePdfBuffer(pdfHtml);
     const csv = statementToCsv(data, timeZone);
+    if (pdfBuffer.length + csv.length > MAX_ATTACHMENT_BYTES) {
+      res.status(413).json({ error: 'Statement is too large to email. Try a shorter period.' });
+      return;
+    }
     const baseName = statementAttachmentBaseName(fromMs, toMs, businessName, timeZone);
 
     const email = buildAccountantStatementEmail({

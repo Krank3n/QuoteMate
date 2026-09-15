@@ -38,6 +38,7 @@ import { formatAuDate } from './timestamps.helpers';
 import { shouldEmbedEmailOpenPixel } from './emailOpenPixel';
 import { hashTerms } from './shared/pdf/terms/defaultAuTradie';
 import { toPdfMaterials, toPdfSections } from './shared/pdf/mapMaterial';
+import type { BusinessPdfData } from './shared/pdf/types';
 import { invoiceIssueDateMs } from './shared/statement/buildStatement';
 import {
   lineMarkupMultiplier,
@@ -78,7 +79,7 @@ const db = () => admin.firestore();
 // Loose RFC 5321 sanity check: one @, no whitespace, dot in the domain. Not a
 // full validator — the goal is to catch typos like trailing characters that
 // would silently route customer replies into the void.
-function isLikelyValidEmail(s: string): boolean {
+export function isLikelyValidEmail(s: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(s.trim());
 }
 
@@ -508,7 +509,7 @@ function applyHideMarkupForDisplay(q: any, businessSettings?: any) {
   };
 }
 
-export function businessLogoHtml(business: BusinessSettings): string {
+function businessLogoHtml(business: BusinessSettings): string {
   // A device-local file:// path is unreachable from the PDF renderer, so it
   // would print a broken-image box on the customer's quote.
   const url = remoteLogoUrl(business.logoStorageUrl || business.logoUri);
@@ -516,7 +517,7 @@ export function businessLogoHtml(business: BusinessSettings): string {
   return `<img src="${url}" alt="${business.businessName || 'Business'}" class="logo" />`;
 }
 
-export function businessCredentials(business: BusinessSettings): Array<{
+function businessCredentials(business: BusinessSettings): Array<{
   label: string;
   number?: string;
   logoHtml?: string;
@@ -531,6 +532,22 @@ export function businessCredentials(business: BusinessSettings): Array<{
         ? `<img src="${String(credential.logoUri)}" alt="Accreditation" class="credential-logo" style="width:64px;height:38px;object-fit:contain;" />`
         : '',
     }));
+}
+
+/** Business settings → the shared PDF header shape every builder takes. */
+export function businessSettingsToPdfData(business: BusinessSettings): BusinessPdfData {
+  return {
+    businessName: business.businessName || 'Business',
+    email: business.email,
+    phone: business.phone,
+    website: business.website,
+    abn: business.abn,
+    address: business.address,
+    logoHtml: businessLogoHtml(business),
+    credentials: businessCredentials(business),
+    brandColor: business.brandColor,
+    pdfTemplate: business.pdfTemplate,
+  };
 }
 
 function sanitizeFilename(s: string): string {
@@ -1147,8 +1164,10 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
       quoteDate: fmtAuDate(invoice.updatedAt),
       invoiceNumber: invoice.invoiceNumber,
       // Shared with the accountant statement so the two can never date an
-      // invoice differently: documentDate || issueDate || createdAt.
-      issueDate: fmtAuDate(invoiceIssueDateMs(invoice)),
+      // invoice differently: documentDate || issueDate || createdAt. The
+      // helper returns 0 when none is usable; `|| undefined` keeps
+      // fmtAuDate's long-standing fallback to today instead of 1970.
+      issueDate: fmtAuDate(invoiceIssueDateMs(invoice) || undefined),
       dueDate: fmtAuDate(invoice.dueDate),
       paymentTerms: invoice.paymentTerms,
       paidAmount: invoice.paidAmount || 0,

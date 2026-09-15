@@ -18,7 +18,7 @@ import { pathHasInk } from './signatureInk';
 import { isLumpSumSection, lineMarkupMultiplier, markupableLabourTotal } from '../document/lumpSum';
 import { resolvePriceDetail, showsLineItems, showsPerLineMoney } from '../document/priceDetail';
 
-const escapeHtml = (s: string) =>
+export const escapeHtml = (s: string) =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 const formatMultiline = (s: string) => escapeHtml(s).replace(/\n/g, '<br>');
