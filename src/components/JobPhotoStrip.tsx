@@ -3,12 +3,14 @@
  *
  * Horizontal scroll of site-photo thumbnails for ViewJobScreen. Aggregates
  * photos from every attached Document plus any that live directly on the
- * Job (photos migrated at backfill / manually added later). Tap a thumb
- * to open a full-screen lightbox with the image.
+ * Job. Tap a thumb to open a full-screen lightbox with the image.
  *
- * Read-only for now — adding / annotating happens in the quote wizard.
- * Once we have a "post-send" edit flow for a job, this is a natural place
- * to bolt a "+" tile on the end.
+ * With `onJobPhotosChange` the strip is the place a tradie goes back to
+ * after quoting: an "Add photos" tile when the job has none, a "+" tile at
+ * the end otherwise, and Annotate / Remove in the lightbox. Every write goes
+ * to `job.photos` through that callback. Photos that live on an attached
+ * document are view-only here (the customer has already seen that quote);
+ * the lightbox captions them with the document number instead.
  */
 
 import React, { useMemo, useState } from 'react';
@@ -22,6 +24,7 @@ import {
   Modal,
   Dimensions,
   StatusBar,
+  ActivityIndicator,
 } from 'react-native';
 import { Text } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
@@ -31,55 +34,69 @@ import type { Document } from '../types/document';
 import { makeStyles, useThemeColors } from '../theme';
 import { selectionTap } from '../utils/haptics';
 import { isPdfUrl } from '../utils/imageMime';
+import { usePhotoUploader, type LocalPhoto } from './usePhotoUploader';
+import { PhotoUploaderModals } from './PhotoUploaderModals';
+import {
+  aggregatePhotos,
+  canEditPhoto,
+  documentOwnedCount,
+  lightboxPhotos,
+  type AggregatedPhoto,
+} from './jobPhotoAggregate';
 
 interface JobPhotoStripProps {
   job: Job;
   documents: Document[];
+  /**
+   * Receives the job's new `photos` list after an add, annotate or remove.
+   * Without it the strip is read-only and hides itself when there is
+   * nothing to show.
+   */
+  onJobPhotosChange?: (photos: JobPhoto[]) => void;
 }
 
 const THUMB_SIZE = 80;
+const EMPTY_PHOTOS: JobPhoto[] = [];
+const noop = () => {};
 
-function aggregatePhotos(job: Job, documents: Document[]): JobPhoto[] {
-  const seen = new Set<string>();
-  const out: JobPhoto[] = [];
-
-  const push = (p: JobPhoto | undefined | null) => {
-    if (!p) return;
-    const key = p.id || p.storageUrl;
-    if (!key || seen.has(key)) return;
-    seen.add(key);
-    if (p.storageUrl) out.push(p);
-  };
-
-  // Job's own photos first (migrated / tradie-added)...
-  for (const p of job.photos || []) push(p);
-  // ...then every attached doc's photos (shape matches JobPhoto
-  // structurally — QuotePhoto on the Document type).
-  for (const doc of documents) {
-    for (const p of (doc.photos as JobPhoto[] | undefined) || []) push(p);
-  }
-  return out;
-}
-
-export function JobPhotoStrip({ job, documents }: JobPhotoStripProps) {
+export function JobPhotoStrip({ job, documents, onJobPhotosChange }: JobPhotoStripProps) {
   const styles = useStyles();
   const themeColors = useThemeColors();
-  const photos = useMemo(() => aggregatePhotos(job, documents), [job, documents]);
+  const editable = !!onJobPhotosChange;
+  const jobPhotos = job.photos ?? EMPTY_PHOTOS;
+
+  // Photos on attached documents count against the cap but are never
+  // written from here, so they ride along as extraCount.
+  const docPhotoCount = useMemo(
+    () => documentOwnedCount(aggregatePhotos(jobPhotos, documents)),
+    [jobPhotos, documents],
+  );
+  const uploader = usePhotoUploader({
+    photos: jobPhotos,
+    onPhotosChange: onJobPhotosChange ?? noop,
+    extraCount: docPhotoCount,
+  });
+
+  // Job-owned photos (committed plus still-uploading) first, then documents.
+  // Not memoised: allPhotos is rebuilt by the hook on every render and the
+  // list is at most 30 entries.
+  const photos = aggregatePhotos(uploader.allPhotos, documents);
   // The lightbox only pages through renderable images — PDF plans open in
   // the browser instead, so they'd be blank frames and dead chevrons there.
-  const imagePhotos = useMemo(() => photos.filter(p => !isPdfUrl(p.storageUrl)), [photos]);
+  const imagePhotos = lightboxPhotos(photos);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
 
-  if (photos.length === 0) return null;
+  if (photos.length === 0 && !editable) return null;
 
   const open = (i: number) => {
     selectionTap();
-    const photo = photos[i];
-    if (isPdfUrl(photo?.storageUrl)) {
-      Linking.openURL(photo.storageUrl).catch(() => {});
+    const entry = photos[i];
+    if (!entry || entry.photo.uploading) return;
+    if (isPdfUrl(entry.photo.storageUrl)) {
+      Linking.openURL(entry.photo.storageUrl).catch(() => {});
       return;
     }
-    const imageIndex = imagePhotos.indexOf(photo);
+    const imageIndex = imagePhotos.indexOf(entry);
     if (imageIndex >= 0) setLightboxIndex(imageIndex);
   };
   const close = () => setLightboxIndex(null);
@@ -90,58 +107,128 @@ export function JobPhotoStrip({ job, documents }: JobPhotoStripProps) {
     setLightboxIndex(next);
   };
 
+  // Both actions close the lightbox first: the annotator and the confirm
+  // alert are modals of their own, and iOS shows one modal at a time.
+  const annotate = (entry: AggregatedPhoto) => {
+    if (!editable || !canEditPhoto(entry)) return;
+    close();
+    uploader.setAnnotatingPhoto(entry.photo as LocalPhoto);
+  };
+  const remove = (entry: AggregatedPhoto) => {
+    if (!editable || !canEditPhoto(entry)) return;
+    close();
+    uploader.handleDelete(entry.photo.id);
+  };
+
+  const showAddTile = editable && !uploader.atCap;
+
   return (
     <View style={styles.container}>
       <View style={styles.headerRow}>
         <Text style={styles.heading}>Photos</Text>
-        <Text style={styles.count}>{photos.length}</Text>
+        <Text style={styles.count}>
+          {uploader.progressLabel ?? (photos.length > 0 ? photos.length : '')}
+        </Text>
       </View>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.scroll}
-      >
-        {photos.map((photo, idx) => (
-          <Pressable
-            key={photo.id || photo.storageUrl}
-            onPress={() => open(idx)}
-            style={({ pressed }) => [styles.thumbWrap, pressed && styles.thumbPressed]}
-          >
-            {isPdfUrl(photo.storageUrl) ? (
-              <View style={styles.pdfThumb}>
-                <MaterialCommunityIcons
-                  name={'file-document-outline' as any}
-                  size={24}
-                  color={themeColors.textMuted}
-                />
-                <Text style={styles.pdfThumbLabel}>PDF</Text>
-              </View>
-            ) : (
-              <Image
-                source={{ uri: photo.thumbnailUrl || photo.storageUrl }}
-                style={styles.thumb}
-                resizeMode="cover"
-              />
-            )}
-            {photo.annotated ? (
-              <View style={styles.annotatedBadge}>
-                <MaterialCommunityIcons
-                  name={'pencil' as any}
-                  size={10}
-                  color={themeColors.alwaysLight}
-                />
-              </View>
-            ) : null}
-          </Pressable>
-        ))}
-      </ScrollView>
+
+      {photos.length === 0 ? (
+        <Pressable
+          testID="job-photo-strip-empty-add"
+          accessibilityRole="button"
+          accessibilityLabel="Add photos"
+          onPress={uploader.showAddOptions}
+          disabled={uploader.hasAnyUploading}
+          style={({ pressed }) => [styles.emptyTile, pressed && styles.thumbPressed]}
+        >
+          <MaterialCommunityIcons
+            name={'camera-plus' as any}
+            size={26}
+            color={themeColors.textMuted}
+          />
+          <Text style={styles.emptyTitle}>Add photos</Text>
+          <Text style={styles.emptyHint}>
+            Site photos, plans and progress shots for this job.
+          </Text>
+        </Pressable>
+      ) : (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.scroll}
+        >
+          {photos.map((entry, idx) => {
+            const { photo } = entry;
+            const isPdf = photo.localIsPdf || isPdfUrl(photo.storageUrl);
+            return (
+              <Pressable
+                key={photo.id || photo.storageUrl}
+                testID={`job-photo-thumb-${idx}`}
+                onPress={() => open(idx)}
+                style={({ pressed }) => [styles.thumbWrap, pressed && styles.thumbPressed]}
+              >
+                {isPdf ? (
+                  <View style={styles.pdfThumb}>
+                    <MaterialCommunityIcons
+                      name={'file-document-outline' as any}
+                      size={24}
+                      color={themeColors.textMuted}
+                    />
+                    <Text style={styles.pdfThumbLabel}>PDF</Text>
+                  </View>
+                ) : (
+                  <Image
+                    source={{ uri: photo.localUri || photo.thumbnailUrl || photo.storageUrl }}
+                    style={styles.thumb}
+                    resizeMode="cover"
+                  />
+                )}
+                {photo.uploading ? (
+                  <View style={styles.uploadingOverlay}>
+                    <ActivityIndicator size="small" color={themeColors.alwaysLight} />
+                  </View>
+                ) : null}
+                {photo.annotated && !photo.uploading ? (
+                  <View style={styles.annotatedBadge}>
+                    <MaterialCommunityIcons
+                      name={'pencil' as any}
+                      size={10}
+                      color={themeColors.alwaysLight}
+                    />
+                  </View>
+                ) : null}
+              </Pressable>
+            );
+          })}
+
+          {showAddTile ? (
+            <Pressable
+              testID="job-photo-strip-add"
+              accessibilityRole="button"
+              accessibilityLabel="Add photos"
+              onPress={uploader.showAddOptions}
+              disabled={uploader.hasAnyUploading}
+              style={({ pressed }) => [
+                styles.addTile,
+                pressed && styles.thumbPressed,
+                uploader.hasAnyUploading && styles.addTileDisabled,
+              ]}
+            >
+              <MaterialCommunityIcons name={'plus' as any} size={26} color={themeColors.textMuted} />
+            </Pressable>
+          ) : null}
+        </ScrollView>
+      )}
 
       <Lightbox
         photos={imagePhotos}
         index={lightboxIndex}
         onClose={close}
         onAdvance={advance}
+        onAnnotate={editable ? annotate : undefined}
+        onRemove={editable ? remove : undefined}
       />
+
+      {editable ? <PhotoUploaderModals uploader={uploader} /> : null}
     </View>
   );
 }
@@ -151,21 +238,27 @@ function Lightbox({
   index,
   onClose,
   onAdvance,
+  onAnnotate,
+  onRemove,
 }: {
-  photos: JobPhoto[];
+  photos: AggregatedPhoto[];
   index: number | null;
   onClose: () => void;
   onAdvance: (delta: number) => void;
+  onAnnotate?: (entry: AggregatedPhoto) => void;
+  onRemove?: (entry: AggregatedPhoto) => void;
 }) {
   const styles = useStyles();
   const themeColors = useThemeColors();
   if (index == null) return null;
-  const photo = photos[index];
-  if (!photo) return null;
+  const entry = photos[index];
+  if (!entry) return null;
+  const { photo } = entry;
 
   const { width, height } = Dimensions.get('window');
   const canPrev = index > 0;
   const canNext = index < photos.length - 1;
+  const editable = !!onAnnotate && !!onRemove && canEditPhoto(entry);
 
   return (
     <Modal
@@ -220,6 +313,37 @@ function Lightbox({
             />
           </Pressable>
         ) : null}
+
+        <View style={styles.lightboxBottomBar}>
+          {editable ? (
+            <>
+              <Pressable
+                testID="lightbox-annotate"
+                accessibilityRole="button"
+                onPress={() => onAnnotate?.(entry)}
+                hitSlop={8}
+                style={styles.lightboxAction}
+              >
+                <MaterialCommunityIcons name={'draw' as any} size={18} color={themeColors.alwaysLight} />
+                <Text style={styles.lightboxActionLabel}>Annotate</Text>
+              </Pressable>
+              <Pressable
+                testID="lightbox-remove"
+                accessibilityRole="button"
+                onPress={() => onRemove?.(entry)}
+                hitSlop={8}
+                style={styles.lightboxAction}
+              >
+                <MaterialCommunityIcons name={'trash-can-outline' as any} size={18} color={themeColors.alwaysLight} />
+                <Text style={styles.lightboxActionLabel}>Remove</Text>
+              </Pressable>
+            </>
+          ) : entry.owner.kind === 'document' ? (
+            <Text testID="lightbox-caption" style={styles.lightboxCaption}>
+              {entry.owner.label}
+            </Text>
+          ) : null}
+        </View>
       </View>
     </Modal>
   );
@@ -281,6 +405,12 @@ const useStyles = makeStyles((t) => ({
     fontWeight: '600',
     color: t.colors.textMuted,
   },
+  uploadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   annotatedBadge: {
     position: 'absolute',
     top: 4,
@@ -291,6 +421,39 @@ const useStyles = makeStyles((t) => ({
     backgroundColor: t.colors.accent,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  addTile: {
+    width: THUMB_SIZE,
+    height: THUMB_SIZE,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderStyle: 'dashed',
+    borderColor: t.colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addTileDisabled: {
+    opacity: 0.5,
+  },
+  emptyTile: {
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderStyle: 'dashed',
+    borderColor: t.colors.border,
+    paddingVertical: 16,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    gap: 4,
+  },
+  emptyTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: t.colors.text,
+  },
+  emptyHint: {
+    fontSize: 12,
+    color: t.colors.textMuted,
+    textAlign: 'center',
   },
   lightboxRoot: {
     flex: 1,
@@ -334,4 +497,34 @@ const useStyles = makeStyles((t) => ({
   },
   lightboxNavLeft: { left: 16 },
   lightboxNavRight: { right: 16 },
+  lightboxBottomBar: {
+    position: 'absolute',
+    bottom: 40,
+    left: 16,
+    right: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+  },
+  lightboxAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+  },
+  lightboxActionLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: t.colors.alwaysLight,
+  },
+  lightboxCaption: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: t.colors.alwaysLight,
+    opacity: 0.8,
+  },
 }));
