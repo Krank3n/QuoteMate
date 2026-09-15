@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyPackAwarePricing } from './packAwarePricing';
+import { applyPackAwarePricing, perUnitSale } from './packAwarePricing';
 import { Material } from '../types';
 
 function mat(quantity: number, unit: Material['unit'], price = 12): Material {
@@ -289,5 +289,157 @@ describe('estimated prices state what one purchase buys (QU-178444 / QU-178571)'
     applyPackAwarePricing(m, { productName: 'Mystery Bulk Product' });
     expect(m.quantity).toBe(40);
     expect(m.description).toContain('check it covers');
+  });
+});
+
+describe("goods sold per the requirement's own unit buy the whole requirement", () => {
+  /**
+   * A bulk landscaping product priced "(per cubic metre, bulk delivery)"
+   * against a 3 m³ requirement came out as ONE purchase. The title carries no
+   * figure for parsePackInfo to read, the estimator's "1 each" left a pack the
+   * branches could not map onto m³, and a bare `!!packSize` treated that as
+   * proof of a pack it had merely failed to size — so the row collapsed to a
+   * single load at the per-cubic-metre price, carrying a third of the money
+   * with a note asking the tradie to check it covered 3 m³.
+   */
+  function estimated(name: string, required: number, unit: Material['unit'], price: number): Material {
+    const m = mat(required, unit, price);
+    m.name = name;
+    m.requiredQty = required;
+    m.requiredUnit = unit;
+    return m;
+  }
+
+  it('buys 3 of a per-cubic-metre product for a 3 m³ requirement, not 1', () => {
+    const m = estimated('Garden mulch', 3, 'm³', 59.09);
+    applyPackAwarePricing(m, {
+      productName: 'Bulk Hardwood Bark Mulch (per cubic metre, bulk delivery)',
+      packSize: 1,
+      packUnit: 'each',
+    });
+    expect(m.quantity).toBe(3);
+    expect(m.packSize).toBe(1);
+    expect(m.packUnit).toBe('m³');
+    expect(m.totalPrice).toBeCloseTo(177.27, 2);
+    expect(m.description ?? '').not.toContain('one purchase');
+  });
+
+  it('reads the per-unit wording when the estimator states no pack at all', () => {
+    const m = estimated('Garden mulch', 3, 'm³', 59.09);
+    applyPackAwarePricing(m, { productName: 'Bulk Hardwood Bark Mulch (per cubic metre, bulk delivery)' });
+    expect(m.quantity).toBe(3);
+    expect(m.totalPrice).toBeCloseTo(177.27, 2);
+  });
+
+  it('rounds a per-tonne product up to whole tonnes for a kg requirement', () => {
+    const m = estimated('Crusher dust', 2500, 'kg', 85);
+    applyPackAwarePricing(m, { productName: 'Crusher Dust Roadbase (per tonne)' });
+    expect(m.quantity).toBe(3);
+    expect(m.packSize).toBe(1000);
+    expect(m.packUnit).toBe('kg');
+    expect(m.totalPrice).toBeCloseTo(255, 2);
+  });
+
+  it('charges per-lineal-metre, per-m² and per-litre goods by the requirement', () => {
+    const timber = estimated('Framing timber', 231, 'm', 8.9);
+    applyPackAwarePricing(timber, { productName: 'Framing Timber H3 90x45mm - per lineal metre' });
+    expect(timber.quantity).toBe(231);
+
+    const tiles = estimated('Floor tiles', 24, 'm²', 39);
+    applyPackAwarePricing(tiles, { productName: 'Porcelain Floor Tile 600x600 $39/m2' });
+    expect(tiles.quantity).toBe(24);
+
+    const fuel = estimated('Diesel', 40, 'L', 2.1);
+    applyPackAwarePricing(fuel, { productName: 'Bulk Diesel per litre', packSize: 1, packUnit: 'each' });
+    expect(fuel.quantity).toBe(40);
+  });
+
+  it('lets a stated pack size beat the per-unit wording', () => {
+    // "2m³ Bulk Bag" is what one purchase holds; the "$30 per m³" beside it is
+    // the rate the supplier quotes. Two bags, not three cubic metres of bags.
+    const m = estimated('Garden mulch', 3, 'm³', 30);
+    applyPackAwarePricing(m, { productName: 'Hardwood Bark Mulch 2m³ Bulk Bag ($30 per m³)' });
+    expect(m.quantity).toBe(2);
+    expect(m.packSize).toBe(2);
+    expect(m.totalPrice).toBeCloseTo(60, 2);
+  });
+
+  it('ignores per-unit wording in a unit the requirement is not measured in', () => {
+    const m = estimated('Garden mulch', 3, 'm³', 39);
+    applyPackAwarePricing(m, { productName: 'Porcelain Floor Tile 600x600 per m2' });
+    expect(m.quantity).toBe(3);
+    expect(m.priceConfidence).toBe('low');
+  });
+
+  it('still buys one 20 kg bag whose 3 m² coverage exceeds a 2 m² need', () => {
+    const m = estimated('Tile adhesive', 2, 'm²', 45.9);
+    applyPackAwarePricing(m, {
+      productName: 'Flexible Tile Adhesive 20kg Bag (covers 3 m² per bag)',
+      packSize: 20,
+      packUnit: 'kg',
+    });
+    expect(m.quantity).toBe(1);
+    expect(m.packSize).toBe(3);
+    expect(m.totalPrice).toBeCloseTo(45.9, 2);
+  });
+
+  it('leaves a discrete piece-good counted in each untouched', () => {
+    const m = estimated('Fence posts', 7, 'each', 24.5);
+    applyPackAwarePricing(m, { productName: 'Treated Pine Post H4 100x100mm 2.4m', packSize: 1, packUnit: 'each' });
+    expect(m.quantity).toBe(7);
+    expect(m.unit).toBe('each');
+    expect(m.totalPrice).toBeCloseTo(171.5, 2);
+    expect(m.priceConfidence).toBeUndefined();
+  });
+
+  it('keeps the requirement, flagged, when coverage is unknown — never one purchase', () => {
+    // A "1 each" pack with no per-unit wording and no figure in the title says
+    // nothing about coverage. Quantity 1 silently under-quotes; the
+    // requirement with the existing note is the honest answer.
+    const m = estimated('Garden mulch', 3, 'm³', 59.09);
+    applyPackAwarePricing(m, { productName: 'Bulk Hardwood Bark Mulch', packSize: 1, packUnit: 'each' });
+    expect(m.quantity).toBe(3);
+    expect(m.unit).toBe('m³');
+    expect(m.priceConfidence).toBe('low');
+    expect(m.description).toContain('check it covers 3 m³');
+  });
+
+  it('still collapses to one purchase when the title proves a pack it cannot map', () => {
+    const m = estimated('Flooring underlay', 8, 'm²', 47.71);
+    applyPackAwarePricing(m, {
+      productName: 'QEP 2mm 11m Silver Laminate Floating Floor Underlay',
+      packSize: 1,
+      packUnit: 'each',
+    });
+    expect(m.quantity).toBe(1);
+    expect(m.description).toContain('check it covers 8 m²');
+  });
+});
+
+describe('perUnitSale reads a price basis and refuses a consumption rate', () => {
+  it('reads every supported per-unit spelling', () => {
+    expect(perUnitSale('Bulk Hardwood Bark Mulch (per cubic metre, bulk delivery)')).toEqual({ packSize: 1, packUnit: 'm³' });
+    expect(perUnitSale('Buffalo Turf sold by the square metre')).toEqual({ packSize: 1, packUnit: 'm²' });
+    expect(perUnitSale('Washed River Sand (per tonne)')).toEqual({ packSize: 1000, packUnit: 'kg' });
+    expect(perUnitSale('Loose Blue Metal Aggregate per kg')).toEqual({ packSize: 1, packUnit: 'kg' });
+    expect(perUnitSale('Colorbond Fascia priced per-lineal-metre')).toEqual({ packSize: 1, packUnit: 'm' });
+    expect(perUnitSale('Bulk Hydraulic Oil per litre')).toEqual({ packSize: 1, packUnit: 'L' });
+    expect(perUnitSale('Porcelain Floor Tile $39/m2')).toEqual({ packSize: 1, packUnit: 'm²' });
+  });
+
+  it('refuses a consumption rate, which is what a figure before the "per" makes it', () => {
+    // "5kg per m²" is how much a square metre eats, not what a purchase buys.
+    // Read as a one-m² purchase it would buy a whole bag per square metre.
+    expect(perUnitSale('Flexible Tile Adhesive 20kg — 5kg per m²')).toBeNull();
+    expect(perUnitSale('Driveway Sealer 4L, 250ml per square metre')).toBeNull();
+  });
+
+  it('refuses container wording, bare slashes and lookalike words', () => {
+    expect(perUnitSale('Decking Screws 100 per box')).toBeNull();
+    expect(perUnitSale('Washed Sand $30 per 20kg bag')).toBeNull();
+    expect(perUnitSale('Flexible Tile Adhesive 20kg/m²')).toBeNull();
+    expect(perUnitSale('Exterior Paint/Lacquer Thinner')).toBeNull();
+    expect(perUnitSale('Scaffold Hire per month')).toBeNull();
+    expect(perUnitSale('Aluminium Angle priced per length')).toBeNull();
   });
 });

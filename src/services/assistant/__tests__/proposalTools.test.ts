@@ -6,6 +6,8 @@ import { markPricingStarted, __resetPricingInFlight } from '../pricingInFlight';
 import type { ImportSupplierListProposal } from '../../../types/assistant';
 import type {
   UpdateQuoteScopeProposal,
+  UpdateQuoteRatesProposal,
+  DraftQuoteProposal,
   RepriceQuoteProposal,
   DeleteLineItemProposal,
   DeleteQuoteProposal,
@@ -182,6 +184,84 @@ describe('propose_draft_quote description hygiene', () => {
       jobDescription: clean,
     });
     expect((proposal as any).jobDescription).toBe(clean);
+  });
+});
+
+// A claim is a figure, not a scope. One drafted with no rate line goes through
+// the materials engine, which invents hours and gear for work already priced.
+// The prompt says to ask the amount; this is the deterministic backstop.
+describe('propose_draft_quote refuses a claim invoice with no amount', () => {
+  const claimLine = 'Final claim for the completed carport slab.';
+
+  it('refuses a claim invoice with no rateLines and tells the model to ask the amount', () => {
+    const { proposal, error } = buildProposal('propose_draft_quote', 'tool_claim_0', {
+      jobName: 'Final claim — carport slab',
+      customerDraft: { name: 'Priya' },
+      jobDescription: claimLine,
+      documentType: 'invoice',
+    });
+    expect(proposal).toBeUndefined();
+    expect(error).toMatch(/how much the claim is for/i);
+    expect(error).toMatch(/ONE rateLines entry/);
+  });
+
+  it('accepts the same claim once it carries the amount as one lump-sum rate line', () => {
+    const { proposal, error } = buildProposal('propose_draft_quote', 'tool_claim_1', {
+      jobName: 'Final claim — carport slab',
+      customerDraft: { name: 'Priya' },
+      jobDescription: claimLine,
+      documentType: 'invoice',
+      rateLines: [{ label: 'Final claim — carport slab', quantity: 1, unit: 'job', unitPrice: 4500, includesMaterials: true, pricesIncludeGst: true }],
+    });
+    expect(error).toBeUndefined();
+    expect((proposal as any).documentType).toBe('invoice');
+    expect((proposal as any).rateLines).toEqual([
+      { label: 'Final claim — carport slab', quantity: 1, unit: 'job', unitPrice: 4500, includesMaterials: true, pricesIncludeGst: true },
+    ]);
+  });
+
+  it('refuses a claim invoice whose only rate line is labour-only — materials would still be generated', () => {
+    const { proposal, error } = buildProposal('propose_draft_quote', 'tool_claim_5', {
+      jobName: 'Progress claim 2 — bathroom reno',
+      customerDraft: { name: 'Priya' },
+      jobDescription: 'Progress claim 2 for the bathroom renovation.',
+      documentType: 'invoice',
+      rateLines: [{ label: 'Progress claim 2', quantity: 1, unit: 'job', unitPrice: 3000, includesMaterials: false }],
+    });
+    expect(proposal).toBeUndefined();
+    expect(error).toMatch(/includesMaterials true/);
+  });
+
+  it('leaves a plain invoice for work that still needs pricing alone', () => {
+    const { proposal, error } = buildProposal('propose_draft_quote', 'tool_claim_2', {
+      jobName: 'Deck oil',
+      customerDraft: { name: 'Priya' },
+      jobDescription: 'Sand and oil a 20 m² merbau deck, two coats.',
+      documentType: 'invoice',
+    });
+    expect(error).toBeUndefined();
+    expect((proposal as any).documentType).toBe('invoice');
+  });
+
+  it('leaves an insurance-claim repair invoice alone — that one has a scope to price', () => {
+    const { proposal, error } = buildProposal('propose_draft_quote', 'tool_claim_4', {
+      jobName: 'Storm damage gutter repair',
+      customerDraft: { name: 'Priya' },
+      jobDescription: 'Insurance claim repair: replace 12 m of storm-damaged gutter and two downpipes.',
+      documentType: 'invoice',
+    });
+    expect(error).toBeUndefined();
+    expect((proposal as any).documentType).toBe('invoice');
+  });
+
+  it('leaves a quote alone even when the wording mentions a deposit', () => {
+    const { proposal, error } = buildProposal('propose_draft_quote', 'tool_claim_3', {
+      jobName: 'Bathroom reno',
+      customerDraft: { name: 'Priya' },
+      jobDescription: 'Full bathroom renovation, deposit payable on acceptance.',
+    });
+    expect(error).toBeUndefined();
+    expect((proposal as any).documentType).toBe('quote');
   });
 });
 
@@ -435,5 +515,136 @@ describe('buildProposal propose_update_quote_scope', () => {
       jobName: 'Patio roof',
     });
     expect(error).toMatch(/never invent a quoteId/);
+  });
+});
+
+describe('a travel charge on the rates tool', () => {
+  /**
+   * A contractor said the job was a fair drive out of town and Mate had
+   * nothing to put on the quote with, so it answered that travel wouldn't
+   * affect it. Travel is money: a figure the tradie states has to reach the
+   * document, and a figure that is not a figure has to be refused rather than
+   * quietly landing as $0 on the customer's copy.
+   */
+  afterEach(() => {
+    setRenderableQuoteProbe(null);
+    __resetPricingInFlight();
+  });
+
+  it('accepts a travel figure on its own, with no other rate changing', () => {
+    const { proposal, error } = buildProposal('propose_update_quote_rates', 'tool_tv1', {
+      quoteId: 'doc_path',
+      travelAdjustment: 80,
+    });
+    expect(error).toBeUndefined();
+    const rates = proposal as UpdateQuoteRatesProposal;
+    expect(rates.travelAdjustment).toBe(80);
+    expect(rates.markup).toBeUndefined();
+    expect(rates.laborHours).toBeUndefined();
+  });
+
+  it('rounds a travel figure to the cent and carries it beside a rate change', () => {
+    const { proposal } = buildProposal('propose_update_quote_rates', 'tool_tv2', {
+      quoteId: 'doc_path',
+      laborHours: 12,
+      travelAdjustment: 64.567,
+    });
+    const rates = proposal as UpdateQuoteRatesProposal;
+    expect(rates.travelAdjustment).toBe(64.57);
+    expect(rates.laborHours).toBe(12);
+  });
+
+  it('keeps 0 as a real instruction — travel off, not travel absent', () => {
+    const { proposal, error } = buildProposal('propose_update_quote_rates', 'tool_tv3', {
+      quoteId: 'doc_path',
+      travelAdjustment: 0,
+    });
+    expect(error).toBeUndefined();
+    expect((proposal as UpdateQuoteRatesProposal).travelAdjustment).toBe(0);
+  });
+
+  it('rejects a negative travel charge and says how to take travel off instead', () => {
+    const { proposal, error } = buildProposal('propose_update_quote_rates', 'tool_tv4', {
+      quoteId: 'doc_path',
+      travelAdjustment: -40,
+    });
+    expect(proposal).toBeUndefined();
+    expect(error).toMatch(/can't be negative/);
+    expect(error).toMatch(/0 to take travel off/);
+  });
+
+  it('rejects a travel charge that is not a number', () => {
+    for (const bad of ['half an hour each way', true, {}, []] as unknown[]) {
+      const { proposal, error } = buildProposal('propose_update_quote_rates', 'tool_tv5', {
+        quoteId: 'doc_path',
+        travelAdjustment: bad,
+      });
+      expect(proposal, String(bad)).toBeUndefined();
+      expect(error, String(bad)).toMatch(/in dollars, as a number/);
+    }
+  });
+
+  it('still needs something to change when travel is absent', () => {
+    const { error } = buildProposal('propose_update_quote_rates', 'tool_tv6', { quoteId: 'doc_path' });
+    expect(error).toMatch(/travelAdjustment/);
+  });
+
+  it('refuses travel while the quote is still being priced, and says to send it after pricing lands', () => {
+    markPricingStarted('doc_path');
+    const { proposal, error } = buildProposal('propose_update_quote_rates', 'tool_tv7', {
+      quoteId: 'doc_path',
+      travelAdjustment: 80,
+    });
+    expect(proposal).toBeUndefined();
+    expect(error).toMatch(/still being priced/);
+    expect(error).toMatch(/pricing finished/);
+  });
+
+  it('lets a plain markup change through while pricing runs — only travel needs the settled subtotal', () => {
+    markPricingStarted('doc_path');
+    const { proposal, error } = buildProposal('propose_update_quote_rates', 'tool_tv8', {
+      quoteId: 'doc_path',
+      markup: 25,
+    });
+    expect(error).toBeUndefined();
+    expect((proposal as UpdateQuoteRatesProposal).markup).toBe(25);
+  });
+});
+
+describe('a travel charge on a draft', () => {
+  const scope =
+    'Pour a 12 m by 1 m reinforced concrete path from the carport to the back steps, broom finish.';
+
+  it('seeds the stated figure onto the draft proposal', () => {
+    const { proposal, error } = buildProposal('propose_draft_quote', 'tool_dtv1', {
+      customerDraft: { name: 'Marlee Okafor' },
+      jobName: 'Concrete path',
+      jobDescription: scope,
+      travelAdjustment: 80,
+    });
+    expect(error).toBeUndefined();
+    expect((proposal as DraftQuoteProposal).travelAdjustment).toBe(80);
+  });
+
+  it('carries no travel field when the tradie named no figure', () => {
+    const { proposal } = buildProposal('propose_draft_quote', 'tool_dtv2', {
+      customerDraft: { name: 'Marlee Okafor' },
+      jobName: 'Concrete path',
+      jobDescription: scope,
+    });
+    expect((proposal as DraftQuoteProposal).travelAdjustment).toBeUndefined();
+  });
+
+  it('refuses a draft whose travel charge is a negative or a phrase', () => {
+    for (const bad of [-10, 'a fair drive'] as unknown[]) {
+      const { proposal, error } = buildProposal('propose_draft_quote', 'tool_dtv3', {
+        customerDraft: { name: 'Marlee Okafor' },
+        jobName: 'Concrete path',
+        jobDescription: scope,
+        travelAdjustment: bad,
+      });
+      expect(proposal, String(bad)).toBeUndefined();
+      expect(error, String(bad)).toBeTruthy();
+    }
   });
 });

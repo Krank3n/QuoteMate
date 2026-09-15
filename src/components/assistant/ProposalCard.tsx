@@ -92,7 +92,15 @@ function Body({ proposal }: { proposal: Proposal }) {
   const docMode = resolveGstMode(settings ?? {});
   const businessInclusive = settings?.pricesIncludeGst === true;
   switch (proposal.type) {
-    case 'propose_draft_quote':
+    case 'propose_draft_quote': {
+      // Said once, on both branches. The hours are held now — the engine's
+      // sections split them rather than replacing them — so "set", not the
+      // old "seeded", which read as a starting point it was free to move.
+      // Rate lines carry the labour, so there is nothing to state.
+      const hoursClause =
+        typeof proposal.estimatedDurationHours === 'number' && !proposal.rateLines?.length
+          ? ` Labour set at ${proposal.estimatedDurationHours} h.`
+          : '';
       return (
         <View>
           <Text style={styles.summary}>{proposal.jobName}</Text>
@@ -114,19 +122,21 @@ function Body({ proposal }: { proposal: Proposal }) {
           })}
           <Text style={styles.dim}>
             {rateLinesCoverMaterials(proposal.rateLines)
-              ? 'Priced off your rate card — no materials list, no extra labour.'
+              ? proposal.documentType === 'invoice'
+                ? 'Goes on the invoice as a lump sum — no materials list, no extra labour.'
+                : 'Priced off your rate card — no materials list, no extra labour.'
               : proposal.materialsMode === 'labour_only'
-                ? 'Labour only — hours and sections, no materials list.'
+                ? `Labour only — hours and sections, no materials list.${hoursClause}`
                 : `I'll work out the materials and price them up${
                     proposal.rateLines?.length ? ' on top of your rate' : ''
-                  }${proposal.documentType === 'invoice' ? ' and convert the result to an invoice' : ''}.${
-                    typeof proposal.estimatedDurationHours === 'number' && !proposal.rateLines?.length
-                      ? ` Labour seeded at ${proposal.estimatedDurationHours} h.`
-                      : ''
-                  }`}
+                  }${proposal.documentType === 'invoice' ? ' and convert the result to an invoice' : ''}.${hoursClause}`}
           </Text>
+          {typeof proposal.travelAdjustment === 'number' && proposal.travelAdjustment > 0 && (
+            <Text style={styles.dim}>Travel: {formatCurrency(proposal.travelAdjustment)}</Text>
+          )}
         </View>
       );
+    }
     case 'propose_remember_preference':
       return (
         <View>
@@ -345,6 +355,13 @@ function Body({ proposal }: { proposal: Proposal }) {
           )}
           {typeof proposal.laborHours === 'number' && (
             <Text style={styles.dim}>Labour hours → {proposal.laborHours} h</Text>
+          )}
+          {typeof proposal.travelAdjustment === 'number' && (
+            <Text style={styles.dim}>
+              {proposal.travelAdjustment > 0
+                ? `Travel: ${formatCurrency(proposal.travelAdjustment)}`
+                : 'Travel: taken off'}
+            </Text>
           )}
           <Text style={styles.dim}>Updates the quote and re-does the totals.</Text>
         </View>

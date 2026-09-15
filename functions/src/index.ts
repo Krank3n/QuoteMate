@@ -256,6 +256,7 @@ import { buildReconcilePrompt } from './reconcile.helpers';
 import { buildMaterialsPrompt, renderQuotingPreferences } from './materialsPrompt';
 import { buildEstimatorPrompt } from './estimatorPrompt';
 import { buildQuantitySanityPrompt, applySanityDecisions, indexMaterialsForSanity } from './quantitySanity';
+import { dropOwnedGear } from './ownedGear';
 import { claudeText } from './claudeText';
 import {
   applyAnchorScale,
@@ -2147,6 +2148,11 @@ async function analyzeJobDescriptionCore(uid: string, body: any): Promise<Record
 
   try {
     const { jobDescription, tradeContext, photoBase64: photoBase64Input, photoUrls, existingMaterials, availableTemplates, userSavedRates } = body;
+    // The hours the tradie stated, when the caller carried them — see
+    // AnalyzeRequest.targetHours. Anything that isn't a real positive number
+    // of hours is "not stated", and the prompt keeps its soft rule.
+    const statedHours = Number(body?.targetHours);
+    const targetHours = Number.isFinite(statedHours) && statedHours > 0 ? statedHours : undefined;
 
     if (!isNonEmptyString(jobDescription)) {
       throw new BadRequestError('Missing or invalid jobDescription');
@@ -2280,6 +2286,7 @@ async function analyzeJobDescriptionCore(uid: string, body: any): Promise<Record
       savedRatesSection,
       reeceCatalogueSection,
       tradeContext,
+      targetHours,
     });
 
     const finalPrompt = attachments.length > 0
@@ -2357,7 +2364,19 @@ async function analyzeJobDescriptionCore(uid: string, body: any): Promise<Record
     // job description and reduce any quantity that's clearly excessive
     // (3-10× over for the job scope). Best-effort: if the call fails the
     // materials list passes through unchanged.
-    const rawMaterials: any[] = Array.isArray(parsed.materials) ? parsed.materials : [];
+    // Owned-gear safety net first: the prompt forbids pricing the tradie's
+    // toolbox onto the quote, but the model still does it, so rows that
+    // clearly name a hammer, broom, mop or gloves are dropped here unless
+    // the job description asked for that item (see ownedGear.ts).
+    const generated: any[] = Array.isArray(parsed.materials) ? parsed.materials : [];
+    const { materials: rawMaterials, dropped: ownedGearDropped } = dropOwnedGear(generated, jobDescription);
+    if (ownedGearDropped.length > 0) {
+      console.log('[owned gear] dropped rows that name the tradie\'s own gear', {
+        uid,
+        dropped: ownedGearDropped,
+        kept: rawMaterials.length,
+      });
+    }
     let validatedMaterials = rawMaterials;
     if (geminiApiKey && rawMaterials.length > 0) {
       try {
@@ -2482,7 +2501,7 @@ async function analyzeJobDescriptionCore(uid: string, body: any): Promise<Record
       materials: anchoredMaterials,
       estimatedHours: parsed.estimatedHours || 8,
       jobSummary: parsed.jobSummary || '',
-      flags: aiFlags,
+      flags: { ...aiFlags, ...(ownedGearDropped.length > 0 && { ownedGearDropped }) },
       ...(jobQualityTier && { jobQualityTier }),
       ...(floorplanAnalysis && { floorplanAnalysis }),
       // Surfaced so the client can tell a "plan too big / unreadable" run

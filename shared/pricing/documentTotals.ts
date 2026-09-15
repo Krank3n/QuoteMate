@@ -91,6 +91,38 @@ export function calculateDocumentTotals(
 }
 
 /**
+ * The travelAdjustment PERCENT that puts a stated dollar charge on a document.
+ *
+ * A document stores travel as a percent of the subtotal — see
+ * travelAdjustmentAmount above, and the Labour & Markup screen's stepper. A
+ * tradie states travel in dollars ("eighty for the drive"), so the figure has
+ * to be read against the subtotal it will land on.
+ *
+ * The percent is taken to the FEWEST decimals that still reproduce the stated
+ * dollars to the cent, because it is customer-facing: the quote, the PDF and
+ * the acceptance email all print "Travel Adjustment (5%)". A charge that
+ * happens to be a round percentage stays round; only one that doesn't grows
+ * the extra digits it needs.
+ *
+ * Returns 0 for a zero charge (travel off) and null when there is no subtotal
+ * to take a percentage of — a percent of nothing can't carry money, so the
+ * caller has to refuse rather than silently write a charge worth $0.
+ */
+export function travelPercentForCharge(dollars: number, subtotal: number): number | null {
+  if (!Number.isFinite(dollars) || dollars < 0) return null;
+  const target = roundToTwoDecimals(dollars);
+  if (target === 0) return 0;
+  if (!Number.isFinite(subtotal) || subtotal <= 0) return null;
+  const exact = (target / subtotal) * 100;
+  for (const decimals of [2, 3, 4, 5, 6]) {
+    const factor = 10 ** decimals;
+    const candidate = Math.round(exact * factor) / factor;
+    if (roundToTwoDecimals(subtotal * (candidate / 100)) === target) return candidate;
+  }
+  return Math.round(exact * 1e6) / 1e6;
+}
+
+/**
  * Coerce any field to a finite number. NaN and Infinity become 0 so they
  * never propagate into Firestore writes — the SDK rejects non-finite values
  * silently, which used to surface as orphan Jobs created without their

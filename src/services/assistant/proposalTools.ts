@@ -28,6 +28,7 @@ import type { Material, RateLine } from '../../types';
 import { resolveQuoteId } from './quoteRefMap';
 import { resolveKnownQuoteId } from './showQuoteGate';
 import { isPricingInFlight } from './pricingInFlight';
+import { isClaimWording } from './claimWording';
 import { canUpdateScope } from './scopeEditable';
 import { sanitizeJobDescription } from '../../utils/sanitizeJobDescription';
 import { MAX_LABEL_CHARS, RATE_CARD_UNITS, normalisePreference, normaliseRateUnit } from '../quotingProfile';
@@ -306,6 +307,25 @@ const IMPORT_SOURCES = ['attachment', 'camera', 'gallery', 'pdf', 'spreadsheet',
 const IMPORT_REASONS = ['no_retail_coverage', 'pricing_fell_back', 'tradie_asked'] as const;
 const MAX_MISSED_ITEMS = 5;
 
+/**
+ * A travel charge as the tradie said it, in dollars. Absent is fine — the
+ * field is optional — but anything present has to be a real, non-negative
+ * number: a travel line is money on the customer's document, so a figure that
+ * arrived as a word, a boolean or a minus is refused rather than quietly
+ * dropped or turned into $0.
+ */
+function parseTravelCharge(raw: unknown): { dollars?: number; error?: string } {
+  if (raw === undefined || raw === null || raw === '') return {};
+  const dollars = typeof raw === 'number' || typeof raw === 'string' ? Number(raw) : NaN;
+  if (!Number.isFinite(dollars)) {
+    return { error: 'travelAdjustment must be the travel charge in dollars, as a number the tradie said.' };
+  }
+  if (dollars < 0) {
+    return { error: "A travel charge can't be negative — pass 0 to take travel off." };
+  }
+  return { dollars: roundToTwoDecimals(dollars) };
+}
+
 export function buildProposal(toolName: string, toolUseId: string, input: any): ProposalResult {
   const now = new Date().toISOString();
   const id = newProposalId();
@@ -346,6 +366,24 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
       }
       const rateLines = parseRateLines(input.rateLines);
       if (rateLines.error) return { error: rateLines.error };
+      // A claim has a figure, not a scope. Drafting one without an all-in
+      // rate line sends it through the materials engine (no lines, or a
+      // labour-only line), which invents hours and gear for work that's
+      // already priced. Backstop for the prompt rule.
+      if (
+        input.documentType === 'invoice' &&
+        !rateLines.lines?.every((line) => line.includesMaterials) &&
+        isClaimWording(`${input.jobName} ${input.jobDescription}`)
+      ) {
+        return {
+          error:
+            'This invoice is a claim — the amount is the whole document, so nothing gets generated. ' +
+            'Ask how much the claim is for (ex or inc GST, as they say it) and draft it as ONE rateLines entry: ' +
+            "label naming the claim, quantity 1, unit 'job', unitPrice = the figure, includesMaterials true. Never run the materials engine on a claim.",
+        };
+      }
+      const draftTravel = parseTravelCharge(input.travelAdjustment);
+      if (draftTravel.error) return { error: draftTravel.error };
       const proposal: DraftQuoteProposal = {
         id,
         toolUseId,
@@ -365,6 +403,8 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
         documentType: input.documentType === 'invoice' ? 'invoice' : 'quote',
         ...(input.materialsMode === 'labour_only' ? { materialsMode: 'labour_only' as const } : {}),
         ...(rateLines.lines ? { rateLines: rateLines.lines } : {}),
+        // A $0 travel charge on a job that has none is nothing to carry.
+        ...(draftTravel.dollars ? { travelAdjustment: draftTravel.dollars } : {}),
       };
       return { proposal, note: customer.note };
     }
@@ -460,13 +500,26 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
       const laborMarkup = num(input.laborMarkup);
       const laborRate = num(input.laborRate);
       const laborHours = num(input.laborHours);
+      const travel = parseTravelCharge(input.travelAdjustment);
+      if (travel.error) return { error: travel.error };
       if (
         markup === undefined &&
         laborMarkup === undefined &&
         laborRate === undefined &&
-        laborHours === undefined
+        laborHours === undefined &&
+        travel.dollars === undefined
       ) {
-        return { error: 'Provide at least one of markup, laborMarkup, laborRate, or laborHours.' };
+        return { error: 'Provide at least one of markup, laborMarkup, laborRate, laborHours, or travelAdjustment.' };
+      }
+      // Travel is stored as a share of the subtotal, so it needs the settled
+      // one. Refuse in-turn while pricing runs — the same wait the scope and
+      // set-total cards take — so Mate says it'll put the travel on once
+      // pricing lands rather than charging a percent of a half-priced quote.
+      if (travel.dollars !== undefined && isPricingInFlight(known.quoteId!)) {
+        return {
+          error:
+            `Quote ${known.quoteId} is still being priced. Tell the tradie you'll put the travel on once pricing lands (one short line), and call propose_update_quote_rates again after the "[context]" line says pricing finished.`,
+        };
       }
       const proposal: UpdateQuoteRatesProposal = {
         id,
@@ -478,6 +531,7 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
         laborMarkup,
         laborRate,
         laborHours,
+        ...(travel.dollars !== undefined ? { travelAdjustment: travel.dollars } : {}),
         displayName: input.displayName ? String(input.displayName) : undefined,
       };
       return { proposal };

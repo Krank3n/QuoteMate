@@ -169,7 +169,7 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
   {
     name: 'get_job_requirements',
     description:
-      "Call this first when a job type is mentioned. Returns the must-ask questions for this niche, pricing method, and flags for measurement-driven and specialist-supply jobs. Use the returned mustAskQuestions — do not invent questions. mustAskQuestions is NEVER empty: when no niche matches, it returns general scope questions and genericScope is true, so there is never a case where you should draft without asking anything. Pass documentType 'invoice' when the tradie is invoicing — the work is already done, so the questions collapse to what was done and who for (invoiceFastPath true) and the supplier-list flags are off. Also returns supplierBookPopulated (true when this phone can see the tradie's own imported/saved supplier rates), supplierBookSuppliers (up to 3 of those supplier names) and supplierBookCoversTrade (true when those rates would actually price this niche's core gear). specialistSupply true + supplierBookPopulated false is the one combination worth mentioning — the core materials for this job don't come off a Bunnings or Reece shelf and there's no price list on the phone to fall back on. KNOWN JOB TYPES (pass one of these verbatim as jobType, or \"none\"): " + KNOWN_JOB_TYPE_LIST + ".",
+      "Call this first when a job type is mentioned. Returns the must-ask questions for this niche, pricing method, and flags for measurement-driven and specialist-supply jobs. Use the returned mustAskQuestions — do not invent questions. mustAskQuestions is NEVER empty: when no niche matches, it returns general scope questions and genericScope is true, so there is never a case where you should draft without asking anything. Pass documentType 'invoice' when the tradie is invoicing — the work is already done, so the questions collapse to what was done and who for (invoiceFastPath true) and the supplier-list flags are off. A claim, deposit or stage payment adds the amount to those questions unless a figure was already said, and returns lumpSum true: draft it as ONE rateLines entry at that figure (quantity 1, unit 'job', includesMaterials true) so nothing is generated. Also returns supplierBookPopulated (true when this phone can see the tradie's own imported/saved supplier rates), supplierBookSuppliers (up to 3 of those supplier names) and supplierBookCoversTrade (true when those rates would actually price this niche's core gear). specialistSupply true + supplierBookPopulated false is the one combination worth mentioning — the core materials for this job don't come off a Bunnings or Reece shelf and there's no price list on the phone to fall back on. KNOWN JOB TYPES (pass one of these verbatim as jobType, or \"none\"): " + KNOWN_JOB_TYPE_LIST + ".",
     parameters: {
       type: 'object',
       properties: {
@@ -257,6 +257,11 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
           type: 'number',
           description:
             'Optional. If the tradie gave a duration ("2 days", "half a day"), convert to hours and pass it. The pipeline uses its own estimate otherwise.',
+        },
+        travelAdjustment: {
+          type: 'number',
+          description:
+            'Optional. A travel charge in dollars for this job — the drive, a callout, fuel. Only a figure the tradie stated, or a travel/callout rate already on their rate card. Never one you worked out from a distance or a drive time. It goes on the quote once pricing lands.',
         },
         documentType: {
           type: 'string',
@@ -511,7 +516,7 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
   {
     name: 'propose_update_quote_rates',
     description:
-      "Change the labour or markup numbers on an existing quote or invoice without re-running the pricing pipeline. Use this whenever the tradie wants to bump the markup percentage, change the labour rate, adjust labour hours, or tweak the labour markup on a specific doc (\"bump markup to 30%\", \"change hours to 14\", \"put the labour rate up\"). Pass only the fields that are changing \u2014 omitted fields stay as-is. Markup values are percentages (30 means 30%). laborRate is $/hour, laborHours is hours. Always know the quote id first (from list_recent_quotes / get_quote / the [context] line after a draft).",
+      "Change the labour, markup or travel numbers on an existing quote or invoice without re-running the pricing pipeline. Use this whenever the tradie wants to bump the markup percentage, change the labour rate, adjust labour hours, tweak the labour markup, or put a travel charge on a specific doc (\"bump markup to 30%\", \"change hours to 14\", \"put the labour rate up\", \"stick the drive on it\"). Pass only the fields that are changing \u2014 omitted fields stay as-is. Markup values are percentages (30 means 30%). laborRate is $/hour, laborHours is hours, travelAdjustment is dollars. Always know the quote id first (from list_recent_quotes / get_quote / the [context] line after a draft).",
     parameters: {
       type: 'object',
       properties: {
@@ -520,6 +525,11 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
         laborMarkup: { type: 'number', description: 'New labour markup percentage (e.g. 20 for 20%). Independent from material markup.' },
         laborRate: { type: 'number', description: 'New labour rate in $/hour.' },
         laborHours: { type: 'number', description: 'New labour hours total.' },
+        travelAdjustment: {
+          type: 'number',
+          description:
+            'Travel charge in dollars for the drive, a callout or fuel. Only a figure the tradie stated, or a travel/callout rate already on their rate card — never one you worked out from a distance or a drive time. 0 takes travel off. If the quote is still being priced, wait for the "[context]" line that says pricing finished and send this then.',
+        },
         displayName: { type: 'string', description: 'Job name to show on the card (display only).' },
       },
       required: ['quoteId'],

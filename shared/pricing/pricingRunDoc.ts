@@ -21,6 +21,11 @@ export interface PricingRunOptions {
   stripLabour: boolean;
   /** Keep hours + sections, drop the gear list and skip pricing. */
   labourOnly: boolean;
+  /**
+   * The total labour hours the tradie stated, when they did — see
+   * GenerateMaterialsArgs.statedHours. The run pins the finished quote to it.
+   */
+  statedHours?: number;
 }
 
 export interface PricingRunResult {

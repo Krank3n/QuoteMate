@@ -51,6 +51,15 @@ describe('resetGeneratedScope', () => {
     expect(out.sections?.map((s) => s.name)).toEqual(['Concrete']);
   });
 
+  it("drops the last run's extra-hours adjustment along with its labour", () => {
+    // A stated-hours draft carries (stated − sections) in laborExtraHours. A
+    // scope re-run rebuilds the sections, so that difference is stale: left
+    // behind it would quietly add its hours on top of the new split.
+    const q = { ...quote(generated), laborExtraHours: 8.5 } as Quote;
+    expect(resetGeneratedScope(q).laborExtraHours).toBe(0);
+    expect(resetGeneratedScope(q, 6).laborExtraHours).toBe(0);
+  });
+
   it('seeds the corrected hours when the tradie gave them', () => {
     expect(resetGeneratedScope(quote(generated), 6).laborHours).toBe(6);
     expect(resetGeneratedScope(quote(generated), 0).laborHours).toBe(0);

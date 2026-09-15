@@ -23,8 +23,8 @@ import type { SupplierGapSummary } from '../services/assistant/supplierGapNote';
 import { reviewQuoteMaterials, isFlaggedRow, priceResettableIds, topLinesSummary, wipeStillImplausibleRows, withIntegrityIssues, QuoteReview } from '../utils/quoteReview';
 import { checkDocumentIntegrity } from '../../shared/document/integrityCheck';
 import { loadTemplates } from '../services/sectionTemplateService';
-import { updateQuoteCalculations, healBrokenLabourSections } from '../utils/quoteCalculator';
-import { finiteNumber, updateAllMaterialPrices, updateDocumentCalculations } from '../utils/documentCalculator';
+import { updateQuoteCalculations, healBrokenLabourSections, landTravelCharge } from '../utils/quoteCalculator';
+import { finiteNumber, formatCurrency, updateAllMaterialPrices, updateDocumentCalculations } from '../utils/documentCalculator';
 import { applySetTotal, describeSetTotalPlan } from '../utils/setTotal';
 import { normalizePhoneTail } from '../utils/textMatch';
 import { normaliseLabourToHours } from '../../shared/document/labourUnits';
@@ -83,6 +83,7 @@ class ServerRunFailed extends Error {
   }
 }
 import { resetGeneratedScope } from '../utils/scopeReset';
+import { waitForMirroredDocument, MATE_INVOICE_MIRROR_WAIT } from './mirroredDocumentWait';
 import { headlineFor } from '../utils/reviewChatFormat';
 import type { CustomerEditPlan } from '../utils/customerEdit';
 import { auth } from '../config/firebase';
@@ -2931,7 +2932,18 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   convertDocumentToInvoice: async (documentId: string) => {
-    const existing = get().getDocumentById(documentId);
+    let existing = get().getDocumentById(documentId) ?? get().getDocumentByLegacyId(documentId);
+    if (!existing) {
+      // A document saved moments ago may not have reached the in-memory list
+      // yet. Mate's rate-card path finishes in well under a second — no
+      // analyse, no pricing run — so the auto-convert that follows a lump-sum
+      // invoice draft (a progress or final claim) overtook the documents sync
+      // and threw "Document not found". The tradie asked for an invoice, was
+      // told they had one, and got a quote numbered Q-001 instead. Re-read
+      // once before giving up.
+      await get().loadDocuments();
+      existing = get().getDocumentById(documentId) ?? get().getDocumentByLegacyId(documentId);
+    }
     if (!existing) {
       throw new Error('Document not found');
     }
@@ -3454,6 +3466,13 @@ export const useStore = create<AppState>((set, get) => ({
         rateLines?: RateLine[];
         ratesCoverMaterials?: boolean;
         labourOnly?: boolean;
+        /**
+         * The total labour hours the tradie stated, when they did. Pinned on
+         * the finished quote whichever side prices it — see holdStatedHours
+         * in shared/pricing/pipeline.ts. Absent means the engine's estimate
+         * stands, exactly as before.
+         */
+        statedHours?: number;
         /** Recorded on the server-side run — a first draft or a scope correction. */
         kind?: 'draft' | 'scope';
       } = {},
@@ -3571,7 +3590,11 @@ export const useStore = create<AppState>((set, get) => ({
           {
             quoteId,
             kind: options.kind ?? 'draft',
-            options: { stripLabour: rateLineCount > 0, labourOnly: !!options.labourOnly },
+            options: {
+              stripLabour: rateLineCount > 0,
+              labourOnly: !!options.labourOnly,
+              ...(options.statedHours ? { statedHours: options.statedHours } : {}),
+            },
             jobName: get().currentQuote?.job?.name,
           },
           { onProgress: (status) => reportProgress(status) },
@@ -3603,6 +3626,7 @@ export const useStore = create<AppState>((set, get) => ({
             businessSettings: get().businessSettings,
             isPro,
             templates,
+            statedHours: options.statedHours,
             // The two modes below rework the analyse after the fact; a
             // launch-time resume would land the raw list instead.
             resumable: !options.labourOnly && rateLineCount === 0,
@@ -3963,7 +3987,14 @@ export const useStore = create<AppState>((set, get) => ({
           const run = await runScopePipeline(
             quoteId,
             { phase: 'preflight', status: 'Getting ready…', done: false },
-            { rateLines, ratesCoverMaterials, labourOnly },
+            {
+              rateLines,
+              ratesCoverMaterials,
+              labourOnly,
+              // Rate lines carry the labour themselves (the seed above is 0),
+              // so there are no hours to hold onto the quote.
+              statedHours: rateLines.length ? undefined : proposal.estimatedDurationHours,
+            },
           );
           if (run.kind === 'cancelled') {
             return { ok: false, error: 'Pipeline was cancelled.' };
@@ -3979,24 +4010,60 @@ export const useStore = create<AppState>((set, get) => ({
           }
           const { review, supplierGap } = run;
 
-          // If the tradie asked for an invoice up front, auto-convert at the
-          // end of the pipeline so they don't have to do a second Apply.
-          if (proposal.documentType === 'invoice') {
-            try {
-              const converted = await get().convertDocumentToInvoice(quoteId);
-              return {
-                ok: true,
-                navigate: { kind: 'open_invoice', invoiceId: converted.id },
-                review,
-                supplierGap,
-              };
-            } catch (err: any) {
-              // eslint-disable-next-line no-console
-              console.warn('[Mate] auto-convert to invoice failed', err);
-              // Fall through to opening the quote — the tradie can convert manually.
+          // The travel charge the tradie stated, now that pricing has settled
+          // the subtotal it is a share of. A degraded run returned above: its
+          // totals aren't real, so a share of them would be the wrong money.
+          let travelNote: string | undefined;
+          if (proposal.travelAdjustment) {
+            const priced = get().currentQuote;
+            const landed = priced && priced.id === quoteId ? landTravelCharge(priced, proposal.travelAdjustment) : null;
+            if (landed) {
+              get().updateQuote(landed);
+              await get().saveDraft(get().currentQuote!);
+            } else {
+              travelNote = `Couldn't put the ${formatCurrency(proposal.travelAdjustment)} travel on — there's nothing priced on it to charge it against yet.`;
             }
           }
 
+          // If the tradie asked for an invoice up front, auto-convert at the
+          // end of the pipeline so they don't have to do a second Apply.
+          let invoiceNote: string | undefined;
+          if (proposal.documentType === 'invoice') {
+            // The unified Document this converts by id is written by the
+            // server mirror AFTER the legacy quote save. A priced run gives
+            // it 15–40 s; the rate-card and labour-only paths give it under
+            // a second, so a lump-sum claim reached here before the copy
+            // existed and stayed a quote (numbered Q-001) while the chat
+            // said "Here's the invoice". Wait for the copy, bounded.
+            const mirrored = await waitForMirroredDocument(
+              () => resolveDocument(quoteId),
+              MATE_INVOICE_MIRROR_WAIT,
+            );
+            if (mirrored) {
+              try {
+                const converted = await get().convertDocumentToInvoice(quoteId);
+                return {
+                  ok: true,
+                  navigate: { kind: 'open_invoice', invoiceId: converted.id },
+                  review,
+                  supplierGap,
+                  ...(travelNote ? { note: travelNote } : {}),
+                };
+              } catch (err: any) {
+                // eslint-disable-next-line no-console
+                console.warn('[Mate] auto-convert to invoice failed', err);
+              }
+            } else {
+              // eslint-disable-next-line no-console
+              console.warn('[Mate] auto-convert to invoice skipped — document never mirrored', quoteId);
+            }
+            // Fall through to opening the quote, and say so — the tradie asked
+            // for an invoice, so a silent quote is the one thing not to hand back.
+            invoiceNote =
+              "Drafted it as a quote for now — the invoice conversion didn't come through. Tap Create Invoice on the job to flip it.";
+          }
+
+          const notes = [travelNote, invoiceNote].filter((n): n is string => !!n);
           // Land on JobPreview (the final review screen) instead of
           // MaterialsList — pricing is already done.
           return {
@@ -4004,6 +4071,7 @@ export const useStore = create<AppState>((set, get) => ({
             navigate: { kind: 'job_preview', quoteId },
             review,
             supplierGap,
+            ...(notes.length ? { note: notes.join(' ') } : {}),
           };
         }
 
@@ -4071,7 +4139,7 @@ export const useStore = create<AppState>((set, get) => ({
           const run = await runScopePipeline(
             quoteId,
             { phase: 'preflight', status: 'Redoing the materials…', done: false },
-            { kind: 'scope' },
+            { kind: 'scope', statedHours: proposal.estimatedDurationHours },
           );
           if (run.kind === 'cancelled') {
             return { ok: false, error: 'Pipeline was cancelled.' };
@@ -4142,7 +4210,20 @@ export const useStore = create<AppState>((set, get) => ({
                 }
               : {}),
           };
-          const recalced = updateQuoteCalculations(nextQuote);
+          // Travel is stored as a share of the subtotal, so a stated dollar
+          // figure is read against the subtotal this card LEAVES BEHIND — new
+          // hours or a new rate move it, and the charge has to follow.
+          let recalced = updateQuoteCalculations(nextQuote);
+          if (proposal.travelAdjustment !== undefined) {
+            const landed = landTravelCharge(recalced, proposal.travelAdjustment);
+            if (!landed) {
+              return {
+                ok: false,
+                error: "There's nothing priced on this one to charge travel against yet — get the materials or labour on it first.",
+              };
+            }
+            recalced = landed;
+          }
           const nextDoc: Document = {
             ...target,
             laborRate: recalced.laborRate,
@@ -4157,6 +4238,9 @@ export const useStore = create<AppState>((set, get) => ({
             subtotal: recalced.subtotal,
             gst: recalced.gst,
             total: recalced.total,
+            ...(proposal.travelAdjustment !== undefined
+              ? { travelAdjustment: recalced.travelAdjustment ?? 0 }
+              : {}),
           };
           await get().saveDocument(nextDoc);
           return { ok: true, navigate: { kind: 'job_preview', quoteId: target.id }, appliedTotal: recalced.total };

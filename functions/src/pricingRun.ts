@@ -132,6 +132,10 @@ export function quotePatch(quote: StoredQuote, nowMs: number): Record<string, un
       materials: recalculated.materials,
       sections: recalculated.sections ?? [],
       laborHours: recalculated.laborHours,
+      // Written by the analyse when the tradie stated the hours
+      // (holdStatedHours); undefined otherwise and stripped below, so a run
+      // with nothing stated leaves whatever the quote already carried alone.
+      laborExtraHours: recalculated.laborExtraHours,
       job: recalculated.job,
       ...(recalculated.draftStep ? { draftStep: recalculated.draftStep } : {}),
       materialsSubtotal: recalculated.materialsSubtotal,
@@ -332,7 +336,7 @@ export async function runPricingRun(args: {
     // ── Phase 1: analyse ──
     const analysed = await generateMaterialsForQuote(
       deps,
-      { quote, businessSettings, isPro, templates },
+      { quote, businessSettings, isPro, templates, statedHours: run.options.statedHours },
       { onEvent: (event) => progress.report({ phase: event.phase, status: event.status, detail: event.detail }) },
     );
     let next: StoredQuote = analysed.updatedQuote;

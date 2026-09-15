@@ -8,6 +8,7 @@ import {
   updateAllMaterialPrices,
   updateMaterialTotalPrice,
 } from '../documentCalculator';
+import { travelPercentForCharge } from '../../../shared/pricing/documentTotals';
 import type { Material, QuoteSection } from '../../types';
 
 function material(over: Partial<Material> = {}): Material {
@@ -496,5 +497,59 @@ describe('calculateDocumentTotals', () => {
     expect(calc.markupAmount).toBe(660); // 3300 × 20% (labour only)
     expect(calc.gst).toBeCloseTo(1124.30, 2);
     expect(calc.total).toBeCloseTo(12367.30, 2);
+  });
+});
+
+describe('travelPercentForCharge', () => {
+  /**
+   * A tradie names travel in dollars; the document stores it as a percent of
+   * the subtotal. The conversion has to come back out as the dollars they
+   * said, and the percent is printed on the customer's quote and PDF, so it
+   * must not grow decimals it doesn't need.
+   */
+  const amountFor = (percent: number, subtotal: number) =>
+    roundToTwoDecimals(subtotal * (percent / 100));
+
+  it('gives a round percent when the charge is one', () => {
+    expect(travelPercentForCharge(125.1, 1251)).toBe(10);
+    expect(travelPercentForCharge(250, 5000)).toBe(5);
+  });
+
+  it('takes the extra decimals only when the charge needs them, and still lands on the cent', () => {
+    for (const [dollars, subtotal] of [
+      [80, 1251],
+      [80, 5498.21],
+      [150, 2733.17],
+      [45.5, 811.09],
+      [1200, 48211.63],
+    ] as Array<[number, number]>) {
+      const percent = travelPercentForCharge(dollars, subtotal)!;
+      expect(percent, `$${dollars} on ${subtotal}`).not.toBeNull();
+      expect(amountFor(percent, subtotal), `$${dollars} on ${subtotal}`).toBe(dollars);
+    }
+  });
+
+  it('is 0 for a charge of nothing — travel off, whatever the subtotal', () => {
+    expect(travelPercentForCharge(0, 1251)).toBe(0);
+    expect(travelPercentForCharge(0, 0)).toBe(0);
+  });
+
+  it('refuses a charge with no subtotal to take a percentage of', () => {
+    expect(travelPercentForCharge(80, 0)).toBeNull();
+    expect(travelPercentForCharge(80, -5)).toBeNull();
+  });
+
+  it('refuses a negative or non-finite charge rather than writing nonsense money', () => {
+    expect(travelPercentForCharge(-40, 1251)).toBeNull();
+    expect(travelPercentForCharge(NaN, 1251)).toBeNull();
+    expect(travelPercentForCharge(Infinity, 1251)).toBeNull();
+  });
+
+  it('feeds calculateDocumentTotals the travel row the tradie asked for', () => {
+    const materials = [material({ price: 1000, totalPrice: 1000 })];
+    const percent = travelPercentForCharge(80, 1000)!;
+    const calc = calculateDocumentTotals(materials, 0, 0, 0, percent, undefined, 0, 0, false, false);
+    expect(calc.travelAdjustmentAmount).toBe(80);
+    expect(calc.total).toBe(1080);
   });
 });
