@@ -260,6 +260,12 @@ export function SendReportDialog({
                   placeholder={drafting ? 'Writing…' : 'A short note above the report summary.'}
                   style={[styles.input, styles.noteInput]}
                   disabled={sending || drafting}
+                  // Explicit caret / selection colours, same as the email body
+                  // editor in DocumentEmailPreviewModal: never leave the Android
+                  // caret to whatever Paper derives.
+                  cursorColor={themeColors.text}
+                  selectionColor={themeColors.accentText}
+                  selectionHandleColor={themeColors.accentText}
                 />
 
                 {!!ownerEmail && (

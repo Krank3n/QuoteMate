@@ -635,6 +635,17 @@ export function DocumentEmailPreviewModal({
                 autoFocus
                 underlineColor="transparent"
                 activeUnderlineColor="transparent"
+                // Paper derives the caret and selection colours from
+                // `activeUnderlineColor` when none are given, so the transparent
+                // underline above made the Android caret transparent and the
+                // selection highlight a translucent black — a paying tradie saw
+                // "a grayed area a line below" instead of a cursor (Sep 2026).
+                // The native insertion handle is tinted separately, and untinted
+                // it takes the build's navy colorPrimary, invisible on the dark
+                // ground. Set all three explicitly.
+                cursorColor={themeColors.text}
+                selectionColor={themeColors.accentText}
+                selectionHandleColor={themeColors.accentText}
               />
             </View>
           ) : (

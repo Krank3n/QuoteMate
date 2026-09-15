@@ -23,11 +23,14 @@ vi.mock('react-native-paper', () => ({
   Portal: ({ children }: any) => <>{children}</>,
   Modal: ({ visible, children }: any) => (visible ? <div data-testid="modal">{children}</div> : null),
   Text: ({ children }: any) => <span>{children}</span>,
-  TextInput: ({ value, onChangeText, label, placeholder }: any) => (
+  TextInput: ({ value, onChangeText, label, placeholder, cursorColor, selectionColor, selectionHandleColor }: any) => (
     <input
       aria-label={label || placeholder}
       value={value}
       onChange={(e) => onChangeText?.(e.target.value)}
+      data-cursor-color={cursorColor}
+      data-selection-color={selectionColor}
+      data-selection-handle-color={selectionHandleColor}
     />
   ),
   Button: ({ children, onPress, disabled }: any) => (
@@ -167,6 +170,21 @@ describe('SendReportDialog', () => {
     fireEvent.click(screen.getByText('Email to customer'));
     await waitFor(() => expect(screen.getByTestId('modal')).toBeTruthy());
     expect(screen.queryByRole('switch')).toBeNull();
+  });
+
+  // Same defect class as the email body editor: an Android caret left to
+  // whatever Paper derives. The theme stub returns one colour for every
+  // token, so this pins that the props are passed, not which token.
+  it('gives the note its caret and selection colours explicitly', async () => {
+    await openCompose();
+    await waitFor(() => expect(screen.getByDisplayValue('Written summary of the visit.')).toBeTruthy());
+
+    const note = screen.getByDisplayValue('Written summary of the visit.');
+    for (const attr of ['data-cursor-color', 'data-selection-color', 'data-selection-handle-color']) {
+      const value = note.getAttribute(attr);
+      expect(value, attr).toBeTruthy();
+      expect(value, attr).not.toBe('transparent');
+    }
   });
 
   it('refuses an invalid address without calling the endpoint', async () => {
