@@ -23,6 +23,10 @@ export interface JobPhoto {
   storageUrl: string;
   thumbnailUrl?: string;
   annotated?: boolean;
+  // Before/after grouping on the job screen; absent means "before".
+  stage?: 'before' | 'after';
+  // When the photo was added, ms epoch.
+  takenAt?: number;
 }
 
 // Lightweight to-do item on a Job. Phase-17+: brain-dump of materials
