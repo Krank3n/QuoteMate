@@ -549,6 +549,9 @@ export interface BusinessSettings {
   // been charged" note. Snapshotted onto each Quote/Invoice like
   // pricesIncludeGst.
   gstRegistered?: boolean;
+  // Where the accountant statement was last sent. Prefilled on the next
+  // send and written by the server on a successful send.
+  accountantEmail?: string;
   // Terms & Conditions shown on the quote/invoice PDF and recorded as
   // accepted when the customer pays. Editable in Settings → Business Profile.
   // When blank, the PDF falls back to the built-in AU tradie default so new

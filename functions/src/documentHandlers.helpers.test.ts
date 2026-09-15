@@ -12,6 +12,54 @@ import {
   sendMethodPatch,
   stageTransitionTimestamps,
 } from './documentHandlers';
+import { invoiceIssueDateMs } from './shared/statement/buildStatement';
+import { formatAuDate } from './timestamps.helpers';
+
+/**
+ * The invoice PDF's date line and the accountant statement must date an
+ * invoice identically, so the PDF path now goes through the shared
+ * invoiceIssueDateMs instead of its own `documentDate || issueDate ||
+ * createdAt` chain. Pinned at source level (the send path can't run
+ * offline) plus a value check that the helper picks the same instant the
+ * old expression did for every shape the legacy invoice record carries.
+ */
+describe('invoice PDF issue date — shared with the accountant statement', () => {
+  const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'documentHandlers.ts'), 'utf8');
+
+  it('dates the invoice PDF through invoiceIssueDateMs', () => {
+    expect(src).toContain('issueDate: fmtAuDate(invoiceIssueDateMs(invoice) || undefined),');
+    expect(src).not.toContain('invoice.documentDate || invoice.issueDate || invoice.createdAt');
+  });
+
+  it('picks the same instant the old || chain printed, for ms, Date and missing fields', () => {
+    const backdated = { documentDate: 1_750_000_000_000, issueDate: new Date(1_760_000_000_000), createdAt: new Date(1_770_000_000_000) };
+    const edited = { documentDate: undefined, issueDate: new Date(1_760_000_000_000), createdAt: new Date(1_770_000_000_000) };
+    const fresh = { documentDate: undefined, issueDate: undefined, createdAt: new Date(1_770_000_000_000) };
+    for (const rec of [backdated, edited, fresh]) {
+      const legacy = new Date((rec.documentDate || rec.issueDate || rec.createdAt) as any).getTime();
+      expect(invoiceIssueDateMs(rec)).toBe(legacy);
+    }
+  });
+
+  // The helper returns 0 for "nothing usable", and fmtAuDate(0) is
+  // 01 January 1970 — the old `||` chain fell through to today instead.
+  it('prints today, not 1970, when the record carries no usable date', () => {
+    const missing = {};
+    const invalid = { documentDate: new Date('nope'), issueDate: new Date('nope'), createdAt: new Date('nope') };
+    for (const rec of [missing, invalid]) {
+      expect(invoiceIssueDateMs(rec)).toBe(0);
+      expect(formatAuDate(invoiceIssueDateMs(rec) || undefined)).toBe(formatAuDate(undefined));
+      expect(formatAuDate(invoiceIssueDateMs(rec) || undefined)).not.toContain('1970');
+    }
+  });
+
+  it('honours a backdate that arrives as the JSON-round-tripped {_seconds} shape', () => {
+    const ms = 1_750_000_000_000;
+    const rec = { documentDate: { _seconds: ms / 1000, _nanoseconds: 0 }, createdAt: new Date(1_770_000_000_000) };
+    expect(invoiceIssueDateMs(rec)).toBe(ms);
+    expect(formatAuDate(invoiceIssueDateMs(rec) || undefined)).toBe(formatAuDate(ms));
+  });
+});
 
 describe('sendAuditPatch', () => {
   it('stamps the send time and increments the count without touching sentAt', () => {

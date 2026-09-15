@@ -38,6 +38,8 @@ import { formatAuDate } from './timestamps.helpers';
 import { shouldEmbedEmailOpenPixel } from './emailOpenPixel';
 import { hashTerms } from './shared/pdf/terms/defaultAuTradie';
 import { toPdfMaterials, toPdfSections } from './shared/pdf/mapMaterial';
+import type { BusinessPdfData } from './shared/pdf/types';
+import { invoiceIssueDateMs } from './shared/statement/buildStatement';
 import {
   lineMarkupMultiplier,
   lumpSumLabourTotal,
@@ -77,7 +79,7 @@ const db = () => admin.firestore();
 // Loose RFC 5321 sanity check: one @, no whitespace, dot in the domain. Not a
 // full validator — the goal is to catch typos like trailing characters that
 // would silently route customer replies into the void.
-function isLikelyValidEmail(s: string): boolean {
+export function isLikelyValidEmail(s: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(s.trim());
 }
 
@@ -453,6 +455,8 @@ interface BusinessSettings {
   showLaborHours?: boolean;
   paymentMethods?: any;
   termsAndConditions?: string;
+  // Remembered from the last accountant statement send (accountantStatement.ts).
+  accountantEmail?: string;
   [key: string]: any;
 }
 
@@ -528,6 +532,22 @@ function businessCredentials(business: BusinessSettings): Array<{
         ? `<img src="${String(credential.logoUri)}" alt="Accreditation" class="credential-logo" style="width:64px;height:38px;object-fit:contain;" />`
         : '',
     }));
+}
+
+/** Business settings → the shared PDF header shape every builder takes. */
+export function businessSettingsToPdfData(business: BusinessSettings): BusinessPdfData {
+  return {
+    businessName: business.businessName || 'Business',
+    email: business.email,
+    phone: business.phone,
+    website: business.website,
+    abn: business.abn,
+    address: business.address,
+    logoHtml: businessLogoHtml(business),
+    credentials: businessCredentials(business),
+    brandColor: business.brandColor,
+    pdfTemplate: business.pdfTemplate,
+  };
 }
 
 function sanitizeFilename(s: string): string {
@@ -1143,7 +1163,11 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
       quoteNumber: invoice.invoiceNumber,
       quoteDate: fmtAuDate(invoice.updatedAt),
       invoiceNumber: invoice.invoiceNumber,
-      issueDate: fmtAuDate(invoice.documentDate || invoice.issueDate || invoice.createdAt),
+      // Shared with the accountant statement so the two can never date an
+      // invoice differently: documentDate || issueDate || createdAt. The
+      // helper returns 0 when none is usable; `|| undefined` keeps
+      // fmtAuDate's long-standing fallback to today instead of 1970.
+      issueDate: fmtAuDate(invoiceIssueDateMs(invoice) || undefined),
       dueDate: fmtAuDate(invoice.dueDate),
       paymentTerms: invoice.paymentTerms,
       paidAmount: invoice.paidAmount || 0,

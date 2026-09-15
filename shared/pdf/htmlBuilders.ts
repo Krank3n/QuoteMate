@@ -18,7 +18,7 @@ import { pathHasInk } from './signatureInk';
 import { isLumpSumSection, lineMarkupMultiplier, markupableLabourTotal } from '../document/lumpSum';
 import { resolvePriceDetail, showsLineItems, showsPerLineMoney } from '../document/priceDetail';
 
-const escapeHtml = (s: string) =>
+export const escapeHtml = (s: string) =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 const formatMultiline = (s: string) => escapeHtml(s).replace(/\n/g, '<br>');
@@ -209,7 +209,7 @@ export function buildBusinessCredentialsHTML(business: BusinessPdfData): string 
  * template puts the badge at the top of the right-hand column) without ending
  * up with two copies in the header.
  */
-function buildBusinessHeaderHTML(
+export function buildBusinessHeaderHTML(
   business: BusinessPdfData,
   options?: { omitCredentials?: boolean },
 ): string {

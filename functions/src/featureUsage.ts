@@ -78,6 +78,16 @@ export async function recordMaterialsRecommend(opts: {
 }
 
 // ---------------------------------------------------------------------------
+// Accountant statement (sendAccountantStatement) — one counter per send, so
+// we can see whether anyone beyond the tradie who asked for it uses it.
+// ---------------------------------------------------------------------------
+
+/** Best-effort — callers fire this with a `.catch(() => {})`. */
+export async function recordAccountantStatementSent(uid: string): Promise<void> {
+  await applyFeatureUsagePatch(uid, { accountantStatementsSent: 1 });
+}
+
+// ---------------------------------------------------------------------------
 // Price fetch (fetchPricesForQuote outcome) — reported by the RN client.
 // ---------------------------------------------------------------------------
 
