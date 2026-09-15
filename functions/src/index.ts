@@ -117,6 +117,7 @@ import {
   LlmAttachment,
   MAX_PDF_ATTACHMENT_BYTES,
   normalizeLlmAttachments,
+  capSitePhotoAttachments,
 } from './llmAttachments';
 import {
   selectEmailPhotoUrls,
@@ -1894,7 +1895,9 @@ const ALLOWED_IMAGE_HOSTS = new Set([
   'firebasestorage.googleapis.com',
   'storage.googleapis.com',
 ]);
-const MAX_FETCH_IMAGES = 10;
+// A quote carries up to 30 photos plus plans that Mate can ride on past that;
+// fetch them all so the count cap below can see every PDF before it decides.
+const MAX_FETCH_IMAGES = 40;
 // Fetch guard only — normalizeLlmAttachments applies the real type-aware
 // caps afterwards. This just avoids base64-ing a download nothing can use
 // (PDFs get the largest per-file allowance, so that's the ceiling here).
@@ -2183,7 +2186,7 @@ async function analyzeJobDescriptionCore(uid: string, body: any): Promise<Record
       const fetched = await fetchStorageImagesAsBase64(photoUrls);
       photoBase64.push(...fetched);
     }
-    const { attachments, dropped } = normalizeLlmAttachments(photoBase64);
+    const { attachments: normalizedAttachments, dropped } = normalizeLlmAttachments(photoBase64);
     for (const d of dropped) {
       // index is into the combined base64 list (fetch skips don't appear in
       // it), so log the counts too or a prod incident can't be traced back.
@@ -2195,6 +2198,17 @@ async function analyzeJobDescriptionCore(uid: string, body: any): Promise<Record
         requestedUrls: Array.isArray(photoUrls) ? photoUrls.length : 0,
       });
     }
+    // Every plan plus the first ten site photos; the rest are cost and
+    // context for little gain. Warns with counts when anything is dropped.
+    // Deliberately not folded into `dropped`: that list tells the client a
+    // plan was unreadable, and a capped site photo is neither.
+    const { attachments } = capSitePhotoAttachments(normalizedAttachments, {
+      logContext: {
+        uid,
+        inputCount: photoBase64.length,
+        requestedUrls: Array.isArray(photoUrls) ? photoUrls.length : 0,
+      },
+    });
 
     // Get API keys from Firebase config.
     // Claude Opus 5 is the PRIMARY model; Gemini 3 Pro is the FALLBACK.

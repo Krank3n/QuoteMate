@@ -1,8 +1,10 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import {
   attachmentTypeFromBase64,
   base64ByteLength,
+  capSitePhotoAttachments,
   normalizeLlmAttachments,
+  MAX_ANALYZE_SITE_PHOTOS,
   MAX_IMAGE_ATTACHMENT_BYTES,
   MAX_PDF_ATTACHMENT_BYTES,
   MAX_TOTAL_ATTACHMENT_BYTES,
@@ -141,5 +143,76 @@ describe('normalizeLlmAttachments', () => {
     const { attachments, dropped } = normalizeLlmAttachments(['']);
     expect(attachments).toHaveLength(0);
     expect(dropped[0].reason).toBe('empty payload');
+  });
+});
+
+describe('capSitePhotoAttachments — what the estimator sees from a 30-photo quote', () => {
+  const photo = (i: number) => ({ data: `photo-${i}`, mediaType: 'image/jpeg' as const });
+  const plan = (i: number) => ({ data: `plan-${i}`, mediaType: 'application/pdf' as const });
+  const photos = (n: number) => Array.from({ length: n }, (_, i) => photo(i + 1));
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('caps site photos at ten', () => {
+    expect(MAX_ANALYZE_SITE_PHOTOS).toBe(10);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const r = capSitePhotoAttachments(photos(30));
+    expect(r.attachments).toEqual(photos(10));
+    expect(r.photosKept).toBe(10);
+    expect(r.photosDropped).toBe(20);
+    expect(r.plans).toBe(0);
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps every plan, wherever it sits in the list, in the original order', () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const input = [photo(1), ...photos(12).slice(1), plan(1), photo(13), plan(2)];
+    const r = capSitePhotoAttachments(input);
+    expect(r.plans).toBe(2);
+    expect(r.photosKept).toBe(10);
+    expect(r.photosDropped).toBe(3);
+    expect(r.attachments).toEqual([...photos(10), plan(1), plan(2)]);
+  });
+
+  it('passes an under-cap quote through untouched and stays quiet', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const input = [plan(1), ...photos(10)];
+    const r = capSitePhotoAttachments(input);
+    expect(r.attachments).toEqual(input);
+    expect(r.photosDropped).toBe(0);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('types come from the sniffed media type, so PNG and WebP count as site photos', () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const input = [
+      ...Array.from({ length: 6 }, (_, i) => ({ data: `png-${i}`, mediaType: 'image/png' as const })),
+      ...Array.from({ length: 6 }, (_, i) => ({ data: `webp-${i}`, mediaType: 'image/webp' as const })),
+    ];
+    const r = capSitePhotoAttachments(input);
+    expect(r.photosKept).toBe(10);
+    expect(r.photosDropped).toBe(2);
+  });
+
+  it('logs the counts and the caller context when photos are dropped', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    capSitePhotoAttachments([plan(1), ...photos(14)], { logContext: { uid: 'u1', requestedUrls: 15 } });
+    expect(warn).toHaveBeenCalledWith('[analyze attachments] photo cap applied', {
+      uid: 'u1',
+      requestedUrls: 15,
+      maxPhotos: 10,
+      plans: 1,
+      photosKept: 10,
+      photosDropped: 4,
+    });
+  });
+
+  it('honours an explicit cap', () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const r = capSitePhotoAttachments(photos(5), { maxPhotos: 2 });
+    expect(r.attachments).toEqual(photos(2));
+    expect(r.photosDropped).toBe(3);
   });
 });

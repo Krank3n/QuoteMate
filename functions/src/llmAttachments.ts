@@ -121,3 +121,57 @@ export function normalizeLlmAttachments(base64List: string[]): {
 
   return { attachments, dropped };
 }
+
+/**
+ * Site photos sent to the model per analyze. A quote can carry 30 photos; the
+ * first ten are plenty to read a scope from, and every photo past that is
+ * cost and context for little gain. Plans (anything sniffed as a PDF) are
+ * always kept — they carry the measurements.
+ */
+export const MAX_ANALYZE_SITE_PHOTOS = 10;
+
+export interface SitePhotoCapResult {
+  attachments: LlmAttachment[];
+  plans: number;
+  photosKept: number;
+  photosDropped: number;
+}
+
+/**
+ * Keep every PDF plan and at most the first `maxPhotos` site photos, in the
+ * order they arrived. Types come from the sniffed media type, not the URL or
+ * the client's isPlan flag, which the server never sees. Logs a warning with
+ * the counts when anything is dropped so a 30-photo quote that prices oddly
+ * can be traced back to what the model actually saw.
+ */
+export function capSitePhotoAttachments(
+  attachments: LlmAttachment[],
+  opts: { maxPhotos?: number; logContext?: Record<string, unknown> } = {},
+): SitePhotoCapResult {
+  const maxPhotos = opts.maxPhotos ?? MAX_ANALYZE_SITE_PHOTOS;
+  const kept: LlmAttachment[] = [];
+  let plans = 0;
+  let photosKept = 0;
+  let photosDropped = 0;
+  for (const a of attachments) {
+    if (a.mediaType === 'application/pdf') {
+      plans++;
+      kept.push(a);
+    } else if (photosKept < maxPhotos) {
+      photosKept++;
+      kept.push(a);
+    } else {
+      photosDropped++;
+    }
+  }
+  if (photosDropped > 0) {
+    console.warn('[analyze attachments] photo cap applied', {
+      ...(opts.logContext ?? {}),
+      maxPhotos,
+      plans,
+      photosKept,
+      photosDropped,
+    });
+  }
+  return { attachments: kept, plans, photosKept, photosDropped };
+}
