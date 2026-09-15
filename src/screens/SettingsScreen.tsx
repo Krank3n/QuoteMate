@@ -107,8 +107,6 @@ export function SettingsScreen() {
           subtitle: 'Pull your real Reece trade prices into every quote',
           icon: 'pipe',
           screen: 'ReeceIntegration',
-          badge: 'NEW',
-          badgeColor: themeColors.accent,
         },
         {
           id: 'googleCalendar',
@@ -116,8 +114,6 @@ export function SettingsScreen() {
           subtitle: 'Push scheduled jobs to your calendar',
           icon: 'calendar-sync',
           screen: 'GoogleCalendarIntegration',
-          badge: 'NEW',
-          badgeColor: themeColors.accent,
         },
         {
           id: 'callKatie',
