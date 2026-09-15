@@ -7,10 +7,12 @@
  *
  * With `onJobPhotosChange` the strip is the place a tradie goes back to
  * after quoting: an "Add photos" tile when the job has none, a "+" tile at
- * the end otherwise, and Annotate / Remove in the lightbox. Every write goes
+ * the end otherwise, and Annotate / Remove in the lightbox. Adds always go
  * to `job.photos` through that callback. Photos that live on an attached
- * document are view-only here (the customer has already seen that quote);
- * the lightbox captions them with the document number instead.
+ * document are captioned with the document number in the lightbox; with
+ * `onDocumentPhotosChange` they can be flipped, annotated and removed too,
+ * and each of those writes goes back to the owning document's `photos`.
+ * Without it they are view-only.
  *
  * Before and after: a photo added here is stamped with a stage picked from
  * the job's stage (see defaultStageForJob), and a one-tap pill on the tile
@@ -41,13 +43,14 @@ import type { PhotoStage } from '../types';
 import { makeStyles, useThemeColors } from '../theme';
 import { selectionTap } from '../utils/haptics';
 import { isPdfUrl } from '../utils/imageMime';
-import { usePhotoUploader, type LocalPhoto } from './usePhotoUploader';
+import { usePhotoUploader, type LocalPhoto, type PhotoTarget } from './usePhotoUploader';
 import { PhotoUploaderModals } from './PhotoUploaderModals';
 import {
   aggregatePhotos,
   canEditPhoto,
   defaultStageForJob,
   documentOwnedCount,
+  documentPhotoRemoveMessage,
   groupPhotosByStage,
   lightboxPhotos,
   photoStage,
@@ -64,20 +67,28 @@ interface JobPhotoStripProps {
    * nothing to show.
    */
   onJobPhotosChange?: (photos: JobPhoto[]) => void;
+  /**
+   * Receives a document's new `photos` list after a flip, annotate or
+   * remove on one of its photos. Only meaningful alongside
+   * `onJobPhotosChange`; without it, document-owned photos are view-only.
+   */
+  onDocumentPhotosChange?: (documentId: string, photos: JobPhoto[]) => void;
 }
 
 const THUMB_SIZE = 80;
 const EMPTY_PHOTOS: JobPhoto[] = [];
 const noop = () => {};
 
-export function JobPhotoStrip({ job, documents, onJobPhotosChange }: JobPhotoStripProps) {
+export function JobPhotoStrip({ job, documents, onJobPhotosChange, onDocumentPhotosChange }: JobPhotoStripProps) {
   const styles = useStyles();
   const themeColors = useThemeColors();
   const editable = !!onJobPhotosChange;
+  const documentsEditable = editable && !!onDocumentPhotosChange;
   const jobPhotos = job.photos ?? EMPTY_PHOTOS;
 
-  // Photos on attached documents count against the cap but are never
-  // written from here, so they ride along as extraCount.
+  // Photos on attached documents count against the cap, but an add never
+  // lands on a document, so they ride along as extraCount rather than as
+  // the uploader's own list.
   const docPhotoCount = useMemo(
     () => documentOwnedCount(aggregatePhotos(jobPhotos, documents)),
     [jobPhotos, documents],
@@ -126,27 +137,56 @@ export function JobPhotoStrip({ job, documents, onJobPhotosChange }: JobPhotoStr
     setLightbox({ ...lightbox, index: next });
   };
 
-  // The pill on a job-owned tile. Pending uploads are not in job.photos yet,
-  // so they wait until the upload lands (the default stage is already right
-  // for them in the common case).
+  const canEdit = (entry: AggregatedPhoto) => editable && canEditPhoto(entry, documentsEditable);
+
+  // Where an edit to this photo is written: job.photos for a job-owned
+  // photo (the uploader's own list, so no target), or the owning document's
+  // photos for a document-owned one. Null when the owning document is no
+  // longer attached, which leaves the photo alone rather than writing to
+  // the wrong record.
+  const targetFor = (entry: AggregatedPhoto): PhotoTarget | null | undefined => {
+    if (entry.owner.kind !== 'document') return undefined;
+    const { documentId } = entry.owner;
+    const doc = documents.find(d => d.id === documentId);
+    if (!doc || !onDocumentPhotosChange) return null;
+    return {
+      photos: doc.photos ?? [],
+      onPhotosChange: photos => onDocumentPhotosChange(documentId, photos),
+      removeMessage: documentPhotoRemoveMessage(doc),
+    };
+  };
+
+  // The pill on a tile. Pending uploads are not in job.photos yet, so they
+  // wait until the upload lands (the default stage is already right for
+  // them in the common case). Stage is metadata a customer never sees, so a
+  // document-owned photo flips just the same, on the document.
   const flipStage = (entry: AggregatedPhoto) => {
-    if (!editable || !canEditPhoto(entry) || entry.photo.uploading) return;
+    if (!canEdit(entry) || entry.photo.uploading) return;
+    const target = targetFor(entry);
+    if (target === null) return;
     selectionTap();
     const next: PhotoStage = photoStage(entry.photo) === 'before' ? 'after' : 'before';
-    onJobPhotosChange?.(jobPhotos.map(p => (p.id === entry.photo.id ? { ...p, stage: next } : p)));
+    const withStage = (list: JobPhoto[]) =>
+      list.map(p => (p.id === entry.photo.id ? { ...p, stage: next } : p));
+    if (target) target.onPhotosChange(withStage(target.photos));
+    else onJobPhotosChange?.(withStage(jobPhotos));
   };
 
   // Both actions close the lightbox first: the annotator and the confirm
   // alert are modals of their own, and iOS shows one modal at a time.
   const annotate = (entry: AggregatedPhoto) => {
-    if (!editable || !canEditPhoto(entry)) return;
+    if (!canEdit(entry)) return;
+    const target = targetFor(entry);
+    if (target === null) return;
     close();
-    uploader.setAnnotatingPhoto(entry.photo as LocalPhoto);
+    uploader.setAnnotatingPhoto(entry.photo as LocalPhoto, target);
   };
   const remove = (entry: AggregatedPhoto) => {
-    if (!editable || !canEditPhoto(entry)) return;
+    if (!canEdit(entry)) return;
+    const target = targetFor(entry);
+    if (target === null) return;
     close();
-    uploader.handleDelete(entry.photo.id);
+    uploader.handleDelete(entry.photo.id, target);
   };
 
   const showAddTile = editable && !uploader.atCap;
@@ -156,7 +196,7 @@ export function JobPhotoStrip({ job, documents, onJobPhotosChange }: JobPhotoStr
     const idx = photos.indexOf(entry);
     const isPdf = photo.localIsPdf || isPdfUrl(photo.storageUrl);
     const stage = photoStage(photo);
-    const canFlip = editable && canEditPhoto(entry) && !photo.uploading;
+    const canFlip = canEdit(entry) && !photo.uploading;
     return (
       <Pressable
         key={photo.id || photo.storageUrl}
@@ -292,6 +332,7 @@ export function JobPhotoStrip({ job, documents, onJobPhotosChange }: JobPhotoStr
         onAdvance={advance}
         onAnnotate={editable ? annotate : undefined}
         onRemove={editable ? remove : undefined}
+        documentsEditable={documentsEditable}
       />
 
       {editable ? <PhotoUploaderModals uploader={uploader} /> : null}
@@ -307,6 +348,7 @@ function Lightbox({
   onAdvance,
   onAnnotate,
   onRemove,
+  documentsEditable = false,
 }: {
   photos: AggregatedPhoto[];
   index: number | null;
@@ -316,6 +358,8 @@ function Lightbox({
   onAdvance: (delta: number) => void;
   onAnnotate?: (entry: AggregatedPhoto) => void;
   onRemove?: (entry: AggregatedPhoto) => void;
+  /** Whether Annotate / Remove also apply to document-owned photos. */
+  documentsEditable?: boolean;
 }) {
   const styles = useStyles();
   const themeColors = useThemeColors();
@@ -327,7 +371,7 @@ function Lightbox({
   const { width, height } = Dimensions.get('window');
   const canPrev = index > 0;
   const canNext = index < photos.length - 1;
-  const editable = !!onAnnotate && !!onRemove && canEditPhoto(entry);
+  const editable = !!onAnnotate && !!onRemove && canEditPhoto(entry, documentsEditable);
 
   return (
     <Modal
@@ -386,9 +430,16 @@ function Lightbox({
           </Pressable>
         ) : null}
 
+        {/* The document caption stays even when the photo is editable, so
+            the tradie knows which quote a Remove here also touches. */}
         <View style={styles.lightboxBottomBar}>
+          {entry.owner.kind === 'document' ? (
+            <Text testID="lightbox-caption" style={styles.lightboxCaption}>
+              {entry.owner.label}
+            </Text>
+          ) : null}
           {editable ? (
-            <>
+            <View style={styles.lightboxActions}>
               <Pressable
                 testID="lightbox-annotate"
                 accessibilityRole="button"
@@ -409,11 +460,7 @@ function Lightbox({
                 <MaterialCommunityIcons name={'trash-can-outline' as any} size={18} color={themeColors.alwaysLight} />
                 <Text style={styles.lightboxActionLabel}>Remove</Text>
               </Pressable>
-            </>
-          ) : entry.owner.kind === 'document' ? (
-            <Text testID="lightbox-caption" style={styles.lightboxCaption}>
-              {entry.owner.label}
-            </Text>
+            </View>
           ) : null}
         </View>
       </View>
@@ -599,6 +646,11 @@ const useStyles = makeStyles((t) => ({
     bottom: 40,
     left: 16,
     right: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+  },
+  lightboxActions: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',

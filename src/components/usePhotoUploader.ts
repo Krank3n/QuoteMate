@@ -13,6 +13,12 @@
  * chrome (tiles, ActionSheet, capture modal, AlertModal, PhotoAnnotator) from
  * the state this returns. See PhotoUploaderModals for the shared chrome.
  *
+ * Removal and annotation can also aim at a second list the caller names per
+ * call (a `PhotoTarget`): the job screen uses that for photos that live on
+ * an attached quote or invoice, so those go through the same confirm,
+ * re-upload and old-file cleanup as job-owned photos. Adds always land in
+ * `photos`.
+ *
  * The cap counts `photos` + pending uploads + `extraCount`. The job screen
  * passes the attached documents' photos as `extraCount` so a job never holds
  * more than MAX_PHOTOS in total, whichever record each photo lives on.
@@ -56,6 +62,18 @@ export interface LocalPhoto extends QuotePhoto {
   localUri?: string;   // Local file URI for immediate preview
   uploading?: boolean; // Whether upload is in progress
   localIsPdf?: boolean; // Sniffed pre-upload so a pending PDF gets its tile, not a broken <Image>
+}
+
+/**
+ * A committed list other than `photos` that one removal or annotation
+ * targets. `photos` is that list as it stands now; `onPhotosChange` receives
+ * its replacement. The job screen builds one per attached document.
+ */
+export interface PhotoTarget {
+  photos: QuotePhoto[];
+  onPhotosChange: (photos: QuotePhoto[]) => void;
+  /** Replaces the default "Are you sure" line in the remove confirm. */
+  removeMessage?: string;
 }
 
 export interface UsePhotoUploaderOptions {
@@ -111,10 +129,14 @@ export interface PhotoUploader {
   setCaptureModalVisible: (visible: boolean) => void;
   handleCaptureComplete: (uris: string[]) => Promise<void>;
 
-  /** Confirms (committed photo) or drops (pending photo) by id. */
-  handleDelete: (photoId: string) => void;
+  /**
+   * Confirms (committed photo) or drops (pending photo) by id. With a
+   * `target` the photo is looked up in, and removed from, that list instead.
+   */
+  handleDelete: (photoId: string, target?: PhotoTarget) => void;
   annotatingPhoto: LocalPhoto | null;
-  setAnnotatingPhoto: (photo: LocalPhoto | null) => void;
+  /** With a `target`, the saved annotation replaces the entry in that list. */
+  setAnnotatingPhoto: (photo: LocalPhoto | null, target?: PhotoTarget) => void;
   handleAnnotationSave: (annotatedUri: string) => Promise<void>;
 
   alertConfig: PhotoAlertConfig | null;
@@ -130,7 +152,12 @@ export function usePhotoUploader({
   stageForNew,
 }: UsePhotoUploaderOptions): PhotoUploader {
   const [localPhotos, setLocalPhotos] = useState<LocalPhoto[]>([]);
-  const [annotatingPhoto, setAnnotatingPhoto] = useState<LocalPhoto | null>(null);
+  // The photo under the annotator, with the list its saved version goes
+  // back to (undefined means `photos`).
+  const [annotating, setAnnotating] = useState<{ photo: LocalPhoto; target?: PhotoTarget } | null>(null);
+  const annotatingPhoto = annotating?.photo ?? null;
+  const setAnnotatingPhoto = (photo: LocalPhoto | null, target?: PhotoTarget) =>
+    setAnnotating(photo ? { photo, target } : null);
   const [photoSheetVisible, setPhotoSheetVisible] = useState(false);
   const [captureModalVisible, setCaptureModalVisible] = useState(false);
   const [alertConfig, setAlertConfig] = useState<PhotoAlertConfig | null>(null);
@@ -327,25 +354,28 @@ export function usePhotoUploader({
     await uploadUris(uris);
   };
 
-  const handleDelete = (photoId: string) => {
-    // Check if it's a local pending photo
-    const localPhoto = localPhotos.find(p => p.id === photoId);
+  const handleDelete = (photoId: string, target?: PhotoTarget) => {
+    // Check if it's a local pending photo (pending uploads only ever land
+    // in `photos`, so a targeted delete skips this).
+    const localPhoto = target ? undefined : localPhotos.find(p => p.id === photoId);
     if (localPhoto) {
       setLocalPhotos(prev => prev.filter(p => p.id !== photoId));
       return;
     }
 
-    const photo = photos.find(p => p.id === photoId);
+    const list = target?.photos ?? photos;
+    const commit = target?.onPhotosChange ?? onPhotosChange;
+    const photo = list.find(p => p.id === photoId);
     if (!photo) return;
 
     showAlert({
       type: 'warning',
       title: 'Remove Photo',
-      message: 'Are you sure you want to remove this photo?',
+      message: target?.removeMessage ?? 'Are you sure you want to remove this photo?',
       primaryButtonText: 'Remove',
       primaryButtonAction: async () => {
         dismissAlert();
-        onPhotosChange(photos.filter(p => p.id !== photoId));
+        commit(list.filter(p => p.id !== photoId));
         try {
           await deleteQuotePhoto(photo.storageUrl);
         } catch {
@@ -358,7 +388,12 @@ export function usePhotoUploader({
   };
 
   const handleAnnotationSave = async (annotatedUri: string) => {
-    if (!annotatingPhoto) return;
+    if (!annotating) return;
+    const { photo: annotatingPhoto, target } = annotating;
+    // The list the saved version replaces its entry in: the target's when
+    // the photo lives on a document, else the caller's `photos`.
+    const list = target?.photos ?? photos;
+    const commit = target?.onPhotosChange ?? onPhotosChange;
 
     const userId = auth.currentUser?.uid;
     if (!userId) return;
@@ -372,14 +407,14 @@ export function usePhotoUploader({
       uploading: true,
       annotated: true,
     }]);
-    // Remove from parent photos while re-uploading
-    onPhotosChange(photos.filter(p => p.id !== photoId));
+    // Remove from the owning list while re-uploading
+    commit(list.filter(p => p.id !== photoId));
     setAnnotatingPhoto(null);
 
     try {
       const storageUrl = await uploadQuotePhoto(userId, annotatedUri, { isPlan: annotatingPhoto.isPlan });
       setLocalPhotos(prev => prev.filter(p => p.id !== photoId));
-      onPhotosChange([...photos.filter(p => p.id !== photoId), { id: photoId, storageUrl, annotated: true, ...carriedFields(annotatingPhoto) }]);
+      commit([...list.filter(p => p.id !== photoId), { id: photoId, storageUrl, annotated: true, ...carriedFields(annotatingPhoto) }]);
 
       // Delete old version in background
       if (annotatingPhoto.storageUrl) {
@@ -388,7 +423,7 @@ export function usePhotoUploader({
     } catch (error) {
       // Restore original photo
       if (annotatingPhoto.storageUrl) {
-        onPhotosChange([...photos, { id: photoId, storageUrl: annotatingPhoto.storageUrl, annotated: annotatingPhoto.annotated, ...carriedFields(annotatingPhoto) }]);
+        commit([...list, { id: photoId, storageUrl: annotatingPhoto.storageUrl, annotated: annotatingPhoto.annotated, ...carriedFields(annotatingPhoto) }]);
       }
       setLocalPhotos(prev => prev.filter(p => p.id !== photoId));
       showAlert({

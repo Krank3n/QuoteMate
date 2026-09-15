@@ -94,6 +94,7 @@ export function ViewJobScreen() {
   const businessSettings = useStore((s) => s.businessSettings);
   const saveQuote = useStore((s) => s.saveQuote);
   const saveInvoice = useStore((s) => s.saveInvoice);
+  const saveDocument = useStore((s) => s.saveDocument);
   const createInvoiceFromQuote = useStore((s) => s.createInvoiceFromQuote);
   const convertDocumentToInvoice = useStore((s) => s.convertDocumentToInvoice);
   const duplicateDocumentForJob = useStore((s) => s.duplicateDocumentForJob);
@@ -1050,6 +1051,19 @@ export function ViewJobScreen() {
     await saveJob({ ...latest, photos });
   };
 
+  // A photo that arrived on a quote or invoice stays on that document; a
+  // flip, annotation or removal from the strip rewrites only its `photos`.
+  // saveDocument is the path every document edit already takes (merge write
+  // plus the legacy mirror, stamping updatedAt), so nothing else on the
+  // record moves. Read the latest copy from the store, not this render's
+  // closure: an annotation removes then re-adds the entry in two quick
+  // writes, and the second must not resurrect what the first took out.
+  const handleDocumentPhotosChange = async (documentId: string, photos: JobPhoto[]) => {
+    const latest = useStore.getState().documents.find((d) => d.id === documentId);
+    if (!latest) return;
+    await saveDocument({ ...latest, photos });
+  };
+
   return (
     <View style={styles.container}>
       <GridBackground />
@@ -1078,11 +1092,14 @@ export function ViewJobScreen() {
             }}
           />
           {/* Photos sit right under the header so they are the first thing
-              to find when coming back to a job. Adds write to job.photos. */}
+              to find when coming back to a job. Adds write to job.photos;
+              edits to a photo that lives on a quote or invoice write back
+              to that document's photos. */}
           <JobPhotoStrip
             job={job}
             documents={attachedDocs}
             onJobPhotosChange={handleJobPhotosChange}
+            onDocumentPhotosChange={handleDocumentPhotosChange}
           />
         </WebContainer>
 
