@@ -30,6 +30,14 @@ import { PhotoAnnotator } from './PhotoAnnotator';
 import { ActionSheet, ActionSheetOption } from './ActionSheet';
 import { SupplierListCaptureModal } from './SupplierListCaptureModal';
 import { AlertModal, AlertType } from './AlertModal';
+import {
+  MAX_PHOTOS,
+  photoLimitMessage,
+  remainingPhotoSlots,
+  trimToPhotoLimit,
+  uploadProgressLabel,
+  UploadProgress,
+} from './jobPhotoLimits';
 
 interface AlertConfig {
   type: AlertType;
@@ -40,8 +48,6 @@ interface AlertConfig {
   secondaryButtonText?: string;
   secondaryButtonAction?: () => void;
 }
-
-const MAX_PHOTOS = 5;
 
 interface LocalPhoto extends QuotePhoto {
   localUri?: string;   // Local file URI for immediate preview
@@ -65,6 +71,9 @@ export function JobPhotos({ photos, onPhotosChange, hideHeader }: JobPhotosProps
   const [photoSheetVisible, setPhotoSheetVisible] = useState(false);
   const [captureModalVisible, setCaptureModalVisible] = useState(false);
   const [alertConfig, setAlertConfig] = useState<AlertConfig | null>(null);
+  // Per-batch "Uploading 4 of 12" — only one batch runs at a time because the
+  // Add tile is disabled while anything is uploading.
+  const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
 
   const showAlert = (config: AlertConfig) => setAlertConfig(config);
   const dismissAlert = () => setAlertConfig(null);
@@ -77,7 +86,7 @@ export function JobPhotos({ photos, onPhotosChange, hideHeader }: JobPhotosProps
 
   /**
    * Upload a list of local URIs as job photos. Shared by both the gallery
-   * picker and the multi-shot camera modal. Uploads run in parallel and the
+   * picker and the multi-shot camera modal. Uploads run one at a time and the
    * parent's photo list is updated as each one finishes — using a running
    * `committed` snapshot rather than the (stale) `photos` closure, so all
    * uploads from the same batch survive instead of clobbering each other.
@@ -125,7 +134,9 @@ export function JobPhotos({ photos, onPhotosChange, hideHeader }: JobPhotosProps
     let anyFailed = false;
     let unsupportedMessage: string | null = null;
 
-    for (const pending of pendingPhotos) {
+    for (let i = 0; i < pendingPhotos.length; i++) {
+      const pending = pendingPhotos[i];
+      setUploadProgress({ current: i + 1, total: pendingPhotos.length });
       try {
         const storageUrl = await uploadQuotePhoto(userId, pending.localUri!, { isPlan: pending.isPlan });
         setLocalPhotos(prev => prev.filter(p => p.id !== pending.id));
@@ -141,6 +152,7 @@ export function JobPhotos({ photos, onPhotosChange, hideHeader }: JobPhotosProps
         console.warn('[JobPhotos] upload failed', err);
       }
     }
+    setUploadProgress(null);
 
     // A batch can fail both ways at once (one unsupported file + one network
     // failure) — report everything, or the tradie retries the wrong thing.
@@ -162,7 +174,7 @@ export function JobPhotos({ photos, onPhotosChange, hideHeader }: JobPhotosProps
       showAlert({
         type: 'warning',
         title: 'Limit Reached',
-        message: `Maximum ${MAX_PHOTOS} photos per quote.`,
+        message: photoLimitMessage(),
       });
       return;
     }
@@ -189,30 +201,25 @@ export function JobPhotos({ photos, onPhotosChange, hideHeader }: JobPhotosProps
       if (status !== 'granted') return;
     }
 
-    const remainingSlots = MAX_PHOTOS - allPhotos.length;
+    const currentCount = allPhotos.length;
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       quality: 0.8,
       allowsMultipleSelection: true,
       // Use 0 (unlimited) so iOS always shows the multi-select checkmark UI.
       // Setting this to 1 (e.g. when only one slot remains) makes PHPicker
-      // fall back to single-tap mode. We trim to remainingSlots below.
+      // fall back to single-tap mode. We trim to the remaining slots below.
       selectionLimit: 0,
     });
 
     if (result.canceled || !result.assets?.length) return;
 
-    let assets = result.assets;
-    if (assets.length > remainingSlots) {
-      assets = assets.slice(0, remainingSlots);
-      showAlert({
-        type: 'info',
-        title: 'Photo Limit',
-        message: `Only the first ${remainingSlots} photo${remainingSlots === 1 ? '' : 's'} were added (max ${MAX_PHOTOS} per quote).`,
-      });
+    const { kept, notice } = trimToPhotoLimit(result.assets, currentCount);
+    if (notice) {
+      showAlert({ type: 'info', title: 'Photo Limit', message: notice });
     }
 
-    await uploadUris(assets.map(a => a.uri), { isPlan: opts.isPlan });
+    await uploadUris(kept.map(a => a.uri), { isPlan: opts.isPlan });
   };
 
   const openCameraCapture = async () => {
@@ -220,7 +227,7 @@ export function JobPhotos({ photos, onPhotosChange, hideHeader }: JobPhotosProps
       showAlert({
         type: 'warning',
         title: 'Limit Reached',
-        message: `Maximum ${MAX_PHOTOS} photos per quote.`,
+        message: photoLimitMessage(),
       });
       return;
     }
@@ -345,6 +352,7 @@ export function JobPhotos({ photos, onPhotosChange, hideHeader }: JobPhotosProps
   ];
 
   const hasAnyUploading = localPhotos.some(p => p.uploading);
+  const progressLabel = uploadProgressLabel(uploadProgress);
 
   return (
     <View style={styles.container}>
@@ -359,6 +367,10 @@ export function JobPhotos({ photos, onPhotosChange, hideHeader }: JobPhotosProps
           </Text>
         </>
       )}
+
+      {/* Sits above the grid, not in the header, so it still shows when a
+          screen hides the header and draws its own label. */}
+      {progressLabel && <Text style={styles.hint}>{progressLabel}</Text>}
 
       <View style={styles.grid}>
         {allPhotos.map((photo) => {
@@ -448,7 +460,7 @@ export function JobPhotos({ photos, onPhotosChange, hideHeader }: JobPhotosProps
         visible={captureModalVisible}
         onCancel={() => setCaptureModalVisible(false)}
         onComplete={handleCaptureComplete}
-        maxPhotos={MAX_PHOTOS - allPhotos.length}
+        maxPhotos={remainingPhotoSlots(allPhotos.length)}
         counterLabel="photos"
         tips={[
           'Capture each angle of the job site',

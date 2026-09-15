@@ -298,6 +298,64 @@ describe('quote email — the acceptance link is the primary action', () => {
   });
 });
 
+describe('quote email — the inline photo grid', () => {
+  const photoUrl = (i: number) => `https://cdn.test/site${i}.jpg`;
+  const photos = (n: number) => Array.from({ length: n }, (_, i) => photoUrl(i + 1));
+
+  // The "Site Photos" block: from its heading to the end of its outer table.
+  function photosSection(html: string): string {
+    const at = html.indexOf('Site Photos');
+    if (at < 0) return '';
+    const end = html.indexOf('</table>\n    </table>', at);
+    return html.slice(at, end);
+  }
+  const imgCount = (s: string) => (s.match(/<img /g) || []).length;
+  const rowCount = (s: string) => (s.match(/<tr><td style="padding:4px;">/g) || []).length;
+
+  it('shows at most the first six photos inline, in order (a quote can carry 30)', () => {
+    const section = photosSection(quote({ photoUrls: photos(30) }));
+    expect(imgCount(section)).toBe(6);
+    for (let i = 1; i <= 6; i++) expect(section).toContain(`src="${photoUrl(i)}"`);
+    expect(section).not.toContain(`src="${photoUrl(7)}"`);
+    expect(section).not.toContain(`src="${photoUrl(30)}"`);
+  });
+
+  it('lays them out three per row, so six photos make two rows', () => {
+    const section = photosSection(quote({ photoUrls: photos(6) }));
+    expect(rowCount(section)).toBe(2);
+    expect(section).toContain(`<tr><td style="padding:4px;"><img src="${photoUrl(1)}"`);
+    expect(section).toContain(`<tr><td style="padding:4px;"><img src="${photoUrl(4)}"`);
+  });
+
+  it('starts a short second row for four photos rather than one long row', () => {
+    const section = photosSection(quote({ photoUrls: photos(4) }));
+    expect(imgCount(section)).toBe(4);
+    expect(rowCount(section)).toBe(2);
+  });
+
+  it('keeps one to three photos on a single row', () => {
+    expect(rowCount(photosSection(quote({ photoUrls: photos(1) })))).toBe(1);
+    expect(rowCount(photosSection(quote({ photoUrls: photos(3) })))).toBe(1);
+  });
+
+  it('leaves PDF plans out of the grid and does not count them toward the six', () => {
+    const urls = [
+      'https://cdn.test/plan.pdf?alt=media&token=abc',
+      ...photos(7),
+    ];
+    const section = photosSection(quote({ photoUrls: urls }));
+    expect(section).not.toContain('plan.pdf');
+    expect(imgCount(section)).toBe(6);
+    expect(section).toContain(`src="${photoUrl(6)}"`);
+  });
+
+  it('renders no photo section at all when there is nothing to show', () => {
+    expect(quote({ photoUrls: [] })).not.toContain('Site Photos');
+    expect(quote({ photoUrls: undefined })).not.toContain('Site Photos');
+    expect(quote({ photoUrls: ['https://cdn.test/plan.pdf', 'file:///local.jpg'] })).not.toContain('Site Photos');
+  });
+});
+
 describe('quote email — the money adds up', () => {
   it('embeds renderPricingRows verbatim rather than a second set of numbers', () => {
     // The reviewed-and-rejected version printed its own section rows, which

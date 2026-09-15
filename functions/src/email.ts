@@ -2231,24 +2231,41 @@ export function renderPricingRows(input: PricingRowsInput): string {
     </table>`;
 }
 
-function renderPhotosSection(photoUrls: string[] | undefined): string {
-  const esc = escapeHtml;
+// A quote can carry up to 30 photos. The email shows the first few as a
+// wrapping grid; the rest ride as file attachments (capped separately) and the
+// acceptance page shows everything.
+export const MAX_INLINE_EMAIL_PHOTOS = 6;
+export const INLINE_EMAIL_PHOTOS_PER_ROW = 3;
+
+/** Photo URLs the email can show inline: http(s) images, PDF plans excluded. */
+export function inlineEmailPhotoUrls(photoUrls: string[] | undefined): string[] {
   // Only embed http(s) URLs; legacy quotes may hold local file:// or blob:
   // URIs that the recipient's mail client cannot resolve. PDF plans are
   // excluded too — an <img> can't render them and they're quoting inputs,
   // not customer-facing site photos (same rule as the acceptance page).
-  const remotePhotoUrls = (photoUrls || []).filter(
-    url => /^https?:\/\//i.test(url) && !isPdfUrl(url)
-  );
+  return (photoUrls || [])
+    .filter(url => /^https?:\/\//i.test(url) && !isPdfUrl(url))
+    .slice(0, MAX_INLINE_EMAIL_PHOTOS);
+}
+
+function renderPhotosSection(photoUrls: string[] | undefined): string {
+  const esc = escapeHtml;
+  const remotePhotoUrls = inlineEmailPhotoUrls(photoUrls);
   if (!remotePhotoUrls.length) return '';
-  const photoImgs = remotePhotoUrls.map(url =>
-    `<td style="padding:4px;"><img src="${esc(url)}" width="160" style="display:block;width:160px;height:120px;object-fit:cover;border-radius:8px;" /></td>`
-  ).join('');
+  // Rows of three: mail clients don't wrap table cells, so one long <tr>
+  // would push the email past the viewport.
+  const rows: string[] = [];
+  for (let i = 0; i < remotePhotoUrls.length; i += INLINE_EMAIL_PHOTOS_PER_ROW) {
+    const cells = remotePhotoUrls.slice(i, i + INLINE_EMAIL_PHOTOS_PER_ROW).map(url =>
+      `<td style="padding:4px;"><img src="${esc(url)}" width="160" style="display:block;width:160px;height:120px;object-fit:cover;border-radius:8px;" /></td>`
+    ).join('');
+    rows.push(`<tr>${cells}</tr>`);
+  }
   return `
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:20px 0;">
       <tr><td style="padding:0 0 8px;"><p style="color:#6b7280;font-size:13px;font-weight:600;margin:0;">Site Photos</p></td></tr>
       <tr><td>
-        <table role="presentation" cellpadding="0" cellspacing="0"><tr>${photoImgs}</tr></table>
+        <table role="presentation" cellpadding="0" cellspacing="0">${rows.join('')}</table>
       </td></tr>
     </table>`;
 }
