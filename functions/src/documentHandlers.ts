@@ -942,7 +942,15 @@ async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailRes
     try {
       await quoteRef.set({ depositAmount: depositAmountForEmail }, { merge: true });
       const linkResult = await input.squareDepositLinkMint(userId, docId);
-      if (linkResult) depositPayNowUrl = linkResult.paymentLinkUrl;
+      if (linkResult) {
+        depositPayNowUrl = linkResult.paymentLinkUrl;
+      } else {
+        // A refused mint may have just swept the stored links (the account
+        // can't take card payments); the quote we loaded predates that.
+        const fresh = (await quoteRef.get()).data() || {};
+        quote.squarePaymentLinkUrl = fresh.squarePaymentLinkUrl;
+        quote.depositPaymentLinkUrl = fresh.depositPaymentLinkUrl;
+      }
     } catch (err: any) {
       console.error('[square] deposit link mint threw in sendDocumentEmail (quote)', {
         userId, docId, message: err?.message,
@@ -1105,6 +1113,13 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
           payNowUrl = linkResult.paymentLinkUrl;
           invoice.squarePaymentLinkId = linkResult.paymentLinkId;
           invoice.squarePaymentLinkUrl = linkResult.paymentLinkUrl;
+        } else {
+          // A refused mint may have just swept the stored links (the account
+          // can't take card payments); the invoice we loaded predates that,
+          // and the fallback below must not resurrect a dead link.
+          const fresh = (await invoiceRef.get()).data() || {};
+          invoice.squarePaymentLinkId = fresh.squarePaymentLinkId;
+          invoice.squarePaymentLinkUrl = fresh.squarePaymentLinkUrl;
         }
       }
     } catch (err: any) {
