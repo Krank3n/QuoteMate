@@ -21,6 +21,7 @@ import { formatPaymentTerms, getAmountDue } from './invoiceCalculator';
 import { isPrintDismissal } from './printDismissal';
 import { formatCurrency } from './quoteCalculator';
 import { imageMimeFromBase64 } from './imageMime';
+import { deviceTimeZone } from './statementPeriods';
 import { Platform, Alert } from 'react-native';
 import {
   buildQuotePdfHtml,
@@ -806,7 +807,7 @@ export async function exportStatementPDF(
 ): Promise<void> {
   const reserved = options.printWindow ?? reservePrintWindow();
   try {
-    const timeZone = options.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const timeZone = options.timeZone || deviceTimeZone();
     const business = await prepareBusinessPdfData(businessSettings, options.isPro);
     const html = buildStatementPdfHtml(data, business, {
       fromMs: options.fromMs,

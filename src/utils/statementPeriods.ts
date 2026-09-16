@@ -40,6 +40,32 @@ export const STATEMENT_PRESET_LABELS: Record<StatementPreset, string> = {
   custom: 'Custom',
 };
 
+/**
+ * What a screen reader should say. The chips are abbreviated so four of them
+ * fit across a phone; "Last FY" read out letter by letter is not a period.
+ */
+export const STATEMENT_PRESET_LONG_LABELS: Record<StatementPreset, string> = {
+  lastFinancialYear: 'Last financial year',
+  thisFinancialYearToDate: 'This financial year so far',
+  lastQuarter: 'Last quarter',
+  custom: 'Custom dates',
+};
+
+/**
+ * The device's IANA zone, or undefined where the runtime can't answer.
+ *
+ * The periods here are computed in local time, so the zone has to travel with
+ * anything that prints or emails them. Intl is missing or throws on some
+ * older Android builds — the same guard notificationService.getTimezone uses.
+ */
+export function deviceTimeZone(): string | undefined {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Local midnight at the start of the given calendar day. */
 function startOfLocalDay(year: number, month: number, day: number): number {
   return new Date(year, month, day).getTime();

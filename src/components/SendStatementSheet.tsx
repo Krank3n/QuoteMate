@@ -26,6 +26,7 @@ import { auth } from '../config/firebase';
 import { makeStyles, useThemeColors } from '../theme';
 import { useStore } from '../store/useStore';
 import { sendAccountantStatement } from '../services/statementSender';
+import type { SendStatementResult } from '../services/statementSender';
 import { trackEvent } from '../services/analyticsService';
 import { isEmailAddress } from '../utils/sendFlow';
 import type { StatementPeriod, StatementPreset } from '../utils/statementPeriods';
@@ -64,18 +65,23 @@ export function SendStatementSheet({
   const [sendCopyToSelf, setSendCopyToSelf] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sentTo, setSentTo] = useState<string | null>(null);
+  const [sentCounts, setSentCounts] = useState<SendStatementResult | null>(null);
 
   // Refill each time the sheet opens — the accountant may have been saved in
-  // Business Profile since it was last shown.
+  // Business Profile since it was last shown. Keyed on `visible` ALONE and
+  // reading the address off the store there: a first-ever send saves the
+  // address, which would otherwise change the dependency while the sheet is
+  // still open, wipe the confirmation and invite a second send.
   useEffect(() => {
     if (visible) {
-      setTo(businessSettings?.accountantEmail || '');
+      setTo(useStore.getState().businessSettings?.accountantEmail || '');
       setNote('');
       setError(null);
       setSentTo(null);
+      setSentCounts(null);
       setSendCopyToSelf(false);
     }
-  }, [visible, businessSettings?.accountantEmail]);
+  }, [visible]);
 
   const handleSend = async () => {
     const recipient = to.trim();
@@ -86,7 +92,7 @@ export function SendStatementSheet({
     setSending(true);
     setError(null);
     try {
-      await sendAccountantStatement({
+      const result = await sendAccountantStatement({
         fromMs: period.fromMs,
         toMs: period.toMs,
         recipientEmail: recipient,
@@ -98,8 +104,11 @@ export function SendStatementSheet({
       // saveBusinessSettings writes the whole document without merge, so the
       // next Business Profile save would otherwise drop what the server wrote.
       if (businessSettings && businessSettings.accountantEmail !== recipient) {
-        void setBusinessSettings({ ...businessSettings, accountantEmail: recipient });
+        // The server already saved it with merge, so a failure here costs
+        // nothing the next successful save won't fix.
+        setBusinessSettings({ ...businessSettings, accountantEmail: recipient }).catch(() => {});
       }
+      setSentCounts(result || null);
       setSentTo(recipient);
     } catch (err: any) {
       setError(err?.message || 'Could not send the statement. Please try again.');
@@ -107,6 +116,14 @@ export function SendStatementSheet({
       setSending(false);
     }
   };
+
+  // What the server says it actually emailed, when it said. The figures on
+  // the card come from the phone's copy of the documents; these come from all
+  // of them, so they are worth repeating back.
+  const sentCountsLine =
+    typeof sentCounts?.invoiceCount === 'number' && typeof sentCounts?.paymentCount === 'number'
+      ? ` ${plural(sentCounts.invoiceCount, 'invoice')} and ${plural(sentCounts.paymentCount, 'payment')}.`
+      : '';
 
   return (
     <Portal>
@@ -123,7 +140,7 @@ export function SendStatementSheet({
             <View style={styles.done}>
               <Text style={styles.doneTitle}>Statement sent</Text>
               <Text style={styles.doneBody}>
-                {`${period.label} went to ${sentTo} with the PDF and CSV attached.`}
+                {`Your statement for ${period.label} went to ${sentTo}, with the PDF and a spreadsheet attached.${sentCountsLine}`}
               </Text>
               <Button
                 mode="contained"
@@ -139,7 +156,7 @@ export function SendStatementSheet({
             <>
               <Text style={styles.title}>Send to accountant</Text>
               <Text style={styles.subtitle}>
-                {`${period.label} · ${plural(summary.invoiceCount, 'invoice')} · ${plural(summary.paymentCount, 'payment')}. The PDF and a CSV go across as attachments. Replies come back to you.`}
+                {`${period.label} · ${plural(summary.invoiceCount, 'invoice')} · ${plural(summary.paymentCount, 'payment')}. The PDF and a spreadsheet (CSV) go across as attachments. Replies come back to you.`}
               </Text>
 
               <TextInput
@@ -162,7 +179,7 @@ export function SendStatementSheet({
                 mode="outlined"
                 multiline
                 numberOfLines={4}
-                placeholder="Anything your accountant should know."
+                placeholder="Leave blank and we'll write a short note with the period."
                 style={[styles.input, styles.noteInput]}
                 disabled={sending}
                 // Explicit caret / selection colours, same as the email body

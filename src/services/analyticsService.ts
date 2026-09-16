@@ -199,6 +199,9 @@ export type AnalyticsEvent =
   // Insights. `preset` names the range chip it came from, so we can see
   // whether anyone besides the tradie who asked for it uses the feature.
   | 'statement_sent'
+  // The same statement shared as a PDF instead of emailed — the OS share
+  // sheet / print dialog, so nothing leaves the phone through us.
+  | 'statement_shared'
   // — Deletes —
   // A quote or invoice was deleted from the app. `source` names the screen
   // (see utils/deleteEventProps.ts), `was_sent` whether a customer had it,

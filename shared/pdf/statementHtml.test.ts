@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildStatementPdfHtml, STATEMENT_EMPTY_LINE, STATEMENT_FOOTER_NOTE } from './statementHtml';
+import { buildStatementPdfHtml, STATEMENT_EMPTY_LINE, statementFooterNote } from './statementHtml';
 import { buildStatement, type StatementDocumentInput } from '../statement/buildStatement';
 import { printMediaCSS } from './templates';
 import type { BusinessPdfData } from './types';
@@ -91,7 +91,10 @@ describe('buildStatementPdfHtml', () => {
     expect(html).toContain('1 July 2025 – 30 June 2026');
     expect(html).toContain('Generated 15 September 2026');
     expect(html).toContain('Outstanding at 30 June 2026');
-    expect(html).toContain(STATEMENT_FOOTER_NOTE);
+    expect(html).toContain(statementFooterNote('Leo Wright Electrical Services'));
+    // The tradie's name, not ours: "as recorded in the app" said nothing an
+    // accountant could use and put us on a customer-facing document.
+    expect(html).not.toContain('as recorded in the app');
     expect(html).toContain('Bank transfer (3)');
     expect(html).not.toMatch(/QuoteMate|\bAI\b/);
   });

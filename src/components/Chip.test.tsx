@@ -29,6 +29,12 @@ describe('Chip', () => {
     expect(screen.getByText('This FY').closest('[aria-selected]')?.getAttribute('aria-selected')).toBe('false');
   });
 
+  it('says the whole period where the label is abbreviated to fit', () => {
+    // "Last FY" is read out as letters; the chip row can't afford the words.
+    render(<Chip label="Last FY" accessibilityLabel="Last financial year" onPress={() => {}} />);
+    expect(screen.getByLabelText('Last financial year')).toBeTruthy();
+  });
+
   it('calls onPress when tapped', () => {
     const onPress = vi.fn();
     render(<Chip label="Last quarter" onPress={onPress} />);

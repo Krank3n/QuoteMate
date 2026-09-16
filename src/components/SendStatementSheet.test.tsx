@@ -55,24 +55,49 @@ vi.mock('../theme', async () => await import('../test/stubs/theme'));
 const analytics = vi.hoisted(() => ({ trackEvent: vi.fn() }));
 vi.mock('../services/analyticsService', () => analytics);
 
-const sender = vi.hoisted(() => ({ sendAccountantStatement: vi.fn(async () => {}) }));
+const sender = vi.hoisted(() => ({ sendAccountantStatement: vi.fn(async () => ({}) as any) }));
 vi.mock('../services/statementSender', () => sender);
 
 vi.mock('../config/firebase', () => ({
   auth: { currentUser: { email: 'leo@example.com.au' } },
 }));
 
-const store = vi.hoisted(() => ({
-  state: {
-    businessSettings: {
-      businessName: 'Leo Wright Electrical',
-      accountantEmail: 'books@accountant.com.au',
-    } as any,
-    setBusinessSettings: vi.fn(async () => {}),
-  },
-}));
+/**
+ * A small real store rather than a frozen object: `getState()` answers (the
+ * sheet reads the remembered address there when it opens) and a write
+ * re-renders every subscriber, which is the only way the first-ever-send
+ * defect shows up at all.
+ */
+const store = vi.hoisted(() => {
+  const listeners = new Set<() => void>();
+  const api = {
+    state: {} as any,
+    subscribe(listener: () => void) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    reset(businessSettings: any) {
+      api.state = {
+        businessSettings,
+        setBusinessSettings: vi.fn(async (next: any) => {
+          api.state = { ...api.state, businessSettings: next };
+          listeners.forEach((listener) => listener());
+        }),
+      };
+    },
+  };
+  return api;
+});
 vi.mock('../store/useStore', () => ({
-  useStore: (selector?: any) => (selector ? selector(store.state) : store.state),
+  useStore: Object.assign(
+    (selector?: any) =>
+      React.useSyncExternalStore(store.subscribe, () =>
+        selector ? selector(store.state) : store.state,
+      ),
+    { getState: () => store.state },
+  ),
 }));
 
 import { SendStatementSheet } from './SendStatementSheet';
@@ -100,22 +125,24 @@ const baseProps = {
 describe('SendStatementSheet', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    store.state.businessSettings = {
+    store.reset({
       businessName: 'Leo Wright Electrical',
       accountantEmail: 'books@accountant.com.au',
-    };
+    });
   });
 
   it('prefills the remembered accountant and recaps the period', () => {
     render(<SendStatementSheet {...baseProps} />);
     expect(screen.getByDisplayValue('books@accountant.com.au')).toBeTruthy();
     expect(
-      screen.getByText(/1 Jul 2025 – 30 Jun 2026 · 38 invoices · 27 payments/),
+      screen.getByText(
+        /1 Jul 2025 – 30 Jun 2026 · 38 invoices · 27 payments\. The PDF and a spreadsheet \(CSV\) go across as attachments\./,
+      ),
     ).toBeTruthy();
   });
 
   it('refuses a bad address without calling the endpoint', async () => {
-    store.state.businessSettings = { businessName: 'Leo Wright Electrical' };
+    store.reset({ businessName: 'Leo Wright Electrical' });
     render(<SendStatementSheet {...baseProps} />);
     fireEvent.change(screen.getByLabelText('To'), { target: { value: 'books@accountant' } });
     fireEvent.click(screen.getByText('Send statement'));
@@ -142,7 +169,9 @@ describe('SendStatementSheet', () => {
     );
     await waitFor(() => expect(screen.getByText('Statement sent')).toBeTruthy());
     expect(
-      screen.getByText(/went to new@accountant.com.au with the PDF and CSV attached/),
+      screen.getByText(
+        'Your statement for 1 Jul 2025 – 30 Jun 2026 went to new@accountant.com.au, with the PDF and a spreadsheet attached.',
+      ),
     ).toBeTruthy();
     expect(store.state.setBusinessSettings).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -153,6 +182,40 @@ describe('SendStatementSheet', () => {
     expect(analytics.trackEvent).toHaveBeenCalledWith('statement_sent', {
       preset: 'lastFinancialYear',
     });
+  });
+
+  // The defect this pins: the reset effect used to depend on the remembered
+  // address, which the send itself writes. The confirmation vanished, the
+  // form came back, and the tradie sent their accountant a second copy.
+  it('keeps the confirmation when the first-ever send saves the accountant', async () => {
+    store.reset({ businessName: 'Leo Wright Electrical' });
+    render(<SendStatementSheet {...baseProps} />);
+    fireEvent.change(screen.getByLabelText('To'), {
+      target: { value: 'books@accountant.com.au' },
+    });
+    fireEvent.click(screen.getByText('Send statement'));
+
+    // The store really does change underneath the open sheet.
+    await waitFor(() =>
+      expect(store.state.businessSettings.accountantEmail).toBe('books@accountant.com.au'),
+    );
+    expect(screen.getByText('Statement sent')).toBeTruthy();
+    expect(screen.queryByText('Send statement')).toBeNull();
+  });
+
+  it('repeats back what the server says it emailed', async () => {
+    sender.sendAccountantStatement.mockResolvedValueOnce({ invoiceCount: 38, paymentCount: 1 });
+    render(<SendStatementSheet {...baseProps} />);
+    fireEvent.click(screen.getByText('Send statement'));
+    await waitFor(() => expect(screen.getByText('Statement sent')).toBeTruthy());
+    expect(screen.getByText(/38 invoices and 1 payment\./)).toBeTruthy();
+  });
+
+  it('stays vague when the server did not say', async () => {
+    render(<SendStatementSheet {...baseProps} />);
+    fireEvent.click(screen.getByText('Send statement'));
+    await waitFor(() => expect(screen.getByText('Statement sent')).toBeTruthy());
+    expect(screen.queryByText(/invoices and/)).toBeNull();
   });
 
   it('bccs the tradie when the copy toggle is on', async () => {

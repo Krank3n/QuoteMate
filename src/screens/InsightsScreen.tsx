@@ -26,13 +26,17 @@ import { Chip } from '../components/Chip';
 import { DueDateSheet } from '../components/DueDateSheet';
 import { ProBadge } from '../components/ProBadge';
 import { SendStatementSheet } from '../components/SendStatementSheet';
+import { SkeletonCrossfade } from '../components/SkeletonCrossfade';
 import { useAlertModal } from '../hooks/useAlertModal';
 import { documentService } from '../services/documentService';
+import { trackEvent } from '../services/analyticsService';
 import type { Document } from '../types/document';
 import { formatCurrency } from '../utils/quoteCalculator';
+import { mergeTruncatedSnapshot } from '../utils/mergeTruncatedSnapshot';
 import { exportStatementPDF, reservePrintWindow } from '../utils/pdfGenerator';
 import {
   STATEMENT_PRESET_LABELS,
+  STATEMENT_PRESET_LONG_LABELS,
   customPeriod,
   statementPeriod,
   type StatementPeriod,
@@ -47,6 +51,16 @@ const PRESET_ORDER: StatementPreset[] = [
   'lastQuarter',
   'custom',
 ];
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Two financial years, with the leap day. Past that the PDF and CSV pair goes
+ * over what the email provider will carry and the send comes back a 413 —
+ * better to say so before the tradie writes the message. Sharing the PDF has
+ * no such limit.
+ */
+const MAX_EMAIL_DAYS = 731;
 
 export function InsightsScreen() {
   const styles = useStyles();
@@ -73,34 +87,58 @@ export function InsightsScreen() {
 
   // The store's listener stops at 500 documents, which is nowhere near a
   // financial year for a busy tradie — so read the collection once, uncapped,
-  // and swap it in. The first paint still comes off the store, so the card is
-  // never blank while that read is in flight.
+  // and swap it in. Until that read settles the rows are a skeleton: figures
+  // off the capped copy would be wrong, and "Nothing recorded" would be a lie
+  // told to anyone who opens Insights on a slow connection.
   const [allDocuments, setAllDocuments] = useState<Document[] | null>(null);
+  const [documentsLoaded, setDocumentsLoaded] = useState(false);
+  const [readFailed, setReadFailed] = useState(false);
   useEffect(() => {
     let cancelled = false;
-    void documentService.loadDocuments().then((loaded) => {
-      // loadDocuments answers [] for a failed read as well as an empty
-      // account; in both cases the store's copy is the better answer.
-      if (!cancelled && loaded.length) setAllDocuments(loaded);
-    });
+    void documentService
+      .loadDocuments()
+      .then((loaded) => {
+        if (cancelled) return;
+        // loadDocuments answers [] for a failed read as well as an empty
+        // account. With documents in the store, [] can only be the failure:
+        // keep the store's copy and say the figures are the phone's.
+        if (loaded.length) setAllDocuments(loaded);
+        else if (useStore.getState().documents.length) setReadFailed(true);
+      })
+      .catch(() => {
+        if (!cancelled) setReadFailed(true);
+      })
+      .finally(() => {
+        if (!cancelled) setDocumentsLoaded(true);
+      });
     return () => {
       cancelled = true;
     };
   }, []);
 
+  // The uncapped read is a snapshot taken on mount; the store's listener is
+  // live. Prefer the store's copy of any document it carries — a payment
+  // recorded while Insights sat underneath in the stack lands there — and
+  // carry the older tail the 500-document listener never reached.
+  const statementDocuments = useMemo(
+    () => (allDocuments ? mergeTruncatedSnapshot(allDocuments, documents, (d) => d.id, true) : documents),
+    [allDocuments, documents],
+  );
+
   const statement = useMemo(
     () =>
       buildStatement(
-        (allDocuments ?? documents) as unknown as StatementDocumentInput[],
+        statementDocuments as unknown as StatementDocumentInput[],
         { fromMs: period.fromMs, toMs: period.toMs },
         { gstRegistered: businessSettings?.gstRegistered },
       ),
-    [allDocuments, documents, period.fromMs, period.toMs, businessSettings?.gstRegistered],
+    [statementDocuments, period.fromMs, period.toMs, businessSettings?.gstRegistered],
   );
 
   const summary = statement.summary;
   const isEmptyPeriod = summary.invoiceCount === 0 && summary.paymentCount === 0;
   const lastDay = format(new Date(period.toMs - 1), 'd MMM yyyy');
+  const tooLongToEmail = Math.round((period.toMs - period.fromMs) / DAY_MS) > MAX_EMAIL_DAYS;
 
   const rows: { label: string; value: string }[] = [
     { label: `Invoices issued (${summary.invoiceCount})`, value: formatCurrency(summary.invoicedTotal) },
@@ -112,12 +150,14 @@ export function InsightsScreen() {
   ];
 
   const choosePreset = (next: StatementPreset) => {
-    setPreset(next);
     if (next === 'custom') {
+      // The chip only takes once both dates are in: a calendar dismissed
+      // halfway leaves the tradie on the period they were already reading.
       setCustomStartMs(undefined);
       setStartSheetVisible(true);
       return;
     }
+    setPreset(next);
     setPeriod(statementPeriod(next));
   };
 
@@ -141,6 +181,7 @@ export function InsightsScreen() {
         isPro,
         printWindow,
       });
+      trackEvent('statement_shared', { preset });
     } catch (error: any) {
       showAlert({
         type: 'error',
@@ -159,29 +200,61 @@ export function InsightsScreen() {
       <WebContainer>
         <View style={styles.content}>
           <Surface style={styles.statementCard}>
-            <Text style={styles.statementTitle}>Statement for your accountant</Text>
+            <View style={styles.headingRow}>
+              <Text style={styles.statementTitle}>Statement for your accountant</Text>
+              {!isPro && <ProBadge size="small" />}
+            </View>
 
+            <Text style={styles.fieldLabel}>Period</Text>
             <View style={styles.chipRow}>
               {PRESET_ORDER.map((option) => (
                 <Chip
                   key={option}
                   label={STATEMENT_PRESET_LABELS[option]}
+                  accessibilityLabel={STATEMENT_PRESET_LONG_LABELS[option]}
                   active={preset === option}
                   onPress={() => choosePreset(option)}
                 />
               ))}
             </View>
             <Text style={styles.periodLabel}>{period.label}</Text>
+            {tooLongToEmail && (
+              <Text style={styles.warningLine}>
+                Emailing covers at most 24 months. Pick a shorter range.
+              </Text>
+            )}
 
-            {isEmptyPeriod ? (
-              <Text style={styles.emptyLine}>Nothing recorded in this period</Text>
-            ) : (
-              rows.map((row) => (
-                <View key={row.label} style={styles.summaryRow}>
-                  <Text style={styles.summaryLabel}>{row.label}</Text>
-                  <Text style={styles.summaryValue}>{row.value}</Text>
+            <SkeletonCrossfade
+              loaded={documentsLoaded}
+              skeleton={
+                <View testID="statement-skeleton">
+                  {rows.map((row) => (
+                    <View key={row.label} style={styles.summaryRow}>
+                      <View style={[styles.skeletonBar, styles.skeletonLabel]} />
+                      <View style={[styles.skeletonBar, styles.skeletonValue]} />
+                    </View>
+                  ))}
                 </View>
-              ))
+              }
+            >
+              {isEmptyPeriod ? (
+                <Text style={styles.emptyLine}>
+                  {`Nothing recorded between ${period.label}. Try another period.`}
+                </Text>
+              ) : (
+                rows.map((row) => (
+                  <View key={row.label} style={styles.summaryRow}>
+                    <Text style={styles.summaryLabel}>{row.label}</Text>
+                    <Text style={styles.summaryValue}>{row.value}</Text>
+                  </View>
+                ))
+              )}
+            </SkeletonCrossfade>
+
+            {readFailed && (
+              <Text style={styles.degradedLine}>
+                {"Showing what's saved on this phone. Get back on signal and reopen to check every invoice."}
+              </Text>
             )}
 
             <View style={styles.actions}>
@@ -193,6 +266,7 @@ export function InsightsScreen() {
                 onPress={() => {
                   if (requirePro()) setSendVisible(true);
                 }}
+                disabled={tooLongToEmail}
                 style={styles.primaryAction}
               >
                 Send to accountant
@@ -206,8 +280,10 @@ export function InsightsScreen() {
               >
                 Share PDF
               </Button>
-              {!isPro && <ProBadge size="small" />}
             </View>
+            {!isPro && (
+              <Text style={styles.proLine}>Sending and sharing the statement is part of Pro.</Text>
+            )}
           </Surface>
 
           <MonthComparisonChart documents={documents} />
@@ -229,18 +305,22 @@ export function InsightsScreen() {
         setCustomStartMs(next);
         setEndSheetVisible(true);
       }}
-      title="Statement starts"
+      title="Start date (1 of 2)"
       clearLabel="Cancel"
     />
     <DueDateSheet
       visible={endSheetVisible}
       onDismiss={() => setEndSheetVisible(false)}
-      value={period.toMs - 1}
+      // Opens on the start just picked, not on the end of the period being
+      // replaced, and nothing before it can be chosen.
+      value={customStartMs ?? period.toMs - 1}
+      minDate={customStartMs}
       onChange={(next) => {
         if (!next || customStartMs === undefined) return;
         setPeriod(customPeriod(customStartMs, next));
+        setPreset('custom');
       }}
-      title="Statement ends"
+      title="End date (2 of 2)"
       clearLabel="Cancel"
     />
 
@@ -275,16 +355,27 @@ const useStyles = makeStyles((t) => ({
     elevation: 2,
     marginBottom: 12,
   },
+  headingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   statementTitle: {
     fontSize: 16,
     fontWeight: '700',
     color: t.colors.text,
   },
+  fieldLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: t.colors.textSecondary,
+    marginTop: 16,
+  },
   chipRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
-    marginTop: 14,
+    marginTop: 8,
   },
   periodLabel: {
     fontSize: 12,
@@ -313,6 +404,35 @@ const useStyles = makeStyles((t) => ({
     fontSize: 13,
     color: t.colors.textMuted,
     paddingVertical: 12,
+  },
+  warningLine: {
+    fontSize: 12,
+    color: t.colors.warning,
+    marginBottom: 6,
+    lineHeight: 17,
+  },
+  degradedLine: {
+    fontSize: 12,
+    color: t.colors.textMuted,
+    marginTop: 6,
+    lineHeight: 17,
+  },
+  proLine: {
+    fontSize: 12,
+    color: t.colors.textMuted,
+    marginTop: 8,
+  },
+  skeletonBar: {
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: t.colors.border,
+  },
+  skeletonLabel: {
+    flex: 1,
+    maxWidth: 160,
+  },
+  skeletonValue: {
+    width: 80,
   },
   actions: {
     flexDirection: 'row',

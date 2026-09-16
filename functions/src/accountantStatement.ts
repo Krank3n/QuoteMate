@@ -319,7 +319,7 @@ export async function handleSendAccountantStatement(
       replyTo: replyEmail ? { email: replyEmail, name: tradieDisplayName } : undefined,
     });
 
-    if (!sent) { res.status(502).json({ error: 'Statement email could not be sent.' }); return; }
+    if (!sent) { res.status(502).json({ error: "Couldn't send it just now. Try again in a minute — nothing's been sent." }); return; }
 
     // Remember the accountant. Best-effort: the email has already gone.
     const remembered = (business.accountantEmail || '').trim().toLowerCase();
@@ -339,7 +339,7 @@ export async function handleSendAccountantStatement(
     });
   } catch (err: any) {
     console.error('[sendAccountantStatement] failed', { userId, message: err?.message });
-    res.status(500).json({ error: 'Statement could not be built.' });
+    res.status(500).json({ error: "Couldn't put the statement together just now. Try again in a minute." });
   }
 }
 

@@ -8,7 +8,7 @@
  */
 import { describe, it, expect } from 'vitest';
 
-import { customPeriod, statementPeriod } from './statementPeriods';
+import { customPeriod, deviceTimeZone, statementPeriod } from './statementPeriods';
 
 /** Local midnight, the same way the helper builds its boundaries. */
 const localDay = (y: number, m: number, d: number) => new Date(y, m, d).getTime();
@@ -92,5 +92,25 @@ describe('customPeriod', () => {
     const period = customPeriod(localDay(2026, 5, 30), localDay(2026, 4, 1));
     expect(period.fromMs).toBe(localDay(2026, 4, 1));
     expect(period.toMs).toBe(localDay(2026, 6, 1));
+  });
+});
+
+describe('deviceTimeZone', () => {
+  it('answers the IANA zone the runtime is standing in', () => {
+    expect(deviceTimeZone()).toBe(Intl.DateTimeFormat().resolvedOptions().timeZone);
+  });
+
+  it('answers undefined rather than throwing where Intl will not', () => {
+    // Some older Android builds throw here; a statement that cannot be sent
+    // because the zone lookup exploded is worse than one sent without it.
+    const real = Intl.DateTimeFormat;
+    (Intl as any).DateTimeFormat = () => {
+      throw new Error('no Intl data');
+    };
+    try {
+      expect(deviceTimeZone()).toBeUndefined();
+    } finally {
+      (Intl as any).DateTimeFormat = real;
+    }
   });
 });

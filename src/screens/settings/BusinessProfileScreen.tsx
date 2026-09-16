@@ -393,17 +393,6 @@ export function BusinessProfileScreen() {
             />
 
             <TextInput
-              label="Accountant email"
-              value={accountantEmail}
-              onChangeText={setAccountantEmail}
-              mode="outlined"
-              style={styles.input}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              placeholder="Where your statement goes when you send it from Insights"
-            />
-
-            <TextInput
               label="Phone"
               value={phone}
               onChangeText={setPhone}
@@ -430,6 +419,22 @@ export function BusinessProfileScreen() {
               onChangeText={setAddress}
               style={styles.input}
             />
+
+            {/* Last in the card: it isn't part of the business identity that
+                prints on a quote, it's where one report goes. */}
+            <TextInput
+              label="Accountant email"
+              value={accountantEmail}
+              onChangeText={setAccountantEmail}
+              mode="outlined"
+              style={styles.input}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              placeholder="books@youraccountant.com.au"
+            />
+            <Text style={styles.helperText}>
+              We'll send your statement here when you send one from Insights.
+            </Text>
           </Surface>
 
           <Surface style={styles.card}>

@@ -26,6 +26,9 @@ interface DueDateSheetProps {
   title?: string;
   /** Label for the clear/reset button. Defaults to "Clear date". */
   clearLabel?: string;
+  /** Earliest day that can be picked, ms-epoch. Used by the two-step
+   *  statement range so the end can't land before the start. */
+  minDate?: number;
 }
 
 const calendarThemeFor = (themeColors: Tokens) => ({
@@ -67,6 +70,7 @@ export function DueDateSheet({
   onChange,
   title = 'Due date',
   clearLabel = 'Clear date',
+  minDate,
 }: DueDateSheetProps) {
   const styles = useStyles();
   const themeColors = useThemeColors();
@@ -102,6 +106,7 @@ export function DueDateSheet({
             theme={CALENDAR_THEME}
             firstDay={1}
             current={selected}
+            minDate={toIsoDay(minDate)}
             markedDates={markedDates}
             onDayPress={handleDayPress}
             enableSwipeMonths

@@ -279,6 +279,9 @@ describe('handleSendAccountantStatement — happy path', () => {
     const res = fakeRes();
     await handleSendAccountantStatement(fakeReq(), res);
     expect(res.statusCode).toBe(502);
+    // What the tradie reads. "Statement email could not be sent" left them
+    // wondering whether half of it went.
+    expect(res.body.error).toBe("Couldn't send it just now. Try again in a minute — nothing's been sent.");
     expect(h.state.sets).toEqual([]);
     expect(h.recordUsage).not.toHaveBeenCalled();
   });
@@ -297,6 +300,7 @@ describe('handleSendAccountantStatement — happy path', () => {
     const res = fakeRes();
     await handleSendAccountantStatement(fakeReq(), res);
     expect(res.statusCode).toBe(500);
+    expect(res.body.error).toBe("Couldn't put the statement together just now. Try again in a minute.");
     expect(h.sendEmail).not.toHaveBeenCalled();
   });
 

@@ -13,6 +13,7 @@ const firebase = vi.hoisted(() => ({
 vi.mock('../config/firebase', () => firebase);
 
 import { sendAccountantStatement } from './statementSender';
+import { deviceTimeZone } from '../utils/statementPeriods';
 
 const input = {
   fromMs: Date.UTC(2025, 6, 1),
@@ -47,7 +48,7 @@ describe('sendAccountantStatement', () => {
       recipientEmail: 'books@accountant.com.au',
       sendCopyToSelf: true,
     });
-    expect(body.timeZone).toBe(Intl.DateTimeFormat().resolvedOptions().timeZone);
+    expect(body.timeZone).toBe(deviceTimeZone());
   });
 
   it('turns a 429 into the hourly-limit message, not "Too many requests"', async () => {
@@ -62,6 +63,62 @@ describe('sendAccountantStatement', () => {
     await expect(sendAccountantStatement(input)).rejects.toThrow(
       'Statement is too large to email. Try a shorter period.',
     );
+  });
+
+  it('hands back the counts the server actually emailed', async () => {
+    respondWith(200, { success: true, invoiceCount: 38, paymentCount: 27 });
+    await expect(sendAccountantStatement(input)).resolves.toEqual({
+      invoiceCount: 38,
+      paymentCount: 27,
+    });
+  });
+
+  it('says the signal is the problem when the fetch never lands', async () => {
+    // What a dropped socket actually throws: a bare TypeError on web, a
+    // "Network request failed" on a phone. Neither is a sentence.
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      throw new TypeError('Network request failed');
+    }));
+    await expect(sendAccountantStatement(input)).rejects.toThrow(
+      "Couldn't reach the server. Check your signal and try again.",
+    );
+  });
+
+  it('tells the tradie to check their email rather than resend when it times out', async () => {
+    // The backstop firing says nothing about the server, which finishes what
+    // it started — so the message must not invite a second statement.
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      const aborted: any = new Error('Aborted');
+      aborted.name = 'AbortError';
+      throw aborted;
+    }));
+    await expect(sendAccountantStatement(input)).rejects.toThrow(
+      "That's taking longer than usual. Check your email in a minute before sending it again.",
+    );
+  });
+
+  it('gives up on its own backstop rather than holding the socket open', async () => {
+    vi.useFakeTimers();
+    try {
+      let signal: AbortSignal | undefined;
+      vi.stubGlobal('fetch', vi.fn((_url: string, init: RequestInit) => {
+        signal = init.signal as AbortSignal;
+        return new Promise((_resolve, reject) => {
+          signal?.addEventListener('abort', () => {
+            const aborted: any = new Error('Aborted');
+            aborted.name = 'AbortError';
+            reject(aborted);
+          });
+        });
+      }));
+      const pending = sendAccountantStatement(input);
+      const settled = expect(pending).rejects.toThrow(/taking longer than usual/);
+      await vi.advanceTimersByTimeAsync(60_000);
+      await settled;
+      expect(signal?.aborted).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('falls back to the status when the body is not JSON', async () => {

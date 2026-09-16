@@ -41,7 +41,8 @@ export function proFeeLine(): string {
  * What a free (post-trial) account gains by going Pro. Each entry maps to a
  * real gate: the materials + pricing pipeline (planGates), the platform fee
  * (shared/pdf/squareFees), non-Square payment methods on documents
- * (pdfGenerator), and the logo + licences (BusinessProfileScreen).
+ * (pdfGenerator), the logo + licences (BusinessProfileScreen) and the
+ * accountant statement (InsightsScreen).
  */
 export const PRO_FEATURES: readonly ProFeature[] = [
   {
@@ -54,6 +55,10 @@ export const PRO_FEATURES: readonly ProFeature[] = [
     text: 'Bank transfer, PayID, BPAY and PayPal on your quotes and invoices, not just Square',
   },
   { icon: 'certificate-outline', text: 'Your logo and licences on every quote and invoice' },
+  {
+    icon: 'file-document-outline',
+    text: 'A statement of invoices sent and payments received, emailed straight to your accountant',
+  },
   { icon: 'headset', text: 'Priority support' },
 ];
 
