@@ -1,7 +1,10 @@
 /**
- * Insights Screen
- * Revenue trends, pipeline, cost breakdown, and month comparison — plus the
- * statement a tradie hands their accountant.
+ * Insights & Reports Screen
+ *
+ * Two different jobs on one page, so a switcher at the top picks between them.
+ * Insights is "how am I going" — revenue trends, pipeline, cost breakdown and
+ * the month comparison. Reports is a document for someone else — the statement
+ * a tradie hands their accountant.
  *
  * The statement lives here, not in Settings: this is already the money page,
  * and "what did I invoice and take last year" is a money question. Settings
@@ -10,8 +13,8 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { ScrollView, View } from 'react-native';
-import { Button, Surface, Text } from 'react-native-paper';
-import { useNavigation } from '@react-navigation/native';
+import { Button, SegmentedButtons, Surface, Text } from 'react-native-paper';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import { format } from 'date-fns';
 
 import { useStore } from '../store/useStore';
@@ -45,6 +48,9 @@ import {
 import { buildStatement } from '../../shared/statement/buildStatement';
 import type { StatementDocumentInput } from '../../shared/statement/buildStatement';
 
+/** Which half of the page is showing: the charts, or the statement. */
+type InsightsSection = 'insights' | 'reports';
+
 const PRESET_ORDER: StatementPreset[] = [
   'lastFinancialYear',
   'thisFinancialYearToDate',
@@ -66,6 +72,7 @@ export function InsightsScreen() {
   const styles = useStyles();
   const themeColors = useThemeColors();
   const navigation = useNavigation<any>();
+  const route = useRoute<any>();
   const { showAlert, alertNode } = useAlertModal();
 
   // The unified Document model, same as the dashboard tiles. These charts used
@@ -76,6 +83,16 @@ export function InsightsScreen() {
   const subscriptionStatus = useStore((s) => s.subscriptionStatus);
   const isTrialActive = !!(subscriptionStatus?.trialStartedAt && !subscriptionStatus?.trialExpired);
   const isPro = subscriptionStatus?.isPro || isTrialActive;
+
+  // The dashboard links land on the half a tradie asked for: the stat tiles on
+  // the charts, "Statement for your accountant" on the statement.
+  const paramSection = route.params?.section as InsightsSection | undefined;
+  const [section, setSection] = useState<InsightsSection>(paramSection ?? 'insights');
+  // Insights sits in the stack underneath other cards, so a later link with a
+  // different param has to move the switcher, not just the first one.
+  useEffect(() => {
+    if (paramSection) setSection(paramSection);
+  }, [paramSection]);
 
   const [preset, setPreset] = useState<StatementPreset>('lastFinancialYear');
   const [period, setPeriod] = useState<StatementPeriod>(() => statementPeriod('lastFinancialYear'));
@@ -199,97 +216,112 @@ export function InsightsScreen() {
     <ScrollView style={styles.scroller}>
       <WebContainer>
         <View style={styles.content}>
-          <Surface style={styles.statementCard}>
-            <View style={styles.headingRow}>
-              <Text style={styles.statementTitle}>Statement for your accountant</Text>
-              {!isPro && <ProBadge size="small" />}
-            </View>
+          <SegmentedButtons
+            value={section}
+            onValueChange={(next) => setSection(next as InsightsSection)}
+            density="medium"
+            buttons={[
+              { value: 'insights', label: 'Insights', icon: 'chart-line' },
+              { value: 'reports', label: 'Reports', icon: 'file-document-outline' },
+            ]}
+            style={styles.switcher}
+          />
 
-            <Text style={styles.fieldLabel}>Period</Text>
-            <View style={styles.chipRow}>
-              {PRESET_ORDER.map((option) => (
-                <Chip
-                  key={option}
-                  label={STATEMENT_PRESET_LABELS[option]}
-                  accessibilityLabel={STATEMENT_PRESET_LONG_LABELS[option]}
-                  active={preset === option}
-                  onPress={() => choosePreset(option)}
-                />
-              ))}
-            </View>
-            <Text style={styles.periodLabel}>{period.label}</Text>
-            {tooLongToEmail && (
-              <Text style={styles.warningLine}>
-                Emailing covers at most 24 months. Pick a shorter range.
-              </Text>
-            )}
+          {section === 'insights' ? (
+            <>
+              <MonthComparisonChart documents={documents} />
+              <QuotePipelineChart documents={documents} />
+              <RevenueChart documents={documents} />
+              <CostBreakdownChart documents={documents} />
+            </>
+          ) : (
+            <Surface style={styles.statementCard}>
+              <View style={styles.headingRow}>
+                <Text style={styles.statementTitle}>Statement for your accountant</Text>
+                {!isPro && <ProBadge size="small" />}
+              </View>
 
-            <SkeletonCrossfade
-              loaded={documentsLoaded}
-              skeleton={
-                <View testID="statement-skeleton">
-                  {rows.map((row) => (
-                    <View key={row.label} style={styles.summaryRow}>
-                      <View style={[styles.skeletonBar, styles.skeletonLabel]} />
-                      <View style={[styles.skeletonBar, styles.skeletonValue]} />
-                    </View>
-                  ))}
-                </View>
-              }
-            >
-              {isEmptyPeriod ? (
-                <Text style={styles.emptyLine}>
-                  {`Nothing recorded between ${period.label}. Try another period.`}
+              <Text style={styles.fieldLabel}>Period</Text>
+              <View style={styles.chipRow}>
+                {PRESET_ORDER.map((option) => (
+                  <Chip
+                    key={option}
+                    label={STATEMENT_PRESET_LABELS[option]}
+                    accessibilityLabel={STATEMENT_PRESET_LONG_LABELS[option]}
+                    active={preset === option}
+                    onPress={() => choosePreset(option)}
+                  />
+                ))}
+              </View>
+              <Text style={styles.periodLabel}>{period.label}</Text>
+              {tooLongToEmail && (
+                <Text style={styles.warningLine}>
+                  Emailing covers at most 24 months. Pick a shorter range.
                 </Text>
-              ) : (
-                rows.map((row) => (
-                  <View key={row.label} style={styles.summaryRow}>
-                    <Text style={styles.summaryLabel}>{row.label}</Text>
-                    <Text style={styles.summaryValue}>{row.value}</Text>
-                  </View>
-                ))
               )}
-            </SkeletonCrossfade>
 
-            {readFailed && (
-              <Text style={styles.degradedLine}>
-                {"Showing what's saved on this phone. Get back on signal and reopen to check every invoice."}
-              </Text>
-            )}
-
-            <View style={styles.actions}>
-              <Button
-                mode="contained"
-                buttonColor={themeColors.accent}
-                textColor={themeColors.onAccent}
-                icon="email-outline"
-                onPress={() => {
-                  if (requirePro()) setSendVisible(true);
-                }}
-                disabled={tooLongToEmail}
-                style={styles.primaryAction}
+              <SkeletonCrossfade
+                loaded={documentsLoaded}
+                skeleton={
+                  <View testID="statement-skeleton">
+                    {rows.map((row) => (
+                      <View key={row.label} style={styles.summaryRow}>
+                        <View style={[styles.skeletonBar, styles.skeletonLabel]} />
+                        <View style={[styles.skeletonBar, styles.skeletonValue]} />
+                      </View>
+                    ))}
+                  </View>
+                }
               >
-                Send to accountant
-              </Button>
-              <Button
-                mode="outlined"
-                icon="file-pdf-box"
-                onPress={handleSharePdf}
-                loading={sharing}
-                disabled={sharing}
-              >
-                Share PDF
-              </Button>
-            </View>
-            {!isPro && (
-              <Text style={styles.proLine}>Sending and sharing the statement is part of Pro.</Text>
-            )}
-          </Surface>
+                {isEmptyPeriod ? (
+                  <Text style={styles.emptyLine}>
+                    {`Nothing recorded between ${period.label}. Try another period.`}
+                  </Text>
+                ) : (
+                  rows.map((row) => (
+                    <View key={row.label} style={styles.summaryRow}>
+                      <Text style={styles.summaryLabel}>{row.label}</Text>
+                      <Text style={styles.summaryValue}>{row.value}</Text>
+                    </View>
+                  ))
+                )}
+              </SkeletonCrossfade>
 
-          <MonthComparisonChart documents={documents} />
-          <QuotePipelineChart documents={documents} />
-          <RevenueChart documents={documents} />
-          <CostBreakdownChart documents={documents} />
+              {readFailed && (
+                <Text style={styles.degradedLine}>
+                  {"Showing what's saved on this phone. Get back on signal and reopen to check every invoice."}
+                </Text>
+              )}
+
+              <View style={styles.actions}>
+                <Button
+                  mode="contained"
+                  buttonColor={themeColors.accent}
+                  textColor={themeColors.onAccent}
+                  icon="email-outline"
+                  onPress={() => {
+                    if (requirePro()) setSendVisible(true);
+                  }}
+                  disabled={tooLongToEmail}
+                  style={styles.primaryAction}
+                >
+                  Send to accountant
+                </Button>
+                <Button
+                  mode="outlined"
+                  icon="file-pdf-box"
+                  onPress={handleSharePdf}
+                  loading={sharing}
+                  disabled={sharing}
+                >
+                  Share PDF
+                </Button>
+              </View>
+              {!isPro && (
+                <Text style={styles.proLine}>Sending and sharing the statement is part of Pro.</Text>
+              )}
+            </Surface>
+          )}
         </View>
       </WebContainer>
     </ScrollView>
@@ -338,6 +370,7 @@ export function InsightsScreen() {
 
 const useStyles = makeStyles((t) => ({
   gridHost: { flex: 1, backgroundColor: t.colors.bg },
+  switcher: { marginBottom: 12 },
   scroller: { flex: 1, backgroundColor: 'transparent' },
   container: {
     flex: 1,

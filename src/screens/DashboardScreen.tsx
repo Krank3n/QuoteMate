@@ -998,7 +998,7 @@ export function DashboardScreen() {
       {/* Quick Stats */}
       <View style={styles.statsContainer}>
         <AnimatedListItem index={0} style={styles.statCardWrapper}>
-          <TapRipple onPress={() => { lightTap(); navigation.navigate('Insights' as never); }} accessibilityRole="button" accessibilityLabel={`Earned this month: ${formatCurrency(thisMonthRevenue)}, opens insights and your accountant statement`} rippleColor={themeColors.moneySubtle}>
+          <TapRipple onPress={() => { lightTap(); navigation.navigate('Insights' as never, { section: 'insights' } as never); }} accessibilityRole="button" accessibilityLabel={`Earned this month: ${formatCurrency(thisMonthRevenue)}, opens insights`} rippleColor={themeColors.moneySubtle}>
             <RNAnimated.View style={{ transform: [{ scale: cardBreath1 }, { rotate: cardTilt1.interpolate({ inputRange: [-1, 1], outputRange: ['-1deg', '1deg'] }) }] }}>
             <Surface style={styles.statCard}>
               <RNAnimated.View style={[styles.statIconCircle, { backgroundColor: themeColors.moneySubtle, transform: [{ translateY: iconFloat1 }, { scale: iconScale1 }] }]}>
@@ -1014,7 +1014,7 @@ export function DashboardScreen() {
         </AnimatedListItem>
 
         <AnimatedListItem index={1} style={styles.statCardWrapper}>
-          <TapRipple onPress={() => { lightTap(); navigation.navigate('Insights' as never); }} accessibilityRole="button" accessibilityLabel={`Awaiting response: ${formatCurrency(pipelineValue)}`} rippleColor={themeColors.infoSubtle}>
+          <TapRipple onPress={() => { lightTap(); navigation.navigate('Insights' as never, { section: 'insights' } as never); }} accessibilityRole="button" accessibilityLabel={`Awaiting response: ${formatCurrency(pipelineValue)}`} rippleColor={themeColors.infoSubtle}>
             <RNAnimated.View style={{ transform: [{ scale: cardBreath2 }, { rotate: cardTilt2.interpolate({ inputRange: [-1, 1], outputRange: ['-1deg', '1deg'] }) }] }}>
             <Surface style={styles.statCard}>
               <RNAnimated.View style={[styles.statIconCircle, { backgroundColor: themeColors.infoSubtle, transform: [{ translateY: iconFloat2 }, { scale: iconScale2 }] }]}>
@@ -1064,10 +1064,11 @@ export function DashboardScreen() {
 
       {/* The statement a tradie hands their accountant lives on the money
           page; nothing on the dashboard said so, and Insights is a tab most
-          never open. Same text-button treatment as View All Jobs. */}
+          never open. Same text-button treatment as View All Jobs. The param
+          lands on the Reports half, not the charts. */}
       <Button
         mode="text"
-        onPress={() => navigation.navigate('Insights' as never)}
+        onPress={() => navigation.navigate('Insights' as never, { section: 'reports' } as never)}
         style={styles.viewAllButton}
       >
         Statement for your accountant
