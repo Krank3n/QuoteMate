@@ -111,6 +111,44 @@ describe('state table (high-intent-conversion-plan.md Intervention 0)', () => {
   });
 });
 
+describe('activate_square: connected, but Square will not take a payment yet', () => {
+  it('a connected account Square has not activated gets activate_square, with no pricing', () => {
+    const r = nextBestAction(
+      base({ plan: 'free', trialStartedAt: NOW - TRIAL_MS - DAY_MS, docs: [doc('quote_sent')], hasSquareConnection: true, squarePaymentsReady: false })
+    );
+    expect(r.key).toBe('activate_square');
+    expect(r.sellingAllowed).toBe(false);
+  });
+
+  it('fires on every plan: a Pro tradie gets refused mints too', () => {
+    const r = nextBestAction(base({ plan: 'pro', docs: [doc('quote_sent')], hasSquareConnection: true, squarePaymentsReady: false }));
+    expect(r.key).toBe('activate_square');
+  });
+
+  it('an unknown verdict, or no connection, never raises the warning', () => {
+    expect(nextBestAction(base({ docs: [doc('quote_sent')], hasSquareConnection: true })).key).toBe('follow_up');
+    expect(nextBestAction(base({ docs: [doc('quote_sent')], hasSquareConnection: true, squarePaymentsReady: null })).key).toBe('follow_up');
+    expect(nextBestAction(base({ docs: [doc('quote_sent')], hasSquareConnection: false, squarePaymentsReady: false })).key).toBe('follow_up');
+  });
+
+  it('a ready account is not nagged', () => {
+    expect(nextBestAction(base({ docs: [doc('quote_sent')], hasSquareConnection: true, squarePaymentsReady: true })).key).toBe('follow_up');
+  });
+
+  it('money owing on a job still comes first; activation comes before the trial-ending ask', () => {
+    const owing = nextBestAction(base({ docs: [doc('invoice_sent')], hasSquareConnection: true, squarePaymentsReady: false }));
+    expect(owing.key).toBe('take_deposit');
+    const ending = nextBestAction(
+      base({ trialStartedAt: NOW - (TRIAL_MS - 1 * DAY_MS), docs: [doc('quote_rejected')], hasSquareConnection: true, squarePaymentsReady: false })
+    );
+    expect(ending.key).toBe('activate_square');
+  });
+
+  it('never before the first send: a draft-only account is told to send, not to activate', () => {
+    expect(nextBestAction(base({ docs: [doc('draft')], hasSquareConnection: true, squarePaymentsReady: false })).key).toBe('send_first_quote');
+  });
+});
+
 describe('precedence: money and activation beat every subscription ask', () => {
   it('take_deposit outranks continuity_choice even on the last trial day', () => {
     const r = nextBestAction(

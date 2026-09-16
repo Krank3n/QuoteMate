@@ -65,6 +65,7 @@ import { TRIAL_MS } from '../utils/trialConfig';
 import { SyncErrorBanner } from '../components/SyncErrorBanner';
 import { TapToPayAwarenessBanner } from '../components/TapToPayAwarenessBanner';
 import { useTapToPayAwareness } from '../hooks/useTapToPayAwareness';
+import { useSquareConnectionStatus } from '../hooks/useSquareConnectionStatus';
 import { ShimmerOverlay } from '../components/ShimmerOverlay';
 import { TapRipple } from '../components/TapRipple';
 import { GrainOverlay } from '../components/GrainOverlay';
@@ -292,6 +293,7 @@ export function DashboardScreen() {
   const businessSettings = useStore((s) => s.businessSettings);
   const subscriptionStatus = useStore((s) => s.subscriptionStatus);
   const tapToPayAwareness = useTapToPayAwareness();
+  const squareConnection = useSquareConnectionStatus(isFocused);
   // Action handles are stable Zustand fn refs — subscribing is a no-op
   // re-render-wise but keeps the call sites unchanged.
   const createNewQuote = useStore((s) => s.createNewQuote);
@@ -507,7 +509,10 @@ export function DashboardScreen() {
           ? new Date(subscriptionStatus.trialStartedAt).getTime()
           : null,
         docs: documentsForStats,
-        hasSquareConnection: hasSquareEvidence(documentsForStats),
+        // The real connection when the check has answered; the document
+        // evidence stands in until then, and after a check that failed.
+        hasSquareConnection: squareConnection.connected ?? hasSquareEvidence(documentsForStats),
+        squarePaymentsReady: squareConnection.paymentsReady,
         // Nothing counts Pro-feature opens or records a "happy on Free"
         // choice yet, so the two states they gate (keep_pro_tools, and the
         // suppression of every generic ask) simply never fire from here.
@@ -515,7 +520,7 @@ export function DashboardScreen() {
         happyOnFree: false,
         now: Date.now(),
       }),
-    [getEffectivePlan, subscriptionStatus, documentsForStats],
+    [getEffectivePlan, subscriptionStatus, documentsForStats, squareConnection],
   );
 
   const nextCard = useMemo(

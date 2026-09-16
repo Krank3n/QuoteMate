@@ -156,6 +156,15 @@ describe('key → action mapping', () => {
     expect(connected?.subtitle).not.toContain('Connect Square');
   });
 
+  it('activate_square opens the Square settings in the warning tone and names the fix', () => {
+    const card = buildCard(action('activate_square'), []);
+    expect(card?.route).toEqual({ screen: 'SquareIntegration' });
+    expect(card?.tone).toBe('warning');
+    expect(card?.title).toContain('taking payments');
+    expect(card?.subtitle).toContain('activating');
+    expect(nextActionCard(action('activate_square'), [])).not.toBeNull();
+  });
+
   it('none renders nothing', () => {
     expect(nextActionCard(action('none'), [])).toBeNull();
   });
@@ -242,6 +251,7 @@ describe('copy', () => {
     'fee_comparison',
     'keep_pro_tools',
     'complete_via_square',
+    'activate_square',
   ];
 
   it('never says "AI" and never uses excluded words', () => {

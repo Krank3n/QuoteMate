@@ -29,6 +29,8 @@ import { WebContainer } from '../../components/WebContainer';
 import { AlertModal } from '../../components/AlertModal';
 import { SquareReconnectBanner } from '../../components/SquareReconnectBanner';
 import { SquarePaymentsNotReadyBanner } from '../../components/SquarePaymentsNotReadyBanner';
+import { squareConnectionStatusLine } from '../../utils/squareReadinessCopy';
+import { invalidateSquareConnectionStatus } from '../../hooks/useSquareConnectionStatus';
 import * as squareService from '../../services/squareService';
 import type { SquareConnectionStatus } from '../../services/squareService';
 import { trackEvent } from '../../services/analyticsService';
@@ -67,6 +69,10 @@ export function SquareIntegrationScreen() {
 
   const checkConnection = async () => {
     setCheckingConnection(true);
+    // The dashboard caches its own read of the connection; anything that
+    // brings the tradie here to re-check (a connect, a "check again") must
+    // reach the home screen on the next visit, not five minutes later.
+    invalidateSquareConnectionStatus();
     try {
       const timeout = new Promise<SquareConnectionStatus>((resolve) =>
         setTimeout(() => resolve({ connected: false }), 5000),
@@ -200,6 +206,7 @@ export function SquareIntegrationScreen() {
   }
 
   const isSandbox = connection?.env === 'sandbox';
+  const statusLine = squareConnectionStatusLine(connection?.paymentReadiness);
 
   return (
     <>
@@ -259,11 +266,16 @@ export function SquareIntegrationScreen() {
               <View>
                 <View style={styles.statusRow}>
                   <MaterialCommunityIcons
-                    name="check-circle"
+                    name={statusLine.tone === 'ready' ? 'check-circle' : 'alert-circle'}
                     size={20}
-                    color={themeColors.money}
+                    color={statusLine.tone === 'ready' ? themeColors.money : themeColors.warning}
                   />
-                  <Text style={styles.connectedText}>Connected</Text>
+                  <Text
+                    style={[styles.connectedText, statusLine.tone === 'warning' && styles.connectedTextWarning]}
+                    testID="square-status-line"
+                  >
+                    {statusLine.label}
+                  </Text>
                   {isSandbox && (
                     <View style={styles.envBadge}>
                       <Text style={styles.envBadgeText}>Sandbox</Text>
@@ -511,6 +523,9 @@ const useStyles = makeStyles((t) => ({
     fontWeight: '600',
     color: t.colors.money,
     marginLeft: 8,
+  },
+  connectedTextWarning: {
+    color: t.colors.warning,
   },
   envBadge: {
     marginLeft: 10,

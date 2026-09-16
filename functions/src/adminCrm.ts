@@ -122,9 +122,19 @@ async function fetchAllAttribution(): Promise<Map<string, any>> {
 
 // Square connection lives at users/{uid}/settings/squareConnection. Doc is written
 // on successful OAuth connect and deleted on user-initiated disconnect, so doc
+export type SquareStatus = 'connected' | 'not_ready' | 'broken' | 'none';
+
 // presence = currently connected. `disconnectedReason` is set (e.g. 'token_refresh_failed')
 // when the backend notices the connection is broken but keeps the doc for debugging.
 type SquareSummary = {
+  /** The server's verdict on whether Square will charge a card for this account; null if never asked. */
+  paymentReadiness: {
+    ready: boolean;
+    reasons: string[];
+    checkedAt: number | null;
+    currency: string | null;
+    capabilities: string[] | null;
+  } | null;
   connected: boolean;
   merchantId: string | null;
   merchantName: string | null;
@@ -136,6 +146,7 @@ type SquareSummary = {
 
 function summariseSquare(data: any | undefined): SquareSummary | null {
   if (!data) return null;
+  const pr = data.paymentReadiness;
   return {
     connected: !data.disconnectedReason,
     merchantId: data.merchantId || null,
@@ -144,7 +155,33 @@ function summariseSquare(data: any | undefined): SquareSummary | null {
     env: data.env || null,
     connectedAt: data.connectedAt || null,
     disconnectedReason: data.disconnectedReason || null,
+    paymentReadiness: pr && typeof pr.ready === 'boolean'
+      ? {
+          ready: pr.ready,
+          reasons: Array.isArray(pr.reasons) ? pr.reasons : [],
+          checkedAt: typeof pr.checkedAt === 'number' ? pr.checkedAt : null,
+          currency: pr.currency || null,
+          capabilities: Array.isArray(pr.capabilities) ? pr.capabilities : null,
+        }
+      : null,
   };
+}
+
+/**
+ * The one-word Square state the users list and the CSV carry.
+ *   'connected' = usable: token good and Square will charge a card
+ *   'not_ready' = token good, but Square hasn't activated the account
+ *                 (or it isn't Australian) — every Pay Now mint is refused
+ *   'broken'    = token refresh failed
+ *   'none'      = never connected, or disconnected
+ * A verdict the server hasn't recorded counts as connected: an old
+ * connection that predates the probe must not read as a problem.
+ */
+export function squareStatusOf(sq: SquareSummary | null): SquareStatus {
+  if (!sq) return 'none';
+  if (!sq.connected) return 'broken';
+  if (sq.paymentReadiness?.ready === false) return 'not_ready';
+  return 'connected';
 }
 
 async function fetchAllSquareConnections(): Promise<Map<string, any>> {
@@ -459,10 +496,8 @@ interface UserListRow {
   tags: string[];
   marketingOptIn: boolean;
   healthScore: number;
-  // 'connected'  = squareConnection doc present, no disconnectedReason
-  // 'broken'     = doc present but token refresh failed (still signed up, currently unusable)
-  // 'none'       = never connected, or user disconnected
-  squareStatus: 'connected' | 'broken' | 'none';
+  // See squareStatusOf.
+  squareStatus: SquareStatus;
   squareMerchantName: string | null;
   squareEnv: string | null;
   appVersion: string | null;
@@ -538,7 +573,7 @@ export const adminListUsers = functions
                 supplierBookCount: userData.supplierBookCount || 0,
                 tier: subFields.tier,
               }),
-          squareStatus: !squareSummary ? 'none' : squareSummary.connected ? 'connected' : 'broken',
+          squareStatus: squareStatusOf(squareSummary),
           squareMerchantName: squareSummary?.merchantName || null,
           squareEnv: squareSummary?.env || null,
           appVersion: emailState.appVersion || null,
@@ -2781,7 +2816,7 @@ export const adminExportCsv = functions
           lastActivityAt: e.lastActivityAt?.toDate?.()?.toISOString?.() || '',
           signupAt: e.signupAt?.toDate?.()?.toISOString?.() || auth.metadata.creationTime || '',
           marketingOptIn: (await firestore.doc(`users/${auth.uid}/settings/emailPreferences`).get()).data()?.marketing !== false,
-          squareStatus: !sq ? 'none' : sq.connected ? 'connected' : 'broken',
+          squareStatus: squareStatusOf(sq),
           squareMerchant: sq?.merchantName || '',
           squareEnv: sq?.env || '',
           squareConnectedAt: sq?.connectedAt || '',
