@@ -83,6 +83,39 @@ export function isLikelyValidEmail(s: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(s.trim());
 }
 
+/** The most addresses one quote or invoice email goes to. Mirrors the app. */
+export const MAX_EMAIL_RECIPIENTS = 5;
+
+export type NormalisedRecipients =
+  | { ok: true; recipients: string[] }
+  | { ok: false; error: string };
+
+/**
+ * The `recipientEmail` a send request carries — one address from older
+ * clients, a list from the Sep 2026 composer — as a clean list: trimmed,
+ * lower-cased, deduplicated, first-seen order. Every entry has to look like
+ * an address and the list has to fit under the cap, or the whole request is
+ * refused: a typo in the accounts-desk address should not quietly reach the
+ * CEO alone and look sent.
+ */
+export function normaliseRecipients(input: unknown): NormalisedRecipients {
+  const raw: unknown[] = Array.isArray(input) ? input : [input];
+  const recipients: string[] = [];
+  for (const entry of raw) {
+    if (entry === undefined || entry === null) continue;
+    if (typeof entry !== 'string') return { ok: false, error: 'recipientEmail must be an email address or a list of them' };
+    const address = entry.trim().toLowerCase();
+    if (!address) continue;
+    if (!isLikelyValidEmail(address)) return { ok: false, error: `Invalid email address: ${entry.trim()}` };
+    if (!recipients.includes(address)) recipients.push(address);
+  }
+  if (!recipients.length) return { ok: false, error: 'Missing required fields: recipientEmail' };
+  if (recipients.length > MAX_EMAIL_RECIPIENTS) {
+    return { ok: false, error: `Up to ${MAX_EMAIL_RECIPIENTS} email addresses per send` };
+  }
+  return { ok: true, recipients };
+}
+
 /**
  * Decide which address to use as Reply-To on customer-facing sends. Prefers
  * the saved business email; falls back to the auth email when the business
@@ -645,7 +678,8 @@ export interface SendDocumentEmailInput {
   userId: string;
   docId: string;
   emailBody: string;
-  recipientEmail: string;
+  /** One address (older clients) or up to MAX_EMAIL_RECIPIENTS of them. */
+  recipientEmail: string | string[];
   isTestSend?: boolean;
   includePhotos?: boolean;
   /**
@@ -722,18 +756,21 @@ function stripLeadingGreeting(text: string): string {
 
 /**
  * BCC list for the "email me a copy" toggle. Real sends only — test sends
- * already go to the tradie — and never when it would duplicate the customer
- * recipient (a tradie emailing a quote to their own address).
+ * already go to the tradie — and never when it would duplicate a customer
+ * recipient (a tradie emailing a quote to their own address, or listing
+ * themselves among several recipients).
  */
 export function buildSelfCopyBcc(params: {
   sendCopyToSelf?: boolean;
   isTestSend?: boolean;
   selfEmail: string | null;
-  recipientEmail: string;
+  recipientEmail: string | string[];
 }): Array<{ email: string }> | undefined {
   const { sendCopyToSelf, isTestSend, selfEmail, recipientEmail } = params;
   if (!sendCopyToSelf || isTestSend || !selfEmail) return undefined;
-  if (selfEmail.trim().toLowerCase() === (recipientEmail || '').trim().toLowerCase()) return undefined;
+  const self = selfEmail.trim().toLowerCase();
+  const recipients = Array.isArray(recipientEmail) ? recipientEmail : [recipientEmail];
+  if (recipients.some((r) => (r || '').trim().toLowerCase() === self)) return undefined;
   return [{ email: selfEmail }];
 }
 
@@ -755,8 +792,13 @@ export async function sendDocumentEmail(
   input: SendDocumentEmailInput,
 ): Promise<SendDocumentEmailResult> {
   const firestore = db();
-  const { userId, docId, recipientEmail, isTestSend, includePhotos, subject } = input;
+  const { userId, docId, isTestSend, includePhotos, subject } = input;
   const emailBody = stripLeadingGreeting(input.emailBody || '');
+  // The HTTP handlers validate before calling; this is the belt for any
+  // other caller. A bad list here is a bug, not a customer typo.
+  const normalised = normaliseRecipients(input.recipientEmail);
+  if (!normalised.ok) throw new Error(normalised.error);
+  const recipientEmail = normalised.recipients;
 
   // Settings + terms snapshot
   const settingsDoc = await firestore.doc(`users/${userId}/settings/business`).get();
@@ -783,7 +825,7 @@ interface FlavourArgs {
   userId: string;
   docId: string;
   emailBody: string;
-  recipientEmail: string;
+  recipientEmail: string[];
   isTestSend?: boolean;
   includePhotos?: boolean;
   subject?: string;

@@ -254,3 +254,57 @@ describe('planCustomerEdit — documents', () => {
     expect(result.documents[0].customerEmail).toBeUndefined();
   });
 });
+
+// Sep 2026: a customer can carry up to three extra send-to addresses. They
+// live on the Contact only. The document keeps ONE customerEmail (the
+// primary); the send composer reads the extras off the contact at send time.
+describe('planCustomerEdit — extra email addresses', () => {
+  const fields = {
+    name: 'Jane Smith',
+    phone: '0400 111 111',
+    email: 'jane@smith.com',
+    additionalEmails: [' Accounts@Smith.com ', '', 'ceo@smith.com', 'accounts@smith.com'],
+  };
+
+  it('saves the extras on the contact, trimmed, lower-cased, blanks and duplicates dropped', () => {
+    const result = plan([job()], {}, [], fields);
+    expect(result.contact.additionalEmails).toEqual(['accounts@smith.com', 'ceo@smith.com']);
+  });
+
+  it('keeps the primary email as the one address on the contact, jobs and documents', () => {
+    const result = plan([job()], { job1: [doc()] }, [], fields);
+    expect(result.contact.email).toBe('jane@smith.com');
+    expect(result.jobs[0].customerEmail).toBe('jane@smith.com');
+    expect(result.documents[0].customerEmail).toBe('jane@smith.com');
+    expect((result.jobs[0] as any).additionalEmails).toBeUndefined();
+    expect((result.documents[0] as any).additionalEmails).toBeUndefined();
+  });
+
+  it('never lists the primary address among the extras', () => {
+    const result = plan([job()], {}, [], { ...fields, additionalEmails: ['JANE@smith.com', 'ceo@smith.com'] });
+    expect(result.contact.additionalEmails).toEqual(['ceo@smith.com']);
+  });
+
+  it('clears the extras when every row was emptied', () => {
+    const existing = contact({ additionalEmails: ['old@smith.com'] });
+    const result = plan([job({ customerId: 'contact-1' })], {}, [existing], { ...fields, additionalEmails: ['', '  '] });
+    expect(result.contact.additionalEmails).toBeUndefined();
+  });
+
+  it('leaves every other contact field exactly as before', () => {
+    const existing = contact({ businessName: 'Smith & Co', notes: 'Gate code 1234', address: '1 Smith St' });
+    const result = plan([job({ customerId: 'contact-1' })], {}, [existing], {
+      ...fields,
+      businessName: 'Smith & Co',
+      notes: 'Gate code 1234',
+      address: '1 Smith St',
+    });
+    expect(result.contact).toMatchObject({
+      id: 'contact-1',
+      businessName: 'Smith & Co',
+      notes: 'Gate code 1234',
+      address: '1 Smith St',
+      additionalEmails: ['accounts@smith.com', 'ceo@smith.com'],
+    });
+  });
+});

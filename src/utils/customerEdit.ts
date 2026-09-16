@@ -40,6 +40,8 @@ export interface CustomerEditFields {
   name: string;
   businessName?: string;
   email?: string;
+  /** Extra send-to addresses. Live on the Contact only; never fanned out. */
+  additionalEmails?: string[];
   phone?: string;
   /** The customer's own address. Never fanned out to job sites. */
   address?: string;
@@ -107,10 +109,14 @@ export function planCustomerEdit(input: {
   const phone = trimmed(fields.phone) || undefined;
 
   const existing = findContactForGroup(group, contacts);
+  const additionalEmails = (fields.additionalEmails ?? [])
+    .map((e) => trimmed(e).toLowerCase())
+    .filter((e, i, all) => e && all.indexOf(e) === i && e !== (email || '').toLowerCase());
   const details = {
     name,
     businessName: trimmed(fields.businessName) || undefined,
     email,
+    additionalEmails: additionalEmails.length ? additionalEmails : undefined,
     phone,
     address: trimmed(fields.address) || undefined,
     website: trimmed(fields.website) || undefined,

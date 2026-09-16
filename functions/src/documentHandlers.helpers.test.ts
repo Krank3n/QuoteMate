@@ -5,6 +5,8 @@ import { fileURLToPath } from 'url';
 import {
   buildSelfCopyBcc,
   buildQuotePdfHtmlForQuote,
+  normaliseRecipients,
+  MAX_EMAIL_RECIPIENTS,
   customerResponseResetPatch,
   describeCustomerResponse,
   hasCustomerResponded,
@@ -173,6 +175,55 @@ describe('buildSelfCopyBcc', () => {
   it('skips the BCC when the tradie is already the recipient (case/whitespace-insensitive)', () => {
     expect(buildSelfCopyBcc({ ...base, recipientEmail: 'tradie@example.au' })).toBeUndefined();
     expect(buildSelfCopyBcc({ ...base, recipientEmail: '  Tradie@Example.AU ' })).toBeUndefined();
+  });
+
+  it('skips the BCC when the tradie is anywhere in a recipient list', () => {
+    expect(buildSelfCopyBcc({ ...base, recipientEmail: ['client@example.au', 'Tradie@Example.AU'] })).toBeUndefined();
+  });
+
+  it('still BCCs the tradie on a list that does not include them', () => {
+    expect(buildSelfCopyBcc({ ...base, recipientEmail: ['client@example.au', 'accounts@example.au'] }))
+      .toEqual([{ email: 'tradie@example.au' }]);
+  });
+});
+
+// Sep 2026: the composer sends `recipientEmail` as a list so a quote can
+// reach the accounts desk as well as the owner. Older clients still send one
+// string. Both land here.
+describe('normaliseRecipients', () => {
+  it('accepts the single string older clients send', () => {
+    expect(normaliseRecipients('Client@Example.au ')).toEqual({ ok: true, recipients: ['client@example.au'] });
+  });
+
+  it('accepts a list, trimmed, lower-cased and deduplicated in first-seen order', () => {
+    expect(normaliseRecipients([' CEO@Firm.com', 'accounts@firm.com', 'ceo@firm.com', ''])).toEqual({
+      ok: true,
+      recipients: ['ceo@firm.com', 'accounts@firm.com'],
+    });
+  });
+
+  it('refuses the whole request when any entry is not an address', () => {
+    const result = normaliseRecipients(['ceo@firm.com', 'accounts at firm']);
+    expect(result.ok).toBe(false);
+    expect(result.ok ? '' : result.error).toBe('Invalid email address: accounts at firm');
+  });
+
+  it(`refuses more than ${MAX_EMAIL_RECIPIENTS} addresses`, () => {
+    const six = ['a', 'b', 'c', 'd', 'e', 'f'].map((n) => `${n}@firm.com`);
+    expect(normaliseRecipients(six).ok).toBe(false);
+    expect(normaliseRecipients(six.slice(0, MAX_EMAIL_RECIPIENTS)).ok).toBe(true);
+  });
+
+  it('refuses an empty list, an empty string and nothing at all', () => {
+    expect(normaliseRecipients([]).ok).toBe(false);
+    expect(normaliseRecipients(['', '  ']).ok).toBe(false);
+    expect(normaliseRecipients('').ok).toBe(false);
+    expect(normaliseRecipients(undefined).ok).toBe(false);
+  });
+
+  it('refuses non-string entries rather than coercing them', () => {
+    expect(normaliseRecipients([{ email: 'ceo@firm.com' }]).ok).toBe(false);
+    expect(normaliseRecipients(42).ok).toBe(false);
   });
 });
 
