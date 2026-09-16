@@ -5,7 +5,14 @@
  */
 import { describe, it, expect } from 'vitest';
 
-import { hasCustomerEmail, isEmailAddress, isSelfSend, orderSendOptions } from './sendFlow';
+import {
+  hasCustomerEmail,
+  isEmailAddress,
+  isEmailList,
+  isSelfSend,
+  orderSendOptions,
+  splitEmailList,
+} from './sendFlow';
 
 describe('hasCustomerEmail', () => {
   it('is true for a doc carrying a usable address', () => {
@@ -89,5 +96,54 @@ describe('orderSendOptions', () => {
         expect([...orderSendOptions({ hasEmail, canSms })].sort()).toEqual(['email', 'sms']);
       }
     }
+  });
+});
+
+// Sep 2026: a Pro tradie asked for "more than 1 email addresses for clients"
+// so a quote reaches the accounts desk as well as the owner. The composer's
+// recipient field takes a list; this is how the list is read.
+describe('splitEmailList', () => {
+  it('splits on comma, semicolon, space and newline alike', () => {
+    expect(splitEmailList('a@x.com, b@y.com;c@z.com d@w.com\ne@v.com')).toEqual([
+      'a@x.com',
+      'b@y.com',
+      'c@z.com',
+      'd@w.com',
+      'e@v.com',
+    ]);
+  });
+
+  it('lower-cases and drops duplicates that differ only by case, keeping first-seen order', () => {
+    expect(splitEmailList('Accounts@Firm.com, ceo@firm.com, accounts@firm.com')).toEqual([
+      'accounts@firm.com',
+      'ceo@firm.com',
+    ]);
+  });
+
+  it('ignores a trailing separator and surrounding whitespace', () => {
+    expect(splitEmailList('  a@x.com, ')).toEqual(['a@x.com']);
+    expect(splitEmailList('a@x.com,,, ;')).toEqual(['a@x.com']);
+  });
+
+  it('is empty for nothing', () => {
+    expect(splitEmailList('')).toEqual([]);
+    expect(splitEmailList('   ')).toEqual([]);
+    expect(splitEmailList(undefined)).toEqual([]);
+    expect(splitEmailList(null)).toEqual([]);
+  });
+
+  it('does not validate — a bad entry comes back for the caller to flag', () => {
+    expect(splitEmailList('a@x.com, bob')).toEqual(['a@x.com', 'bob']);
+  });
+});
+
+describe('isEmailList', () => {
+  it('is true only when every entry is an address', () => {
+    expect(isEmailList(['a@x.com', 'b@y.com.au'])).toBe(true);
+    expect(isEmailList(['a@x.com', 'bob'])).toBe(false);
+  });
+
+  it('is false for an empty list — nobody to send to', () => {
+    expect(isEmailList([])).toBe(false);
   });
 });

@@ -206,6 +206,7 @@ import {
 export { onDocumentAcceptedSyncXero } from './xeroSyncTriggers';
 import {
   sendDocumentEmail,
+  normaliseRecipients,
   loadDocumentForQuoteId,
   loadDocumentForInvoiceId,
   applyPaymentToDocument,
@@ -6309,6 +6310,14 @@ export const sendQuoteEmail = functions.runWith({ timeoutSeconds: 120, memory: '
       res.status(400).json({ error: 'Missing required fields: quoteId, emailBody, recipientEmail' });
       return;
     }
+    // One address or a list (Sep 2026: a quote can go to the accounts desk
+    // as well as the owner). Cleaned and capped here so a typo 400s instead
+    // of reaching Brevo.
+    const recipients = normaliseRecipients(recipientEmail);
+    if (!recipients.ok) {
+      res.status(400).json({ error: recipients.error });
+      return;
+    }
 
     const gate = await enforceFreeTierDeliveryGate(userId);
     if (!gate.ok) {
@@ -6334,7 +6343,7 @@ export const sendQuoteEmail = functions.runWith({ timeoutSeconds: 120, memory: '
         userId,
         docId: quoteId,
         emailBody,
-        recipientEmail,
+        recipientEmail: recipients.recipients,
         isTestSend,
         includePhotos,
         subject: typeof subject === 'string' ? subject : undefined,
@@ -6397,6 +6406,11 @@ export const sendInvoiceEmail = functions.runWith({ timeoutSeconds: 120, memory:
       res.status(400).json({ error: 'Missing required fields: invoiceId, emailBody, recipientEmail' });
       return;
     }
+    const recipients = normaliseRecipients(recipientEmail);
+    if (!recipients.ok) {
+      res.status(400).json({ error: recipients.error });
+      return;
+    }
 
     const gate = await enforceFreeTierDeliveryGate(userId);
     if (!gate.ok) {
@@ -6420,7 +6434,7 @@ export const sendInvoiceEmail = functions.runWith({ timeoutSeconds: 120, memory:
         userId,
         docId: doc.id,
         emailBody,
-        recipientEmail,
+        recipientEmail: recipients.recipients,
         isTestSend,
         includePhotos,
         subject: typeof subject === 'string' ? subject : undefined,

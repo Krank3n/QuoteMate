@@ -30,8 +30,11 @@ vi.mock('react-native-paper', () => {
   const TextInput: any = ({
     value,
     onChangeText,
+    onBlur,
     multiline,
     placeholder,
+    accessibilityLabel,
+    error,
     cursorColor,
     selectionColor,
     selectionHandleColor,
@@ -43,17 +46,29 @@ vi.mock('react-native-paper', () => {
       'data-selection-color': selectionColor,
       'data-selection-handle-color': selectionHandleColor,
       'data-selection': selection ? `${selection.start}-${selection.end}` : undefined,
+      'data-error': error ? 'true' : undefined,
+      'aria-label': accessibilityLabel,
       placeholder,
       value: value ?? '',
       onChange: (e: any) => onChangeText?.(e.target.value),
+      onBlur: () => onBlur?.(),
     });
   TextInput.Icon = () => null;
+  // A recipient chip: its label plus the × that removes it.
+  const Chip = ({ children, onClose, closeIconAccessibilityLabel }: any) =>
+    React.createElement(
+      'span',
+      { 'data-testid': 'recipient-chip' },
+      children,
+      React.createElement('button', { 'aria-label': closeIconAccessibilityLabel, onClick: onClose }, '×'),
+    );
   return {
     // src/theme.ts spreads these at import time.
     DefaultTheme: { colors: {} },
     MD3DarkTheme: { colors: {} },
     Text: ({ children }: any) => React.createElement('span', null, children),
     TextInput,
+    Chip,
     Button: ({ children, onPress, disabled }: any) =>
       React.createElement('button', { onClick: onPress, disabled }, children),
     Portal: { Host: ({ children }: any) => React.createElement('div', null, children) },
@@ -86,7 +101,10 @@ vi.mock('./AlertModal', () => ({
         )
       : null,
 }));
-vi.mock('../store/useStore', () => ({ useStore: () => ({ quotes: [] }) }));
+const store = vi.hoisted(() => ({ contacts: [] as any[] }));
+vi.mock('../store/useStore', () => ({ useStore: () => ({ quotes: [], contacts: store.contacts }) }));
+const contactLookup = vi.hoisted(() => ({ getContactById: vi.fn(async (_id: string): Promise<any> => null) }));
+vi.mock('../services/firestoreService', () => ({ firestoreService: contactLookup }));
 vi.mock('../services/analyticsService', () => ({ trackEvent: vi.fn() }));
 
 import { DocumentEmailPreviewModal } from './DocumentEmailPreviewModal';
@@ -153,9 +171,15 @@ function eventProps(name: string) {
 }
 
 const bodyEditor = () => document.querySelector('textarea');
+const recipientInput = () => screen.getByLabelText('Recipient email') as HTMLInputElement;
+const chips = () => screen.queryAllByTestId('recipient-chip').map((el) => el.textContent?.replace('×', ''));
+const typeRecipient = (text: string) => fireEvent.change(recipientInput(), { target: { value: text } });
+const sentBody = () => JSON.parse(fetchMock.mock.calls[0][1].body);
 
 beforeEach(() => {
   vi.clearAllMocks();
+  store.contacts = [];
+  contactLookup.getContactById.mockResolvedValue(null);
   fetchMock.mockResolvedValue({ ok: true, json: async () => ({}) });
   vi.stubGlobal('fetch', fetchMock);
   (auth as any).currentUser = {
@@ -456,5 +480,159 @@ describe('More ways to send', () => {
     renderModal({ onMoreWaysToSend: undefined });
 
     expect(screen.queryByText('More ways to send')).toBeNull();
+  });
+});
+
+// Sep 2026: "more than 1 email addresses for clients contact as would like to
+// send to their admin/pay section as well as the CEO". The recipient field is
+// now a list: chips for the committed addresses, an input for the next one.
+describe('more than one recipient', () => {
+  it('prefills the customer address as a chip', () => {
+    renderModal();
+
+    expect(chips()).toEqual(['sam@example.com']);
+    expect(recipientInput().value).toBe('');
+  });
+
+  it('adds the linked contact’s extra addresses from the store', () => {
+    store.contacts = [{ id: 'c1', name: 'Sam', email: 'sam@example.com', additionalEmails: ['accounts@example.com', 'CEO@Example.com'] }];
+
+    renderModal({ doc: doc({ contactId: 'c1' }) });
+
+    expect(chips()).toEqual(['sam@example.com', 'accounts@example.com', 'ceo@example.com']);
+    expect(contactLookup.getContactById).not.toHaveBeenCalled();
+  });
+
+  it('reads the contact when the store has not loaded it', async () => {
+    contactLookup.getContactById.mockResolvedValue({ id: 'c1', additionalEmails: ['accounts@example.com'] });
+
+    renderModal({ doc: doc({ contactId: 'c1' }) });
+
+    await waitFor(() => expect(chips()).toEqual(['sam@example.com', 'accounts@example.com']));
+    expect(contactLookup.getContactById).toHaveBeenCalledWith('c1');
+  });
+
+  it('never doubles up an extra that is already the primary', () => {
+    store.contacts = [{ id: 'c1', name: 'Sam', additionalEmails: ['SAM@example.com', 'accounts@example.com'] }];
+
+    renderModal({ doc: doc({ contactId: 'c1' }) });
+
+    expect(chips()).toEqual(['sam@example.com', 'accounts@example.com']);
+  });
+
+  it('commits a typed address on the comma and clears the input', () => {
+    renderModal();
+
+    typeRecipient('accounts@example.com,');
+
+    expect(chips()).toEqual(['sam@example.com', 'accounts@example.com']);
+    expect(recipientInput().value).toBe('');
+  });
+
+  it('takes a pasted list in one go and keeps the unfinished tail in the input', () => {
+    renderModal();
+
+    typeRecipient('a@x.com; b@y.com c@z');
+
+    expect(chips()).toEqual(['sam@example.com', 'a@x.com', 'b@y.com']);
+    expect(recipientInput().value).toBe('c@z');
+  });
+
+  it('commits on blur, and once for an address typed twice', () => {
+    renderModal();
+
+    typeRecipient('Sam@Example.com');
+    fireEvent.blur(recipientInput());
+
+    expect(chips()).toEqual(['sam@example.com']);
+    expect(recipientInput().value).toBe('');
+  });
+
+  it('removes a chip with its ×', () => {
+    renderModal();
+    typeRecipient('accounts@example.com,');
+
+    fireEvent.click(screen.getByLabelText('Remove sam@example.com'));
+
+    expect(chips()).toEqual(['accounts@example.com']);
+  });
+
+  it('hands a non-address back to the input with an error instead of a chip', () => {
+    renderModal();
+
+    typeRecipient('accounts at example,');
+
+    expect(chips()).toEqual(['sam@example.com']);
+    expect(recipientInput().value).toBe('accounts at example');
+    expect(screen.getByText('Please enter a valid email address')).toBeTruthy();
+  });
+
+  it('stops at five addresses', () => {
+    renderModal();
+
+    typeRecipient('b@x.com, c@x.com, d@x.com, e@x.com, f@x.com,');
+
+    expect(chips()).toHaveLength(5);
+    expect(recipientInput().value).toBe('f@x.com');
+    expect(screen.getByText('Up to 5 addresses per email')).toBeTruthy();
+    expect((screen.getByText('Send Quote') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('sends the whole list as an array', async () => {
+    renderModal();
+    typeRecipient('accounts@example.com,');
+
+    fireEvent.click(screen.getByText('Send Quote'));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(sentBody().recipientEmail).toEqual(['sam@example.com', 'accounts@example.com']);
+    expect(sentBody().isTestSend).toBeUndefined();
+  });
+
+  it('counts an address still sitting in the input when Send is tapped', async () => {
+    renderModal();
+    typeRecipient('accounts@example.com');
+
+    fireEvent.click(screen.getByText('Send Quote'));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(sentBody().recipientEmail).toEqual(['sam@example.com', 'accounts@example.com']);
+  });
+
+  it('will not send with nobody on the list', () => {
+    renderModal({ doc: doc({ customerEmail: undefined }) });
+
+    expect((screen.getByText('Send Quote') as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByText('Send Quote'));
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('is a self-send only when every address is the tradie’s own', async () => {
+    renderModal({ doc: doc({ customerEmail: OWNER_EMAIL }) });
+    typeRecipient('accounts@example.com,');
+
+    fireEvent.click(screen.getByText('Send Quote'));
+
+    await waitFor(() => expect(eventProps('quote_send_succeeded')).toBeTruthy());
+    expect(eventProps('quote_send_succeeded').to_self).toBe(false);
+  });
+
+  it('names every address in the sent confirmation', async () => {
+    renderModal();
+    typeRecipient('accounts@example.com,');
+
+    fireEvent.click(screen.getByText('Send Quote'));
+
+    await waitFor(() => expect(screen.getByText('Quote Sent!')).toBeTruthy());
+  });
+
+  it('still sends a test to the tradie alone, as one address', async () => {
+    renderModal();
+    typeRecipient('accounts@example.com,');
+
+    fireEvent.click(screen.getByText('Send a test to myself'));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(sentBody().recipientEmail).toBe(OWNER_EMAIL);
   });
 });

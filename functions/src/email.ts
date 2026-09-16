@@ -33,7 +33,11 @@ const ADMIN_EMAIL = process.env.ADMIN_EMAILS || '';
 type EmailCategory = 'transactional' | 'marketing';
 
 interface SendEmailOptions {
-  to: string;
+  // One address, or several for a customer-facing quote/invoice send (Sep
+  // 2026: the accounts desk alongside the owner). Each goes on the To line;
+  // unsendable or hard-bounced entries are dropped individually and the
+  // rest still go.
+  to: string | string[];
   subject: string;
   htmlContent: string;
   // Plain-text alternative. A multipart message reads properly in clients that
@@ -100,6 +104,32 @@ export function classifyUnsendable(to: string): string | null {
 // full mailboxes recover.
 export function hasHardBounce(rows: Array<{ bounceType?: unknown }>): boolean {
   return rows.some((r) => r.bounceType === 'hard');
+}
+
+/**
+ * Split a recipient list into the addresses worth a Brevo call and the ones
+ * to drop, with why. Pure so the per-address rule is testable without
+ * Firestore; `bounced` is the set the caller already looked up.
+ */
+export function partitionRecipients(
+  to: string | string[],
+  bounced: Set<string> = new Set(),
+): { sendable: string[]; dropped: Array<{ email: string; reason: string }> } {
+  const list = Array.isArray(to) ? to : [to];
+  const sendable: string[] = [];
+  const dropped: Array<{ email: string; reason: string }> = [];
+  const seen = new Set<string>();
+  for (const raw of list) {
+    const email = (raw || '').trim();
+    const key = email.toLowerCase();
+    if (!email || seen.has(key)) continue;
+    seen.add(key);
+    const unsendable = classifyUnsendable(email);
+    if (unsendable) dropped.push({ email, reason: unsendable });
+    else if (bounced.has(key)) dropped.push({ email, reason: 'hard-bounced' });
+    else sendable.push(email);
+  }
+  return { sendable, dropped };
 }
 
 // The skip is silent on purpose: the original bounced row already documents
@@ -341,8 +371,12 @@ QuoteMate is made by Hansen Dev (Sydney NSW, Australia). You're receiving this b
 // Brevo webhook posts back events keyed to that tag, which lets us correlate
 // delivery / bounce / open / click / spam back to this exact send.
 export async function sendEmail(options: SendEmailOptions): Promise<boolean> {
-  const { to, subject, category, userId, tags, attachment, replyTo: replyToOverride, senderName, bcc, textContent } = options;
+  const { to: toRaw, subject, category, userId, tags, attachment, replyTo: replyToOverride, senderName, bcc, textContent } = options;
   let { htmlContent, unsubscribeUrl } = options;
+  const requested = (Array.isArray(toRaw) ? toRaw : [toRaw]).map((r) => (r || '').trim()).filter(Boolean);
+  // The one address every single-recipient path reads (outreach unsubscribe
+  // links, log lines). For a list it is the first entry.
+  const to = requested[0] || '';
 
   // For cold lead outreach, wrap with the AU spam-act compliance footer
   // and ensure a List-Unsubscribe header is set even if the caller didn't.
@@ -384,19 +418,30 @@ export async function sendEmail(options: SendEmailOptions): Promise<boolean> {
 
   // Short-circuit known-unsendable addresses before we burn a Brevo call or
   // sender reputation. We still log a row so the admin email log shows what
-  // was skipped and why.
-  const unsendableReason = classifyUnsendable(to);
-  if (unsendableReason) {
-    console.info(`sendEmail: blocking unsendable recipient ${to} (${unsendableReason})`);
+  // was skipped and why. With several recipients each is judged on its own:
+  // one junk address must not stop the quote reaching the others.
+  const bounced = new Set<string>();
+  for (const address of requested) {
+    if (!classifyUnsendable(address) && (await hasPriorHardBounce(address))) {
+      bounced.add(address.toLowerCase());
+    }
+  }
+  const { sendable, dropped } = partitionRecipients(requested, bounced);
+  for (const { email, reason } of dropped) {
+    if (reason === 'hard-bounced') {
+      console.info(`sendEmail: skipping ${email} — prior hard bounce on record`);
+      continue;
+    }
+    console.info(`sendEmail: blocking unsendable recipient ${email} (${reason})`);
     try {
       await admin.firestore().collection('emailLog').add({
         userId: userId || null,
-        to,
+        to: email,
         subject,
         category,
-        tags: [...(tags || []), `blocked:${unsendableReason}`],
+        tags: [...(tags || []), `blocked:${reason}`],
         status: 'blocked',
-        blockedReason: unsendableReason,
+        blockedReason: reason,
         queuedAt: admin.firestore.FieldValue.serverTimestamp(),
         openCount: 0,
         clickCount: 0,
@@ -404,8 +449,8 @@ export async function sendEmail(options: SendEmailOptions): Promise<boolean> {
     } catch (logErr: any) {
       console.warn('sendEmail: failed to log blocked send', logErr?.message);
     }
-    return false;
   }
+  if (!sendable.length) return false;
 
   // Check user email preferences (skip for test sends)
   if (userId && userId !== 'test') {
@@ -416,15 +461,13 @@ export async function sendEmail(options: SendEmailOptions): Promise<boolean> {
     }
   }
 
-  if (await hasPriorHardBounce(to)) {
-    console.info(`sendEmail: skipping ${to} — prior hard bounce on record`);
-    return false;
-  }
-
   // Pre-create log doc — status: 'pending' until Brevo accepts, then 'sent'.
+  // `to` stays a string (the admin log and the bounce lookup key on it); a
+  // multi-recipient send joins them and also keeps the list.
   const logRef = await admin.firestore().collection('emailLog').add({
     userId: userId || null,
-    to,
+    to: sendable.join(', '),
+    ...(sendable.length > 1 ? { recipients: sendable } : {}),
     subject,
     category,
     tags: tags || [],
@@ -461,7 +504,7 @@ export async function sendEmail(options: SendEmailOptions): Promise<boolean> {
           : isLeadOutreach && process.env.OUTREACH_REPLY_TO_EMAIL
             ? { email: process.env.OUTREACH_REPLY_TO_EMAIL, name: process.env.OUTREACH_REPLY_TO_NAME || 'Tom' }
             : { email: 'tom@hansendev.com.au', name: 'Tom at QuoteMate' },
-        to: [{ email: to }],
+        to: sendable.map((email) => ({ email })),
         ...(bcc?.length ? { bcc } : {}),
         subject,
         htmlContent,
@@ -482,7 +525,7 @@ export async function sendEmail(options: SendEmailOptions): Promise<boolean> {
 
     if (!response.ok) {
       const errorBody = await response.text();
-      console.error(`sendEmail: Brevo API error ${response.status} for "${subject}" to ${to}: ${errorBody}`);
+      console.error(`sendEmail: Brevo API error ${response.status} for "${subject}" to ${sendable.join(', ')}: ${errorBody}`);
       await logRef.set({
         status: 'send_failed',
         sendError: `brevo-${response.status}`,
@@ -501,7 +544,7 @@ export async function sendEmail(options: SendEmailOptions): Promise<boolean> {
 
     return true;
   } catch (error: any) {
-    console.error(`sendEmail: unexpected error for "${subject}" to ${to}:`, error?.message);
+    console.error(`sendEmail: unexpected error for "${subject}" to ${sendable.join(', ')}:`, error?.message);
     await logRef.set({
       status: 'send_failed',
       sendError: error?.message || 'unknown',

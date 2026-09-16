@@ -111,6 +111,7 @@ export function CustomerScreen() {
       name: contact?.name ?? group?.name ?? fallbackName ?? '',
       businessName: contact?.businessName,
       email: contact?.email ?? group?.email,
+      additionalEmails: contact?.additionalEmails,
       phone: contact?.phone ?? group?.phone,
       address: contact?.address,
       website: contact?.website,

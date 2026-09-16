@@ -13,6 +13,33 @@ export function isEmailAddress(value?: string | null): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 }
 
+/** The most addresses one quote or invoice email goes to. */
+export const MAX_EMAIL_RECIPIENTS = 5;
+
+/**
+ * Split whatever a tradie typed or pasted into the recipient field into
+ * addresses: "a@x.com, b@y.com" or one per line or space-separated all read
+ * the same. Trimmed, lower-cased, deduplicated, first occurrence wins the
+ * order. Does NOT validate — the caller decides what to do with a bad entry.
+ */
+export function splitEmailList(text?: string | null): string[] {
+  if (!text) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of text.split(/[,;\s]+/)) {
+    const addr = raw.trim().toLowerCase();
+    if (!addr || seen.has(addr)) continue;
+    seen.add(addr);
+    out.push(addr);
+  }
+  return out;
+}
+
+/** True when there is at least one address and every one of them is usable. */
+export function isEmailList(list: string[]): boolean {
+  return list.length > 0 && list.every((e) => isEmailAddress(e));
+}
+
 /**
  * Whether we already know where to email this doc. When we do, the send
  * sheet's five rows are pure friction — email is the dominant path — so the

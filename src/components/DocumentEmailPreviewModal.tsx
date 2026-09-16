@@ -30,6 +30,7 @@ import {
   Text,
   TextInput,
   Button,
+  Chip,
   Portal,
   Switch,
   ActivityIndicator,
@@ -48,7 +49,8 @@ import { auth } from '../config/firebase';
 import { AlertModal } from './AlertModal';
 import { useStore } from '../store/useStore';
 import { trackEvent } from '../services/analyticsService';
-import { isEmailAddress, isSelfSend } from '../utils/sendFlow';
+import { isEmailAddress, isSelfSend, MAX_EMAIL_RECIPIENTS } from '../utils/sendFlow';
+import { firestoreService } from '../services/firestoreService';
 import { maybePromptForPushPermission } from '../services/pushPermissionPrompt';
 import { resolvePriceDetail, showsPerLineMoney } from '../../shared/document/priceDetail';
 
@@ -67,6 +69,12 @@ function EmailGeneratingState() {
       <Text style={styles.generatingTitle}>Writing your email…</Text>
     </View>
   );
+}
+
+/** The document's own address as a one-entry list, or none. */
+function addressList(email?: string | null): string[] {
+  const address = (email || '').trim().toLowerCase();
+  return address ? [address] : [];
 }
 
 const USE_EMULATOR = process.env.USE_FIREBASE_EMULATOR === 'true';
@@ -120,7 +128,7 @@ export function DocumentEmailPreviewModal({
   const bottomInset = insets.bottom;
 
   const isInvoice = doc.type === 'invoice';
-  const { quotes } = useStore();
+  const { quotes, contacts } = useStore();
 
   // Photos: a quote carries them inline; an invoice borrows them from its
   // source quote when set. Both modals show the same attachment toggle UI.
@@ -144,7 +152,13 @@ export function DocumentEmailPreviewModal({
     ? `The email will include a pricing breakdown, payment details, and a PDF invoice attachment.${photos.length > 0 ? ' Job photos will be attached.' : ''}`
     : `The email will include a pricing table, ${photos.length > 0 ? 'job photos, ' : ''}accept/decline buttons, and your business details.`;
 
-  const [recipientEmail, setRecipientEmail] = useState(doc.customerEmail || '');
+  // Who the email goes to. More than one address is the point (Sep 2026: a
+  // Pro tradie wanted the CEO and the accounts desk on every quote), so the
+  // committed addresses live as chips and `recipientInput` is only what's
+  // being typed right now. Prefilled from the document's address plus the
+  // linked contact's extra addresses.
+  const [recipients, setRecipients] = useState<string[]>(() => addressList(doc.customerEmail));
+  const [recipientInput, setRecipientInput] = useState('');
   const [sending, setSending] = useState(false);
   const [sendingTest, setSendingTest] = useState(false);
   const [sent, setSent] = useState(false);
@@ -286,11 +300,66 @@ export function DocumentEmailPreviewModal({
     setAlertVisible(true);
   };
 
-  const validateEmail = (email: string): string => {
-    const trimmed = email.trim();
-    if (!trimmed) return 'Email address is required';
-    if (!isEmailAddress(trimmed)) return 'Please enter a valid email address';
+  /**
+   * What's wrong with the recipient list as it stands, or '' when it's
+   * sendable. `pending` is the uncommitted text in the input: it counts as
+   * one more address, so a tradie who types an address and taps Send
+   * without a trailing comma is not told to add one.
+   */
+  const validateRecipients = (list: string[], pending: string): string => {
+    const typed = pending.trim().toLowerCase();
+    if (!list.length && !typed) return 'Email address is required';
+    if (typed && !isEmailAddress(typed)) return 'Please enter a valid email address';
+    const total = list.length + (typed && !list.includes(typed) ? 1 : 0);
+    if (total > MAX_EMAIL_RECIPIENTS) return `Up to ${MAX_EMAIL_RECIPIENTS} addresses per email`;
     return '';
+  };
+
+  /**
+   * Turn what's in the input into chips. Splits on comma, semicolon, space
+   * or newline (a pasted "a@x.com, b@y.com" is the common case). Unless
+   * `force`, the text after the last separator is still being typed and
+   * stays in the input. Anything that isn't an address, or won't fit under
+   * the cap, is handed back to the input with an error rather than dropped.
+   */
+  const commitRecipientText = (text: string, force: boolean) => {
+    const endsWithSeparator = /[,;\s]$/.test(text);
+    const segments = text.split(/[,;\s]+/);
+    const rest = !endsWithSeparator && !force ? segments.pop() ?? '' : '';
+    const list = [...recipients];
+    const rejected: string[] = [];
+    let error = '';
+    for (const segment of segments) {
+      const candidate = segment.trim().toLowerCase();
+      if (!candidate || list.includes(candidate)) continue;
+      if (!isEmailAddress(candidate)) {
+        rejected.push(candidate);
+        error = 'Please enter a valid email address';
+        continue;
+      }
+      if (list.length >= MAX_EMAIL_RECIPIENTS) {
+        rejected.push(candidate);
+        error = `Up to ${MAX_EMAIL_RECIPIENTS} addresses per email`;
+        continue;
+      }
+      list.push(candidate);
+    }
+    const leftover = [...rejected, rest].filter(Boolean).join(' ');
+    setRecipients(list);
+    setRecipientInput(leftover);
+    if (error) {
+      setEmailTouched(true);
+      setEmailError(error);
+    } else if (emailTouched) {
+      setEmailError(validateRecipients(list, leftover));
+    }
+    return { list, leftover, error };
+  };
+
+  const removeRecipient = (address: string) => {
+    const list = recipients.filter((r) => r !== address);
+    setRecipients(list);
+    if (emailTouched) setEmailError(validateRecipients(list, recipientInput));
   };
 
   // Reset transient state when modal opens. Subject is owned by the parent
@@ -299,7 +368,8 @@ export function DocumentEmailPreviewModal({
   // close/reopen.
   React.useEffect(() => {
     if (visible) {
-      setRecipientEmail(doc.customerEmail || '');
+      setRecipients(addressList(doc.customerEmail));
+      setRecipientInput('');
       setSent(false);
       setEmailTouched(false);
       setEmailError('');
@@ -308,6 +378,43 @@ export function DocumentEmailPreviewModal({
       setBodyEdited(false);
     }
   }, [visible, doc.customerEmail]);
+
+  // The linked contact's extra addresses (an accounts desk, a second owner)
+  // join the list on open. The store has them when the Contacts screen has
+  // loaded; otherwise one read. Never touches what the tradie typed: it only
+  // appends addresses that aren't already there.
+  React.useEffect(() => {
+    if (!visible || !doc.contactId) return;
+    let cancelled = false;
+    const append = (extra?: string[]) => {
+      if (cancelled || !extra?.length) return;
+      setRecipients((prev) => {
+        const list = [...prev];
+        for (const raw of extra) {
+          const address = (raw || '').trim().toLowerCase();
+          if (!address || list.includes(address) || !isEmailAddress(address)) continue;
+          if (list.length >= MAX_EMAIL_RECIPIENTS) break;
+          list.push(address);
+        }
+        return list;
+      });
+    };
+    const fromStore = (contacts ?? []).find((c) => c.id === doc.contactId);
+    if (fromStore) {
+      append(fromStore.additionalEmails);
+    } else {
+      firestoreService
+        .getContactById(doc.contactId)
+        .then((contact) => append(contact?.additionalEmails))
+        .catch(() => {});
+    }
+    return () => {
+      cancelled = true;
+    };
+    // `contacts` is deliberately not a dependency: a store refresh mid-compose
+    // must not re-run the prefill over a list the tradie has been editing.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, doc.contactId]);
 
   /**
    * Close the preview. Anything other than a completed send is a drop-off —
@@ -318,7 +425,7 @@ export function DocumentEmailPreviewModal({
     if (!sent) {
       trackEvent('email_preview_abandoned', {
         doc_type: docType,
-        had_recipient: !!recipientEmail.trim(),
+        had_recipient: recipients.length > 0 || !!recipientInput.trim(),
         edited_body: bodyEdited,
       });
     }
@@ -326,15 +433,20 @@ export function DocumentEmailPreviewModal({
   };
 
   const handleEmailChange = (text: string) => {
-    setRecipientEmail(text);
+    if (/[,;\s]/.test(text)) {
+      commitRecipientText(text, false);
+      return;
+    }
+    setRecipientInput(text);
     if (emailTouched) {
-      setEmailError(validateEmail(text));
+      setEmailError(validateRecipients(recipients, text));
     }
   };
 
   const handleEmailBlur = () => {
+    const { list, leftover } = commitRecipientText(recipientInput, true);
     setEmailTouched(true);
-    setEmailError(validateEmail(recipientEmail));
+    setEmailError((prev) => prev || validateRecipients(list, leftover));
   };
 
   // Build the request body for the cloud function. Server-side handlers
@@ -342,7 +454,7 @@ export function DocumentEmailPreviewModal({
   // `invoiceId`); we adapt the unified Document back via the legacy adapter
   // so the user's latest in-memory edits are sent rather than waiting for a
   // Firestore round-trip.
-  const buildRequestBody = (recipient: string, isTestSend: boolean) => {
+  const buildRequestBody = (recipient: string | string[], isTestSend: boolean) => {
     const trimmedSubject = subject.trim();
     if (isInvoice) {
       const invoice = documentToInvoice(doc);
@@ -375,14 +487,21 @@ export function DocumentEmailPreviewModal({
   // tradie knows the number (services, custom supply) — this is the moment
   // they either fix them or consciously send anyway. Test sends skip it.
   const [presendWarning, setPresendWarning] = useState<PresendWarning | null>(null);
+  // The list a send was asked for, so "Send anyway" on the $0 warning sends
+  // to exactly what was validated rather than re-reading state later.
+  const sendListRef = useRef<string[]>([]);
 
   const handleSend = async () => {
-    const error = validateEmail(recipientEmail);
+    // Whatever is still in the input is an address the tradie meant to send
+    // to — Send commits it the same way a comma would.
+    const committed = commitRecipientText(recipientInput, true);
+    const error = committed.error || validateRecipients(committed.list, committed.leftover);
     if (error) {
       setEmailTouched(true);
       setEmailError(error);
       return;
     }
+    sendListRef.current = committed.list;
 
     const warning = buildPresendWarning(
       reviewQuoteMaterials(doc.materials, doc.sections),
@@ -397,10 +516,10 @@ export function DocumentEmailPreviewModal({
       return;
     }
 
-    await doSend();
+    await doSend(committed.list);
   };
 
-  const doSend = async () => {
+  const doSend = async (to: string[]) => {
     setSending(true);
     try {
       const idToken = await auth.currentUser?.getIdToken();
@@ -410,7 +529,7 @@ export function DocumentEmailPreviewModal({
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${idToken}`,
         },
-        body: JSON.stringify(buildRequestBody(recipientEmail.trim(), false)),
+        body: JSON.stringify(buildRequestBody(to, false)),
       });
 
       if (!response.ok) {
@@ -419,7 +538,8 @@ export function DocumentEmailPreviewModal({
       }
 
       setSent(true);
-      const selfSend = isSelfSend(recipientEmail, ownerEmail);
+      // A self-send is a rehearsal only when NOBODY else is on the list.
+      const selfSend = to.every((r) => isSelfSend(r, ownerEmail));
       trackEvent('quote_send_succeeded', {
         doc_type: docType,
         method: 'email',
@@ -474,9 +594,10 @@ export function DocumentEmailPreviewModal({
     }
   };
 
+  const recipientSummary = recipients.join(', ');
   const sentMessage = isInvoice && doc.dueDate
-    ? `Your invoice has been sent to ${recipientEmail}\n${formatCurrency(doc.total)} due by ${format(new Date(doc.dueDate), 'dd MMM yyyy')}`
-    : `Your ${isInvoice ? 'invoice' : 'quote'} has been sent to ${recipientEmail}`;
+    ? `Your invoice has been sent to ${recipientSummary}\n${formatCurrency(doc.total)} due by ${format(new Date(doc.dueDate), 'dd MMM yyyy')}`
+    : `Your ${isInvoice ? 'invoice' : 'quote'} has been sent to ${recipientSummary}`;
 
   // No keyboard-avoiding wrapper: this modal does its own, by padding the
   // scroll content with `keyboardHeight` (below) and swapping the footer for a
@@ -527,7 +648,7 @@ export function DocumentEmailPreviewModal({
             <View style={styles.collapsedBarContent}>
               <MaterialCommunityIcons name="account-outline" size={14} color={themeColors.textMuted} />
               <Text style={styles.collapsedBarText} numberOfLines={1}>
-                {recipientEmail || 'No recipient'}
+                {recipientSummary || recipientInput || 'No recipient'}
               </Text>
               <Text style={styles.collapsedBarDivider}>|</Text>
               <MaterialCommunityIcons name="tag-outline" size={14} color={themeColors.textMuted} />
@@ -545,19 +666,42 @@ export function DocumentEmailPreviewModal({
                 <View style={[styles.sectionIconCircle, { backgroundColor: themeColors.infoSubtle }]}>
                   <MaterialCommunityIcons name="account-outline" size={18} color={themeColors.info} />
                 </View>
-                <Text style={styles.sectionTitle}>Recipient</Text>
+                <Text style={styles.sectionTitle}>
+                  {recipients.length > 1 ? 'Recipients' : 'Recipient'}
+                </Text>
               </View>
+              {recipients.length > 0 && (
+                <View style={styles.recipientChips}>
+                  {recipients.map((address) => (
+                    <Chip
+                      key={address}
+                      mode="outlined"
+                      compact
+                      onClose={() => removeRecipient(address)}
+                      closeIconAccessibilityLabel={`Remove ${address}`}
+                      style={styles.recipientChip}
+                      textStyle={styles.recipientChipText}
+                    >
+                      {address}
+                    </Chip>
+                  ))}
+                </View>
+              )}
               <TextInput
-                value={recipientEmail}
+                value={recipientInput}
                 onChangeText={handleEmailChange}
                 onBlur={handleEmailBlur}
+                onSubmitEditing={handleEmailBlur}
+                blurOnSubmit={false}
                 mode="outlined"
                 style={styles.recipientInput}
                 keyboardType="email-address"
                 autoCapitalize="none"
-                placeholder="client@email.com"
+                autoCorrect={false}
+                placeholder={recipients.length ? 'Add another address' : 'client@email.com'}
                 placeholderTextColor={themeColors.textMuted}
                 error={emailTouched && !!emailError}
+                accessibilityLabel="Recipient email"
               />
               {emailTouched && !!emailError && (
                 <Text style={styles.emailErrorText}>{emailError}</Text>
@@ -736,7 +880,7 @@ export function DocumentEmailPreviewModal({
             mode="contained" buttonColor={themeColors.accent} textColor={themeColors.onAccent}
             onPress={handleSend}
             loading={sending}
-            disabled={sending || sendingTest || !emailBody.trim() || !!validateEmail(recipientEmail) || isRegenerating}
+            disabled={sending || sendingTest || !emailBody.trim() || !!validateRecipients(recipients, recipientInput) || isRegenerating}
             style={styles.sendButton}
             contentStyle={styles.sendButtonContent}
             icon="send"
@@ -825,7 +969,7 @@ export function DocumentEmailPreviewModal({
           primaryButtonText="Send anyway"
           primaryButtonAction={() => {
             setPresendWarning(null);
-            doSend();
+            doSend(sendListRef.current);
           }}
           secondaryButtonText="Go back and fix"
           secondaryButtonAction={() => {
@@ -905,6 +1049,20 @@ const useStyles = makeStyles((t) => ({
     backgroundColor: 'transparent',
     marginBottom: 0,
     fontSize: 15,
+    color: t.colors.text,
+  },
+  recipientChips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 8,
+  },
+  recipientChip: {
+    backgroundColor: t.colors.surfaceOverlay,
+    borderColor: t.colors.border,
+  },
+  recipientChipText: {
+    fontSize: 13,
     color: t.colors.text,
   },
   emailErrorText: {

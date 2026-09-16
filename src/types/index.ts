@@ -822,6 +822,13 @@ export interface Contact {
   name: string;
   businessName?: string;
   email?: string;
+  /**
+   * Up to three more addresses that get every quote and invoice sent to this
+   * customer — an accounts department alongside the owner, say. `email` stays
+   * the primary and the only address denormalised onto jobs and documents;
+   * these are read at send time to prefill the composer's recipient list.
+   */
+  additionalEmails?: string[];
   phone?: string;
   address?: string;
   website?: string;
