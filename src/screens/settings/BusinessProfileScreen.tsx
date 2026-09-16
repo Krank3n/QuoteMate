@@ -433,7 +433,7 @@ export function BusinessProfileScreen() {
               placeholder="books@youraccountant.com.au"
             />
             <Text style={styles.helperText}>
-              We'll send your statement here when you send one from Insights.
+              We'll send your statement here when you send one from Reports.
             </Text>
           </Surface>
 
