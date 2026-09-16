@@ -137,7 +137,10 @@ export function SendStatementSheet({
         // Full-screen flex container; the card inside carries the width cap.
         contentContainerStyle={styles.modalContainer}
       >
-        <KeyboardAvoidingView behavior="padding" automaticOffset>
+        {/* The avoiding view must carry the width: with none, it shrinks to
+            its content, the card's 100% resolves against the widest field
+            (~480pt), and the sheet overflows both edges of a phone screen. */}
+        <KeyboardAvoidingView behavior="padding" automaticOffset style={styles.avoid}>
         <View style={{ ...styles.card, maxHeight: windowHeight * 0.86 }}>
         <ScrollView keyboardShouldPersistTaps="handled">
           {sentTo ? (
@@ -246,10 +249,13 @@ const useStyles = makeStyles((t) => ({
     justifyContent: 'center',
     padding: 20,
   },
-  card: {
+  avoid: {
     // Full width on a phone, capped and centred on anything larger.
     width: '100%',
     maxWidth: 520,
+  },
+  card: {
+    width: '100%',
     backgroundColor: t.colors.surfaceRaised,
     borderRadius: 14,
     padding: 20,
