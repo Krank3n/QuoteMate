@@ -238,6 +238,15 @@ export function buildCard(
         route: { screen: 'ViewJob', params: { jobId: doc.jobId, openSendDocId: doc.id } },
       };
     }
+    case 'activate_square':
+      return {
+        key: action.key,
+        title: 'Square isn’t taking payments yet',
+        subtitle: 'Finish activating your Square account so invoices go out with a Pay Now button.',
+        icon: 'credit-card-off-outline',
+        tone: 'warning',
+        route: { screen: 'SquareIntegration' },
+      };
     case 'follow_up': {
       const doc = pickSentQuoteDoc(docs);
       if (!doc?.jobId) return null;

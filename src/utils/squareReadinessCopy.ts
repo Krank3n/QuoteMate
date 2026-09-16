@@ -52,3 +52,26 @@ export function squareNotReadyCopy(
     action: 'Finish activating at squareup.com, then check again',
   };
 }
+
+export interface SquareStatusLine {
+  /** The words next to the status icon on the Square settings screen. */
+  label: string;
+  /** 'ready' wears the money colour and a tick; 'warning' the warning colour and an alert. */
+  tone: 'ready' | 'warning';
+}
+
+/**
+ * The status line at the top of the Connection card. "Connected" in green
+ * above a warning banner reads as done to a tradie who skims, and one who
+ * skims walks away without activating. So the line itself carries the truth:
+ * connected, but not yet able to take a payment.
+ */
+export function squareConnectionStatusLine(
+  readiness: Pick<SquarePaymentReadiness, 'ready' | 'reasons'> | null | undefined,
+): SquareStatusLine {
+  if (!readiness || readiness.ready !== false) return { label: 'Connected', tone: 'ready' };
+  if (readiness.reasons.includes('currency_mismatch')) {
+    return { label: 'Connected · not an Australian account', tone: 'warning' };
+  }
+  return { label: 'Connected · not taking payments yet', tone: 'warning' };
+}

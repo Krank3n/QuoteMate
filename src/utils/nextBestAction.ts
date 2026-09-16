@@ -38,6 +38,8 @@ export type NextBestActionKey =
   | 'fee_comparison'
   /** Trial user repeatedly using Pro-only tools — keep them with Pro. */
   | 'keep_pro_tools'
+  /** Square is connected but Square won't charge a card for it yet — finish activating. */
+  | 'activate_square'
   /** Sent quote(s) awaiting a customer response — follow up. */
   | 'follow_up'
   /** Settled on Free — help them run jobs and get paid through Square. */
@@ -114,6 +116,14 @@ export interface NextBestActionInput {
   docs: NextBestActionDoc[];
   /** users/{uid}/settings/squareConnection exists. */
   hasSquareConnection: boolean;
+  /**
+   * The server's verdict on whether Square will charge a card for the
+   * connected account (squareConnection.paymentReadiness.ready). `false`
+   * means every Pay Now mint is refused and a free tradie can't send an
+   * invoice at all. Null/undefined when unknown or not connected — the
+   * dashboard may not have asked yet, and a guess must not raise a warning.
+   */
+  squarePaymentsReady?: boolean | null;
   /** Pro-only feature opens this trial (premium template, logo, …). */
   proFeatureUses: number;
   /** User chose "happy on Free" within the suppression window (promptState). */
@@ -162,6 +172,14 @@ export function nextBestAction(input: NextBestActionInput): NextBestAction {
   // 2–3. Activation: no pricing before the first real outcome.
   if (!hasAnyDoc) return { key: 'create_first_quote', sellingAllowed: false, ...base };
   if (!hasSentDoc) return { key: 'send_first_quote', sellingAllowed: false, ...base };
+
+  // 3½. Connected to Square, but Square won't take a payment for the account
+  // yet. Before this card the tradie only found out at the invoice gate,
+  // which is the moment they reach for another tool. Not a selling state:
+  // it's the Square path (Path B) with a step missing.
+  if (input.hasSquareConnection && input.squarePaymentsReady === false) {
+    return { key: 'activate_square', sellingAllowed: false, ...base };
+  }
 
   // 4–6. Commercial states — never for Pro, and suppressed by "happy on Free".
   if (input.plan !== 'pro' && !input.happyOnFree) {
