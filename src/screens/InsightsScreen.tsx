@@ -13,7 +13,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { ScrollView, View } from 'react-native';
-import { Button, SegmentedButtons, Surface, Text } from 'react-native-paper';
+import { Button, Surface, Text } from 'react-native-paper';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { format } from 'date-fns';
 
@@ -26,6 +26,7 @@ import { CostBreakdownChart } from '../components/CostBreakdownChart';
 import { WebContainer } from '../components/WebContainer';
 import { GridBackground } from '../components/GridBackground';
 import { Chip } from '../components/Chip';
+import { PillToggle, type PillToggleOption } from '../components/PillToggle';
 import { DueDateSheet } from '../components/DueDateSheet';
 import { ProBadge } from '../components/ProBadge';
 import { SendStatementSheet } from '../components/SendStatementSheet';
@@ -50,6 +51,11 @@ import type { StatementDocumentInput } from '../../shared/statement/buildStateme
 
 /** Which half of the page is showing: the charts, or the statement. */
 type InsightsSection = 'insights' | 'reports';
+
+const SECTION_OPTIONS: PillToggleOption<InsightsSection>[] = [
+  { value: 'insights', label: 'Insights', icon: 'chart-line' },
+  { value: 'reports', label: 'Reports', icon: 'file-document-outline' },
+];
 
 const PRESET_ORDER: StatementPreset[] = [
   'lastFinancialYear',
@@ -216,14 +222,12 @@ export function InsightsScreen() {
     <ScrollView style={styles.scroller}>
       <WebContainer>
         <View style={styles.content}>
-          <SegmentedButtons
+          {/* The same pill every other mode switch in the app uses. */}
+          <PillToggle<InsightsSection>
             value={section}
-            onValueChange={(next) => setSection(next as InsightsSection)}
-            density="medium"
-            buttons={[
-              { value: 'insights', label: 'Insights', icon: 'chart-line' },
-              { value: 'reports', label: 'Reports', icon: 'file-document-outline' },
-            ]}
+            onChange={setSection}
+            options={SECTION_OPTIONS}
+            fullWidth
             style={styles.switcher}
           />
 
