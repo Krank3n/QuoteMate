@@ -30,6 +30,27 @@ import { normalizePhoneTail } from '../utils/textMatch';
 import { normaliseLabourToHours } from '../../shared/document/labourUnits';
 import { isAlreadyInvoiced } from '../../shared/document/convertGuard';
 import { keepSupplierPriceInclusive, resolveGstMode } from '../../shared/document/gstMode';
+import { holdStatusForward } from '../../shared/document/forwardOnlyStatus';
+import type { DocumentType } from '../../shared/document/types';
+
+/**
+ * A legacy save may not carry a status below the unified document's stage —
+ * the copy being saved can predate a send (or acceptance, or payment) the
+ * server has since stamped, and writing its stale status back is how sent
+ * quotes were rewound to 'draft' (60 of 208 on 16 Sep 2026). Deliberate stage
+ * moves pass `stageChange` and go through untouched. See
+ * shared/document/forwardOnlyStatus for the rule; this just applies it to the
+ * record in hand, returning the same instance when nothing needed holding.
+ */
+function withStatusHeldForward<T extends { id: string; status: any }>(
+  record: T,
+  unified: Document | undefined,
+  type: DocumentType,
+  options: { stageChange?: boolean } = {},
+): T {
+  const status = holdStatusForward(record as any, unified?.stage, type, options);
+  return status === record.status ? record : { ...record, status };
+}
 import {
   addPreference,
   buildRateWorkItem,
@@ -147,14 +168,19 @@ interface AppState {
   // mints the quote, 'new_quote' (default) everywhere else.
   createNewQuote: (source?: 'new_quote' | 'mate') => void;
   setCurrentQuote: (quote: Quote | null) => void;
-  saveQuote: (quote: Quote) => Promise<void>;
+  /**
+   * `stageChange` declares a deliberate stage move (applyStageChange) so the
+   * forward-only status guard lets a rewind through. Every other save is
+   * held at or above the unified document's stage.
+   */
+  saveQuote: (quote: Quote, options?: { stageChange?: boolean }) => Promise<void>;
   /**
    * Persist a quote. By default it also becomes currentQuote — every wizard
    * and chat caller wants that. A BACKGROUND caller (the launch-time analyse
    * resume) passes makeCurrent:false, or it would swap the quote the tradie
    * is looking at for one they aren't.
    */
-  saveDraft: (quote: Quote, options?: { makeCurrent?: boolean }) => Promise<void>;
+  saveDraft: (quote: Quote, options?: { makeCurrent?: boolean; stageChange?: boolean }) => Promise<void>;
   deleteQuote: (quoteId: string, source?: QuoteDeleteSource) => Promise<void>;
   duplicateQuote: (quote: Quote) => Promise<void>;
   updateQuote: (quote: Quote) => void;
@@ -220,7 +246,7 @@ interface AppState {
   createInvoiceFromQuote: (quote: Quote) => Promise<Invoice>;
   setCurrentInvoice: (invoice: Invoice | null) => void;
   updateInvoice: (invoice: Invoice) => void;
-  saveInvoice: (invoice: Invoice) => Promise<void>;
+  saveInvoice: (invoice: Invoice, options?: { stageChange?: boolean }) => Promise<void>;
   deleteInvoice: (invoiceId: string, source?: QuoteDeleteSource) => Promise<void>;
   loadInvoices: () => Promise<void>;
   /** Mirror of mergeRemoteQuotes for invoices. */
@@ -803,7 +829,7 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   // Save draft to storage (lightweight, no quota check or number assignment)
-  saveDraft: async (quote: Quote, options: { makeCurrent?: boolean } = {}) => {
+  saveDraft: async (quote: Quote, options: { makeCurrent?: boolean; stageChange?: boolean } = {}) => {
     try {
       // Forward-only TYPE guard. If the unified Document with this id has
       // already been promoted to type='invoice' (via Phase-5
@@ -840,10 +866,14 @@ export const useStore = create<AppState>((set, get) => ({
         }
       }
       const { quotes } = get();
+      // Forward-only status: this copy may predate a send the server has
+      // since stamped, and a 'draft' written over 'sent' is how 60 sent
+      // quotes went missing from follow-up (16 Sep 2026).
+      const heldQuote = withStatusHeldForward(quote, get().getDocumentById(quote.id), 'quote', options);
       // Phase-8: ensure a Job exists before the legacy quote hits Firestore —
       // the mirror carries jobId into the unified Document, and the trigger
       // needs an existing Job to update aggregates against.
-      const withJob = await ensureJobForQuote(quote);
+      const withJob = await ensureJobForQuote(heldQuote);
       const calculatedQuote = updateQuoteCalculations({
         ...withJob,
         updatedAt: new Date(),
@@ -986,7 +1016,7 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   // Save quote to storage
-  saveQuote: async (quote: Quote) => {
+  saveQuote: async (quote: Quote, options: { stageChange?: boolean } = {}) => {
     try {
       // Forward-only TYPE guard — see saveDraft for the rationale. If the
       // unified doc with this id is already an invoice, route through
@@ -1016,8 +1046,11 @@ export const useStore = create<AppState>((set, get) => ({
       }
       const { quotes, getNextQuoteNumber, subscriptionStatus } = get();
 
+      // Forward-only status — same guard as saveDraft; see there.
+      const heldQuote = withStatusHeldForward(quote, get().getDocumentById(quote.id), 'quote', options);
+
       // Phase-8: auto-create a Job on first save if one isn't linked already.
-      const withJob = await ensureJobForQuote(quote);
+      const withJob = await ensureJobForQuote(heldQuote);
 
       // Update or add quote
       const existingIndex = quotes.findIndex((q) => q.id === withJob.id);
@@ -1886,14 +1919,18 @@ export const useStore = create<AppState>((set, get) => ({
     });
   },
 
-  saveInvoice: async (invoice: Invoice) => {
+  saveInvoice: async (invoice: Invoice, options: { stageChange?: boolean } = {}) => {
     try {
       const { invoices, getNextInvoiceNumber } = get();
+
+      // Forward-only status — same guard as saveDraft; a stale 'sent' copy
+      // saved after a part payment must not un-record the payment's status.
+      const heldInvoice = withStatusHeldForward(invoice, get().getDocumentById(invoice.id), 'invoice', options);
 
       // Phase-8: auto-create a Job on first save if one isn't linked already.
       // Converted-from-quote invoices already carry jobId, so this is a no-op
       // for that common path.
-      const withJob = await ensureJobForQuote(invoice);
+      const withJob = await ensureJobForQuote(heldInvoice);
 
       const existingIndex = invoices.findIndex((i) => i.id === withJob.id);
       const isNewInvoice = existingIndex < 0;
