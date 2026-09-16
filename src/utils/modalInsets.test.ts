@@ -23,4 +23,16 @@ describe('resolveModalInset', () => {
     expect(resolveModalInset({ contextValue: 0, metricsValue: 0 })).toBe(0);
     expect(resolveModalInset({ contextValue: 0, metricsValue: 59 })).toBe(59);
   });
+
+  it('takes the platform status bar height when the modal tree and startup metrics both say nothing (Android)', () => {
+    expect(resolveModalInset({ contextValue: 0, metricsValue: undefined, platformValue: 24 })).toBe(24);
+  });
+
+  it('still prefers a larger real inset over the platform value', () => {
+    expect(resolveModalInset({ contextValue: 47, metricsValue: 0, platformValue: 24 })).toBe(47);
+  });
+
+  it('treats a null platform value as no inset', () => {
+    expect(resolveModalInset({ contextValue: 0, metricsValue: undefined, platformValue: null })).toBe(0);
+  });
 });

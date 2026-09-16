@@ -3,6 +3,7 @@
  * (and the arithmetic, which is unit-tested) lives in utils/modalInsets.
  */
 
+import { Platform, StatusBar } from 'react-native';
 import { useSafeAreaInsets, initialWindowMetrics } from 'react-native-safe-area-context';
 import { MODAL_MIN_BOTTOM_PAD, resolveModalInset } from '../utils/modalInsets';
 
@@ -21,6 +22,8 @@ export function useModalInsets(minimumBottom: number = MODAL_MIN_BOTTOM_PAD): Mo
     top: resolveModalInset({
       contextValue: insets.top,
       metricsValue: initialWindowMetrics?.insets.top,
+      // Android knows its own status bar height even inside a Modal's window.
+      platformValue: Platform.OS === 'android' ? StatusBar.currentHeight : undefined,
     }),
     bottom: resolveModalInset({
       contextValue: insets.bottom,

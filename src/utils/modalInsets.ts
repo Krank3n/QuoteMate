@@ -29,9 +29,21 @@ export const MODAL_MIN_BOTTOM_PAD = 16;
 export function resolveModalInset(args: {
   contextValue?: number;
   metricsValue?: number;
+  /**
+   * What the platform itself reports, independent of any provider. On
+   * Android this is StatusBar.currentHeight: inside a <Modal> the context
+   * reads 0 and initialWindowMetrics is often null there, so without it the
+   * Invoice Email header sat under the clock and signal icons.
+   */
+  platformValue?: number | null;
   minimum?: number;
 }): number {
-  const usable = (v: number | undefined): number =>
+  const usable = (v: number | null | undefined): number =>
     typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : 0;
-  return Math.max(usable(args.contextValue), usable(args.metricsValue), args.minimum ?? 0);
+  return Math.max(
+    usable(args.contextValue),
+    usable(args.metricsValue),
+    usable(args.platformValue),
+    args.minimum ?? 0,
+  );
 }
