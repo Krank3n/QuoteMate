@@ -216,7 +216,7 @@ import {
   buildQuotePdfHtmlForQuote,
   hasCustomerResponded,
   describeCustomerResponse,
-  recordReminderSend,
+  sendAuditPatch,
   type SquareLinkMinter,
 } from './documentHandlers';
 export { getStageViolationCounts, convertDocumentToInvoice } from './documentHandlers';
@@ -240,7 +240,9 @@ import { normaliseTimestamp } from './timestamps.helpers';
 import {
   selectQuotesForFollowUp,
   selectInvoicesForFollowUp,
-  CHASEABLE_INVOICE_STATUSES,
+  followUpQuoteFromRecords,
+  followUpInvoiceFromRecords,
+  legacyIdForDocument,
   DEFAULT_ON_FROM_MS as FOLLOW_UP_DEFAULT_ON_FROM_MS,
   TOKEN_EXPIRATION_MS as CUSTOMER_FOLLOW_UP_TOKEN_EXPIRATION_MS,
   type FollowUpQuote,
@@ -11400,6 +11402,18 @@ export const onQuoteExpiring = functions.pubsub
 // so neither fits in the 60-second default any more. A run that times out
 // half-way just resumes tomorrow — the per-doc counters make that safe — but
 // the tail of the user list would never be reached.
+//
+// Both jobs select off `documents` by stage and merge in the legacy row — see
+// followUpQuoteFromRecords for why the legacy status alone cannot be trusted.
+interface FollowUpRefs {
+  /** users/{uid}/documents/{id} — the row selection runs on. */
+  ref: admin.firestore.DocumentReference;
+  data: Record<string, any>;
+  /** users/{uid}/quotes|invoices/{legacyId} — what the acceptance page, Square link and older clients read. */
+  legacyRef: admin.firestore.DocumentReference;
+  /** null when no legacy row exists; nothing is ever minted there from here. */
+  legacy: Record<string, any> | null;
+}
 export const customerQuoteFollowUp = functions
   .runWith({ timeoutSeconds: 540 })
   .pubsub
@@ -11408,8 +11422,6 @@ export const customerQuoteFollowUp = functions
   .onRun(async () => {
     const now = Date.now();
     const usersSnapshot = await db.collection('users').get();
-
-    const toMsOrNull = (v: unknown): number | null => normaliseTimestamp(v)?.getTime() ?? null;
 
     for (const userDoc of usersSnapshot.docs) {
       const settingsDoc = await db.doc(`users/${userDoc.id}/settings/business`).get();
@@ -11425,38 +11437,34 @@ export const customerQuoteFollowUp = functions
       const businessName = settings.businessName || '';
       if (!businessName) continue;
 
-      const quotesSnapshot = await userDoc.ref
-        .collection('quotes')
-        .where('status', '==', 'sent')
+      // Selected by unified stage, not legacy status: a legacy row the app
+      // rewound to 'draft' after the send would otherwise hide a sent quote
+      // from this job for good (60 of 208 on 16 Sep 2026).
+      const sentSnapshot = await userDoc.ref
+        .collection('documents')
+        .where('stage', '==', 'quote_sent')
         .get();
-      if (quotesSnapshot.empty) continue;
+      if (sentSnapshot.empty) continue;
 
       // Looked up once per tradie: replies route here, and a quote addressed
       // here is a self-send the selector must skip.
       const authEmail = await getUserEmail(userDoc.id);
       const tradieReplyEmail = settings.email || authEmail || undefined;
 
-      // Normalise each doc into the pure selector's shape, keeping a handle
-      // back to the Firestore doc for the writes below.
-      const byId = new Map<string, admin.firestore.QueryDocumentSnapshot>();
+      // Normalise each document, merged with its legacy row (which carries the
+      // counters this job wrote before it read documents), into the pure
+      // selector's shape, keeping both refs for the writes below.
+      const byId = new Map<string, FollowUpRefs>();
       const candidates: FollowUpQuote[] = [];
-      for (const quoteDoc of quotesSnapshot.docs) {
-        const q = quoteDoc.data();
-        byId.set(quoteDoc.id, quoteDoc);
-        candidates.push({
-          id: quoteDoc.id,
-          customerEmail: q.customerEmail,
-          sendMethod: q.sendMethod,
-          // Any sign the customer has answered: the canonical respondedAt, or
-          // a legacy acceptedAt/declinedAt on docs that never got it.
-          respondedAtMs:
-            toMsOrNull(q.respondedAt) ?? toMsOrNull(q.acceptedAt) ?? toMsOrNull(q.declinedAt),
-          suppressAutoFollowUp: !!q.suppressAutoFollowUp,
-          sentAtMs: toMsOrNull(q.sentAt),
-          acceptanceTokenCreatedAtMs: toMsOrNull(q.acceptanceTokenCreatedAt),
-          followUpCount: q.customerFollowUpCount ?? 0,
-          lastFollowUpAtMs: toMsOrNull(q.customerFollowUpLastAt),
-        });
+      for (const docSnap of sentSnapshot.docs) {
+        const d = docSnap.data();
+        if (d.type && d.type !== 'quote') continue;
+        const legacyRef = userDoc.ref
+          .collection('quotes')
+          .doc(legacyIdForDocument(docSnap.id, d, 'quote'));
+        const legacy = (await legacyRef.get()).data() ?? null;
+        byId.set(docSnap.id, { ref: docSnap.ref, data: d, legacyRef, legacy });
+        candidates.push(followUpQuoteFromRecords(docSnap.id, d, legacy));
       }
 
       const due = selectQuotesForFollowUp(candidates, now, {
@@ -11465,9 +11473,10 @@ export const customerQuoteFollowUp = functions
       });
 
       for (const { quote, followUpNumber } of due) {
-        const quoteDoc = byId.get(quote.id);
-        if (!quoteDoc) continue;
-        const q = quoteDoc.data();
+        const refs = byId.get(quote.id);
+        if (!refs) continue;
+        // The email copy reads off the unified row, legacy filling any gap.
+        const q = { ...(refs.legacy ?? {}), ...refs.data };
 
         // One quote's failure (token write, bounce lookup, the stamp) must not
         // abort the run for every tradie after it — and a stamp that fails
@@ -11480,7 +11489,7 @@ export const customerQuoteFollowUp = functions
           const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
           await db.collection('quoteAcceptanceTokens').doc(tokenHash).set({
             userId: userDoc.id,
-            quoteId: quoteDoc.id,
+            quoteId: refs.legacyRef.id,
             createdAt: admin.firestore.FieldValue.serverTimestamp(),
           });
           const acceptanceUrl = acceptancePageUrlForToken(token);
@@ -11505,20 +11514,33 @@ export const customerQuoteFollowUp = functions
           });
 
           if (sent) {
-            await quoteDoc.ref.update({
+            // Counters land on both rows in one batch: the unified row is what
+            // this job selects from, the legacy row is what the acceptance
+            // page and older clients read. A legacy row that doesn't exist is
+            // left that way — a sparse quotes/ doc would mirror back over the
+            // real document.
+            const stampedAt = Date.now();
+            const batch = db.batch();
+            if (refs.legacy) {
+              batch.set(refs.legacyRef, {
+                customerFollowUpCount: quote.followUpCount + 1,
+                customerFollowUpLastAt: admin.firestore.FieldValue.serverTimestamp(),
+                acceptanceTokenHash: tokenHash,
+                acceptanceTokenCreatedAt: admin.firestore.FieldValue.serverTimestamp(),
+              }, { merge: true });
+            }
+            // Admin visibility: a reminder is a send too (sendAuditPatch).
+            batch.set(refs.ref, {
               customerFollowUpCount: quote.followUpCount + 1,
-              customerFollowUpLastAt: admin.firestore.FieldValue.serverTimestamp(),
-              acceptanceTokenHash: tokenHash,
-              acceptanceTokenCreatedAt: admin.firestore.FieldValue.serverTimestamp(),
-            });
-            // Admin visibility: a reminder is a send too.
-            await recordReminderSend(userDoc.id, quoteDoc.id, 'quote').catch((err) => {
-              console.warn(`customerQuoteFollowUp: send audit failed for ${quoteDoc.id}`, (err as Error)?.message);
-            });
+              customerFollowUpLastAt: stampedAt,
+              acceptanceTokenCreatedAt: stampedAt,
+              ...sendAuditPatch(stampedAt),
+            }, { merge: true });
+            await batch.commit();
           }
         } catch (err) {
           console.error(
-            `customerQuoteFollowUp: quote ${quoteDoc.id} (user ${userDoc.id}) reminder ${followUpNumber} failed`,
+            `customerQuoteFollowUp: quote ${refs.ref.id} (user ${userDoc.id}) reminder ${followUpNumber} failed`,
             (err as Error)?.message,
           );
         }
@@ -11550,8 +11572,6 @@ export const customerInvoiceFollowUp = functions
     const now = Date.now();
     const usersSnapshot = await db.collection('users').get();
 
-    const toMsOrNull = (v: unknown): number | null => normaliseTimestamp(v)?.getTime() ?? null;
-
     for (const userDoc of usersSnapshot.docs) {
       const settingsDoc = await db.doc(`users/${userDoc.id}/settings/business`).get();
       const settings = settingsDoc.exists ? (settingsDoc.data() || {}) : {};
@@ -11568,34 +11588,31 @@ export const customerInvoiceFollowUp = functions
       const businessName = settings.businessName || '';
       if (!businessName) continue;
 
-      const invoicesSnapshot = await userDoc.ref
-        .collection('invoices')
-        .where('status', 'in', Array.from(CHASEABLE_INVOICE_STATUSES))
+      // Selected by unified stage (the two stages that still owe money), not
+      // legacy status — same reasoning as the quote job above. A single-field
+      // `in` needs no composite index.
+      const owingSnapshot = await userDoc.ref
+        .collection('documents')
+        .where('stage', 'in', ['invoice_sent', 'partially_paid'])
         .get();
-      if (invoicesSnapshot.empty) continue;
+      if (owingSnapshot.empty) continue;
 
       const authEmail = await getUserEmail(userDoc.id);
       const tradieReplyEmail = settings.email || authEmail || undefined;
 
-      const byId = new Map<string, admin.firestore.QueryDocumentSnapshot>();
+      const byId = new Map<string, FollowUpRefs>();
       const candidates: FollowUpInvoice[] = [];
-      for (const invoiceDoc of invoicesSnapshot.docs) {
-        const inv = invoiceDoc.data();
-        byId.set(invoiceDoc.id, invoiceDoc);
-        candidates.push({
-          id: invoiceDoc.id,
-          customerEmail: inv.customerEmail,
-          sendMethod: inv.sendMethod,
-          status: inv.status,
-          suppressAutoFollowUp: !!inv.suppressAutoFollowUp,
-          sentAtMs: toMsOrNull(inv.sentAt),
-          dueAtMs: toMsOrNull(inv.dueDate),
-          // The same helper the Square link charges off, so the figure in the
-          // email can never disagree with the figure at the checkout.
-          balanceDue: invoiceLinkAmountDue(inv),
-          followUpCount: inv.customerFollowUpCount ?? 0,
-          lastFollowUpAtMs: toMsOrNull(inv.customerFollowUpLastAt),
-        });
+      for (const docSnap of owingSnapshot.docs) {
+        const d = docSnap.data();
+        if (d.type !== 'invoice') continue;
+        // A converted invoice's document lives under the source QUOTE's id;
+        // legacyInvoiceId is the row the Square link is minted off.
+        const legacyRef = userDoc.ref
+          .collection('invoices')
+          .doc(legacyIdForDocument(docSnap.id, d, 'invoice'));
+        const legacy = (await legacyRef.get()).data() ?? null;
+        byId.set(docSnap.id, { ref: docSnap.ref, data: d, legacyRef, legacy });
+        candidates.push(followUpInvoiceFromRecords(docSnap.id, d, legacy));
       }
 
       const due = selectInvoicesForFollowUp(candidates, now, {
@@ -11612,9 +11629,12 @@ export const customerInvoiceFollowUp = functions
       ).exists;
 
       for (const { invoice, followUpNumber } of due) {
-        const invoiceDoc = byId.get(invoice.id);
-        if (!invoiceDoc) continue;
-        const inv = invoiceDoc.data();
+        const refs = byId.get(invoice.id);
+        if (!refs) continue;
+        // The email copy reads off the unified row, legacy filling any gap
+        // (invoiceNumber is a legacy field; `number` is its unified name).
+        const inv = { ...(refs.legacy ?? {}), ...refs.data };
+        const legacyInvoiceId = refs.legacyRef.id;
 
         // One invoice's failure (a Square timeout, a bounce, the stamp) must
         // not abort the run for every tradie after it — and a stamp that fails
@@ -11631,11 +11651,11 @@ export const customerInvoiceFollowUp = functions
           let payNowUrl: string | undefined;
           if (hasSquare) {
             try {
-              const link = await createSquarePaymentLinkInternal(userDoc.id, invoiceDoc.id);
+              const link = await createSquarePaymentLinkInternal(userDoc.id, legacyInvoiceId);
               if (link) payNowUrl = link.paymentLinkUrl;
             } catch (linkErr) {
               console.error(
-                `customerInvoiceFollowUp: pay link mint failed for invoice ${invoiceDoc.id} (user ${userDoc.id})`,
+                `customerInvoiceFollowUp: pay link mint failed for invoice ${legacyInvoiceId} (user ${userDoc.id})`,
                 (linkErr as Error)?.message,
               );
             }
@@ -11646,7 +11666,7 @@ export const customerInvoiceFollowUp = functions
             to: inv.customerEmail,
             customerName: inv.customerName || '',
             jobName: inv.job?.name || 'your job',
-            invoiceNumber: inv.invoiceNumber,
+            invoiceNumber: inv.invoiceNumber ?? inv.number,
             balanceDue: invoice.balanceDue,
             dueDate: new Date(dueAtMs).toISOString(),
             daysOverdue: Math.max(0, Math.floor((now - dueAtMs) / (24 * 60 * 60 * 1000))),
@@ -11667,18 +11687,27 @@ export const customerInvoiceFollowUp = functions
           });
 
           if (sent) {
-            await invoiceDoc.ref.update({
+            // Same two-row stamp as the quote job; see there for why a missing
+            // legacy row is left missing.
+            const stampedAt = Date.now();
+            const batch = db.batch();
+            if (refs.legacy) {
+              batch.set(refs.legacyRef, {
+                customerFollowUpCount: invoice.followUpCount + 1,
+                customerFollowUpLastAt: admin.firestore.FieldValue.serverTimestamp(),
+              }, { merge: true });
+            }
+            // Admin visibility: a reminder is a send too (sendAuditPatch).
+            batch.set(refs.ref, {
               customerFollowUpCount: invoice.followUpCount + 1,
-              customerFollowUpLastAt: admin.firestore.FieldValue.serverTimestamp(),
-            });
-            // Admin visibility: a reminder is a send too.
-            await recordReminderSend(userDoc.id, invoiceDoc.id, 'invoice').catch((err) => {
-              console.warn(`customerInvoiceFollowUp: send audit failed for ${invoiceDoc.id}`, (err as Error)?.message);
-            });
+              customerFollowUpLastAt: stampedAt,
+              ...sendAuditPatch(stampedAt),
+            }, { merge: true });
+            await batch.commit();
           }
         } catch (err) {
           console.error(
-            `customerInvoiceFollowUp: invoice ${invoiceDoc.id} (user ${userDoc.id}) reminder ${followUpNumber} failed`,
+            `customerInvoiceFollowUp: invoice ${legacyInvoiceId} (user ${userDoc.id}) reminder ${followUpNumber} failed`,
             (err as Error)?.message,
           );
         }
