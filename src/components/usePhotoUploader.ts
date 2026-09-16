@@ -114,6 +114,8 @@ export interface PhotoUploader {
   /** Slots left for the multi-shot camera. */
   remainingSlots: number;
   hasAnyUploading: boolean;
+  /** Position within the batch in flight, else null. */
+  uploadProgress: UploadProgress | null;
   /** "Uploading 4 of 12" while a batch is in flight, else null. */
   progressLabel: string | null;
 
@@ -458,6 +460,7 @@ export function usePhotoUploader({
     atCap,
     remainingSlots: remainingPhotoSlots(totalCount, max),
     hasAnyUploading: localPhotos.some(p => p.uploading),
+    uploadProgress,
     progressLabel: uploadProgressLabel(uploadProgress),
 
     uploadUris,
