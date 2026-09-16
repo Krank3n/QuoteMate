@@ -40,6 +40,7 @@ import { PaymentChip, shouldShowPaymentChip, type PaymentContext } from './Payme
 import { selectionTap } from '../utils/haptics';
 import { previewDocumentPDF } from '../utils/pdfGenerator';
 import { DueDateSheet } from './DueDateSheet';
+import { ScopeRow, useScopeRowStyles } from './ScopeRow';
 import { documentService } from '../services/documentService';
 import { useStore } from '../store/useStore';
 import { useAlertModal } from '../hooks/useAlertModal';
@@ -177,6 +178,7 @@ export function JobScopeCard({
   const saveQuote = useStore((s) => s.saveQuote);
   const saveInvoice = useStore((s) => s.saveInvoice);
 
+  const rowStyles = useScopeRowStyles();
   const [expanded, setExpanded] = useState(false);
   // Display & deposit has its own expand state so tapping its chevron
   // doesn't drag the Materials/Labour sections open with it. The parent
@@ -406,20 +408,20 @@ export function JobScopeCard({
               selectionTap();
               setDateSheetVisible(true);
             }}
-            style={styles.row}
+            style={rowStyles.row}
             accessibilityRole="button"
             accessibilityLabel="Change document date"
           >
-            <View style={styles.rowIcon}>
+            <View style={rowStyles.rowIcon}>
               <MaterialCommunityIcons
                 name={'calendar-outline' as any}
                 size={18}
                 color={themeColors.accentText}
               />
             </View>
-            <View style={styles.rowBody}>
-              <Text style={styles.rowLabel}>Document date</Text>
-              <Text style={styles.rowBodyText} numberOfLines={1}>
+            <View style={rowStyles.rowBody}>
+              <Text style={rowStyles.rowLabel}>Document date</Text>
+              <Text style={rowStyles.rowBodyText} numberOfLines={1}>
                 {new Date(
                   doc.documentDate ?? (isInvoice ? doc.issueDate ?? doc.updatedAt : doc.updatedAt),
                 ).toLocaleDateString('en-AU', {
@@ -610,7 +612,7 @@ function PaymentTermsRow({
   invoice: Invoice;
   onChange: (next: Invoice) => void;
 }) {
-  const styles = useStyles();
+  const styles = useScopeRowStyles();
   const themeColors = useThemeColors();
   const [menuVisible, setMenuVisible] = useState(false);
   const currentTerms: PaymentTerms = invoice.paymentTerms || 'net_14';
@@ -685,59 +687,6 @@ function PaymentTermsRow({
       <Menu.Item onPress={() => applyTerms('net_14')} title="Net 14 (14 days)" />
       <Menu.Item onPress={() => applyTerms('net_30')} title="Net 30 (30 days)" />
     </Menu>
-  );
-}
-
-function ScopeRow({
-  icon,
-  label,
-  body,
-  rightLabel,
-  muted,
-  onPress,
-}: {
-  icon: string;
-  label: string;
-  body: string;
-  rightLabel?: string;
-  muted?: boolean;
-  onPress: () => void;
-}) {
-  const styles = useStyles();
-  const themeColors = useThemeColors();
-  return (
-    <Pressable
-      onPress={() => {
-        selectionTap();
-        onPress();
-      }}
-      style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
-    >
-      <View style={styles.rowIcon}>
-        <MaterialCommunityIcons
-          name={icon as any}
-          size={18}
-          color={themeColors.accentText}
-        />
-      </View>
-      <View style={styles.rowBody}>
-        <Text style={styles.rowLabel}>{label}</Text>
-        <Text
-          style={[styles.rowBodyText, muted && styles.rowBodyMuted]}
-          numberOfLines={2}
-        >
-          {body}
-        </Text>
-      </View>
-      {rightLabel ? (
-        <Text style={styles.rowRight}>{rightLabel}</Text>
-      ) : null}
-      <MaterialCommunityIcons
-        name={'chevron-right' as any}
-        size={18}
-        color={themeColors.textDisabled}
-      />
-    </Pressable>
   );
 }
 
@@ -870,50 +819,6 @@ const useStyles = makeStyles((t) => ({
   },
   pressed: {
     opacity: 0.7,
-  },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    padding: 10,
-    borderRadius: 12,
-    backgroundColor: t.colors.surfacePressed,
-  },
-  rowPressed: {
-    opacity: 0.85,
-  },
-  rowIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: t.colors.accentSubtle,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  rowBody: {
-    flex: 1,
-    gap: 2,
-  },
-  rowLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: t.colors.textMuted,
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
-  },
-  rowBodyText: {
-    fontSize: 13,
-    color: t.colors.text,
-    lineHeight: 18,
-  },
-  rowBodyMuted: {
-    color: t.colors.textMuted,
-    fontStyle: 'italic',
-  },
-  rowRight: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: t.colors.text,
   },
   previewButton: {
     flexDirection: 'row',
