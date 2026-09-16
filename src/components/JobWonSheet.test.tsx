@@ -210,6 +210,33 @@ describe('the Pro offer', () => {
     ).toBeTruthy();
   });
 
+  it('adds what Pro costs in minutes of the tradie\'s own labour when the rate is known', () => {
+    renderSheet({ trialDaysRemaining: 2, laborRate: 110 });
+    expect(
+      screen.getByText(
+        'Your trial ends in 2 days — Pro keeps bank transfer, PayID and PayPal on your documents. At $110 an hour, Pro costs about 27 minutes of your time a month.',
+      ),
+    ).toBeTruthy();
+  });
+
+  it('prices Pro for a free account too, after the payment-methods line', () => {
+    renderSheet({ trialDaysRemaining: null, hasOtherPaymentMethod: true, laborRate: 85 });
+    expect(
+      screen.getByText(
+        'Pro also puts bank transfer, PayID and PayPal on your quotes and invoices, alongside Square. At $85 an hour, Pro costs about 35 minutes of your time a month.',
+      ),
+    ).toBeTruthy();
+  });
+
+  it('leaves the line alone when the account has no usable rate', () => {
+    renderSheet({ trialDaysRemaining: 2, laborRate: 0 });
+    expect(
+      screen.getByText(
+        'Your trial ends in 2 days — Pro keeps bank transfer, PayID and PayPal on your documents.',
+      ),
+    ).toBeTruthy();
+  });
+
   it('still puts the money action ahead of Pro when both are shown', () => {
     const { props } = renderSheet({ trialDaysRemaining: 2, collect: 'deposit' });
 

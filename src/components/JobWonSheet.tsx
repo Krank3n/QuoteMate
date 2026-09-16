@@ -33,6 +33,7 @@ import { formatCurrency } from '../utils/quoteCalculator';
 import { trackEvent } from '../services/analyticsService';
 import { selectionTap, lightTap } from '../utils/haptics';
 import type { PaymentMethodSettings } from '../types';
+import { proTimeLine } from '../screens/paywallCopy';
 
 /** The money step a won job is up to. Never a percentage — see collectBody. */
 export type WonCollectAction = 'deposit' | 'invoice';
@@ -63,6 +64,12 @@ interface JobWonSheetProps {
    * generic — see shouldOfferPro.
    */
   hasOtherPaymentMethod: boolean;
+  /**
+   * The rate this account quotes labour at ($/hour), so the Pro line can say
+   * what Pro costs in minutes of their own work. Omitted or unusable → the
+   * line stays as it was.
+   */
+  laborRate?: number | null;
 }
 
 /** The primary button: the money step, named plainly. */
@@ -114,16 +121,22 @@ export function shouldOfferPro(args: {
   return args.hasOtherPaymentMethod;
 }
 
-/** The one line on what Pro does, told from where the tradie stands. */
-export function proLine(trialDaysRemaining: number | null): string {
-  if (trialDaysRemaining === null) {
-    return 'Pro also puts bank transfer, PayID and PayPal on your quotes and invoices, alongside Square.';
-  }
-  const ending =
-    trialDaysRemaining <= 0
-      ? 'Your trial ends today'
-      : `Your trial ends in ${trialDaysRemaining} day${trialDaysRemaining === 1 ? '' : 's'}`;
-  return `${ending} — Pro keeps bank transfer, PayID and PayPal on your documents.`;
+/**
+ * The one line on what Pro does, told from where the tradie stands, followed
+ * by what it costs in minutes of their own labour when the rate is known — a
+ * won job is the one moment the value and the price sit side by side.
+ */
+export function proLine(trialDaysRemaining: number | null, laborRate?: number | null): string {
+  const what =
+    trialDaysRemaining === null
+      ? 'Pro also puts bank transfer, PayID and PayPal on your quotes and invoices, alongside Square.'
+      : `${
+          trialDaysRemaining <= 0
+            ? 'Your trial ends today'
+            : `Your trial ends in ${trialDaysRemaining} day${trialDaysRemaining === 1 ? '' : 's'}`
+        } — Pro keeps bank transfer, PayID and PayPal on your documents.`;
+  const cost = proTimeLine(laborRate);
+  return cost ? `${what} ${cost}` : what;
 }
 
 export function JobWonSheet({
@@ -135,6 +148,7 @@ export function JobWonSheet({
   collect,
   onCollect,
   hasOtherPaymentMethod,
+  laborRate,
 }: JobWonSheetProps) {
   const styles = useStyles();
   const navigation = useNavigation<any>();
@@ -198,7 +212,7 @@ export function JobWonSheet({
 
         {offerPro ? (
           <>
-            <Text style={styles.proNote}>{proLine(trialDaysRemaining)}</Text>
+            <Text style={styles.proNote}>{proLine(trialDaysRemaining, laborRate)}</Text>
             <Button mode="text" onPress={handleSeePro} style={styles.secondaryButton}>
               See Pro
             </Button>

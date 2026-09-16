@@ -9,6 +9,8 @@
  *
  * Pure so it can be unit tested without the store graph.
  */
+import { ACTUAL_PRICE_AUD, BillingPeriod } from '../config/pricingConfig';
+import { TRIAL_DAYS, TRIAL_MS } from '../utils/trialConfig';
 import {
   QM_APP_FEE_PCT_ONLINE,
   QM_APP_FEE_PCT_ONLINE_FREE,
@@ -64,8 +66,31 @@ export const PRO_FEATURES: readonly ProFeature[] = [
 
 export type PaywallPlanState =
   | { kind: 'pro' }
+  /** The trial clock has not started: it starts on the first quote. */
+  | { kind: 'trial_pending' }
   | { kind: 'trial'; daysRemaining: number }
   | { kind: 'free' };
+
+/**
+ * One rule for "where does this account stand", shared by the paywall, the
+ * Settings row and anything else that names the plan — so a tradie never
+ * reads "Free Plan" on one screen and "14 days left" on the next. The trial
+ * clock starts on the first quote (trialStartedAt), not at signup.
+ */
+export function paywallPlanState(args: {
+  isPro: boolean;
+  trialExpired: boolean;
+  trialStartedAt: Date | string | number | null | undefined;
+  now?: number;
+}): PaywallPlanState {
+  if (args.isPro) return { kind: 'pro' };
+  if (args.trialExpired) return { kind: 'free' };
+  const startMs = args.trialStartedAt ? new Date(args.trialStartedAt).getTime() : NaN;
+  if (!Number.isFinite(startMs)) return { kind: 'trial_pending' };
+  const elapsed = (args.now ?? Date.now()) - startMs;
+  const daysRemaining = Math.max(0, Math.ceil((TRIAL_MS - elapsed) / (24 * 60 * 60 * 1000)));
+  return { kind: 'trial', daysRemaining };
+}
 
 /** The line under the paywall title: where this account stands right now. */
 export function paywallSubtitle(state: PaywallPlanState): string {
@@ -74,6 +99,8 @@ export function paywallSubtitle(state: PaywallPlanState): string {
       return 'Pro is active on this account';
     case 'free':
       return 'Your free trial has ended';
+    case 'trial_pending':
+      return `Your ${TRIAL_DAYS}-day Pro trial starts with your first quote`;
     case 'trial': {
       const d = state.daysRemaining;
       return `${d} day${d === 1 ? '' : 's'} left in your free trial`;
@@ -82,18 +109,93 @@ export function paywallSubtitle(state: PaywallPlanState): string {
 }
 
 /**
- * The note under the subtitle for accounts that are not yet Pro. A trial is
- * Pro already, so the ask is to keep it; a free account keeps quoting and
- * Square invoicing regardless, so the note says so before listing what Pro
- * adds. Pro accounts get no note.
+ * The note under the subtitle for accounts that are not yet Pro. Neither
+ * store carries an introductory offer, so a subscription taken during the
+ * trial is billed the moment it is confirmed — the note says so, because the
+ * old "subscribe to keep it after the trial" read as if billing waited. A free
+ * account keeps quoting and Square invoicing regardless, so the note says so
+ * before listing what Pro adds. Pro accounts get no note.
  */
 export function paywallHeaderNote(state: PaywallPlanState): string | null {
   switch (state.kind) {
     case 'pro':
       return null;
+    case 'trial_pending':
+      return `Make a quote first and Pro is free for ${TRIAL_DAYS} days. Subscribing now bills you today.`;
     case 'trial':
-      return "You're using Pro now. Subscribe to keep it after the trial.";
+      return "You're on Pro for the rest of your trial. Subscribing now bills you today, not when the trial ends.";
     case 'free':
       return 'Quotes and Square invoices still work on Free. Pro adds the rest.';
   }
+}
+
+/** The Settings row under "Subscription": the plan in a few words. */
+export function planRowSubtitle(state: PaywallPlanState): string {
+  switch (state.kind) {
+    case 'pro':
+      return 'Pro Member';
+    case 'free':
+      return 'Free plan';
+    case 'trial_pending':
+      return 'Pro trial starts with your first quote';
+    case 'trial': {
+      const d = state.daysRemaining;
+      return d <= 0 ? 'Pro trial ends today' : `Pro trial · ${d} day${d === 1 ? '' : 's'} left`;
+    }
+  }
+}
+
+/** The one button: what you get and what it costs, on the button itself. */
+export function proCtaLabel(priceLabel: string, period: BillingPeriod): string {
+  return `Start Pro · ${priceLabel}/${period === 'yearly' ? 'year' : 'month'}`;
+}
+
+/**
+ * The legal line under the button. Leads with when the money moves, since
+ * that is the question a trial user actually has.
+ */
+export function billingLine(priceLabel: string, period: BillingPeriod): string {
+  const unit = period === 'yearly' ? 'year' : 'month';
+  return `Billed today, then ${priceLabel}/${unit} as an auto-renewing ${period} subscription. Cancel anytime; renews unless cancelled 24 hours before the period ends.`;
+}
+
+/**
+ * Pro's price told in the tradie's own unit: minutes of their labour at the
+ * rate they quote with. "$49 a month" is an abstract number; "about 27
+ * minutes of your time" is a comparison they can make on the spot. The rate
+ * is whatever the account quotes labour at (BusinessSettings.defaultLaborRate,
+ * which onboarding stores as $85 when left blank), so the line says "at
+ * $85 an hour" rather than "your rate" and never invents a figure.
+ *
+ * Null when the rate is unusable, so callers render nothing rather than a
+ * claim built on garbage. The price defaults to the current list price of
+ * record; the paywall passes the store's live price when it has one.
+ */
+export function proTimeLine(
+  laborRatePerHour: number | null | undefined,
+  monthlyPriceAud: number = ACTUAL_PRICE_AUD.monthly,
+): string | null {
+  const rate = Number(laborRatePerHour);
+  const price = Number(monthlyPriceAud);
+  if (!Number.isFinite(rate) || rate <= 0 || !Number.isFinite(price) || price <= 0) return null;
+  const minutes = (price / rate) * 60;
+  return `At $${formatRate(rate)} an hour, Pro costs about ${describeMinutes(minutes)} of your time a month.`;
+}
+
+function formatRate(rate: number): string {
+  return Number.isInteger(rate) ? String(rate) : rate.toFixed(2).replace(/\.?0+$/, '');
+}
+
+/** "27 minutes", "an hour", "1½ hours", "2 hours" — never a decimal. */
+export function describeMinutes(minutes: number): string {
+  if (minutes < 55) {
+    const m = Math.max(1, Math.round(minutes));
+    return `${m} minute${m === 1 ? '' : 's'}`;
+  }
+  const halves = Math.round(minutes / 30); // whole half-hours
+  const hours = Math.floor(halves / 2);
+  const half = halves % 2 === 1;
+  if (hours === 0) return 'half an hour';
+  if (hours === 1) return half ? '1½ hours' : 'an hour';
+  return half ? `${hours}½ hours` : `${hours} hours`;
 }

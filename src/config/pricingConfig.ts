@@ -59,8 +59,23 @@ export const discountPercent = (period: BillingPeriod): number =>
  * derived from the charged prices so the paywall badge can never drift from
  * reality the way a hardcoded "Save 44%" could. $328 vs $588 → 44.
  */
-export const yearlyVsMonthlySavingsPercent = (): number =>
-  Math.round((1 - ACTUAL_PRICE_AUD.yearly / (ACTUAL_PRICE_AUD.monthly * 12)) * 100);
+export const yearlyVsMonthlySavingsPercent = (
+  monthly: number = ACTUAL_PRICE_AUD.monthly,
+  yearly: number = ACTUAL_PRICE_AUD.yearly,
+): number => {
+  if (!(monthly > 0) || !(yearly > 0)) return yearlyVsMonthlySavingsPercent();
+  return Math.max(0, Math.round((1 - yearly / (monthly * 12)) * 100));
+};
+
+/**
+ * The founding-member framing (struck-through regular price, "goes to $99")
+ * is written in AUD from the constants above, so it is only honest next to
+ * live store prices that are also AUD. An unknown currency, or none loaded
+ * yet, falls back to the AUD list prices and keeps the framing.
+ */
+export const foundingFramingApplies = (
+  products: ReadonlyArray<{ currency?: string | null }>,
+): boolean => products.every((p) => !p.currency || p.currency === 'AUD');
 
 // Platform fee on Square payments, in basis points. Free-plan sends carry the
 // higher fee; Pro drops it — the delta is Pro's concrete value for tradies

@@ -21,6 +21,7 @@ import { useStore } from '../store/useStore';
 import { LIGHT_MODE_ENABLED, makeStyles, useThemeColors } from '../theme';
 import { WebContainer } from '../components/WebContainer';
 import { GridBackground } from '../components/GridBackground';
+import { paywallPlanState, planRowSubtitle } from './paywallCopy';
 
 interface SettingsMenuItem {
   id: string;
@@ -207,7 +208,13 @@ export function SettingsScreen() {
         {
           id: 'subscription',
           title: 'Subscription',
-          subtitle: subscriptionStatus?.isPro ? 'Pro Member' : 'Free Plan',
+          subtitle: planRowSubtitle(
+            paywallPlanState({
+              isPro: !!subscriptionStatus?.isPro,
+              trialExpired: !!subscriptionStatus?.trialExpired,
+              trialStartedAt: subscriptionStatus?.trialStartedAt,
+            }),
+          ),
           icon: 'crown',
           screen: 'SubscriptionSettings',
           badge: subscriptionStatus?.isPro ? 'PRO' : undefined,

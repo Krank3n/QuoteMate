@@ -130,7 +130,14 @@ const notificationTaps = createNotificationTapNavigator({
 function RouteAwareKeyboardToolbar() {
   const [routeName, setRouteName] = useState<string | undefined>(undefined);
   useEffect(() => {
-    const update = () => setRouteName(navigationRef.getCurrentRoute()?.name);
+    // The container is not mounted on the first pass; asking it for a route
+    // then logs a "navigation object hasn't been initialized" console error on
+    // every dev launch (its toast sat over the tab bar and ate taps). The
+    // 'state' listener fires once it is ready, so waiting costs nothing.
+    const update = () => {
+      if (!navigationRef.isReady()) return;
+      setRouteName(navigationRef.getCurrentRoute()?.name);
+    };
     update();
     return navigationRef.addListener('state', update);
   }, []);

@@ -1261,6 +1261,7 @@ export function ViewJobScreen() {
           trialDaysRemaining={wonSheetState.trialDaysRemaining}
           collect={wonSheetState.collect}
           hasOtherPaymentMethod={hasNonSquarePaymentMethod(businessSettings?.paymentMethods)}
+          laborRate={businessSettings?.defaultLaborRate}
           onCollect={() => {
             const { doc, collect } = wonSheetState;
             setWonSheetState(null);
