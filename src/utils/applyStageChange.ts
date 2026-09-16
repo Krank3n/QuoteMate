@@ -12,9 +12,18 @@ import type { Document, DocumentStage, SendMethod } from '../types/document';
 import { documentToQuote } from '../types/documentAdapter';
 import { isStageDowngrade } from '../../shared/document/stage';
 
+/**
+ * Declared on the saves below so the store's forward-only status guard lets
+ * a deliberate rewind (sent → draft) through. Every other legacy save is
+ * held at or above the unified stage — see shared/document/forwardOnlyStatus.
+ */
+export interface StageChangeSaveOptions {
+  stageChange?: boolean;
+}
+
 export interface ApplyStageChangeHelpers {
-  saveQuote: (q: Quote) => Promise<void>;
-  saveInvoice: (i: Invoice) => Promise<void>;
+  saveQuote: (q: Quote, options?: StageChangeSaveOptions) => Promise<void>;
+  saveInvoice: (i: Invoice, options?: StageChangeSaveOptions) => Promise<void>;
   createInvoiceFromQuote: (q: Quote) => Promise<Invoice>;
   navigation?: { navigate: (route: string, params?: any) => void };
 }
@@ -82,7 +91,10 @@ export async function applyStageChange(
     const firstSend = target === 'invoice_sent' && !doc.sentAt
       ? { sentAt: Date.now(), sendMethod }
       : {};
-    await helpers.saveInvoice({ ...invoice, status, updatedAt: new Date(), ...firstSend });
+    await helpers.saveInvoice(
+      { ...invoice, status, updatedAt: new Date(), ...firstSend },
+      { stageChange: true },
+    );
     return;
   }
 
@@ -98,7 +110,10 @@ export async function applyStageChange(
   const firstSend = target === 'quote_sent' && !doc.sentAt
     ? { sentAt: Date.now(), sendMethod }
     : {};
-  await helpers.saveQuote({ ...quote, status, updatedAt: new Date(), ...firstSend });
+  await helpers.saveQuote(
+    { ...quote, status, updatedAt: new Date(), ...firstSend },
+    { stageChange: true },
+  );
 }
 
 /**
