@@ -11,9 +11,9 @@
  * still needs a home for them. So this card sits directly under the job
  * header, not inside the document card.
  *
- * Default state: open on a job with no photos (the Add tile is one tap
- * away), shut once it has some. The tradie's own taps hold for the screen
- * session only. The uploader lives here, above the collapse, so a batch
+ * Default state: shut, with or without photos, so the job page opens at
+ * the same height every time; the summary line says what is inside. The
+ * tradie's own taps hold for the screen session only. The uploader lives here, above the collapse, so a batch
  * keeps uploading with its progress in the summary and its alerts on
  * screen while the row is shut.
  */
@@ -46,7 +46,7 @@ export function JobPhotosCard(props: JobPhotosCardProps) {
   const photos = aggregatePhotos(uploader.allPhotos, documents);
   // Decided once, on the first render; from then on only the row's own tap
   // moves it, so adding a first photo does not snap the strip shut.
-  const [expanded, setExpanded] = useState(() => photos.length === 0);
+  const [expanded, setExpanded] = useState(false);
 
   if (photos.length === 0 && !editable) return null;
 

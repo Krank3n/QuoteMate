@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 /**
- * JobPhotosCard on the job page: a PHOTOS row that opens by default on a
- * job with no photos and stays shut once it has some, expands the strip
- * inline on tap, and carries an upload in its summary while collapsed.
+ * JobPhotosCard on the job page: a PHOTOS row that starts shut whether or
+ * not the job has photos, expands the strip inline on tap, and carries an
+ * upload in its summary while collapsed.
  */
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -59,10 +59,18 @@ beforeEach(() => {
 });
 
 describe('JobPhotosCard default state', () => {
-  it('starts expanded on a job with no photos, with the Add tile one tap away', () => {
+  it('starts collapsed on a job with no photos, with the empty summary in the row', () => {
     render(<JobPhotosCard job={makeJob()} documents={[]} onJobPhotosChange={vi.fn()} />);
     expect(screen.getByTestId('job-photos-row')).toBeTruthy();
     expect(screen.getByText('Add site or progress photos')).toBeTruthy();
+    expect(screen.queryByTestId('job-photos-body')).toBeNull();
+    expect(screen.queryByTestId('job-photo-strip-empty-add')).toBeNull();
+    expect(screen.getByLabelText('Show photos')).toBeTruthy();
+  });
+
+  it('opens on tap when the job has no photos and shows the Add tile', () => {
+    render(<JobPhotosCard job={makeJob()} documents={[]} onJobPhotosChange={vi.fn()} />);
+    fireEvent.click(screen.getByTestId('job-photos-row'));
     expect(screen.getByTestId('job-photos-body')).toBeTruthy();
     expect(screen.getByTestId('job-photo-strip-empty-add')).toBeTruthy();
     expect(screen.getByLabelText('Hide photos')).toBeTruthy();
@@ -144,6 +152,8 @@ describe('JobPhotosCard expand and collapse', () => {
     const { rerender } = render(
       <JobPhotosCard job={makeJob()} documents={[]} onJobPhotosChange={onJobPhotosChange} />,
     );
+    // The row starts shut on an empty job, so open it before adding.
+    fireEvent.click(screen.getByTestId('job-photos-row'));
     await act(async () => {
       fireEvent.click(screen.getByTestId('job-photo-strip-empty-add'));
     });
@@ -167,6 +177,8 @@ describe('JobPhotosCard while uploading', () => {
     storage.uploadQuotePhoto.mockImplementationOnce(() => new Promise(() => {}));
     render(<JobPhotosCard job={makeJob()} documents={[]} onJobPhotosChange={vi.fn()} />);
 
+    // The row starts shut on an empty job, so open it before adding.
+    fireEvent.click(screen.getByTestId('job-photos-row'));
     await act(async () => {
       fireEvent.click(screen.getByTestId('job-photo-strip-empty-add'));
     });
