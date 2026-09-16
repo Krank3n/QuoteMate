@@ -11,6 +11,9 @@ import { describe, it, expect } from 'vitest';
 import {
   selectQuotesForFollowUp,
   selectInvoicesForFollowUp,
+  followUpQuoteFromRecords,
+  followUpInvoiceFromRecords,
+  legacyIdForDocument,
   type FollowUpQuote,
   type FollowUpInvoice,
   FIRST_FOLLOW_UP_MS,
@@ -584,6 +587,139 @@ describe('openFromMs — the enrolment floor', () => {
     it('chases the same old invoice when no floor is passed', () => {
       const old = i({ dueAtMs: BEFORE });
       expect(selectInvoicesForFollowUp([old], BEFORE + 5 * DAY)).toHaveLength(1);
+    });
+  });
+});
+
+/**
+ * The schedulers select off the unified documents row and merge in the legacy
+ * row. The scenario that forced this: after a send the app re-saved the legacy
+ * quote as 'draft' from a stale copy, the mirror kept the unified row at
+ * quote_sent, and 60 sent quotes were never chased (16 Sep 2026).
+ */
+describe('reading candidates off the unified documents row', () => {
+  const SENT = NOW - 3 * DAY;
+  /** Unified row: sent, numbers for timestamps. */
+  const driftedDocument = {
+    stage: 'quote_sent',
+    type: 'quote',
+    customerEmail: 'customer@somewhere.com',
+    sendMethod: 'email',
+    sentAt: SENT,
+    acceptanceTokenCreatedAt: SENT + 50,
+  };
+  /** Legacy row: rewound to draft, Firestore Timestamp / ISO shapes. */
+  const driftedLegacy = {
+    status: 'draft',
+    customerEmail: 'customer@somewhere.com',
+    sendMethod: 'email',
+    sentAt: { seconds: Math.floor((SENT + 30) / 1000), nanoseconds: 0 },
+    acceptanceTokenCreatedAt: new Date(SENT + 30).toISOString(),
+  };
+
+  it('chases a sent quote whose legacy row was rewound to draft', () => {
+    const q = followUpQuoteFromRecords('q1', driftedDocument, driftedLegacy);
+    expect(q.sentAtMs).toBe(SENT);
+    const out = selectQuotesForFollowUp([q], NOW);
+    expect(out).toHaveLength(1);
+    expect(out[0].followUpNumber).toBe(1);
+  });
+
+  it('keeps the reminder count the legacy row already carries, so nothing is chased "first" twice', () => {
+    const q = followUpQuoteFromRecords('q1', driftedDocument, {
+      ...driftedLegacy,
+      customerFollowUpCount: 1,
+      customerFollowUpLastAt: new Date(NOW - DAY).toISOString(),
+    });
+    expect(q.followUpCount).toBe(1);
+    expect(q.lastFollowUpAtMs).toBe(NOW - DAY);
+    expect(selectQuotesForFollowUp([q], NOW)).toHaveLength(0);
+  });
+
+  it('takes the higher count and the later stamp when both rows carry them', () => {
+    const q = followUpQuoteFromRecords(
+      'q1',
+      { ...driftedDocument, customerFollowUpCount: 2, customerFollowUpLastAt: NOW - HOUR },
+      { ...driftedLegacy, customerFollowUpCount: 1, customerFollowUpLastAt: new Date(NOW - DAY).toISOString() },
+    );
+    expect(q.followUpCount).toBe(2);
+    expect(q.lastFollowUpAtMs).toBe(NOW - HOUR);
+  });
+
+  it('treats the later of the two token mint times as the live link', () => {
+    const q = followUpQuoteFromRecords(
+      'q1',
+      { ...driftedDocument, acceptanceTokenCreatedAt: SENT },
+      { ...driftedLegacy, acceptanceTokenCreatedAt: new Date(NOW - HOUR).toISOString() },
+    );
+    expect(q.acceptanceTokenCreatedAtMs).toBe(NOW - HOUR);
+  });
+
+  it('falls back to the legacy row for an address, channel and answer the unified row lacks', () => {
+    const q = followUpQuoteFromRecords(
+      'q1',
+      { stage: 'quote_sent', sentAt: SENT, acceptanceTokenCreatedAt: SENT },
+      { customerEmail: 'legacy@somewhere.com', sendMethod: 'sms', declinedAt: new Date(NOW - DAY).toISOString() },
+    );
+    expect(q.customerEmail).toBe('legacy@somewhere.com');
+    expect(q.sendMethod).toBe('sms');
+    expect(q.respondedAtMs).toBe(NOW - DAY);
+  });
+
+  it('works with no legacy row at all', () => {
+    const q = followUpQuoteFromRecords('q1', driftedDocument, null);
+    expect(q.followUpCount).toBe(0);
+    expect(q.lastFollowUpAtMs).toBeNull();
+    expect(selectQuotesForFollowUp([q], NOW)).toHaveLength(1);
+  });
+
+  it('a mute on either row mutes the quote', () => {
+    expect(followUpQuoteFromRecords('q1', driftedDocument, { ...driftedLegacy, suppressAutoFollowUp: true }).suppressAutoFollowUp).toBe(true);
+    expect(followUpQuoteFromRecords('q1', { ...driftedDocument, suppressAutoFollowUp: true }, driftedLegacy).suppressAutoFollowUp).toBe(true);
+    expect(followUpQuoteFromRecords('q1', driftedDocument, driftedLegacy).suppressAutoFollowUp).toBe(false);
+  });
+
+  describe('invoices', () => {
+    const DUE = NOW - 5 * DAY;
+    const document = {
+      stage: 'invoice_sent',
+      type: 'invoice',
+      customerEmail: 'customer@somewhere.com',
+      sendMethod: 'email',
+      sentAt: DUE - 14 * DAY,
+      dueDate: DUE,
+      balanceDue: 250,
+      legacyInvoiceId: 'inv-legacy',
+    };
+
+    it('maps invoice_sent to sent and partially_paid to partial', () => {
+      expect(followUpInvoiceFromRecords('d1', document, null).status).toBe('sent');
+      expect(followUpInvoiceFromRecords('d1', { ...document, stage: 'partially_paid' }, null).status).toBe('partial');
+    });
+
+    it('is not chaseable from any other stage', () => {
+      const paid = followUpInvoiceFromRecords('d1', { ...document, stage: 'paid' }, null);
+      expect(selectInvoicesForFollowUp([paid], NOW)).toHaveLength(0);
+    });
+
+    it('takes the balance from the legacy row the pay link is minted off, when there is one', () => {
+      const withLegacy = followUpInvoiceFromRecords('d1', document, { total: 1000, paidAmount: 400, status: 'draft' });
+      expect(withLegacy.balanceDue).toBe(600);
+      const withoutLegacy = followUpInvoiceFromRecords('d1', document, null);
+      expect(withoutLegacy.balanceDue).toBe(250);
+    });
+
+    it('chases an overdue invoice whose legacy row still reads draft', () => {
+      const inv = followUpInvoiceFromRecords('d1', document, { status: 'draft', total: 250, paidAmount: 0 });
+      const out = selectInvoicesForFollowUp([inv], NOW);
+      expect(out).toHaveLength(1);
+      expect(out[0].followUpNumber).toBe(1);
+    });
+
+    it('resolves the legacy row through legacyInvoiceId for a converted invoice, and the id itself otherwise', () => {
+      expect(legacyIdForDocument('quote-id', document, 'invoice')).toBe('inv-legacy');
+      expect(legacyIdForDocument('quote-id', { stage: 'invoice_sent' }, 'invoice')).toBe('quote-id');
+      expect(legacyIdForDocument('quote-id', { legacyQuoteId: 'quote-id' }, 'quote')).toBe('quote-id');
     });
   });
 });

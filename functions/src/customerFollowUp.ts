@@ -16,6 +16,11 @@
  * effects (minting tokens and pay links, sending, writing back).
  */
 
+import { normaliseTimestamp } from './timestamps.helpers';
+import { invoiceLinkAmountDue } from './paymentReceipt.helpers';
+import { stageToInvoiceStatus } from './shared/document/adapter';
+import type { DocumentStage } from './shared/document/types';
+
 /** Acceptance tokens expire 30 days after they're minted. index.ts imports this — one number. */
 export const TOKEN_EXPIRATION_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -342,4 +347,116 @@ export function selectInvoicesForFollowUp(
 
   // Anchored on the due date: the deepest-overdue invoice is chased first.
   return onePerCustomer(out, (s) => s.invoice.customerEmail, (s) => s.invoice.dueAtMs ?? Infinity);
+}
+
+// ---------------------------------------------------------------------------
+// Reading candidates off the unified `documents` collection
+// ---------------------------------------------------------------------------
+
+/**
+ * The schedulers select from `documents` by STAGE, never from the legacy
+ * `quotes` / `invoices` rows by status.
+ *
+ * The two disagree more often than they should. After an email send the app
+ * can re-save the legacy quote from a stale in-memory copy still marked
+ * 'draft' (the preview screen's copy is never refreshed by the listener), and
+ * the mirror's forward-only stage guard then keeps the unified row at
+ * quote_sent while the legacy row reads draft. On 16 Sep 2026 that was 60 of
+ * 208 sent quotes across 18 accounts: shown as "quote sent" in the admin,
+ * never chased, because this job was querying the legacy status. The unified
+ * stage is the one writer-protected against downgrade, so it is the one to
+ * trust.
+ *
+ * The legacy row still matters for two things: the reminder counters this job
+ * wrote there before the switch (so a quote already chased once never gets a
+ * second "first" reminder), and legacy-only response stamps. Both are merged
+ * in here, taking whichever side has the later / higher value. Pure.
+ */
+type FirestoreData = Record<string, any>;
+
+function ms(value: unknown): number | null {
+  return normaliseTimestamp(value)?.getTime() ?? null;
+}
+
+function latest(a: number | null, b: number | null): number | null {
+  if (a == null) return b;
+  if (b == null) return a;
+  return Math.max(a, b);
+}
+
+function reminderCount(value: unknown): number {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+}
+
+/**
+ * The legacy row a unified document was projected from. A quote's document
+ * shares its id; an invoice converted from a quote lives under the QUOTE's id
+ * and points back at its own legacy row through legacyInvoiceId.
+ */
+export function legacyIdForDocument(
+  id: string,
+  document: FirestoreData,
+  kind: 'quote' | 'invoice',
+): string {
+  const legacyId = kind === 'invoice' ? document.legacyInvoiceId : document.legacyQuoteId;
+  return typeof legacyId === 'string' && legacyId ? legacyId : id;
+}
+
+export function followUpQuoteFromRecords(
+  id: string,
+  document: FirestoreData,
+  legacy: FirestoreData | null | undefined,
+): FollowUpQuote {
+  const l = legacy ?? {};
+  return {
+    id,
+    customerEmail: document.customerEmail ?? l.customerEmail,
+    sendMethod: document.sendMethod ?? l.sendMethod,
+    // Any sign the customer has answered: the canonical respondedAt (a real
+    // re-send clears it on both rows), or a legacy acceptedAt/declinedAt on
+    // rows that never got it.
+    respondedAtMs:
+      ms(document.respondedAt) ?? ms(l.respondedAt) ?? ms(l.acceptedAt) ?? ms(l.declinedAt),
+    suppressAutoFollowUp: !!(document.suppressAutoFollowUp || l.suppressAutoFollowUp),
+    sentAtMs: ms(document.sentAt) ?? ms(l.sentAt),
+    // Both rows carry a mint time; the later one is the link that is live.
+    acceptanceTokenCreatedAtMs: latest(
+      ms(document.acceptanceTokenCreatedAt),
+      ms(l.acceptanceTokenCreatedAt),
+    ),
+    followUpCount: Math.max(
+      reminderCount(document.customerFollowUpCount),
+      reminderCount(l.customerFollowUpCount),
+    ),
+    lastFollowUpAtMs: latest(ms(document.customerFollowUpLastAt), ms(l.customerFollowUpLastAt)),
+  };
+}
+
+export function followUpInvoiceFromRecords(
+  id: string,
+  document: FirestoreData,
+  legacy: FirestoreData | null | undefined,
+): FollowUpInvoice {
+  const l = legacy ?? {};
+  return {
+    id,
+    customerEmail: document.customerEmail ?? l.customerEmail,
+    sendMethod: document.sendMethod ?? l.sendMethod,
+    // invoice_sent → 'sent', partially_paid → 'partial'; anything else is not
+    // a chaseable status and the selector drops it.
+    status: stageToInvoiceStatus(document.stage as DocumentStage),
+    suppressAutoFollowUp: !!(document.suppressAutoFollowUp || l.suppressAutoFollowUp),
+    sentAtMs: ms(document.sentAt) ?? ms(l.sentAt),
+    dueAtMs: ms(document.dueDate) ?? ms(l.dueDate),
+    // The Square pay link is minted off the legacy row, so while that row
+    // exists the figure in the email comes from the same arithmetic and can
+    // never disagree with the figure at the checkout.
+    balanceDue: legacy ? invoiceLinkAmountDue(legacy) : Number(document.balanceDue) || 0,
+    followUpCount: Math.max(
+      reminderCount(document.customerFollowUpCount),
+      reminderCount(l.customerFollowUpCount),
+    ),
+    lastFollowUpAtMs: latest(ms(document.customerFollowUpLastAt), ms(l.customerFollowUpLastAt)),
+  };
 }
