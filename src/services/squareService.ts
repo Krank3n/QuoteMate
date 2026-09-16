@@ -44,6 +44,8 @@ async function squareFetch(endpoint: string, body?: any): Promise<any> {
   return data;
 }
 
+import type { SquarePaymentReadiness } from '../utils/squareReadinessCopy';
+
 export interface SquareConnectionStatus {
   connected: boolean;
   merchantId?: string | null;
@@ -53,6 +55,12 @@ export interface SquareConnectionStatus {
   env?: SquareEnv;
   connectedAt?: string | null;
   disconnectedReason?: string | null;
+  /**
+   * Whether Square will actually charge a card for this account. Null until
+   * the server has asked Square; `ready: false` means every mint is refused
+   * and the settings screen explains why (see squareReadinessCopy).
+   */
+  paymentReadiness?: SquarePaymentReadiness | null;
 }
 
 /**
