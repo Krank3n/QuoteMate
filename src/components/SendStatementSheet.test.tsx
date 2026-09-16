@@ -19,6 +19,7 @@ vi.mock('react-native', () => ({
   StyleSheet: { create: (s: any) => s, absoluteFill: {} },
   ScrollView: 'div',
   Platform: { OS: 'web', select: (o: any) => o.web ?? o.default },
+  useWindowDimensions: () => ({ width: 390, height: 844, scale: 2, fontScale: 1 }),
 }));
 
 vi.mock('react-native-paper', () => ({

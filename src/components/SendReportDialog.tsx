@@ -13,7 +13,7 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { View, StyleSheet, ScrollView } from 'react-native';
+import { View, StyleSheet, ScrollView, useWindowDimensions } from 'react-native';
 // A paper <Modal> renders through <Portal> into the app's own React tree — the
 // same window — so the keyboard provider reaches it and the controller's
 // KeyboardAvoidingView works here. (A react-native <Modal> is a separate
@@ -65,6 +65,10 @@ export function SendReportDialog({
   onSent,
 }: SendReportDialogProps) {
   const styles = useStyles();
+  // A percentage maxHeight resolves against the keyboard-avoiding wrapper,
+  // which has no height of its own, and the card was clipped above its
+  // buttons on iPad. Size it from the window instead.
+  const { height: windowHeight } = useWindowDimensions();
   const themeColors = useThemeColors();
   const [composeVisible, setComposeVisible] = useState(false);
   const [to, setTo] = useState('');
@@ -204,7 +208,7 @@ export function SendReportDialog({
             // This asks native for the true screen position instead.
             automaticOffset
           >
-          <View style={styles.card}>
+          <View style={{ ...styles.card, maxHeight: windowHeight * 0.86 }}>
           <ScrollView keyboardShouldPersistTaps="handled">
             {sentTo ? (
               <View style={styles.done}>
@@ -324,7 +328,6 @@ const useStyles = makeStyles((t) => ({
     // the cap a two-field form ends up spanning a desktop window.
     width: '100%',
     maxWidth: 520,
-    maxHeight: '86%',
     backgroundColor: t.colors.surfaceRaised,
     borderRadius: 14,
     padding: 20,
