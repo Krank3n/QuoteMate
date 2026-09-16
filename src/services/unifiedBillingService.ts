@@ -62,7 +62,7 @@ class UnifiedBillingService {
             description: 'Unlimited quotes and premium features',
             price: '$49.00',
             priceValue: 49.0,
-            currency: 'USD',
+            currency: 'AUD',
             period: 'monthly',
           },
           {
@@ -71,7 +71,7 @@ class UnifiedBillingService {
             description: 'Unlimited quotes and premium features',
             price: '$328.00',
             priceValue: 328.0,
-            currency: 'USD',
+            currency: 'AUD',
             period: 'yearly',
           },
         ];

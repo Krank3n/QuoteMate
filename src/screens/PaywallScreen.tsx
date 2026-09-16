@@ -29,6 +29,8 @@ import { StripeCheckoutModal } from '../components/StripeCheckoutModal';
 import { CancellationReasonModal } from '../components/CancellationReasonModal';
 import { TRIAL_DAYS, TRIAL_MS } from '../utils/trialConfig';
 import {
+  ACTUAL_PRICE_AUD,
+  foundingFramingApplies,
   regularPriceLabel,
   yearlyVsMonthlySavingsPercent,
   feeSavingLabel,
@@ -40,7 +42,16 @@ import { resolvePurchaseAnalytics } from '../services/paywallAnalytics.helpers';
 import { ReceiptOutcome } from '../utils/purchaseValidation';
 import { validatePurchase, purchaseKey, claimPurchase, releasePurchase } from '../services/receiptEntitlement';
 import { GridBackground } from '../components/GridBackground';
-import { PRO_FEATURES, paywallSubtitle, paywallHeaderNote, PaywallPlanState } from './paywallCopy';
+import {
+  PRO_FEATURES,
+  paywallSubtitle,
+  paywallHeaderNote,
+  paywallPlanState,
+  proTimeLine,
+  proCtaLabel,
+  billingLine,
+  PaywallPlanState,
+} from './paywallCopy';
 
 const PRO_ON_MESSAGE =
   'Pro is switched on. Materials and pricing, every payment method and your logo are all unlocked.';
@@ -55,7 +66,7 @@ export function PaywallScreen() {
   // falls through to 'unknown'.
   const paywallSource: string = route.params?.source ?? 'unknown';
   const insets = useSafeAreaInsets();
-  const { subscriptionStatus, loadSubscription, documents } = useStore();
+  const { subscriptionStatus, loadSubscription, documents, businessSettings } = useStore();
   const { quoteCount, setPremium } = useSubscriptionStore();
   const [isUpgrading, setIsUpgrading] = useState(false);
   const [products, setProducts] = useState<any[]>([]);
@@ -67,7 +78,9 @@ export function PaywallScreen() {
   const [showCancellationModal, setShowCancellationModal] = useState(false);
   const [productsLoadError, setProductsLoadError] = useState(false);
   const [isRestoring, setIsRestoring] = useState(false);
-  const [selectedPlan, setSelectedPlan] = useState<'monthly' | 'yearly'>('yearly');
+  // Monthly first: the smaller commitment is the one to put in front of a
+  // tradie who is two weeks into a trial. Yearly stays a tap away.
+  const [selectedPlan, setSelectedPlan] = useState<'monthly' | 'yearly'>('monthly');
   // Founding-member cap status from config/foundingOffer (public read; the
   // aggregateEventFunnel cron computes it from REAL billed subs). null =
   // unknown/unavailable → all founding framing is suppressed, never faked.
@@ -360,6 +373,29 @@ export function PaywallScreen() {
 
   const selectedSku = selectedPlan === 'yearly' ? SUBSCRIPTION_SKUS.YEARLY : SUBSCRIPTION_SKUS.MONTHLY;
 
+  // Pro's price in minutes of the tradie's own labour, per month, for the plan
+  // they have selected: the store's live price when it loaded, else the list
+  // price of record. Null (nothing rendered) when the account has no usable rate.
+  const timeLine = useMemo(() => {
+    const live = products.find((p) => p.productId === selectedSku)?.price;
+    const perMonth =
+      typeof live === 'number' && Number.isFinite(live) && live > 0
+        ? selectedPlan === 'yearly' ? live / 12 : live
+        : selectedPlan === 'yearly' ? ACTUAL_PRICE_AUD.yearly / 12 : ACTUAL_PRICE_AUD.monthly;
+    return proTimeLine(businessSettings?.defaultLaborRate, perMonth);
+  }, [products, selectedSku, selectedPlan, businessSettings?.defaultLaborRate]);
+
+  // The founding anchors ("$99", "$658") are AUD constants; only show them
+  // beside AUD store prices. The savings badge uses the live prices when both
+  // loaded, else the list prices.
+  const foundingApplies = !!founding?.capActive && foundingFramingApplies(products);
+  const liveMonthly = products.find((p) => p.productId === SUBSCRIPTION_SKUS.MONTHLY)?.price;
+  const liveYearly = products.find((p) => p.productId === SUBSCRIPTION_SKUS.YEARLY)?.price;
+  const savingsPercent =
+    typeof liveMonthly === 'number' && typeof liveYearly === 'number'
+      ? yearlyVsMonthlySavingsPercent(liveMonthly, liveYearly)
+      : yearlyVsMonthlySavingsPercent();
+
   const handleRestorePurchases = async () => {
     if (Platform.OS === 'web') return;
 
@@ -548,11 +584,7 @@ export function PaywallScreen() {
 
   // Check if user is Pro
   const isPro = subscriptionStatus?.isPro || false;
-  const planState: PaywallPlanState = isPro
-    ? { kind: 'pro' }
-    : trialExpired
-      ? { kind: 'free' }
-      : { kind: 'trial', daysRemaining: trialDaysRemaining };
+  const planState: PaywallPlanState = paywallPlanState({ isPro, trialExpired, trialStartedAt });
   const headerNote = paywallHeaderNote(planState);
 
   const handleCheckoutSuccess = async () => {
@@ -648,9 +680,10 @@ export function PaywallScreen() {
         periodEndDate={subscriptionStatus?.currentPeriodEnd}
       />
 
+    <View style={styles.container}>
     <ScrollView
       style={styles.container}
-      contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 20 }]}
+      contentContainerStyle={[styles.scrollContent, { paddingBottom: isPro ? insets.bottom + 20 : 20 }]}
     >
       <WebContainer>
         <View style={styles.header}>
@@ -733,7 +766,7 @@ export function PaywallScreen() {
             onPress={() => setSelectedPlan('monthly')}
           >
             <Text style={[styles.planOptionLabel, selectedPlan === 'monthly' && styles.planOptionLabelSelected]}>Monthly</Text>
-            {founding?.capActive && <Text style={styles.planOptionRegularPrice}>{regularPriceLabel('monthly')}</Text>}
+            {foundingApplies && <Text style={styles.planOptionRegularPrice}>{regularPriceLabel('monthly')}</Text>}
             <Text style={[styles.planOptionPrice, selectedPlan === 'monthly' && styles.planOptionPriceSelected]}>{getProductPrice(SUBSCRIPTION_SKUS.MONTHLY)}</Text>
             <Text style={[styles.planOptionPeriod, selectedPlan === 'monthly' && styles.planOptionPeriodSelected]}>/month</Text>
           </Pressable>
@@ -743,17 +776,17 @@ export function PaywallScreen() {
             onPress={() => setSelectedPlan('yearly')}
           >
             <View style={styles.saveBadge}>
-              <Text style={styles.saveBadgeText}>Save {yearlyVsMonthlySavingsPercent()}%</Text>
+              <Text style={styles.saveBadgeText}>Save {savingsPercent}%</Text>
             </View>
             <Text style={[styles.planOptionLabel, selectedPlan === 'yearly' && styles.planOptionLabelSelected]}>Yearly</Text>
-            {founding?.capActive && <Text style={styles.planOptionRegularPrice}>{regularPriceLabel('yearly')}</Text>}
+            {foundingApplies && <Text style={styles.planOptionRegularPrice}>{regularPriceLabel('yearly')}</Text>}
             <Text style={[styles.planOptionPrice, selectedPlan === 'yearly' && styles.planOptionPriceSelected]}>{getProductPrice(SUBSCRIPTION_SKUS.YEARLY)}</Text>
             <Text style={[styles.planOptionPeriod, selectedPlan === 'yearly' && styles.planOptionPeriodSelected]}>/year</Text>
           </Pressable>
         </View>
       )}
 
-      {!isPro && founding?.capActive && (
+      {!isPro && foundingApplies && founding && (
         <>
           {/* Founding-member framing — every number here is real: spotsLeft is
               computed server-side from billed subs, and the price rise is the
@@ -774,6 +807,10 @@ export function PaywallScreen() {
             {regularPriceLabel('monthly')}/mo for new members once the founding spots fill.
           </Text>
         </>
+      )}
+
+      {!isPro && timeLine && (
+        <Text style={styles.foundingNote}>{timeLine}</Text>
       )}
 
       {!isPro && feeBleedLine && (
@@ -804,29 +841,6 @@ export function PaywallScreen() {
           </View>
         )}
 
-        <Button
-          mode="contained" buttonColor={themeColors.accent} textColor={themeColors.onAccent}
-          onPress={handleUpgrade}
-          style={styles.upgradeButton}
-          contentStyle={styles.upgradeButtonContent}
-          labelStyle={styles.upgradeButtonLabel}
-          loading={isUpgrading}
-          disabled={isUpgrading}
-        >
-          Start Pro Subscription
-        </Button>
-
-        {Platform.OS !== 'web' && (
-          <Button
-            mode="text"
-            onPress={handleRestorePurchases}
-            loading={isRestoring}
-            disabled={isRestoring}
-            style={styles.restoreButton}
-          >
-            Restore Purchases
-          </Button>
-        )}
       </View>
       )}
 
@@ -844,10 +858,6 @@ export function PaywallScreen() {
             Maybe Later
           </Button>
 
-          <Text style={styles.disclaimer}>
-            Auto-renewable {selectedPlan} subscription at {getProductPrice(selectedSku)}/{selectedPlan === 'yearly' ? 'year' : 'month'}.{'\n'}Cancel anytime. Renews unless cancelled 24 hours before period end.
-          </Text>
-
           <View style={styles.legalLinks}>
             <Text
               style={styles.legalLink}
@@ -862,6 +872,20 @@ export function PaywallScreen() {
             >
               Terms of Use
             </Text>
+            {Platform.OS !== 'web' && (
+              <>
+                <Text style={styles.legalSeparator}>|</Text>
+                {/* Apple requires a restore path; it belongs with the fine print,
+                    not at the same weight as the one thing we want tapped. */}
+                <Text
+                  style={styles.legalLink}
+                  onPress={isRestoring ? undefined : handleRestorePurchases}
+                  accessibilityRole="button"
+                >
+                  {isRestoring ? 'Restoring…' : 'Restore Purchases'}
+                </Text>
+              </>
+            )}
           </View>
         </View>
       )}
@@ -878,6 +902,29 @@ export function PaywallScreen() {
       </WebContainer>
 
     </ScrollView>
+
+      {/* Sticky footer: the button and when the money moves, visible at every
+          scroll position. The old CTA sat under the feature list, below the
+          fold on an iPhone 17 Pro, with no price on it. */}
+      {!isPro && (
+        <View style={[styles.footer, { paddingBottom: insets.bottom + 12 }]}>
+          <WebContainer>
+            <Button
+              mode="contained" buttonColor={themeColors.accent} textColor={themeColors.onAccent}
+              onPress={handleUpgrade}
+              style={styles.upgradeButton}
+              contentStyle={styles.upgradeButtonContent}
+              labelStyle={styles.upgradeButtonLabel}
+              loading={isUpgrading}
+              disabled={isUpgrading}
+            >
+              {proCtaLabel(getProductPrice(selectedSku), selectedPlan)}
+            </Button>
+            <Text style={styles.disclaimer}>{billingLine(getProductPrice(selectedSku), selectedPlan)}</Text>
+          </WebContainer>
+        </View>
+      )}
+    </View>
     </>
   );
 }
@@ -1175,7 +1222,11 @@ const useStyles = makeStyles((t) => ({
     color: t.colors.textMuted,
     marginHorizontal: 8,
   },
-  restoreButton: {
-    marginTop: 4,
+  footer: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    backgroundColor: t.colors.bg,
+    borderTopWidth: 1,
+    borderTopColor: t.colors.border,
   },
 }));

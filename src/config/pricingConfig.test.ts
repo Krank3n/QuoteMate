@@ -5,6 +5,7 @@ import {
   regularPriceLabel,
   discountPercent,
   yearlyVsMonthlySavingsPercent,
+  foundingFramingApplies,
   monthlyFeeSaving,
   feeSavingLabel,
   squareCollectedLast30d,
@@ -126,5 +127,18 @@ describe('squareCollectedLast30d', () => {
   it('ignores future-dated payments and empty inputs', () => {
     expect(squareCollectedLast30d([{ payments: [pay(1000, -2, 'square')] }], NOW)).toBe(0);
     expect(squareCollectedLast30d([], NOW)).toBe(0);
+  });
+
+  describe('live-price aware helpers', () => {
+    it('computes the savings badge from live store prices when given', () => {
+      expect(yearlyVsMonthlySavingsPercent(29, 199)).toBe(43);
+      expect(yearlyVsMonthlySavingsPercent(0, 199)).toBe(yearlyVsMonthlySavingsPercent());
+    });
+    it('keeps the AUD founding anchors only beside AUD (or not-yet-loaded) prices', () => {
+      expect(foundingFramingApplies([])).toBe(true);
+      expect(foundingFramingApplies([{ currency: 'AUD' }, { currency: 'AUD' }])).toBe(true);
+      expect(foundingFramingApplies([{ currency: null }])).toBe(true);
+      expect(foundingFramingApplies([{ currency: 'USD' }, { currency: 'AUD' }])).toBe(false);
+    });
   });
 });
