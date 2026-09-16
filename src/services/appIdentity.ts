@@ -83,3 +83,28 @@ export function currentAppBuild(): AppBuildIdentity {
   if (!cached) cached = describeAppBuild(deviceSources());
   return cached;
 }
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** "16 Sep 2026, 11:55 am" in the device's local time. */
+function formatPublished(iso: string): string | null {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  const h = d.getHours();
+  const hour12 = h % 12 === 0 ? 12 : h % 12;
+  const mins = String(d.getMinutes()).padStart(2, '0');
+  return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}, ${hour12}:${mins} ${h < 12 ? 'am' : 'pm'}`;
+}
+
+/**
+ * The one line the About screen shows under the version badge so a phone can
+ * say, without a cable, whether it is running an over-the-air update or the
+ * code it was installed with. Null on web, where there are no updates.
+ */
+export function describeUpdateLine(identity: AppBuildIdentity): string | null {
+  if (identity.platform === 'web') return null;
+  if (!identity.updateId) return 'Running the installed code, no update applied yet';
+  const short = identity.updateId.slice(0, 8);
+  const when = identity.updatedAt ? formatPublished(identity.updatedAt) : null;
+  return when ? `Update ${short}, published ${when}` : `Update ${short}`;
+}

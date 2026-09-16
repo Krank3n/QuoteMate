@@ -20,12 +20,14 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import Constants from 'expo-constants';
 import { LinearGradient } from 'expo-linear-gradient';
 
+import { currentAppBuild, describeUpdateLine } from '../../services/appIdentity';
+
 import { makeStyles, useThemeColors } from '../../theme';
 import { WebContainer } from '../../components/WebContainer';
 import { GridBackground } from '../../components/GridBackground';
 
 const features = [
-  { icon: 'robot' as const, text: 'AI-powered job analysis' },
+  { icon: 'robot' as const, text: 'Smart job analysis' },
   { icon: 'store' as const, text: 'Live price integration' },
   { icon: 'file-pdf-box' as const, text: 'Professional PDF quotes' },
   { icon: 'cloud-sync' as const, text: 'Cloud sync across devices' },
@@ -52,8 +54,13 @@ const supportLinks = [
 export function AboutScreen() {
   const styles = useStyles();
   const themeColors = useThemeColors();
-  const appVersion = Constants.expoConfig?.version || '1.0.0';
-  const buildNumber = Constants.expoConfig?.ios?.buildNumber || Constants.expoConfig?.android?.versionCode || '1';
+  // The native build number, not the config's. The config is part of the JS
+  // bundle, so on Android it used to show the iOS build number, and it reads
+  // the same whether an over-the-air update has landed or not.
+  const build = currentAppBuild();
+  const appVersion = build.version || Constants.expoConfig?.version || '1.0.0';
+  const buildNumber = build.build;
+  const updateLine = describeUpdateLine(build);
 
   const handleLinkPress = (url: string) => {
     Linking.openURL(url);
@@ -81,17 +88,24 @@ export function AboutScreen() {
 
             <View style={styles.versionBadge}>
               <Text style={styles.versionBadgeText}>v{appVersion}</Text>
-              <View style={styles.versionDot} />
-              <Text style={styles.versionBadgeText}>Build {buildNumber}</Text>
+              {buildNumber ? (
+                <>
+                  <View style={styles.versionDot} />
+                  <Text style={styles.versionBadgeText}>Build {buildNumber}</Text>
+                </>
+              ) : null}
             </View>
+            {updateLine ? (
+              <Text style={styles.updateLine} testID="about-update-line">{updateLine}</Text>
+            ) : null}
           </LinearGradient>
 
           {/* Features Section */}
           <Surface style={styles.card}>
             <Text style={styles.sectionTitle}>What we offer</Text>
             <Text style={styles.description}>
-              Built specifically for Australian tradies. AI-powered job analysis
-              and Bunnings integration make professional quoting effortless.
+              Built specifically for Australian tradies. Smart job analysis
+              and live Bunnings pricing make professional quoting effortless.
             </Text>
 
             <View style={styles.featureGrid}>
@@ -208,6 +222,13 @@ const useStyles = makeStyles((t) => ({
     fontSize: 13,
     color: t.colors.textSecondary,
     fontWeight: '500',
+  },
+  updateLine: {
+    fontSize: 12,
+    color: t.colors.textDisabled,
+    marginTop: 8,
+    paddingHorizontal: 24,
+    textAlign: 'center',
   },
   versionDot: {
     width: 4,
