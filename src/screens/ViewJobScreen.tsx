@@ -38,7 +38,7 @@ import {
   crossesContractLine,
   depositHasBeenPaid,
 } from '../../shared/job/stage';
-import { JobPhotoStrip } from '../components/JobPhotoStrip';
+import { JobPhotosCard } from '../components/JobPhotosCard';
 import { JobChecklist } from '../components/JobChecklist';
 import { PaymentSheet } from '../components/PaymentSheet';
 import { derivePaymentState } from '../components/PaymentChip';
@@ -1092,10 +1092,13 @@ export function ViewJobScreen() {
             }}
           />
           {/* Photos sit right under the header so they are the first thing
-              to find when coming back to a job. Adds write to job.photos;
-              edits to a photo that lives on a quote or invoice write back
-              to that document's photos. */}
-          <JobPhotoStrip
+              to find when coming back to a job. They stay job-level (not
+              inside the document card): a job can carry a quote and an
+              invoice, and a job with no document yet still needs a home
+              for them. Adds write to job.photos; edits to a photo that
+              lives on a quote or invoice write back to that document's
+              photos. */}
+          <JobPhotosCard
             job={job}
             documents={attachedDocs}
             onJobPhotosChange={handleJobPhotosChange}

@@ -19,6 +19,11 @@
  * flips it. Once both stages have photos the strip splits into two labelled
  * rows and the lightbox pages within the tapped row; with one stage nothing
  * about the layout changes.
+ *
+ * The job page itself renders JobPhotosCard, which owns the uploader and
+ * shows JobPhotoStripBody (everything below the heading) under a PHOTOS
+ * row that expands inline. JobPhotoStrip is the same body with its own card
+ * and heading, for any caller that wants the strip on its own.
  */
 
 import React, { useMemo, useState } from 'react';
@@ -43,7 +48,12 @@ import type { PhotoStage } from '../types';
 import { makeStyles, useThemeColors } from '../theme';
 import { selectionTap } from '../utils/haptics';
 import { isPdfUrl } from '../utils/imageMime';
-import { usePhotoUploader, type LocalPhoto, type PhotoTarget } from './usePhotoUploader';
+import {
+  usePhotoUploader,
+  type LocalPhoto,
+  type PhotoTarget,
+  type PhotoUploader,
+} from './usePhotoUploader';
 import { PhotoUploaderModals } from './PhotoUploaderModals';
 import {
   aggregatePhotos,
@@ -79,26 +89,80 @@ const THUMB_SIZE = 80;
 const EMPTY_PHOTOS: JobPhoto[] = [];
 const noop = () => {};
 
-export function JobPhotoStrip({ job, documents, onJobPhotosChange, onDocumentPhotosChange }: JobPhotoStripProps) {
-  const styles = useStyles();
-  const themeColors = useThemeColors();
-  const editable = !!onJobPhotosChange;
-  const documentsEditable = editable && !!onDocumentPhotosChange;
+/**
+ * The uploader behind the job page's photos. Photos on attached documents
+ * count against the cap, but an add never lands on a document, so they
+ * ride along as extraCount rather than as the uploader's own list.
+ *
+ * Exported so JobPhotosCard can own the uploader above its collapse: a
+ * batch keeps its pending tiles, progress and alerts while the row is shut.
+ */
+export function useJobPhotoUploader({
+  job,
+  documents,
+  onJobPhotosChange,
+}: Pick<JobPhotoStripProps, 'job' | 'documents' | 'onJobPhotosChange'>): PhotoUploader {
   const jobPhotos = job.photos ?? EMPTY_PHOTOS;
-
-  // Photos on attached documents count against the cap, but an add never
-  // lands on a document, so they ride along as extraCount rather than as
-  // the uploader's own list.
   const docPhotoCount = useMemo(
     () => documentOwnedCount(aggregatePhotos(jobPhotos, documents)),
     [jobPhotos, documents],
   );
-  const uploader = usePhotoUploader({
+  return usePhotoUploader({
     photos: jobPhotos,
     onPhotosChange: onJobPhotosChange ?? noop,
     extraCount: docPhotoCount,
     stageForNew: () => defaultStageForJob(job.stage),
   });
+}
+
+export function JobPhotoStrip(props: JobPhotoStripProps) {
+  const { documents, onJobPhotosChange } = props;
+  const styles = useStyles();
+  const editable = !!onJobPhotosChange;
+  const uploader = useJobPhotoUploader(props);
+  const photos = aggregatePhotos(uploader.allPhotos, documents);
+
+  if (photos.length === 0 && !editable) return null;
+
+  return (
+    <View style={styles.container}>
+      <View style={styles.headerRow}>
+        <Text style={styles.heading}>Photos</Text>
+        <Text style={styles.count}>
+          {uploader.progressLabel ?? (photos.length > 0 ? photos.length : '')}
+        </Text>
+      </View>
+
+      <JobPhotoStripBody {...props} uploader={uploader} />
+
+      {editable ? <PhotoUploaderModals uploader={uploader} /> : null}
+    </View>
+  );
+}
+
+export interface JobPhotoStripBodyProps extends JobPhotoStripProps {
+  /** From useJobPhotoUploader, owned by whoever renders PhotoUploaderModals. */
+  uploader: PhotoUploader;
+}
+
+/**
+ * The strip without its card and "Photos" heading: the Before/After rows,
+ * the "+" and "Add photos" tiles, the stage pills and the lightbox. Renders
+ * no uploader modals — the owner of `uploader` does that, so an alert or
+ * the annotator can still appear when the body is not on screen.
+ */
+export function JobPhotoStripBody({
+  job,
+  documents,
+  uploader,
+  onJobPhotosChange,
+  onDocumentPhotosChange,
+}: JobPhotoStripBodyProps) {
+  const styles = useStyles();
+  const themeColors = useThemeColors();
+  const editable = !!onJobPhotosChange;
+  const documentsEditable = editable && !!onDocumentPhotosChange;
+  const jobPhotos = job.photos ?? EMPTY_PHOTOS;
 
   // Job-owned photos (committed plus still-uploading) first, then documents.
   // Not memoised: allPhotos is rebuilt by the hook on every render and the
@@ -113,8 +177,6 @@ export function JobPhotoStrip({ job, documents, onJobPhotosChange, onDocumentPho
   const [lightbox, setLightbox] = useState<{ group: PhotoStage | null; index: number } | null>(null);
   const lightboxList =
     lightbox?.group && groups.showHeadings ? lightboxPhotos(groups[lightbox.group]) : imagePhotos;
-
-  if (photos.length === 0 && !editable) return null;
 
   const open = (i: number) => {
     selectionTap();
@@ -282,14 +344,7 @@ export function JobPhotoStrip({ job, documents, onJobPhotosChange, onDocumentPho
   const addStage = defaultStageForJob(job.stage);
 
   return (
-    <View style={styles.container}>
-      <View style={styles.headerRow}>
-        <Text style={styles.heading}>Photos</Text>
-        <Text style={styles.count}>
-          {uploader.progressLabel ?? (photos.length > 0 ? photos.length : '')}
-        </Text>
-      </View>
-
+    <>
       {photos.length === 0 ? (
         <Pressable
           testID="job-photo-strip-empty-add"
@@ -334,9 +389,7 @@ export function JobPhotoStrip({ job, documents, onJobPhotosChange, onDocumentPho
         onRemove={editable ? remove : undefined}
         documentsEditable={documentsEditable}
       />
-
-      {editable ? <PhotoUploaderModals uploader={uploader} /> : null}
-    </View>
+    </>
   );
 }
 

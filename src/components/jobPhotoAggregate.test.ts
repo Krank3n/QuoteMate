@@ -17,7 +17,9 @@ import {
   documentPhotoRemoveMessage,
   groupPhotosByStage,
   lightboxPhotos,
+  photoRowSummary,
   photoStage,
+  EMPTY_PHOTOS_SUMMARY,
   type StripPhoto,
 } from './jobPhotoAggregate';
 
@@ -198,5 +200,55 @@ describe('documentPhotoLabel', () => {
     expect(documentPhotoLabel({ number: 'IN-7', type: 'invoice' } as Document)).toBe('From IN-7');
     expect(documentPhotoLabel({ number: '', type: 'invoice' } as Document)).toBe('From the invoice');
     expect(documentPhotoLabel({ number: '', type: 'quote' } as Document)).toBe('From the quote');
+  });
+});
+
+describe('photoRowSummary', () => {
+  const rows = (photos: StripPhoto[]) => aggregatePhotos(photos, []);
+  const pending = (id: string): StripPhoto =>
+    ({ id, storageUrl: '', localUri: `file:///${id}.jpg`, uploading: true, stage: 'after' });
+
+  it('invites the tradie to add photos when the job has none', () => {
+    expect(photoRowSummary([])).toBe('Add site or progress photos');
+    expect(photoRowSummary([])).toBe(EMPTY_PHOTOS_SUMMARY);
+  });
+
+  it('uses the singular for one photo', () => {
+    expect(photoRowSummary(rows([photo('a')]))).toBe('1 photo');
+  });
+
+  it('gives a bare count when every photo is in one group', () => {
+    expect(photoRowSummary(rows([photo('a'), photo('b'), photo('c')]))).toBe('3 photos');
+    expect(
+      photoRowSummary(rows([photo('a', { stage: 'after' }), photo('b', { stage: 'after' })])),
+    ).toBe('2 photos');
+  });
+
+  it('adds the before/after split once both groups have something', () => {
+    expect(
+      photoRowSummary(rows([photo('a'), photo('b', { stage: 'after' }), photo('c', { stage: 'after' })])),
+    ).toBe('3 photos · 1 before, 2 after');
+  });
+
+  it('appends the batch progress while photos are uploading', () => {
+    expect(photoRowSummary(rows([photo('a'), pending('p1'), pending('p2')]), { current: 2, total: 4 })).toBe(
+      '3 photos · 1 before, 2 after · uploading 2 of 4',
+    );
+    expect(photoRowSummary(rows([photo('a'), photo('b')]), { current: 1, total: 2 })).toBe(
+      '2 photos · uploading 1 of 2',
+    );
+  });
+
+  it('clamps a progress position that runs past the batch', () => {
+    expect(photoRowSummary(rows([photo('a')]), { current: 9, total: 3 })).toBe('1 photo · uploading 3 of 3');
+    expect(photoRowSummary(rows([photo('a')]), { current: 0, total: 3 })).toBe('1 photo · uploading 1 of 3');
+  });
+
+  it('says just "uploading" for a single-photo batch, where "1 of 1" adds nothing', () => {
+    expect(photoRowSummary(rows([photo('a')]), { current: 1, total: 1 })).toBe('1 photo · uploading');
+  });
+
+  it('drops the progress once the batch is done', () => {
+    expect(photoRowSummary(rows([photo('a')]), null)).toBe('1 photo');
   });
 });

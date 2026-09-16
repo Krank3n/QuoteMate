@@ -16,6 +16,7 @@ import type { JobPhoto, JobStage } from '../../shared/job/types';
 import type { Document } from '../types/document';
 import type { PhotoStage } from '../types';
 import { isPdfUrl } from '../utils/imageMime';
+import type { UploadProgress } from './jobPhotoLimits';
 
 /** A job photo the strip may still be uploading (mirrors LocalPhoto). */
 export interface StripPhoto extends JobPhoto {
@@ -143,4 +144,35 @@ export function groupPhotosByStage(aggregated: AggregatedPhoto[]): StageGroups {
   const before = aggregated.filter(a => photoStage(a.photo) === 'before');
   const after = aggregated.filter(a => photoStage(a.photo) === 'after');
   return { before, after, showHeadings: before.length > 0 && after.length > 0 };
+}
+
+/** The PHOTOS row's summary when the job has nothing yet. */
+export const EMPTY_PHOTOS_SUMMARY = 'Add site or progress photos';
+
+/**
+ * One line for the PHOTOS row on the job page: "3 photos · 1 before, 2 after".
+ * The before/after part is dropped when every photo sits in one group, and a
+ * batch in flight is appended ("· uploading 2 of 4") so the row still says
+ * what is happening while it is collapsed. Pending uploads are already in
+ * `aggregated`, so the count holds steady as a batch lands.
+ */
+export function photoRowSummary(
+  aggregated: AggregatedPhoto[],
+  progress?: UploadProgress | null,
+): string {
+  const count = aggregated.length;
+  if (count === 0) return EMPTY_PHOTOS_SUMMARY;
+
+  const parts = [`${count} ${count === 1 ? 'photo' : 'photos'}`];
+  const { before, after, showHeadings } = groupPhotosByStage(aggregated);
+  if (showHeadings) parts.push(`${before.length} before, ${after.length} after`);
+  if (progress) {
+    if (progress.total > 1) {
+      const current = Math.min(Math.max(1, progress.current), progress.total);
+      parts.push(`uploading ${current} of ${progress.total}`);
+    } else {
+      parts.push('uploading');
+    }
+  }
+  return parts.join(' · ');
 }
