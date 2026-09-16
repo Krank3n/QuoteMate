@@ -259,3 +259,19 @@ describe('SendStatementSheet', () => {
     }
   });
 });
+
+describe('SendStatementSheet fits the phone', () => {
+  // 16 Sep 2026: on an iPhone the sheet rendered ~40pt off the left edge with
+  // "Send statement" cut off on the right — the keyboard-avoiding wrapper had
+  // no width, so the card's 100% resolved against its widest field.
+  it('gives the keyboard-avoiding wrapper the full width so the card cannot overflow', async () => {
+    const kav = await import('react-native-keyboard-controller');
+    const spy = vi.spyOn(kav, 'KeyboardAvoidingView');
+    store.reset({ businessName: 'Leo Wright Electrical', accountantEmail: 'books@accountant.com.au' });
+    render(<SendStatementSheet {...baseProps} />);
+    const style = spy.mock.calls.at(-1)?.[0]?.style as { width?: string; maxWidth?: number } | undefined;
+    expect(style?.width).toBe('100%');
+    expect(style?.maxWidth).toBe(520);
+    spy.mockRestore();
+  });
+});
