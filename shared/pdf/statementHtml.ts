@@ -34,8 +34,18 @@ export interface StatementPdfOptions {
 
 export const STATEMENT_NOT_REGISTERED_LINE = 'Not registered for GST — no GST charged';
 export const STATEMENT_EMPTY_LINE = 'None in this period';
-export const STATEMENT_FOOTER_NOTE =
-  'Invoices issued lists invoices by issue date. Payments received lists money by the date it was recorded. Where a deposit was taken on the quote, the invoice total is the amount invoiced after that deposit; the deposit itself appears under Payments received. Figures are as recorded in the app.';
+const STATEMENT_FOOTER_METHOD_NOTE =
+  'Invoices issued lists invoices by issue date. Payments received lists money by the date it was recorded. Where a deposit was taken on the quote, the invoice total is the amount invoiced after that deposit; the deposit itself appears under Payments received.';
+
+/**
+ * The note at the foot of the statement. The figures are the tradie's own
+ * records, so the document says so in the tradie's name — an accountant
+ * reading it has no interest in what software produced it, and this is a
+ * customer-facing document that carries no app name anywhere else either.
+ */
+export function statementFooterNote(businessName: string): string {
+  return `${STATEMENT_FOOTER_METHOD_NOTE} Figures are as recorded by ${businessName}.`;
+}
 
 const money = (n: number) => formatCurrency(Number(n) || 0);
 
@@ -198,7 +208,7 @@ export function buildStatementPdfHtml(
         ${buildPaymentsHTML(data, timeZone)}
       </div>
 
-      <p class="statement-note">${STATEMENT_FOOTER_NOTE}</p>
+      <p class="statement-note">${escapeHtml(statementFooterNote(business.businessName))}</p>
       </div>
 
       <div class="pdf-footer">

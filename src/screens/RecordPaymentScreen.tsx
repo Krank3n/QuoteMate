@@ -11,7 +11,7 @@
  */
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { View, Pressable, Platform, Share, Alert } from 'react-native';
+import { View, Platform, Share, Alert } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { Text, Button, TextInput } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
@@ -25,6 +25,7 @@ import { makeStyles, useThemeColors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
 import { getAmountDue } from '../utils/invoiceCalculator';
 import { BottomSheet } from '../components/BottomSheet';
+import { Chip } from '../components/Chip';
 import { CurrencyInput } from '../components/CurrencyInput';
 import { DueDateSheet } from '../components/DueDateSheet';
 import { useAlertModal } from '../hooks/useAlertModal';
@@ -539,37 +540,6 @@ export function RecordPaymentScreen() {
   );
 }
 
-function Chip({
-  label,
-  active,
-  onPress,
-}: {
-  label: string;
-  active?: boolean;
-  onPress: () => void;
-}) {
-  const styles = useStyles();
-  return (
-    <Pressable
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityState={{ selected: !!active }}
-      // react-native-web drops accessibilityState.selected on buttons;
-      // the explicit alias reaches the DOM (and assistive tech) on web.
-      aria-selected={!!active}
-      style={({ pressed }) => [
-        styles.chip,
-        active && styles.chipActive,
-        pressed && !active && { opacity: 0.85 },
-      ]}
-    >
-      <Text style={[styles.chipLabel, active && styles.chipLabelActive]}>
-        {label}
-      </Text>
-    </Pressable>
-  );
-}
-
 const useStyles = makeStyles((t) => ({
   summaryRow: {
     flexDirection: 'row',
@@ -626,28 +596,6 @@ const useStyles = makeStyles((t) => ({
     flexWrap: 'wrap',
     gap: 8,
     marginTop: 10,
-  },
-  chip: {
-    // 10 matches PillToggle and keeps the tap target near the 44pt guideline
-    // for gloved on-site thumbs.
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: t.colors.border,
-    backgroundColor: t.colors.surfaceOverlay,
-  },
-  chipActive: {
-    backgroundColor: t.colors.accent,
-    borderColor: t.colors.accent,
-  },
-  chipLabel: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: t.colors.text,
-  },
-  chipLabelActive: {
-    color: t.colors.onAccent,
   },
   dateText: {
     fontSize: 15,
