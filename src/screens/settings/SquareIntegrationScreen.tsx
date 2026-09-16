@@ -28,6 +28,7 @@ import { makeStyles, useThemeColors } from '../../theme';
 import { WebContainer } from '../../components/WebContainer';
 import { AlertModal } from '../../components/AlertModal';
 import { SquareReconnectBanner } from '../../components/SquareReconnectBanner';
+import { SquarePaymentsNotReadyBanner } from '../../components/SquarePaymentsNotReadyBanner';
 import * as squareService from '../../services/squareService';
 import type { SquareConnectionStatus } from '../../services/squareService';
 import { trackEvent } from '../../services/analyticsService';
@@ -211,6 +212,19 @@ export function SquareIntegrationScreen() {
               OAuth flow via the Connect button further down the screen. */}
           {connection?.connected && connection?.disconnectedReason ? (
             <SquareReconnectBanner reason={connection.disconnectedReason} />
+          ) : null}
+
+          {/* Connected, but Square won't charge a card for this account yet
+              (never activated, or not Australian). The server refuses to mint
+              while this stands, so sends carry no Pay Now button; this is
+              where the tradie finds out why. "Check again" re-asks Square. */}
+          {connection?.connected ? (
+            <SquarePaymentsNotReadyBanner
+              readiness={connection.paymentReadiness}
+              merchantName={connection.merchantName}
+              onCheckAgain={checkConnection}
+              checking={checkingConnection}
+            />
           ) : null}
 
           {/* Header */}
