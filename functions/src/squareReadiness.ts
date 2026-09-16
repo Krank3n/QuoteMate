@@ -110,7 +110,11 @@ export function shouldReprobeReadiness(
 ): boolean {
   if (!stored || typeof stored.checkedAt !== 'number') return true;
   const age = now - stored.checkedAt;
-  return age >= (stored.ready ? READINESS_RECHECK_READY_MS : READINESS_RECHECK_NOT_READY_MS);
+  // "Ready" earns the daily cadence only when the location's capabilities
+  // were actually observed. A verdict built from a merchant answer alone
+  // (locations call failed) is a guess, and a guess is re-checked soon.
+  const confirmedReady = stored.ready && Array.isArray(stored.capabilities);
+  return age >= (confirmedReady ? READINESS_RECHECK_READY_MS : READINESS_RECHECK_NOT_READY_MS);
 }
 
 export interface ReadinessProbeInput {

@@ -18,39 +18,34 @@ vi.mock('firebase-admin', () => ({
 
 import {
   DOCUMENT_LINK_FIELDS,
+  INVOICE_LINK_FIELDS,
   invalidateUserPaymentLinks,
   squareConnectionChanged,
 } from './squareLinkInvalidation';
 
 type Row = { id: string; data: Record<string, unknown> };
 
-function fakeDb(collections: Record<string, Row[]>) {
+function fakeDb(collections: Record<string, Row[]>, failPaths: string[] = []) {
   const updates: Array<{ path: string; data: Record<string, unknown> }> = [];
-  const commits: number[] = [];
-  let staged = 0;
   const db = {
     collection: (path: string) => ({
       select: (...fields: string[]) => ({
         get: async () => ({
           docs: (collections[path] ?? []).map((row) => ({
-            ref: `${path}/${row.id}`,
+            ref: {
+              path: `${path}/${row.id}`,
+              update: async (data: Record<string, unknown>) => {
+                if (failPaths.includes(`${path}/${row.id}`)) throw new Error('NOT_FOUND');
+                updates.push({ path: `${path}/${row.id}`, data });
+              },
+            },
             data: () => Object.fromEntries(fields.filter((f) => f in row.data).map((f) => [f, row.data[f]])),
           })),
         }),
       }),
     }),
-    batch: () => ({
-      update: (ref: unknown, data: Record<string, unknown>) => {
-        updates.push({ path: ref as string, data });
-        staged += 1;
-      },
-      commit: async () => {
-        commits.push(staged);
-        staged = 0;
-      },
-    }),
   };
-  return { db, updates, commits };
+  return { db, updates };
 }
 
 const NOW = 1_790_000_000_000;
@@ -143,18 +138,24 @@ describe('invalidateUserPaymentLinks', () => {
     }
   });
 
-  it('a user with nothing to clear commits nothing', async () => {
+  it('a user with nothing to clear writes nothing', async () => {
     const empty = fakeDb({ 'users/u2/documents': [{ id: 'd', data: { total: 1 } }] });
     const counts = await invalidateUserPaymentLinks(empty.db, 'u2', 'disconnected', NOW);
     expect(counts).toEqual({ documents: 0, quotes: 0, invoices: 0 });
-    expect(empty.commits).toEqual([]);
+    expect(empty.updates).toEqual([]);
   });
 
-  it('splits a large sweep into batches under the Firestore limit', async () => {
-    const rows = Array.from({ length: 900 }, (_, i) => ({ id: `d${i}`, data: { squarePaymentLinkUrl: `https://x/${i}` } }));
-    const big = fakeDb({ 'users/u3/documents': rows });
+  it('a doc deleted between the read and the write is skipped, and the rest are still swept', async () => {
+    const rows = Array.from({ length: 120 }, (_, i) => ({ id: `d${i}`, data: { squarePaymentLinkUrl: `https://x/${i}` } }));
+    const big = fakeDb({ 'users/u3/documents': rows }, ['users/u3/documents/d7', 'users/u3/documents/d99']);
     const counts = await invalidateUserPaymentLinks(big.db, 'u3', 'square_not_ready', NOW);
-    expect(counts.documents).toBe(900);
-    expect(big.commits).toEqual([400, 400, 100]);
+    expect(counts.documents).toBe(118);
+    expect(big.updates).toHaveLength(118);
+    expect(big.updates.map((u) => u.path)).not.toContain('users/u3/documents/d7');
+  });
+
+  it('the legacy invoice mirror loses its createdAt stamp too, not just the url', () => {
+    // mirrorLinkToLegacy writes squarePaymentLinkCreatedAt on users/{uid}/invoices.
+    expect(INVOICE_LINK_FIELDS).toContain('squarePaymentLinkCreatedAt');
   });
 });

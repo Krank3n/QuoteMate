@@ -87,9 +87,16 @@ describe('shouldReprobeReadiness', () => {
   });
 
   it('re-confirms a healthy account daily, not on every mint', () => {
-    const ok = { ready: true, reasons: [], checkedAt: NOW };
+    const ok = { ready: true, reasons: [], checkedAt: NOW, capabilities: ['CREDIT_CARD_PROCESSING'] };
     expect(shouldReprobeReadiness(ok, NOW + READINESS_RECHECK_NOT_READY_MS)).toBe(false);
     expect(shouldReprobeReadiness(ok, NOW + READINESS_RECHECK_READY_MS)).toBe(true);
+  });
+
+  it('a "ready" verdict that never saw the location capabilities is a guess, re-checked on the short cadence', () => {
+    // The locations call failed, so nothing flagged — but nothing was confirmed either.
+    const guess = { ready: true, reasons: [], checkedAt: NOW };
+    expect(shouldReprobeReadiness(guess, NOW + READINESS_RECHECK_NOT_READY_MS - 1)).toBe(false);
+    expect(shouldReprobeReadiness(guess, NOW + READINESS_RECHECK_NOT_READY_MS)).toBe(true);
   });
 });
 

@@ -6707,6 +6707,18 @@ export interface AcceptedQuotePaymentDeps {
     quoteId: string,
     kind: 'deposit' | 'quote_full',
   ) => Promise<{ paymentLinkUrl: string } | null>;
+  /**
+   * Whether Square will charge a card for this tradie's account. Checked
+   * before the active link is reused, so a not-ready account never offers
+   * a link that opens "not accepting payments". Absent (tests) = assume yes.
+   */
+  canTakeCards?: (userId: string) => Promise<boolean>;
+}
+
+async function squareCanTakeCardPaymentsForUser(userId: string): Promise<boolean> {
+  const tokens = await getSquareTokens(userId);
+  if (!tokens) return false;
+  return squareCanTakeCardPayments(userId, tokens);
 }
 
 // Square hosted links expire after 24h; the legacy minters treat >23h as
@@ -6740,7 +6752,11 @@ export async function paymentOfferForAcceptedQuote(
   userId: string,
   quoteId: string,
   quote: any,
-  deps: AcceptedQuotePaymentDeps = { loadDocument: loadDocumentForQuoteId, mint: mintAndRotate },
+  deps: AcceptedQuotePaymentDeps = {
+    loadDocument: loadDocumentForQuoteId,
+    mint: mintAndRotate,
+    canTakeCards: squareCanTakeCardPaymentsForUser,
+  },
 ): Promise<AcceptedQuotePaymentOffer | null> {
   const total = Number(quote?.total) || 0;
   const depositRequired = quote?.requireDeposit === true;
@@ -6761,6 +6777,7 @@ export async function paymentOfferForAcceptedQuote(
   if (amount <= 0) return null;
 
   try {
+    if (deps.canTakeCards && !(await deps.canTakeCards(userId))) return null;
     const unifiedDoc = await deps.loadDocument(userId, quoteId);
     const active = unifiedDoc?.activePaymentLink as
       { url?: string; kind?: string; amount?: number; createdAt?: number; consumedAt?: number } | undefined;
@@ -14045,6 +14062,7 @@ async function refreshSquareReadiness(
   userId: string,
   conn: { paymentReadiness?: SquarePaymentReadiness | null },
   tokens?: SquareTokens | null,
+  options: { awaitSweep?: boolean } = {},
 ): Promise<SquarePaymentReadiness | null> {
   const stored = conn.paymentReadiness ?? null;
   if (!shouldReprobeReadiness(stored)) return stored;
@@ -14061,16 +14079,21 @@ async function refreshSquareReadiness(
 
   const firestore = admin.firestore();
   // update(), not set(): a disconnect racing this must not resurrect a
-  // token-less connection doc.
-  await firestore
+  // token-less connection doc. The sweep runs only once the verdict is
+  // stored, otherwise a lost write would re-sweep on every call.
+  const stored_ok = await firestore
     .doc(`users/${userId}/settings/squareConnection`)
     .update({ paymentReadiness: fresh })
-    .catch(() => {});
-  if (!fresh.ready && stored?.ready !== false) {
+    .then(() => true)
+    .catch(() => false);
+  if (stored_ok && !fresh.ready && stored?.ready !== false) {
     console.warn('[square] account cannot take card payments', { userId, reasons: fresh.reasons });
-    await invalidateUserPaymentLinks(firestore, userId, 'square_not_ready').catch((error) => {
+    const sweep = invalidateUserPaymentLinks(firestore, userId, 'square_not_ready').catch((error) => {
       console.error('[square] link invalidation failed on a not-ready verdict', { userId, error });
     });
+    // Mint paths wait (the email send re-reads the doc right after a refused
+    // mint); the settings-screen status check answers first.
+    if (options.awaitSweep !== false) await sweep;
   }
   return fresh;
 }
@@ -14315,6 +14338,7 @@ export const squareCallback = functions.https.onRequest((req, res) => {
       // What Square reports about the account, for the readiness verdict.
       let merchantProfile: any = null;
       let locationProfile: any = null;
+      let locationsAnswered = false;
 
       try {
         const merchResp = await fetch(`${squareApiBase()}/v2/merchants/${merchantId}`, {
@@ -14340,6 +14364,7 @@ export const squareCallback = functions.https.onRequest((req, res) => {
         if (locResp.ok) {
           const locJson: any = await locResp.json();
           const loc = locJson?.locations?.[0];
+          locationsAnswered = true;
           locationProfile = loc ?? null;
           locationId = loc?.id;
           locationName = loc?.name;
@@ -14351,6 +14376,13 @@ export const squareCallback = functions.https.onRequest((req, res) => {
       // The connection this one replaces, if any: links minted under a
       // different merchant or location pay the wrong seller from here on.
       const previous = (await connRef.get().catch(() => null))?.data() ?? null;
+      if (!locationsAnswered && previous) {
+        // Square didn't answer the locations call: keep what we knew rather
+        // than storing null and sweeping links for a location that has not
+        // changed.
+        locationId = locationId || previous.locationId || undefined;
+        locationName = locationName || previous.locationName || undefined;
+      }
 
       // Square says up front whether the account can charge a card. An
       // unactivated seller mints links that land on "not accepting
@@ -14372,7 +14404,10 @@ export const squareCallback = functions.https.onRequest((req, res) => {
         paymentReadiness,
       });
 
-      if (squareConnectionChanged(previous, { merchantId, locationId })) {
+      const changed = locationsAnswered
+        ? squareConnectionChanged(previous, { merchantId, locationId })
+        : squareConnectionChanged(previous, { merchantId, locationId: previous?.locationId ?? locationId });
+      if (changed) {
         await invalidateUserPaymentLinks(firestore, userId, 'connection_changed').catch((error) => {
           console.error('[square] link invalidation failed after reconnect', { userId, error });
         });
@@ -14426,7 +14461,7 @@ export const checkSquareConnection = functions.https.onRequest((req, res) => {
     const data = connDoc.data()!;
     // Re-asks Square only when the stored verdict is stale (missing, a few
     // minutes old on a flagged account, a day old on a healthy one).
-    const paymentReadiness = await refreshSquareReadiness(decodedToken.uid, data);
+    const paymentReadiness = await refreshSquareReadiness(decodedToken.uid, data, null, { awaitSweep: false });
     res.status(200).json({
       connected: true,
       merchantId: data.merchantId || null,
@@ -14838,6 +14873,13 @@ async function mintAndRotate(
   // Resolve to the unified document id. For deposit/quote_full the legacy id
   // is the quoteId (which is also the unified docId). For invoices the
   // unified doc may live under the source quote's id (collapsed).
+  // The rotation below reuses the doc's active link without minting, so the
+  // readiness gate has to run here or a not-ready account keeps handing out
+  // the link it already has.
+  const tokens = await getSquareTokens(userId);
+  if (!tokens) return null;
+  if (!(await squareCanTakeCardPayments(userId, tokens))) return null;
+
   let unifiedDocId: string = legacyTargetId;
   if (expectedKind === 'invoice') {
     const inv = await loadDocumentForInvoiceId(userId, legacyTargetId);
@@ -14944,6 +14986,12 @@ async function createSquareDepositPaymentLinkInternal(
   const depositAmount = Number(quote.depositAmount) || centsToDollars(dollarsToCents(total * (depositPct / 100)));
   if (depositAmount <= 0) return null;
 
+  // Gate BEFORE the reuse branch: a reused link is still a link handed to a
+  // customer, and it deserves the same "can Square charge a card" check.
+  const tokens = await getSquareTokens(userId);
+  if (!tokens) return null;
+  if (!(await squareCanTakeCardPayments(userId, tokens))) return null;
+
   // Reuse an existing link only while it's still fresh. Square payment links
   // default to a 24-hour expiry; reusing after that serves the customer a
   // 404. Treat anything >23h old as stale and mint a new one.
@@ -14972,10 +15020,6 @@ async function createSquareDepositPaymentLinkInternal(
       depositAmount,
     };
   }
-
-  const tokens = await getSquareTokens(userId);
-  if (!tokens) return null;
-  if (!(await squareCanTakeCardPayments(userId, tokens))) return null;
 
   const plan = await getUserPlanServerSide(userId);
   const { chargedDollars, appFeeCents } =
@@ -15084,6 +15128,11 @@ async function createSquareFullQuotePaymentLinkInternal(
   const amount = Math.max(0, total - depositPaid);
   if (amount <= 0) return null;
 
+  // Gate BEFORE the reuse branch — see createSquareDepositPaymentLinkInternal.
+  const tokens = await getSquareTokens(userId);
+  if (!tokens) return null;
+  if (!(await squareCanTakeCardPayments(userId, tokens))) return null;
+
   // Reuse a fresh existing link if total + depositPaid haven't changed.
   const SQUARE_LINK_TTL_MS = 23 * 60 * 60 * 1000;
   const linkCreatedAt: number | undefined = quote.fullPaymentLinkCreatedAt
@@ -15101,10 +15150,6 @@ async function createSquareFullQuotePaymentLinkInternal(
       amount,
     };
   }
-
-  const tokens = await getSquareTokens(userId);
-  if (!tokens) return null;
-  if (!(await squareCanTakeCardPayments(userId, tokens))) return null;
 
   const plan = await getUserPlanServerSide(userId);
   const { chargedDollars, appFeeCents } =

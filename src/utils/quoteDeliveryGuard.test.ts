@@ -14,6 +14,7 @@ vi.mock('../store/useStore', () => ({
 }));
 
 import {
+  PAY_LINK_CHECK_TIMEOUT_MS,
   attachPayLink,
   carriesPayableAmount,
   ensureCanDeliver,
@@ -174,6 +175,30 @@ describe('attachPayLink — the link for copy composed on the phone', () => {
   it('drops a stored link when Square is no longer connected', async () => {
     square.checkSquareConnection.mockResolvedValue({ connected: false });
     expect(await attachPayLink(invoice({ squarePaymentLinkUrl: 'https://sq/stale' }))).toBeUndefined();
+    expect(square.mintInvoicePaymentLink).not.toHaveBeenCalled();
+  });
+
+  it('keeps the stored link when the connection check throws — bad signal must not strip a good link', async () => {
+    square.checkSquareConnection.mockRejectedValue(new Error('Network request failed'));
+    expect(await attachPayLink(invoice({ squarePaymentLinkUrl: 'https://sq/existing' }))).toBe('https://sq/existing');
+    expect(square.mintInvoicePaymentLink).not.toHaveBeenCalled();
+  });
+
+  it('keeps the stored link when the connection check times out', async () => {
+    vi.useFakeTimers();
+    try {
+      square.checkSquareConnection.mockReturnValue(new Promise(() => {}));
+      const pending = attachPayLink(invoice({ squarePaymentLinkUrl: 'https://sq/existing' }));
+      await vi.advanceTimersByTimeAsync(PAY_LINK_CHECK_TIMEOUT_MS + 1);
+      expect(await pending).toBe('https://sq/existing');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a doc with no stored link comes back empty when the check cannot complete', async () => {
+    square.checkSquareConnection.mockRejectedValue(new Error('offline'));
+    expect(await attachPayLink(invoice())).toBeUndefined();
     expect(square.mintInvoicePaymentLink).not.toHaveBeenCalled();
   });
 

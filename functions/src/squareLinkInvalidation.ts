@@ -24,6 +24,7 @@ export const DOCUMENT_LINK_FIELDS = [
   'activePaymentLink',
   'squarePaymentLinkId',
   'squarePaymentLinkUrl',
+  'squarePaymentLinkCreatedAt',
   'depositPaymentLinkId',
   'depositPaymentLinkUrl',
   'depositPaymentLinkCreatedAt',
@@ -47,7 +48,7 @@ export const QUOTE_LINK_FIELDS = [
   'fullPaymentLinkAmount',
 ] as const;
 
-export const INVOICE_LINK_FIELDS = ['squarePaymentLinkId', 'squarePaymentLinkUrl'] as const;
+export const INVOICE_LINK_FIELDS = ['squarePaymentLinkId', 'squarePaymentLinkUrl', 'squarePaymentLinkCreatedAt'] as const;
 
 export interface SweepCounts {
   documents: number;
@@ -55,16 +56,20 @@ export interface SweepCounts {
   invoices: number;
 }
 
+export interface SweepDocRef {
+  path?: string;
+  update(data: Record<string, unknown>): Promise<unknown>;
+}
+
 /** The slice of Firestore the sweep touches; a test hands in a fake. */
 export interface LinkSweepDb {
   collection(path: string): {
-    select(...fields: string[]): { get(): Promise<{ docs: Array<{ ref: unknown; data(): Record<string, unknown> }> }> };
+    select(...fields: string[]): { get(): Promise<{ docs: Array<{ ref: SweepDocRef; data(): Record<string, unknown> }> }> };
   };
-  batch(): { update(ref: unknown, data: Record<string, unknown>): unknown; commit(): Promise<unknown> };
 }
 
-/** Firestore batches take 500 writes; leave headroom. */
-const BATCH_LIMIT = 400;
+/** Per-doc writes in flight at once. One failure never takes the rest down. */
+const SWEEP_CONCURRENCY = 50;
 
 /**
  * True when a fresh connection would pay a different Square account than the
@@ -88,22 +93,18 @@ export async function invalidateUserPaymentLinks(
 ): Promise<SweepCounts> {
   const del = admin.firestore.FieldValue.delete();
   const counts: SweepCounts = { documents: 0, quotes: 0, invoices: 0 };
+  let failed = 0;
 
-  let batch = db.batch();
-  let pending = 0;
-  const flush = async () => {
-    if (pending === 0) return;
-    await batch.commit();
-    batch = db.batch();
-    pending = 0;
-  };
-
+  // Per-doc updates rather than a batch: a batch fails as a whole when one
+  // doc was deleted between the read and the commit, leaving the user
+  // half-swept with nothing to retry it. Each doc stands alone here.
   const sweep = async (
     key: keyof SweepCounts,
     fields: readonly string[],
     extra?: (data: Record<string, unknown>) => Record<string, unknown>,
   ) => {
     const snap = await db.collection(`users/${userId}/${key}`).select(...fields).get();
+    const jobs: Array<() => Promise<void>> = [];
     for (const doc of snap.docs) {
       const data = doc.data();
       const present = fields.filter((f) => data[f] !== undefined && data[f] !== null);
@@ -111,10 +112,18 @@ export async function invalidateUserPaymentLinks(
       const update: Record<string, unknown> = {};
       for (const f of present) update[f] = del;
       Object.assign(update, extra?.(data) ?? {});
-      batch.update(doc.ref, update);
-      counts[key] += 1;
-      pending += 1;
-      if (pending >= BATCH_LIMIT) await flush();
+      jobs.push(async () => {
+        try {
+          await doc.ref.update(update);
+          counts[key] += 1;
+        } catch (error) {
+          failed += 1;
+          console.error('[square] link invalidation skipped a doc', { userId, path: doc.ref.path, error });
+        }
+      });
+    }
+    for (let i = 0; i < jobs.length; i += SWEEP_CONCURRENCY) {
+      await Promise.all(jobs.slice(i, i + SWEEP_CONCURRENCY).map((job) => job()));
     }
   };
 
@@ -131,8 +140,7 @@ export async function invalidateUserPaymentLinks(
   });
   await sweep('quotes', QUOTE_LINK_FIELDS);
   await sweep('invoices', INVOICE_LINK_FIELDS);
-  await flush();
 
-  console.log('[square] payment links invalidated', { userId, reason, ...counts });
+  console.log('[square] payment links invalidated', { userId, reason, ...counts, failed });
   return counts;
 }
