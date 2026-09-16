@@ -52,6 +52,18 @@ vi.mock('../components/SendStatementSheet', () => ({
   },
 }));
 
+vi.mock('../components/PillToggle', () => ({
+  PillToggle: ({ value, onChange, options }: any) => (
+    <div>
+      {options.map((opt: any) => (
+        <button key={opt.value} aria-selected={value === opt.value} onClick={() => onChange(opt.value)}>
+          {opt.label}
+        </button>
+      ))}
+    </div>
+  ),
+}));
+
 vi.mock('react-native-paper', async () => {
   const { Text, View } = await import('react-native');
   return {
@@ -61,19 +73,6 @@ vi.mock('react-native-paper', async () => {
       <button onClick={onPress} disabled={disabled}>
         {children}
       </button>
-    ),
-    SegmentedButtons: ({ value, onValueChange, buttons }: any) => (
-      <div>
-        {buttons.map((button: any) => (
-          <button
-            key={button.value}
-            aria-selected={value === button.value}
-            onClick={() => onValueChange(button.value)}
-          >
-            {button.label}
-          </button>
-        ))}
-      </div>
     ),
   };
 });
