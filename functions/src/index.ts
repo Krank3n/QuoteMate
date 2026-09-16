@@ -266,6 +266,14 @@ import { buildQuantitySanityPrompt, applySanityDecisions, indexMaterialsForSanit
 import { dropOwnedGear } from './ownedGear';
 import { claudeText } from './claudeText';
 import {
+  assessSquareReadiness,
+  probeSquareReadiness,
+  shouldReprobeReadiness,
+  squareNotReadyMessage,
+  type SquarePaymentReadiness,
+} from './squareReadiness';
+import { invalidateUserPaymentLinks, squareConnectionChanged } from './squareLinkInvalidation';
+import {
   applyAnchorScale,
   scaleMaterialsToAnchor,
   isAnchorLaundered,
@@ -13948,7 +13956,7 @@ function decryptSquareToken(value: string | undefined | null): string | null {
  */
 async function getSquareTokens(
   userId: string,
-): Promise<{ accessToken: string; merchantId: string; locationId?: string } | null> {
+): Promise<SquareTokens | null> {
   const firestore = admin.firestore();
   const connRef = firestore.doc(`users/${userId}/settings/squareConnection`);
   const connDoc = await connRef.get();
@@ -13973,7 +13981,7 @@ async function getSquareTokens(
         refreshToken: encryptSquareToken(refreshToken),
       });
     }
-    return { accessToken, merchantId, locationId };
+    return { accessToken, merchantId, locationId, paymentReadiness: data.paymentReadiness ?? null };
   }
 
   try {
@@ -14012,10 +14020,97 @@ async function getSquareTokens(
       tokenExpiresAt: expiresAtMs,
     });
 
-    return { accessToken: newAccessToken, merchantId, locationId };
+    return { accessToken: newAccessToken, merchantId, locationId, paymentReadiness: data.paymentReadiness ?? null };
   } catch (error) {
     return null;
   }
+}
+
+interface SquareTokens {
+  accessToken: string;
+  merchantId: string;
+  locationId?: string;
+  /** Stored verdict from the last readiness probe; null before the first. */
+  paymentReadiness?: SquarePaymentReadiness | null;
+}
+
+/**
+ * The stored readiness verdict, refreshed from Square when it is stale.
+ * Stores the fresh verdict on the connection; the first time an account is
+ * found unable to take card payments, every stored pay link is dropped so no
+ * reader keeps handing out a link to a dead checkout page. Square being
+ * unreachable keeps the previous verdict rather than flipping anything.
+ */
+async function refreshSquareReadiness(
+  userId: string,
+  conn: { paymentReadiness?: SquarePaymentReadiness | null },
+  tokens?: SquareTokens | null,
+): Promise<SquarePaymentReadiness | null> {
+  const stored = conn.paymentReadiness ?? null;
+  if (!shouldReprobeReadiness(stored)) return stored;
+
+  const t = tokens ?? (await getSquareTokens(userId));
+  if (!t) return stored;
+  const fresh = await probeSquareReadiness({
+    apiBase: squareApiBase(),
+    accessToken: t.accessToken,
+    merchantId: t.merchantId,
+    locationId: t.locationId,
+  });
+  if (!fresh) return stored;
+
+  const firestore = admin.firestore();
+  // update(), not set(): a disconnect racing this must not resurrect a
+  // token-less connection doc.
+  await firestore
+    .doc(`users/${userId}/settings/squareConnection`)
+    .update({ paymentReadiness: fresh })
+    .catch(() => {});
+  if (!fresh.ready && stored?.ready !== false) {
+    console.warn('[square] account cannot take card payments', { userId, reasons: fresh.reasons });
+    await invalidateUserPaymentLinks(firestore, userId, 'square_not_ready').catch((error) => {
+      console.error('[square] link invalidation failed on a not-ready verdict', { userId, error });
+    });
+  }
+  return fresh;
+}
+
+/**
+ * Gate in front of every mint. A link minted for an account Square won't
+ * charge cards for is worse than no link: the email falls back to the other
+ * ways to pay, but a Pay button that opens "not accepting payments" reads as
+ * the tradie's fault.
+ */
+async function squareCanTakeCardPayments(userId: string, tokens: SquareTokens): Promise<boolean> {
+  const readiness = await refreshSquareReadiness(userId, tokens, tokens);
+  if (readiness && !readiness.ready) {
+    console.warn('[square] mint refused: account cannot take card payments', { userId, reasons: readiness.reasons });
+    return false;
+  }
+  return true;
+}
+
+/**
+ * The mint endpoints' failure answer. When the account is the known reason,
+ * say so in words the tradie can act on instead of "failed to create link".
+ */
+async function respondMintFailure(res: functions.Response, userId: string, fallback: string): Promise<void> {
+  try {
+    const snap = await admin.firestore().doc(`users/${userId}/settings/squareConnection`).get();
+    const data = snap.data();
+    const readiness = data?.paymentReadiness as SquarePaymentReadiness | undefined;
+    if (readiness && readiness.ready === false) {
+      res.status(409).json({
+        error: squareNotReadyMessage(readiness, data?.merchantName),
+        reason: 'square_not_ready',
+        paymentReadiness: readiness,
+      });
+      return;
+    }
+  } catch {
+    // Fall through to the generic answer.
+  }
+  res.status(400).json({ error: fallback });
 }
 
 /**
@@ -14217,6 +14312,9 @@ export const squareCallback = functions.https.onRequest((req, res) => {
       let merchantName: string | undefined;
       let locationId: string | undefined;
       let locationName: string | undefined;
+      // What Square reports about the account, for the readiness verdict.
+      let merchantProfile: any = null;
+      let locationProfile: any = null;
 
       try {
         const merchResp = await fetch(`${squareApiBase()}/v2/merchants/${merchantId}`, {
@@ -14227,7 +14325,8 @@ export const squareCallback = functions.https.onRequest((req, res) => {
         });
         if (merchResp.ok) {
           const merchJson: any = await merchResp.json();
-          merchantName = merchJson?.merchant?.business_name;
+          merchantProfile = merchJson?.merchant ?? null;
+          merchantName = merchantProfile?.business_name;
         }
       } catch {}
 
@@ -14241,13 +14340,25 @@ export const squareCallback = functions.https.onRequest((req, res) => {
         if (locResp.ok) {
           const locJson: any = await locResp.json();
           const loc = locJson?.locations?.[0];
+          locationProfile = loc ?? null;
           locationId = loc?.id;
           locationName = loc?.name;
         }
       } catch {}
 
       const firestore = admin.firestore();
-      await firestore.doc(`users/${userId}/settings/squareConnection`).set({
+      const connRef = firestore.doc(`users/${userId}/settings/squareConnection`);
+      // The connection this one replaces, if any: links minted under a
+      // different merchant or location pay the wrong seller from here on.
+      const previous = (await connRef.get().catch(() => null))?.data() ?? null;
+
+      // Square says up front whether the account can charge a card. An
+      // unactivated seller mints links that land on "not accepting
+      // payments", so the verdict is stored with the connection and every
+      // mint path checks it — see squareCanTakeCardPayments.
+      const paymentReadiness = assessSquareReadiness(merchantProfile, locationProfile);
+
+      await connRef.set({
         merchantId,
         merchantName: merchantName || null,
         locationId: locationId || null,
@@ -14258,13 +14369,30 @@ export const squareCallback = functions.https.onRequest((req, res) => {
         env: SQUARE_ENV,
         connectedAt: new Date().toISOString(),
         disconnectedReason: null,
+        paymentReadiness,
       });
+
+      if (squareConnectionChanged(previous, { merchantId, locationId })) {
+        await invalidateUserPaymentLinks(firestore, userId, 'connection_changed').catch((error) => {
+          console.error('[square] link invalidation failed after reconnect', { userId, error });
+        });
+      } else if (!paymentReadiness.ready) {
+        await invalidateUserPaymentLinks(firestore, userId, 'square_not_ready').catch((error) => {
+          console.error('[square] link invalidation failed on a not-ready connect', { userId, error });
+        });
+      }
+      if (!paymentReadiness.ready) {
+        console.warn('[square] connected an account that cannot take card payments', {
+          userId, merchantId, reasons: paymentReadiness.reasons,
+        });
+      }
 
       res.status(200).json({
         success: true,
         merchantName: merchantName || null,
         locationName: locationName || null,
         env: SQUARE_ENV,
+        paymentReadiness,
       });
     } catch (error: any) {
       res.status(500).json({ error: 'Internal error connecting to Square' });
@@ -14296,6 +14424,9 @@ export const checkSquareConnection = functions.https.onRequest((req, res) => {
     }
 
     const data = connDoc.data()!;
+    // Re-asks Square only when the stored verdict is stale (missing, a few
+    // minutes old on a flagged account, a day old on a healthy one).
+    const paymentReadiness = await refreshSquareReadiness(decodedToken.uid, data);
     res.status(200).json({
       connected: true,
       merchantId: data.merchantId || null,
@@ -14305,6 +14436,7 @@ export const checkSquareConnection = functions.https.onRequest((req, res) => {
       env: data.env || SQUARE_ENV,
       connectedAt: data.connectedAt || null,
       disconnectedReason: data.disconnectedReason || null,
+      paymentReadiness,
     });
   });
 });
@@ -14349,6 +14481,12 @@ export const squareDisconnect = functions.https.onRequest((req, res) => {
         }
       }
       await connRef.delete();
+      // Every stored link paid this merchant. Readers reuse whatever the doc
+      // carries, so without the sweep a disconnected tradie keeps sharing
+      // links to an account that is no longer theirs to be paid into.
+      await invalidateUserPaymentLinks(firestore, decodedToken.uid, 'disconnected').catch((error) => {
+        console.error('[square] link invalidation failed on disconnect', { userId: decodedToken.uid, error });
+      });
     }
 
     res.status(200).json({ success: true });
@@ -14440,6 +14578,7 @@ async function createSquarePaymentLinkInternal(
 
   const tokens = await getSquareTokens(userId);
   if (!tokens) return null;
+  if (!(await squareCanTakeCardPayments(userId, tokens))) return null;
 
   // Charge the outstanding balance, not the full total — a part payment
   // recorded against the invoice (deposit, progress payment) must not be
@@ -14741,7 +14880,7 @@ export const createSquarePaymentLink = functions.https.onRequest((req, res) => {
       }
       const result = await mintAndRotate(decodedToken.uid, targetId, 'deposit');
       if (!result) {
-        res.status(400).json({ error: 'Failed to create Square deposit payment link' });
+        await respondMintFailure(res, decodedToken.uid, 'Failed to create Square deposit payment link');
         return;
       }
       res.status(200).json({ success: true, reused: false, ...result });
@@ -14755,7 +14894,7 @@ export const createSquarePaymentLink = functions.https.onRequest((req, res) => {
       }
       const result = await mintAndRotate(decodedToken.uid, targetId, 'quote_full');
       if (!result) {
-        res.status(400).json({ error: 'Failed to create Square full quote payment link' });
+        await respondMintFailure(res, decodedToken.uid, 'Failed to create Square full quote payment link');
         return;
       }
       res.status(200).json({ success: true, reused: false, ...result });
@@ -14770,7 +14909,7 @@ export const createSquarePaymentLink = functions.https.onRequest((req, res) => {
 
     const result = await mintAndRotate(decodedToken.uid, id, 'invoice');
     if (!result) {
-      res.status(400).json({ error: 'Failed to create Square payment link' });
+      await respondMintFailure(res, decodedToken.uid, 'Failed to create Square payment link');
       return;
     }
     res.status(200).json({ success: true, reused: false, ...result });
@@ -14836,6 +14975,7 @@ async function createSquareDepositPaymentLinkInternal(
 
   const tokens = await getSquareTokens(userId);
   if (!tokens) return null;
+  if (!(await squareCanTakeCardPayments(userId, tokens))) return null;
 
   const plan = await getUserPlanServerSide(userId);
   const { chargedDollars, appFeeCents } =
@@ -14964,6 +15104,7 @@ async function createSquareFullQuotePaymentLinkInternal(
 
   const tokens = await getSquareTokens(userId);
   if (!tokens) return null;
+  if (!(await squareCanTakeCardPayments(userId, tokens))) return null;
 
   const plan = await getUserPlanServerSide(userId);
   const { chargedDollars, appFeeCents } =

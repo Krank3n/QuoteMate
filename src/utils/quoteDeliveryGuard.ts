@@ -19,6 +19,7 @@
  */
 
 import { checkSquareConnection } from '../services/squareService';
+import { squareNotReadyCopy } from './squareReadinessCopy';
 import * as squareService from '../services/squareService';
 import { useStore } from '../store/useStore';
 
@@ -64,7 +65,9 @@ export function carriesPayableAmount(target: DeliveryDoc): boolean {
 export async function ensureCanDeliver(target: DeliveryDoc): Promise<DeliveryGate> {
   const plan = useStore.getState().getEffectivePlan();
   if (plan === 'pro' || plan === 'trial' || !carriesPayableAmount(target)) {
-    return { ok: true, squarePaymentLinkUrl: target.doc.squarePaymentLinkUrl };
+    // No link handed back here: attachPayLink decides, after confirming the
+    // connection, whether the one on the doc is still the one to use.
+    return { ok: true };
   }
 
   // Free tier, money on the document — Square connection is mandatory.
@@ -86,7 +89,17 @@ export async function ensureCanDeliver(target: DeliveryDoc): Promise<DeliveryGat
     };
   }
 
-  // Reuse a previously-minted link if the doc already carries one.
+  if (connection.paymentReadiness?.ready === false) {
+    return {
+      ok: false,
+      reason: 'mint_link_failed',
+      message: squareNotReadyCopy(connection.paymentReadiness, connection.merchantName).body,
+    };
+  }
+
+  // Reuse a previously-minted link if the doc already carries one. Safe
+  // here: the connection was just confirmed, and a changed connection sweeps
+  // these fields server-side.
   if (target.doc.squarePaymentLinkUrl) {
     return { ok: true, squarePaymentLinkUrl: target.doc.squarePaymentLinkUrl };
   }
@@ -112,10 +125,16 @@ export async function ensureCanDeliver(target: DeliveryDoc): Promise<DeliveryGat
  * at all. Plain quotes have nothing to link, so they cost no round-trip.
  */
 export async function attachPayLink(target: DeliveryDoc): Promise<string | undefined> {
-  if (target.doc.squarePaymentLinkUrl) return target.doc.squarePaymentLinkUrl;
   if (!carriesPayableAmount(target)) return undefined;
   try {
-    if (!(await checkSquareConnection()).connected) return undefined;
+    // Connection first, even with a link in hand: the stored link paid the
+    // merchant it was minted under. After a disconnect or a reconnect to a
+    // different Square account the server sweeps those fields, but the copy
+    // on the phone can predate the sweep, and a link to the wrong seller or
+    // to Square's "not accepting payments" page must never reach a customer.
+    const connection = await checkSquareConnection();
+    if (!connection.connected || connection.paymentReadiness?.ready === false) return undefined;
+    if (target.doc.squarePaymentLinkUrl) return target.doc.squarePaymentLinkUrl;
     return await mintPaymentLinkForDoc(target);
   } catch {
     return undefined;

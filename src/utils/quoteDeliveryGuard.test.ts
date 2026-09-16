@@ -64,6 +64,25 @@ describe('ensureCanDeliver — the free-tier gate', () => {
     expect(square.checkSquareConnection).not.toHaveBeenCalled();
   });
 
+  it('trial and pro never get a stored link handed back unchecked — attachPayLink decides', async () => {
+    planState.plan = 'pro';
+    expect(await ensureCanDeliver(invoice({ squarePaymentLinkUrl: 'https://sq/stale' }))).toEqual({ ok: true });
+  });
+
+  it('a free user whose Square account cannot take card payments gets told, and nothing is minted', async () => {
+    planState.plan = 'free';
+    square.checkSquareConnection.mockResolvedValue({
+      connected: true,
+      merchantName: 'Slimjims',
+      paymentReadiness: { ready: false, reasons: ['no_card_processing'], checkedAt: 1 },
+    });
+    const gate = await ensureCanDeliver(invoice({ squarePaymentLinkUrl: 'https://sq/dead' }));
+    expect(gate.ok).toBe(false);
+    expect(gate).toMatchObject({ reason: 'mint_link_failed' });
+    expect((gate as any).message).toContain('Slimjims');
+    expect(square.mintInvoicePaymentLink).not.toHaveBeenCalled();
+  });
+
   // Regression: 8 of the 13 tradies who met this gate on a quote abandoned
   // the send. A quote without a deposit has nothing for Square to collect,
   // so a free user sends it like anyone else.
@@ -144,9 +163,28 @@ describe('attachPayLink — the link for copy composed on the phone', () => {
     expect(square.mintInvoicePaymentLink).not.toHaveBeenCalled();
   });
 
-  it('reuses the link the doc already carries, with no round-trip', async () => {
+  it('reuses the link the doc already carries once the connection is confirmed, without re-minting', async () => {
     expect(await attachPayLink(invoice({ squarePaymentLinkUrl: 'https://sq/existing' }))).toBe('https://sq/existing');
-    expect(square.checkSquareConnection).not.toHaveBeenCalled();
+    expect(square.checkSquareConnection).toHaveBeenCalledTimes(1);
+    expect(square.mintInvoicePaymentLink).not.toHaveBeenCalled();
+  });
+
+  // Regression, 16 Sep 2026: a stored link outlived the connection it was
+  // minted under and went out on a PDF to a dead Square checkout page.
+  it('drops a stored link when Square is no longer connected', async () => {
+    square.checkSquareConnection.mockResolvedValue({ connected: false });
+    expect(await attachPayLink(invoice({ squarePaymentLinkUrl: 'https://sq/stale' }))).toBeUndefined();
+    expect(square.mintInvoicePaymentLink).not.toHaveBeenCalled();
+  });
+
+  it('drops a stored link, and mints nothing, when Square says the account cannot take card payments', async () => {
+    square.checkSquareConnection.mockResolvedValue({
+      connected: true,
+      paymentReadiness: { ready: false, reasons: ['no_card_processing'], checkedAt: 1 },
+    });
+    expect(await attachPayLink(invoice({ squarePaymentLinkUrl: 'https://sq/dead' }))).toBeUndefined();
+    expect(await attachPayLink(invoice())).toBeUndefined();
+    expect(square.mintInvoicePaymentLink).not.toHaveBeenCalled();
   });
 
   it('costs a plain quote nothing — no link, no round-trip', async () => {
