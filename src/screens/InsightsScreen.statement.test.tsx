@@ -10,6 +10,9 @@
  * and a financial year is bigger than that — and nothing about the period is
  * asserted on screen until that read has actually answered. The custom range
  * takes two picks before it counts as a range at all.
+ *
+ * The card sits behind the Reports segment of the switcher, so these render
+ * with the route param the dashboard's statement link sends.
  */
 import React from 'react';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
@@ -20,10 +23,16 @@ vi.mock('../components/GridBackground', () => ({ GridBackground: () => null }));
 vi.mock('../components/WebContainer', () => ({
   WebContainer: ({ children }: any) => React.createElement('div', null, children),
 }));
-vi.mock('../components/MonthComparisonChart', () => ({ MonthComparisonChart: () => null }));
-vi.mock('../components/QuotePipelineChart', () => ({ QuotePipelineChart: () => null }));
-vi.mock('../components/RevenueChart', () => ({ RevenueChart: () => null }));
-vi.mock('../components/CostBreakdownChart', () => ({ CostBreakdownChart: () => null }));
+vi.mock('../components/MonthComparisonChart', () => ({
+  MonthComparisonChart: () => <div data-testid="chart:months" />,
+}));
+vi.mock('../components/QuotePipelineChart', () => ({
+  QuotePipelineChart: () => <div data-testid="chart:pipeline" />,
+}));
+vi.mock('../components/RevenueChart', () => ({ RevenueChart: () => <div data-testid="chart:revenue" /> }));
+vi.mock('../components/CostBreakdownChart', () => ({
+  CostBreakdownChart: () => <div data-testid="chart:costs" />,
+}));
 // The calendar itself is covered by its own suite; what matters here is the
 // two-step conversation the screen has with it.
 const sheets = vi.hoisted(() => ({ byTitle: {} as Record<string, any> }));
@@ -53,6 +62,19 @@ vi.mock('react-native-paper', async () => {
         {children}
       </button>
     ),
+    SegmentedButtons: ({ value, onValueChange, buttons }: any) => (
+      <div>
+        {buttons.map((button: any) => (
+          <button
+            key={button.value}
+            aria-selected={value === button.value}
+            onClick={() => onValueChange(button.value)}
+          >
+            {button.label}
+          </button>
+        ))}
+      </div>
+    ),
   };
 });
 
@@ -61,7 +83,11 @@ vi.mock('../hooks/useAlertModal', () => ({
 }));
 
 const nav = vi.hoisted(() => ({ navigate: vi.fn() }));
-vi.mock('@react-navigation/native', () => ({ useNavigation: () => nav }));
+const routeParams = vi.hoisted(() => ({ current: undefined as any }));
+vi.mock('@react-navigation/native', () => ({
+  useNavigation: () => nav,
+  useRoute: () => ({ params: routeParams.current }),
+}));
 
 const pdf = vi.hoisted(() => ({
   exportStatementPDF: vi.fn(async () => {}),
@@ -147,6 +173,7 @@ const buttonFor = (label: string) =>
 
 beforeEach(() => {
   vi.clearAllMocks();
+  routeParams.current = { section: 'reports' };
   sendSheet.props = null;
   sheets.byTitle = {};
   store.state = {
@@ -356,5 +383,58 @@ describe('InsightsScreen — a custom range', () => {
 
     expect(screen.queryByText(/at most 24 months/)).toBeNull();
     expect(buttonFor('Send to accountant').disabled).toBe(false);
+  });
+});
+
+/**
+ * Insights ("how am I going") and Reports (a document for someone else) are
+ * two different jobs, so only one of them is on screen at a time and the
+ * dashboard links land on the right one.
+ */
+describe('InsightsScreen — the Insights / Reports switcher', () => {
+  it('opens on the charts, with the statement out of the way', () => {
+    routeParams.current = undefined;
+    render(<InsightsScreen />);
+
+    expect(screen.getByTestId('chart:months')).toBeTruthy();
+    expect(screen.getByTestId('chart:pipeline')).toBeTruthy();
+    expect(screen.getByTestId('chart:revenue')).toBeTruthy();
+    expect(screen.getByTestId('chart:costs')).toBeTruthy();
+    expect(screen.queryByText('Statement for your accountant')).toBeNull();
+  });
+
+  it("opens on the statement when the dashboard's link asks for Reports", () => {
+    routeParams.current = { section: 'reports' };
+    render(<InsightsScreen />);
+
+    expect(screen.getByText('Statement for your accountant')).toBeTruthy();
+    expect(screen.queryByTestId('chart:months')).toBeNull();
+  });
+
+  it('swaps the halves when a segment is tapped', () => {
+    routeParams.current = undefined;
+    render(<InsightsScreen />);
+
+    fireEvent.click(screen.getByText('Reports'));
+    expect(screen.getByText('Statement for your accountant')).toBeTruthy();
+    expect(screen.queryByTestId('chart:months')).toBeNull();
+
+    fireEvent.click(screen.getByText('Insights'));
+    expect(screen.getByTestId('chart:months')).toBeTruthy();
+    expect(screen.queryByText('Statement for your accountant')).toBeNull();
+  });
+
+  // The screen sits in the stack under other cards: a later link has to move
+  // the switcher, not just the one that mounted it.
+  it('follows a param change while the screen stays mounted', () => {
+    routeParams.current = { section: 'insights' };
+    const { rerender } = render(<InsightsScreen />);
+    expect(screen.getByTestId('chart:months')).toBeTruthy();
+
+    routeParams.current = { section: 'reports' };
+    rerender(<InsightsScreen />);
+
+    expect(screen.getByText('Statement for your accountant')).toBeTruthy();
+    expect(screen.queryByTestId('chart:months')).toBeNull();
   });
 });

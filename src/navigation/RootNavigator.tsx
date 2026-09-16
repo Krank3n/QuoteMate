@@ -82,6 +82,7 @@ export type NewQuoteStackParamList = {
 // from here to type its navigation.navigate(...) call.
 export type RootStackParamList = {
   ServiceReport: { jobId: string; reportId?: string };
+  Insights: { section?: 'insights' | 'reports' } | undefined;
 };
 
 const Tab = createBottomTabNavigator<RootTabParamList>();
@@ -584,7 +585,7 @@ export function RootNavigator() {
           },
           headerTintColor: themeColors.text,
           headerTitleStyle: { fontFamily: 'Archivo-Bold' },
-          title: 'Insights',
+          title: 'Insights & Reports',
         }}
       />
       <RootStack.Screen
