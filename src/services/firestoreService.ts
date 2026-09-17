@@ -23,7 +23,7 @@ import {
 import { auth, db } from '../config/firebase';
 import { Quote, BusinessSettings, SubscriptionStatus, Invoice, ReferralInfo, Contact } from '../types';
 import { Conversation } from '../types/assistant';
-import { TRIAL_DAYS, TRIAL_MS } from '../utils/trialConfig';
+import { TRIAL_DAYS, isTrialWindowExpired, trialDaysRemaining } from '../utils/trialConfig';
 import { clientSubscriptionWritePayload } from '../utils/subscriptionWritePayload';
 
 /**
@@ -66,20 +66,26 @@ function normalizeQuoteStatus(status: any): Quote['status'] {
  * otherwise we infer from isPro/trialStartedAt so users with old docs land in
  * the right tier on their next load.
  */
-function subscriptionFromSnapshotData(data: any): SubscriptionStatus {
-  const trialStartedAt = data.trialStartedAt
-    ? new Date(data.trialStartedAt.toDate ? data.trialStartedAt.toDate() : data.trialStartedAt)
-    : undefined;
+function dateField(value: any): Date | undefined {
+  if (!value) return undefined;
+  const d = new Date(value.toDate ? value.toDate() : value);
+  return Number.isFinite(d.getTime()) ? d : undefined;
+}
 
-  // Trial expiry is recomputed live from `trialStartedAt + TRIAL_MS`. The
+function subscriptionFromSnapshotData(data: any): SubscriptionStatus {
+  const trialStartedAt = dateField(data.trialStartedAt);
+  const trialEndsAt = dateField(data.trialEndsAt);
+  const returnTrialGrantedAt = dateField(data.returnTrialGrantedAt);
+  const returnTrialNoticeSeenAt = dateField(data.returnTrialNoticeSeenAt);
+
+  // Trial expiry is recomputed live from the trial window (trialStartedAt +
+  // TRIAL_MS, or the server's explicit trialEndsAt after a return trial). The
   // stored `data.trialExpired` flag is unreliable — it's only refreshed on
   // quota-check writes and can lag the truth on the snapshot (e.g. cohorts
   // we extended from 7 to 14 days). Many screens key off `!trialExpired` to
   // gate features, so this needs to be authoritative on load.
   const isProUser = data.isPro || data.plan === 'pro';
-  const liveTrialExpired = !isProUser
-    && !!trialStartedAt
-    && Date.now() - trialStartedAt.getTime() >= TRIAL_MS;
+  const liveTrialExpired = !isProUser && isTrialWindowExpired({ trialStartedAt, trialEndsAt });
 
   let plan: SubscriptionStatus['plan'];
   if (isProUser) {
@@ -100,8 +106,12 @@ function subscriptionFromSnapshotData(data: any): SubscriptionStatus {
     currentPeriodEnd: new Date(data.currentPeriodEnd),
     freeQuotesLimit: data.freeQuotesLimit,
     trialStartedAt,
+    trialEndsAt,
     trialExpired: liveTrialExpired,
     dismissedUpgradeBanner: data.dismissedUpgradeBanner || false,
+    returnTrialGrantedAt,
+    returnTrialDays: typeof data.returnTrialDays === 'number' ? data.returnTrialDays : undefined,
+    returnTrialNoticeSeenAt,
     platformFeeBps: typeof data.platformFeeBps === 'number' ? data.platformFeeBps : undefined,
   };
 }
@@ -1097,9 +1107,10 @@ class FirestoreService {
 
         // Trial expired → free tier. Creation stays unlimited on free (the
         // paid gate is on sending — see quoteDeliveryGuard), so count the
-        // quote and flag trialExpired instead of blocking.
-        const elapsed = now.getTime() - trialStartedAt.getTime();
-        if (elapsed >= TRIAL_MS) {
+        // quote and flag trialExpired instead of blocking. The window honours
+        // a server-granted return trial's trialEndsAt.
+        const trialSource = { trialStartedAt, trialEndsAt: data.trialEndsAt?.toDate?.() ?? data.trialEndsAt };
+        if (isTrialWindowExpired(trialSource, now.getTime())) {
           const newCount = (data.quotesThisMonth || 0) + 1;
           transaction.set(subscriptionRef, {
             ...data,
@@ -1111,7 +1122,7 @@ class FirestoreService {
 
         // Trial still active - allow
         const newCount = (data.quotesThisMonth || 0) + 1;
-        const daysRemaining = Math.ceil((TRIAL_MS - elapsed) / (24 * 60 * 60 * 1000));
+        const daysRemaining = trialDaysRemaining(trialSource, now.getTime()) ?? 0;
         transaction.set(subscriptionRef, {
           ...data,
           quotesThisMonth: newCount,

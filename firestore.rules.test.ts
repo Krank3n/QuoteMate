@@ -147,6 +147,38 @@ describe('users/{uid}/profile/subscription (PAY-02)', () => {
     }, { merge: true }));
   });
 
+  it('denies a client granting itself the return trial (trialEndsAt / returnTrialGrantedAt)', async () => {
+    // Trial lapsed weeks ago. Writing a future trialEndsAt would re-open it;
+    // writing returnTrialGrantedAt would let it be deleted and re-claimed.
+    await seed(SUB_PATH, { ...quotaSeed, trialStartedAt: '2026-06-01T00:00:00.000Z' });
+    await assertFails(updateDoc(doc(aliceDb(), SUB_PATH), { trialEndsAt: '2099-01-01T00:00:00.000Z' }));
+    await assertFails(updateDoc(doc(aliceDb(), SUB_PATH), { returnTrialGrantedAt: '2026-07-17T00:00:00.000Z' }));
+    await assertFails(updateDoc(doc(aliceDb(), SUB_PATH), { returnTrialDays: 30 }));
+    await assertFails(updateDoc(doc(aliceDb(), SUB_PATH), { returnTrialPriorActivityAt: '2020-01-01T00:00:00.000Z' }));
+    await assertFails(updateDoc(doc(aliceDb(), SUB_PATH), { returnTrialPriorTrialEndsAt: '2020-01-01T00:00:00.000Z' }));
+    await assertFails(setDoc(doc(aliceDb(), SUB_PATH), { ...quotaSeed, trialEndsAt: '2099-01-01T00:00:00.000Z' }));
+  });
+
+  it('denies a client removing a server-granted return trial stamp to re-claim it', async () => {
+    const granted = {
+      ...quotaSeed,
+      trialStartedAt: '2026-06-01T00:00:00.000Z',
+      trialEndsAt: '2026-07-24T00:00:00.000Z',
+      returnTrialGrantedAt: '2026-07-17T00:00:00.000Z',
+      returnTrialDays: 7,
+    };
+    await seed(SUB_PATH, granted);
+    // Full set() that drops the grant fields (the old-client mirror shape).
+    await assertFails(setDoc(doc(aliceDb(), SUB_PATH), quotaSeed));
+    // …but the quota transaction's full set() with them unchanged is fine,
+    // and so is the whitelisted merge that records the card was dismissed.
+    await assertSucceeds(setDoc(doc(aliceDb(), SUB_PATH), { ...granted, quotesThisMonth: 2 }));
+    await assertSucceeds(setDoc(doc(aliceDb(), SUB_PATH), {
+      returnTrialNoticeSeenAt: '2026-07-17T01:00:00.000Z',
+      syncedAt: '2026-07-17T01:00:00.000Z',
+    }, { merge: true }));
+  });
+
   it('denies deleting the subscription doc', async () => {
     await seed(SUB_PATH, quotaSeed);
     await assertFails(deleteDoc(doc(aliceDb(), SUB_PATH)));

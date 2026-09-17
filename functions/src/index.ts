@@ -37,6 +37,7 @@ import {
 } from './email';
 import { listAllAuthUsers } from './authUsers.helpers';
 import { isUnreachableEmail, reEngagementVerdict } from './reEngagement.helpers';
+import { recordReturnAndMaybeGrantTrial } from './returnTrial';
 import {
   invoiceLinkAmountDue,
   isPaymentAlreadyApplied,
@@ -158,7 +159,7 @@ import { receiptVerdict, isFirstGrantOfTransaction, isNewSubscriber, storeTrialP
 import { fetchGooglePlaySubscription } from './iapStoreStatus';
 import { verifyAppleJws } from './appleJws.helpers';
 import { verifySquareWebhookSignature } from './squareWebhookSignature';
-import { resolveServerPlan, storePricePatch, subInterval, subPriceInfo } from './subscription.helpers';
+import { resolveServerPlan, storePricePatch, subInterval, subPriceInfo, trialEndMs, TRIAL_MS } from './subscription.helpers';
 import {
   SQUARE_OAUTH_STATES_COLLECTION,
   SQUARE_OAUTH_STATE_TTL_MS,
@@ -1407,7 +1408,6 @@ export const checkAndIncrementQuota = functions.https.onRequest((req, res) => {
     try {
       const db = admin.firestore();
       const subscriptionRef = db.doc(`users/${userId}/profile/subscription`);
-      const TRIAL_DURATION_MS = 14 * 24 * 60 * 60 * 1000; // 14-day trial — keep in sync with src/utils/trialConfig.ts
 
       const result = await db.runTransaction(async (transaction) => {
         const subscriptionDoc = await transaction.get(subscriptionRef);
@@ -1475,11 +1475,12 @@ export const checkAndIncrementQuota = functions.https.onRequest((req, res) => {
             : new Date(subscriptionData.trialStartedAt);
         }
 
-        const elapsed = now.getTime() - trialStartedAt.getTime();
-        const trialExpired = elapsed >= TRIAL_DURATION_MS;
+        // Shared window maths (honours a return trial's explicit trialEndsAt).
+        const trialEnd = trialEndMs({ ...subscriptionData, trialStartedAt }) ?? trialStartedAt.getTime() + TRIAL_MS;
+        const trialExpired = now.getTime() >= trialEnd;
         const trialDaysRemaining = trialExpired
           ? 0
-          : Math.ceil((TRIAL_DURATION_MS - elapsed) / (24 * 60 * 60 * 1000));
+          : Math.ceil((trialEnd - now.getTime()) / (24 * 60 * 60 * 1000));
 
         if (trialExpired) {
           // Trial expired — don't increment count, deny access
@@ -8659,15 +8660,22 @@ export const updateActivityTimestamp = functions.https.onRequest((req, res) => {
       const appVersion = /^[\d]+\.[\d]+\.[\d]+([.\-+][\w.-]*)?$/.test(rawVersion) ? rawVersion : null;
       const appPlatform = ['ios', 'android', 'web', 'macos', 'windows'].includes(rawPlatform) ? rawPlatform : null;
 
-      await admin.firestore()
-        .doc(`users/${decodedToken.uid}/settings/emailState`)
-        .set({
+      // This ping is the "they came back" moment, so it is also where a
+      // lapsed trial gets its one return-triggered re-open. The prior
+      // lastActivityAt is read and the new stamp written in the same
+      // transaction — see returnTrial.ts. Only a client that says it can
+      // render the re-trial (supportsReturnTrial) is considered.
+      const returnTrial = await recordReturnAndMaybeGrantTrial({
+        uid: decodedToken.uid,
+        consider: req.body?.supportsReturnTrial === true,
+        activityPatch: {
           lastActivityAt: admin.firestore.FieldValue.serverTimestamp(),
           ...(appVersion ? { appVersion, appVersionSeenAt: admin.firestore.FieldValue.serverTimestamp() } : {}),
           ...(appPlatform ? { appPlatform } : {}),
-        }, { merge: true });
+        },
+      });
 
-      res.status(200).json({ success: true });
+      res.status(200).json({ success: true, returnTrial });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }

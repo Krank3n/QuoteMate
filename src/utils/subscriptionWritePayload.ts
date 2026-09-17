@@ -23,6 +23,7 @@ export const CLIENT_SUBSCRIPTION_WRITABLE_KEYS = [
   'trialStartedAt',
   'trialExpired',
   'dismissedUpgradeBanner',
+  'returnTrialNoticeSeenAt',
   'syncedAt',
 ] as const;
 
@@ -35,6 +36,11 @@ export function clientSubscriptionWritePayload(status: SubscriptionStatus): Reco
     trialStartedAt: status.trialStartedAt ? new Date(status.trialStartedAt).toISOString() : null,
     trialExpired: status.trialExpired || false,
     dismissedUpgradeBanner: status.dismissedUpgradeBanner || false,
+    // Omitted (not nulled) when unset so a merge never clears a value another
+    // device wrote.
+    ...(status.returnTrialNoticeSeenAt
+      ? { returnTrialNoticeSeenAt: new Date(status.returnTrialNoticeSeenAt).toISOString() }
+      : {}),
     syncedAt: new Date().toISOString(),
   };
 }

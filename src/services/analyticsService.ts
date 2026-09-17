@@ -68,6 +68,13 @@ export type AnalyticsEvent =
   // quote timestamps — and no push had a read on whether it worked. See
   // appOpenTracker.ts for the grace-window attribution.
   | 'app_opened'
+  // The server re-opened a lapsed trial on this visit's activity ping: the
+  // tradie came back after 30+ days away and gets `days` of Pro again, once
+  // (functions/src/returnTrial.helpers.ts). Fired by the dashboard when the
+  // ping's response says so.
+  | 'return_trial_granted'
+  // The welcome-back card was closed (`via` dismiss | quote).
+  | 'return_trial_notice_dismissed'
   // Persistent dashboard / job-screen nudge after trial expires + no Square.
   | 'trial_expired_banner_shown'
   // The hard gate at Send. Fires when SendGateModal opens — funnel's last

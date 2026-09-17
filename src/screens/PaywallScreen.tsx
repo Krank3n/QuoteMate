@@ -27,7 +27,7 @@ import { doc as firestoreDoc, getDoc } from 'firebase/firestore';
 import { WebContainer } from '../components/WebContainer';
 import { StripeCheckoutModal } from '../components/StripeCheckoutModal';
 import { CancellationReasonModal } from '../components/CancellationReasonModal';
-import { TRIAL_DAYS, TRIAL_MS } from '../utils/trialConfig';
+import { TRIAL_DAYS, trialDaysRemaining as trialDaysLeft } from '../utils/trialConfig';
 import {
   ACTUAL_PRICE_AUD,
   foundingFramingApplies,
@@ -96,15 +96,8 @@ export function PaywallScreen() {
   // Trial status
   const trialExpired = subscriptionStatus?.trialExpired || false;
   const trialStartedAt = subscriptionStatus?.trialStartedAt;
-  const getTrialDaysRemaining = () => {
-    if (!trialStartedAt) return TRIAL_DAYS;
-    const start = new Date(trialStartedAt);
-    const now = new Date();
-    const elapsed = now.getTime() - start.getTime();
-    const remaining = Math.ceil((TRIAL_MS - elapsed) / (24 * 60 * 60 * 1000));
-    return Math.max(0, remaining);
-  };
-  const trialDaysRemaining = getTrialDaysRemaining();
+  const trialEndsAt = subscriptionStatus?.trialEndsAt;
+  const trialDaysRemaining = trialDaysLeft(subscriptionStatus) ?? TRIAL_DAYS;
 
   useEffect(() => {
     trackEvent('paywall_viewed', {
@@ -585,7 +578,7 @@ export function PaywallScreen() {
 
   // Check if user is Pro
   const isPro = subscriptionStatus?.isPro || false;
-  const planState: PaywallPlanState = paywallPlanState({ isPro, trialExpired, trialStartedAt });
+  const planState: PaywallPlanState = paywallPlanState({ isPro, trialExpired, trialStartedAt, trialEndsAt });
   // Free days the store gives before the first charge on the selected plan —
   // null when the store reports no introductory offer, or this buyer has used
   // theirs. Every "when am I charged" line below reads this one value.

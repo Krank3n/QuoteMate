@@ -601,8 +601,20 @@ export interface SubscriptionStatus {
   currentPeriodEnd: Date;
   freeQuotesLimit: number;
   trialStartedAt?: Date;
+  /**
+   * Server-owned explicit end of the trial window. Absent for a normal
+   * trial (trialStartedAt + TRIAL_DAYS); set by the one return-triggered
+   * second trial. Read through utils/trialConfig.ts, never by hand.
+   */
+  trialEndsAt?: Date;
   trialExpired?: boolean;
   dismissedUpgradeBanner?: boolean;
+  /** When the server granted the return trial (the start of that window). Server-owned. */
+  returnTrialGrantedAt?: Date;
+  /** Length of the return trial in days, as granted. Server-owned. */
+  returnTrialDays?: number;
+  /** The tradie dismissed the welcome-back card (client-written). */
+  returnTrialNoticeSeenAt?: Date;
   platformFeeBps?: number;
 }
 

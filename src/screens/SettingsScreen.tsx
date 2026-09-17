@@ -213,6 +213,7 @@ export function SettingsScreen() {
               isPro: !!subscriptionStatus?.isPro,
               trialExpired: !!subscriptionStatus?.trialExpired,
               trialStartedAt: subscriptionStatus?.trialStartedAt,
+              trialEndsAt: subscriptionStatus?.trialEndsAt,
             }),
           ),
           icon: 'crown',

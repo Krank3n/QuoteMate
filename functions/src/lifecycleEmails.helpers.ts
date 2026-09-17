@@ -19,7 +19,7 @@
  * tip 5 (Tom's first-quote note, day 14 post-signup) owns it — anyone with a
  * trial has already built a quote, so the two campaigns can't overlap.
  */
-import { deriveSubFields, TRIAL_MS, ts } from './subscription.helpers';
+import { deriveSubFields, ts } from './subscription.helpers';
 import { isActivatingDoc } from './adminFunnel.helpers';
 import { NUDGE_SEND_ONCE_FIELD } from './squareNudge.helpers';
 
@@ -151,8 +151,8 @@ export function lifecycleVerdict(
     return { send: null };
   }
 
-  if (f.tier === 'trial_expired' && !emailState?.trialEndedEmailAt) {
-    const endedAt = f.trialStartedAt + TRIAL_MS;
+  if (f.tier === 'trial_expired' && !emailState?.trialEndedEmailAt && f.trialEndsAt !== null) {
+    const endedAt = f.trialEndsAt;
     if (now - endedAt <= ENDED_WINDOW_MS) {
       return { send: 'trial_ended', trialStartedAt: f.trialStartedAt };
     }

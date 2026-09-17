@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { View, StyleSheet, ScrollView, TouchableOpacity, Alert, RefreshControl, Pressable, Animated as RNAnimated } from 'react-native';
+import { View, StyleSheet, ScrollView, TouchableOpacity, Alert, RefreshControl, Pressable, Platform, Animated as RNAnimated } from 'react-native';
 import {
   Text,
   Surface,
@@ -61,7 +61,9 @@ import {
 import { nextBestAction } from '../utils/nextBestAction';
 import { TrialBanner } from '../components/TrialBanner';
 import { LeadsPromoCard } from '../components/LeadsPromoCard';
-import { TRIAL_MS } from '../utils/trialConfig';
+import { trialDaysRemaining, trialEndMs } from '../utils/trialConfig';
+import { ReturnTrialBanner } from '../components/ReturnTrialBanner';
+import { returnTrialNoticeVisible } from '../utils/returnTrialNotice';
 import { SyncErrorBanner } from '../components/SyncErrorBanner';
 import { TapToPayAwarenessBanner } from '../components/TapToPayAwarenessBanner';
 import { useTapToPayAwareness } from '../hooks/useTapToPayAwareness';
@@ -274,12 +276,22 @@ export function DashboardScreen() {
     return () => clearInterval(interval);
   }, [subtitleFade, isFocused, isAppActive]);
 
-  // Track user activity for re-engagement emails (once per app session)
+  // Track user activity for re-engagement emails (once per app session).
+  // The same ping is where the server decides whether this visit is a
+  // return after a month away on a lapsed trial — if it re-opened the trial,
+  // reload the subscription so the welcome-back card and Pro state land now,
+  // not on the next launch.
   const activityTracked = useRef(false);
   useEffect(() => {
     if (!activityTracked.current) {
       activityTracked.current = true;
-      updateActivityTimestamp();
+      updateActivityTimestamp()
+        .then((result) => {
+          if (!result?.returnTrial?.granted) return;
+          trackEvent('return_trial_granted', { days: result.returnTrial.days ?? null, platform: Platform.OS });
+          return useStore.getState().loadSubscription();
+        })
+        .catch(() => {});
     }
   }, []);
   const navigation = useNavigation<any>();
@@ -297,6 +309,7 @@ export function DashboardScreen() {
   // Action handles are stable Zustand fn refs — subscribing is a no-op
   // re-render-wise but keeps the call sites unchanged.
   const createNewQuote = useStore((s) => s.createNewQuote);
+  const dismissReturnTrialNotice = useStore((s) => s.dismissReturnTrialNotice);
   const setCurrentQuote = useStore((s) => s.setCurrentQuote);
   const duplicateQuote = useStore((s) => s.duplicateQuote);
   const deleteQuote = useStore((s) => s.deleteQuote);
@@ -508,6 +521,7 @@ export function DashboardScreen() {
         trialStartedAt: subscriptionStatus?.trialStartedAt
           ? new Date(subscriptionStatus.trialStartedAt).getTime()
           : null,
+        trialEndsAt: trialEndMs(subscriptionStatus),
         docs: documentsForStats,
         // The real connection when the check has answered; the document
         // evidence stands in until then, and after a check that failed.
@@ -844,18 +858,40 @@ export function DashboardScreen() {
         />
       )}
 
+      {/* Return trial — the one welcome-back moment for a tradie who came
+          back after a month away on a lapsed trial. The server re-opened the
+          trial on this visit's activity ping; this card is what turns the
+          visit into a fresh go rather than another bounce. Stays until
+          dismissed or the window ends, and is explicit that it's the last. */}
+      {returnTrialNoticeVisible(subscriptionStatus) && (
+        <ReturnTrialBanner
+          trial={subscriptionStatus!}
+          onQuote={() => {
+            trackEvent('return_trial_notice_dismissed', { via: 'quote' });
+            dismissReturnTrialNotice();
+            handleMateDoor();
+          }}
+          onDismiss={() => {
+            trackEvent('return_trial_notice_dismissed', { via: 'dismiss' });
+            dismissReturnTrialNotice();
+          }}
+        />
+      )}
+
       {/* Trial Status — shown only in the final 3 days of an active trial
           (days 1-3). Earlier in the trial, suppressing the countdown lets
           the tradie get hooked first; the hard gate fires at Send. The full
           banner is always available on the Subscription Settings screen. */}
       {(() => {
         if (!subscriptionStatus || subscriptionStatus.isPro || !subscriptionStatus.trialStartedAt) return null;
-        const elapsed = Date.now() - new Date(subscriptionStatus.trialStartedAt).getTime();
-        const daysRemaining = Math.max(0, Math.ceil((TRIAL_MS - elapsed) / (24 * 60 * 60 * 1000)));
+        // One trial card at a time: the welcome-back card already carries
+        // the days left until it's dismissed.
+        if (returnTrialNoticeVisible(subscriptionStatus)) return null;
+        const daysRemaining = trialDaysRemaining(subscriptionStatus) ?? 0;
         if (daysRemaining > 3 || daysRemaining === 0) return null;
         return (
           <TrialBanner
-            trialStartedAt={subscriptionStatus.trialStartedAt}
+            trial={subscriptionStatus}
             quoteCount={quotes.length}
           />
         );

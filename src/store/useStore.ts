@@ -77,7 +77,7 @@ import { documentService } from '../services/documentService';
 // "the app rebooted itself a few seconds after Xero kicked off". Static
 // import bundles xeroService into the main graph and dodges the issue.
 import * as xeroService from '../services/xeroService';
-import { TRIAL_MS } from '../utils/trialConfig';
+import { isTrialWindowExpired } from '../utils/trialConfig';
 import { trackEvent } from '../services/analyticsService';
 import { describeDeletedDoc, type DeletableRecord, type QuoteDeleteSource } from '../utils/deleteEventProps';
 import { maybeRequestReview } from '../services/storeReviewService';
@@ -213,6 +213,8 @@ interface AppState {
   getEffectivePlan: () => 'trial' | 'free' | 'pro';
   /** True iff the trial window has elapsed and the user is not yet Pro. */
   isTrialExpired: () => boolean;
+  /** Record that the return-trial welcome-back card was dismissed. */
+  dismissReturnTrialNotice: () => Promise<void>;
   /** Persist that the user closed the dashboard upgrade banner. */
   dismissUpgradeBanner: () => Promise<void>;
 
@@ -1384,7 +1386,10 @@ export const useStore = create<AppState>((set, get) => ({
       const stored = await AsyncStorage.getItem(STORAGE_KEYS.SUBSCRIPTION);
       if (stored) {
         const subscription: SubscriptionStatus = JSON.parse(stored, (key, value) => {
-          if (key === 'currentPeriodStart' || key === 'currentPeriodEnd' || key === 'trialStartedAt') {
+          if (
+            key === 'currentPeriodStart' || key === 'currentPeriodEnd' || key === 'trialStartedAt'
+            || key === 'trialEndsAt' || key === 'returnTrialGrantedAt' || key === 'returnTrialNoticeSeenAt'
+          ) {
             return value ? new Date(value) : value;
           }
           return value;
@@ -1479,10 +1484,7 @@ export const useStore = create<AppState>((set, get) => ({
 
     // Compute trial expiry on read so the moment the trial window elapses
     // we report 'free' even if no save has happened yet.
-    if (subscriptionStatus.trialStartedAt) {
-      const trialStart = new Date(subscriptionStatus.trialStartedAt);
-      if (Date.now() - trialStart.getTime() >= TRIAL_MS) return 'free';
-    }
+    if (isTrialWindowExpired(subscriptionStatus)) return 'free';
     return 'trial';
   },
 
@@ -1490,9 +1492,27 @@ export const useStore = create<AppState>((set, get) => ({
     const { subscriptionStatus } = get();
     if (!subscriptionStatus) return false;
     if (subscriptionStatus.isPro || subscriptionStatus.plan === 'pro') return false;
-    if (!subscriptionStatus.trialStartedAt) return false;
-    const trialStart = new Date(subscriptionStatus.trialStartedAt);
-    return Date.now() - trialStart.getTime() >= TRIAL_MS;
+    return isTrialWindowExpired(subscriptionStatus);
+  },
+
+  // The welcome-back card for the return trial shows until dismissed; the
+  // dismissal lives on the subscription doc so it holds across devices.
+  dismissReturnTrialNotice: async () => {
+    try {
+      const { subscriptionStatus } = get();
+      if (!subscriptionStatus || subscriptionStatus.returnTrialNoticeSeenAt) return;
+      const updated: SubscriptionStatus = {
+        ...subscriptionStatus,
+        returnTrialNoticeSeenAt: new Date(),
+      };
+      await AsyncStorage.setItem(STORAGE_KEYS.SUBSCRIPTION, JSON.stringify(updated));
+      set({ subscriptionStatus: updated });
+      if (auth.currentUser) {
+        firestoreService.saveSubscriptionStatus(updated).catch(() => {});
+      }
+    } catch (error) {
+      // silently ignore
+    }
   },
 
   dismissUpgradeBanner: async () => {

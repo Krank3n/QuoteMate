@@ -10,16 +10,36 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation } from '@react-navigation/native';
 
 import { makeStyles, useThemeColors } from '../theme';
-import { TRIAL_MS } from '../utils/trialConfig';
+import { trialWindow, type TrialWindowSource } from '../utils/trialConfig';
 
 interface TrialBannerProps {
-  trialStartedAt: string | Date;
+  /**
+   * The subscription's trial fields. Days left and the progress bar follow
+   * the window in force — the first 14-day trial, or the 7-day return trial
+   * the server re-opened for a tradie who came back after a month away.
+   */
+  trial: TrialWindowSource;
   quoteCount: number;
   /** Compact mode for settings screen (no upgrade button, slightly different layout) */
   compact?: boolean;
 }
 
-function getTrialMessage(daysRemaining: number, quoteCount: number, trialExpired: boolean): { title: string; subtitle: string } {
+function getTrialMessage(
+  daysRemaining: number,
+  quoteCount: number,
+  trialExpired: boolean,
+  isReturnTrial: boolean,
+): { title: string; subtitle: string } {
+  if (trialExpired && isReturnTrial) {
+    // The second trial was the last one — say so, no third act to tease.
+    return {
+      title: "That was the last free run",
+      subtitle: quoteCount > 0
+        ? `${quoteCount} quotes on the board. Go Pro to keep everything you've set up`
+        : "Your second trial's done. Go Pro to keep the full kit",
+    };
+  }
+
   if (trialExpired) {
     const expiredMessages = [
       { title: "Time's up, legend", subtitle: quoteCount > 0 ? `You smashed out ${quoteCount} quotes — don't let that momentum die on the vine` : "Your free trial's gone the way of the dodo" },
@@ -86,19 +106,24 @@ function getTrialMessage(daysRemaining: number, quoteCount: number, trialExpired
   return freshMessages[quoteCount % freshMessages.length];
 }
 
-export function TrialBanner({ trialStartedAt, quoteCount, compact = false }: TrialBannerProps) {
+export function TrialBanner({ trial, quoteCount, compact = false }: TrialBannerProps) {
   const styles = useStyles();
   const themeColors = useThemeColors();
   const navigation = useNavigation<any>();
 
-  const trialStart = new Date(trialStartedAt);
-  const now = new Date();
-  const elapsed = now.getTime() - trialStart.getTime();
-  const daysRemaining = Math.max(0, Math.ceil((TRIAL_MS - elapsed) / (24 * 60 * 60 * 1000)));
-  const trialExpired = elapsed >= TRIAL_MS;
-  const progress = Math.max(0, 1 - (elapsed / TRIAL_MS));
+  const window = trialWindow(trial);
+  const now = Date.now();
+  // A banner is only rendered once a trial has started; fall back to an
+  // expired zero-length window rather than crashing if a caller slips.
+  const startMs = window?.startMs ?? now;
+  const endMs = window?.endMs ?? now;
+  const elapsed = now - startMs;
+  const windowMs = Math.max(1, endMs - startMs);
+  const daysRemaining = Math.max(0, Math.ceil((endMs - now) / (24 * 60 * 60 * 1000)));
+  const trialExpired = now >= endMs;
+  const progress = Math.max(0, 1 - (elapsed / windowMs));
 
-  const { title, subtitle } = getTrialMessage(daysRemaining, quoteCount, trialExpired);
+  const { title, subtitle } = getTrialMessage(daysRemaining, quoteCount, trialExpired, !!window?.isReturnTrial);
 
   const barColor = trialExpired
     ? themeColors.error

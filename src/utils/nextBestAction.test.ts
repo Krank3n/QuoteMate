@@ -247,3 +247,17 @@ describe('docHasRealSquarePayment mirror (functions/src/eventFunnel.helpers.ts d
     expect(docHasRealSquarePayment(null)).toBe(false);
   });
 });
+
+describe('return trial: trialEndsAt drives the days-left count', () => {
+  it('a lapsed trial re-opened for 7 days counts 7, not the 14-day maths', () => {
+    const out = nextBestAction(
+      base({ plan: 'trial', trialStartedAt: NOW - 60 * DAY_MS, trialEndsAt: NOW + 7 * DAY_MS }),
+    );
+    expect(out.trialDaysRemaining).toBe(7);
+  });
+
+  it('with no explicit end the 14-day window is unchanged', () => {
+    const out = nextBestAction(base({ plan: 'trial', trialStartedAt: NOW - 2 * DAY_MS, trialEndsAt: null }));
+    expect(out.trialDaysRemaining).toBe(TRIAL_MS / DAY_MS - 2);
+  });
+});

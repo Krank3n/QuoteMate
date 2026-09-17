@@ -208,3 +208,24 @@ describe('paywallCopy', () => {
     });
   });
 });
+
+describe('paywallPlanState honours a return trial (explicit trialEndsAt)', () => {
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const NOW = Date.parse('2026-09-17T09:00:00.000Z');
+
+  it('a lapsed 14-day trial re-opened for 7 days reads as a 7-day trial', () => {
+    const lapsedStart = new Date(NOW - 60 * DAY_MS);
+    expect(
+      paywallPlanState({ isPro: false, trialExpired: false, trialStartedAt: lapsedStart, now: NOW }),
+    ).toEqual({ kind: 'trial', daysRemaining: 0 });
+    expect(
+      paywallPlanState({
+        isPro: false,
+        trialExpired: false,
+        trialStartedAt: lapsedStart,
+        trialEndsAt: new Date(NOW + 7 * DAY_MS),
+        now: NOW,
+      }),
+    ).toEqual({ kind: 'trial', daysRemaining: 7 });
+  });
+});

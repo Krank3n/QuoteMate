@@ -23,7 +23,7 @@ import { useStore } from '../../store/useStore';
 import { makeStyles, useThemeColors } from '../../theme';
 import { WebContainer } from '../../components/WebContainer';
 import { TrialBanner } from '../../components/TrialBanner';
-import { TRIAL_DAYS } from '../../utils/trialConfig';
+import { RETURN_TRIAL_DAYS, TRIAL_DAYS } from '../../utils/trialConfig';
 import { GridBackground } from '../../components/GridBackground';
 
 export function SubscriptionSettingsScreen() {
@@ -82,7 +82,7 @@ export function SubscriptionSettingsScreen() {
       <View style={styles.quotaInfo}>
         {subscriptionStatus?.trialStartedAt ? (
           <TrialBanner
-            trialStartedAt={subscriptionStatus.trialStartedAt}
+            trial={subscriptionStatus}
             quoteCount={quotes.length}
             compact
           />
@@ -99,7 +99,7 @@ export function SubscriptionSettingsScreen() {
       </View>
 
       <Text style={styles.upgradeDescription}>
-        You've got full access to Pro features for your {TRIAL_DAYS}-day trial.
+        You've got full access to Pro features for your {subscriptionStatus?.returnTrialGrantedAt ? (subscriptionStatus.returnTrialDays ?? RETURN_TRIAL_DAYS) : TRIAL_DAYS}-day trial.{subscriptionStatus?.returnTrialGrantedAt ? ' This second trial is the last one.' : ''}
         {'\n\n'}
         Once it ends, the Free plan kicks in. You can still collect online payments
         via Square. QuoteMate's platform fee comes out of your payout, on top of
