@@ -157,17 +157,26 @@ Set your standard markup on materials.
 
 ## Display Options
 
-### Show Labor Hours
+All customer-facing display defaults live together under
+**Business Defaults → Document Display** (Show Markup, "What the customer
+sees", Show Labour Hours). The PDF Template screen only picks a style; it
+reads these values to drive its preview but does not edit them.
 
-Control whether labor hours appear on documents.
+### Show Labour Hours
+
+Control whether labour hours appear on documents.
 
 **Enabled:**
 - Shows hours and rate breakdown
 - Example: "8 hours @ $85/hr = $680"
 
 **Disabled:**
-- Shows only total labor cost
-- Example: "Labor: $680"
+- Shows only total labour cost
+- Example: "Labour: $680"
+
+Only applies when "What the customer sees" shows line prices. In a mode
+that hides per-line money the PDF builder never prints hours or rate, so
+the switch is disabled with a note explaining why.
 
 ### Show Payment Info
 

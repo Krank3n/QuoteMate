@@ -11,7 +11,6 @@ import {
   TouchableOpacity,
   Dimensions,
   Platform,
-  Switch,
 } from 'react-native';
 import {
   Text,
@@ -524,17 +523,18 @@ export function PDFTemplateScreen() {
   const isPro = subscriptionStatus?.isPro || isTrialActive;
 
   const [selectedTemplate, setSelectedTemplate] = useState<PdfTemplateId>('professional');
-  const [showLaborHours, setShowLaborHours] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [previewLoading, setPreviewLoading] = useState<PdfTemplateId | null>(null);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
   const [initialSnapshot, setInitialSnapshot] = useState<string | null>(null);
 
-  // Cost/markup visibility toggles live in BusinessDefaults → Document Display.
-  // Here we read the current values to drive the live preview so the tradie
-  // can see the effect without leaving this screen.
+  // Every document-display default (markup, price detail, labour hours)
+  // lives in BusinessDefaults → Document Display. Here we only read the
+  // current values to drive the live preview so the tradie can see the
+  // effect without leaving this screen.
   const showMarkup = businessSettings?.showMarkup === true;
+  const showLaborHours = businessSettings?.showLaborHours === true;
   // Preview the account's own default presentation, resolved the same way the
   // real document resolves it.
   const priceDetail = resolvePriceDetail(null, businessSettings);
@@ -542,22 +542,17 @@ export function PDFTemplateScreen() {
   useEffect(() => {
     if (businessSettings) {
       const tpl = businessSettings.pdfTemplate || 'professional';
-      const slh = businessSettings.showLaborHours === true;
       if (businessSettings.pdfTemplate) {
         setSelectedTemplate(businessSettings.pdfTemplate);
       }
-      setShowLaborHours(slh);
-      setInitialSnapshot(JSON.stringify({ tpl, slh }));
+      setInitialSnapshot(JSON.stringify({ tpl }));
     }
   }, [businessSettings]);
 
   const isDirty = useMemo(() => {
     if (!initialSnapshot) return false;
-    return JSON.stringify({
-      tpl: selectedTemplate,
-      slh: showLaborHours,
-    }) !== initialSnapshot;
-  }, [selectedTemplate, showLaborHours, initialSnapshot]);
+    return JSON.stringify({ tpl: selectedTemplate }) !== initialSnapshot;
+  }, [selectedTemplate, initialSnapshot]);
 
   const handleSave = async (opts?: { silent?: boolean }): Promise<boolean> => {
     try {
@@ -565,12 +560,8 @@ export function PDFTemplateScreen() {
       await setBusinessSettings({
         ...businessSettings!,
         pdfTemplate: selectedTemplate,
-        showLaborHours,
       });
-      setInitialSnapshot(JSON.stringify({
-        tpl: selectedTemplate,
-        slh: showLaborHours,
-      }));
+      setInitialSnapshot(JSON.stringify({ tpl: selectedTemplate }));
       if (!opts?.silent) setShowSuccessModal(true);
       return true;
     } catch (error) {
@@ -724,22 +715,6 @@ export function PDFTemplateScreen() {
             );
           })}
 
-          <Surface style={styles.toggleCard}>
-            <Title style={styles.toggleSectionTitle}>Display Options</Title>
-
-            <View style={styles.toggleRow}>
-              <View style={styles.toggleLabel}>
-                <Text style={styles.toggleTitle}>Show Labour Hours</Text>
-                <Text style={styles.toggleSubtitle}>Display hourly rate and hours breakdown on PDFs</Text>
-              </View>
-              <Switch
-                value={showLaborHours}
-                onValueChange={setShowLaborHours}
-                trackColor={{ false: '#D1D5DB', true: themeColors.accentSubtle }}
-                thumbColor={showLaborHours ? themeColors.accent : '#F3F4F6'}
-              />
-            </View>
-          </Surface>
         </WebContainer>
       </ScrollView>
 
@@ -892,41 +867,5 @@ const useStyles = makeStyles((t) => ({
     fontSize: 13,
     fontWeight: '600',
     color: t.colors.accentText,
-  },
-  toggleCard: {
-    padding: 20,
-    marginBottom: 16,
-    borderRadius: 12,
-    elevation: 2,
-    backgroundColor: t.colors.surfaceRaised,
-  },
-  toggleSectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    marginBottom: 16,
-  },
-  toggleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  toggleLabel: {
-    flex: 1,
-    marginRight: 16,
-  },
-  toggleTitle: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: t.colors.text,
-    marginBottom: 2,
-  },
-  toggleSubtitle: {
-    fontSize: 13,
-    color: t.colors.textSecondary,
-  },
-  toggleDivider: {
-    height: 1,
-    backgroundColor: t.colors.border,
-    marginVertical: 14,
   },
 }));

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  isInternalAccount,
   COHORT_WINDOW_DAYS,
   computeFunnelStats,
   isActivatingDoc,
@@ -75,6 +76,34 @@ describe('isTestAccount', () => {
     expect(isTestAccount('jo@example.com.au')).toBe(false);
     expect(isTestAccount(null, null)).toBe(false);
     expect(isTestAccount(undefined)).toBe(false);
+  });
+});
+
+describe('isInternalAccount — the one population filter every analytics surface shares', () => {
+  const real = { uid: 'abc123', email: 'craig@warragulfencing.com.au', displayName: 'Warragul Fencing', providerData: [{ providerId: 'password' }], customClaims: null };
+
+  it('keeps a real tradie', () => {
+    expect(isInternalAccount(real)).toBe(false);
+    // Missing providerData (an older record shape) must NOT read as anonymous.
+    expect(isInternalAccount({ ...real, providerData: undefined })).toBe(false);
+  });
+
+  it('drops seeded test accounts by email or name', () => {
+    expect(isInternalAccount({ ...real, email: 'testuser9@example.com' })).toBe(true);
+    expect(isInternalAccount({ ...real, displayName: 'qm-marketing-demo' })).toBe(true);
+  });
+
+  it('drops anonymous accounts — no sign-in provider means a harness or demo', () => {
+    expect(isInternalAccount({ ...real, providerData: [] })).toBe(true);
+  });
+
+  it('drops the bake-off harness by uid, whatever it is called', () => {
+    expect(isInternalAccount({ ...real, uid: 'bakeoff-harness-internal-3' })).toBe(true);
+  });
+
+  it('drops admin accounts — the founder is not a customer', () => {
+    expect(isInternalAccount({ ...real, customClaims: { admin: true } })).toBe(true);
+    expect(isInternalAccount({ ...real, customClaims: { admin: false } })).toBe(false);
   });
 });
 

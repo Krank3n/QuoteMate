@@ -70,7 +70,20 @@ export const adminTrafficStats = functions
         { name: 'screenPageViews' },
         { name: 'averageSessionDuration' },
         { name: 'engagementRate' },
+        { name: 'engagedSessions' },
       ],
+    });
+
+    // ----- 1b. Sessions/users that clicked ANY get-the-app CTA -----
+    // Filtered on eventName with no dimension, so a session that pressed two
+    // buttons counts once. The per-event table below still reports raw clicks.
+    const ctaSessionsP = ga.runReport({
+      property: GA_PROPERTY,
+      dateRanges,
+      metrics: [{ name: 'sessions' }, { name: 'totalUsers' }],
+      dimensionFilter: {
+        filter: { fieldName: 'eventName', inListFilter: { values: CTA_EVENTS } },
+      },
     });
 
     // ----- 2. Acquisition by channel -----
@@ -103,7 +116,7 @@ export const adminTrafficStats = functions
         filter: {
           fieldName: 'eventName',
           inListFilter: {
-            values: ['session_start', 'user_engagement', 'form_start', ...CTA_EVENTS],
+            values: ['session_start', 'user_engagement', 'form_start', 'sign_up', ...CTA_EVENTS],
           },
         },
       },
@@ -151,8 +164,9 @@ export const adminTrafficStats = functions
       .then((res) => ({ ok: true as const, res: res[0] }))
       .catch((err: any) => ({ ok: false as const, error: String(err?.message || err) }));
 
-    const [totalsR, channelsR, dailyR, funnelR, pagesR, abR] = await Promise.all([
+    const [totalsR, ctaSessionsR, channelsR, dailyR, funnelR, pagesR, abR] = await Promise.all([
       totalsP,
+      ctaSessionsP,
       channelsP,
       dailyP,
       funnelP,
@@ -169,7 +183,9 @@ export const adminTrafficStats = functions
       pageViews: num(tRow[3]?.value),
       avgSessionDuration: num(tRow[4]?.value),
       engagementRate: num(tRow[5]?.value),
+      engagedSessions: num(tRow[6]?.value),
     };
+    const ctaRow = ctaSessionsR[0].rows?.[0]?.metricValues || [];
 
     // ---- channels ----
     const channels = (channelsR[0].rows || []).map((r) => ({
@@ -193,10 +209,21 @@ export const adminTrafficStats = functions
       evCount[name] = num(r.metricValues?.[0]?.value);
     }
     const ctaTotal = CTA_EVENTS.reduce((a, e) => a + (evCount[e] || 0), 0);
+    // Every stage is in SESSIONS so the ladder is one unit top to bottom.
+    // `engaged` used to be the user_engagement EVENT count, which is a
+    // different thing from engaged sessions (589 vs 650 over one 28-day
+    // window) and can exceed sessions on a busy day.
     const funnel = {
       sessions: summary.sessions,
-      engaged: evCount['user_engagement'] || 0,
+      engaged: summary.engagedSessions,
+      // Sessions with at least one CTA click (deduped), and the users behind
+      // them. ctaClicks stays the raw button-press count.
+      ctaSessions: num(ctaRow[0]?.value),
+      ctaUsers: num(ctaRow[1]?.value),
       ctaClicks: ctaTotal,
+      // Accounts created in the /app web build (webAnalytics.ts fires
+      // sign_up on isNewUser). Store installs never appear here.
+      webSignups: evCount['sign_up'] || 0,
       byCta: {
         web: evCount['web_app_click'] || 0,
         appStore: evCount['app_store_click'] || 0,

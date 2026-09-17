@@ -44,6 +44,7 @@ import {
   resolvePriceDetail,
   legacyFlagsFor,
   priceDetailBlurb,
+  showsPerLineMoney,
   PRICE_DETAIL_OPTIONS,
   type PriceDetail,
 } from '../../../shared/document';
@@ -71,6 +72,7 @@ export function BusinessDefaultsScreen() {
   const [gstMode, setGstMode] = useState<GstMode>('exclusive');
   const [showMarkup, setShowMarkup] = useState(false);
   const [priceDetail, setPriceDetail] = useState<PriceDetail>('itemised');
+  const [showLaborHours, setShowLaborHours] = useState(false);
   const [autoCustomerFollowUp, setAutoCustomerFollowUp] = useState(true);
   const [autoStartMic, setAutoStartMic] = useState(false);
   const [termsAndConditions, setTermsAndConditions] = useState('');
@@ -80,6 +82,8 @@ export function BusinessDefaultsScreen() {
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
   const [initialSnapshot, setInitialSnapshot] = useState<string | null>(null);
+
+  const laborHoursApplicable = showsPerLineMoney(priceDetail);
 
   useEffect(() => {
     if (!businessSettings) return;
@@ -94,6 +98,7 @@ export function BusinessDefaultsScreen() {
     // Resolved, never read raw — an account that only ever set the legacy
     // pair migrates on read with no backfill.
     const pd = resolvePriceDetail(null, businessSettings);
+    const slh = businessSettings.showLaborHours === true;
     const acf = resolveAutoCustomerFollowUp(businessSettings.autoCustomerFollowUpEnabled);
     const asm = resolveAutoStartMic(businessSettings.autoStartMicOnMate);
     const tc = businessSettings.termsAndConditions ?? '';
@@ -107,11 +112,12 @@ export function BusinessDefaultsScreen() {
     setGstMode(gm);
     setShowMarkup(sm);
     setPriceDetail(pd);
+    setShowLaborHours(slh);
     setAutoCustomerFollowUp(acf);
     setAutoStartMic(asm);
     setTermsAndConditions(tc);
 
-    setInitialSnapshot(JSON.stringify({ lr, mk, lm, dp, rd, tm, gm, sm, pd, acf, asm, tc }));
+    setInitialSnapshot(JSON.stringify({ lr, mk, lm, dp, rd, tm, gm, sm, pd, slh, acf, asm, tc }));
   }, [businessSettings]);
 
   // Re-check on focus so the deposit toggle unlocks the moment
@@ -138,6 +144,7 @@ export function BusinessDefaultsScreen() {
       gm: gstMode,
       sm: showMarkup,
       pd: priceDetail,
+      slh: showLaborHours,
       acf: autoCustomerFollowUp,
       asm: autoStartMic,
       tc: termsAndConditions,
@@ -146,7 +153,7 @@ export function BusinessDefaultsScreen() {
   }, [
     laborRate, markup, laborMarkup, defaultDepositPercentage, requireDepositByDefault,
     transportMarkupEnabled, gstMode,
-    showMarkup, priceDetail, autoCustomerFollowUp, autoStartMic, termsAndConditions,
+    showMarkup, priceDetail, showLaborHours, autoCustomerFollowUp, autoStartMic, termsAndConditions,
     initialSnapshot,
   ]);
 
@@ -177,6 +184,7 @@ export function BusinessDefaultsScreen() {
         gstRegistered: gstMode !== 'none',
         showMarkup,
         defaultPriceDetail: priceDetail,
+        showLaborHours,
         // Dual-written for one release so an older installed build reading
         // the legacy pair still renders documents the way this screen says.
         // Remove with legacyFlagsFor() in shared/document/priceDetail.ts.
@@ -328,6 +336,27 @@ export function BusinessDefaultsScreen() {
               fullWidth
               style={{ marginTop: 10 }}
             />
+
+            {/* Only meaningful when per-line money is shown: the PDF builder
+                gates "(30 hours @ $85/hr)" on the detail mode above, so the
+                switch is disabled, not hidden, when that mode hides it. */}
+            <View style={[styles.toggleRow, { marginTop: 16 }, !laborHoursApplicable && styles.toggleRowDisabled]}>
+              <View style={styles.toggleLabel}>
+                <Text style={styles.toggleTitle}>Show Labour Hours</Text>
+                <Text style={styles.toggleDescription}>
+                  {laborHoursApplicable
+                    ? 'Show the hours and hourly rate next to the labour total, not just the total.'
+                    : 'Hours and rate only show when the customer sees line prices.'}
+                </Text>
+              </View>
+              <Switch
+                testID="show-labour-hours"
+                value={showLaborHours}
+                onValueChange={setShowLaborHours}
+                disabled={!laborHoursApplicable}
+                color={themeColors.accentText}
+              />
+            </View>
           </Surface>
 
           <Surface style={styles.card}>
@@ -553,6 +582,7 @@ const useStyles = makeStyles((t) => ({
     alignItems: 'center',
     paddingVertical: 10,
   },
+  toggleRowDisabled: { opacity: 0.5 },
   toggleLabel: { flex: 1, marginRight: 12 },
   gstModeSection: { paddingVertical: 10 },
   gstModeButtons: { marginTop: 8, marginBottom: 6 },

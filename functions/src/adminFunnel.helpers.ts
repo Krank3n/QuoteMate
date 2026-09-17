@@ -248,6 +248,9 @@ export interface FunnelPayload {
   };
   asOf: number;
   cached: boolean;
+  /** Accounts dropped from the population (adminCrm listRealAuthUsers). Set by
+   *  the fetch wrapper, not by computeFunnelStats, which only sees real users. */
+  excluded?: { internalAccounts: number };
 }
 
 /** Zero-safe ratio: 0 (never NaN/Infinity) when the denominator is 0. */
@@ -283,6 +286,40 @@ export function isTestAccount(
   displayName?: string | null | undefined
 ): boolean {
   return TEST_ACCOUNT_PATTERN.test(email || '') || TEST_ACCOUNT_PATTERN.test(displayName || '');
+}
+
+/**
+ * Everything the analytics population must leave out, in one place, so the
+ * dashboard, the business-health funnel, the event funnel and the daily
+ * snapshot all count the SAME people. Before this each one filtered
+ * differently (or not at all), and the analytics page showed 551 signups in
+ * one card and 531 in the next.
+ *
+ *   - seeded test accounts (isTestAccount, by email or display name);
+ *   - anonymous accounts — no sign-in provider at all. Real tradies always
+ *     arrive through password/Google/Apple; a provider-less account is a
+ *     harness or a demo (the bake-off harness and the marketing demo both
+ *     live here, and neither carries a matching email or name);
+ *   - the bake-off harness uids, matched by uid so a renamed one still drops;
+ *   - admin accounts (custom claim `admin: true`) — the founder's own login,
+ *     which has a trial, a sent quote and a comped Pro, none of them revenue.
+ */
+export const INTERNAL_UID_PATTERN = /^bakeoff-harness/i;
+
+export interface AccountIdentity {
+  uid: string;
+  email?: string | null;
+  displayName?: string | null;
+  /** Firebase Auth providerData — empty for an anonymous account. */
+  providerData?: ReadonlyArray<unknown> | null;
+  customClaims?: Record<string, unknown> | null;
+}
+
+export function isInternalAccount(u: AccountIdentity): boolean {
+  if (isTestAccount(u.email, u.displayName)) return true;
+  if (INTERNAL_UID_PATTERN.test(u.uid || '')) return true;
+  if (u.customClaims?.admin === true) return true;
+  return Array.isArray(u.providerData) && u.providerData.length === 0;
 }
 
 /**
