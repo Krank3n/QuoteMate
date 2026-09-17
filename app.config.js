@@ -31,7 +31,7 @@ export default {
     // 1.55). It does NOT generalise — a native dep that loads at LAUNCH still
     // kills an older binary outright, which is exactly what the expo-location
     // OTA did on 4 Sep 2026.
-    version: "1.57",
+    version: "1.58",
     orientation: "portrait",
     icon: "./assets/icon.png",
     userInterfaceStyle: "automatic",
@@ -192,7 +192,7 @@ export default {
       supportsTablet: true,
       bundleIdentifier: "com.hansendev.quotemate",
       usesAppleSignIn: true,
-      buildNumber: "95",
+      buildNumber: "96",
       // Universal Links. The path allow-list lives in
       // public/.well-known/apple-app-site-association (/join* and /ref/*).
       associatedDomains: ["applinks:quotemateapp.au"],
@@ -207,7 +207,7 @@ export default {
         backgroundColor: "#0A0E16"  // Dark blue-gray to match app theme
       },
       package: "com.quotemate.app",
-      versionCode: 173,
+      versionCode: 174,
       // Android 16 (targetSdk 36) enforces edge-to-edge and ignores the
       // opt-out flag. Declaring it here makes Expo theme for it deliberately
       // rather than emitting an opt-out Android no longer honours.
