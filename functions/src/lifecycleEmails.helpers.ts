@@ -22,6 +22,7 @@
 import { deriveSubFields, ts } from './subscription.helpers';
 import { isActivatingDoc } from './adminFunnel.helpers';
 import { NUDGE_SEND_ONCE_FIELD } from './squareNudge.helpers';
+import { RETURN_TRIAL_EMAIL_SEND_ONCE_FIELD } from './returnTrialEmail.helpers';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 // How long after trial expiry the trial_ended email may still go out. Going
@@ -69,7 +70,11 @@ export const CROSS_CAMPAIGN_WINDOW_MS = 20 * 60 * 60 * 1000;
 /** ms epoch of the most recent conversion-campaign send, or null. */
 export function lastConversionSendMs(emailState: Record<string, unknown> | undefined): number | null {
   if (!emailState) return null;
-  const fields = [...Object.values(SEND_ONCE_FIELD), ...Object.values(NUDGE_SEND_ONCE_FIELD)];
+  const fields = [
+    ...Object.values(SEND_ONCE_FIELD),
+    ...Object.values(NUDGE_SEND_ONCE_FIELD),
+    RETURN_TRIAL_EMAIL_SEND_ONCE_FIELD,
+  ];
   let latest: number | null = null;
   for (const field of fields) {
     const at = ts(emailState[field]);

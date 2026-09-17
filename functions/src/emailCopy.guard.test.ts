@@ -19,7 +19,7 @@ import { TRIAL_MS } from './subscription.helpers';
  */
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const COPY_FILES = ['email.ts', 'aussieNotifications.ts'];
+const COPY_FILES = ['email.ts', 'aussieNotifications.ts', 'returnTrialEmail.helpers.ts'];
 
 function copySource(file: string): string {
   return readFileSync(join(HERE, file), 'utf8')
@@ -45,8 +45,12 @@ describe('email.ts claim accuracy', () => {
   const src = copySource('email.ts');
 
   it('never claims a 7-day trial (trial is 14 days)', () => {
+    // The return-trial reclaim email (returnTrialEmail.helpers.ts) offers a
+    // fresh week of Pro to an account whose 14-day trial lapsed — a second
+    // trial, never the first — and takes its figure from RETURN_TRIAL_DAYS.
     expect(src).not.toMatch(/7[- ]day free trial/i);
     expect(src).not.toMatch(/for 7 days/i);
+    expect(copySource('returnTrialEmail.helpers.ts')).not.toMatch(/7[- ]day free trial/i);
   });
 
   it('never claims a monthly quote quota (free plan is unlimited)', () => {
