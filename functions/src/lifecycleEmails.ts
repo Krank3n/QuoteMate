@@ -29,6 +29,12 @@
  *   - square_no_paylink:     trial expired, sent quotes, never connected
  * evaluated only when no lifecycle step is due, so one email/user/day holds.
  *
+ * And, last in the order, the return-trial reclaim track
+ * (returnTrialEmail.helpers): an expired-trial account away 30+ days is told
+ * its trial re-opens for a fresh week when it comes back. Gated by
+ * config/returnTrialEmail { enabled, dailyCap } — OFF until that doc says
+ * otherwise, capped per run, one send per account ever.
+ *
  * SAFETY
  *   - Dry-run unless LIFECYCLE_LIVE=true in functions/.env. Dry runs log the
  *     exact would-send list.
@@ -54,6 +60,11 @@ import {
   suppressedByOnboardingDrip,
 } from './lifecycleEmails.helpers';
 import { squareNudgeVerdict, NUDGE_SEND_ONCE_FIELD } from './squareNudge.helpers';
+import {
+  parseReturnTrialEmailConfig,
+  returnTrialEmailVerdict,
+  RETURN_TRIAL_EMAIL_SEND_ONCE_FIELD,
+} from './returnTrialEmail.helpers';
 import { isActivatingDoc } from './adminFunnel.helpers';
 import { docHasSquarePayment } from './eventFunnel.helpers';
 import { ts } from './subscription.helpers';
@@ -64,6 +75,7 @@ import {
   sendTrialEndedEmail,
   sendSquareIdleNudgeEmail,
   sendSquareNoPaylinkNudgeEmail,
+  sendReturnTrialEmail,
   type FoundingSpots,
 } from './email';
 
@@ -107,6 +119,14 @@ export const trialLifecycleDaily = functions.pubsub
       // Nudges degrade gracefully; lifecycle steps don't depend on the scan.
       functions.logger.error('trialLifecycleDaily: documents scan failed', err?.message);
     }
+
+    // Return-trial reclaim switch + per-run cap. Missing doc = off.
+    let reclaim = parseReturnTrialEmailConfig(undefined);
+    try {
+      reclaim = parseReturnTrialEmailConfig((await db.doc('config/returnTrialEmail').get()).data());
+    } catch {}
+    let reclaimSent = 0;
+    let reclaimEligible = 0;
 
     const authUsers = await listAllAuthUsers(admin.auth());
     let processed = 0;
@@ -154,7 +174,20 @@ export const trialLifecycleDaily = functions.pubsub
               },
               now
             );
-        const send = verdict.send ?? nudge;
+        // Return-trial reclaim: last in the order, only when nothing else is
+        // due. Counted even when the switch is off so the run log shows the
+        // size of the backlog; sent only while enabled and under the cap.
+        let reclaimDue = false;
+        if (!verdict.send && !nudge) {
+          const rv = returnTrialEmailVerdict({ sub: subDoc.data(), emailState, nowMs: now });
+          if (rv.send) {
+            reclaimEligible++;
+            reclaimDue = reclaim.enabled && reclaimSent < reclaim.dailyCap;
+            if (!reclaimDue) continue;
+          }
+        }
+
+        const send = verdict.send ?? nudge ?? (reclaimDue ? ('return_trial_reclaim' as const) : null);
         if (!send) continue;
 
         // trial_ending is declined for users who never sent a quote — the
@@ -207,12 +240,18 @@ export const trialLifecycleDaily = functions.pubsub
           case 'square_no_paylink':
             ok = await sendSquareNoPaylinkNudgeEmail(email, businessName, userId);
             break;
+          case 'return_trial_reclaim':
+            ok = await sendReturnTrialEmail(email, businessName, userId);
+            if (ok) reclaimSent++;
+            break;
         }
 
         if (ok || declined) {
           const field = verdict.send
             ? SEND_ONCE_FIELD[verdict.send]
-            : NUDGE_SEND_ONCE_FIELD[nudge!];
+            : nudge
+              ? NUDGE_SEND_ONCE_FIELD[nudge]
+              : RETURN_TRIAL_EMAIL_SEND_ONCE_FIELD;
           await stateRef.set(
             { [field]: admin.firestore.FieldValue.serverTimestamp() },
             { merge: true }
@@ -225,12 +264,14 @@ export const trialLifecycleDaily = functions.pubsub
       }
     }
 
+    const reclaimSummary =
+      `reclaim(enabled=${reclaim.enabled}, cap=${reclaim.dailyCap}): eligible=${reclaimEligible}, sent=${reclaimSent}`;
     if (!live) {
       functions.logger.info(
-        `trialLifecycleDaily DRY RUN: processed=${processed}, wouldSend=${wouldSend.length}` +
+        `trialLifecycleDaily DRY RUN: processed=${processed}, wouldSend=${wouldSend.length}; ${reclaimSummary}` +
           (wouldSend.length ? ` -> ${wouldSend.join('; ')}` : '')
       );
     } else {
-      functions.logger.info(`trialLifecycleDaily: processed=${processed}, sent=${sent}, errors=${errors}`);
+      functions.logger.info(`trialLifecycleDaily: processed=${processed}, sent=${sent}, errors=${errors}; ${reclaimSummary}`);
     }
   });

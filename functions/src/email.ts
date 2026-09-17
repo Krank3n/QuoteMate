@@ -1,4 +1,5 @@
 import * as admin from 'firebase-admin';
+import { returnTrialEmailCopy } from './returnTrialEmail.helpers';
 import { subPlanLabel, subPriceInfo, type SubPriceInfo } from './subscription.helpers';
 import fetch from 'node-fetch';
 import { isPdfUrl } from './shared/media/pdfUrl';
@@ -1467,6 +1468,58 @@ export function sendSquareNoPaylinkNudgeEmail(
     userId,
     tags: ['square-nudge', 'no-paylink'],
     unsubscribeUrl,
+  });
+}
+
+/**
+ * Return-trial reclaim: an expired-trial account that has been away 30+
+ * days is told its trial re-opens for a fresh week the moment it comes back
+ * (returnTrial.helpers.ts grants it on the next activity ping). One send,
+ * ever; copy in returnTrialEmail.helpers.ts. The days figure is the real
+ * RETURN_TRIAL_DAYS, never typed by hand.
+ */
+export function sendReturnTrialEmail(
+  to: string,
+  businessName: string,
+  userId: string
+): Promise<boolean> {
+  const unsubscribeUrl = `https://us-central1-hansendev.cloudfunctions.net/unsubscribeEmail?userId=${userId}&category=marketing`;
+  const copy = returnTrialEmailCopy(businessName);
+  const icons = ['&#128172;', '&#128247;', '&#128203;', '&#128179;', '&#9203;'];
+
+  const content = wrapEmailTemplate(`
+    <h1 style="color:#111827;font-size:26px;font-weight:700;margin:0 0 20px;line-height:1.3;">
+      ${copy.heading}
+    </h1>
+    <p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 16px;">
+      ${copy.intro}
+    </p>
+
+    ${infoCard(`
+      <tr>
+        <td style="padding:12px 0;">
+          <p style="color:#111827;font-size:14px;font-weight:600;margin:0 0 16px;">New since you were last in:</p>
+          ${copy.whatsNew.map((line, i) => featureBullet(icons[i] || '&#10003;', line)).join('')}
+        </td>
+      </tr>
+    `)}
+
+    <p style="color:#374151;font-size:15px;line-height:1.7;margin:0;">
+      ${copy.howItWorks}
+    </p>
+
+    ${ctaButton(copy.cta)}
+  `, { unsubscribeUrl, preheader: copy.preheader });
+
+  return sendEmail({
+    to,
+    subject: copy.subject,
+    htmlContent: content,
+    category: 'marketing',
+    userId,
+    tags: ['return-trial', 'reclaim'],
+    unsubscribeUrl,
+    replyTo: { email: 'tom@hansendev.com.au', name: 'Tom at QuoteMate' },
   });
 }
 
