@@ -217,8 +217,20 @@ export function storePricePatch(input: {
 // cancels before it lands. The receipt validators stamp storeTrialUntil
 // (receiptValidation.helpers storeTrialPatch) and clear it on conversion.
 export function inStoreFreeTrial(sub: any, nowMs: number = Date.now()): boolean {
+  // Only the two stores run introductory periods; a Stripe sub that lands on
+  // a doc still carrying an old store marker is paying and must count.
+  const platform = String(sub?.platform || '').toLowerCase();
+  if (platform !== 'ios' && platform !== 'android') return false;
   const until = ts(sub?.storeTrialUntil);
   return until !== null && until > nowMs;
+}
+
+// A billed sub that has actually been charged: the north-star "paid" test.
+// isBilledSub is the billing-RECORD test (card on file, real productId) and
+// stays true through a store free trial; the funnel, the founding cap and
+// anything that says "paying" must use this one instead.
+export function isPayingSub(sub: any, nowMs: number = Date.now()): boolean {
+  return isBilledSub(sub) && !inStoreFreeTrial(sub, nowMs);
 }
 
 // A billed sub whose paid period has run out is NOT revenue. Firestore only

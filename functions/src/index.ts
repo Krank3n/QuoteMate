@@ -1682,7 +1682,9 @@ export const validateAppleReceipt = functions.https.onRequest((req, res) => {
         // Process referral commission — bill against the signed SKU so a forged
         // request body can't inflate a referrer's commission.
         try {
-          const grossCents = PRODUCT_PRICES[signedProductId] || 4900;
+          // A store free-trial start collects nothing yet — pass $0 so the
+          // earning (and the conversion count) wait for the paid period.
+          const grossCents = jwsResult.isFreeTrial ? 0 : (PRODUCT_PRICES[signedProductId] || 4900);
           await processReferralCommission(userId, 'ios', signedProductId, grossCents);
         } catch (refError) {
           // silently ignore
@@ -1824,7 +1826,7 @@ export const validateGoogleReceipt = functions.https.onRequest((req, res) => {
       if (firstGrant) {
         // Process referral commission
         try {
-          const grossCents = PRODUCT_PRICES[productId] || 4900;
+          const grossCents = googleIsFreeTrial ? 0 : (PRODUCT_PRICES[productId] || 4900);
           await processReferralCommission(userId, 'android', productId, grossCents);
         } catch (refError) {
           // silently ignore

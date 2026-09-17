@@ -174,10 +174,12 @@ describe('paywallCopy', () => {
       );
       expect(paywallHeaderNote({ kind: 'trial_pending' }, 14)).toMatch(/no charge for 14 days/);
       expect(paywallHeaderNote({ kind: 'trial', daysRemaining: 10 }, 14)).not.toMatch(/bills you today/);
-      expect(proCtaLabel('$49', 'monthly', 14)).toBe('Start Pro · 14 days free, then $49/month');
-      expect(proCtaLabel('$328', 'yearly', 7)).toBe('Start Pro · 7 days free, then $328/year');
+      expect(proCtaLabel('$49', 'monthly', 14)).toBe('Start Pro · 14 days free');
+      expect(proCtaLabel('$328', 'yearly', 7)).toBe('Start Pro · 7 days free');
+      // The price moves to the billing line, so it is never ellipsised off a one-line button.
+      expect(billingLine('$328', 'yearly', 7)).toMatch(/then \$328\/year/);
       expect(billingLine('$49', 'monthly', 14)).toMatch(/^No charge for 14 days, then \$49\/month/);
-      expect(billingLine('$49', 'monthly', 14)).toMatch(/Cancel before the 14 days end and you pay nothing/);
+      expect(billingLine('$49', 'monthly', 14)).toMatch(/Cancel at least 24 hours before the 14 days end and you pay nothing/);
       expect(billingLine('$49', 'monthly', 14)).not.toMatch(/Billed today/);
       // Free and Pro notes do not change with the offer.
       expect(paywallHeaderNote({ kind: 'free' }, 14)).toMatch(/Pro adds the rest/);

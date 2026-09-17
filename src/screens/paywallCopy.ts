@@ -159,13 +159,15 @@ export function planRowSubtitle(state: PaywallPlanState): string {
 
 /**
  * The one button: what you get and what it costs, on the button itself. With
- * a store introductory offer the button leads with the free days, because
- * "no charge today" is the fact that moves a trial user.
+ * a store introductory offer the button carries the free days instead of the
+ * price, because "no charge today" is the fact that moves a trial user — and
+ * a Paper Button label is one line, so "14 days free, then $49/month" would
+ * ellipsise the price on a 375pt phone. The price then lives in billingLine.
  */
 export function proCtaLabel(priceLabel: string, period: BillingPeriod, introFreeDays: number | null = null): string {
   const unit = period === 'yearly' ? 'year' : 'month';
   return hasIntroOffer(introFreeDays)
-    ? `Start Pro · ${introFreeDays} days free, then ${priceLabel}/${unit}`
+    ? `Start Pro · ${introFreeDays} days free`
     : `Start Pro · ${priceLabel}/${unit}`;
 }
 
@@ -177,7 +179,7 @@ export function billingLine(priceLabel: string, period: BillingPeriod, introFree
   const unit = period === 'yearly' ? 'year' : 'month';
   const renewal = `Cancel anytime; renews unless cancelled 24 hours before the period ends.`;
   return hasIntroOffer(introFreeDays)
-    ? `No charge for ${introFreeDays} days, then ${priceLabel}/${unit} as an auto-renewing ${period} subscription. Cancel before the ${introFreeDays} days end and you pay nothing. ${renewal}`
+    ? `No charge for ${introFreeDays} days, then ${priceLabel}/${unit} as an auto-renewing ${period} subscription. Cancel at least 24 hours before the ${introFreeDays} days end and you pay nothing. ${renewal}`
     : `Billed today, then ${priceLabel}/${unit} as an auto-renewing ${period} subscription. ${renewal}`;
 }
 

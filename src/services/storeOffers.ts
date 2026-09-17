@@ -47,6 +47,22 @@ export function periodDays(period: any): number | null {
   }
 }
 
+const isBasePlanEntry = (o: any) => !o?.id && !o?.offerId && !o?.offerIdAndroid;
+
+/**
+ * Play lists every base plan of the product and every offer on each. The
+ * paywall sells one base plan per SKU ("$49/month"), so an offer only counts
+ * when it hangs off a base plan Play also listed as buyable here — otherwise a
+ * second base plan (say a prepaid one) could advertise a free period for a
+ * product the screen is not selling. With no base-plan entries to scope by
+ * (older payloads), every offer is considered, as before.
+ */
+function onSoldBasePlans(offers: any[]): any[] {
+  const sold = new Set(offers.filter(isBasePlanEntry).map((o) => o?.basePlanIdAndroid).filter(Boolean));
+  if (sold.size === 0) return offers;
+  return offers.filter((o) => !o?.basePlanIdAndroid || sold.has(o.basePlanIdAndroid));
+}
+
 function isFreePhase(phase: any): boolean {
   const micros = Number(phase?.priceAmountMicros);
   return Number.isFinite(micros) && micros === 0 && !!isoDurationDays(phase?.billingPeriod);
@@ -61,9 +77,9 @@ function isFreePhase(phase: any): boolean {
 export function introOfferFromProduct(product: any, opts: { eligibleIOS?: boolean } = {}): StoreIntroOffer | null {
   if (!product) return null;
 
-  // Android: an offer whose first pricing phase is free.
+  // Android: an offer whose first pricing phase is free, on a base plan we sell.
   const androidOffers: any[] = Array.isArray(product.subscriptionOffers) ? product.subscriptionOffers : [];
-  for (const offer of androidOffers) {
+  for (const offer of onSoldBasePlans(androidOffers)) {
     const phases: any[] = offer?.pricingPhasesAndroid?.pricingPhaseList || offer?.pricingPhases?.pricingPhaseList || [];
     const first = phases[0];
     if (first && isFreePhase(first)) {
@@ -96,12 +112,12 @@ export function introOfferFromProduct(product: any, opts: { eligibleIOS?: boolea
 export function pickAndroidOfferToken(offers: any[] | null | undefined): string | null {
   if (!Array.isArray(offers) || offers.length === 0) return null;
   const token = (o: any) => o?.offerTokenAndroid || o?.offerToken || null;
-  const free = offers.find((o) => {
+  const free = onSoldBasePlans(offers).find((o) => {
     const phases: any[] = o?.pricingPhasesAndroid?.pricingPhaseList || o?.pricingPhases?.pricingPhaseList || [];
     return phases[0] && isFreePhase(phases[0]) && token(o);
   });
   if (free) return token(free);
-  const base = offers.find((o) => !o?.id && !o?.offerId && !o?.offerIdAndroid && token(o));
+  const base = offers.find((o) => isBasePlanEntry(o) && token(o));
   if (base) return token(base);
   return token(offers[0]);
 }

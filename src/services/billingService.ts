@@ -252,17 +252,20 @@ class BillingService {
 
   /**
    * StoreKit's answer to "may this Apple ID still take the introductory offer
-   * on this subscription group?" — false once they have used one. Unknown
-   * (no API, threw) reads as eligible: the store itself still decides what it
-   * charges, this only steers the paywall copy.
+   * on this subscription group?" — false once they have used one. StoreKit
+   * lists the offer on the product REGARDLESS of eligibility, so this call is
+   * the only thing between a lapsed subscriber and a "14 days free" promise
+   * Apple will not honour. Unknown (no API, no group id, threw, timed out)
+   * therefore reads as NOT eligible: the copy under-claims and the store
+   * still charges exactly what it would have. Only an explicit true claims.
    */
   async isEligibleForIntroOfferIOS(subscriptionGroupId: string | null | undefined): Promise<boolean> {
-    if (Platform.OS !== 'ios' || !subscriptionGroupId || !RNIap?.isEligibleForIntroOfferIOS) return true;
+    if (Platform.OS !== 'ios' || !subscriptionGroupId || !RNIap?.isEligibleForIntroOfferIOS) return false;
     try {
       const eligible = await withTimeout(RNIap.isEligibleForIntroOfferIOS(subscriptionGroupId), 5000, 'isEligibleForIntroOfferIOS');
-      return eligible !== false;
+      return eligible === true;
     } catch {
-      return true;
+      return false;
     }
   }
 

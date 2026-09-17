@@ -83,21 +83,21 @@ class UnifiedBillingService {
         // expo-iap 3.x products use 'id' (not 'productId') and 'displayPrice' (not 'localizedPrice')
         const nativeProducts = await nativeBillingService.getProducts();
         // A store introductory offer (free days before the first charge) is
-        // read off the product; on iOS StoreKit must also confirm this Apple
-        // ID has not used one already. Null = no offer, so the paywall says
-        // "billed today".
-        const groupIds = new Set<string>(
+        // read off the product; on iOS StoreKit must ALSO confirm this Apple
+        // ID has not used one already, and only an explicit yes counts. Null
+        // = no offer, so the paywall says "billed today".
+        const groupIds = [...new Set<string>(
           nativeProducts.map((p: any) => p?.subscriptionInfoIOS?.subscriptionGroupId).filter(Boolean),
+        )];
+        const eligibility = new Map<string, boolean>(
+          await Promise.all(groupIds.map(async (groupId): Promise<[string, boolean]> =>
+            [groupId, await nativeBillingService.isEligibleForIntroOfferIOS(groupId)])),
         );
-        const eligibility = new Map<string, boolean>();
-        for (const groupId of groupIds) {
-          eligibility.set(groupId, await nativeBillingService.isEligibleForIntroOfferIOS(groupId));
-        }
         return nativeProducts.map((product: any) => {
           const productId = product.id || product.productId;
           const groupId = product?.subscriptionInfoIOS?.subscriptionGroupId;
           const intro = introOfferFromProduct(product, {
-            eligibleIOS: groupId ? eligibility.get(groupId) !== false : true,
+            eligibleIOS: Platform.OS === 'ios' ? (groupId ? eligibility.get(groupId) === true : false) : true,
           });
           return {
             id: productId,

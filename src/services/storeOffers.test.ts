@@ -26,6 +26,14 @@ describe('storeOffers', () => {
       });
     });
 
+    it('ignores a free offer that hangs off a base plan Play did not list as buyable', () => {
+      const prepaidIntro = { ...introOffer, id: 'prepaid-free', basePlanIdAndroid: 'quotemate-prepaid', offerTokenAndroid: 'tok-prepaid' };
+      expect(introOfferFromProduct({ subscriptionOffers: [basePlan, prepaidIntro] })).toBeNull();
+      expect(pickAndroidOfferToken([basePlan, prepaidIntro])).toBe('tok-base');
+      // …but still finds the one on the sold base plan alongside it.
+      expect(introOfferFromProduct({ subscriptionOffers: [basePlan, prepaidIntro, introOffer] })?.offerTokenAndroid).toBe('tok-intro');
+    });
+
     it('reports nothing when Play lists only the base plan (buyer already used the offer)', () => {
       expect(introOfferFromProduct({ subscriptionOffers: [basePlan] })).toBeNull();
     });

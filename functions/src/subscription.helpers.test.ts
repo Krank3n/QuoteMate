@@ -10,6 +10,7 @@ import {
   netMonthlyRevenueAud,
   monthlyRevenueAud,
   inStoreFreeTrial,
+  isPayingSub,
   rollupRevenue,
   RevenueEntry,
   TRIAL_MS,
@@ -268,6 +269,30 @@ describe('subPriceInfo — what a subscriber is REALLY charged', () => {
     expect(monthlyRevenueAud(converted, Date.parse('2026-10-02T00:00:00Z'))).toBe(49);
     // A stale marker in the past never suppresses revenue.
     expect(inStoreFreeTrial(onStoreTrial, Date.parse('2026-10-02T00:00:00Z'))).toBe(false);
+    // "Paying" is billed AND charged: the funnel + founding cap read this one.
+    expect(isPayingSub(onStoreTrial, NOW)).toBe(false);
+    expect(isPayingSub(converted, Date.parse('2026-10-02T00:00:00Z'))).toBe(true);
+    expect(isPayingSub({ ...onStoreTrial, isPro: false }, NOW)).toBe(false);
+  });
+
+  it('never treats a Stripe sub as a store trial, even with a stale store marker on the doc', () => {
+    const NOW = Date.parse('2026-10-03T00:00:00Z');
+    // iOS trial started 1 Oct, cancelled, then subscribed on the web 3 Oct —
+    // the Stripe webhook merges onto the same doc without clearing the marker.
+    const web = {
+      isPro: true,
+      platform: 'web',
+      subscriptionId: 'sub_123',
+      priceId: 'price_monthly',
+      priceMicros: 49000000,
+      priceCurrency: 'AUD',
+      priceInterval: 'monthly',
+      currentPeriodEnd: '2026-11-03T00:00:00.000Z',
+      storeTrialUntil: '2026-10-15T00:00:00.000Z',
+    };
+    expect(inStoreFreeTrial(web, NOW)).toBe(false);
+    expect(monthlyRevenueAud(web, NOW)).toBe(49);
+    expect(isPayingSub(web, NOW)).toBe(true);
   });
 
   it('stops counting a sub whose paid period has run out', () => {

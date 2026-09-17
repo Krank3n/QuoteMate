@@ -7,13 +7,14 @@
  * and existing members are grandfathered.
  *
  * Deliberately absent: the per-user 72h post-trial claim window from the
- * original spec. Apple/Google can't charge different users different prices
- * for one product without a configured intro offer, and none is configured —
- * so no per-user deadline appears anywhere in copy until that store ops work
- * is done. The only scarcity is the cap, and it is real: `taken` is computed
- * from actual billed subscriptions (isBilledSub — bare isPro flags and
- * admin_grant comps never count), published by the aggregateEventFunnel cron
- * to config/foundingOffer (public read, server-only write).
+ * original spec. Both stores now carry a 14-day FREE introductory offer
+ * (Sep 2026), but that is a store-side period on the same price, not a
+ * per-user price — so no per-user deadline appears anywhere in copy. The
+ * only scarcity is the cap, and it is real: `taken` is computed from
+ * actually PAID subscriptions (isPayingSub — bare isPro flags, admin_grant
+ * comps and store free-trial periods never count), published by the
+ * aggregateEventFunnel cron to config/foundingOffer (public read,
+ * server-only write).
  */
 export const FOUNDING_CAP = 100;
 
