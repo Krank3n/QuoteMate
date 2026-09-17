@@ -363,6 +363,11 @@ function Body({ proposal }: { proposal: Proposal }) {
                 : 'Travel: taken off'}
             </Text>
           )}
+          {typeof proposal.chargeGst === 'boolean' && (
+            <Text style={styles.dim}>
+              {proposal.chargeGst ? 'GST: charged on this one' : 'GST: taken off — "No GST has been charged" prints instead'}
+            </Text>
+          )}
           <Text style={styles.dim}>Updates the quote and re-does the totals.</Text>
         </View>
       );

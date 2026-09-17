@@ -23,6 +23,24 @@
  */
 const SHEET_FIXING = /\b(?:plugs?|anchors?|fixings?|hooks?)\b/;
 
+/**
+ * Reinforcing mesh — the SL-grade slab sheet a steel merchant sells at ~$105.
+ * The bare "mesh sheet" wording used to be enough, and it swept in every
+ * other mesh on a site: "plaster sanding sheets / mesh 120 grit" took the
+ * $105 sheet rate ten times over on a $6.9k cavity-slider job (15 Sep 2026,
+ * $954.50 of sandpaper), and "plastic bar chairs for mesh" priced 409 chairs
+ * at $105 each ($42,952 on a shed slab). Only reo wording qualifies now, and
+ * the accessories that hang off a slab (chairs, spacers, ties, trench mesh)
+ * plus every abrasive / fibreglass / fly / render mesh stay on the retail path.
+ */
+const REO_MESH = /\bsl\s?(?:52|62|72|82|92|102)\b|\b(?:reo|slab|reinforcing|reinforcement|steel)\s+mesh\b|\bmesh\s+sheets?\b/;
+const NOT_REO_MESH = /trench|chairs?|spacers?|\bties?\b|tie\s+wire|sanding|sandpaper|abrasive|\bgrit\b|fibre\s*glass|fiberglass|\bfly\b|insect|screen|gyprock|plaster|joint|render|\btape\b|shade|debris|safety|garden|chicken|bird|aviary|gutter/;
+
+export function isReoMesh(nameText: string): boolean {
+  const name = nameText.toLowerCase();
+  return REO_MESH.test(name) && !NOT_REO_MESH.test(name);
+}
+
 export function isNonRetailTradeRow(nameText: string, unit?: string, qty?: number): boolean {
   const name = nameText.toLowerCase();
   const quantity = qty ?? 0;
@@ -36,7 +54,7 @@ export function isNonRetailTradeRow(nameText: string, unit?: string, qty?: numbe
   // Deliberately NOT routed away: trench mesh and bar chairs, which Bunnings
   // genuinely stocks and prices correctly.
   if (/\bn(?:12|16|20|24|28|32|36)\b.*\b(?:bar|rod|dowel|reo|starter)\b|\b(?:starter|dowel|deformed|reinforcing|reo)\s+bars?\b(?!\s*chairs?)|\brebar\b/.test(name)) return true;
-  if (/\bsl\s?(?:52|62|72|82|92|102)\b|\b(?:reo|slab|reinforcing)\s+mesh\b|\bmesh\s+sheets?\b/.test(name) && !/trench/.test(name)) return true;
+  if (isReoMesh(name)) return true;
   // Steel/metal formwork pegs only: hardwood formwork pegs are stocked (they
   // are just hardwood stakes) and routing them here priced a $2-3 timber peg
   // off the steel table.
@@ -134,7 +152,7 @@ export function tradeFallbackUnitPrice(nameText: string, unit?: string): number 
     const mm = name.match(/\b(\d{2,4})\s*mm\b/);
     return mm && parseInt(mm[1], 10) <= 1500 ? 6 : 26;
   }
-  if (/\bsl\s?(?:52|62|72|82|92|102)\b|\b(?:reo|slab|reinforcing)\s+mesh\b|\bmesh\s+sheets?\b/.test(name) && !/trench/.test(name)) {
+  if (isReoMesh(name)) {
     return unit === 'm²' ? 8 : 105;
   }
   if (/\b(?:steel|metal|galvanised|galvanized)\b[^.]*\bformwork\s+(?:pegs?|pins?)|\bformwork\s+(?:pegs?|pins?)\b[^.]*\b(?:steel|metal|galvanised|galvanized)\b/.test(name)) return 7;
@@ -166,7 +184,8 @@ export function tradeFallbackUnitPrice(nameText: string, unit?: string): number 
   if (/paint|ceiling\s+paint|wall\s+paint/.test(name)) return unit === 'L' ? 18 : 55;
   if (/weed\s+mat|geotextile|landscape\s+fabric/.test(name)) return unit === 'm²' ? 1.5 : 45;
   if (/road\s+base|crusher\s+dust|aggregate\s+base/.test(name)) return unit === 'm³' ? 110 : unit === 'kg' ? 0.08 : 95;
-  if (/gravel|aggregate|sand/.test(name)) return unit === 'm³' ? 120 : unit === 'kg' ? 0.12 : 12;
+  // \bsand\b, not a substring: "plaster SANDing sheets" is not a bag of sand.
+  if (/gravel|aggregate|\bsand\b/.test(name)) return unit === 'm³' ? 120 : unit === 'kg' ? 0.12 : 12;
   if (/sliding\s+gate\s+(?:catcher|receiver|stop)|gate\s+(?:catcher|receiver|stop)/.test(name)) return 30;
   if (/sliding\s+gate\s+wheels?|gate\s+wheels?/.test(name)) return 35;
   if (/electrical\s+tape|insulation\s+tape/.test(name)) return 5;

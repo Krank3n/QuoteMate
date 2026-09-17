@@ -10,12 +10,52 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { MATE_SYSTEM_PROMPT } from '../systemPrompt';
 import { NO_PROFILE_NOTE } from '../../quotingProfile';
 import {
+  FREE_PLAN_NOTE,
   quotingProfileContextNote,
+  registerPlanSource,
   registerQuotingProfileSource,
   systemPromptWithProfile,
 } from '../quotingProfileContext';
 
-afterEach(() => registerQuotingProfileSource(() => null));
+afterEach(() => {
+  registerQuotingProfileSource(() => null);
+  registerPlanSource(() => null);
+});
+
+describe('the free-plan line', () => {
+  it('is absent while the plan is unknown, on trial and on Pro', () => {
+    expect(systemPromptWithProfile()).not.toContain(FREE_PLAN_NOTE);
+    registerPlanSource(() => 'trial');
+    expect(systemPromptWithProfile()).not.toContain(FREE_PLAN_NOTE);
+    registerPlanSource(() => 'pro');
+    expect(systemPromptWithProfile()).toBe(MATE_SYSTEM_PROMPT);
+    expect(quotingProfileContextNote()).toBeNull();
+  });
+
+  // Two free-plan tradies (16–17 Sep 2026) scoped a job over six turns, tapped
+  // "Price it up", and met the paywall as an error bubble. Mate can know first.
+  it('rides in on a free account, after the profile, in both the prompt and the context note', () => {
+    registerPlanSource(() => 'free');
+    registerQuotingProfileSource(() => ({ quotingPreferences: ['Work up materials and labour for every job'] } as any));
+    const prompt = systemPromptWithProfile();
+    expect(prompt.startsWith(MATE_SYSTEM_PROMPT)).toBe(true);
+    expect(prompt.indexOf('- Work up materials and labour')).toBeLessThan(prompt.indexOf(FREE_PLAN_NOTE));
+    expect(prompt).toContain('This account is on the FREE plan.');
+    expect(quotingProfileContextNote()).toContain(FREE_PLAN_NOTE);
+  });
+
+  it('tells Mate to say so before the first scoping question, and which tools still work', () => {
+    expect(FREE_PLAN_NOTE).toContain('before any scoping question');
+    expect(FREE_PLAN_NOTE).toContain('propose_draft_quote');
+    expect(FREE_PLAN_NOTE).toContain('mark paid');
+    expect(FREE_PLAN_NOTE).not.toMatch(/\bAI\b(?!")/);
+  });
+
+  it('a throwing plan source leaves the prompt static', () => {
+    registerPlanSource(() => { throw new Error('store not ready'); });
+    expect(systemPromptWithProfile()).toBe(MATE_SYSTEM_PROMPT);
+  });
+});
 
 describe('systemPromptWithProfile', () => {
   it('is the static prompt when there are no settings to read', () => {

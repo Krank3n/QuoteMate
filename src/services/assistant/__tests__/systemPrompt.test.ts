@@ -536,3 +536,34 @@ describe('drafts that land — the send offer and the scope tool (2 Sep 2026 dra
     expect(TOOL_DECLARATIONS.some((t) => t.name === 'propose_update_quote_scope')).toBe(true);
   });
 });
+
+// 15–17 Sep 2026 chat audit: "No GST" → Mate said GST was set at pricing and
+// deleted the quote to redraft it (scope lost); "$80 an hour plus 15% on top"
+// was filed as a preference and the quote priced at the defaults; the set-rate
+// question was asked three turns running until the tradie left.
+describe('GST, stated rates and never deleting to fix (15–17 Sep 2026 audit)', () => {
+  it('routes "no GST" to the rates card and says GST can change after drafting', () => {
+    expect(MATE_SYSTEM_PROMPT).toContain('propose_update_quote_rates with chargeGst false');
+    expect(MATE_SYSTEM_PROMPT).toContain('never say GST is locked in');
+    expect(MATE_SYSTEM_PROMPT).toContain('never discount the total to fake it');
+  });
+
+  it('names Business Defaults as a real location, for the standing GST setting and default rates', () => {
+    expect(MATE_SYSTEM_PROMPT).toContain('Settings → Business Defaults');
+    expect(MATE_SYSTEM_PROMPT).toContain('"GST on quotes & invoices"');
+  });
+
+  it('forbids delete-and-redraft as a way to change a number', () => {
+    expect(MATE_SYSTEM_PROMPT).toContain('Never delete and redraft a quote to change a number');
+    expect(MATE_SYSTEM_PROMPT).toContain('propose_delete_quote is only ever for a quote they want gone');
+  });
+
+  it('a rate or markup named before the draft lands on the quote once pricing finishes', () => {
+    expect(MATE_SYSTEM_PROMPT).toContain('put up propose_update_quote_rates with exactly those figures');
+  });
+
+  it('asks the set-rate question once and treats silence as "work it up"', () => {
+    expect(MATE_SYSTEM_PROMPT).toContain('asked ONCE');
+    expect(MATE_SYSTEM_PROMPT).toContain('take it as "work it up" and don\'t ask it again');
+  });
+});

@@ -300,6 +300,11 @@ export interface UpdateQuoteRatesProposal extends BaseProposal {
   // own travelAdjustment, which is a percent of the subtotal — apply converts.
   // 0 takes travel off.
   travelAdjustment?: number;
+  // Whether GST is charged on THIS document. false = the tradie isn't
+  // registered (no GST added or shown, the "No GST has been charged" note
+  // prints); true = charge it. Writes the document's gstRegistered snapshot —
+  // the standing default lives in Business Defaults.
+  chargeGst?: boolean;
   // Display-only — name the doc on the card without a re-fetch.
   displayName?: string;
 }

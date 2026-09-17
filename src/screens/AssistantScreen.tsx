@@ -1134,11 +1134,16 @@ export function AssistantScreen() {
         if (result.code === 'PLAN_GATED') {
           navigation.navigate('Paywall', { source: 'mate' });
         }
-        // Tell the model too. It has no other way to know the card failed —
-        // it only ever saw `{ ok: true, proposalId }` from the tool call —
-        // which is how a tradie ended up tapping the same broken "mark paid"
-        // card three times in a row while Mate re-proposed it each time.
-        noteToMate(
+        // Tell the model too, and give it the turn. It has no other way to
+        // know the card failed — it only ever saw `{ ok: true, proposalId }`
+        // from the tool call — which is how a tradie ended up tapping the
+        // same broken "mark paid" card three times in a row while Mate
+        // re-proposed it each time. A silent note was not enough either: two
+        // free-plan tradies (16–17 Sep 2026) scoped a job over six turns,
+        // tapped "Price it up", got the plan-gate error bubble and nothing
+        // from Mate at all, and left. The reply is what tells them what to do
+        // next.
+        continueMateTurn(
           conversation.id,
           `[context] The tradie tapped Apply on ${proposal.type} and it FAILED: ` +
             `"${result.error || 'unknown error'}". Do NOT propose the same action again — ` +
