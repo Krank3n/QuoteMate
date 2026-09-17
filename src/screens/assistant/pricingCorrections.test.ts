@@ -48,6 +48,16 @@ describe('correctionsClause', () => {
     expect(clause).toContain('Never draft a new quote for them.');
   });
 
+  // 16 Sep 2026: a builder's voice session picked up "just popping down to
+  // Bunnings to grab some Colorbond and Gyprock" mid-pipeline and Mate wrote
+  // "new walls … with Colorbond sheeting" into a bathroom refit's scope.
+  it('tells Mate to judge each line, and to leave unrelated chatter out of the scope', () => {
+    const clause = correctionsClause(['just popping down to Bunnings for some Colorbond'], 'q-bath-1');
+    expect(clause).toContain('Read each line for what it is');
+    expect(clause).toMatch(/isn't about this job/);
+    expect(clause).toContain("don't work it into the scope");
+  });
+
   it('is empty when there is nothing to act on', () => {
     expect(correctionsClause([], 'q1')).toBe('');
   });

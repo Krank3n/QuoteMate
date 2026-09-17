@@ -58,8 +58,10 @@ export function correctionsClause(lines: string[], quoteId?: string): string {
   const quoted = lines.map((l) => `"${l}"`).join(', ');
   const target = quoteId ? ` on ${quoteId}` : '';
   return (
-    ` While pricing ran the tradie said: ${quoted}. Those are corrections to THIS quote — act on them now: ` +
-    `say you're folding them in, then propose_update_quote_scope${target} with the full corrected description ` +
-    `(or propose_update_customer / propose_update_line_item where that's what they meant). Never draft a new quote for them.`
+    ` While pricing ran the tradie said: ${quoted}. Read each line for what it is. A line about THIS job — a brand, a measurement, ` +
+    `something that's already there, who it's for — is a correction to this quote, so act on it now: say you're folding it in, then ` +
+    `propose_update_quote_scope${target} with the full corrected description (or propose_update_customer / propose_update_line_item ` +
+    `where that's what they meant). Never draft a new quote for them. A line that isn't about this job — small talk, a supplies run, ` +
+    `another job, a mis-heard phone in a pocket — changes nothing: leave the quote alone and don't work it into the scope.`
   );
 }

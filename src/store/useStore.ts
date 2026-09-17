@@ -4246,6 +4246,10 @@ export const useStore = create<AppState>((set, get) => ({
           const nextRate = proposal.laborRate ?? sourceQuote.laborRate;
           const nextQuote: Quote = {
             ...sourceQuote,
+            // GST off/on for this document only: the calculator reads the
+            // snapshot, so the totals, the PDF and the "No GST has been
+            // charged" note all follow from this one field.
+            ...(proposal.chargeGst !== undefined ? { gstRegistered: proposal.chargeGst } : {}),
             markup: proposal.markup ?? sourceQuote.markup,
             laborMarkup: proposal.laborMarkup ?? sourceQuote.laborMarkup,
             laborRate: nextRate,
@@ -4298,6 +4302,7 @@ export const useStore = create<AppState>((set, get) => ({
             ...(proposal.travelAdjustment !== undefined
               ? { travelAdjustment: recalced.travelAdjustment ?? 0 }
               : {}),
+            ...(proposal.chargeGst !== undefined ? { gstRegistered: proposal.chargeGst } : {}),
           };
           await get().saveDocument(nextDoc);
           return { ok: true, navigate: { kind: 'job_preview', quoteId: target.id }, appliedTotal: recalced.total };

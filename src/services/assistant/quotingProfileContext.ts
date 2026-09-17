@@ -18,15 +18,51 @@
  * none of the assistant services grow an import edge into the store graph.
  */
 import type { BusinessSettings } from '../../types';
+import type { EffectivePlan } from '../../store/planGates';
+import { canRunMatePipeline } from '../../store/planGates';
 import { MATE_SYSTEM_PROMPT } from './systemPrompt';
 import { NO_PROFILE_NOTE, buildQuotingProfileBlock } from '../quotingProfile';
 
 type ProfileSource = () => BusinessSettings | null | undefined;
+type PlanSource = () => EffectivePlan | null | undefined;
 
 let source: ProfileSource = () => null;
+let planSource: PlanSource = () => null;
 
 export function registerQuotingProfileSource(fn: ProfileSource): void {
   source = fn;
+}
+
+/** The store's getEffectivePlan, registered the same way as the settings source. */
+export function registerPlanSource(fn: PlanSource): void {
+  planSource = fn;
+}
+
+/**
+ * What Mate is told on a free (post-trial) account.
+ *
+ * The apply path gates the pipeline (planGates.canRunMatePipeline), and it
+ * always will. What it must not do is surprise the tradie: two of them on
+ * 16–17 Sep 2026 answered six turns of scoping questions, tapped "Price it
+ * up", and met the paywall as an error bubble with nothing from Mate. The
+ * gate is a fact about the account Mate can know before the first question.
+ */
+export const FREE_PLAN_NOTE = [
+  'This account is on the FREE plan.',
+  'Auto-pricing — building the materials list and fetching prices — is a Pro feature, so every "Price it up" card you put up will fail at the tap: propose_draft_quote, propose_update_quote_scope, propose_add_line_item for a material, propose_reprice. Do not put one up and let them find out.',
+  "The FIRST time they ask you to quote or invoice anything, say it plainly in one line before any scoping question: \"Auto-pricing's a Pro thing, so I can't build the materials list on this plan — you can add rows and prices yourself in the app, or go Pro and I'll price it.\" Never say \"AI\".",
+  'Then stop asking scoping questions — there is nothing to hand the answers to. Answer questions about their quotes, send, mark paid, set totals, add a lump-sum line at a price they name, and save rates and preferences as normal — none of those need the pipeline.',
+].join('\n');
+
+/** The plan line, or null when the plan is unknown or the pipeline is open to them. */
+function planText(): string | null {
+  try {
+    const plan = planSource();
+    if (!plan || canRunMatePipeline(plan)) return null;
+    return FREE_PLAN_NOTE;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -57,14 +93,17 @@ function profileText(): string | null {
   }
 }
 
-/** The static prompt, plus the profile (or the nothing-saved line) when settings are loaded. */
+/**
+ * The static prompt, plus the profile (or the nothing-saved line) when settings
+ * are loaded, plus the free-plan line when the pipeline is closed to them.
+ */
 export function systemPromptWithProfile(): string {
-  const text = profileText();
-  return text ? `${MATE_SYSTEM_PROMPT}\n\n${text}` : MATE_SYSTEM_PROMPT;
+  const parts = [profileText(), planText()].filter((t): t is string => !!t);
+  return parts.length ? `${MATE_SYSTEM_PROMPT}\n\n${parts.join('\n\n')}` : MATE_SYSTEM_PROMPT;
 }
 
 /** The same text as a silent context note, for providers that own their prompt. */
 export function quotingProfileContextNote(): string | null {
-  const text = profileText();
-  return text ? `[context] ${text}` : null;
+  const parts = [profileText(), planText()].filter((t): t is string => !!t);
+  return parts.length ? `[context] ${parts.join('\n\n')}` : null;
 }

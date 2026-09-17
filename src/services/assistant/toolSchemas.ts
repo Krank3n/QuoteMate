@@ -516,7 +516,7 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
   {
     name: 'propose_update_quote_rates',
     description:
-      "Change the labour, markup or travel numbers on an existing quote or invoice without re-running the pricing pipeline. Use this whenever the tradie wants to bump the markup percentage, change the labour rate, adjust labour hours, tweak the labour markup, or put a travel charge on a specific doc (\"bump markup to 30%\", \"change hours to 14\", \"put the labour rate up\", \"stick the drive on it\"). Pass only the fields that are changing \u2014 omitted fields stay as-is. Markup values are percentages (30 means 30%). laborRate is $/hour, laborHours is hours, travelAdjustment is dollars. Always know the quote id first (from list_recent_quotes / get_quote / the [context] line after a draft).",
+      "Change the labour, markup, travel or GST on an existing quote or invoice without re-running the pricing pipeline. Use this whenever the tradie wants to bump the markup percentage, change the labour rate, adjust labour hours, tweak the labour markup, take GST off (or put it on), or put a travel charge on a specific doc (\"bump markup to 30%\", \"change hours to 14\", \"put the labour rate up\", \"stick the drive on it\"). Pass only the fields that are changing \u2014 omitted fields stay as-is. Markup values are percentages (30 means 30%). laborRate is $/hour, laborHours is hours, travelAdjustment is dollars. Always know the quote id first (from list_recent_quotes / get_quote / the [context] line after a draft).",
     parameters: {
       type: 'object',
       properties: {
@@ -529,6 +529,11 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
           type: 'number',
           description:
             'Travel charge in dollars for the drive, a callout or fuel. Only a figure the tradie stated, or a travel/callout rate already on their rate card — never one you worked out from a distance or a drive time. 0 takes travel off. If the quote is still being priced, wait for the "[context]" line that says pricing finished and send this then.',
+        },
+        chargeGst: {
+          type: 'boolean',
+          description:
+            'Whether GST is charged on this document. false when the tradie says they are not registered for GST, "no GST", "take the GST off", "don\'t charge GST on this one" — GST comes off and the customer copy says no GST has been charged. true puts it back. This is the ONLY way GST changes on an existing quote or invoice: never delete and redraft a quote to remove GST, and never discount the total to fake it. For every FUTURE quote the tradie changes the setting themselves under Settings → Business Defaults → "GST on quotes & invoices".',
         },
         displayName: { type: 'string', description: 'Job name to show on the card (display only).' },
       },

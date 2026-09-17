@@ -265,6 +265,63 @@ describe('runPipelineOnServer', () => {
     if (outcome.kind === 'failed') expect(outcome.error).toMatch(/stopped reporting/);
   });
 
+  // 15 Sep 2026: a tradie locked the phone during a five-minute server run
+  // and came back eleven minutes later to "The server stopped reporting
+  // progress" and "Pricing finished" in the same second — the stale timer
+  // fired on resume before the listener delivered the finished document.
+  it('reads the run document before declaring a silent run dead, and delivers a finished one', async () => {
+    let now = 0;
+    const { io, server } = fakeIo({ now: () => now });
+    const pending = runPipelineOnServer(request, {}, io);
+    await vi.advanceTimersByTimeAsync(10);
+    server.advance({ status: 'running', updatedAt: 't1' });
+    // The server finishes while the listener is asleep: the document changes,
+    // no snapshot arrives.
+    server.record!.status = 'done';
+    server.record!.result = { generatedMaterialCount: 3, fetchedCount: 3, failedCount: 0, skippedCount: 0, missedSupplierTerms: [], reeceReauthNeeded: false } as any;
+    now = STALE_TIMEOUT_MS + 1;
+    await vi.advanceTimersByTimeAsync(20_000);
+    const outcome = await pending;
+    expect(outcome.kind).toBe('done');
+  });
+
+  it('keeps waiting on a silent run whose document has been written since it last looked', async () => {
+    let now = 0;
+    const { io, server } = fakeIo({ now: () => now });
+    const seen: string[] = [];
+    const pending = runPipelineOnServer(request, { onProgress: (s) => seen.push(s.status) }, io);
+    await vi.advanceTimersByTimeAsync(10);
+    server.advance({ status: 'running', updatedAt: 't1', progress: { phase: 'analyse', status: 'Reading the scope', done: false } });
+    // Progress lands in Firestore while the listener is asleep.
+    server.record!.updatedAt = 't2';
+    server.record!.progress = { phase: 'pricing', status: 'Sorting pack sizes', done: false } as any;
+    now = STALE_TIMEOUT_MS + 1;
+    await vi.advanceTimersByTimeAsync(20_000);
+    // Not failed: the read showed a newer write, so the clock restarted.
+    let settled = false;
+    void pending.then(() => { settled = true; });
+    await vi.advanceTimersByTimeAsync(10);
+    expect(settled).toBe(false);
+    expect(seen).toContain('Sorting pack sizes');
+    server.advance({ status: 'failed', error: 'x' });
+    expect((await pending).kind).toBe('failed');
+  });
+
+  it('restarts the silence clock and catches up on the document when the app comes back to the front', async () => {
+    let now = 0;
+    const { io, server } = fakeIo({ now: () => now });
+    const pending = runPipelineOnServer(request, {}, io);
+    await vi.advanceTimersByTimeAsync(10);
+    server.advance({ status: 'running', updatedAt: 't1' });
+    server.appState('background');
+    server.record!.status = 'done';
+    server.record!.result = { generatedMaterialCount: 1, fetchedCount: 1, failedCount: 0, skippedCount: 0, missedSupplierTerms: [], reeceReauthNeeded: false } as any;
+    now = STALE_TIMEOUT_MS + 1;
+    server.appState('active');
+    await vi.advanceTimersByTimeAsync(10);
+    expect((await pending).kind).toBe('done');
+  });
+
   it('is unavailable when the remote flag is off or nobody is signed in', async () => {
     expect(await runPipelineOnServer(request, {}, fakeIo({ isEnabled: async () => false }).io)).toEqual({
       kind: 'unavailable',
