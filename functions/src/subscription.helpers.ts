@@ -211,6 +211,28 @@ export function storePricePatch(input: {
 }
 
 
+// A store introductory free period: the store holds a card and the doc is a
+// billed sub (productId + token), but nothing has been charged and nothing
+// will be until storeTrialUntil. Counting it as MRR would book money that
+// cancels before it lands. The receipt validators stamp storeTrialUntil
+// (receiptValidation.helpers storeTrialPatch) and clear it on conversion.
+export function inStoreFreeTrial(sub: any, nowMs: number = Date.now()): boolean {
+  // Only the two stores run introductory periods; a Stripe sub that lands on
+  // a doc still carrying an old store marker is paying and must count.
+  const platform = String(sub?.platform || '').toLowerCase();
+  if (platform !== 'ios' && platform !== 'android') return false;
+  const until = ts(sub?.storeTrialUntil);
+  return until !== null && until > nowMs;
+}
+
+// A billed sub that has actually been charged: the north-star "paid" test.
+// isBilledSub is the billing-RECORD test (card on file, real productId) and
+// stays true through a store free trial; the funnel, the founding cap and
+// anything that says "paying" must use this one instead.
+export function isPayingSub(sub: any, nowMs: number = Date.now()): boolean {
+  return isBilledSub(sub) && !inStoreFreeTrial(sub, nowMs);
+}
+
 // A billed sub whose paid period has run out is NOT revenue. Firestore only
 // learns about a renewal when the device re-validates its receipt, so a lapsed
 // row means "unconfirmed", not "definitely churned" — the admin reports these
@@ -227,6 +249,7 @@ export function subPeriodEnded(sub: any, nowMs: number = Date.now()): boolean {
 export function monthlyRevenueAud(sub: any, nowMs: number = Date.now()): number {
   if (!isBilledSub(sub)) return 0;
   if (subPeriodEnded(sub, nowMs)) return 0;
+  if (inStoreFreeTrial(sub, nowMs)) return 0;
   const price = subPriceInfo(sub);
   if (price.currency !== 'AUD') return 0;
   return price.interval === 'yearly' ? round2(price.amount / 12) : round2(price.amount);

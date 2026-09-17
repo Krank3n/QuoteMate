@@ -198,6 +198,7 @@ export function PaywallScreen() {
         price: p.priceValue,
         currency: p.currency,
         period: p.period, // 'monthly' | 'yearly' — used on web to match selectedPlan
+        introFreeDays: p.introFreeDays ?? null, // store introductory offer, when this buyer may use it
       }));
       setProducts(formattedProducts as any);
     } catch (error: any) {
@@ -585,7 +586,12 @@ export function PaywallScreen() {
   // Check if user is Pro
   const isPro = subscriptionStatus?.isPro || false;
   const planState: PaywallPlanState = paywallPlanState({ isPro, trialExpired, trialStartedAt });
-  const headerNote = paywallHeaderNote(planState);
+  // Free days the store gives before the first charge on the selected plan —
+  // null when the store reports no introductory offer, or this buyer has used
+  // theirs. Every "when am I charged" line below reads this one value.
+  const introFreeDays: number | null =
+    products.find((p) => p.productId === selectedSku)?.introFreeDays ?? null;
+  const headerNote = paywallHeaderNote(planState, introFreeDays);
 
   const handleCheckoutSuccess = async () => {
     setShowCheckoutModal(false);
@@ -918,9 +924,9 @@ export function PaywallScreen() {
               loading={isUpgrading}
               disabled={isUpgrading}
             >
-              {proCtaLabel(getProductPrice(selectedSku), selectedPlan)}
+              {proCtaLabel(getProductPrice(selectedSku), selectedPlan, introFreeDays)}
             </Button>
-            <Text style={styles.disclaimer}>{billingLine(getProductPrice(selectedSku), selectedPlan)}</Text>
+            <Text style={styles.disclaimer}>{billingLine(getProductPrice(selectedSku), selectedPlan, introFreeDays)}</Text>
           </WebContainer>
         </View>
       )}

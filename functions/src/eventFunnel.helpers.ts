@@ -27,7 +27,7 @@
  * Mirrors adminFunnel.helpers.ts: pure, dependency-light, injectable `now`,
  * consumed by the aggregateEventFunnel cron in adminCrm.ts.
  */
-import { deriveSubFields, isBilledSub } from './subscription.helpers';
+import { deriveSubFields, isPayingSub } from './subscription.helpers';
 import { safeRatio } from './adminFunnel.helpers';
 
 export type SharedStage =
@@ -102,12 +102,13 @@ export interface EventFunnelUserInput {
 }
 
 /**
- * THE north-star numerator: billed Pro on any platform OR at least one real
- * Square payment collected. Restored-but-unverified store subs deliberately
- * don't count here — this is the honest revenue view.
+ * THE north-star numerator: PAID Pro on any platform OR at least one real
+ * Square payment collected. Restored-but-unverified store subs and store
+ * free-trial periods (card on file, nothing charged yet) deliberately don't
+ * count here — this is the honest revenue view.
  */
 export function isMonetized(input: Pick<EventFunnelUserInput, 'sub' | 'hasSquarePayment'>): boolean {
-  return isBilledSub(input.sub) || input.hasSquarePayment;
+  return isPayingSub(input.sub) || input.hasSquarePayment;
 }
 
 export interface FurthestStages {
@@ -137,7 +138,7 @@ export function furthestStage(input: EventFunnelUserInput): FurthestStages {
           ? 'quote_draft'
           : 'signup';
 
-  const pathA: PathAStage | null = isBilledSub(input.sub)
+  const pathA: PathAStage | null = isPayingSub(input.sub)
     ? 'pro_paid'
     : input.startedCheckout
       ? 'checkout_started'
@@ -301,7 +302,7 @@ export function rollupEventFunnel(
     if (stages.pathB) squareConnected++;
     if (stages.pathB === 'first_payment_collected') firstPaymentCollected++;
 
-    const pro = isBilledSub(input.sub);
+    const pro = isPayingSub(input.sub, now);
     if (pro) viaPro++;
     if (input.hasSquarePayment) viaSquare++;
     if (pro && input.hasSquarePayment) viaBoth++;

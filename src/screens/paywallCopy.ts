@@ -109,24 +109,36 @@ export function paywallSubtitle(state: PaywallPlanState): string {
 }
 
 /**
- * The note under the subtitle for accounts that are not yet Pro. Neither
- * store carries an introductory offer, so a subscription taken during the
- * trial is billed the moment it is confirmed — the note says so, because the
- * old "subscribe to keep it after the trial" read as if billing waited. A free
+ * The note under the subtitle for accounts that are not yet Pro. When the
+ * store reports no introductory offer (or this buyer has used theirs), a
+ * subscription taken during the trial is billed the moment it is confirmed —
+ * the note says so, because the old "subscribe to keep it after the trial"
+ * read as if billing waited. When the store DOES give free days before the
+ * first charge, the note says that instead, in the store's own number. A free
  * account keeps quoting and Square invoicing regardless, so the note says so
  * before listing what Pro adds. Pro accounts get no note.
  */
-export function paywallHeaderNote(state: PaywallPlanState): string | null {
+export function paywallHeaderNote(state: PaywallPlanState, introFreeDays: number | null = null): string | null {
+  const intro = hasIntroOffer(introFreeDays);
   switch (state.kind) {
     case 'pro':
       return null;
     case 'trial_pending':
-      return `Make a quote first and Pro is free for ${TRIAL_DAYS} days. Subscribing now bills you today.`;
+      return intro
+        ? `Make a quote first and Pro is free for ${TRIAL_DAYS} days. Or start a subscription now: no charge for ${introFreeDays} days.`
+        : `Make a quote first and Pro is free for ${TRIAL_DAYS} days. Subscribing now bills you today.`;
     case 'trial':
-      return "You're on Pro for the rest of your trial. Subscribing now bills you today, not when the trial ends.";
+      return intro
+        ? `You're on Pro for the rest of your trial. Start a subscription now and your first charge is ${introFreeDays} days away.`
+        : "You're on Pro for the rest of your trial. Subscribing now bills you today, not when the trial ends.";
     case 'free':
       return 'Quotes and Square invoices still work on Free. Pro adds the rest.';
   }
+}
+
+/** A usable store introductory offer: a positive whole number of free days. */
+export function hasIntroOffer(introFreeDays: number | null | undefined): introFreeDays is number {
+  return typeof introFreeDays === 'number' && Number.isFinite(introFreeDays) && introFreeDays > 0;
 }
 
 /** The Settings row under "Subscription": the plan in a few words. */
@@ -145,18 +157,30 @@ export function planRowSubtitle(state: PaywallPlanState): string {
   }
 }
 
-/** The one button: what you get and what it costs, on the button itself. */
-export function proCtaLabel(priceLabel: string, period: BillingPeriod): string {
-  return `Start Pro · ${priceLabel}/${period === 'yearly' ? 'year' : 'month'}`;
+/**
+ * The one button: what you get and what it costs, on the button itself. With
+ * a store introductory offer the button carries the free days instead of the
+ * price, because "no charge today" is the fact that moves a trial user — and
+ * a Paper Button label is one line, so "14 days free, then $49/month" would
+ * ellipsise the price on a 375pt phone. The price then lives in billingLine.
+ */
+export function proCtaLabel(priceLabel: string, period: BillingPeriod, introFreeDays: number | null = null): string {
+  const unit = period === 'yearly' ? 'year' : 'month';
+  return hasIntroOffer(introFreeDays)
+    ? `Start Pro · ${introFreeDays} days free`
+    : `Start Pro · ${priceLabel}/${unit}`;
 }
 
 /**
  * The legal line under the button. Leads with when the money moves, since
  * that is the question a trial user actually has.
  */
-export function billingLine(priceLabel: string, period: BillingPeriod): string {
+export function billingLine(priceLabel: string, period: BillingPeriod, introFreeDays: number | null = null): string {
   const unit = period === 'yearly' ? 'year' : 'month';
-  return `Billed today, then ${priceLabel}/${unit} as an auto-renewing ${period} subscription. Cancel anytime; renews unless cancelled 24 hours before the period ends.`;
+  const renewal = `Cancel anytime; renews unless cancelled 24 hours before the period ends.`;
+  return hasIntroOffer(introFreeDays)
+    ? `No charge for ${introFreeDays} days, then ${priceLabel}/${unit} as an auto-renewing ${period} subscription. Cancel at least 24 hours before the ${introFreeDays} days end and you pay nothing. ${renewal}`
+    : `Billed today, then ${priceLabel}/${unit} as an auto-renewing ${period} subscription. ${renewal}`;
 }
 
 /**

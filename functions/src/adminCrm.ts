@@ -24,10 +24,10 @@ import type { DocumentStage, DocumentType } from './shared/document/types';
 import {
   ts,
   deriveSubFields,
-  isBilledSub,
   isRestoredStorePro,
   rollupRevenue,
   RevenueEntry,
+  isPayingSub,
 } from './subscription.helpers';
 import { listAllAuthUsers as drainAuthUsers } from './authUsers.helpers';
 import { staleSubscriptionAction, lapsedCompAction, type StoreStatus } from './receiptValidation.helpers';
@@ -2217,9 +2217,11 @@ export async function computeEventFunnelPayload(): Promise<
 
   // Founding-member count over the FULL subs map, not just users with auth
   // records — a billed sub whose auth account was deleted still holds a spot.
+  // A store free-trial period does NOT hold one: nothing has been paid, and
+  // a hundred trials must not close the cap on a promise of revenue.
   let foundingTaken = 0;
   for (const sub of subs.values()) {
-    if (isBilledSub(sub)) foundingTaken++;
+    if (isPayingSub(sub)) foundingTaken++;
   }
 
   // Acquisition scoreboard (users/{uid}/profile/attribution is written once,

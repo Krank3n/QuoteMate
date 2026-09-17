@@ -65,6 +65,16 @@ describe('isMonetized', () => {
     expect(isMonetized(user({ sub: compSub }))).toBe(false);
   });
 
+  it('false during a store free-trial period (card on file, nothing charged yet)', () => {
+    const inYear = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString();
+    const storeTrial = { ...billedSub, platform: 'ios', storeTrialUntil: inYear, currentPeriodEnd: inYear };
+    expect(isMonetized(user({ sub: storeTrial }))).toBe(false);
+    expect(furthestStage(user({ sub: storeTrial, viewedPaywall: true, startedCheckout: true })).pathA).toBe('checkout_started');
+    // Once the marker is behind us the same record is paid.
+    const past = new Date(Date.now() - 1000).toISOString();
+    expect(isMonetized(user({ sub: { ...storeTrial, storeTrialUntil: past } }))).toBe(true);
+  });
+
   it('false for a plain trial user', () => {
     expect(isMonetized(user({ sub: trialSub }))).toBe(false);
   });

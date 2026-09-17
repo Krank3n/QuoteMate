@@ -154,7 +154,7 @@ import {
   describeProviders,
   evaluateThrottle,
 } from './passwordReset.helpers';
-import { receiptVerdict, isFirstGrantOfTransaction, isNewSubscriber } from './receiptValidation.helpers';
+import { receiptVerdict, isFirstGrantOfTransaction, isNewSubscriber, storeTrialPatch } from './receiptValidation.helpers';
 import { fetchGooglePlaySubscription } from './iapStoreStatus';
 import { verifyAppleJws } from './appleJws.helpers';
 import { verifySquareWebhookSignature } from './squareWebhookSignature';
@@ -1666,6 +1666,8 @@ export const validateAppleReceipt = functions.https.onRequest((req, res) => {
           validatedAt: admin.firestore.FieldValue.serverTimestamp(),
           currentPeriodStart: now,
           currentPeriodEnd: expiryDate,
+          // A store free-trial period: card on file, nothing charged until then.
+          ...storeTrialPatch({ isFreeTrial: jwsResult.isFreeTrial, expiryDate }),
           quotesThisMonth: 0,
           // A re-grant after the expiry sweep (or an admin revoke) is live
           // again — don't leave the doc saying both isPro and expired.
@@ -1682,7 +1684,9 @@ export const validateAppleReceipt = functions.https.onRequest((req, res) => {
         // Process referral commission — bill against the signed SKU so a forged
         // request body can't inflate a referrer's commission.
         try {
-          const grossCents = PRODUCT_PRICES[signedProductId] || 4900;
+          // A store free-trial start collects nothing yet — pass $0 so the
+          // earning (and the conversion count) wait for the paid period.
+          const grossCents = jwsResult.isFreeTrial ? 0 : (PRODUCT_PRICES[signedProductId] || 4900);
           await processReferralCommission(userId, 'ios', signedProductId, grossCents);
         } catch (refError) {
           // silently ignore
@@ -1696,7 +1700,7 @@ export const validateAppleReceipt = functions.https.onRequest((req, res) => {
             const iosFirestore = admin.firestore();
             const userProfile = await iosFirestore.doc(`users/${userId}/settings/business`).get();
             const businessName = userProfile.data()?.businessName || '';
-            await sendNewProSubscriptionEmail(userEmail, userId, 'ios', signedProductId, businessName, subPriceInfo({ ...applePricePatch, productId: signedProductId }));
+            await sendNewProSubscriptionEmail(userEmail, userId, 'ios', signedProductId, businessName, subPriceInfo({ ...applePricePatch, productId: signedProductId }), jwsResult.isFreeTrial ? expiryDate : null);
           } catch (emailError) {
             // silently ignore
           }
@@ -1750,6 +1754,7 @@ export const validateGoogleReceipt = functions.https.onRequest((req, res) => {
       let googleExpiryDate: Date | null = null;
       let googlePriceMicros: number | null = null;
       let googlePriceCurrency: string | null = null;
+      let googleIsFreeTrial = false;
 
       // Validate with the Play Developer API (shared with the nightly expiry
       // sweep, which asks the same question before cutting anyone off).
@@ -1759,6 +1764,7 @@ export const validateGoogleReceipt = functions.https.onRequest((req, res) => {
         googleExpiryDate = play.outcome === 'valid' ? play.expiryDate : null;
         googlePriceMicros = play.priceMicros ?? null;
         googlePriceCurrency = play.currency ?? null;
+        googleIsFreeTrial = play.isFreeTrial === true;
       } else {
         console.warn('[receipts] Google validation skipped — missing purchase token', { userId });
       }
@@ -1810,6 +1816,7 @@ export const validateGoogleReceipt = functions.https.onRequest((req, res) => {
           validatedAt: admin.firestore.FieldValue.serverTimestamp(),
           currentPeriodStart: now,
           currentPeriodEnd: expiryDate,
+          ...storeTrialPatch({ isFreeTrial: googleIsFreeTrial, expiryDate }),
           quotesThisMonth: 0,
           ...clearExpiryMarkers(),
         }, { merge: true });
@@ -1821,7 +1828,7 @@ export const validateGoogleReceipt = functions.https.onRequest((req, res) => {
       if (firstGrant) {
         // Process referral commission
         try {
-          const grossCents = PRODUCT_PRICES[productId] || 4900;
+          const grossCents = googleIsFreeTrial ? 0 : (PRODUCT_PRICES[productId] || 4900);
           await processReferralCommission(userId, 'android', productId, grossCents);
         } catch (refError) {
           // silently ignore
@@ -1833,7 +1840,7 @@ export const validateGoogleReceipt = functions.https.onRequest((req, res) => {
             const userEmail = await getUserEmail(userId) || 'unknown';
             const userProfile = await firestore.doc(`users/${userId}/settings/business`).get();
             const businessName = userProfile.data()?.businessName || '';
-            await sendNewProSubscriptionEmail(userEmail, userId, 'android', productId, businessName, subPriceInfo({ ...googlePricePatch, productId }));
+            await sendNewProSubscriptionEmail(userEmail, userId, 'android', productId, businessName, subPriceInfo({ ...googlePricePatch, productId }), googleIsFreeTrial ? expiryDate : null);
           } catch (emailError) {
             // silently ignore
           }

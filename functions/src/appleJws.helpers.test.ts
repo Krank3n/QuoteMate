@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { verifyAppleJws, peekJwsEnvironment } from './appleJws.helpers';
+import { verifyAppleJws, peekJwsEnvironment, isAppleFreeTrial } from './appleJws.helpers';
 
 /**
  * These deliberately contain no real purchase tokens — a genuine StoreKit JWS
@@ -86,5 +86,22 @@ describe('verifyAppleJws', () => {
       const r = await verifyAppleJws(input);
       if (r.outcome !== 'valid') expect(r.expiryDate).toBeNull();
     }
+  });
+});
+
+describe('isAppleFreeTrial', () => {
+  it('reads a free introductory period off the signed payload', () => {
+    expect(isAppleFreeTrial({ offerType: 1, offerDiscountType: 'FREE_TRIAL', price: 0 })).toBe(true);
+    // Older payloads carry offerType but no discount type: zero price decides.
+    expect(isAppleFreeTrial({ offerType: 1, price: 0 })).toBe(true);
+    expect(isAppleFreeTrial({ offerType: '1', price: 0 })).toBe(true);
+  });
+  it('is false for paid periods, paid intro pricing and non-intro offers', () => {
+    expect(isAppleFreeTrial({ price: 49000 })).toBe(false);
+    expect(isAppleFreeTrial({ offerType: 1, offerDiscountType: 'PAY_AS_YOU_GO', price: 990 })).toBe(false);
+    expect(isAppleFreeTrial({ offerType: 1, price: 990 })).toBe(false);
+    expect(isAppleFreeTrial({ offerType: 2, price: 0 })).toBe(false);
+    expect(isAppleFreeTrial(null)).toBe(false);
+    expect(isAppleFreeTrial(undefined)).toBe(false);
   });
 });
