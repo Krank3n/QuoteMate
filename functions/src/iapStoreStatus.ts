@@ -95,6 +95,8 @@ export async function fetchGooglePlaySubscription(
         expiryDate,
         priceMicros: Number.isFinite(priceMicros) ? priceMicros : null,
         currency,
+        // paymentState 2 = free trial: Play has the card, nothing charged yet.
+        isFreeTrial: Number(data?.paymentState) === 2,
         detail: live ? 'live' : 'lapsed',
       };
     }

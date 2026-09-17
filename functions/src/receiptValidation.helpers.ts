@@ -165,9 +165,28 @@ export type StoreStatus = {
   expiryDate: Date | null;
   priceMicros?: number | null;
   currency?: string | null;
+  /** The store holds a card but this period is a free introductory one. */
+  isFreeTrial?: boolean;
   /** Short machine-readable note for logs. */
   detail: string;
 };
+
+/**
+ * Fields to merge onto the subscription doc so a store free-trial period is
+ * recorded as exactly that: entitled, card on file, nothing charged until
+ * `storeTrialUntil`. A paid period clears the marker (null, not delete — so
+ * a merge on re-validation after conversion overwrites the old value).
+ * Revenue maths (subscription.helpers monthlyRevenueAud) reads it.
+ */
+export function storeTrialPatch(params: { isFreeTrial: boolean | undefined; expiryDate: Date | null }): {
+  storeTrialUntil: string | null;
+} {
+  const { isFreeTrial, expiryDate } = params;
+  if (isFreeTrial && expiryDate instanceof Date && !Number.isNaN(expiryDate.getTime())) {
+    return { storeTrialUntil: expiryDate.toISOString() };
+  }
+  return { storeTrialUntil: null };
+}
 
 export type StaleAction =
   | { action: 'keep'; reason: 'not_stale' | 'store_live_no_expiry' | 'store_unavailable_within_backstop' }

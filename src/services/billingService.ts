@@ -1,4 +1,5 @@
 import { Platform } from 'react-native';
+import { pickAndroidOfferToken } from './storeOffers';
 
 // Safely import expo-iap only if available
 let RNIap: any = null;
@@ -214,10 +215,13 @@ class BillingService {
 
         const product = products[0];
 
-        // expo-iap 3.x: subscriptionOffers is the primary field, subscriptionOfferDetailsAndroid is deprecated
+        // expo-iap 3.x: subscriptionOffers is the primary field, subscriptionOfferDetailsAndroid is deprecated.
+        // Play lists the base plan AND any offer this buyer is eligible for, in
+        // no promised order — pick the free introductory offer when there is
+        // one, else the base plan (storeOffers.pickAndroidOfferToken).
         const offerDetails = product.subscriptionOffers || product.subscriptionOfferDetailsAndroid;
-        if (offerDetails && offerDetails.length > 0) {
-          const offerToken = offerDetails[0].offerToken;
+        const offerToken = pickAndroidOfferToken(offerDetails);
+        if (offerToken) {
           const purchase = await RNIap.requestPurchase({
             request: {
               google: {
@@ -243,6 +247,22 @@ class BillingService {
       return purchase;
     } catch (error: any) {
       throw error;
+    }
+  }
+
+  /**
+   * StoreKit's answer to "may this Apple ID still take the introductory offer
+   * on this subscription group?" — false once they have used one. Unknown
+   * (no API, threw) reads as eligible: the store itself still decides what it
+   * charges, this only steers the paywall copy.
+   */
+  async isEligibleForIntroOfferIOS(subscriptionGroupId: string | null | undefined): Promise<boolean> {
+    if (Platform.OS !== 'ios' || !subscriptionGroupId || !RNIap?.isEligibleForIntroOfferIOS) return true;
+    try {
+      const eligible = await withTimeout(RNIap.isEligibleForIntroOfferIOS(subscriptionGroupId), 5000, 'isEligibleForIntroOfferIOS');
+      return eligible !== false;
+    } catch {
+      return true;
     }
   }
 

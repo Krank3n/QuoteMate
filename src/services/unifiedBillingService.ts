@@ -1,6 +1,7 @@
 import { Platform } from 'react-native';
 import { billingService as nativeBillingService } from './billingService';
 import { stripeService, STRIPE_PRICES } from './stripeService';
+import { introOfferFromProduct } from './storeOffers';
 
 /**
  * Unified Billing Service
@@ -17,6 +18,8 @@ export interface Product {
   priceValue: number;
   currency: string;
   period: 'monthly' | 'yearly';
+  /** Free days the store gives before the first charge, when it has a live introductory offer this buyer may use. */
+  introFreeDays?: number | null;
 }
 
 export interface SubscriptionStatus {
@@ -79,8 +82,23 @@ class UnifiedBillingService {
         // For native, get from App Store / Google Play
         // expo-iap 3.x products use 'id' (not 'productId') and 'displayPrice' (not 'localizedPrice')
         const nativeProducts = await nativeBillingService.getProducts();
+        // A store introductory offer (free days before the first charge) is
+        // read off the product; on iOS StoreKit must also confirm this Apple
+        // ID has not used one already. Null = no offer, so the paywall says
+        // "billed today".
+        const groupIds = new Set<string>(
+          nativeProducts.map((p: any) => p?.subscriptionInfoIOS?.subscriptionGroupId).filter(Boolean),
+        );
+        const eligibility = new Map<string, boolean>();
+        for (const groupId of groupIds) {
+          eligibility.set(groupId, await nativeBillingService.isEligibleForIntroOfferIOS(groupId));
+        }
         return nativeProducts.map((product: any) => {
           const productId = product.id || product.productId;
+          const groupId = product?.subscriptionInfoIOS?.subscriptionGroupId;
+          const intro = introOfferFromProduct(product, {
+            eligibleIOS: groupId ? eligibility.get(groupId) !== false : true,
+          });
           return {
             id: productId,
             title: product.title || product.displayName || 'QuoteMate Pro',
@@ -89,6 +107,7 @@ class UnifiedBillingService {
             priceValue: product.price || 49.0,
             currency: product.currency || 'USD',
             period: productId?.includes('yearly') ? 'yearly' as const : 'monthly' as const,
+            introFreeDays: intro?.freeDays ?? null,
           };
         });
       }

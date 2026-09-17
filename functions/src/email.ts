@@ -3317,6 +3317,17 @@ export function sendNewUserNotificationEmail(
   });
 }
 
+/**
+ * " — free trial, first charge 1 Oct 2026" when the store took the card but
+ * has not billed yet; empty otherwise. The admin email must not read a
+ * store free-trial start as money in the bank.
+ */
+export function storeTrialSuffix(storeTrialUntil: Date | null | undefined): string {
+  if (!(storeTrialUntil instanceof Date) || Number.isNaN(storeTrialUntil.getTime())) return '';
+  const when = storeTrialUntil.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Australia/Brisbane' });
+  return ` — store free trial, first charge ${when}`;
+}
+
 export function sendNewProSubscriptionEmail(
   userEmail: string,
   userId: string,
@@ -3325,6 +3336,8 @@ export function sendNewProSubscriptionEmail(
   businessName: string,
   /** What the store says this subscriber is billed; list price if omitted. */
   price?: SubPriceInfo | null,
+  /** Set when the store started them on a free introductory period: no money until this date. */
+  storeTrialUntil?: Date | null,
 ): Promise<boolean> {
   const platformLabels: Record<string, string> = {
     ios: 'iOS (App Store)',
@@ -3333,7 +3346,7 @@ export function sendNewProSubscriptionEmail(
   };
   const platformDisplay = platformLabels[platform] || platform || 'Unknown';
 
-  const planDisplay = subPlanLabel(price || subPriceInfo({ productId }));
+  const planDisplay = subPlanLabel(price || subPriceInfo({ productId })) + storeTrialSuffix(storeTrialUntil);
 
   const content = wrapEmailTemplate(`
     <p style="color:#6b7280;font-size:14px;margin:0 0 8px;">New Pro Subscription 💰</p>

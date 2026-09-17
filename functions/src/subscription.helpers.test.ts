@@ -9,6 +9,7 @@ import {
   storePurchaseKey,
   netMonthlyRevenueAud,
   monthlyRevenueAud,
+  inStoreFreeTrial,
   rollupRevenue,
   RevenueEntry,
   TRIAL_MS,
@@ -245,6 +246,28 @@ describe('subPriceInfo — what a subscriber is REALLY charged', () => {
       environment: 'Production',
     };
     expect(monthlyRevenueAud(usd)).toBe(0);
+  });
+
+  it('does not bank a store free-trial period until the first charge lands', () => {
+    const NOW = Date.parse('2026-09-20T00:00:00Z');
+    const onStoreTrial = {
+      isPro: true,
+      platform: 'ios',
+      productId: 'quotemate_pro_monthly',
+      environment: 'Production',
+      currentPeriodEnd: '2026-10-01T00:00:00.000Z',
+      storeTrialUntil: '2026-10-01T00:00:00.000Z',
+    };
+    expect(inStoreFreeTrial(onStoreTrial, NOW)).toBe(true);
+    expect(monthlyRevenueAud(onStoreTrial, NOW)).toBe(0);
+    // Still a billed record (card on file, real productId) — headcount, not MRR.
+    expect(isBilledSub(onStoreTrial)).toBe(true);
+    // Once the trial date passes and the paid period was re-validated, it counts.
+    const converted = { ...onStoreTrial, storeTrialUntil: null, currentPeriodEnd: '2026-11-01T00:00:00.000Z', priceMicros: 49000000, priceCurrency: 'AUD' };
+    expect(inStoreFreeTrial(converted, Date.parse('2026-10-02T00:00:00Z'))).toBe(false);
+    expect(monthlyRevenueAud(converted, Date.parse('2026-10-02T00:00:00Z'))).toBe(49);
+    // A stale marker in the past never suppresses revenue.
+    expect(inStoreFreeTrial(onStoreTrial, Date.parse('2026-10-02T00:00:00Z'))).toBe(false);
   });
 
   it('stops counting a sub whose paid period has run out', () => {

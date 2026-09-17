@@ -7,6 +7,7 @@ import {
   lapsedCompAction,
   IAP_GRACE_MS,
   IAP_UNVERIFIED_BACKSTOP_MS,
+  storeTrialPatch,
 } from './receiptValidation.helpers';
 
 const NOW = new Date('2026-07-17T00:00:00Z');
@@ -262,5 +263,18 @@ describe('lapsedCompAction', () => {
         isPro: true, platform, restoredFromIncident: 'incident-2026-07', incidentProUntil: LAPSED.toISOString(),
       }, NOW)).toEqual({ action: 'keep' });
     }
+  });
+});
+
+describe('storeTrialPatch', () => {
+  it('stamps the trial end when the store says this period is a free introductory one', () => {
+    const end = new Date('2026-10-01T00:00:00.000Z');
+    expect(storeTrialPatch({ isFreeTrial: true, expiryDate: end })).toEqual({ storeTrialUntil: '2026-10-01T00:00:00.000Z' });
+  });
+  it('clears the marker (null, so a merge overwrites) on a paid period or an unknown expiry', () => {
+    expect(storeTrialPatch({ isFreeTrial: false, expiryDate: new Date('2026-10-01T00:00:00.000Z') })).toEqual({ storeTrialUntil: null });
+    expect(storeTrialPatch({ isFreeTrial: undefined, expiryDate: new Date('2026-10-01T00:00:00.000Z') })).toEqual({ storeTrialUntil: null });
+    expect(storeTrialPatch({ isFreeTrial: true, expiryDate: null })).toEqual({ storeTrialUntil: null });
+    expect(storeTrialPatch({ isFreeTrial: true, expiryDate: new Date('garbage') })).toEqual({ storeTrialUntil: null });
   });
 });

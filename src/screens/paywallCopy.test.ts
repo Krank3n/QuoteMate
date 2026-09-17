@@ -15,6 +15,7 @@ import {
   planRowSubtitle,
   proCtaLabel,
   billingLine,
+  hasIntroOffer,
 } from './paywallCopy';
 
 describe('paywallCopy', () => {
@@ -31,6 +32,10 @@ describe('paywallCopy', () => {
     planRowSubtitle({ kind: 'trial', daysRemaining: 2 }),
     proCtaLabel('$49', 'monthly'),
     billingLine('$49', 'monthly'),
+    paywallHeaderNote({ kind: 'trial', daysRemaining: 3 }, 14),
+    paywallHeaderNote({ kind: 'trial_pending' }, 14),
+    proCtaLabel('$49', 'monthly', 14),
+    billingLine('$49', 'monthly', 14),
   ].filter((s): s is string => typeof s === 'string');
 
   it('never carries guilt or unsupported competitor claims', () => {
@@ -153,10 +158,38 @@ describe('paywallCopy', () => {
   });
 
   describe('billing honesty', () => {
-    it('tells a trial user that subscribing now bills today (no intro offer in either store)', () => {
+    it('tells a trial user that subscribing now bills today when the store reports no intro offer', () => {
       expect(paywallHeaderNote({ kind: 'trial', daysRemaining: 10 })).toMatch(/bills you today/);
       expect(paywallHeaderNote({ kind: 'trial_pending' })).toMatch(/bills you today/);
       expect(paywallHeaderNote({ kind: 'trial', daysRemaining: 10 })).not.toMatch(/keep it after/);
+      // Null, zero and rubbish all mean "no offer" — never a free-days claim.
+      expect(paywallHeaderNote({ kind: 'trial', daysRemaining: 10 }, 0)).toMatch(/bills you today/);
+      expect(paywallHeaderNote({ kind: 'trial', daysRemaining: 10 }, Number.NaN)).toMatch(/bills you today/);
+      expect(proCtaLabel('$49', 'monthly', 0)).toBe('Start Pro · $49/month');
+      expect(billingLine('$49', 'monthly', null)).toMatch(/^Billed today/);
+    });
+    it('states the store\'s free days, in the store\'s number, when it has a live intro offer', () => {
+      expect(paywallHeaderNote({ kind: 'trial', daysRemaining: 10 }, 14)).toBe(
+        "You're on Pro for the rest of your trial. Start a subscription now and your first charge is 14 days away.",
+      );
+      expect(paywallHeaderNote({ kind: 'trial_pending' }, 14)).toMatch(/no charge for 14 days/);
+      expect(paywallHeaderNote({ kind: 'trial', daysRemaining: 10 }, 14)).not.toMatch(/bills you today/);
+      expect(proCtaLabel('$49', 'monthly', 14)).toBe('Start Pro · 14 days free, then $49/month');
+      expect(proCtaLabel('$328', 'yearly', 7)).toBe('Start Pro · 7 days free, then $328/year');
+      expect(billingLine('$49', 'monthly', 14)).toMatch(/^No charge for 14 days, then \$49\/month/);
+      expect(billingLine('$49', 'monthly', 14)).toMatch(/Cancel before the 14 days end and you pay nothing/);
+      expect(billingLine('$49', 'monthly', 14)).not.toMatch(/Billed today/);
+      // Free and Pro notes do not change with the offer.
+      expect(paywallHeaderNote({ kind: 'free' }, 14)).toMatch(/Pro adds the rest/);
+      expect(paywallHeaderNote({ kind: 'pro' }, 14)).toBeNull();
+    });
+    it('hasIntroOffer is the one rule for "the store gives free days"', () => {
+      expect(hasIntroOffer(14)).toBe(true);
+      expect(hasIntroOffer(0)).toBe(false);
+      expect(hasIntroOffer(-3)).toBe(false);
+      expect(hasIntroOffer(null)).toBe(false);
+      expect(hasIntroOffer(undefined)).toBe(false);
+      expect(hasIntroOffer(Number.NaN)).toBe(false);
     });
     it('the pending state points at the first quote, on every surface', () => {
       expect(paywallSubtitle({ kind: 'trial_pending' })).toMatch(/starts with your first quote/);

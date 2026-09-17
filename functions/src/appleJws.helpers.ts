@@ -46,6 +46,12 @@ export interface AppleJwsVerification {
   currency: string | null;
   /** The subscription's first transaction — stable across every renewal. */
   originalTransactionId: string | null;
+  /**
+   * True when this transaction is a FREE introductory period (offerType 1 +
+   * offerDiscountType FREE_TRIAL, or an introductory offer at a zero price):
+   * the card is on file but nothing has been charged yet.
+   */
+  isFreeTrial: boolean;
   /** Short machine-readable note for logs; never surfaced to the buyer. */
   detail: string;
 }
@@ -114,6 +120,7 @@ export async function verifyAppleJws(jws: unknown): Promise<AppleJwsVerification
     price: null,
     currency: null,
     originalTransactionId: null,
+    isFreeTrial: false,
     detail: '',
   };
 
@@ -151,6 +158,7 @@ export async function verifyAppleJws(jws: unknown): Promise<AppleJwsVerification
       price: typeof payload.price === 'number' ? payload.price : null,
       currency: payload.currency ?? null,
       originalTransactionId: payload.originalTransactionId ?? null,
+      isFreeTrial: isAppleFreeTrial(payload),
       detail: 'verified',
     };
   } catch (err: any) {
@@ -167,4 +175,23 @@ export async function verifyAppleJws(jws: unknown): Promise<AppleJwsVerification
     }
     return { ...base, environment: declared, detail: `verify_threw:${String(err)}` };
   }
+}
+
+/**
+ * Does this signed transaction cover a free introductory period? Apple marks
+ * an introductory offer with offerType 1 and, on newer payloads, the
+ * offerDiscountType; an older payload only carries offerType plus a zero
+ * price. Pure so it can be tested on a plain object.
+ */
+export function isAppleFreeTrial(payload: {
+  offerType?: number | string | null;
+  offerDiscountType?: string | null;
+  price?: number | null;
+} | null | undefined): boolean {
+  if (!payload) return false;
+  const offerType = Number(payload.offerType);
+  const discount = String(payload.offerDiscountType || '').toUpperCase();
+  if (discount === 'FREE_TRIAL') return true;
+  if (offerType === 1 && discount === '') return Number(payload.price) === 0;
+  return false;
 }
