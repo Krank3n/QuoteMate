@@ -35,8 +35,8 @@ import { fetchGooglePlaySubscription, fetchAppleSubscriptionStatus } from './iap
 import {
   computeFunnelStats,
   isActivatingDoc,
+  isInternalAccount,
   isRecoveredDocId,
-  isTestAccount,
   maxQuoteStage,
   quoteStageOfDoc,
   type FunnelUserInput,
@@ -210,6 +210,60 @@ async function listAllAuthUsers(): Promise<admin.auth.UserRecord[]> {
   return drainAuthUsers(admin.auth());
 }
 
+/**
+ * The analytics population: every Auth account that is a real tradie. Test
+ * seeds, anonymous harness/demo accounts and the admin's own login are
+ * dropped (adminFunnel.helpers isInternalAccount), and the count dropped is
+ * returned so every payload can say so instead of silently filtering.
+ *
+ * Every analytics surface — dashboard tiles, daily snapshot, business-health
+ * funnel, event funnel — MUST draw from this, never from listAllAuthUsers,
+ * or the cards drift apart again (551 signups on one card, 531 on the next).
+ */
+async function listRealAuthUsers(): Promise<{ users: admin.auth.UserRecord[]; internal: number }> {
+  const all = await listAllAuthUsers();
+  const users = all.filter((u) => !isInternalAccount(u));
+  return { users, internal: all.length - users.length };
+}
+
+/**
+ * uids with at least one client event in the last `days` days. lastActivityAt
+ * on emailState is only stamped by document writes and the app's activity
+ * ping, so a tradie who opened the app and browsed without saving anything
+ * is invisible to it — the events stream (app_opened etc.) catches them. The
+ * where('ts','>=') bound keeps the scan to a few thousand docs.
+ */
+async function fetchRecentlyActiveUids(sinceMs: number): Promise<Set<string>> {
+  const cutoff = admin.firestore.Timestamp.fromMillis(sinceMs);
+  const snap = await db().collectionGroup('events').where('ts', '>=', cutoff).select().get();
+  const uids = new Set<string>();
+  for (const d of snap.docs) {
+    const uid = d.ref.parent.parent?.id;
+    if (uid) uids.add(uid);
+  }
+  return uids;
+}
+
+/**
+ * Active in the last 7 days = a real account with a recent lastActivityAt OR a
+ * recent client event. Orphaned emailState docs (the account was deleted but
+ * its settings subcollection survived — 143 of them at the time of writing)
+ * and internal accounts never count.
+ */
+function countActiveSevenDay(
+  users: admin.auth.UserRecord[],
+  emailStates: Map<string, any>,
+  recentEventUids: Set<string>,
+  sinceMs: number
+): number {
+  let active = 0;
+  for (const u of users) {
+    const t = ts(emailStates.get(u.uid)?.lastActivityAt);
+    if ((t && t >= sinceMs) || recentEventUids.has(u.uid)) active++;
+  }
+  return active;
+}
+
 async function logAdminAction(params: {
   adminUid: string;
   action: string;
@@ -299,42 +353,50 @@ async function computeDashboardStats() {
   // Users live as Auth accounts; there may or may not be a root users/{uid} doc.
   // Firebase Auth listUsers is the source of truth for user count.
   const [
-    allAuthUsers,
+    { users: allAuthUsers, internal: internalAccounts },
     suppliers,
     subscriptions,
     feedback,
     emailStates,
+    recentEventUids,
   ] = await Promise.all([
-    listAllAuthUsers(),
+    listRealAuthUsers(),
     firestore.collection('suppliers').select('ownerUid', 'subscriberCount', 'name').get(),
     fetchAllSubscriptions(),
     firestore.collection('feedback').orderBy('createdAt', 'desc').limit(10).get(),
     fetchAllEmailStates(),
+    fetchRecentlyActiveUids(now - 7 * dayMs),
   ]);
   const allUsers = { size: allAuthUsers.length };
+  const realUids = new Set(allAuthUsers.map((u) => u.uid));
 
-  // Active in last 7d — count emailState docs whose lastActivityAt is recent.
-  let activeSevenDay = 0;
-  for (const [, es] of emailStates) {
-    const t = ts(es.lastActivityAt);
-    if (t && t >= now - 7 * dayMs) activeSevenDay++;
-  }
+  const activeSevenDay = countActiveSevenDay(allAuthUsers, emailStates, recentEventUids, now - 7 * dayMs);
 
   let activeSubs = 0;
+  let activeBilledSubs = 0;
   let cancelingSubs = 0;
   let canceledSubs = 0;
   let trialingSubs = 0;
   let trialExpiredSubs = 0;
   // The dashboard already holds every subscription doc, so the revenue rollup
   // is free here — no separate call needed to answer "are we making money?".
+  //
+  // Status tallies cover REAL accounts only (a deleted account's leftover
+  // subscription doc is not a trial; 19 such orphans were being counted).
+  // Revenue keeps every doc: a store subscription bills whether or not its
+  // Firebase account still exists, and the rollup dedupes per purchase.
   const revenueEntries: RevenueEntry[] = [];
   for (const [uid, raw] of subscriptions) {
     const f = deriveSubFields(raw, now);
-    if (f.status === 'active') activeSubs++;
-    else if (f.status === 'canceling') cancelingSubs++;
-    else if (f.status === 'canceled') canceledSubs++;
-    else if (f.status === 'trialing') trialingSubs++;
-    else if (f.status === 'trial_expired') trialExpiredSubs++;
+    if (realUids.has(uid)) {
+      if (f.status === 'active') {
+        activeSubs++;
+        if (f.billed) activeBilledSubs++;
+      } else if (f.status === 'canceling') cancelingSubs++;
+      else if (f.status === 'canceled') canceledSubs++;
+      else if (f.status === 'trialing') trialingSubs++;
+      else if (f.status === 'trial_expired') trialExpiredSubs++;
+    }
     revenueEntries.push({
       uid,
       billed: f.billed,
@@ -387,6 +449,10 @@ async function computeDashboardStats() {
     },
     subscriptions: {
       active: activeSubs,
+      // Subset of `active` with a real billing record — the rest are comps,
+      // bare isPro flags and sandbox purchases. Matches revenue.payers minus
+      // billed subs whose account no longer exists.
+      activeBilled: activeBilledSubs,
       canceling: cancelingSubs,
       canceled: canceledSubs,
       trialing: trialingSubs,
@@ -398,6 +464,9 @@ async function computeDashboardStats() {
       top: topSuppliers,
     },
     feedback: feedbackItems,
+    // What the population leaves out, so a reader can reconcile against the
+    // raw Auth count instead of wondering why the numbers moved.
+    excluded: { internalAccounts },
     generatedAt: new Date().toISOString(),
     ranges: {
       sevenDaysAgo: sevenDaysAgo.toMillis(),
@@ -1513,37 +1582,38 @@ async function computeDailySnapshot(): Promise<Record<string, any>> {
   const firestore = db();
   const now = Date.now();
   const day = 24 * 60 * 60 * 1000;
-  const [authUsers, subs, suppliersSnap] = await Promise.all([
-    listAllAuthUsers(),
-    fetchAllSubscriptions(),
-    firestore.collection('suppliers').select('subscriberCount', 'priceItemCount').get(),
-  ]);
+  // Same population and the same definitions as computeDashboardStats, so the
+  // trend tiles are the history of the headline tiles rather than a lookalike.
+  const [{ users: authUsers, internal: internalAccounts }, subs, suppliersSnap, emailStates, recentEventUids] =
+    await Promise.all([
+      listRealAuthUsers(),
+      fetchAllSubscriptions(),
+      firestore.collection('suppliers').select('subscriberCount', 'priceItemCount').get(),
+      fetchAllEmailStates(),
+      fetchRecentlyActiveUids(now - 7 * day),
+    ]);
+  const realUids = new Set(authUsers.map((u) => u.uid));
   let active = 0;
   let canceling = 0;
   let canceled = 0;
   let trialingSubs = 0;
   let trialExpiredSubs = 0;
-  for (const [, raw] of subs) {
-    const f = deriveSubFields(raw);
+  for (const [uid, raw] of subs) {
+    if (!realUids.has(uid)) continue;
+    const f = deriveSubFields(raw, now);
     if (f.status === 'active') active++;
     else if (f.status === 'canceling') canceling++;
     else if (f.status === 'canceled') canceled++;
     else if (f.status === 'trialing') trialingSubs++;
     else if (f.status === 'trial_expired') trialExpiredSubs++;
   }
-  // Signups in last 24h — use emailState.signupAt where present, fall back to Auth creationTime
+  // Signups in last 24h — emailState.signupAt where present, else Auth creationTime.
   let signupsToday = 0;
   for (const u of authUsers) {
-    const created = new Date(u.metadata.creationTime).getTime();
-    if (created >= now - day) signupsToday++;
+    const signupAt = ts(emailStates.get(u.uid)?.signupAt) || new Date(u.metadata.creationTime).getTime();
+    if (signupAt >= now - day) signupsToday++;
   }
-  // Active 7d — iterate fetched emailState docs (collection-group on 'settings').
-  const emailStates = await fetchAllEmailStates();
-  let active7d = 0;
-  for (const [, es] of emailStates) {
-    const t = ts(es.lastActivityAt);
-    if (t && t >= now - 7 * day) active7d++;
-  }
+  const active7d = countActiveSevenDay(authUsers, emailStates, recentEventUids, now - 7 * day);
 
   // Supplier totals
   let supplierSubscriberSum = 0;
@@ -1567,6 +1637,7 @@ async function computeDailySnapshot(): Promise<Record<string, any>> {
     suppliersTotal: suppliersSnap.size,
     supplierSubscriberSum,
     supplierItemSum,
+    internalAccountsExcluded: internalAccounts,
     at: admin.firestore.FieldValue.serverTimestamp(),
   };
 }
@@ -1886,8 +1957,8 @@ export async function computeFunnelPayload(): Promise<FunnelPayload> {
   const firestore = db();
   const now = Date.now();
 
-  const [authUsers, subs, emailStates, docsSnap] = await Promise.all([
-    listAllAuthUsers(),
+  const [{ users: authUsers, internal: internalAccounts }, subs, emailStates, docsSnap] = await Promise.all([
+    listRealAuthUsers(),
     fetchAllSubscriptions(),
     fetchAllEmailStates(),
     firestore.collectionGroup('documents').get(),
@@ -1923,7 +1994,7 @@ export async function computeFunnelPayload(): Promise<FunnelPayload> {
     };
   });
 
-  return computeFunnelStats(inputs, now);
+  return { ...computeFunnelStats(inputs, now), excluded: { internalAccounts } };
 }
 
 const FUNNEL_CACHE_TTL_MS = 15 * 60 * 1000;
@@ -1978,7 +2049,8 @@ const EVENT_WINDOW_DAYS = 30;
 //
 // Two exclusions keep the numbers honest, and both report their own count in
 // `excluded` so this stays auditable rather than a silent filter:
-//   - our own test accounts (isTestAccount) never enter the population;
+//   - internal accounts (isInternalAccount: test seeds, anonymous harnesses,
+//     the admin login) never enter the population;
 //   - `recovered-` documents — the 2026-07 email-derived reconstructions — are
 //     skipped, because they carry a sent-looking stage for a send that never
 //     happened and would read as activation the tradie never performed.
@@ -1986,7 +2058,7 @@ export async function computeEventFunnelPayload(): Promise<
   EventFunnelPayload & {
     foundingTaken: number;
     attribution: AttributionRollup;
-    excluded: { testAccounts: number; recoveredDocs: number };
+    excluded: { internalAccounts: number; recoveredDocs: number };
   }
 > {
   const firestore = db();
@@ -1997,9 +2069,9 @@ export async function computeEventFunnelPayload(): Promise<
   // (firstViewedAt / viewCount, written by the public acceptance page) live
   // ONLY there — the documents mirror doesn't project them. Read unfiltered:
   // a where() on viewCount would need a collection-group field override.
-  const [authUsers, subs, userSettings, docsSnap, quotesSnap, eventsSnap, attributionMap] =
+  const [{ users: realUsers, internal: internalAccounts }, subs, userSettings, docsSnap, quotesSnap, eventsSnap, attributionMap] =
     await Promise.all([
-      listAllAuthUsers(),
+      listRealAuthUsers(),
       fetchAllSubscriptions(),
       fetchAllUserSettings(),
       firestore.collectionGroup('documents').get(),
@@ -2089,9 +2161,6 @@ export async function computeEventFunnelPayload(): Promise<
     eventFlags.set(uid, foldEvent(eventFlags.get(uid), data?.event, data?.props));
   }
 
-  const realUsers = authUsers.filter((u) => !isTestAccount(u.email, u.displayName));
-  const testAccounts = authUsers.length - realUsers.length;
-
   const inputs: EventFunnelUserInput[] = realUsers.map((u) => {
     const flags = eventFlags.get(u.uid);
     return {
@@ -2137,7 +2206,7 @@ export async function computeEventFunnelPayload(): Promise<
     ...rollupEventFunnel(inputs, now, EVENT_WINDOW_DAYS, outcomeDocs),
     foundingTaken,
     attribution,
-    excluded: { testAccounts, recoveredDocs },
+    excluded: { internalAccounts, recoveredDocs },
   };
 }
 
@@ -2184,7 +2253,7 @@ export const aggregateEventFunnel = functions
         `(durableOnly=${send.durableOnlySends}), preview=${send.email.previewOpened} ` +
         `abandoned=${send.email.previewAbandoned}, waitMedian=${send.email.waitMs.median}ms ` +
         `over ${send.email.waitMs.samples} samples; ` +
-        `excluded: ${payload.excluded.testAccounts} test accounts, ` +
+        `excluded: ${payload.excluded.internalAccounts} internal accounts, ` +
         `${payload.excluded.recoveredDocs} recovered docs`
     );
   });
