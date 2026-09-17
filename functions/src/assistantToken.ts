@@ -25,6 +25,7 @@ import {
   Plan,
 } from './assistantQuota.helpers';
 import { decideRateLimitWindow } from './rateLimitWindow';
+import { trialEndMs } from './subscription.helpers';
 import { userRateLimitKey } from './rateLimitKey';
 import { decideVoiceProvider, VoiceConfigDoc } from './assistantVoiceProvider';
 import {
@@ -92,13 +93,9 @@ export async function getEffectivePlan(uid: string): Promise<'free' | 'trial' | 
     const data = snap.data() || {};
     if (data.plan === 'pro' || data.isPro === true) return 'pro';
     if (data.plan === 'free') return 'free';
-    if (data.trialStartedAt) {
-      const started = data.trialStartedAt.toDate
-        ? data.trialStartedAt.toDate()
-        : new Date(data.trialStartedAt);
-      const trialMs = 14 * 24 * 60 * 60 * 1000;
-      return Date.now() - started.getTime() < trialMs ? 'trial' : 'free';
-    }
+    // Shared window maths (honours a server-granted return trial's trialEndsAt).
+    const endMs = trialEndMs(data);
+    if (endMs !== null) return Date.now() < endMs ? 'trial' : 'free';
     return 'trial';
   } catch {
     return 'trial';

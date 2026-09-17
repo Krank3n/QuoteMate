@@ -466,3 +466,36 @@ describe('subPlanLabel (admin new-subscriber email)', () => {
     expect(formatSubPrice({ amount: 12.5, currency: 'NZD', interval: 'monthly', source: 'store' })).toBe('12.50 NZD/mo');
   });
 });
+
+describe('trialEndMs — an explicit trialEndsAt wins over trialStartedAt + 14 days', () => {
+  const DAY = 24 * 60 * 60 * 1000;
+  const NOW = Date.parse('2026-09-17T00:00:00.000Z');
+  const start = new Date(NOW - 40 * DAY).toISOString();
+
+  it('resolveServerPlan: a lapsed trial re-opened by trialEndsAt is "trial" until that end', () => {
+    expect(resolveServerPlan({ isPro: false, trialStartedAt: start }, NOW)).toBe('free');
+    const reopened = { isPro: false, trialStartedAt: start, trialEndsAt: new Date(NOW + 5 * DAY).toISOString() };
+    expect(resolveServerPlan(reopened, NOW)).toBe('trial');
+    expect(resolveServerPlan(reopened, NOW + 5 * DAY)).toBe('free');
+  });
+
+  it('deriveSubFields: tier, days remaining and trialEndsAt follow the explicit end', () => {
+    const reopened = { isPro: false, trialStartedAt: start, trialEndsAt: new Date(NOW + 5 * DAY).toISOString() };
+    const f = deriveSubFields(reopened, NOW);
+    expect(f.tier).toBe('trialing');
+    expect(f.trialDaysRemaining).toBe(5);
+    expect(f.trialEndsAt).toBe(NOW + 5 * DAY);
+    expect(f.returnTrialGrantedAt).toBeNull();
+    // Without the explicit end the old maths are unchanged.
+    const g = deriveSubFields({ isPro: false, trialStartedAt: start }, NOW);
+    expect(g.tier).toBe('trial_expired');
+    expect(g.trialEndsAt).toBe(NOW - 40 * DAY + TRIAL_MS);
+  });
+
+  it('a trialEndsAt with no trialStartedAt is not a trial that ever started', () => {
+    const f = deriveSubFields({ isPro: false, trialEndsAt: new Date(NOW + 5 * DAY).toISOString() }, NOW);
+    expect(f.trialStartedAt).toBeNull();
+    expect(f.trialEndsAt).toBeNull();
+    expect(f.tier).toBe('free');
+  });
+});

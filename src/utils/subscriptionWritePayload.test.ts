@@ -27,8 +27,27 @@ describe('clientSubscriptionWritePayload (PAY-02)', () => {
   });
 
   it('contains exactly the rules-allow-listed keys', () => {
-    const payload = clientSubscriptionWritePayload(proStatus);
+    const payload = clientSubscriptionWritePayload({ ...proStatus, returnTrialNoticeSeenAt: new Date('2026-09-17T00:00:00Z') });
     expect(Object.keys(payload).sort()).toEqual([...CLIENT_SUBSCRIPTION_WRITABLE_KEYS].sort());
+  });
+
+  it('omits returnTrialNoticeSeenAt when unset so a merge never clears another device\'s dismissal', () => {
+    const payload = clientSubscriptionWritePayload(proStatus);
+    expect(payload).not.toHaveProperty('returnTrialNoticeSeenAt');
+    const seen = clientSubscriptionWritePayload({ ...proStatus, returnTrialNoticeSeenAt: new Date('2026-09-17T00:00:00Z') });
+    expect(seen.returnTrialNoticeSeenAt).toBe('2026-09-17T00:00:00.000Z');
+  });
+
+  it('never uploads the server-owned return-trial grant fields', () => {
+    const payload = clientSubscriptionWritePayload({
+      ...proStatus,
+      trialEndsAt: new Date('2026-09-24T00:00:00Z'),
+      returnTrialGrantedAt: new Date('2026-09-17T00:00:00Z'),
+      returnTrialDays: 7,
+    });
+    for (const key of ['trialEndsAt', 'returnTrialGrantedAt', 'returnTrialDays']) {
+      expect(payload, `payload must not contain ${key}`).not.toHaveProperty(key);
+    }
   });
 
   it('serialises dates as ISO strings and preserves quota/trial values', () => {

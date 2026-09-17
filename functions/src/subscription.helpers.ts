@@ -36,15 +36,27 @@ export function resolveServerPlan(
 ): 'trial' | 'free' | 'pro' {
   if (!data) return 'trial';
   if (data.isPro === true) return 'pro';
-  const rawStart = data.trialStartedAt;
-  if (rawStart) {
-    const startedAt = rawStart?.toDate ? rawStart.toDate() : new Date(rawStart);
-    const startMs = startedAt.getTime();
-    if (Number.isFinite(startMs)) {
-      return nowMs - startMs < TRIAL_MS ? 'trial' : 'free';
-    }
-  }
+  const endMs = trialEndMs(data);
+  if (endMs !== null) return nowMs < endMs ? 'trial' : 'free';
   return 'trial';
+}
+
+/**
+ * When this account's trial ends (or ended), in ms epoch — null when no
+ * trial has started. The default window is trialStartedAt + TRIAL_MS; an
+ * explicit `trialEndsAt` on the doc wins over it. `trialEndsAt` is
+ * server-owned (firestore.rules subEntitlementKeys) and today has exactly
+ * one writer: the return-triggered second trial (returnTrial.helpers.ts),
+ * which re-opens a lapsed trial for RETURN_TRIAL_DAYS without touching the
+ * original trialStartedAt, so cohort dates and the lifecycle-email clock
+ * keep their history. Every trial-window read on the server goes through
+ * here — mirror of trialEndMs in src/utils/trialConfig.ts.
+ */
+export function trialEndMs(data: Record<string, any> | undefined | null): number | null {
+  const explicitEnd = ts(data?.trialEndsAt);
+  if (explicitEnd !== null) return explicitEnd;
+  const start = ts(data?.trialStartedAt);
+  return start !== null ? start + TRIAL_MS : null;
 }
 
 // Monthly-equivalent AUD we actually bill per subscription. Source of truth:
@@ -329,6 +341,12 @@ export interface SubFields {
    */
   trialEndsAt: number | null;
   trialDaysRemaining: number | null;
+  /**
+   * Set when the lapsed trial was re-opened once for a tradie who came back
+   * after RETURN_TRIAL_INACTIVE_DAYS away (returnTrial.helpers.ts). While it
+   * runs the tier reads 'trialing' again; afterwards there is no third one.
+   */
+  returnTrialGrantedAt: number | null;
   billed: boolean;
   interval: 'yearly' | 'monthly' | null;
   /** Monthly-equivalent AUD this sub bills right now (0 once the period lapses). */
@@ -365,9 +383,10 @@ export function deriveSubFields(sub: any | undefined | null, now: number = Date.
   const canceling = isPro && !!sub?.cancelAtPeriodEnd;
   const platform = sub?.platform || null;
   const trialStartedAt = ts(sub?.trialStartedAt);
-  const trialElapsed = trialStartedAt ? now - trialStartedAt : Infinity;
-  const inTrial = trialStartedAt !== null && trialElapsed < TRIAL_MS;
-  const trialDaysRemaining = inTrial ? Math.ceil((TRIAL_MS - trialElapsed) / (24 * 60 * 60 * 1000)) : null;
+  const trialEndsAt = trialStartedAt !== null ? trialEndMs(sub) : null;
+  const inTrial = trialEndsAt !== null && now < trialEndsAt;
+  const trialDaysRemaining = inTrial ? Math.ceil((trialEndsAt - now) / (24 * 60 * 60 * 1000)) : null;
+  const returnTrialGrantedAt = ts(sub?.returnTrialGrantedAt);
 
   let tier: SubFields['tier'];
   let status: SubFields['status'];
@@ -401,8 +420,9 @@ export function deriveSubFields(sub: any | undefined | null, now: number = Date.
     validatedAt: ts(sub?.validatedAt),
     cancelAt: canceling ? ts(sub?.currentPeriodEnd) : null,
     trialStartedAt,
-    trialEndsAt: trialStartedAt !== null ? trialStartedAt + TRIAL_MS : null,
+    trialEndsAt,
     trialDaysRemaining,
+    returnTrialGrantedAt,
     billed: isBilledSub(sub),
     interval: isBilledSub(sub) ? subInterval(sub) : null,
     monthlyAud: monthlyRevenueAud(sub, now),

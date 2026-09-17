@@ -21,12 +21,18 @@ service cloud.firestore {
     // trialStartedAt (resolveServerPlan) and never trusts a client plan string,
     // so a client plan:'trial'/'pro' — which dodged the free-tier gate + fee —
     // must be rejected outright.
+    // trialEndsAt / returnTrialGrantedAt / returnTrialDays are the one-off
+    // return-triggered second trial (functions/src/returnTrial.helpers.ts):
+    // a client that could write them could re-open its own trial, or delete
+    // the grant stamp and claim "the last one" again.
     function subEntitlementKeys() {
       return ['plan', 'platform', 'productId', 'transactionId', 'purchaseToken',
               'appleValidated', 'googleValidated', 'validatedAt',
               'subscriptionId', 'customerId', 'priceId', 'cancelAtPeriodEnd',
               'canceledAt', 'environment', 'restoredFromIncident', 'incidentProUntil',
-              'interval', 'planInterval', 'platformFeeBps'];
+              'interval', 'planInterval', 'platformFeeBps',
+              'trialEndsAt', 'returnTrialGrantedAt', 'returnTrialDays',
+              'returnTrialPriorTrialEndsAt', 'returnTrialPriorActivityAt'];
     }
 
     // Users can read/write their own user document and ALL subcollections —
@@ -76,6 +82,8 @@ service cloud.firestore {
             || (request.resource.data.isPro == false && resource.data.get('isPro', false) == false));
       // NOTE: trialStartedAt/trialExpired stay client-writable for the trial
       // bootstrap — a known, accepted weakness (tracked as follow-up).
+      // returnTrialNoticeSeenAt is client-writable on purpose: it only records
+      // that the welcome-back card was dismissed, never whether it was earned.
     }
 
     // Referral / affiliate profile (PAY-04). EVERY field here is server-owned:

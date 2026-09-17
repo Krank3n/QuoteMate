@@ -10,7 +10,7 @@
  * Pure so it can be unit tested without the store graph.
  */
 import { ACTUAL_PRICE_AUD, BillingPeriod } from '../config/pricingConfig';
-import { TRIAL_DAYS, TRIAL_MS } from '../utils/trialConfig';
+import { TRIAL_DAYS, trialDaysRemaining } from '../utils/trialConfig';
 import {
   QM_APP_FEE_PCT_ONLINE,
   QM_APP_FEE_PCT_ONLINE_FREE,
@@ -81,14 +81,17 @@ export function paywallPlanState(args: {
   isPro: boolean;
   trialExpired: boolean;
   trialStartedAt: Date | string | number | null | undefined;
+  /** Server-owned explicit end (return trial); absent for a normal trial. */
+  trialEndsAt?: Date | string | number | null;
   now?: number;
 }): PaywallPlanState {
   if (args.isPro) return { kind: 'pro' };
   if (args.trialExpired) return { kind: 'free' };
-  const startMs = args.trialStartedAt ? new Date(args.trialStartedAt).getTime() : NaN;
-  if (!Number.isFinite(startMs)) return { kind: 'trial_pending' };
-  const elapsed = (args.now ?? Date.now()) - startMs;
-  const daysRemaining = Math.max(0, Math.ceil((TRIAL_MS - elapsed) / (24 * 60 * 60 * 1000)));
+  const daysRemaining = trialDaysRemaining(
+    { trialStartedAt: args.trialStartedAt, trialEndsAt: args.trialEndsAt },
+    args.now ?? Date.now(),
+  );
+  if (daysRemaining === null) return { kind: 'trial_pending' };
   return { kind: 'trial', daysRemaining };
 }
 

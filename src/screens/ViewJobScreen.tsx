@@ -73,7 +73,7 @@ import { selectionTap, lightTap } from '../utils/haptics';
 import { useAlertModal } from '../hooks/useAlertModal';
 import { paymentCopy } from '../constants/paymentCopy';
 import { cardChargeSuccessAlert } from '../utils/cardChargeSuccessAlert';
-import { TRIAL_MS } from '../utils/trialConfig';
+import { trialDaysRemaining as trialDaysLeft } from '../utils/trialConfig';
 import { GridBackground } from '../components/GridBackground';
 
 export function ViewJobScreen() {
@@ -113,15 +113,7 @@ export function ViewJobScreen() {
 
   // Whole days left in the trial (ceil), counted the same way the dashboard
   // and TrialBanner count it. Null when the tradie never started a trial.
-  const trialDaysRemaining = subscriptionStatus?.trialStartedAt
-    ? Math.max(
-        0,
-        Math.ceil(
-          (TRIAL_MS - (Date.now() - new Date(subscriptionStatus.trialStartedAt).getTime())) /
-            (24 * 60 * 60 * 1000),
-        ),
-      )
-    : null;
+  const trialDaysRemaining = trialDaysLeft(subscriptionStatus);
 
   const [stageSheetVisible, setStageSheetVisible] = useState(false);
   const [docStageSheetDoc, setDocStageSheetDoc] = useState<Document | null>(null);

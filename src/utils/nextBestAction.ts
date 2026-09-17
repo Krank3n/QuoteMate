@@ -20,7 +20,7 @@
  * followUpNudge.ts — no store, no Firestore, no Date.now().
  */
 import type { DocumentStage } from '../types/document';
-import { TRIAL_MS } from './trialConfig';
+import { trialDaysRemaining as windowDaysRemaining } from './trialConfig';
 import { monthlyFeeSaving, FEE_SAVING_CLAIM_THRESHOLD_AUD, squareCollectedLast30d } from '../config/pricingConfig';
 
 export type EffectivePlan = 'trial' | 'free' | 'pro';
@@ -112,6 +112,11 @@ export interface NextBestActionInput {
   plan: EffectivePlan;
   /** trialStartedAt in ms epoch, or null if the trial never started. */
   trialStartedAt: number | null;
+  /**
+   * Explicit trial end in ms epoch (a server-granted return trial), or null
+   * for the normal trialStartedAt + TRIAL_MS window.
+   */
+  trialEndsAt?: number | null;
   /** Minimal projection of the user's documents (durable truth). */
   docs: NextBestActionDoc[];
   /** users/{uid}/settings/squareConnection exists. */
@@ -151,7 +156,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 export function nextBestAction(input: NextBestActionInput): NextBestAction {
   const trialing = input.plan === 'trial' && input.trialStartedAt !== null;
   const trialDaysRemaining = trialing
-    ? Math.max(0, Math.ceil((input.trialStartedAt! + TRIAL_MS - input.now) / DAY_MS))
+    ? windowDaysRemaining({ trialStartedAt: input.trialStartedAt, trialEndsAt: input.trialEndsAt ?? null }, input.now)
     : null;
 
   const base = { trialDaysRemaining, needsSquareConnect: false };
