@@ -12,9 +12,10 @@
  * (updateActivityTimestamp in index.ts). "How long were they away" is a
  * server-side fact, not a client claim: the ping keeps its own return
  * clock, emailState.returnTrialClockAt, written by this handler alone.
- * lastActivityAt is only the fallback for accounts that predate the clock,
- * because the quote/invoice triggers (adminCrm touchUserActivity) also
- * write it and could stamp "now" seconds before the ping reads it.
+ * lastActivityAt is only the fallback for accounts that predate the clock.
+ * (Until 21 Sep 2026 the quote/invoice triggers also wrote it on every
+ * server-side write, so it could say "now" for a tradie a month gone; the
+ * ping is its only writer now, but the clock stays the primary source.)
  *
  * Only a client that declares `supportsReturnTrial` is granted one — an
  * older bundle computes the trial from trialStartedAt + 14 days, would show

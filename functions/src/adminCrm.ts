@@ -3577,31 +3577,24 @@ async function recomputeUserStats(uid: string): Promise<void> {
   );
 }
 
-// Touch users/{uid}/settings/emailState.lastActivityAt without clobbering other fields.
-// The app currently only writes this on signup / email-link click, so derived triggers
-// (quote/invoice/supplier writes) are our best real-time signal of in-app activity.
-async function touchUserActivity(uid: string): Promise<void> {
-  await db()
-    .doc(`users/${uid}/settings/emailState`)
-    .set({ lastActivityAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
-}
-
+// These two used to also stamp emailState.lastActivityAt ("touchUserActivity").
+// That made every server-side write look like the tradie opening the app: the
+// noon draftNudge, follow-up stage syncs, a customer accepting a quote, the
+// documents mirror — on 20 Sep 2026 a run of accounts carried lastActivityAt
+// = 02:00 UTC exactly, the draftNudge cron. The return trial and the
+// re-engagement emails read that stamp as "when were they last here", so a
+// lapsed tradie never looked away. Activity is the dashboard's ping
+// (updateActivityTimestamp) and nothing else.
 export const recomputeUserStatsOnQuoteWrite = functions.firestore
   .document('users/{uid}/quotes/{quoteId}')
   .onWrite(async (_change, ctx) => {
-    await Promise.all([
-      recomputeUserStats(ctx.params.uid),
-      touchUserActivity(ctx.params.uid),
-    ]);
+    await recomputeUserStats(ctx.params.uid);
   });
 
 export const recomputeUserStatsOnInvoiceWrite = functions.firestore
   .document('users/{uid}/invoices/{invoiceId}')
   .onWrite(async (_change, ctx) => {
-    await Promise.all([
-      recomputeUserStats(ctx.params.uid),
-      touchUserActivity(ctx.params.uid),
-    ]);
+    await recomputeUserStats(ctx.params.uid);
   });
 
 export const recomputeSupplierStatsOnSubscriberWrite = functions.firestore

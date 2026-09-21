@@ -4,6 +4,7 @@
 
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
+import { onAuthStateChanged, type Auth, type User } from 'firebase/auth';
 import { auth } from '../config/firebase';
 
 const USE_EMULATOR = process.env.USE_FIREBASE_EMULATOR === 'true';
@@ -38,12 +39,50 @@ export interface ActivityPingResult {
  * one, so an older client can't burn the account's single re-trial on a
  * screen that would still show it as expired.
  */
+/**
+ * How long the activity ping waits for Firebase to produce the signed-in
+ * user before giving up. A restored session on a cold start can arrive a
+ * beat after the dashboard mounts, and Firebase also emits a transient null
+ * ~1 s after the restore (see App.tsx) — the ping used to fire into that gap
+ * with no token and get a 401, which the server read as "nobody came back".
+ */
+export const ACTIVITY_PING_AUTH_WAIT_MS = 10_000;
+
+/**
+ * The current Firebase user, or the next one Firebase produces within
+ * `timeoutMs`. Resolves null when nobody signs in by then. Pure over the auth
+ * instance so it can be tested with a fake.
+ */
+export function waitForAuthUser(authInstance: Auth, timeoutMs: number): Promise<User | null> {
+  if (authInstance.currentUser) return Promise.resolve(authInstance.currentUser);
+  return new Promise((resolve) => {
+    let settled = false;
+    let unsubscribe: (() => void) | undefined;
+    const finish = (user: User | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      unsubscribe?.();
+      resolve(user);
+    };
+    const timer = setTimeout(() => finish(authInstance.currentUser ?? null), timeoutMs);
+    unsubscribe = onAuthStateChanged(authInstance, (user) => {
+      if (user) finish(user);
+    });
+  });
+}
+
 export async function updateActivityTimestamp(): Promise<ActivityPingResult | null> {
   try {
-    const headers = await getAuthHeaders();
+    // No user, no ping. A request without a token is a guaranteed 401 and
+    // tells the server nothing — 205 of 274 pings in the week of 14 Sep 2026.
+    const user = await waitForAuthUser(auth, ACTIVITY_PING_AUTH_WAIT_MS);
+    if (!user) return null;
+    const token = await user.getIdToken();
+    if (!token) return null;
     const response = await fetch(`${FIREBASE_FUNCTIONS_URL}/updateActivityTimestamp`, {
       method: 'POST',
-      headers,
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify({
         appVersion: Constants.expoConfig?.version || null,
         appPlatform: Platform.OS,
