@@ -805,6 +805,15 @@ export function SendDocumentDialog({
         onSubjectChange={setEmailSubject}
         onRegenerate={handleRegenerateEmail}
         onMoreWaysToSend={handleMoreWaysToSend}
+        onDeliveryGate={() => {
+          // The server's gate said no where ours said yes (a stale plan on
+          // the phone, a deposit added elsewhere). Same two-option gate the
+          // tradie would have met here, with their email edits kept.
+          persistEmailEdits();
+          setEmailPreviewVisible(false);
+          trackEvent('send_gate_shown', { doc_type: isInvoice ? 'invoice' : 'quote' });
+          setSendGateVisible(true);
+        }}
         onSent={() => { emailSentRef.current = true; }}
         isPro={isPro}
         isRegenerating={isGeneratingEmail}

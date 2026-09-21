@@ -409,6 +409,36 @@ describe('a successful send', () => {
     });
   });
 
+  it('hands the server’s free-tier gate to the host instead of alerting', async () => {
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 402,
+      json: async () => ({ error: 'Connect Square to send invoices and deposit quotes on the free plan.', reason: 'connect_square' }),
+    });
+    const onDeliveryGate = vi.fn();
+    const { props } = renderModal({ onDeliveryGate });
+
+    fireEvent.click(screen.getByText('Send Quote'));
+
+    await waitFor(() => expect(onDeliveryGate).toHaveBeenCalledTimes(1));
+    expect(props.onSent).not.toHaveBeenCalled();
+    expect(eventProps('quote_send_succeeded')).toBeUndefined();
+    expect(screen.queryByText('Send Failed')).toBeNull();
+  });
+
+  it('still alerts on a 402 when the host gave it nowhere to go', async () => {
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 402,
+      json: async () => ({ error: 'Connect Square to send invoices and deposit quotes on the free plan.', reason: 'connect_square' }),
+    });
+    renderModal();
+
+    fireEvent.click(screen.getByText('Send Quote'));
+
+    await waitFor(() => expect(screen.getByText('Send Failed')).toBeTruthy());
+  });
+
   it('flags a send to the tradie’s own inbox as a self-send', async () => {
     renderModal({ doc: doc({ customerEmail: OWNER_EMAIL }) });
 

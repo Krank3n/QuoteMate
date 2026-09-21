@@ -160,6 +160,7 @@ import { fetchGooglePlaySubscription } from './iapStoreStatus';
 import { verifyAppleJws } from './appleJws.helpers';
 import { verifySquareWebhookSignature } from './squareWebhookSignature';
 import { resolveServerPlan, storePricePatch, subInterval, subPriceInfo, trialEndMs, TRIAL_MS } from './subscription.helpers';
+import { freeTierGateApplies, FREE_TIER_GATE_MESSAGE, type DeliveryGateTarget } from './deliveryGate.helpers';
 import {
   SQUARE_OAUTH_STATES_COLLECTION,
   SQUARE_OAUTH_STATE_TTL_MS,
@@ -6337,12 +6338,6 @@ export const sendQuoteEmail = functions.runWith({ timeoutSeconds: 120, memory: '
       return;
     }
 
-    const gate = await enforceFreeTierDeliveryGate(userId);
-    if (!gate.ok) {
-      res.status(gate.status).json({ error: gate.message, reason: gate.reason });
-      return;
-    }
-
     logShimInvocation('sendQuoteEmail', userId, { quoteId });
 
     try {
@@ -6354,6 +6349,17 @@ export const sendQuoteEmail = functions.runWith({ timeoutSeconds: 120, memory: '
       }
       if (!doc) {
         res.status(404).json({ error: 'Quote not found' });
+        return;
+      }
+
+      // After the doc is in hand: the gate only applies to a quote that asks
+      // for a deposit, which is on the document, not the request.
+      const gate = await enforceFreeTierDeliveryGate(userId, {
+        kind: 'quote',
+        doc: { requireDeposit: doc.requireDeposit, depositPercentage: doc.depositPercentage },
+      });
+      if (!gate.ok) {
+        res.status(gate.status).json({ error: gate.message, reason: gate.reason });
         return;
       }
 
@@ -6430,7 +6436,7 @@ export const sendInvoiceEmail = functions.runWith({ timeoutSeconds: 120, memory:
       return;
     }
 
-    const gate = await enforceFreeTierDeliveryGate(userId);
+    const gate = await enforceFreeTierDeliveryGate(userId, { kind: 'invoice' });
     if (!gate.ok) {
       res.status(gate.status).json({ error: gate.message, reason: gate.reason });
       return;
@@ -14591,12 +14597,21 @@ export const squareDisconnect = functions.https.onRequest((req, res) => {
  * plan without a connected Square account — without Square we have no way to
  * collect the platform fee, which is the entire freemium revenue model.
  *
+ * Mirrors the client's quoteDeliveryGuard exactly (deliveryGate.helpers.ts):
+ * only a document with money on it — an invoice, or a quote with a deposit —
+ * is gated. A plain quote goes out on every plan. Until 21 Sep 2026 this
+ * refused every free-plan send while the client had stopped gating plain
+ * quotes (#175), so free tradies met a bare "Send Failed" alert instead of
+ * the gate modal — 11 refusals across 3 accounts in the audit week.
+ *
  * Trusts the client's quoteDeliveryGuard to have minted a payment link before
  * dispatching the send. If something slipped through, this catches it.
  */
 async function enforceFreeTierDeliveryGate(
   userId: string,
+  target: DeliveryGateTarget,
 ): Promise<{ ok: true } | { ok: false; status: number; reason: string; message: string }> {
+  if (!freeTierGateApplies(target)) return { ok: true };
   const plan = await getUserPlanServerSide(userId);
   if (plan !== 'free') return { ok: true };
   const tokens = await getSquareTokens(userId);
@@ -14605,7 +14620,7 @@ async function enforceFreeTierDeliveryGate(
       ok: false,
       status: 402, // Payment Required — semantically apt
       reason: 'connect_square',
-      message: 'Connect Square to send quotes and invoices on the free plan.',
+      message: FREE_TIER_GATE_MESSAGE,
     };
   }
   return { ok: true };
