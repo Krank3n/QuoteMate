@@ -75,8 +75,15 @@ export type AnalyticsEvent =
   | 'return_trial_granted'
   // The welcome-back card was closed (`via` dismiss | quote).
   | 'return_trial_notice_dismissed'
-  // Persistent dashboard / job-screen nudge after trial expires + no Square.
+  // The expired-trial banner rendered on the dashboard (once per mount).
+  // Wired for the first time on 22 Sep 2026: the dashboard had hidden the
+  // banner at "0 days left", which is also what an expired trial reads as,
+  // so 27 post-trial tradies that month saw no ask at all.
   | 'trial_expired_banner_shown'
+  // "Stay on Free" on the expired banner. Silences every proactive Pro ask
+  // for 30 days (see screens/dashboard/trialAsk.ts). `source` names the
+  // surface it was tapped on.
+  | 'happy_on_free_chosen'
   // The hard gate at Send. Fires when SendGateModal opens — funnel's last
   // visible decision point.
   | 'send_gate_shown'
