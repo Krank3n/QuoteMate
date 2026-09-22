@@ -160,6 +160,7 @@ import { fetchGooglePlaySubscription } from './iapStoreStatus';
 import { verifyAppleJws } from './appleJws.helpers';
 import { verifySquareWebhookSignature } from './squareWebhookSignature';
 import { resolveServerPlan, storePricePatch, subInterval, subPriceInfo, trialEndMs, TRIAL_MS } from './subscription.helpers';
+import { authRejectionLog, bearerToken, invalidTokenRejection } from './authRejection.helpers';
 import { freeTierGateApplies, FREE_TIER_GATE_MESSAGE, type DeliveryGateTarget } from './deliveryGate.helpers';
 import {
   SQUARE_OAUTH_STATES_COLLECTION,
@@ -649,17 +650,20 @@ async function verifyAuth(
   req: functions.https.Request,
   res: functions.Response
 ): Promise<admin.auth.DecodedIdToken | null> {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+  const bearer = bearerToken(req.headers.authorization);
+  if (!bearer.ok) {
+    // Structured, token-free: which endpoint, why, and what the client says
+    // it is. Before this a 401 was invisible — see authRejection.helpers.ts.
+    functions.logger.warn('auth_rejected', authRejectionLog(req, bearer.rejection));
     res.status(401).json({ error: 'Missing or invalid Authorization header' });
     return null;
   }
 
-  const idToken = authHeader.split('Bearer ')[1];
   try {
-    const decodedToken = await admin.auth().verifyIdToken(idToken);
+    const decodedToken = await admin.auth().verifyIdToken(bearer.token);
     return decodedToken;
   } catch (error) {
+    functions.logger.warn('auth_rejected', authRejectionLog(req, invalidTokenRejection(error)));
     res.status(401).json({ error: 'Invalid or expired auth token' });
     return null;
   }
