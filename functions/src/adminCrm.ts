@@ -13,6 +13,7 @@ import * as admin from 'firebase-admin';
 import { sendEmail, getUserEmail } from './email';
 import { applyBrevoEventToLead } from './leadOutreach';
 import { brevoOpenTarget, isBrevoHumanOpen } from './brevoOpenSignal.helpers';
+import { brevoEventMs } from './brevoTimestamp.helpers';
 import { adminRecordEmailOpenDeps, recordEmailOpenOnQuote } from './customerOpenRecord';
 import {
   stageToQuoteStatus,
@@ -3070,14 +3071,12 @@ function parseEmailLogId(body: any): string | null {
   return null;
 }
 
+// Epoch fields first — Brevo's `date` is account-local with no offset and
+// used to be read as UTC, putting every stored event time 10 h ahead for an
+// AEST account (brevoTimestamp.helpers.ts).
 function timestampFromBrevo(body: any): admin.firestore.FieldValue | admin.firestore.Timestamp {
-  const raw = body.date || body.ts_event || body.ts;
-  if (typeof raw === 'number') return admin.firestore.Timestamp.fromMillis(raw * 1000);
-  if (typeof raw === 'string') {
-    const t = Date.parse(raw);
-    if (!isNaN(t)) return admin.firestore.Timestamp.fromMillis(t);
-  }
-  return admin.firestore.FieldValue.serverTimestamp();
+  const ms = brevoEventMs(body);
+  return ms === null ? admin.firestore.FieldValue.serverTimestamp() : admin.firestore.Timestamp.fromMillis(ms);
 }
 
 export const brevoEmailWebhook = functions.https.onRequest(async (req, res) => {
