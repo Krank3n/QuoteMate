@@ -48,6 +48,13 @@ describe('correctionsClause', () => {
     expect(clause).toContain('Never draft a new quote for them.');
   });
 
+  it('routes a phone number or email said while pricing ran to propose_update_customer, not scope', () => {
+    const clause = correctionsClause(['0401 946 711'], 'q-1');
+    expect(clause).toContain('"0401 946 711"');
+    expect(clause).toContain('a bare phone number or email');
+    expect(clause).toContain('propose_update_customer');
+  });
+
   it('is empty when there is nothing to act on', () => {
     expect(correctionsClause([], 'q1')).toBe('');
   });

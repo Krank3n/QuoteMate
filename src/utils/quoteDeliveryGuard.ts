@@ -54,6 +54,22 @@ export function carriesPayableAmount(target: DeliveryDoc): boolean {
 }
 
 /**
+ * Whether a failed send is the server's free-tier gate rather than a real
+ * error. sendQuoteEmail / sendInvoiceEmail answer 402 with
+ * `{ reason: 'connect_square' }` when a free-plan account without Square
+ * tries to send a document with money on it. The two gates mirror each other
+ * (see functions/src/deliveryGate.helpers.ts), so this should never fire
+ * for a plain quote — but when it does (a stale plan on the phone, a deposit
+ * added on another device), the tradie should meet the same two-option gate
+ * they would have met here, not a bare "Send Failed" alert. Pure.
+ */
+export function isConnectSquareRefusal(status: number, body: unknown): boolean {
+  if (status !== 402) return false;
+  const reason = body && typeof body === 'object' ? (body as { reason?: unknown }).reason : undefined;
+  return reason === 'connect_square';
+}
+
+/**
  * Returns whether the user is allowed to deliver the supplied quote/invoice
  * right now, and a payment-link URL if one was minted as part of the check.
  *

@@ -60,6 +60,7 @@ export function correctionsClause(lines: string[], quoteId?: string): string {
   return (
     ` While pricing ran the tradie said: ${quoted}. Those are corrections to THIS quote — act on them now: ` +
     `say you're folding them in, then propose_update_quote_scope${target} with the full corrected description ` +
-    `(or propose_update_customer / propose_update_line_item where that's what they meant). Never draft a new quote for them.`
+    `(or propose_update_customer / propose_update_line_item where that's what they meant — a bare phone number or email ` +
+    `is the customer's contact for propose_update_customer, never scope). Never draft a new quote for them.`
   );
 }

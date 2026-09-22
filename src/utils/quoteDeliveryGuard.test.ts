@@ -18,6 +18,7 @@ import {
   attachPayLink,
   carriesPayableAmount,
   ensureCanDeliver,
+  isConnectSquareRefusal,
 } from './quoteDeliveryGuard';
 
 const quote = (over: Record<string, unknown> = {}) =>
@@ -52,6 +53,16 @@ describe('carriesPayableAmount', () => {
   it('requireDeposit without a percentage collects nothing', () => {
     expect(carriesPayableAmount(quote({ requireDeposit: true, depositPercentage: 0 }))).toBe(false);
     expect(carriesPayableAmount(quote({ requireDeposit: true }))).toBe(false);
+  });
+});
+
+describe('isConnectSquareRefusal — recognising the server gate', () => {
+  it('is the 402 with the connect_square reason, nothing else', () => {
+    expect(isConnectSquareRefusal(402, { error: 'Connect Square…', reason: 'connect_square' })).toBe(true);
+    expect(isConnectSquareRefusal(402, { error: 'Connect Square…' })).toBe(false);
+    expect(isConnectSquareRefusal(500, { reason: 'connect_square' })).toBe(false);
+    expect(isConnectSquareRefusal(402, null)).toBe(false);
+    expect(isConnectSquareRefusal(402, 'connect_square')).toBe(false);
   });
 });
 

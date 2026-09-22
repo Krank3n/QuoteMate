@@ -161,6 +161,7 @@ import { verifyAppleJws } from './appleJws.helpers';
 import { verifySquareWebhookSignature } from './squareWebhookSignature';
 import { resolveServerPlan, storePricePatch, subInterval, subPriceInfo, trialEndMs, TRIAL_MS } from './subscription.helpers';
 import { authRejectionLog, bearerToken, invalidTokenRejection } from './authRejection.helpers';
+import { freeTierGateApplies, FREE_TIER_GATE_MESSAGE, type DeliveryGateTarget } from './deliveryGate.helpers';
 import {
   SQUARE_OAUTH_STATES_COLLECTION,
   SQUARE_OAUTH_STATE_TTL_MS,
@@ -239,6 +240,8 @@ import { sendExpoPushNotifications } from './expoPush';
 import { hashTerms } from './shared/pdf/terms/defaultAuTradie';
 import { generateQuotePdfBuffer } from './pdfGenerator';
 import { normaliseTimestamp } from './timestamps.helpers';
+import { decideQuoteOpenedPush } from './quoteOpenedPush.helpers';
+import { projectCustomerOpenToDocument } from './customerOpenRecord';
 import {
   selectQuotesForFollowUp,
   selectInvoicesForFollowUp,
@@ -6168,6 +6171,10 @@ export const trackEmailOpen = functions
         // an index signature a named interface can't satisfy.
         const update: any = stamp;
         await db.doc(`users/${userId}/quotes/${quoteId}`).update(update);
+        // Re-read so the derived customerOpenedAt sees the resolved server
+        // timestamps, then carry the slice to the mirror the app reads.
+        const after = await db.doc(`users/${userId}/quotes/${quoteId}`).get();
+        await projectCustomerOpenToDocument(userId, quoteId, after.data());
       },
       onError: (err: any) => {
         functions.logger.warn('trackEmailOpen_failed', { message: err?.message });
@@ -6341,12 +6348,6 @@ export const sendQuoteEmail = functions.runWith({ timeoutSeconds: 120, memory: '
       return;
     }
 
-    const gate = await enforceFreeTierDeliveryGate(userId);
-    if (!gate.ok) {
-      res.status(gate.status).json({ error: gate.message, reason: gate.reason });
-      return;
-    }
-
     logShimInvocation('sendQuoteEmail', userId, { quoteId });
 
     try {
@@ -6358,6 +6359,17 @@ export const sendQuoteEmail = functions.runWith({ timeoutSeconds: 120, memory: '
       }
       if (!doc) {
         res.status(404).json({ error: 'Quote not found' });
+        return;
+      }
+
+      // After the doc is in hand: the gate only applies to a quote that asks
+      // for a deposit, which is on the document, not the request.
+      const gate = await enforceFreeTierDeliveryGate(userId, {
+        kind: 'quote',
+        doc: { requireDeposit: doc.requireDeposit, depositPercentage: doc.depositPercentage },
+      });
+      if (!gate.ok) {
+        res.status(gate.status).json({ error: gate.message, reason: gate.reason });
         return;
       }
 
@@ -6434,7 +6446,7 @@ export const sendInvoiceEmail = functions.runWith({ timeoutSeconds: 120, memory:
       return;
     }
 
-    const gate = await enforceFreeTierDeliveryGate(userId);
+    const gate = await enforceFreeTierDeliveryGate(userId, { kind: 'invoice' });
     if (!gate.ok) {
       res.status(gate.status).json({ error: gate.message, reason: gate.reason });
       return;
@@ -6685,6 +6697,13 @@ export const getQuoteForAcceptance = functions.https.onRequest((req, res) => {
           viewUpdate.firstViewedAt = admin.firestore.FieldValue.serverTimestamp();
         }
         await quoteRef.update(viewUpdate);
+        // The view stamps don't bump updatedAt, so the mirror may never
+        // re-project them — carry the slice to documents/{id} directly.
+        const ownerId = quoteRef.parent.parent?.id;
+        if (ownerId) {
+          const after = await quoteRef.get();
+          await projectCustomerOpenToDocument(ownerId, quoteRef.id, after.data());
+        }
       }
 
       // Return quote data for the acceptance page (excluding sensitive fields).
@@ -11094,7 +11113,8 @@ async function sendAussiePush(
   userId: string,
   event: AussieEvent,
   vars: Record<string, string> = {},
-  dataPayload: Record<string, string> = {}
+  dataPayload: Record<string, string> = {},
+  opts: { quietHours?: boolean } = {}
 ): Promise<boolean> {
   const nowMs = Date.now();
   const userRef = db.collection('users').doc(userId);
@@ -11118,6 +11138,7 @@ async function sendAussiePush(
     timezone,
     nowMs,
     nudgesSentToday,
+    quietHours: opts.quietHours,
   });
 
   if (!decision.send) {
@@ -11165,30 +11186,24 @@ export const onQuoteViewed = functions.firestore
     const after = change.after.data();
     const { userId, quoteId } = context.params;
 
-    // Only fire when lastViewedAt is set/updated and wasn't just updated by the owner
-    if (!after.lastViewedAt || before.lastViewedAt?.toMillis?.() === after.lastViewedAt?.toMillis?.()) {
-      return;
-    }
+    // Two signals say the customer opened the quote: the acceptance page
+    // (lastViewedAt, the ~8% path) and the email-open pixel
+    // (emailFirstOpenedAt, the ~70% path — silent until now). The decision —
+    // rising edge only for the pixel, proxy-prefetch guard, settled-status
+    // skip, and the 24 h cooldown that stops one interested customer turning
+    // into a burst of identical pushes — lives in quoteOpenedPush.helpers.ts.
+    const decision = decideQuoteOpenedPush(before, after, Date.now());
+    if (!decision.push) return;
 
-    // Don't notify if quote is already accepted/rejected
-    if (['accepted', 'rejected', 'completed'].includes(after.status)) {
-      return;
-    }
-
-    // A customer weighing up a quote opens it repeatedly. Notifying on every
-    // open turned one interested customer into a burst of identical pushes,
-    // which is the fastest way to teach someone to mute the channel. Tell the
-    // tradie the first time, then stay quiet for a day.
-    const lastNotifiedMs = toMs(after.viewNotifiedAt) ?? 0;
-    if (lastNotifiedMs && Date.now() - lastNotifiedMs < 24 * 60 * 60 * 1000) {
-      return;
-    }
-
+    // An email open fires whenever a mail client fetches an image — a phone
+    // syncing mail at 2 am included — so that signal keeps to the tradie's
+    // daytime; the timeline and chip still carry it. A page load stays
+    // unconditional, as before.
     const sent = await sendAussiePush(userId, 'quote_viewed', {
       customer: after.customerName || 'A customer',
       job: after.job?.name || 'the job',
       amount: formatPushAmount(after.total),
-    }, { quoteId, ...jobLink(after) });
+    }, { quoteId, ...jobLink(after) }, { quietHours: decision.signal === 'email' });
 
     if (sent) {
       await change.after.ref.update({
@@ -14595,12 +14610,21 @@ export const squareDisconnect = functions.https.onRequest((req, res) => {
  * plan without a connected Square account — without Square we have no way to
  * collect the platform fee, which is the entire freemium revenue model.
  *
+ * Mirrors the client's quoteDeliveryGuard exactly (deliveryGate.helpers.ts):
+ * only a document with money on it — an invoice, or a quote with a deposit —
+ * is gated. A plain quote goes out on every plan. Until 21 Sep 2026 this
+ * refused every free-plan send while the client had stopped gating plain
+ * quotes (#175), so free tradies met a bare "Send Failed" alert instead of
+ * the gate modal — 11 refusals across 3 accounts in the audit week.
+ *
  * Trusts the client's quoteDeliveryGuard to have minted a payment link before
  * dispatching the send. If something slipped through, this catches it.
  */
 async function enforceFreeTierDeliveryGate(
   userId: string,
+  target: DeliveryGateTarget,
 ): Promise<{ ok: true } | { ok: false; status: number; reason: string; message: string }> {
+  if (!freeTierGateApplies(target)) return { ok: true };
   const plan = await getUserPlanServerSide(userId);
   if (plan !== 'free') return { ok: true };
   const tokens = await getSquareTokens(userId);
@@ -14609,7 +14633,7 @@ async function enforceFreeTierDeliveryGate(
       ok: false,
       status: 402, // Payment Required — semantically apt
       reason: 'connect_square',
-      message: 'Connect Square to send quotes and invoices on the free plan.',
+      message: FREE_TIER_GATE_MESSAGE,
     };
   }
   return { ok: true };

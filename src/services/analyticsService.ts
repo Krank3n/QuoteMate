@@ -117,6 +117,13 @@ export type AnalyticsEvent =
   // A document actually went out. `to_self` flags a send to the tradie's own
   // account email — previously indistinguishable from a real customer send.
   | 'quote_send_succeeded'
+  // Mate moved a freshly priced quote toward a send. `kind` is send_card (a
+  // tappable Send card minted by the app the moment pricing landed),
+  // contact_ask (Mate asked for a mobile/email while pricing ran because
+  // none was on file) or model_offer (the older spoken offer, kept for
+  // corrections and the no-contact case). Sep 2026: 58 priced Mate quotes,
+  // 44 with nobody to send to, 0 yeses to "want me to send it?".
+  | 'mate_send_prompt'
   // Dashboard follow-up nudge banner. `nudge_type` distinguishes
   // invoice_overdue / self_sent_quote / unsent_quote / quote_follow_up —
   // measures whether nudging moves quotes to real customers (the Jul 2026

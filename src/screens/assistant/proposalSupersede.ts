@@ -21,7 +21,15 @@ export interface SupersededRef {
 // supersedes per-conversation (no quote id exists yet); the others supersede
 // per-quote.
 const PER_CONVERSATION = new Set(['propose_draft_quote']);
-const PER_QUOTE = new Set(['propose_update_customer', 'propose_update_quote_rates', 'propose_update_quote_scope']);
+// propose_send_quote joined on 21 Sep 2026: the app mints a Send card the
+// moment a quote is priced and someone can be sent to, and a re-price or a
+// customer change mints a fresh one — the older card carries a stale total.
+const PER_QUOTE = new Set([
+  'propose_update_customer',
+  'propose_update_quote_rates',
+  'propose_update_quote_scope',
+  'propose_send_quote',
+]);
 
 function isPending(message: ChatMessage, proposal: Proposal): boolean {
   return (message.proposalStatus?.[proposal.id] ?? 'pending') === 'pending';

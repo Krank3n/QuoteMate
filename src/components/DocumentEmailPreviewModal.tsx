@@ -44,6 +44,7 @@ import { BusinessSettings } from '../types';
 import { Document } from '../types/document';
 import { documentToQuote, documentToInvoice } from '../types/documentAdapter';
 import { formatCurrency } from '../utils/quoteCalculator';
+import { isConnectSquareRefusal } from '../utils/quoteDeliveryGuard';
 import { reviewQuoteMaterials, buildPresendWarning, type PresendWarning } from '../utils/quoteReview';
 import { auth } from '../config/firebase';
 import { AlertModal } from './AlertModal';
@@ -99,6 +100,12 @@ interface Props {
   onSent?: () => void;
   /** Opens the full send sheet — SMS / Share / Export PDF. */
   onMoreWaysToSend?: () => void;
+  /**
+   * The server refused the send with its free-tier gate (402 connect_square).
+   * The host swaps this preview for the gate modal; without a handler the
+   * refusal falls through to the error alert.
+   */
+  onDeliveryGate?: () => void;
   isPro: boolean;
   isRegenerating: boolean;
 }
@@ -115,6 +122,7 @@ export function DocumentEmailPreviewModal({
   onRegenerate,
   onSent,
   onMoreWaysToSend,
+  onDeliveryGate,
   isPro,
   isRegenerating,
 }: Props) {
@@ -533,7 +541,14 @@ export function DocumentEmailPreviewModal({
       });
 
       if (!response.ok) {
-        const err = await response.json();
+        const err = await response.json().catch(() => ({}));
+        // The free-tier gate is a decision for the tradie, not a failure:
+        // hand it to the host so they get Connect Square / Go Pro, not a
+        // dead-end alert. 11 of these in the week of 14 Sep 2026.
+        if (onDeliveryGate && isConnectSquareRefusal(response.status, err)) {
+          onDeliveryGate();
+          return;
+        }
         throw new Error(err.error || 'Failed to send email');
       }
 

@@ -67,6 +67,7 @@ const metaFor = (themeColors: Tokens): Record<TimelineEventKind, EventMeta> => (
   job_created:            { icon: 'briefcase-plus-outline',    color: themeColors.info,    bgColor: themeColors.infoSubtle },
   quote_drafted:          { icon: 'file-document-edit-outline', color: themeColors.info,    bgColor: themeColors.infoSubtle },
   quote_sent:             { icon: 'send-outline',               color: themeColors.warning, bgColor: themeColors.warningSubtle },
+  quote_opened:           { icon: 'email-open-outline',         color: themeColors.info,    bgColor: themeColors.infoSubtle },
   quote_accepted:         { icon: 'check-circle-outline',       color: themeColors.money, bgColor: themeColors.moneySubtle },
   quote_rejected:         { icon: 'close-circle-outline',       color: themeColors.error,   bgColor: themeColors.errorSubtle },
   invoice_created:        { icon: 'file-swap-outline',          color: themeColors.accentText, bgColor: themeColors.accentSubtle },
