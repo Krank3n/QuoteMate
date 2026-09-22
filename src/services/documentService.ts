@@ -243,8 +243,14 @@ class DocumentService {
       logLabourUnitCanary(rawDocument);
     }
     const docRef = doc(db, 'users', userId, 'documents', document.id);
+    // `receiptSentPaidCents` is the server's payment-receipt idempotency mark
+    // (functions/src/index.ts onDocumentPaymentReceived). We round-trip every
+    // field we read, so writing it back from a copy loaded before the last
+    // payment would rewind the mark and re-send the customer a receipt they
+    // already have. The server owns it; never echo it.
+    const { receiptSentPaidCents: _serverOwned, ...clientOwned } = document as any;
     const payload = stripUndefined({
-      ...document,
+      ...clientOwned,
       updatedAt: document.updatedAt ?? Date.now(),
       syncedAt: new Date().toISOString(),
     });
