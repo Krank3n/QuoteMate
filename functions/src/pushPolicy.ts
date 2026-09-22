@@ -135,6 +135,12 @@ export interface PushDecisionInput {
   nowMs: number;
   /** Nudge-class pushes already delivered to this user on their local day. */
   nudgesSentToday?: number;
+  /**
+   * Hold an EVENT-class push to the daytime window too (no daily cap). For
+   * events that a machine can raise at any hour on the customer's behalf —
+   * an email-open pixel fetched by a phone syncing mail overnight.
+   */
+  quietHours?: boolean;
 }
 
 export interface PushDecision {
@@ -168,13 +174,18 @@ export function decidePush(input: PushDecisionInput): PushDecision {
     return { ...base, send: false, reason: 'opted_out' };
   }
 
-  if (pushClass === 'event') {
+  if (pushClass === 'event' && !input.quietHours) {
     return { ...base, send: true, reason: 'ok' };
   }
 
   const hour = localHourIn(timezone, nowMs) ?? localHourIn(DEFAULT_TIMEZONE, nowMs);
   if (hour === null || hour < NUDGE_EARLIEST_HOUR || hour >= NUDGE_LATEST_HOUR) {
     return { ...base, send: false, reason: 'quiet_hours' };
+  }
+
+  // An event held to the daytime window still never burns the nudge cap.
+  if (pushClass === 'event') {
+    return { ...base, send: true, reason: 'ok' };
   }
 
   if (nudgesSentToday >= NUDGE_DAILY_CAP) {

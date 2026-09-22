@@ -238,6 +238,36 @@ import { sendExpoPushNotifications } from './expoPush';
 import { hashTerms } from './shared/pdf/terms/defaultAuTradie';
 import { generateQuotePdfBuffer } from './pdfGenerator';
 import { normaliseTimestamp } from './timestamps.helpers';
+import { decideQuoteOpenedPush } from './quoteOpenedPush.helpers';
+import { customerOpenProjection } from './shared/document/customerOpened';
+
+/**
+ * Push the customer-open slice of a legacy quote straight onto its
+ * documents/{id} mirror. The open stamps never bump the legacy `updatedAt`,
+ * and documentMirror's writeMirror skips any projection older than what is
+ * on disk — so after any path that moved the mirror's updatedAt ahead of
+ * the legacy row (the share-link mint, the terms snapshot, a Square link
+ * rotation) an open would reach the push but never the app. Merge, no
+ * updatedAt bump, and a missing mirror is left for the mirror trigger to
+ * create — never half-built here.
+ */
+async function projectCustomerOpenToDocument(
+  userId: string,
+  quoteId: string,
+  legacy: FirebaseFirestore.DocumentData | undefined,
+): Promise<void> {
+  if (!legacy) return;
+  const slice = Object.fromEntries(
+    Object.entries(customerOpenProjection(legacy as any)).filter(([, v]) => v !== undefined),
+  );
+  if (Object.keys(slice).length === 0) return;
+  try {
+    await db.doc(`users/${userId}/documents/${quoteId}`).update(slice);
+  } catch (err: any) {
+    // NOT_FOUND (gRPC 5): no mirror yet — the next legacy write projects it whole.
+    if (err?.code !== 5) functions.logger.warn('customer_open_projection_failed', { userId, quoteId, message: err?.message });
+  }
+}
 import {
   selectQuotesForFollowUp,
   selectInvoicesForFollowUp,
@@ -6164,6 +6194,10 @@ export const trackEmailOpen = functions
         // an index signature a named interface can't satisfy.
         const update: any = stamp;
         await db.doc(`users/${userId}/quotes/${quoteId}`).update(update);
+        // Re-read so the derived customerOpenedAt sees the resolved server
+        // timestamps, then carry the slice to the mirror the app reads.
+        const after = await db.doc(`users/${userId}/quotes/${quoteId}`).get();
+        await projectCustomerOpenToDocument(userId, quoteId, after.data());
       },
       onError: (err: any) => {
         functions.logger.warn('trackEmailOpen_failed', { message: err?.message });
@@ -6681,6 +6715,13 @@ export const getQuoteForAcceptance = functions.https.onRequest((req, res) => {
           viewUpdate.firstViewedAt = admin.firestore.FieldValue.serverTimestamp();
         }
         await quoteRef.update(viewUpdate);
+        // The view stamps don't bump updatedAt, so the mirror may never
+        // re-project them — carry the slice to documents/{id} directly.
+        const ownerId = quoteRef.parent.parent?.id;
+        if (ownerId) {
+          const after = await quoteRef.get();
+          await projectCustomerOpenToDocument(ownerId, quoteRef.id, after.data());
+        }
       }
 
       // Return quote data for the acceptance page (excluding sensitive fields).
@@ -11090,7 +11131,8 @@ async function sendAussiePush(
   userId: string,
   event: AussieEvent,
   vars: Record<string, string> = {},
-  dataPayload: Record<string, string> = {}
+  dataPayload: Record<string, string> = {},
+  opts: { quietHours?: boolean } = {}
 ): Promise<boolean> {
   const nowMs = Date.now();
   const userRef = db.collection('users').doc(userId);
@@ -11114,6 +11156,7 @@ async function sendAussiePush(
     timezone,
     nowMs,
     nudgesSentToday,
+    quietHours: opts.quietHours,
   });
 
   if (!decision.send) {
@@ -11161,30 +11204,24 @@ export const onQuoteViewed = functions.firestore
     const after = change.after.data();
     const { userId, quoteId } = context.params;
 
-    // Only fire when lastViewedAt is set/updated and wasn't just updated by the owner
-    if (!after.lastViewedAt || before.lastViewedAt?.toMillis?.() === after.lastViewedAt?.toMillis?.()) {
-      return;
-    }
+    // Two signals say the customer opened the quote: the acceptance page
+    // (lastViewedAt, the ~8% path) and the email-open pixel
+    // (emailFirstOpenedAt, the ~70% path — silent until now). The decision —
+    // rising edge only for the pixel, proxy-prefetch guard, settled-status
+    // skip, and the 24 h cooldown that stops one interested customer turning
+    // into a burst of identical pushes — lives in quoteOpenedPush.helpers.ts.
+    const decision = decideQuoteOpenedPush(before, after, Date.now());
+    if (!decision.push) return;
 
-    // Don't notify if quote is already accepted/rejected
-    if (['accepted', 'rejected', 'completed'].includes(after.status)) {
-      return;
-    }
-
-    // A customer weighing up a quote opens it repeatedly. Notifying on every
-    // open turned one interested customer into a burst of identical pushes,
-    // which is the fastest way to teach someone to mute the channel. Tell the
-    // tradie the first time, then stay quiet for a day.
-    const lastNotifiedMs = toMs(after.viewNotifiedAt) ?? 0;
-    if (lastNotifiedMs && Date.now() - lastNotifiedMs < 24 * 60 * 60 * 1000) {
-      return;
-    }
-
+    // An email open fires whenever a mail client fetches an image — a phone
+    // syncing mail at 2 am included — so that signal keeps to the tradie's
+    // daytime; the timeline and chip still carry it. A page load stays
+    // unconditional, as before.
     const sent = await sendAussiePush(userId, 'quote_viewed', {
       customer: after.customerName || 'A customer',
       job: after.job?.name || 'the job',
       amount: formatPushAmount(after.total),
-    }, { quoteId, ...jobLink(after) });
+    }, { quoteId, ...jobLink(after) }, { quietHours: decision.signal === 'email' });
 
     if (sent) {
       await change.after.ref.update({

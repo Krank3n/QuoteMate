@@ -17,37 +17,15 @@ import type {
   DocumentType,
   LegacyDocumentRecord,
 } from './types';
+import { customerOpenProjection } from './customerOpened';
+import { fromMs, toMs, toMsRequired } from './time';
 
 // -------- date helpers --------------------------------------------------
+// Defined in ./time so customerOpened.ts can use them without importing the
+// adapter back; re-exported here because every existing caller imports them
+// from this module.
 
-export function toMs(value: any): number | undefined {
-  if (value === null || value === undefined) return undefined;
-  if (typeof value === 'number') return value;
-  if (value instanceof Date) {
-    const t = value.getTime();
-    return isNaN(t) ? undefined : t;
-  }
-  if (typeof value === 'string') {
-    const t = Date.parse(value);
-    return isNaN(t) ? undefined : t;
-  }
-  if (typeof value === 'object' && typeof (value as any).toDate === 'function') {
-    const t = (value as any).toDate().getTime();
-    return isNaN(t) ? undefined : t;
-  }
-  if (typeof value === 'object' && typeof (value as any).seconds === 'number') {
-    return (value as any).seconds * 1000;
-  }
-  return undefined;
-}
-
-export function toMsRequired(value: any): number {
-  return toMs(value) ?? Date.now();
-}
-
-export function fromMs(ms?: number): Date | undefined {
-  return typeof ms === 'number' ? new Date(ms) : undefined;
-}
+export { toMs, toMsRequired, fromMs };
 
 export function fromMsRequired(ms: number): Date {
   return new Date(ms);
@@ -195,6 +173,13 @@ function projectShared(s: LegacyDocumentRecord, type: DocumentType): LegacyDocum
     aiSkipped: type === 'quote' ? s.aiSkipped : undefined,
     draftStep: type === 'quote' ? s.draftStep : undefined,
     invoicedAt: type === 'quote' ? toMs(s.invoicedAt) : undefined,
+    // Customer-open signals (acceptance-page view stamps + email-pixel
+    // stamps) live on the LEGACY quote only; nothing downstream could see
+    // them until they rode along here, together with the derived
+    // customerOpenedAt / customerOpenSource the app reads. One helper builds
+    // the slice so the two handlers that stamp opens can write the same
+    // shape straight onto documents/{id} (shared/document/customerOpened.ts).
+    ...(type === 'quote' ? customerOpenProjection(s) : {}),
 
     // Invoice-only optionals (undefined for quotes)
     issueDate: type === 'invoice' ? toMs(s.issueDate) : undefined,
