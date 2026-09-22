@@ -20,6 +20,7 @@ export type TimelineEventKind =
   | 'job_created'
   | 'quote_drafted'
   | 'quote_sent'
+  | 'quote_opened'
   | 'quote_accepted'
   | 'quote_rejected'
   | 'invoice_created'
@@ -53,6 +54,21 @@ function fmtCurrency(n: number): string {
 
 function push(events: TimelineEvent[], e: TimelineEvent | null) {
   if (e) events.push(e);
+}
+
+/**
+ * The customer's first trustworthy open of a SENT quote, in ms, else null.
+ * `customerOpenedAt` is derived by the mirror (shared/document/customerOpened
+ * .ts — page view or email pixel past the proxy-prefetch window). An open
+ * that predates sentAt is a stale stamp from an earlier send and says
+ * nothing about this quote, so it is ignored. Shared by the timeline event
+ * and the JobScopeCard stage chip so both surfaces agree.
+ */
+export function quoteOpenedAfterSend(
+  doc: Pick<Document, 'type' | 'customerOpenedAt' | 'sentAt'>,
+): number | null {
+  if (doc.type !== 'quote' || !doc.customerOpenedAt || !doc.sentAt) return null;
+  return doc.customerOpenedAt >= doc.sentAt ? doc.customerOpenedAt : null;
 }
 
 /**
@@ -104,6 +120,22 @@ export function deriveTimelineEvents(
         title: 'Quote sent',
         detail: docCustomer ? `to ${docCustomer}` : undefined,
         amount: docTotal,
+      });
+    }
+
+    // Customer opened it — the acceptance page or the email pixel, already
+    // reduced to one trustworthy stamp by the mirror (customerOpenedAt). Only
+    // meaningful after a send; an "opened" that predates sentAt is a stale
+    // stamp from a re-send and says nothing about this quote.
+    const openedAt = quoteOpenedAfterSend(doc);
+    if (openedAt) {
+      const via = doc.customerOpenSource === 'link' ? 'via the link' : 'via email';
+      push(events, {
+        id: `${doc.id}:quote_opened`,
+        kind: 'quote_opened',
+        at: openedAt,
+        title: 'Quote opened',
+        detail: docCustomer ? `by ${docCustomer} · ${via}` : via,
       });
     }
 

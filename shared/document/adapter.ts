@@ -17,37 +17,15 @@ import type {
   DocumentType,
   LegacyDocumentRecord,
 } from './types';
+import { customerOpenSource, customerOpenedAtMs } from './customerOpened';
+import { fromMs, toMs, toMsRequired } from './time';
 
 // -------- date helpers --------------------------------------------------
+// Defined in ./time so customerOpened.ts can use them without importing the
+// adapter back; re-exported here because every existing caller imports them
+// from this module.
 
-export function toMs(value: any): number | undefined {
-  if (value === null || value === undefined) return undefined;
-  if (typeof value === 'number') return value;
-  if (value instanceof Date) {
-    const t = value.getTime();
-    return isNaN(t) ? undefined : t;
-  }
-  if (typeof value === 'string') {
-    const t = Date.parse(value);
-    return isNaN(t) ? undefined : t;
-  }
-  if (typeof value === 'object' && typeof (value as any).toDate === 'function') {
-    const t = (value as any).toDate().getTime();
-    return isNaN(t) ? undefined : t;
-  }
-  if (typeof value === 'object' && typeof (value as any).seconds === 'number') {
-    return (value as any).seconds * 1000;
-  }
-  return undefined;
-}
-
-export function toMsRequired(value: any): number {
-  return toMs(value) ?? Date.now();
-}
-
-export function fromMs(ms?: number): Date | undefined {
-  return typeof ms === 'number' ? new Date(ms) : undefined;
-}
+export { toMs, toMsRequired, fromMs };
 
 export function fromMsRequired(ms: number): Date {
   return new Date(ms);
@@ -195,6 +173,23 @@ function projectShared(s: LegacyDocumentRecord, type: DocumentType): LegacyDocum
     aiSkipped: type === 'quote' ? s.aiSkipped : undefined,
     draftStep: type === 'quote' ? s.draftStep : undefined,
     invoicedAt: type === 'quote' ? toMs(s.invoicedAt) : undefined,
+    // Customer-open signals. The acceptance page stamps firstViewedAt /
+    // lastViewedAt / viewCount and the email pixel stamps emailFirst/
+    // LastOpenedAt / emailOpenCount / emailFirstOpenAfterMs on the LEGACY
+    // quote only; nothing downstream could see them until they rode along
+    // here. customerOpenedAt / customerOpenSource are the derived answer the
+    // app reads (shared/document/customerOpened.ts) so the client never
+    // re-derives the prefetch rule.
+    firstViewedAt: type === 'quote' ? toMs(s.firstViewedAt) : undefined,
+    lastViewedAt: type === 'quote' ? toMs(s.lastViewedAt) : undefined,
+    viewCount: type === 'quote' && typeof s.viewCount === 'number' ? s.viewCount : undefined,
+    emailFirstOpenedAt: type === 'quote' ? toMs(s.emailFirstOpenedAt) : undefined,
+    emailLastOpenedAt: type === 'quote' ? toMs(s.emailLastOpenedAt) : undefined,
+    emailOpenCount: type === 'quote' && typeof s.emailOpenCount === 'number' ? s.emailOpenCount : undefined,
+    emailFirstOpenAfterMs:
+      type === 'quote' && typeof s.emailFirstOpenAfterMs === 'number' ? s.emailFirstOpenAfterMs : undefined,
+    customerOpenedAt: type === 'quote' ? customerOpenedAtMs(s) ?? undefined : undefined,
+    customerOpenSource: type === 'quote' ? customerOpenSource(s) ?? undefined : undefined,
 
     // Invoice-only optionals (undefined for quotes)
     issueDate: type === 'invoice' ? toMs(s.issueDate) : undefined,

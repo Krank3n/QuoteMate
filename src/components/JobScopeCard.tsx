@@ -27,6 +27,7 @@ import {
 import { Text, ActivityIndicator, Menu, TextInput } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { formatDistanceToNowStrict } from 'date-fns';
+import { quoteOpenedAfterSend } from '../utils/jobTimeline';
 
 import type { Document } from '../types/document';
 import type { Invoice, PaymentTerms, Quote } from '../types';
@@ -96,6 +97,9 @@ function sumMaterials(doc: Document): number {
 function stageTimestamp(doc: Document): number | null {
   switch (doc.stage) {
     case 'quote_sent':
+      // Once the customer has opened a sent quote, the moment that matters
+      // is the open, not the send — "opened 2h ago" is what the chip says.
+      return quoteOpenedAfterSend(doc) ?? doc.sentAt ?? doc.updatedAt ?? null;
     case 'invoice_sent':
       return doc.sentAt ?? doc.updatedAt ?? null;
     case 'quote_accepted':
@@ -113,7 +117,8 @@ function stageAgoLabel(doc: Document): string | null {
   const ts = stageTimestamp(doc);
   if (!ts) return null;
   try {
-    return formatDistanceToNowStrict(new Date(ts), { addSuffix: false });
+    const ago = formatDistanceToNowStrict(new Date(ts), { addSuffix: false });
+    return doc.stage === 'quote_sent' && quoteOpenedAfterSend(doc) ? `opened ${ago} ago` : ago;
   } catch {
     return null;
   }

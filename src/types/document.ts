@@ -141,6 +141,18 @@ export interface Document {
   aiEmailBody?: string;
   aiSkipped?: boolean;
   draftStep?: string;
+  // Customer-open signals, projected from the legacy quote by the mirror
+  // (shared/document/adapter.ts). customerOpenedAt / customerOpenSource are
+  // the derived answer — read those; the raw stamps are for diagnostics.
+  firstViewedAt?: number;      // acceptance page first loaded
+  lastViewedAt?: number;
+  viewCount?: number;
+  emailFirstOpenedAt?: number; // email-open pixel first fetched
+  emailLastOpenedAt?: number;
+  emailOpenCount?: number;
+  emailFirstOpenAfterMs?: number;
+  customerOpenedAt?: number;   // first trustworthy open (shared/document/customerOpened.ts)
+  customerOpenSource?: 'email' | 'link';
   // Stage-transition timestamps. Set by setDocumentStage on the server —
   // never overwritten once set. Drive the activity timeline on ViewJob.
   sentAt?: number;           // first time the doc was stage_sent (quote or invoice)

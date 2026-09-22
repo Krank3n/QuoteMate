@@ -238,6 +238,7 @@ import { sendExpoPushNotifications } from './expoPush';
 import { hashTerms } from './shared/pdf/terms/defaultAuTradie';
 import { generateQuotePdfBuffer } from './pdfGenerator';
 import { normaliseTimestamp } from './timestamps.helpers';
+import { decideQuoteOpenedPush } from './quoteOpenedPush.helpers';
 import {
   selectQuotesForFollowUp,
   selectInvoicesForFollowUp,
@@ -11161,24 +11162,14 @@ export const onQuoteViewed = functions.firestore
     const after = change.after.data();
     const { userId, quoteId } = context.params;
 
-    // Only fire when lastViewedAt is set/updated and wasn't just updated by the owner
-    if (!after.lastViewedAt || before.lastViewedAt?.toMillis?.() === after.lastViewedAt?.toMillis?.()) {
-      return;
-    }
-
-    // Don't notify if quote is already accepted/rejected
-    if (['accepted', 'rejected', 'completed'].includes(after.status)) {
-      return;
-    }
-
-    // A customer weighing up a quote opens it repeatedly. Notifying on every
-    // open turned one interested customer into a burst of identical pushes,
-    // which is the fastest way to teach someone to mute the channel. Tell the
-    // tradie the first time, then stay quiet for a day.
-    const lastNotifiedMs = toMs(after.viewNotifiedAt) ?? 0;
-    if (lastNotifiedMs && Date.now() - lastNotifiedMs < 24 * 60 * 60 * 1000) {
-      return;
-    }
+    // Two signals say the customer opened the quote: the acceptance page
+    // (lastViewedAt, the ~8% path) and the email-open pixel
+    // (emailFirstOpenedAt, the ~70% path — silent until now). The decision —
+    // rising edge only for the pixel, proxy-prefetch guard, settled-status
+    // skip, and the 24 h cooldown that stops one interested customer turning
+    // into a burst of identical pushes — lives in quoteOpenedPush.helpers.ts.
+    const decision = decideQuoteOpenedPush(before, after, Date.now());
+    if (!decision.push) return;
 
     const sent = await sendAussiePush(userId, 'quote_viewed', {
       customer: after.customerName || 'A customer',
