@@ -11,6 +11,7 @@ import { useNavigation } from '@react-navigation/native';
 
 import { makeStyles, useThemeColors } from '../theme';
 import { trialWindow, type TrialWindowSource } from '../utils/trialConfig';
+import { trackEvent } from '../services/analyticsService';
 
 interface TrialBannerProps {
   /**
@@ -22,9 +23,14 @@ interface TrialBannerProps {
   quoteCount: number;
   /** Compact mode for settings screen (no upgrade button, slightly different layout) */
   compact?: boolean;
+  /**
+   * "Stay on Free" on the expired banner. When given, the banner offers the
+   * choice next to Upgrade; the host records it and stops asking for a while.
+   */
+  onStayOnFree?: () => void;
 }
 
-function getTrialMessage(
+export function getTrialMessage(
   daysRemaining: number,
   quoteCount: number,
   trialExpired: boolean,
@@ -41,12 +47,16 @@ function getTrialMessage(
   }
 
   if (trialExpired) {
-    const expiredMessages = [
-      { title: "Time's up, legend", subtitle: quoteCount > 0 ? `You smashed out ${quoteCount} quotes — don't let that momentum die on the vine` : "Your free trial's gone the way of the dodo" },
-      { title: "She's cooked, mate", subtitle: "Trial's done and dusted. Upgrade before your quotes go walkabout" },
-      { title: "Trial's cactus", subtitle: "Dead as a doornail. Time to go Pro or go home" },
-    ];
-    return expiredMessages[quoteCount % expiredMessages.length];
+    // Plain and honest — this one is seen every session until they choose.
+    // Quotes still send on Free; what Pro keeps is the full kit. No "go Pro
+    // or go home": the guilt quips came off the paywall on 11 Sep 2026 and
+    // this banner was only ever unreachable, not exempt.
+    return {
+      title: "Your free trial's finished",
+      subtitle: quoteCount > 0
+        ? `${quoteCount} quote${quoteCount === 1 ? '' : 's'} on the board. Quotes still send on Free — Pro keeps the full kit`
+        : 'Quotes still send on Free — Pro keeps the full kit',
+    };
   }
 
   if (daysRemaining <= 1) {
@@ -106,7 +116,7 @@ function getTrialMessage(
   return freshMessages[quoteCount % freshMessages.length];
 }
 
-export function TrialBanner({ trial, quoteCount, compact = false }: TrialBannerProps) {
+export function TrialBanner({ trial, quoteCount, compact = false, onStayOnFree }: TrialBannerProps) {
   const styles = useStyles();
   const themeColors = useThemeColors();
   const navigation = useNavigation<any>();
@@ -122,6 +132,12 @@ export function TrialBanner({ trial, quoteCount, compact = false }: TrialBannerP
   const daysRemaining = Math.max(0, Math.ceil((endMs - now) / (24 * 60 * 60 * 1000)));
   const trialExpired = now >= endMs;
   const progress = Math.max(0, 1 - (elapsed / windowMs));
+
+  // One impression per mount of the expired state on the full banner — the
+  // Settings copy (compact) is the tradie going looking, not us asking.
+  React.useEffect(() => {
+    if (trialExpired && !compact) trackEvent('trial_expired_banner_shown', {});
+  }, [trialExpired, compact]);
 
   const { title, subtitle } = getTrialMessage(daysRemaining, quoteCount, trialExpired, !!window?.isReturnTrial);
 
@@ -191,14 +207,27 @@ export function TrialBanner({ trial, quoteCount, compact = false }: TrialBannerP
           <MaterialCommunityIcons name="chevron-right" size={20} color={themeColors.textSecondary} />
         </View>
         {trialExpired && (
-          <Button
-            mode="contained" buttonColor={themeColors.accent} textColor={themeColors.onAccent}
-            compact
-            onPress={handlePress}
-            style={styles.upgradeButton}
-          >
-            Upgrade to Pro
-          </Button>
+          <View style={styles.expiredActions}>
+            <Button
+              mode="contained" buttonColor={themeColors.accent} textColor={themeColors.onAccent}
+              compact
+              onPress={handlePress}
+              style={styles.upgradeButton}
+            >
+              Upgrade to Pro
+            </Button>
+            {onStayOnFree && (
+              <Button
+                mode="text"
+                compact
+                textColor={themeColors.textSecondary}
+                onPress={onStayOnFree}
+                accessibilityLabel="Stay on Free"
+              >
+                Stay on Free
+              </Button>
+            )}
+          </View>
         )}
       </Surface>
     </TouchableOpacity>
@@ -263,8 +292,14 @@ const useStyles = makeStyles((t) => ({
     fontSize: 11,
     fontWeight: '600',
   },
-  upgradeButton: {
+  expiredActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
     marginTop: 12,
+  },
+  upgradeButton: {
+    marginTop: 0,
   },
   // Compact styles (for settings screen)
   compactTitle: {
