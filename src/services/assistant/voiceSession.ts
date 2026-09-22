@@ -537,9 +537,10 @@ async function openGeminiVoiceSession(
             model: `models/${model}`,
             generationConfig: {
               responseModalities: ['AUDIO'],
-              // Pin the session to English. gemini-live-2.5-flash is a
-              // half-cascade model, so it accepts speechConfig.languageCode
-              // (native-audio models don't). Without it the ASR auto-detects
+              // Pin the session to English. The Live models this key has run
+              // (2.5 half-cascade, 3.1 preview, gemini-3.8-live — the last
+              // verified against the constrained socket on 21 Sep 2026) all
+              // accept speechConfig.languageCode. Without it the ASR auto-detects
               // per utterance and intermittently renders plain English in
               // another language (a known Live preview bug — e.g. a stray
               // "à compter de Non, je ne pense pas." for "No, I don't think

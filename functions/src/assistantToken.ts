@@ -41,11 +41,17 @@ import {
 const corsHandler = cors({ origin: true });
 const db = () => admin.firestore();
 
-// Keep model identity here so the client can render "Mate (gemini-3.1-flash)"
-// without hard-coding the string. Bind the same model into the ephemeral
-// token's liveConnectConstraints — the client can't escalate to a more
-// expensive model with the same token.
-const GEMINI_MODEL = 'gemini-3.1-flash-live-preview';
+// Keep model identity here so the client can render "Mate (gemini-3.8-live)"
+// without hard-coding the string. The client opens its Live socket on
+// exactly this model (voiceSession.ts reads it off the mint response).
+//
+// 21 Sep 2026: gemini-3.1-flash-live-preview → gemini-3.8-live (GA, listed
+// on this key with bidiGenerateContent). Verified over the constrained
+// ephemeral-token socket with the app's own setup frame: AUDIO modality,
+// speechConfig.languageCode en-US accepted, tools called, both
+// transcriptions present, usageMetadata carries per-modality details plus
+// thoughtsTokenCount. Pricing row lives in assistantCosts.ts.
+const GEMINI_MODEL = 'gemini-3.8-live';
 const TOKEN_TTL_MINUTES = 30;
 const NEW_SESSION_WINDOW_MINUTES = 1;
 
