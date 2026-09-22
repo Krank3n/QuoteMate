@@ -86,7 +86,7 @@ vi.mock('./SendGateModal', () => ({ SendGateModal: () => null }));
 // Stub preview: exposes the callbacks the dialog wires into it so the tests
 // can drive "sent", "closed" and "more ways to send" without the real modal.
 vi.mock('./DocumentEmailPreviewModal', () => ({
-  DocumentEmailPreviewModal: ({ visible, onDismiss, onSent, onMoreWaysToSend, onEmailBodyChange, emailBody, isRegenerating }: any) =>
+  DocumentEmailPreviewModal: ({ visible, onDismiss, onSent, onMoreWaysToSend, onDeliveryGate, onEmailBodyChange, emailBody, isRegenerating }: any) =>
     visible
       ? React.createElement(
           'div',
@@ -96,6 +96,7 @@ vi.mock('./DocumentEmailPreviewModal', () => ({
           React.createElement('button', { onClick: onSent }, 'stub-sent'),
           React.createElement('button', { onClick: onDismiss }, 'stub-close'),
           React.createElement('button', { onClick: onMoreWaysToSend }, 'stub-more'),
+          React.createElement('button', { onClick: onDeliveryGate }, 'stub-gate'),
           React.createElement('button', { onClick: () => onEmailBodyChange('MY HAND EDITS') }, 'stub-edit'),
         )
       : null,
@@ -716,6 +717,21 @@ describe('the free-tier send gate', () => {
 
     await waitFor(() => expect(eventProps('send_gate_shown')).toEqual({ doc_type: 'quote' }));
     expect(screen.queryByTestId('preview')).toBeNull();
+  });
+
+  it('opens when the SERVER refuses the send, instead of a dead-end alert', async () => {
+    // Our gate let the send through (a plain quote passes on every plan) but
+    // sendQuoteEmail answered 402 connect_square — the preview hands that
+    // back and the tradie meets the same two options they would have here.
+    renderDialog();
+    await waitFor(() => expect(screen.getByTestId('preview')).toBeTruthy());
+    expect(eventProps('send_gate_shown')).toBeUndefined();
+
+    fireEvent.click(screen.getByText('stub-gate'));
+
+    await waitFor(() => expect(eventProps('send_gate_shown')).toEqual({ doc_type: 'quote' }));
+    expect(screen.queryByTestId('preview')).toBeNull();
+    expect(eventProps('email_preview_abandoned')).toBeUndefined();
   });
 });
 
