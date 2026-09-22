@@ -1995,11 +1995,12 @@ export async function computeFunnelPayload(): Promise<FunnelPayload> {
   const firestore = db();
   const now = Date.now();
 
-  const [{ users: authUsers, internal: internalAccounts }, subs, emailStates, docsSnap] = await Promise.all([
+  const [{ users: authUsers, internal: internalAccounts }, subs, emailStates, docsSnap, paywallUids] = await Promise.all([
     listRealAuthUsers(),
     fetchAllSubscriptions(),
     fetchAllEmailStates(),
     firestore.collectionGroup('documents').get(),
+    fetchPaywallViewerUids(),
   ]);
 
   // One pass over every document: mark which uids have an activating (sent)
@@ -2029,10 +2030,35 @@ export async function computeFunnelPayload(): Promise<FunnelPayload> {
       lastActivityAt: ts(es.lastActivityAt),
       hasSentDoc: activatedUids.has(u.uid),
       quoteStage: quoteStages.get(u.uid) || 'none',
+      ...(paywallUids ? { viewedPaywall: paywallUids.has(u.uid) } : {}),
     };
   });
 
   return { ...computeFunnelStats(inputs, now), excluded: { internalAccounts } };
+}
+
+// Every uid with at least one paywall_viewed client event, all time — the
+// funnel's paywall step is a cohort count, so it can't use the event funnel's
+// 30-day window. Needs the events.event COLLECTION_GROUP override in
+// firestore.indexes.json; until that's deployed (or on any read failure) this
+// returns null and the funnel simply omits the paywall step.
+async function fetchPaywallViewerUids(): Promise<Set<string> | null> {
+  try {
+    const snap = await db()
+      .collectionGroup('events')
+      .where('event', '==', 'paywall_viewed')
+      .select()
+      .get();
+    const uids = new Set<string>();
+    for (const d of snap.docs) {
+      const uid = d.ref.parent.parent?.id;
+      if (uid) uids.add(uid);
+    }
+    return uids;
+  } catch (err) {
+    console.error('computeFunnelPayload: paywall events read failed, omitting paywall step', err);
+    return null;
+  }
 }
 
 const FUNNEL_CACHE_TTL_MS = 15 * 60 * 1000;
