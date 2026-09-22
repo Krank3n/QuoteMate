@@ -12,6 +12,8 @@ import { summariseModels } from './shared/assistant/modelsUsed';
 import * as admin from 'firebase-admin';
 import { sendEmail, getUserEmail } from './email';
 import { applyBrevoEventToLead } from './leadOutreach';
+import { brevoOpenTarget, isBrevoHumanOpen } from './brevoOpenSignal.helpers';
+import { adminRecordEmailOpenDeps, recordEmailOpenOnQuote } from './customerOpenRecord';
 import {
   stageToQuoteStatus,
   stageToInvoiceStatus,
@@ -3187,6 +3189,27 @@ export const brevoEmailWebhook = functions.https.onRequest(async (req, res) => {
 
       await logRef.set(update, { merge: true });
       matched++;
+
+      // A human open of a customer-facing quote email is the customer-open
+      // signal (Brevo separates proxy prefetches into proxy_open, which we
+      // ignore). Our own pixel catches some of these, but Brevo's image
+      // proxy caches it, so repeat opens reach us only sometimes; the
+      // webhook arrives for every open. Same stamp, same throttle, same
+      // derivation → the onQuoteViewed push and the app's timeline/chip
+      // need nothing extra. Never lets a stamp failure fail the webhook.
+      if (isBrevoHumanOpen(event)) {
+        try {
+          const row = (await logRef.get()).data();
+          const target = brevoOpenTarget(event, row);
+          if (target) {
+            const openedAtMs = at instanceof admin.firestore.Timestamp ? at.toMillis() : Date.now();
+            const result = await recordEmailOpenOnQuote(adminRecordEmailOpenDeps, target, openedAtMs);
+            functions.logger.info('brevo_open_stamped', { ...target, event, ...result });
+          }
+        } catch (e: any) {
+          functions.logger.warn('brevo_open_stamp_failed', { logId, event, message: e?.message });
+        }
+      }
     }
 
     res.json({ ok: true, matched, unmatched });

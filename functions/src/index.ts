@@ -239,35 +239,7 @@ import { hashTerms } from './shared/pdf/terms/defaultAuTradie';
 import { generateQuotePdfBuffer } from './pdfGenerator';
 import { normaliseTimestamp } from './timestamps.helpers';
 import { decideQuoteOpenedPush } from './quoteOpenedPush.helpers';
-import { customerOpenProjection } from './shared/document/customerOpened';
-
-/**
- * Push the customer-open slice of a legacy quote straight onto its
- * documents/{id} mirror. The open stamps never bump the legacy `updatedAt`,
- * and documentMirror's writeMirror skips any projection older than what is
- * on disk — so after any path that moved the mirror's updatedAt ahead of
- * the legacy row (the share-link mint, the terms snapshot, a Square link
- * rotation) an open would reach the push but never the app. Merge, no
- * updatedAt bump, and a missing mirror is left for the mirror trigger to
- * create — never half-built here.
- */
-async function projectCustomerOpenToDocument(
-  userId: string,
-  quoteId: string,
-  legacy: FirebaseFirestore.DocumentData | undefined,
-): Promise<void> {
-  if (!legacy) return;
-  const slice = Object.fromEntries(
-    Object.entries(customerOpenProjection(legacy as any)).filter(([, v]) => v !== undefined),
-  );
-  if (Object.keys(slice).length === 0) return;
-  try {
-    await db.doc(`users/${userId}/documents/${quoteId}`).update(slice);
-  } catch (err: any) {
-    // NOT_FOUND (gRPC 5): no mirror yet — the next legacy write projects it whole.
-    if (err?.code !== 5) functions.logger.warn('customer_open_projection_failed', { userId, quoteId, message: err?.message });
-  }
-}
+import { projectCustomerOpenToDocument } from './customerOpenRecord';
 import {
   selectQuotesForFollowUp,
   selectInvoicesForFollowUp,
