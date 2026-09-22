@@ -57,6 +57,13 @@ describe('quote_opened timeline event', () => {
     expect(kinds([quote({ customerOpenedAt: T - 2 * HOUR, sentAt: T - HOUR })])).not.toContain('quote_opened');
   });
 
+  it('judges staleness against the LATEST send, since the mirror sentAt is first-send only', () => {
+    // Sent at T-2h, opened at T-90m, re-sent at T-1h: nothing has been opened since the re-send.
+    expect(kinds([quote({ sentAt: T - 2 * HOUR, customerOpenedAt: T - 1.5 * HOUR, lastSentAt: T - HOUR })])).not.toContain('quote_opened');
+    // …and an open after the re-send shows again.
+    expect(kinds([quote({ sentAt: T - 2 * HOUR, customerOpenedAt: T - HOUR / 2, lastSentAt: T - HOUR })])).toContain('quote_opened');
+  });
+
   it('is absent for an unsent draft and for an invoice', () => {
     expect(kinds([quote({ stage: 'draft', sentAt: undefined, customerOpenedAt: T })])).not.toContain('quote_opened');
     expect(kinds([quote({ type: 'invoice', stage: 'invoice_sent', customerOpenedAt: T })])).not.toContain('quote_opened');

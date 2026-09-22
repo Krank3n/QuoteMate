@@ -54,6 +54,25 @@ describe('decideQuoteOpenedPush — email open', () => {
     expect(decideQuoteOpenedPush({ status: 'sent' }, later, NOW)).toEqual({ push: true, signal: 'email' });
   });
 
+  it('re-arms when a proxy took the first stamp and a person opens later — via the last-open stamp', () => {
+    const sentAt = ts(NOW - 3 * 3600_000);
+    const prefetched = { status: 'sent', sentAt, emailFirstOpenedAt: ts(NOW - 3 * 3600_000 + 4000), emailFirstOpenAfterMs: 4000, emailOpenCount: 1 };
+    expect(decideQuoteOpenedPush({ status: 'sent', sentAt }, prefetched, NOW)).toEqual({ push: false, reason: 'no-open' });
+    const human = { ...prefetched, emailLastOpenedAt: ts(NOW), emailOpenCount: 2 };
+    expect(decideQuoteOpenedPush(prefetched, human, NOW)).toEqual({ push: true, signal: 'email' });
+    // and the self-write of viewNotifiedAt after that push is a repeat, not a new open
+    expect(decideQuoteOpenedPush(human, { ...human, viewNotifiedAt: ts(NOW) }, NOW + 1000)).toEqual({ push: false, reason: 'repeat-open' });
+  });
+
+  it('re-arms after a re-send: the old open is stale, a fresh open pushes again', () => {
+    const oldSend = ts(NOW - 5 * 86400_000);
+    const opened = { status: 'sent', sentAt: oldSend, emailFirstOpenedAt: ts(NOW - 5 * 86400_000 + 600_000), emailFirstOpenAfterMs: 600_000, viewNotifiedAt: ts(NOW - 5 * 86400_000 + 600_000) };
+    const resent = { ...opened, sentAt: ts(NOW - 3600_000) };
+    expect(decideQuoteOpenedPush(opened, resent, NOW)).toEqual({ push: false, reason: 'no-open' });
+    const reopened = { ...resent, emailLastOpenedAt: ts(NOW), emailOpenCount: 2 };
+    expect(decideQuoteOpenedPush(resent, reopened, NOW)).toEqual({ push: true, signal: 'email' });
+  });
+
   it('does not treat an email open as new when a page view was already known', () => {
     const before = { status: 'sent', lastViewedAt: ts(NOW - 60_000) };
     const after = { ...before, emailFirstOpenedAt: ts(NOW), emailFirstOpenAfterMs: 120_000 };

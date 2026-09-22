@@ -17,7 +17,7 @@ import type {
   DocumentType,
   LegacyDocumentRecord,
 } from './types';
-import { customerOpenSource, customerOpenedAtMs } from './customerOpened';
+import { customerOpenProjection } from './customerOpened';
 import { fromMs, toMs, toMsRequired } from './time';
 
 // -------- date helpers --------------------------------------------------
@@ -173,23 +173,13 @@ function projectShared(s: LegacyDocumentRecord, type: DocumentType): LegacyDocum
     aiSkipped: type === 'quote' ? s.aiSkipped : undefined,
     draftStep: type === 'quote' ? s.draftStep : undefined,
     invoicedAt: type === 'quote' ? toMs(s.invoicedAt) : undefined,
-    // Customer-open signals. The acceptance page stamps firstViewedAt /
-    // lastViewedAt / viewCount and the email pixel stamps emailFirst/
-    // LastOpenedAt / emailOpenCount / emailFirstOpenAfterMs on the LEGACY
-    // quote only; nothing downstream could see them until they rode along
-    // here. customerOpenedAt / customerOpenSource are the derived answer the
-    // app reads (shared/document/customerOpened.ts) so the client never
-    // re-derives the prefetch rule.
-    firstViewedAt: type === 'quote' ? toMs(s.firstViewedAt) : undefined,
-    lastViewedAt: type === 'quote' ? toMs(s.lastViewedAt) : undefined,
-    viewCount: type === 'quote' && typeof s.viewCount === 'number' ? s.viewCount : undefined,
-    emailFirstOpenedAt: type === 'quote' ? toMs(s.emailFirstOpenedAt) : undefined,
-    emailLastOpenedAt: type === 'quote' ? toMs(s.emailLastOpenedAt) : undefined,
-    emailOpenCount: type === 'quote' && typeof s.emailOpenCount === 'number' ? s.emailOpenCount : undefined,
-    emailFirstOpenAfterMs:
-      type === 'quote' && typeof s.emailFirstOpenAfterMs === 'number' ? s.emailFirstOpenAfterMs : undefined,
-    customerOpenedAt: type === 'quote' ? customerOpenedAtMs(s) ?? undefined : undefined,
-    customerOpenSource: type === 'quote' ? customerOpenSource(s) ?? undefined : undefined,
+    // Customer-open signals (acceptance-page view stamps + email-pixel
+    // stamps) live on the LEGACY quote only; nothing downstream could see
+    // them until they rode along here, together with the derived
+    // customerOpenedAt / customerOpenSource the app reads. One helper builds
+    // the slice so the two handlers that stamp opens can write the same
+    // shape straight onto documents/{id} (shared/document/customerOpened.ts).
+    ...(type === 'quote' ? customerOpenProjection(s) : {}),
 
     // Invoice-only optionals (undefined for quotes)
     issueDate: type === 'invoice' ? toMs(s.issueDate) : undefined,

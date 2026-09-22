@@ -140,6 +140,20 @@ describe('nudge-class pushes', () => {
     expect(perth.reason).toBe('quiet_hours');
   });
 
+  it('holds an event to the daytime window only when asked, and never counts it against the nudge cap', () => {
+    const night = decidePush({ event: 'quote_viewed', timezone: 'Australia/Sydney', nowMs: SYDNEY_2200, quietHours: true });
+    expect(night.send).toBe(false);
+    expect(night.reason).toBe('quiet_hours');
+    expect(night.pushClass).toBe('event');
+
+    const nightUnconditional = decidePush({ event: 'quote_viewed', timezone: 'Australia/Sydney', nowMs: SYDNEY_2200 });
+    expect(nightUnconditional.send).toBe(true);
+
+    const dayAtCap = decidePush({ event: 'quote_viewed', timezone: 'Australia/Sydney', nowMs: SYDNEY_1000, quietHours: true, nudgesSentToday: 99 });
+    expect(dayAtCap.send).toBe(true);
+    expect(dayAtCap.reason).toBe('ok');
+  });
+
   it('suppresses nudges late at night', () => {
     const decision = decidePush({
       event: 'invoice_overdue',

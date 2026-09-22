@@ -59,16 +59,19 @@ function push(events: TimelineEvent[], e: TimelineEvent | null) {
 /**
  * The customer's first trustworthy open of a SENT quote, in ms, else null.
  * `customerOpenedAt` is derived by the mirror (shared/document/customerOpened
- * .ts — page view or email pixel past the proxy-prefetch window). An open
- * that predates sentAt is a stale stamp from an earlier send and says
- * nothing about this quote, so it is ignored. Shared by the timeline event
- * and the JobScopeCard stage chip so both surfaces agree.
+ * .ts — page view or email pixel past the proxy-prefetch window). The
+ * mirror's `sentAt` is the FIRST send and never moves; `lastSentAt` is the
+ * latest real send. An open that predates the latest send belongs to an
+ * earlier version of the quote and says nothing about this one, so it is
+ * ignored. Shared by the timeline event and the JobScopeCard stage chip so
+ * both surfaces agree.
  */
 export function quoteOpenedAfterSend(
-  doc: Pick<Document, 'type' | 'customerOpenedAt' | 'sentAt'>,
+  doc: Pick<Document, 'type' | 'customerOpenedAt' | 'sentAt' | 'lastSentAt'>,
 ): number | null {
   if (doc.type !== 'quote' || !doc.customerOpenedAt || !doc.sentAt) return null;
-  return doc.customerOpenedAt >= doc.sentAt ? doc.customerOpenedAt : null;
+  const latestSend = doc.lastSentAt ?? doc.sentAt;
+  return doc.customerOpenedAt >= latestSend ? doc.customerOpenedAt : null;
 }
 
 /**

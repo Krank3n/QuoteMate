@@ -156,6 +156,7 @@ export interface Document {
   // Stage-transition timestamps. Set by setDocumentStage on the server —
   // never overwritten once set. Drive the activity timeline on ViewJob.
   sentAt?: number;           // first time the doc was stage_sent (quote or invoice)
+  lastSentAt?: number;       // latest real send incl. reminders (sendAuditPatch on the server)
   sendMethod?: SendMethod;   // channel used for that first send (email/sms/share/export)
   acceptedAt?: number;       // first time the doc moved to quote_accepted
   paidInFullAt?: number;     // first time the doc moved to paid
