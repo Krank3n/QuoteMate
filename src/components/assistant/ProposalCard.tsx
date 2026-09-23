@@ -134,6 +134,9 @@ function Body({ proposal }: { proposal: Proposal }) {
           {typeof proposal.travelAdjustment === 'number' && proposal.travelAdjustment > 0 && (
             <Text style={styles.dim}>Travel: {formatCurrency(proposal.travelAdjustment)}</Text>
           )}
+          {typeof proposal.targetTotal === 'number' && proposal.targetTotal > 0 && (
+            <Text style={styles.dim}>Total set to {formatCurrency(proposal.targetTotal)} once it's priced</Text>
+          )}
         </View>
       );
     }

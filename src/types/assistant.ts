@@ -61,6 +61,20 @@ export interface DraftQuoteProposal extends BaseProposal {
    * yields this figure — see landTravelCharge.
    */
   travelAdjustment?: number;
+  /**
+   * The total the tradie stated before the draft ("twenty-nine thousand,
+   * supply and install"). Set on the document the moment pricing lands, by the
+   * same planner propose_set_total runs — not left to the model to remember:
+   * Rural Built (22 Sep 2026) was told "I'll set it to $29,000 after pricing"
+   * and the quote sat at the engine's $45,840.
+   */
+  targetTotal?: number;
+  /**
+   * A deliberate second version of a job already quoted for this customer —
+   * the labour-only price beside the supply-and-lay one, Colorbond beside
+   * paling. Steps the one-job-one-quote guard aside.
+   */
+  option?: boolean;
 }
 
 /** A standing rule about how the tradie quotes, saved to their settings on Apply. */
@@ -484,7 +498,7 @@ export interface AssistantChatResponse {
   // Cards the model confirmed/cancelled in words via the control tools
   // (typed "yes"/"nah"). The screen resolves each exactly as its button tap
   // would, once the turn resolves.
-  controlActions?: Array<{ decision: 'apply' | 'cancel'; messageId: string; proposalId: string }>;
+  controlActions?: Array<{ decision: 'apply' | 'cancel'; messageId: string; proposalId: string; group?: boolean }>;
   usage: {
     inputTokens: number;
     outputTokens: number;

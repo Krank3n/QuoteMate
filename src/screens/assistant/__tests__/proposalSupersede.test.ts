@@ -167,3 +167,27 @@ describe('findSupersededProposals on a continued bubble', () => {
     expect(refs).toEqual([{ messageId: bubble.id, proposalId: 'p1' }]);
   });
 });
+
+describe('rate and preference cards — replaced only by the SAME rate or rule', () => {
+  const rate = (id: string, label: string, rate: number, unit = 'm²', includesMaterials = false): Proposal =>
+    ({ id, toolUseId: `t_${id}`, createdAt: '2026-09-21T10:03:00Z', type: 'propose_save_rate', label, unit, rate, includesMaterials }) as Proposal;
+  const pref = (id: string, text: string): Proposal =>
+    ({ id, toolUseId: `t_${id}`, createdAt: '2026-09-21T10:03:00Z', type: 'propose_remember_preference', text }) as Proposal;
+
+  it('the same rate re-proposed under a reworded label dismisses the stale card', () => {
+    const old = msg([rate('r1', 'Driveway concrete prep', 135), rate('r2', 'Driveway concrete pour', 140, 'm²', true)]);
+    const incoming = [rate('r3', 'Concrete driveway prep - plain finish', 135), rate('r4', 'Concrete driveway pour - plain finish', 140, 'm²', true)];
+    expect(findSupersededProposals([old], incoming).map((r) => r.proposalId).sort()).toEqual(['r1', 'r2']);
+  });
+
+  it('a different rate beside them (the bobcat by the hour) leaves them waiting', () => {
+    const old = msg([rate('r1', 'Driveway concrete prep', 135), rate('r2', 'Driveway concrete pour', 140, 'm²', true)]);
+    expect(findSupersededProposals([old], [rate('r5', 'Bobcat hire', 135, 'hour')])).toEqual([]);
+  });
+
+  it('the same rule said again replaces the waiting card; a different rule does not', () => {
+    const old = msg([pref('p1', 'Work up materials and labour for every job')]);
+    expect(findSupersededProposals([old], [pref('p2', 'work up materials and labour for every job.')]).map((r) => r.proposalId)).toEqual(['p1']);
+    expect(findSupersededProposals([old], [pref('p3', 'Always add a skip bin on demolition jobs')])).toEqual([]);
+  });
+});

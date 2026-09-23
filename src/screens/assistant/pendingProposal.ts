@@ -21,3 +21,18 @@ export function findPendingProposal(
   }
   return null;
 }
+
+// The cards one "yes" confirms: the pinned card plus every other pending card
+// of the SAME kind that Mate put up alongside it in that message ("two cards
+// up — tap to confirm both"). Matt Browns Concreting, 21 Sep 2026: two rate
+// cards up, "Yeah" typed four times, nothing saved — a yes resolved at most
+// one card, so the model kept putting the pair up again instead. Mixed kinds
+// (a draft beside a save-rate card) stay one card per yes; the model names
+// the other by id if the tradie means it too.
+export function pendingCardsForYes(message: ChatMessage, pinned: Proposal): Proposal[] {
+  const status = message.proposalStatus || {};
+  const same = (message.proposals || []).filter(
+    (p) => p.type === pinned.type && (status[p.id] || 'pending') === 'pending',
+  );
+  return same.some((p) => p.id === pinned.id) ? same : [pinned];
+}

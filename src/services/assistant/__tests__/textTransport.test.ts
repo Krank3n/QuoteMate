@@ -643,7 +643,8 @@ describe('typed confirmations (control tools)', () => {
       .mockResolvedValueOnce(okChatResponse('Done — pricing it up now.'));
     const res = await sendAssistantTurn({ history });
     expect(res.controlActions).toEqual([
-      { decision: 'apply', messageId: 'm9', proposalId: 'prop_9' },
+      // No proposalId from the model — a plain yes/nah, so same-kind siblings go too.
+      { decision: 'apply', messageId: 'm9', proposalId: 'prop_9', group: true },
     ]);
     // The model was told ok inside the turn.
     const secondBody = JSON.parse((fetchMock.mock.calls[1][1] as any).body);
@@ -658,7 +659,8 @@ describe('typed confirmations (control tools)', () => {
       .mockResolvedValueOnce(okChatResponse('No worries, binned it.'));
     const res = await sendAssistantTurn({ history });
     expect(res.controlActions).toEqual([
-      { decision: 'cancel', messageId: 'm9', proposalId: 'prop_9' },
+      // No proposalId from the model — a plain yes/nah, so same-kind siblings go too.
+      { decision: 'cancel', messageId: 'm9', proposalId: 'prop_9', group: true },
     ]);
   });
 

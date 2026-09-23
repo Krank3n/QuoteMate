@@ -44,6 +44,12 @@ export interface ControlAction {
   decision: 'apply' | 'cancel';
   messageId: string;
   proposalId: string;
+  /**
+   * True when the model named no card — a plain "yes". The screen then
+   * resolves the waiting cards of the same kind alongside it (see
+   * pendingCardsForYes); a named card is resolved alone.
+   */
+  group?: boolean;
 }
 
 export interface ToolCallOutput {
@@ -114,7 +120,12 @@ export async function dispatchToolCall(call: ToolCallInput): Promise<ToolCallOut
     if (!gate.ok) {
       return { name, id, response: { error: gate.error } };
     }
-    return { name, id, response: { ok: true }, control: { decision, ...gate.ref } };
+    return {
+      name,
+      id,
+      response: { ok: true },
+      control: { decision, ...gate.ref, ...(input?.proposalId ? {} : { group: true }) },
+    };
   }
 
   if (name === 'show_quote') {

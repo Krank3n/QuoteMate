@@ -31,6 +31,22 @@ const PER_QUOTE = new Set([
   'propose_send_quote',
 ]);
 
+// Types where a newer card replaces an older pending one only when both say
+// the SAME thing — the same rate (unit, figure, all-in or labour), the same
+// rule. Matt Browns Concreting, 21 Sep 2026: the prep and pour rate cards
+// were re-proposed three times under reworded labels ("Driveway concrete
+// prep" / "Concrete driveway prep - plain finish") and eight pending cards
+// stacked up. A different rate — the bobcat at its own hourly figure beside
+// them — is a different decision and stays.
+const SAME_CONTENT: Record<string, (p: Proposal) => string> = {
+  propose_save_rate: (p) => {
+    const r = p as Extract<Proposal, { type: 'propose_save_rate' }>;
+    return `${r.unit}|${r.rate}|${r.includesMaterials}`;
+  },
+  propose_remember_preference: (p) =>
+    (p as Extract<Proposal, { type: 'propose_remember_preference' }>).text.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(),
+};
+
 function isPending(message: ChatMessage, proposal: Proposal): boolean {
   return (message.proposalStatus?.[proposal.id] ?? 'pending') === 'pending';
 }
@@ -54,13 +70,15 @@ export function findSupersededProposals(
   for (const next of incoming) {
     const perConvo = PER_CONVERSATION.has(next.type);
     const perQuote = PER_QUOTE.has(next.type);
-    if (!perConvo && !perQuote) continue;
+    const contentKey = SAME_CONTENT[next.type];
+    if (!perConvo && !perQuote && !contentKey) continue;
     const nextQuoteId = (next as { quoteId?: string }).quoteId;
     for (const message of messages) {
       for (const prior of message.proposals || []) {
         if (prior.type !== next.type || incomingIds.has(prior.id)) continue;
         if (!isPending(message, prior)) continue;
         if (perQuote && (prior as { quoteId?: string }).quoteId !== nextQuoteId) continue;
+        if (contentKey && contentKey(prior) !== contentKey(next)) continue;
         refs.push({ messageId: message.id, proposalId: prior.id });
       }
     }

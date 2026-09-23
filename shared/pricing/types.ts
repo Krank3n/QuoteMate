@@ -106,6 +106,15 @@ export interface Material {
    * would silently destroy the tradie's scope text on the next reprice.
    */
   scope?: string;
+  /**
+   * Set on a work item Mate minted from a rate line, saying how the tradie
+   * charged the job: 'all_in' (the rate is the whole price — nothing to
+   * generate), 'labour' (labour only, materials priced on top) or
+   * 'labour_no_materials' (labour only and the customer supplies the gear).
+   * A scope change re-runs in the same mode instead of generating a full
+   * materials list and fresh hours on top of the tradie's own price.
+   */
+  rateCard?: 'all_in' | 'labour' | 'labour_no_materials';
   brand?: string; // Product brand
   stockLevel?: string; // Stock availability (deprecated, use stockCheckedAt)
   stockCheckedAt?: string; // ISO timestamp of when stock was last checked

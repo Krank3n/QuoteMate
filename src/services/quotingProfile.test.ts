@@ -10,6 +10,7 @@ import {
   addPreference,
   buildQuotingProfileBlock,
   buildRateWorkItem,
+  rateModeOfQuote,
   formatRate,
   normalisePreference,
   normaliseRateUnit,
@@ -278,5 +279,31 @@ describe('parseRateAmount', () => {
     expect(parseRateAmount('12.3.4')).toBeNull();
     expect(parseRateAmount(120)).toBeNull();
     expect(parseRateAmount(undefined)).toBeNull();
+  });
+});
+
+describe('rateModeOfQuote — how a scope change re-runs a rate-card quote', () => {
+  const allIn = { label: 'Exposed aggregate', quantity: 45, unit: 'm²' as const, unitPrice: 165, includesMaterials: true };
+  const labour = { ...allIn, label: 'Pour and finish', unitPrice: 80, includesMaterials: false };
+
+  it('stamps each rate row with how it was charged', () => {
+    expect(buildRateWorkItem(allIn, 'exclusive', false).rateCard).toBe('all_in');
+    expect(buildRateWorkItem(labour, 'exclusive', false).rateCard).toBe('labour');
+    const supplied = buildRateWorkItem(labour, 'exclusive', false, { customerSupplies: true });
+    expect(supplied.rateCard).toBe('labour_no_materials');
+    expect(supplied.scope).toMatch(/— labour only, materials supplied by the customer$/);
+  });
+
+  it('reads the mode back — all-in, labour, customer-supplied — and null with no rate rows', () => {
+    expect(rateModeOfQuote([buildRateWorkItem(allIn, 'exclusive', false)])).toEqual({ rateLineCount: 1, ratesCoverMaterials: true, labourOnly: false });
+    expect(rateModeOfQuote([buildRateWorkItem(labour, 'exclusive', false)])).toEqual({ rateLineCount: 1, ratesCoverMaterials: false, labourOnly: false });
+    expect(rateModeOfQuote([buildRateWorkItem(labour, 'exclusive', false, { customerSupplies: true })])).toEqual({ rateLineCount: 1, ratesCoverMaterials: false, labourOnly: true });
+    expect(rateModeOfQuote([])).toBeNull();
+    expect(rateModeOfQuote([{ id: 'x', name: 'Handrail', kind: 'work', scope: 'Custom handrail', quantity: 1, unit: 'each', price: 400 } as any])).toBeNull();
+  });
+
+  it('a row minted before the stamp is read off the scope text it always carried', () => {
+    const { rateCard: _gone, ...legacy } = buildRateWorkItem(allIn, 'exclusive', false);
+    expect(rateModeOfQuote([legacy as any])?.ratesCoverMaterials).toBe(true);
   });
 });

@@ -40,3 +40,19 @@ describe('gateControlAction', () => {
     expect(res.ok).toBe(true);
   });
 });
+
+describe('dispatchToolCall — a plain yes vs a named card', () => {
+  it('no proposalId → group: the screen confirms same-kind siblings too', async () => {
+    const { dispatchToolCall } = await import('../toolDispatcher');
+    setPendingProposalProbe(() => ({ messageId: 'm1', proposalId: 'prop_rate_2' }));
+    const out = await dispatchToolCall({ name: 'apply_pending_proposal', id: 'c1', args: {} });
+    expect(out.control).toEqual({ decision: 'apply', messageId: 'm1', proposalId: 'prop_rate_2', group: true });
+  });
+
+  it('a named card is resolved alone', async () => {
+    const { dispatchToolCall } = await import('../toolDispatcher');
+    setPendingProposalProbe((id) => ({ messageId: 'm1', proposalId: id! }));
+    const out = await dispatchToolCall({ name: 'apply_pending_proposal', id: 'c2', args: { proposalId: 'prop_rate_1' } });
+    expect(out.control).toEqual({ decision: 'apply', messageId: 'm1', proposalId: 'prop_rate_1' });
+  });
+});

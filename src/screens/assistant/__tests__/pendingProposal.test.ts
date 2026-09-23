@@ -4,7 +4,7 @@
  * card a spoken confirm would.
  */
 import { describe, it, expect } from 'vitest';
-import { findPendingProposal } from '../pendingProposal';
+import { findPendingProposal, pendingCardsForYes } from '../pendingProposal';
 import type { ChatMessage, Proposal } from '../../../types/assistant';
 
 function prop(id: string): Proposal {
@@ -54,5 +54,26 @@ describe('findPendingProposal', () => {
   it('missing status map means pending (matches the card renderer)', () => {
     const bare = msg([prop('p1')]);
     expect(findPendingProposal([bare])?.proposal.id).toBe('p1');
+  });
+});
+
+describe('pendingCardsForYes — Matt Browns Concreting, 21 Sep 2026: two rate cards, "Yeah" ×4, nothing saved', () => {
+  const rate = (id: string, rate: number): Proposal =>
+    ({ id, toolUseId: `t_${id}`, createdAt: '2026-09-21T10:02:34Z', type: 'propose_save_rate', label: `Rate ${id}`, unit: 'm²', rate, includesMaterials: false }) as Proposal;
+
+  it('a yes confirms every waiting card of the same kind in that message', () => {
+    const m = msg([rate('prep', 135), rate('pour', 140)]);
+    expect(pendingCardsForYes(m, m.proposals![1]).map((p) => p.id)).toEqual(['prep', 'pour']);
+  });
+
+  it('skips a sibling already applied or dismissed', () => {
+    const m = msg([rate('prep', 135), rate('pour', 140)], { prep: 'applied' });
+    expect(pendingCardsForYes(m, m.proposals![1]).map((p) => p.id)).toEqual(['pour']);
+  });
+
+  it('a card of another kind beside it is not swept in', () => {
+    const m = msg([rate('downlights', 60), prop('send-1')]);
+    expect(pendingCardsForYes(m, m.proposals![1]).map((p) => p.id)).toEqual(['send-1']);
+    expect(pendingCardsForYes(m, m.proposals![0]).map((p) => p.id)).toEqual(['downlights']);
   });
 });

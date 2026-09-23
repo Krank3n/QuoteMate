@@ -151,7 +151,7 @@ import { createUnansweredTurn, unansweredTurnBubble } from './assistant/unanswer
 import { formatCurrency } from '../utils/documentCalculator';
 import { setPendingProposalProbe } from '../services/assistant/pendingProposalGate';
 import { findSupersededProposals } from './assistant/proposalSupersede';
-import { findPendingProposal } from './assistant/pendingProposal';
+import { findPendingProposal, pendingCardsForYes } from './assistant/pendingProposal';
 import { ensureLocalUri } from '../services/assistant/attachmentBytes';
 import { useSupplierListImport, type ExtractResult } from '../hooks/useSupplierListImport';
 import type { SaveSummary } from '../hooks/useSupplierListImport';
@@ -644,6 +644,8 @@ export function AssistantScreen() {
     decision: 'apply' | 'cancel';
     message: ChatMessage;
     proposal: Proposal;
+    /** A plain yes (no card named) — resolve its same-kind siblings too. */
+    group: boolean;
   } | null>(null);
 
   // Lazy-create a conversation on first focus. Chat history isn't persisted —
@@ -2359,10 +2361,17 @@ export function AssistantScreen() {
           const prop = target?.proposals?.find((p) => p.id === action.proposalId);
           if (!target || !prop) continue;
           if ((target.proposalStatus?.[prop.id] ?? 'pending') !== 'pending') continue;
-          if (action.decision === 'apply') {
-            await handleApply(target, prop);
-          } else {
-            handleDismiss(target, prop);
+          const cards = action.group ? pendingCardsForYes(target, prop) : [prop];
+          for (const card of cards) {
+            // A sibling may have been tapped while an earlier one applied.
+            const live = useStore.getState().conversations.find((c) => c.id === convoId)?.messages
+              .find((m) => m.id === target.id);
+            if ((live?.proposalStatus?.[card.id] ?? 'pending') !== 'pending') continue;
+            if (action.decision === 'apply') {
+              await handleApply(live ?? target, card);
+            } else {
+              handleDismiss(live ?? target, card);
+            }
           }
         }
       } catch (err: any) {
@@ -3026,7 +3035,12 @@ export function AssistantScreen() {
               error: proposalId ? 'That card is no longer waiting.' : 'No card is waiting to confirm.',
             };
           }
-          pendingVoiceActionRef.current = { decision, message: found.message, proposal: found.proposal };
+          pendingVoiceActionRef.current = {
+            decision,
+            message: found.message,
+            proposal: found.proposal,
+            group: !proposalId,
+          };
           return { ok: true };
         },
         onShowQuote: (quoteId) => {
@@ -3097,10 +3111,25 @@ export function AssistantScreen() {
           pendingVoiceActionRef.current = null;
           const runVoiceAction = () => {
             if (!voiceAction) return;
+            const cards = voiceAction.group
+              ? pendingCardsForYes(voiceAction.message, voiceAction.proposal)
+              : [voiceAction.proposal];
             if (voiceAction.decision === 'apply') {
-              void handleApply(voiceAction.message, voiceAction.proposal);
+              // One after another: two cards applying at once would race
+              // their writes to the same message's status.
+              const stillPending = (card: Proposal) =>
+                (useStore
+                  .getState()
+                  .conversations.find((c) => c.id === convoId)
+                  ?.messages.find((m) => m.id === voiceAction.message.id)
+                  ?.proposalStatus?.[card.id] ?? 'pending') === 'pending';
+              void cards.reduce<Promise<unknown>>(
+                (prev, card) =>
+                  prev.then(() => (stillPending(card) ? handleApply(voiceAction.message, card) : undefined)),
+                Promise.resolve(),
+              );
             } else {
-              handleDismiss(voiceAction.message, voiceAction.proposal);
+              for (const card of cards) handleDismiss(voiceAction.message, card);
             }
           };
 
