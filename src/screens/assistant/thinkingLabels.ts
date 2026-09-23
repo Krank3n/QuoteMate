@@ -35,6 +35,7 @@ export function labelForToolCall(name: string, args?: Record<string, unknown>): 
     case 'get_business_defaults': return 'Checking your rates…';
     case 'get_job_requirements': return 'Working out what this job needs…';
     case 'search_supplier_book': return 'Checking your supplier book…';
+    case 'get_typical_rates': return 'Checking what others charge…';
     case 'review_quote': return 'Checking the prices…';
     case 'list_service_reports': return 'Looking for service reports…';
     case 'propose_draft_quote': return 'Writing up the scope…';

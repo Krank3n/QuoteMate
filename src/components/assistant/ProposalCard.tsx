@@ -152,7 +152,11 @@ function Body({ proposal }: { proposal: Proposal }) {
         <View>
           <Text style={styles.summary}>{proposal.label}</Text>
           <Text style={styles.dim}>{rateSummary(proposal)}</Text>
-          <Text style={styles.dim}>Goes on your rate card — I'll use it whenever it fits a job.</Text>
+          <Text style={styles.dim}>
+            {proposal.standardLabourRate
+              ? 'Becomes your labour rate on new quotes, and goes on your rate card.'
+              : "Goes on your rate card — I'll use it whenever it fits a job."}
+          </Text>
         </View>
       );
     case 'propose_add_line_item':

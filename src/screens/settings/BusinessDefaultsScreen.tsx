@@ -7,7 +7,7 @@
  * terms). Easier to find and less to scroll past.
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { View, StyleSheet, ScrollView, Alert, TouchableOpacity } from 'react-native';
 // Under edge-to-edge Android no longer resizes the window for the keyboard, so
 // a form screen with a plain ScrollView leaves its fields behind it — and RN's
@@ -64,6 +64,8 @@ export function BusinessDefaultsScreen() {
   const { businessSettings, setBusinessSettings } = useStore();
 
   const [laborRate, setLaborRate] = useState('85');
+  // Edited on this visit — saving it makes the rate theirs (labourRateIsTheirs).
+  const laborRateTouchedRef = useRef(false);
   const [markup, setMarkup] = useState('30');
   const [laborMarkup, setLaborMarkup] = useState('20');
   const [defaultDepositPercentage, setDefaultDepositPercentage] = useState('0');
@@ -175,6 +177,7 @@ export function BusinessDefaultsScreen() {
       await setBusinessSettings({
         ...currentSettings,
         defaultLaborRate: parseFloat(laborRate) || 85,
+        ...(laborRateTouchedRef.current || currentSettings.laborRateConfirmed ? { laborRateConfirmed: true } : {}),
         defaultMarkup: parseFloat(markup) || 30,
         defaultLaborMarkup: parseFloat(laborMarkup) || 0,
         defaultDepositPercentage: Math.max(0, Math.min(100, parseFloat(defaultDepositPercentage) || 0)),
@@ -232,7 +235,10 @@ export function BusinessDefaultsScreen() {
             <TextInput
               label="Hourly Labour Rate"
               value={laborRate}
-              onChangeText={setLaborRate}
+              onChangeText={(text) => {
+                laborRateTouchedRef.current = true;
+                setLaborRate(text);
+              }}
               mode="outlined"
               style={styles.input}
               keyboardType="decimal-pad"

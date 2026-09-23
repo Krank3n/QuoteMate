@@ -459,6 +459,15 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
         ...(typeof input.pricesIncludeGst === 'boolean' ? { pricesIncludeGst: input.pricesIncludeGst } : {}),
         ...(shortText(input.notes) ? { notes: shortText(input.notes) } : {}),
       };
+      if (input.standardLabourRate === true) {
+        if (unit !== 'hour' || input.includesMaterials !== false) {
+          return {
+            error:
+              "standardLabourRate is for their normal hourly labour rate only — unit 'hour', includesMaterials false. For anything else leave standardLabourRate out.",
+          };
+        }
+        proposal.standardLabourRate = true;
+      }
       return { proposal };
     }
 

@@ -4684,8 +4684,21 @@ export const useStore = create<AppState>((set, get) => ({
         case 'propose_save_rate': {
           const settings = get().businessSettings;
           if (!settings) return { ok: false, error: 'Set the business up first — there is nowhere to keep this yet.' };
+          // Their normal hourly rate is also the default new quotes are priced
+          // at — a rate-card entry alone never reached them (Lights Out, 21
+          // Sep: "Saved $150/hour as your labour rate, that'll apply from here
+          // on", while new quotes stayed on the $85 starting value). Stored in
+          // the business's own GST basis, the one the labour rate is read in.
+          const basis = rateGstBasis(settings, proposal.pricesIncludeGst);
+          const businessInclusive = settings.pricesIncludeGst === true;
+          const standardRate = proposal.standardLabourRate
+            ? settings.gstRegistered === false || basis === undefined || basis === businessInclusive
+              ? proposal.rate
+              : roundToTwoDecimals(basis ? proposal.rate / 1.1 : proposal.rate * 1.1)
+            : undefined;
           await get().setBusinessSettings({
             ...settings,
+            ...(standardRate !== undefined ? { defaultLaborRate: standardRate, laborRateConfirmed: true } : {}),
             rateCard: upsertRate(settings.rateCard, {
               label: proposal.label,
               unit: proposal.unit,

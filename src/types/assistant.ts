@@ -93,6 +93,12 @@ export interface SaveRateProposal extends BaseProposal {
   pricesIncludeGst?: boolean;
   includesMaterials: boolean;
   notes?: string;
+  /**
+   * Their normal hourly rate for labour on every job ("I charge 150 an hour").
+   * Apply also makes it the business's default labour rate, which is what new
+   * quotes are priced at — a rate-card entry alone never reached them.
+   */
+  standardLabourRate?: boolean;
 }
 
 export interface AddLineItemProposal extends BaseProposal {

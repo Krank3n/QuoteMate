@@ -8,7 +8,7 @@
  */
 import { describe, it, expect, afterEach } from 'vitest';
 import { MATE_SYSTEM_PROMPT } from '../systemPrompt';
-import { NO_PROFILE_NOTE } from '../../quotingProfile';
+import { NO_PROFILE_NOTE, labourRateNotSetNote } from '../../quotingProfile';
 import {
   FREE_PLAN_NOTE,
   quotingProfileContextNote,
@@ -64,9 +64,20 @@ describe('systemPromptWithProfile', () => {
   });
 
   it('tells Mate nothing is saved yet when settings are loaded but empty', () => {
-    registerQuotingProfileSource(() => ({ supplierPriority: [] } as any));
+    registerQuotingProfileSource(() => ({ supplierPriority: [], defaultLaborRate: 110 } as any));
     expect(systemPromptWithProfile()).toBe(`${MATE_SYSTEM_PROMPT}\n\n${NO_PROFILE_NOTE}`);
     expect(quotingProfileContextNote()).toBe(`[context] ${NO_PROFILE_NOTE}`);
+  });
+
+  // Audit 23 Sep 2026: Mate called the pre-filled starting rate "your rate" to
+  // tradies who had never seen it ("I never saved that or said that").
+  it('says the labour rate is NOT theirs while it is still the pre-filled starting value', () => {
+    registerQuotingProfileSource(() => ({ defaultLaborRate: 85 } as any));
+    expect(systemPromptWithProfile()).toBe(`${MATE_SYSTEM_PROMPT}\n\n${NO_PROFILE_NOTE}\n${labourRateNotSetNote(85)}`);
+    expect(quotingProfileContextNote()).toContain('Labour rate: NOT SET BY THEM');
+    // Confirmed, it's theirs — even at exactly the starting figure.
+    registerQuotingProfileSource(() => ({ defaultLaborRate: 85, laborRateConfirmed: true } as any));
+    expect(systemPromptWithProfile()).toBe(`${MATE_SYSTEM_PROMPT}\n\n${NO_PROFILE_NOTE}`);
   });
 
   // Deliberately self-contained rather than a pointer: on the simulator a
