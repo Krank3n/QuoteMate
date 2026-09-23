@@ -30,6 +30,7 @@ function user(over: Partial<FunnelUserInput>): FunnelUserInput {
     lastActivityAt: 'lastActivityAt' in over ? (over.lastActivityAt as number | null) : null,
     hasSentDoc: over.hasSentDoc ?? false,
     ...(over.quoteStage ? { quoteStage: over.quoteStage } : {}),
+    ...(over.viewedPaywall !== undefined ? { viewedPaywall: over.viewedPaywall } : {}),
   };
 }
 
@@ -437,5 +438,31 @@ describe('week segments + recent payers — a conversion is visible the day it h
     expect(out.weekCohorts[0].matureForPaid).toBe(false); // current week
     expect(out.weekCohorts[1].matureForPaid).toBe(false); // ended 3.6d ago
     expect(out.weekCohorts[5].matureForPaid).toBe(true); // ended >17d ago
+  });
+});
+
+describe('paywall step — sent a quote, then reached the paywall', () => {
+  const billedSub = { isPro: true, platform: 'ios', productId: 'p', transactionId: 't', currentPeriodStart: iso(NOW - DAY) };
+
+  it('counts senders who viewed the paywall, plus senders who pay without a recorded view', () => {
+    const { funnel } = computeFunnelStats(
+      [
+        user({ uid: 'sent-saw', hasSentDoc: true, viewedPaywall: true }),
+        user({ uid: 'sent-no', hasSentDoc: true, viewedPaywall: false }),
+        user({ uid: 'unsent-saw', hasSentDoc: false, viewedPaywall: true }),
+        user({ uid: 'sent-paid-noview', hasSentDoc: true, viewedPaywall: false, sub: billedSub }),
+      ],
+      NOW
+    );
+    expect(funnel.hitPaywall).toBe(2);
+    expect(funnel.sawPaywallAny).toBe(2);
+    expect(funnel.hitPaywall!).toBeLessThanOrEqual(funnel.sentQuote);
+  });
+
+  it('omits the paywall fields entirely when paywall events were not read', () => {
+    const { funnel, weekCohorts } = computeFunnelStats([user({ uid: 'a', hasSentDoc: true })], NOW);
+    expect(funnel).not.toHaveProperty('hitPaywall');
+    expect(funnel).not.toHaveProperty('sawPaywallAny');
+    expect(weekCohorts[0]).not.toHaveProperty('hitPaywall');
   });
 });

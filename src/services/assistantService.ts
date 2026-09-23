@@ -1,7 +1,7 @@
 // Mate client transport — text chat over Gemini generateContent.
 //
 // The voice path runs on the Live WebSocket + a native-audio model
-// (gemini-3.1-flash-live-preview), which only emits AUDIO. Text needs a model
+// (gemini-3.8-live), which only emits AUDIO. Text needs a model
 // that emits TEXT, so it uses a separate transport: a thin Firebase proxy
 // (assistantChat) in front of a text-capable flash model, with the master key
 // kept server-side.

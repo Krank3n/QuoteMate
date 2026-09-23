@@ -12,6 +12,9 @@ import { summariseModels } from './shared/assistant/modelsUsed';
 import * as admin from 'firebase-admin';
 import { sendEmail, getUserEmail } from './email';
 import { applyBrevoEventToLead } from './leadOutreach';
+import { brevoOpenTarget, isBrevoHumanOpen } from './brevoOpenSignal.helpers';
+import { brevoEventMs } from './brevoTimestamp.helpers';
+import { adminRecordEmailOpenDeps, recordEmailOpenOnQuote } from './customerOpenRecord';
 import {
   stageToQuoteStatus,
   stageToInvoiceStatus,
@@ -1992,11 +1995,12 @@ export async function computeFunnelPayload(): Promise<FunnelPayload> {
   const firestore = db();
   const now = Date.now();
 
-  const [{ users: authUsers, internal: internalAccounts }, subs, emailStates, docsSnap] = await Promise.all([
+  const [{ users: authUsers, internal: internalAccounts }, subs, emailStates, docsSnap, paywallUids] = await Promise.all([
     listRealAuthUsers(),
     fetchAllSubscriptions(),
     fetchAllEmailStates(),
     firestore.collectionGroup('documents').get(),
+    fetchPaywallViewerUids(),
   ]);
 
   // One pass over every document: mark which uids have an activating (sent)
@@ -2026,10 +2030,35 @@ export async function computeFunnelPayload(): Promise<FunnelPayload> {
       lastActivityAt: ts(es.lastActivityAt),
       hasSentDoc: activatedUids.has(u.uid),
       quoteStage: quoteStages.get(u.uid) || 'none',
+      ...(paywallUids ? { viewedPaywall: paywallUids.has(u.uid) } : {}),
     };
   });
 
   return { ...computeFunnelStats(inputs, now), excluded: { internalAccounts } };
+}
+
+// Every uid with at least one paywall_viewed client event, all time — the
+// funnel's paywall step is a cohort count, so it can't use the event funnel's
+// 30-day window. Needs the events.event COLLECTION_GROUP override in
+// firestore.indexes.json; until that's deployed (or on any read failure) this
+// returns null and the funnel simply omits the paywall step.
+async function fetchPaywallViewerUids(): Promise<Set<string> | null> {
+  try {
+    const snap = await db()
+      .collectionGroup('events')
+      .where('event', '==', 'paywall_viewed')
+      .select()
+      .get();
+    const uids = new Set<string>();
+    for (const d of snap.docs) {
+      const uid = d.ref.parent.parent?.id;
+      if (uid) uids.add(uid);
+    }
+    return uids;
+  } catch (err) {
+    console.error('computeFunnelPayload: paywall events read failed, omitting paywall step', err);
+    return null;
+  }
 }
 
 const FUNNEL_CACHE_TTL_MS = 15 * 60 * 1000;
@@ -3068,14 +3097,12 @@ function parseEmailLogId(body: any): string | null {
   return null;
 }
 
+// Epoch fields first — Brevo's `date` is account-local with no offset and
+// used to be read as UTC, putting every stored event time 10 h ahead for an
+// AEST account (brevoTimestamp.helpers.ts).
 function timestampFromBrevo(body: any): admin.firestore.FieldValue | admin.firestore.Timestamp {
-  const raw = body.date || body.ts_event || body.ts;
-  if (typeof raw === 'number') return admin.firestore.Timestamp.fromMillis(raw * 1000);
-  if (typeof raw === 'string') {
-    const t = Date.parse(raw);
-    if (!isNaN(t)) return admin.firestore.Timestamp.fromMillis(t);
-  }
-  return admin.firestore.FieldValue.serverTimestamp();
+  const ms = brevoEventMs(body);
+  return ms === null ? admin.firestore.FieldValue.serverTimestamp() : admin.firestore.Timestamp.fromMillis(ms);
 }
 
 export const brevoEmailWebhook = functions.https.onRequest(async (req, res) => {
@@ -3187,6 +3214,27 @@ export const brevoEmailWebhook = functions.https.onRequest(async (req, res) => {
 
       await logRef.set(update, { merge: true });
       matched++;
+
+      // A human open of a customer-facing quote email is the customer-open
+      // signal (Brevo separates proxy prefetches into proxy_open, which we
+      // ignore). Our own pixel catches some of these, but Brevo's image
+      // proxy caches it, so repeat opens reach us only sometimes; the
+      // webhook arrives for every open. Same stamp, same throttle, same
+      // derivation → the onQuoteViewed push and the app's timeline/chip
+      // need nothing extra. Never lets a stamp failure fail the webhook.
+      if (isBrevoHumanOpen(event)) {
+        try {
+          const row = (await logRef.get()).data();
+          const target = brevoOpenTarget(event, row);
+          if (target) {
+            const openedAtMs = at instanceof admin.firestore.Timestamp ? at.toMillis() : Date.now();
+            const result = await recordEmailOpenOnQuote(adminRecordEmailOpenDeps, target, openedAtMs);
+            functions.logger.info('brevo_open_stamped', { ...target, event, ...result });
+          }
+        } catch (e: any) {
+          functions.logger.warn('brevo_open_stamp_failed', { logId, event, message: e?.message });
+        }
+      }
     }
 
     res.json({ ok: true, matched, unmatched });
@@ -3577,31 +3625,24 @@ async function recomputeUserStats(uid: string): Promise<void> {
   );
 }
 
-// Touch users/{uid}/settings/emailState.lastActivityAt without clobbering other fields.
-// The app currently only writes this on signup / email-link click, so derived triggers
-// (quote/invoice/supplier writes) are our best real-time signal of in-app activity.
-async function touchUserActivity(uid: string): Promise<void> {
-  await db()
-    .doc(`users/${uid}/settings/emailState`)
-    .set({ lastActivityAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
-}
-
+// These two used to also stamp emailState.lastActivityAt ("touchUserActivity").
+// That made every server-side write look like the tradie opening the app: the
+// noon draftNudge, follow-up stage syncs, a customer accepting a quote, the
+// documents mirror — on 20 Sep 2026 a run of accounts carried lastActivityAt
+// = 02:00 UTC exactly, the draftNudge cron. The return trial and the
+// re-engagement emails read that stamp as "when were they last here", so a
+// lapsed tradie never looked away. Activity is the dashboard's ping
+// (updateActivityTimestamp) and nothing else.
 export const recomputeUserStatsOnQuoteWrite = functions.firestore
   .document('users/{uid}/quotes/{quoteId}')
   .onWrite(async (_change, ctx) => {
-    await Promise.all([
-      recomputeUserStats(ctx.params.uid),
-      touchUserActivity(ctx.params.uid),
-    ]);
+    await recomputeUserStats(ctx.params.uid);
   });
 
 export const recomputeUserStatsOnInvoiceWrite = functions.firestore
   .document('users/{uid}/invoices/{invoiceId}')
   .onWrite(async (_change, ctx) => {
-    await Promise.all([
-      recomputeUserStats(ctx.params.uid),
-      touchUserActivity(ctx.params.uid),
-    ]);
+    await recomputeUserStats(ctx.params.uid);
   });
 
 export const recomputeSupplierStatsOnSubscriberWrite = functions.firestore

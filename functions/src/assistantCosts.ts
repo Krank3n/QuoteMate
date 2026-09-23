@@ -194,13 +194,26 @@ export const PRICING: Record<string, ModelPricing> = {
     cachedInputPerM: 2.50,
     perMinuteUsd: 0.006,
   },
-  // Voice Live model used by assistantToken → client WS.
+  // Voice Live model used by assistantToken → client WS until 21 Sep 2026.
+  // Kept so sessions still reporting it (an un-updated client) cost as before.
   'gemini-3.1-flash-live-preview': {
     inputPerM: 0.30,
     outputPerM: 2.50,
     cachedInputPerM: 0.075,
     inputAudioPerM: 0.50,
     outputAudioPerM: 2.00,
+  },
+  // Voice Live model from 21 Sep 2026 (assistantToken GEMINI_MODEL). Rates
+  // off ai.google.dev/gemini-api/docs/pricing that day: text $0.75 in /
+  // $4.50 out, audio $3.00 in / $12.00 out per 1M tokens. No cached-input
+  // rate is published for it, so cached tokens bill at the full input rate
+  // rather than inventing a discount. Thoughts bill at the output rate.
+  'gemini-3.8-live': {
+    inputPerM: 0.75,
+    outputPerM: 4.50,
+    cachedInputPerM: 0.75,
+    inputAudioPerM: 3.00,
+    outputAudioPerM: 12.00,
   },
 };
 

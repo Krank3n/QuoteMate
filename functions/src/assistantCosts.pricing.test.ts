@@ -160,6 +160,28 @@ describe('ElevenLabs pricing row', () => {
   });
 });
 
+describe('gemini-3.8-live — the voice model from 21 Sep 2026', () => {
+  it('has its own row, so a session on it never falls back to the text-model default', () => {
+    expect(PRICING['gemini-3.8-live']).toBeDefined();
+    expect(PRICING['gemini-3.8-live']).not.toBe(PRICING['gemini-3-flash-preview']);
+  });
+
+  it('bills audio at the published Live rates: $3.00/M in, $12.00/M out', () => {
+    // 1M input audio tokens → $3.00 → 3,000,000 micros; 100k output audio → $1.20.
+    expect(costMicrosForLive('gemini-3.8-live', { inputAudioTokens: 1_000_000 })).toBe(3_000_000);
+    expect(costMicrosForLive('gemini-3.8-live', { outputAudioTokens: 100_000 })).toBe(1_200_000);
+  });
+
+  it('bills thoughts at the output text rate and cached input at the full input rate', () => {
+    expect(costMicrosForLive('gemini-3.8-live', { thoughtsTokens: 1_000_000 })).toBe(4_500_000);
+    expect(costMicrosForLive('gemini-3.8-live', { inputTextTokens: 1_000_000, cachedTokens: 1_000_000 })).toBe(750_000);
+  });
+
+  it('is token-billed — no per-minute platform charge', () => {
+    expect(platformCostMicros('gemini-3.8-live', 600)).toBe(0);
+  });
+});
+
 describe('token-cost regression for the pre-existing rows', () => {
   it('costs a Gemini Live session exactly as it did before the voice swap', () => {
     // Guards the additive change: adding perMinuteUsd must not perturb any

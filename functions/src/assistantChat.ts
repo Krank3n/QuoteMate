@@ -4,7 +4,7 @@
 //
 // Why this exists separately from assistantToken/the Live WS path:
 // the voice path runs over the Live WebSocket on a native-audio model
-// (gemini-3.1-flash-live-preview), which only emits AUDIO. Text chat needs a
+// (gemini-3.8-live), which only emits AUDIO. Text chat needs a
 // model that emits TEXT, and none of the Live (bidiGenerateContent) models on
 // this project can — so text can't share that transport. This endpoint is a
 // thin authenticated proxy: the client posts a Gemini generateContent request

@@ -61,7 +61,18 @@ import { activateKeepAwakeAsync } from 'expo-keep-awake';
 import { shouldAutoStartMic, resolveAutoStartMic } from './assistant/shouldAutoStartMic';
 import { getMateIntro, isBlankSlate, isUnfinishedStem } from './assistant/mateIntro';
 import { buildPipelineDonePrompt } from './assistant/pipelineDoneCopy';
-import { buildSendOfferNote, sendOfferFactsForQuote, shouldOfferSendTurn } from './assistant/sendOfferNote';
+import {
+  buildContactAskNote,
+  buildSendCardProposal,
+  buildSendOfferNote,
+  describeDraftCustomer,
+  isUnsentSource,
+  sendOfferFactsForQuote,
+  sendCardLine,
+  type SendOfferFacts,
+  shouldAskContactDuringPricing,
+  shouldOfferSendTurn,
+} from './assistant/sendOfferNote';
 import { reviewBlockForChat } from '../utils/reviewChatFormat';
 import { buildGreetPrompt, withTypeInsteadHint } from './assistant/voiceCopy';
 import { GREET_RETRY_MS, shouldRetryGreet } from './assistant/greetWatchdog';
@@ -622,6 +633,9 @@ export function AssistantScreen() {
   // What the tradie says while a pipeline apply runs — handed to Mate the
   // moment pricing lands. See screens/assistant/pricingCorrections.ts.
   const pricingCorrectionsRef = useRef(createPricingCorrections());
+  // Quotes Mate already asked for a mobile/email on while pricing ran — the
+  // post-pricing note must not have it ask a second time.
+  const contactAskedRef = useRef(new Set<string>());
   const pacerTickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // Set when the tradie accepted/cancelled a card by voice this turn (Mate
   // called a control tool). We run the actual Apply / dismiss on turnComplete
@@ -809,6 +823,32 @@ export function AssistantScreen() {
       });
     },
     [appendMessage],
+  );
+
+  // The Send card the app mints itself the moment there is a priced draft and
+  // someone to send it to — the offer as one tap, not a question ("want me to
+  // send it?" got 0 yeses in 13 asks, 19 Sep 2026 audit). An earlier pending
+  // Send card on the same quote is dismissed first (its total is stale), and
+  // Mate is told the offer has been made so it doesn't make it again in words.
+  const mintSendCard = useCallback(
+    (convoId: string, quoteId: string, facts: SendOfferFacts) => {
+      const now = new Date().toISOString();
+      const card = buildSendCardProposal({ quoteId, facts, id: generateId(), createdAt: now });
+      const msgs = useStore.getState().conversations.find((c) => c.id === convoId)?.messages || [];
+      for (const ref of findSupersededProposals(msgs, [card])) {
+        updateProposalStatus(convoId, ref.messageId, ref.proposalId, 'dismissed');
+      }
+      appendMessage(convoId, {
+        id: generateId(),
+        role: 'assistant',
+        text: sendCardLine(facts),
+        createdAt: now,
+        proposals: [card],
+      });
+      trackEvent('mate_send_prompt', { kind: 'send_card' });
+      noteToMate(convoId, buildSendOfferNote(facts, [], quoteId, { cardShown: true }));
+    },
+    [appendMessage, updateProposalStatus, noteToMate],
   );
 
   // A pricing run the server finished (or lost) while the app was closed.
@@ -1003,6 +1043,26 @@ export function AssistantScreen() {
                       `if the tradie changes the scope, say you'll fold it in once pricing lands, then use ` +
                       `propose_update_quote_scope on ${quoteId} after the "[context]" line that says pricing finished.`,
                   );
+                  // 15–40 s of dead time, and 3 in 4 Mate quotes had nobody
+                  // to send to (19 Sep 2026 audit). Spend the wait getting a
+                  // mobile or email, so the Send card can land with pricing.
+                  const customer = describeDraftCustomer(proposal, (id) =>
+                    useStore.getState().contacts.find((c) => c.id === id),
+                  );
+                  if (
+                    shouldAskContactDuringPricing({
+                      proposalType: proposal.type,
+                      customer,
+                      voiceOpen: !!voiceSessionRef.current?.isOpen(),
+                    })
+                  ) {
+                    contactAskedRef.current.add(quoteId);
+                    trackEvent('mate_send_prompt', { kind: 'contact_ask' });
+                    offerSendTurnRef.current(
+                      conversation.id,
+                      buildContactAskNote({ quoteId, jobName: proposal.jobName, customerName: customer.name }),
+                    );
+                  }
                 }
               : undefined,
         },
@@ -1442,7 +1502,42 @@ export function AssistantScreen() {
               voiceOpen: !!voiceSessionRef.current?.isOpen(),
             })
           ) {
-            offerSendTurnRef.current(conversation.id, buildSendOfferNote(offerFacts, corrections, correctionsQuoteId));
+            // With someone to send to and nothing to fold in first, the offer
+            // is a Send card minted here, not a question: "want me to send
+            // it?" got 0 yeses in 13 asks (19 Sep 2026 audit). Mate still
+            // learns the card is up, so it doesn't offer twice.
+            const cardQuoteId = offerFacts.hasContact && corrections.length === 0 ? mintedId : undefined;
+            if (cardQuoteId) {
+              mintSendCard(conversation.id, cardQuoteId, offerFacts);
+            } else {
+              trackEvent('mate_send_prompt', { kind: 'model_offer' });
+              offerSendTurnRef.current(
+                conversation.id,
+                buildSendOfferNote(offerFacts, corrections, correctionsQuoteId, {
+                  contactAsked: !!mintedId && contactAskedRef.current.has(mintedId),
+                }),
+              );
+            }
+          } else if (
+            (proposal.type === 'propose_update_customer' || proposal.type === 'propose_pick_contact') &&
+            !voiceSessionRef.current?.isOpen()
+          ) {
+            // A contact just landed on an existing quote — often the answer to
+            // the mid-pricing ask. If it's priced and still a draft, the Send
+            // card goes up now, the same as it would have at pricing time.
+            const source =
+              useStore.getState().quotes.find((q) => q.id === renderableId) ||
+              useStore.getState().documents.find((d) => d.id === renderableId);
+            const facts = source ? sendOfferFactsForQuote(source) : undefined;
+            if (
+              source &&
+              facts?.hasContact &&
+              typeof facts.total === 'number' &&
+              facts.total > 0 &&
+              isUnsentSource(source)
+            ) {
+              mintSendCard(conversation.id, renderableId, facts);
+            }
           }
         }
         return;
@@ -1476,6 +1571,7 @@ export function AssistantScreen() {
       updateProposalStatus,
       handleNavigate,
       navigation,
+      mintSendCard,
     ],
   );
 

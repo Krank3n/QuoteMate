@@ -62,6 +62,12 @@ export interface FunnelUserInput {
    * screen". Optional: absent means unknown, which counts as 'none'.
    */
   quoteStage?: QuoteStage;
+  /**
+   * True iff the user has ≥1 `paywall_viewed` client event. Optional: absent
+   * means the events read failed or wasn't made, and the paywall steps are
+   * then left out of the payload rather than reported as zero.
+   */
+  viewedPaywall?: boolean;
 }
 
 /**
@@ -165,6 +171,16 @@ export interface FunnelSteps {
   addedMaterials: number;
   reachedPreview: number;
   sentQuote: number;
+  /**
+   * Sent a quote AND reached the paywall — the step between activation and
+   * paying. A payer who sent counts even with no recorded view (they bought
+   * before paywall_viewed existed, or through the web checkout), so this
+   * never dips below the paying payers who sent. Absent when paywall events
+   * weren't read.
+   */
+  hitPaywall?: number;
+  /** Everyone with a paywall_viewed event, sent or not. Absent as above. */
+  sawPaywallAny?: number;
   /** Total paying headcount: billed + incident-restored store subs. */
   paying: number;
   /** Subset of `paying` with a verifiable billing record (drives MRR). */
@@ -392,6 +408,7 @@ export function computeFunnelStats(inputs: FunnelUserInput[], now: number = Date
       sentQuote: u.hasSentDoc,
       // A sent document is proof of the whole wizard, whatever the drafts say.
       quoteStage: maxQuoteStage(u.quoteStage, u.hasSentDoc ? 'sent' : 'none'),
+      viewedPaywall: u.viewedPaywall,
       // Headcount includes incident-restored store subs (their Apple/Google
       // billing kept running; only the Firestore billing record is missing).
       payingBilled: billed,
@@ -499,6 +516,8 @@ interface UserMarks {
   startedTrial: boolean;
   sentQuote: boolean;
   quoteStage: QuoteStage;
+  /** undefined = not measured (see FunnelUserInput.viewedPaywall). */
+  viewedPaywall?: boolean;
   payingBilled: boolean;
   payingRestored: boolean;
 }
@@ -512,6 +531,9 @@ function aggregateSteps(marks: UserMarks[]): FunnelSteps {
   let addedMaterials = 0;
   let reachedPreview = 0;
   let sentQuote = 0;
+  let hitPaywall = 0;
+  let sawPaywallAny = 0;
+  let paywallMeasured = false;
   let payingBilled = 0;
   let payingRestored = 0;
 
@@ -524,6 +546,12 @@ function aggregateSteps(marks: UserMarks[]): FunnelSteps {
     if (rank >= quoteStageRank('materials')) addedMaterials++;
     if (rank >= quoteStageRank('preview')) reachedPreview++;
     if (m.sentQuote) sentQuote++;
+    if (m.viewedPaywall !== undefined) {
+      paywallMeasured = true;
+      const isPaying = m.payingBilled || m.payingRestored;
+      if (m.viewedPaywall) sawPaywallAny++;
+      if (m.sentQuote && (m.viewedPaywall || isPaying)) hitPaywall++;
+    }
     if (m.payingBilled) payingBilled++;
     else if (m.payingRestored) payingRestored++;
   }
@@ -537,6 +565,7 @@ function aggregateSteps(marks: UserMarks[]): FunnelSteps {
     addedMaterials,
     reachedPreview,
     sentQuote,
+    ...(paywallMeasured ? { hitPaywall, sawPaywallAny } : {}),
     paying,
     payingBilled,
     payingRestored,

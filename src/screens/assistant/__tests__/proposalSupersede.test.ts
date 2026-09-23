@@ -101,6 +101,30 @@ describe('findSupersededProposals', () => {
   });
 });
 
+describe('findSupersededProposals — Send cards', () => {
+  function sendCard(id: string, quoteId: string, displayTotal: number): Proposal {
+    return {
+      id,
+      toolUseId: `client-send-offer:${quoteId}`,
+      createdAt: new Date(2026, 8, 21).toISOString(),
+      type: 'propose_send_quote',
+      quoteId,
+      displayTotal,
+    } as Proposal;
+  }
+
+  it('a fresh Send card dismisses the older pending one for the same quote — its total is stale', () => {
+    const prior = msg([sendCard('s1', 'q1', 8630)]);
+    const refs = findSupersededProposals([prior], [sendCard('s2', 'q1', 9100)]);
+    expect(refs).toEqual([{ messageId: prior.id, proposalId: 's1' }]);
+  });
+
+  it('leaves a pending Send card on a different quote alone', () => {
+    const prior = msg([sendCard('s1', 'q1', 8630)]);
+    expect(findSupersededProposals([prior], [sendCard('s2', 'q2', 100)])).toEqual([]);
+  });
+});
+
 describe('findSupersededProposals — scope updates', () => {
   function updateScope(id: string, quoteId: string, description: string): Proposal {
     return {

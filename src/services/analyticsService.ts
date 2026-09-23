@@ -75,8 +75,15 @@ export type AnalyticsEvent =
   | 'return_trial_granted'
   // The welcome-back card was closed (`via` dismiss | quote).
   | 'return_trial_notice_dismissed'
-  // Persistent dashboard / job-screen nudge after trial expires + no Square.
+  // The expired-trial banner rendered on the dashboard (once per mount).
+  // Wired for the first time on 22 Sep 2026: the dashboard had hidden the
+  // banner at "0 days left", which is also what an expired trial reads as,
+  // so 27 post-trial tradies that month saw no ask at all.
   | 'trial_expired_banner_shown'
+  // "Stay on Free" on the expired banner. Silences every proactive Pro ask
+  // for 30 days (see screens/dashboard/trialAsk.ts). `source` names the
+  // surface it was tapped on.
+  | 'happy_on_free_chosen'
   // The hard gate at Send. Fires when SendGateModal opens — funnel's last
   // visible decision point.
   | 'send_gate_shown'
@@ -117,6 +124,13 @@ export type AnalyticsEvent =
   // A document actually went out. `to_self` flags a send to the tradie's own
   // account email — previously indistinguishable from a real customer send.
   | 'quote_send_succeeded'
+  // Mate moved a freshly priced quote toward a send. `kind` is send_card (a
+  // tappable Send card minted by the app the moment pricing landed),
+  // contact_ask (Mate asked for a mobile/email while pricing ran because
+  // none was on file) or model_offer (the older spoken offer, kept for
+  // corrections and the no-contact case). Sep 2026: 58 priced Mate quotes,
+  // 44 with nobody to send to, 0 yeses to "want me to send it?".
+  | 'mate_send_prompt'
   // Dashboard follow-up nudge banner. `nudge_type` distinguishes
   // invoice_overdue / self_sent_quote / unsent_quote / quote_follow_up —
   // measures whether nudging moves quotes to real customers (the Jul 2026

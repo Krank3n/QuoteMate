@@ -49,6 +49,10 @@ interface SendEmailOptions {
   category: EmailCategory;
   userId?: string; // For logging and preference checking
   tags?: string[];
+  // The quote/invoice this email carries, written onto the emailLog row so a
+  // Brevo `opened` webhook can be tied back to the document it was about
+  // (brevoOpenSignal.helpers.ts). Customer-facing sends only.
+  documentId?: string;
   attachment?: Array<{ name: string; content: string }>; // base64 encoded
   unsubscribeUrl?: string; // If set, adds List-Unsubscribe headers (required by Gmail bulk-sender rules)
   // Customer-facing sends (quote/invoice to client) override the default
@@ -372,7 +376,7 @@ QuoteMate is made by Hansen Dev (Sydney NSW, Australia). You're receiving this b
 // Brevo webhook posts back events keyed to that tag, which lets us correlate
 // delivery / bounce / open / click / spam back to this exact send.
 export async function sendEmail(options: SendEmailOptions): Promise<boolean> {
-  const { to: toRaw, subject, category, userId, tags, attachment, replyTo: replyToOverride, senderName, bcc, textContent } = options;
+  const { to: toRaw, subject, category, userId, tags, attachment, replyTo: replyToOverride, senderName, bcc, textContent, documentId } = options;
   let { htmlContent, unsubscribeUrl } = options;
   const requested = (Array.isArray(toRaw) ? toRaw : [toRaw]).map((r) => (r || '').trim()).filter(Boolean);
   // The one address every single-recipient path reads (outreach unsubscribe
@@ -441,6 +445,7 @@ export async function sendEmail(options: SendEmailOptions): Promise<boolean> {
         subject,
         category,
         tags: [...(tags || []), `blocked:${reason}`],
+        ...(documentId ? { documentId } : {}),
         status: 'blocked',
         blockedReason: reason,
         queuedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -472,6 +477,7 @@ export async function sendEmail(options: SendEmailOptions): Promise<boolean> {
     subject,
     category,
     tags: tags || [],
+    ...(documentId ? { documentId } : {}),
     status: 'pending',
     queuedAt: admin.firestore.FieldValue.serverTimestamp(),
     openCount: 0,

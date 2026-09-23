@@ -46,6 +46,15 @@ import type { Document, DocumentStage } from '../types/document';
 import { pickDashboardDraft, excludeDraftJob } from '../utils/dashboardDraft';
 import { resolveDraftBannerAction } from '../utils/draftBannerAction';
 import { pickFollowUpNudge, pruneSnoozes, NUDGE_SNOOZE_MS, type FollowUpNudge } from '../utils/followUpNudge';
+import {
+  HAPPY_ON_FREE_KEY,
+  HAPPY_ON_FREE_MS,
+  isHappyOnFree,
+  nextCardSlotTaken,
+  nudgeYieldsToCard,
+  parseHappyOnFree,
+  showDashboardTrialBanner,
+} from './dashboard/trialAsk';
 import { FollowUpNudgeBanner } from '../components/FollowUpNudgeBanner';
 import { auth } from '../config/firebase';
 import { useJobActionsSheet } from '../hooks/useJobActionsSheet';
@@ -397,9 +406,16 @@ export function DashboardScreen() {
   // dismissal actually sticks; null until loaded so a nudge the tradie
   // snoozed yesterday can't flash for a frame on mount.
   const [nudgeSnoozes, setNudgeSnoozes] = useState<Record<string, number> | null>(null);
+  // "Stay on Free" — epoch-ms until which no proactive Pro ask renders here.
+  // Read alongside the snoozes so the expired banner can't flash before the
+  // choice is known.
+  const [happyOnFreeUntil, setHappyOnFreeUntil] = useState<number | null>(null);
   useEffect(() => {
     if (!isFocused) return;
     let cancelled = false;
+    AsyncStorage.getItem(HAPPY_ON_FREE_KEY)
+      .then((raw) => { if (!cancelled) setHappyOnFreeUntil(parseHappyOnFree(raw)); })
+      .catch(() => {});
     AsyncStorage.getItem('follow_up_nudge_snoozes')
       .then((raw) => {
         if (cancelled) return;
@@ -440,6 +456,13 @@ export function DashboardScreen() {
     } else {
       handleViewQuote(nudge.docId);
     }
+  };
+
+  const handleStayOnFree = () => {
+    const until = Date.now() + HAPPY_ON_FREE_MS;
+    setHappyOnFreeUntil(until);
+    AsyncStorage.setItem(HAPPY_ON_FREE_KEY, String(until)).catch(() => {});
+    trackEvent('happy_on_free_chosen', { source: 'trial_banner' });
   };
 
   const handleNudgeDismiss = (nudge: FollowUpNudge) => {
@@ -527,23 +550,33 @@ export function DashboardScreen() {
         // evidence stands in until then, and after a check that failed.
         hasSquareConnection: squareConnection.connected ?? hasSquareEvidence(documentsForStats),
         squarePaymentsReady: squareConnection.paymentsReady,
-        // Nothing counts Pro-feature opens or records a "happy on Free"
-        // choice yet, so the two states they gate (keep_pro_tools, and the
-        // suppression of every generic ask) simply never fire from here.
+        // Nothing counts Pro-feature opens yet, so keep_pro_tools never
+        // fires from here. "Stay on Free" on the expired banner is the
+        // happy-on-Free choice: 30 days without a generic ask.
         proFeatureUses: 0,
-        happyOnFree: false,
+        happyOnFree: isHappyOnFree(happyOnFreeUntil),
         now: Date.now(),
       }),
-    [getEffectivePlan, subscriptionStatus, documentsForStats, squareConnection],
+    [getEffectivePlan, subscriptionStatus, documentsForStats, squareConnection, happyOnFreeUntil],
   );
 
+  // The slot rule lives in dashboard/trialAsk.ts: a draft owns it, nothing
+  // renders before snoozes load, and a SELLING card outranks the follow-up
+  // nudge — there is always a quote to chase, and the nudge starved the one
+  // selling card down to 2 tradies a month (22 Sep 2026 audit).
   const nextCard = useMemo(
     () =>
       nextActionCard(nextAction, documentsForStats, {
-        slotTaken: !!inProgressDraft || !!followUpNudge || nudgeSnoozes === null,
+        slotTaken: nextCardSlotTaken({
+          draftActive: !!inProgressDraft,
+          nudgeAvailable: !!followUpNudge,
+          snoozesLoaded: nudgeSnoozes !== null,
+          sellingAllowed: nextAction.sellingAllowed,
+        }),
       }),
     [nextAction, documentsForStats, inProgressDraft, followUpNudge, nudgeSnoozes],
   );
+  const sellingCardShown = nudgeYieldsToCard(nextCard);
 
   // One impression per surfaced action, keyed on the action itself so
   // re-renders don't spam analytics (same rule as the nudge banner).
@@ -883,16 +916,27 @@ export function DashboardScreen() {
           the tradie get hooked first; the hard gate fires at Send. The full
           banner is always available on the Subscription Settings screen. */}
       {(() => {
-        if (!subscriptionStatus || subscriptionStatus.isPro || !subscriptionStatus.trialStartedAt) return null;
-        // One trial card at a time: the welcome-back card already carries
-        // the days left until it's dismissed.
-        if (returnTrialNoticeVisible(subscriptionStatus)) return null;
-        const daysRemaining = trialDaysRemaining(subscriptionStatus) ?? 0;
-        if (daysRemaining > 3 || daysRemaining === 0) return null;
+        if (!subscriptionStatus) return null;
+        // The rules are in dashboard/trialAsk.ts. The old gate hid the card at
+        // "0 days left", which is also what an expired trial reads as, so the
+        // expired state never rendered here (27 post-trial tradies in Sep
+        // 2026 saw no ask at all).
+        const endMs = trialEndMs(subscriptionStatus);
+        const show = showDashboardTrialBanner({
+          hasTrial: !!subscriptionStatus.trialStartedAt,
+          isPro: !!subscriptionStatus.isPro,
+          returnNoticeVisible: returnTrialNoticeVisible(subscriptionStatus),
+          happyOnFree: isHappyOnFree(happyOnFreeUntil),
+          trialExpired: endMs !== null && Date.now() >= endMs,
+          daysRemaining: trialDaysRemaining(subscriptionStatus),
+          sellingCardShown,
+        });
+        if (!show) return null;
         return (
           <TrialBanner
             trial={subscriptionStatus}
             quoteCount={quotes.length}
+            onStayOnFree={handleStayOnFree}
           />
         );
       })()}
@@ -945,7 +989,7 @@ export function DashboardScreen() {
       {/* Follow-up nudge — one "chase this" card (overdue invoice /
           self-sent quote / finished-but-unsent quote / aging sent quote).
           Shares the banner slot with the draft banner; drafts win. */}
-      {followUpNudge && (
+      {followUpNudge && !sellingCardShown && (
         <FollowUpNudgeBanner
           nudge={followUpNudge}
           onPress={handleNudgePress}
