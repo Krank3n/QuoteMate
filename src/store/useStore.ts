@@ -56,11 +56,11 @@ import {
   buildRateWorkItem,
   rateLineUnitPrice,
   rateLinesCoverMaterials,
+  rateModeOfQuote,
   stripLabourFromQuote,
   rateGstBasis,
   upsertRate,
 } from '../services/quotingProfile';
-import type { RateLine } from '../types';
 import { calculateDueDate } from '../utils/invoiceCalculator';
 import { canRevertToQuote } from '../utils/revertToQuote';
 import { isEditablePayment, maxAmountForEdit } from '../utils/editablePayment';
@@ -3520,7 +3520,8 @@ export const useStore = create<AppState>((set, get) => ({
       // list and the pricing run. Labour on a rate line means the analysis's
       // hours would be a second labour charge, so they are stripped.
       options: {
-        rateLines?: RateLine[];
+        /** How many rate-card lines the quote is charged through (0 = none). */
+        rateLineCount?: number;
         ratesCoverMaterials?: boolean;
         labourOnly?: boolean;
         /**
@@ -3534,7 +3535,7 @@ export const useStore = create<AppState>((set, get) => ({
         kind?: 'draft' | 'scope';
       } = {},
     ): Promise<ScopePipelineRun> => {
-      const rateLineCount = options.rateLines?.length ?? 0;
+      const rateLineCount = options.rateLineCount ?? 0;
       let materialCount = 0;
       // Accumulated outside the event→progress mapper: the fallback event
       // is one-shot info, not a progress frame, and the caller needs the
@@ -4001,9 +4002,11 @@ export const useStore = create<AppState>((set, get) => ({
           const businessInclusive = get().businessSettings?.pricesIncludeGst === true;
           const docMode = resolveGstMode(fresh);
           const rateLines = proposal.rateLines ?? [];
-          const rateItems = rateLines.map((line) => buildRateWorkItem(line, docMode, businessInclusive));
-          const ratesCoverMaterials = rateLinesCoverMaterials(rateLines);
           const labourOnly = proposal.materialsMode === 'labour_only';
+          const rateItems = rateLines.map((line) =>
+            buildRateWorkItem(line, docMode, businessInclusive, { customerSupplies: labourOnly }),
+          );
+          const ratesCoverMaterials = rateLinesCoverMaterials(rateLines);
 
           // Stamp customer + scope. Materials come from the pipeline.
           const seeded: Quote = {
@@ -4045,7 +4048,7 @@ export const useStore = create<AppState>((set, get) => ({
             quoteId,
             { phase: 'preflight', status: 'Getting ready…', done: false },
             {
-              rateLines,
+              rateLineCount: rateLines.length,
               ratesCoverMaterials,
               labourOnly,
               // Rate lines carry the labour themselves (the seed above is 0),
@@ -4082,6 +4085,30 @@ export const useStore = create<AppState>((set, get) => ({
             }
           }
 
+          // The total the tradie said before the draft, set now that pricing
+          // has settled — the same planner the Set total card runs, so nothing
+          // depends on the model remembering to do it afterwards. It plans
+          // against the priced quote the pipeline just left in the store, the
+          // way the travel charge above does: re-reading the document here
+          // (sim, 23 Sep 2026) got the copy from BEFORE the server's priced
+          // rows landed, and saving it put every material back to $0.
+          let totalNote: string | undefined;
+          if (proposal.targetTotal) {
+            const priced = get().currentQuote;
+            const set =
+              priced && priced.id === quoteId
+                ? applySetTotal(updateQuoteCalculations(priced), proposal.targetTotal)
+                : null;
+            if (set?.ok) {
+              get().updateQuote({ ...priced!, ...set.patch } as Quote);
+              await get().saveDraft(get().currentQuote!);
+            }
+            // Shown to the tradie as its own bubble, like the travel note.
+            totalNote = set?.ok
+              ? `Total set to your ${formatCurrency(proposal.targetTotal)}.`
+              : `Couldn't set the total to ${formatCurrency(proposal.targetTotal)}${set && !set.ok && set.message ? ` — ${set.message}` : '.'}`;
+          }
+
           // If the tradie asked for an invoice up front, auto-convert at the
           // end of the pipeline so they don't have to do a second Apply.
           let invoiceNote: string | undefined;
@@ -4104,7 +4131,7 @@ export const useStore = create<AppState>((set, get) => ({
                   navigate: { kind: 'open_invoice', invoiceId: converted.id },
                   review,
                   supplierGap,
-                  ...(travelNote ? { note: travelNote } : {}),
+                  ...(travelNote || totalNote ? { note: [travelNote, totalNote].filter(Boolean).join(' ') } : {}),
                 };
               } catch (err: any) {
                 // eslint-disable-next-line no-console
@@ -4120,7 +4147,7 @@ export const useStore = create<AppState>((set, get) => ({
               "Drafted it as a quote for now — the invoice conversion didn't come through. Tap Create Invoice on the job to flip it.";
           }
 
-          const notes = [travelNote, invoiceNote].filter((n): n is string => !!n);
+          const notes = [travelNote, totalNote, invoiceNote].filter((n): n is string => !!n);
           // Land on JobPreview (the final review screen) instead of
           // MaterialsList — pricing is already done.
           return {
@@ -4193,10 +4220,28 @@ export const useStore = create<AppState>((set, get) => ({
           await get().saveDraft(merged);
           const quoteId = get().currentQuote?.id || merged.id;
 
+          // Re-run in the mode the tradie charged it in. Their rate rows are
+          // kept by resetGeneratedScope (they're tradie rows); what must not
+          // happen is a full materials list and fresh hours landing on top of
+          // an all-in price — see rateModeOfQuote.
+          const rateMode = rateModeOfQuote(merged.materials);
           const run = await runScopePipeline(
             quoteId,
-            { phase: 'preflight', status: 'Redoing the materials…', done: false },
-            { kind: 'scope', statedHours: proposal.estimatedDurationHours },
+            {
+              phase: 'preflight',
+              status: rateMode?.ratesCoverMaterials ? 'Updating the scope…' : 'Redoing the materials…',
+              done: false,
+            },
+            {
+              kind: 'scope',
+              ...(rateMode
+                ? {
+                    rateLineCount: rateMode.rateLineCount,
+                    ratesCoverMaterials: rateMode.ratesCoverMaterials,
+                    labourOnly: rateMode.labourOnly,
+                  }
+                : { statedHours: proposal.estimatedDurationHours }),
+            },
           );
           if (run.kind === 'cancelled') {
             return { ok: false, error: 'Pipeline was cancelled.' };

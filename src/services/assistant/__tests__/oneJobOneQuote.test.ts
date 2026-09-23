@@ -88,3 +88,43 @@ describe('propose_draft_quote after a draft was applied', () => {
     expect(draft().error).toBeUndefined();
   });
 });
+
+describe('a second VERSION of the same job — MSB Civil, 18 Sep 2026: "same scope just at $80sm they supply everything"', () => {
+  it('option: true drafts it instead of refusing', () => {
+    const { proposal, error } = draft({ option: true, jobName: 'Fire detectors - Red Dot, customer supplies the detectors' });
+    expect(error).toBeUndefined();
+    expect(proposal).toMatchObject({ type: 'propose_draft_quote', option: true });
+  });
+
+  it('the refusal tells the model the option route exists', () => {
+    expect(draft().error).toContain('option: true');
+  });
+});
+
+describe('targetTotal — the total the tradie stated before the draft', () => {
+  const fresh = (over: Record<string, unknown>) => draft({ customerDraft: { name: 'Jade Peel' }, jobName: 'Custom shed build', ...over });
+
+  it('rides on the card, rounded to the cent', () => {
+    expect(fresh({ targetTotal: 29000.004 }).proposal).toMatchObject({ targetTotal: 29000 });
+  });
+
+  it('refuses a zero, a negative or a non-number', () => {
+    for (const bad of [0, -5, 'lots']) expect(fresh({ targetTotal: bad }).error).toMatch(/targetTotal/);
+  });
+
+  it('refuses a total on top of an all-in rate line, which is already the price', () => {
+    const { error } = fresh({
+      targetTotal: 29000,
+      rateLines: [{ label: 'Shed supply and install', quantity: 1, unit: 'job', unitPrice: 30000, includesMaterials: true }],
+    });
+    expect(error).toMatch(/already set the whole price/);
+  });
+
+  it('is fine beside a labour-only rate line', () => {
+    const { proposal } = fresh({
+      targetTotal: 29000,
+      rateLines: [{ label: 'Erect shed', quantity: 1, unit: 'job', unitPrice: 8000, includesMaterials: false }],
+    });
+    expect(proposal).toMatchObject({ targetTotal: 29000 });
+  });
+});

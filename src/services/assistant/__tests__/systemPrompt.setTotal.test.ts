@@ -52,13 +52,16 @@ describe('Mate prompt — a price named before the draft is the total', () => {
     expect(TOTAL_SECTION).toBeTruthy();
   });
 
-  it('tells Mate to carry a stated price through pricing and set it unprompted', () => {
-    expect(TOTAL_SECTION).toMatch(/BEFORE the job is drafted/);
-    expect(TOTAL_SECTION).toMatch(/without being asked again/i);
+  // Rural Built, 22 Sep 2026: "I'll set it to that after pricing" and the
+  // quote sat at the engine's figure. The total now rides on the draft card.
+  it('puts a stated price on the draft as targetTotal, so nothing has to be remembered', () => {
+    expect(TOTAL_SECTION).toMatch(/BEFORE the job is priced/);
+    expect(TOTAL_SECTION).toMatch(/targetTotal on propose_draft_quote/);
+    expect(TOTAL_SECTION).toMatch(/re-propose the draft with targetTotal/);
   });
 
-  it('names the failure it is there to stop — promising to adjust it later', () => {
-    expect(TOTAL_SECTION).toMatch(/adjust it after it prices/i);
+  it('names the failure it is there to stop — promising to set it later', () => {
+    expect(TOTAL_SECTION).toMatch(/Never promise to "set it after it prices"/);
   });
 
   it('holds the copy rules — no "AI", Aussie and gender-neutral', () => {

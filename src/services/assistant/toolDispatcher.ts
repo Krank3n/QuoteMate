@@ -20,7 +20,7 @@ import {
 import { buildProposal } from './proposalTools';
 import { resolveQuoteId } from './quoteRefMap';
 import { gateShowQuote } from './showQuoteGate';
-import { gateControlAction } from './pendingProposalGate';
+import { findIdenticalPendingCard, gateControlAction, reproposeAfterYes } from './pendingProposalGate';
 import { isControlTool, isProposalTool, isReadTool } from './toolSchemas';
 
 export interface ToolCallInput {
@@ -44,6 +44,12 @@ export interface ControlAction {
   decision: 'apply' | 'cancel';
   messageId: string;
   proposalId: string;
+  /**
+   * True when the model named no card — a plain "yes". The screen then
+   * resolves the waiting cards of the same kind alongside it (see
+   * pendingCardsForYes); a named card is resolved alone.
+   */
+  group?: boolean;
 }
 
 export interface ToolCallOutput {
@@ -114,7 +120,17 @@ export async function dispatchToolCall(call: ToolCallInput): Promise<ToolCallOut
     if (!gate.ok) {
       return { name, id, response: { error: gate.error } };
     }
-    return { name, id, response: { ok: true }, control: { decision, ...gate.ref } };
+    return {
+      name,
+      id,
+      response: { ok: true },
+      control: {
+        decision,
+        messageId: gate.ref.messageId,
+        proposalId: gate.ref.proposalId,
+        ...(!input?.proposalId || gate.ref.group ? { group: true } : {}),
+      },
+    };
   }
 
   if (name === 'show_quote') {
@@ -141,6 +157,18 @@ export async function dispatchToolCall(call: ToolCallInput): Promise<ToolCallOut
       return { name, id, response: { error: err?.message || 'Proposal validation failed.' } };
     }
     const { proposal, error, note } = built;
+    if (proposal && (findIdenticalPendingCard(proposal) || reproposeAfterYes(proposal))) {
+      return {
+        name,
+        id,
+        response: {
+          error:
+            'A card like this is already up and waiting, and the tradie just said yes — that yes is for the waiting card; a second copy would just be another card to tap. ' +
+            'If the tradie said yes to it, call apply_pending_proposal (no proposalId). If they said no, cancel_pending_proposal. ' +
+            'Otherwise answer what they asked.',
+        },
+      };
+    }
     if (proposal) {
       const response: Record<string, unknown> = { ok: true, proposalId: proposal.id };
       const notes: string[] = [];

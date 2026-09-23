@@ -149,9 +149,13 @@ import { scopeStatusOf } from '../services/assistant/scopeEditable';
 import { createBubbleContinuity, joinFragments } from './assistant/bubbleContinuity';
 import { createUnansweredTurn, unansweredTurnBubble } from './assistant/unansweredTurn';
 import { formatCurrency } from '../utils/documentCalculator';
-import { setPendingProposalProbe } from '../services/assistant/pendingProposalGate';
+import {
+  setLatestTradieLineProbe,
+  setPendingCardsProbe,
+  setPendingProposalProbe,
+} from '../services/assistant/pendingProposalGate';
 import { findSupersededProposals } from './assistant/proposalSupersede';
-import { findPendingProposal } from './assistant/pendingProposal';
+import { pendingCardsForYes, resolveControlTarget } from './assistant/pendingProposal';
 import { ensureLocalUri } from '../services/assistant/attachmentBytes';
 import { useSupplierListImport, type ExtractResult } from '../hooks/useSupplierListImport';
 import type { SaveSummary } from '../hooks/useSupplierListImport';
@@ -644,6 +648,8 @@ export function AssistantScreen() {
     decision: 'apply' | 'cancel';
     message: ChatMessage;
     proposal: Proposal;
+    /** A plain yes (no card named) — resolve its same-kind siblings too. */
+    group: boolean;
   } | null>(null);
 
   // Lazy-create a conversation on first focus. Chat history isn't persisted —
@@ -1712,10 +1718,32 @@ export function AssistantScreen() {
       const state = useStore.getState();
       const messages =
         state.conversations.find((c) => c.id === state.currentConversationId)?.messages || [];
-      const found = findPendingProposal(messages, proposalId);
-      return found ? { messageId: found.message.id, proposalId: found.proposal.id } : null;
+      const found = resolveControlTarget(messages, proposalId);
+      return found ? { messageId: found.message.id, proposalId: found.proposal.id, group: found.group } : null;
     });
-    return () => setPendingProposalProbe(null);
+    setPendingCardsProbe(() => {
+      const state = useStore.getState();
+      const messages =
+        state.conversations.find((c) => c.id === state.currentConversationId)?.messages || [];
+      return messages.flatMap((m) =>
+        (m.proposals || []).filter((p) => (m.proposalStatus?.[p.id] ?? 'pending') === 'pending'),
+      );
+    });
+    setLatestTradieLineProbe(() => {
+      const state = useStore.getState();
+      const messages =
+        state.conversations.find((c) => c.id === state.currentConversationId)?.messages || [];
+      for (let i = messages.length - 1; i >= 0; i--) {
+        const m = messages[i];
+        if (m.role === 'user' && m.text && !m.text.startsWith('[context]')) return m.text;
+      }
+      return '';
+    });
+    return () => {
+      setPendingProposalProbe(null);
+      setPendingCardsProbe(null);
+      setLatestTradieLineProbe(null);
+    };
   }, []);
 
   const showAlert = useCallback((config: AlertConfig) => setAlertConfig(config), []);
@@ -2359,10 +2387,17 @@ export function AssistantScreen() {
           const prop = target?.proposals?.find((p) => p.id === action.proposalId);
           if (!target || !prop) continue;
           if ((target.proposalStatus?.[prop.id] ?? 'pending') !== 'pending') continue;
-          if (action.decision === 'apply') {
-            await handleApply(target, prop);
-          } else {
-            handleDismiss(target, prop);
+          const cards = action.group ? pendingCardsForYes(target, prop) : [prop];
+          for (const card of cards) {
+            // A sibling may have been tapped while an earlier one applied.
+            const live = useStore.getState().conversations.find((c) => c.id === convoId)?.messages
+              .find((m) => m.id === target.id);
+            if ((live?.proposalStatus?.[card.id] ?? 'pending') !== 'pending') continue;
+            if (action.decision === 'apply') {
+              await handleApply(live ?? target, card);
+            } else {
+              handleDismiss(live ?? target, card);
+            }
           }
         }
       } catch (err: any) {
@@ -3019,14 +3054,19 @@ export function AssistantScreen() {
           // pins a specific one. We stash it and act on turnComplete so the
           // spoken reply finishes first.
           const convo = useStore.getState().conversations.find((c) => c.id === convoId);
-          const found = findPendingProposal(convo?.messages || [], proposalId);
+          const found = resolveControlTarget(convo?.messages || [], proposalId);
           if (!found) {
             return {
               ok: false,
               error: proposalId ? 'That card is no longer waiting.' : 'No card is waiting to confirm.',
             };
           }
-          pendingVoiceActionRef.current = { decision, message: found.message, proposal: found.proposal };
+          pendingVoiceActionRef.current = {
+            decision,
+            message: found.message,
+            proposal: found.proposal,
+            group: found.group,
+          };
           return { ok: true };
         },
         onShowQuote: (quoteId) => {
@@ -3097,10 +3137,25 @@ export function AssistantScreen() {
           pendingVoiceActionRef.current = null;
           const runVoiceAction = () => {
             if (!voiceAction) return;
+            const cards = voiceAction.group
+              ? pendingCardsForYes(voiceAction.message, voiceAction.proposal)
+              : [voiceAction.proposal];
             if (voiceAction.decision === 'apply') {
-              void handleApply(voiceAction.message, voiceAction.proposal);
+              // One after another: two cards applying at once would race
+              // their writes to the same message's status.
+              const stillPending = (card: Proposal) =>
+                (useStore
+                  .getState()
+                  .conversations.find((c) => c.id === convoId)
+                  ?.messages.find((m) => m.id === voiceAction.message.id)
+                  ?.proposalStatus?.[card.id] ?? 'pending') === 'pending';
+              void cards.reduce<Promise<unknown>>(
+                (prev, card) =>
+                  prev.then(() => (stillPending(card) ? handleApply(voiceAction.message, card) : undefined)),
+                Promise.resolve(),
+              );
             } else {
-              handleDismiss(voiceAction.message, voiceAction.proposal);
+              for (const card of cards) handleDismiss(voiceAction.message, card);
             }
           };
 

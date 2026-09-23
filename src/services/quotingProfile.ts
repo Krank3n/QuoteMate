@@ -228,27 +228,80 @@ export function rateLineUnitPrice(line: RateLine, docMode: GstMode, businessIncl
  * A rate line as a lump-sum work item: the same shape the inline editor mints,
  * so every calculator, adapter and PDF path handles it unchanged. Markup never
  * applies to a work item — the tradie set this price.
+ *
+ * `customerSupplies` is a labour-only draft (materialsMode 'labour_only'): the
+ * customer buys the gear, so nothing is "listed separately" and a scope change
+ * must not generate a materials list either — see rateModeOfQuote.
  */
-export function buildRateWorkItem(line: RateLine, docMode: GstMode, businessInclusive: boolean): Material {
+export function buildRateWorkItem(
+  line: RateLine,
+  docMode: GstMode,
+  businessInclusive: boolean,
+  opts: { customerSupplies?: boolean } = {},
+): Material {
   const unitPrice = rateLineUnitPrice(line, docMode, businessInclusive);
   const total = roundToTwoDecimals(unitPrice * line.quantity);
   const qty = Number.isInteger(line.quantity) ? String(line.quantity) : line.quantity.toFixed(2);
   const basis = line.unit === 'job' && line.quantity === 1 ? `${formatCurrency(unitPrice)} fixed price` : `${qty} ${line.unit === 'each' ? 'items' : line.unit} @ ${formatCurrency(unitPrice)} ${rateUnitLabel(line.unit)}`;
+  const rateCard: NonNullable<Material['rateCard']> = line.includesMaterials
+    ? 'all_in'
+    : opts.customerSupplies
+      ? 'labour_no_materials'
+      : 'labour';
   return withOrigin(
     {
       id: generateId(),
       name: line.label.replace(/\s+/g, ' ').trim(),
       kind: 'work',
-      scope: `${basis}${line.includesMaterials ? ' — materials included' : ' — labour only, materials listed separately'}`,
+      scope: `${basis}${RATE_SCOPE_SUFFIX[rateCard]}`,
       quantity: 1,
       unit: 'each',
       price: total,
       totalPrice: total,
       manualPriceOverride: true,
       pricingSource: 'manual',
+      rateCard,
     } as Material,
     'manual',
   );
+}
+
+const RATE_SCOPE_SUFFIX: Record<NonNullable<Material['rateCard']>, string> = {
+  all_in: ' — materials included',
+  labour: ' — labour only, materials listed separately',
+  labour_no_materials: ' — labour only, materials supplied by the customer',
+};
+
+/**
+ * How a quote was charged off the rate card, read back off its rate work
+ * items — what a scope change has to re-run in. Rows minted before the
+ * rateCard stamp (before 23 Sep 2026) are read off the scope suffix they have
+ * always carried. No rate rows → null: the quote re-runs the full pipeline.
+ *
+ * MSB Civil, 22 Sep 2026: a draft at the tradie's $165/m² all-in rate took a
+ * scope correction ("I have to do the excavation as well") and the re-run
+ * generated a full materials list and fresh hours ON TOP of the kept $7,425
+ * rate row — $8,168 became $36,496.
+ */
+export function rateModeOfQuote(
+  materials: Material[] | undefined,
+): { rateLineCount: number; ratesCoverMaterials: boolean; labourOnly: boolean } | null {
+  const modes: NonNullable<Material['rateCard']>[] = [];
+  for (const m of materials || []) {
+    if (m.kind !== 'work') continue;
+    const mode =
+      m.rateCard ??
+      (Object.keys(RATE_SCOPE_SUFFIX) as NonNullable<Material['rateCard']>[]).find((k) =>
+        (m.scope || '').endsWith(RATE_SCOPE_SUFFIX[k]),
+      );
+    if (mode) modes.push(mode);
+  }
+  if (!modes.length) return null;
+  return {
+    rateLineCount: modes.length,
+    ratesCoverMaterials: modes.every((m) => m === 'all_in'),
+    labourOnly: modes.every((m) => m === 'labour_no_materials'),
+  };
 }
 
 /** True when the rate lines are the whole price — nothing to generate or price on top. */

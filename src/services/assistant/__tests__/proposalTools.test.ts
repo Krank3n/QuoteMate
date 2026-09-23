@@ -1,5 +1,6 @@
 import { afterEach } from 'vitest';
-import { buildProposal, setUnconsumedAttachmentProbe } from '../proposalTools';
+import { buildProposal, setProposalDocumentProbe, setUnconsumedAttachmentProbe } from '../proposalTools';
+import { buildRateWorkItem } from '../../quotingProfile';
 import { rememberAppliedQuote } from '../quoteRefMap';
 import { setRenderableQuoteProbe } from '../showQuoteGate';
 import { markPricingStarted, __resetPricingInFlight } from '../pricingInFlight';
@@ -465,6 +466,20 @@ describe('buildProposal propose_update_quote_scope', () => {
       estimatedDurationHours: 6,
     });
     expect((proposal as UpdateQuoteScopeProposal).jobDescription).toContain('Hager');
+  });
+
+  it("a rate-card quote's card says what the re-run keeps (the card said it would redo the materials)", () => {
+    setRenderableQuoteProbe((id) => id);
+    const allIn = buildRateWorkItem({ label: 'Exposed aggregate', quantity: 45, unit: 'm²', unitPrice: 165, includesMaterials: true }, 'inclusive', true);
+    setProposalDocumentProbe((id) => (id === 'doc_rated' ? ({ materials: [allIn] } as never) : ({ materials: [] } as never)));
+    try {
+      const rated = buildProposal('propose_update_quote_scope', 'tool_s9', { quoteId: 'doc_rated', jobDescription: 'Supply and lay 45 m², plus our own excavation.' });
+      expect((rated.proposal as UpdateQuoteScopeProposal).rateMode).toBe('all_in');
+      const plain = buildProposal('propose_update_quote_scope', 'tool_s10', { quoteId: 'doc_plain', jobDescription: 'Supply and lay 45 m², plus our own excavation.' });
+      expect((plain.proposal as UpdateQuoteScopeProposal).rateMode).toBeUndefined();
+    } finally {
+      setProposalDocumentProbe(null);
+    }
   });
 
   it('resolves a proposal id to the minted quote id, like every other quote-scoped tool', () => {

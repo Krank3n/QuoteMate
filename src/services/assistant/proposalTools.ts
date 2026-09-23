@@ -31,7 +31,7 @@ import { isPricingInFlight } from './pricingInFlight';
 import { isClaimWording } from './claimWording';
 import { canUpdateScope } from './scopeEditable';
 import { sanitizeJobDescription } from '../../utils/sanitizeJobDescription';
-import { MAX_LABEL_CHARS, RATE_CARD_UNITS, normalisePreference, normaliseRateUnit } from '../quotingProfile';
+import { MAX_LABEL_CHARS, RATE_CARD_UNITS, normalisePreference, normaliseRateUnit, rateLinesCoverMaterials, rateModeOfQuote } from '../quotingProfile';
 import { planSetTotal, setTotalGstMode, type SetTotalSource } from '../../utils/setTotal';
 import { phoneForRecord } from '../../utils/auPhone';
 import { formatCurrency, roundToTwoDecimals } from '../../utils/documentCalculator';
@@ -344,7 +344,8 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
       if (CONTACT_DETAILS_IN_SCOPE.test(String(input.jobDescription))) {
         return { error: "jobDescription is the work, and it prints on the customer's document — customer details go in customerDraft, never in the scope." };
       }
-      const repeated = findRepeatedDraft(appliedDraftsProbe?.() ?? [], {
+      // A deliberate second version (option: true) is a new quote on purpose.
+      const repeated = input.option === true ? undefined : findRepeatedDraft(appliedDraftsProbe?.() ?? [], {
         customerId: customer.customerId,
         customerName: customer.draft?.name,
         jobName: String(input.jobName),
@@ -361,6 +362,7 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
           error:
             `Quote ${repeated.quoteId} ("${repeated.jobName}") already exists for this customer in this conversation — drafting again mints a second quote for the same job. ` +
             `Put the change on it with propose_update_quote_scope (the full corrected description) or propose_update_customer. ` +
+            `If the tradie wants a second VERSION to compare or offer alongside it (another rate, another material), call propose_draft_quote again with option: true and a jobName that says what differs — never tell them it can't be done. ` +
             `Only if this is genuinely a different job, give it a different jobName and call propose_draft_quote again.`,
         };
       }
@@ -384,6 +386,21 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
       }
       const draftTravel = parseTravelCharge(input.travelAdjustment);
       if (draftTravel.error) return { error: draftTravel.error };
+      let targetTotal: number | undefined;
+      if (input.targetTotal !== undefined && input.targetTotal !== null) {
+        const target = Number(input.targetTotal);
+        if (!Number.isFinite(target) || target <= 0) {
+          return { error: 'targetTotal must be the dollar figure the tradie said the job comes to, above zero.' };
+        }
+        // An all-in rate line already IS the price; a total on top would move it.
+        if (rateLinesCoverMaterials(rateLines.lines)) {
+          return {
+            error:
+              'These rate lines already set the whole price, so a targetTotal would fight them. Pass one or the other: a stated total for the job → targetTotal and no all-in rate lines.',
+          };
+        }
+        targetTotal = roundToTwoDecimals(target);
+      }
       const proposal: DraftQuoteProposal = {
         id,
         toolUseId,
@@ -405,6 +422,8 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
         ...(rateLines.lines ? { rateLines: rateLines.lines } : {}),
         // A $0 travel charge on a job that has none is nothing to carry.
         ...(draftTravel.dollars ? { travelAdjustment: draftTravel.dollars } : {}),
+        ...(targetTotal ? { targetTotal } : {}),
+        ...(input.option === true ? { option: true } : {}),
       };
       return { proposal, note: customer.note };
     }
@@ -488,6 +507,10 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
         estimatedDurationHours: hours,
         displayName: input.displayName ? String(input.displayName) : undefined,
       };
+      const rateMode = rateModeOfQuote(documentProbe?.(known.quoteId!)?.materials);
+      if (rateMode) {
+        proposal.rateMode = rateMode.ratesCoverMaterials ? 'all_in' : rateMode.labourOnly ? 'labour_no_materials' : 'labour';
+      }
       return { proposal };
     }
 

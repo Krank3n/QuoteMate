@@ -263,6 +263,16 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
           description:
             'Optional. A travel charge in dollars for this job — the drive, a callout, fuel. Only a figure the tradie stated, or a travel/callout rate already on their rate card. Never one you worked out from a distance or a drive time. It goes on the quote once pricing lands.',
         },
+        targetTotal: {
+          type: 'number',
+          description:
+            "Optional. The total the tradie said the job comes to — \"call it this much all up\", \"that's the price, supply and install\" — GST included where it applies, as they said it. The materials are still worked out and priced, then the total is set to this figure the moment pricing lands (the difference goes on the labour, or a named adjustment line), exactly as propose_set_total does. Only a figure they said; never one you worked out. If they name it while this card is waiting, re-propose the draft with it — never promise to set it later.",
+        },
+        option: {
+          type: 'boolean',
+          description:
+            "Optional. True ONLY when the tradie asks for a second version of a job already quoted for this customer, to compare or to offer both (\"do the same scope at the labour-only rate\", \"do a Colorbond option as well\"). Give it a jobName that says what differs. Without it, a second draft for the same customer and job is refused.",
+        },
         documentType: {
           type: 'string',
           enum: ['quote', 'invoice'],
@@ -278,7 +288,7 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
         rateLines: {
           type: 'array',
           description:
-            "Optional. Charge the job off their rate card: one line per rate that fits, quantity taken from the job (m², rooms, hours, days — never guessed; ask if you don't know it). Each becomes a lump-sum line on the quote at rate × quantity. When EVERY line has includesMaterials true the rate IS the price: no materials are generated and no labour is added. When a line is labour-only, materials are still worked out and priced on top.",
+            "Optional. Charge the job off their rate card: one line per rate that fits, quantity taken from the job (m², rooms, hours, days — never guessed; ask if you don't know it). Each becomes a lump-sum line on the quote at rate × quantity. When EVERY line has includesMaterials true the rate IS the price: no materials are generated and no labour is added. When a line is labour-only, materials are still worked out and priced on top — unless materialsMode is 'labour_only' as well, which is how a job where the customer supplies the gear is drafted. A later scope change keeps charging the same way.",
           items: {
             type: 'object',
             properties: {
@@ -639,7 +649,8 @@ export const CONTROL_TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
       properties: {
         proposalId: {
           type: 'string',
-          description: 'Optional. The specific card to apply if you know its id; omit to apply the one currently waiting.',
+          description:
+            'Optional. The specific card to apply if you know its id. Omit it on a plain yes: that applies the waiting card AND any other waiting cards of the same kind put up alongside it (two rate cards, two deletions).',
         },
       },
     },
