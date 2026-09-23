@@ -124,6 +124,36 @@ describe('reinforcing steel is a steel-merchant line, not a hardware shelf (QU-1
     expect(tradeFallbackUnitPrice('SL72 reinforcing mesh sheet', 'm²')).toBe(8);
   });
 
+  // 15 Sep 2026 audit: "Plaster sanding sheets / mesh 120 grit" took the $105
+  // reo-sheet rate ten times over ($954.50 of sandpaper on a cavity slider),
+  // and "plastic bar chairs for mesh" priced 409 chairs at $105 each.
+  it('never gives the reo-sheet rate to sanding mesh, bar chairs or any other site mesh', () => {
+    const notReo = [
+      'plaster sanding sheets / mesh 120 grit sanding mesh sheets 120 grit',
+      'sanding mesh sheet 120 grit',
+      'plastic bar chairs for mesh 50mm Bar Chairs',
+      'mesh spacers 40mm',
+      'fibreglass jointing mesh tape 50mm',
+      'self adhesive jointing mesh sheet 90mm',
+      'fly screen mesh sheet 1.2m',
+      'render mesh sheet alkali resistant',
+      'gutter guard mesh sheet',
+    ];
+    for (const name of notReo) {
+      expect(tradeFallbackUnitPrice(name, 'each'), name).not.toBe(105);
+      expect(isNonRetailTradeRow(name, 'each', 10), name).toBe(false);
+    }
+    // The real thing still prices as a sheet, and still stays off retail search.
+    expect(tradeFallbackUnitPrice('reo mesh sheet SL72 6m x 2.4m', 'each')).toBe(105);
+    expect(tradeFallbackUnitPrice('steel mesh sheet for slab', 'each')).toBe(105);
+    expect(isNonRetailTradeRow('reinforcing mesh SL82', 'each', 4)).toBe(true);
+  });
+
+  it('prices sand only when the row is sand, not "sanding"', () => {
+    expect(tradeFallbackUnitPrice('bedding sand 20kg bag', 'kg')).toBe(0.12);
+    expect(tradeFallbackUnitPrice('plaster sanding sheets 120 grit', 'each')).not.toBe(12);
+  });
+
   it('prices steel formwork pegs', () => {
     expect(tradeFallbackUnitPrice('steel formwork peg 600mm', 'each')).toBe(7);
   });

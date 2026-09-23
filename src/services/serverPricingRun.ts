@@ -317,19 +317,49 @@ export function watchServerRun(
         }, QUEUE_TIMEOUT_MS),
       );
     }
-    // The stale watchdog: claimed, then silence.
-    const staleCheck = () => {
+    // The last run-document write this watcher has seen. A fresh read that
+    // carries a different stamp means the server is alive, whatever the
+    // phone's own clock says about the silence.
+    let lastSeenUpdatedAt: string | undefined;
+
+    // Wall-clock silence is not evidence on its own. iOS freezes JavaScript
+    // in the background, and the snapshot listener only catches up after the
+    // timers have already fired on resume — so a tradie who locked the phone
+    // for eleven minutes came back to "The server stopped reporting progress"
+    // and "Pricing finished" in the same second (15 Sep 2026, a run that had
+    // finished cleanly at 13:06). Read the document once before giving up:
+    // settled → deliver it; written since we last looked → keep waiting.
+    const confirmDead = async (error: string): Promise<void> => {
       if (settled) return;
-      if (claimed && io.now() - lastProgressAt >= STALE_TIMEOUT_MS) {
-        finish({ kind: 'failed', error: 'The server stopped reporting progress.' });
+      let fresh: PricingRunRecord | null = null;
+      try {
+        fresh = await withTimeout(io.readRun(runId), CREATE_TIMEOUT_MS, 'read timed out');
+      } catch {
+        fresh = null;
+      }
+      if (settled) return;
+      if (fresh && (fresh.status === 'done' || fresh.status === 'failed' || fresh.status === 'cancelled')) {
+        handleRecord(fresh);
         return;
       }
-      timers.push(setTimeout(staleCheck, 15_000));
+      if (fresh && fresh.updatedAt && fresh.updatedAt !== lastSeenUpdatedAt) {
+        handleRecord(fresh);
+        return;
+      }
+      finish({ kind: 'failed', error });
     };
-    timers.push(setTimeout(staleCheck, 15_000));
-    timers.push(
-      setTimeout(() => finish({ kind: 'failed', error: 'Pricing timed out.' }), HARD_TIMEOUT_MS),
-    );
+
+    // The stale watchdog: claimed, then silence.
+    const staleCheck = async () => {
+      if (settled) return;
+      if (claimed && io.now() - lastProgressAt >= STALE_TIMEOUT_MS) {
+        await confirmDead('The server stopped reporting progress.');
+        if (settled) return;
+      }
+      timers.push(setTimeout(() => void staleCheck(), 15_000));
+    };
+    timers.push(setTimeout(() => void staleCheck(), 15_000));
+    timers.push(setTimeout(() => void confirmDead('Pricing timed out.'), HARD_TIMEOUT_MS));
 
     // The foreground heartbeat: while the app is in front, keep the stamp
     // fresh so the server knows a watching tradie needs no push.
@@ -345,51 +375,66 @@ export function watchServerRun(
       if (settled) return;
       // 'inactive' precedes 'background' on an iOS lock and gives the write
       // the most time to leave the phone before JavaScript is frozen.
+      const wasInFront = inFront;
       inFront = state === 'active';
       io.setForeground(runId, inFront).catch(() => {});
+      if (inFront && !wasInFront) {
+        // Back from the background: the silence was ours, not the server's.
+        // Restart the clock and catch up on the document without waiting for
+        // the listener to reconnect.
+        lastProgressAt = io.now();
+        io.readRun(runId)
+          .then((fresh) => {
+            if (!settled && fresh) handleRecord(fresh);
+          })
+          .catch(() => {});
+      }
     });
+
+    const handleRecord = (latest: PricingRunRecord | null): void => {
+      if (settled) return;
+      if (!latest) return; // Our own create hasn't echoed yet, or it was taken back.
+      if (latest.status !== 'queued') {
+        claimed = true;
+        lastProgressAt = io.now();
+      }
+      if (latest.updatedAt) lastSeenUpdatedAt = latest.updatedAt;
+      if (latest.progress) {
+        // Only a claimed run is safe to lock the phone on.
+        callbacks.onProgress?.({ ...latest.progress, runsOnServer: latest.status !== 'queued' });
+      }
+      if (latest.status === 'done') {
+        const result = latest.result;
+        if (!result) {
+          finish({ kind: 'failed', error: 'The run finished without a result.' });
+          return;
+        }
+        io.fetchQuote(quoteId).then(
+          (quote) => {
+            if (!quote) {
+              finish({ kind: 'failed', error: 'The priced quote could not be read back.' });
+              return;
+            }
+            finish({ kind: 'done', result, quote });
+          },
+          (err) => finish({ kind: 'failed', error: err instanceof Error ? err.message : 'read failed' }),
+        );
+        return;
+      }
+      if (latest.status === 'failed') {
+        finish({ kind: 'failed', error: latest.error || 'Pricing failed on the server.' });
+        return;
+      }
+      if (latest.status === 'cancelled') {
+        // Our own cancellation echoing back before the transaction resolves
+        // is the fallback, not a failure.
+        finish(weCancelled ? { kind: 'unavailable', reason: 'no server pickup' } : { kind: 'failed', error: 'Pricing was cancelled.' });
+      }
+    };
 
     unsubscribeWatch = io.watchRun(
       runId,
-      (latest) => {
-        if (settled) return;
-        if (!latest) return; // Our own create hasn't echoed yet, or it was taken back.
-        if (latest.status !== 'queued') {
-          claimed = true;
-          lastProgressAt = io.now();
-        }
-        if (latest.progress) {
-          // Only a claimed run is safe to lock the phone on.
-          callbacks.onProgress?.({ ...latest.progress, runsOnServer: latest.status !== 'queued' });
-        }
-        if (latest.status === 'done') {
-          const result = latest.result;
-          if (!result) {
-            finish({ kind: 'failed', error: 'The run finished without a result.' });
-            return;
-          }
-          io.fetchQuote(quoteId).then(
-            (quote) => {
-              if (!quote) {
-                finish({ kind: 'failed', error: 'The priced quote could not be read back.' });
-                return;
-              }
-              finish({ kind: 'done', result, quote });
-            },
-            (err) => finish({ kind: 'failed', error: err instanceof Error ? err.message : 'read failed' }),
-          );
-          return;
-        }
-        if (latest.status === 'failed') {
-          finish({ kind: 'failed', error: latest.error || 'Pricing failed on the server.' });
-          return;
-        }
-        if (latest.status === 'cancelled') {
-          // Our own cancellation echoing back before the transaction resolves
-          // is the fallback, not a failure.
-          finish(weCancelled ? { kind: 'unavailable', reason: 'no server pickup' } : { kind: 'failed', error: 'Pricing was cancelled.' });
-        }
-      },
+      handleRecord,
       (err) => {
         if (claimed) {
           finish({ kind: 'failed', error: err instanceof Error ? err.message : 'watch failed' });

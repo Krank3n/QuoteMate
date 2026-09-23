@@ -573,6 +573,30 @@ describe('a travel charge on the rates tool', () => {
     expect(error).toMatch(/0 to take travel off/);
   });
 
+  // 15 Sep 2026: "No GST" on a priced deck quote had Mate say it couldn't
+  // change GST after drafting, then delete the quote and redraft it — losing
+  // the scope. A tree lopper the same night got a -$40.91 "Discount" line to
+  // fake a GST-free $450. GST on a document is one boolean on the rates card.
+  it('takes GST off a document on its own, with no other rate changing', () => {
+    const { proposal, error } = buildProposal('propose_update_quote_rates', 'tool_gst1', {
+      quoteId: 'doc_path',
+      chargeGst: false,
+    });
+    expect(error).toBeUndefined();
+    const rates = proposal as UpdateQuoteRatesProposal;
+    expect(rates.chargeGst).toBe(false);
+    expect(rates.markup).toBeUndefined();
+    expect(rates.travelAdjustment).toBeUndefined();
+  });
+
+  it('puts GST back with true, and refuses a string that is not a boolean', () => {
+    const on = buildProposal('propose_update_quote_rates', 'tool_gst2', { quoteId: 'doc_path', chargeGst: true });
+    expect((on.proposal as UpdateQuoteRatesProposal).chargeGst).toBe(true);
+    const bad = buildProposal('propose_update_quote_rates', 'tool_gst3', { quoteId: 'doc_path', chargeGst: 'false' });
+    expect(bad.proposal).toBeUndefined();
+    expect(bad.error).toMatch(/true or false/);
+  });
+
   it('rejects a travel charge that is not a number', () => {
     for (const bad of ['half an hour each way', true, {}, []] as unknown[]) {
       const { proposal, error } = buildProposal('propose_update_quote_rates', 'tool_tv5', {

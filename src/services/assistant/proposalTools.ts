@@ -502,14 +502,20 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
       const laborHours = num(input.laborHours);
       const travel = parseTravelCharge(input.travelAdjustment);
       if (travel.error) return { error: travel.error };
+      // Strictly a boolean: "false" as a string would read as GST on.
+      if (input.chargeGst !== undefined && typeof input.chargeGst !== 'boolean') {
+        return { error: 'chargeGst must be true or false.' };
+      }
+      const chargeGst = typeof input.chargeGst === 'boolean' ? input.chargeGst : undefined;
       if (
         markup === undefined &&
         laborMarkup === undefined &&
         laborRate === undefined &&
         laborHours === undefined &&
-        travel.dollars === undefined
+        travel.dollars === undefined &&
+        chargeGst === undefined
       ) {
-        return { error: 'Provide at least one of markup, laborMarkup, laborRate, laborHours, or travelAdjustment.' };
+        return { error: 'Provide at least one of markup, laborMarkup, laborRate, laborHours, travelAdjustment, or chargeGst.' };
       }
       // Travel is stored as a share of the subtotal, so it needs the settled
       // one. Refuse in-turn while pricing runs — the same wait the scope and
@@ -532,6 +538,7 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
         laborRate,
         laborHours,
         ...(travel.dollars !== undefined ? { travelAdjustment: travel.dollars } : {}),
+        ...(chargeGst !== undefined ? { chargeGst } : {}),
         displayName: input.displayName ? String(input.displayName) : undefined,
       };
       return { proposal };

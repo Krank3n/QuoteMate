@@ -44,7 +44,7 @@ import { trackEvent } from './src/services/analyticsService';
 import { appOpenTracker, pushTapKey, pushTypeOf } from './src/services/appOpenTracker';
 import { warmUpTapToPay } from './src/services/squarePayments';
 import { syncFavoritesFromCloud } from './src/services/materialFavorites';
-import { registerQuotingProfileSource } from './src/services/assistant/quotingProfileContext';
+import { registerPlanSource, registerQuotingProfileSource } from './src/services/assistant/quotingProfileContext';
 import { resumeUnfinishedAnalyses } from './src/services/analyseResume';
 import { listUnsettledAnalyses, recordAnalyseSettled } from './src/services/analyseLedger';
 import { forgetParkedAnalyse } from './src/services/analyseHandoff';
@@ -100,6 +100,8 @@ import { SplashOverlay } from './src/components/SplashOverlay';
 // rate card). Registered here, at the composition root, so the assistant
 // services never import the store.
 registerQuotingProfileSource(() => useStore.getState().businessSettings);
+// The plan gate Mate's Apply path applies, known to Mate before the first question.
+registerPlanSource(() => useStore.getState().getEffectivePlan());
 
 const navigationRef = createNavigationContainerRef<any>();
 

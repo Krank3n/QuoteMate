@@ -557,3 +557,33 @@ describe('propose_pick_contact', () => {
     expect(!result.ok && result.error).toContain('web');
   });
 });
+
+// 15 Sep 2026: "No GST" on a priced deck quote had Mate delete and redraft it
+// (scope lost); a tree lopper's "not registered for GST" became a -$40.91
+// "Discount" line under a GST line that was still there. GST on a document is
+// the gstRegistered snapshot the calculator already reads — one boolean.
+describe('propose_update_quote_rates chargeGst', () => {
+  it('puts GST on and takes it off a document in place, re-doing the totals each time', async () => {
+    const on = await useStore.getState().applyProposal({ ...base, type: 'propose_update_quote_rates', quoteId: DOC_ID, chargeGst: true });
+    expect(on.ok).toBe(true);
+    expect(stored().gstRegistered).toBe(true);
+    expect(stored().gst).toBeCloseTo(141.57, 2); // 10% on 1,415.70 (ex-GST basis)
+    expect(stored().total).toBeCloseTo(1557.27, 2);
+    expect(on.ok && on.appliedTotal).toBeCloseTo(1557.27, 2);
+
+    const off = await useStore.getState().applyProposal({ ...base, type: 'propose_update_quote_rates', quoteId: DOC_ID, chargeGst: false });
+    expect(off.ok).toBe(true);
+    expect(stored().gstRegistered).toBe(false);
+    expect(stored().gst).toBe(0);
+    expect(stored().total).toBe(1415.7);
+    // Nothing else moved — no discount line, materials untouched.
+    expect(stored().materials).toHaveLength(1);
+    expect(stored().laborTotal).toBe(702);
+  });
+
+  it('leaves the GST snapshot alone when the card carries no chargeGst', async () => {
+    await useStore.getState().applyProposal({ ...base, type: 'propose_update_quote_rates', quoteId: DOC_ID, markup: 20 });
+    expect(stored().gstRegistered).toBe(false);
+    expect(stored().gst).toBe(0);
+  });
+});
