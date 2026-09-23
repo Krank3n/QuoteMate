@@ -45,8 +45,11 @@ describe('shouldShowWonPrompt audience', () => {
     expect(decide({ plan: 'free' })).toBe(true);
   });
 
-  it('stays quiet mid-trial, when they already have everything it offers', () => {
-    expect(decide({ plan: 'trial', trialDaysRemaining: 5 })).toBe(false);
+  // 22 Sep 2026: a won job is the moment that converts (accepted ≈ 3× sent)
+  // and the sheet had reached one tradie in 30 days. Every win now.
+  it('shows mid-trial too — the win is the moment, not the countdown', () => {
+    expect(decide({ plan: 'trial', trialDaysRemaining: 5 })).toBe(true);
+    expect(decide({ plan: 'trial', trialDaysRemaining: 13 })).toBe(true);
   });
 
   it('shows in the last 3 days of a trial', () => {

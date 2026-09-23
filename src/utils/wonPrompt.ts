@@ -31,6 +31,7 @@ export const WON_PROMPT_KEY = 'won_prompt_state';
  * dashboard, which suppresses the trial countdown until the last 3 days so a
  * tradie mid-trial is never nagged about a plan they already have.
  */
+/** Days left at which the trial copy turns urgent; no longer gates whether the sheet shows. */
 export const WON_PROMPT_TRIAL_ENDING_DAYS = 3;
 
 /** The persisted shape, backing the once-per-doc / once-per-7-days caps. */
@@ -80,12 +81,13 @@ export function shouldShowWonPrompt(args: {
 }): boolean {
   const { plan, trialDaysRemaining, docId, total, shownDocIds, lastShownAt, now } = args;
   if (plan === 'pro') return false; // Pro (billed or comped) never sees it.
-  if (plan === 'trial') {
-    // Mid-trial they already have invoicing and payments — offering them Pro
-    // would be nagging, not an offer. Only once the trial is nearly up.
-    if (trialDaysRemaining === null) return false;
-    if (trialDaysRemaining > WON_PROMPT_TRIAL_ENDING_DAYS) return false;
-  }
+  // A trial sees it on every win, not only in its last days. 22 Sep 2026
+  // audit: an accepted quote converts about three times as often as a sent
+  // one, and this sheet reached ONE tradie in 30 days. The sheet's first job
+  // is still the money step; Pro is the line underneath, priced in minutes
+  // of the tradie's own rate (JobWonSheet.proLine). A trial with no countdown
+  // to stand on stays quiet — the line would have nothing true to say.
+  if (plan === 'trial' && trialDaysRemaining === null) return false;
   if (!docId) return false;
   // No price, no moment. An unpriced accepted quote would headline "$0.00" (or
   // "$NaN"), and it must not burn the 7-day budget either.
