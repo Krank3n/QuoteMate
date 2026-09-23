@@ -278,6 +278,12 @@ export interface UpdateQuoteScopeProposal extends BaseProposal {
   estimatedDurationHours?: number;
   /** Display-only — names the quote on the card without a round-trip. */
   displayName?: string;
+  /**
+   * Display-only — the quote is charged off rate lines, so the card says what
+   * the re-run keeps instead of promising to redo the materials. Apply reads
+   * the live quote itself (rateModeOfQuote); this is just the card's copy.
+   */
+  rateMode?: 'all_in' | 'labour' | 'labour_no_materials';
 }
 
 // Mark an invoice paid in full — the voice / chat equivalent of opening

@@ -66,8 +66,11 @@ export function findSupersededProposals(
   _excludeMessageId?: string,
 ): SupersededRef[] {
   const refs: SupersededRef[] = [];
-  const incomingIds = new Set(incoming.map((p) => p.id));
-  for (const next of incoming) {
+  // A card is only ever replaced by one that came AFTER it — a stale card from
+  // an earlier turn, or an earlier copy in this same batch (sim, 23 Sep 2026:
+  // one reply put up two identical Update scope cards for one quote).
+  const position = new Map(incoming.map((p, i) => [p.id, i]));
+  for (const [nextIndex, next] of incoming.entries()) {
     const perConvo = PER_CONVERSATION.has(next.type);
     const perQuote = PER_QUOTE.has(next.type);
     const contentKey = SAME_CONTENT[next.type];
@@ -75,7 +78,10 @@ export function findSupersededProposals(
     const nextQuoteId = (next as { quoteId?: string }).quoteId;
     for (const message of messages) {
       for (const prior of message.proposals || []) {
-        if (prior.type !== next.type || incomingIds.has(prior.id)) continue;
+        if (prior.type !== next.type || prior.id === next.id) continue;
+        const priorIndex = position.get(prior.id);
+        if (priorIndex !== undefined && priorIndex > nextIndex) continue;
+        if (refs.some((r) => r.proposalId === prior.id)) continue;
         if (!isPending(message, prior)) continue;
         if (perQuote && (prior as { quoteId?: string }).quoteId !== nextQuoteId) continue;
         if (contentKey && contentKey(prior) !== contentKey(next)) continue;

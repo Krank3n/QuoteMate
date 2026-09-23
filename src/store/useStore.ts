@@ -4086,22 +4086,27 @@ export const useStore = create<AppState>((set, get) => ({
           }
 
           // The total the tradie said before the draft, set now that pricing
-          // has settled — the same planner and save the Set total card runs,
-          // so nothing depends on the model remembering to do it afterwards.
+          // has settled — the same planner the Set total card runs, so nothing
+          // depends on the model remembering to do it afterwards. It plans
+          // against the priced quote the pipeline just left in the store, the
+          // way the travel charge above does: re-reading the document here
+          // (sim, 23 Sep 2026) got the copy from BEFORE the server's priced
+          // rows landed, and saving it put every material back to $0.
           let totalNote: string | undefined;
           if (proposal.targetTotal) {
-            const set = await get().applyProposal({
-              id: `${proposal.id}-total`,
-              toolUseId: proposal.toolUseId,
-              createdAt: proposal.createdAt,
-              type: 'propose_set_total',
-              quoteId,
-              targetTotal: proposal.targetTotal,
-            });
+            const priced = get().currentQuote;
+            const set =
+              priced && priced.id === quoteId
+                ? applySetTotal(updateQuoteCalculations(priced), proposal.targetTotal)
+                : null;
+            if (set?.ok) {
+              get().updateQuote({ ...priced!, ...set.patch } as Quote);
+              await get().saveDraft(get().currentQuote!);
+            }
             // Shown to the tradie as its own bubble, like the travel note.
-            totalNote = set.ok
+            totalNote = set?.ok
               ? `Total set to your ${formatCurrency(proposal.targetTotal)}.`
-              : `Couldn't set the total to ${formatCurrency(proposal.targetTotal)}${set.error ? ` — ${set.error}` : '.'}`;
+              : `Couldn't set the total to ${formatCurrency(proposal.targetTotal)}${set && !set.ok && set.message ? ` — ${set.message}` : '.'}`;
           }
 
           // If the tradie asked for an invoice up front, auto-convert at the

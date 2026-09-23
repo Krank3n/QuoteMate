@@ -396,8 +396,14 @@ function Body({ proposal }: { proposal: Proposal }) {
             <Text style={styles.scope} numberOfLines={6}>{proposal.jobDescription}</Text>
           ) : null}
           <Text style={styles.dim}>
-            I'll redo the materials and prices for the new scope.
-            {typeof proposal.estimatedDurationHours === 'number'
+            {proposal.rateMode === 'all_in'
+              ? 'New description — your rate stays the whole price, no materials list.'
+              : proposal.rateMode === 'labour_no_materials'
+                ? 'New description — your labour rate stays, and the customer still supplies the materials.'
+                : proposal.rateMode === 'labour'
+                  ? "Your labour rate stays — I'll redo the materials and their prices for the new scope."
+                  : "I'll redo the materials and prices for the new scope."}
+            {proposal.rateMode !== 'all_in' && proposal.rateMode !== 'labour_no_materials' && typeof proposal.estimatedDurationHours === 'number'
               ? ` Labour set to ${proposal.estimatedDurationHours} h.`
               : ''}
           </Text>

@@ -56,3 +56,74 @@ describe('dispatchToolCall — a plain yes vs a named card', () => {
     expect(out.control).toEqual({ decision: 'apply', messageId: 'm1', proposalId: 'prop_rate_1' });
   });
 });
+
+describe('a card proposed again after a bare yes — the yes was for the waiting card', () => {
+  const draftCard = (id: string, description: string) =>
+    ({
+      id,
+      toolUseId: `t_${id}`,
+      createdAt: '2026-09-23T03:00:00Z',
+      type: 'propose_draft_quote',
+      customerDraft: { name: 'Jade Testthree' },
+      jobName: 'Colorbond Garden Shed',
+      jobDescription: description,
+      targetTotal: 9000,
+    }) as never;
+
+  afterEach(async () => {
+    const gate = await import('../pendingProposalGate');
+    gate.setPendingCardsProbe(null);
+    gate.setLatestTradieLineProbe(null);
+  });
+
+  it('isBareYes: a plain yes, not a yes carrying a change', async () => {
+    const { isBareYes } = await import('../pendingProposalGate');
+    for (const yes of ['Yep', 'yeah go ahead', 'Sweet, price it up', 'do it', 'yep save both', 'ok']) expect(isBareYes(yes)).toBe(true);
+    for (const more of ['yeah but make it 7 by 4', 'no phone yet, go ahead', 'nah', 'yes 9000', '', 'go to the next one mate please now ok']) {
+      expect(isBareYes(more)).toBe(false);
+    }
+  });
+
+  it('refuses the re-proposed draft in-turn and points at apply_pending_proposal (sim: "Yep" → same draft, one word changed)', async () => {
+    const gate = await import('../pendingProposalGate');
+    const { dispatchToolCall } = await import('../toolDispatcher');
+    gate.setPendingCardsProbe(() => [draftCard('waiting', "Supply and install a Colorbond garden shed, 6m x 4m, on the customer's existing concrete slab.")]);
+    gate.setLatestTradieLineProbe(() => 'Yep');
+    const out = await dispatchToolCall({
+      name: 'propose_draft_quote',
+      id: 'c3',
+      args: {
+        customerDraft: { name: 'Jade Testthree' },
+        jobName: 'Colorbond Garden Shed',
+        jobDescription: "Supply and install a Colorbond garden shed, 6m x 4m, on the customer's existing slab.",
+        targetTotal: 9000,
+      },
+    });
+    expect(out.proposal).toBeUndefined();
+    expect((out.response as { error: string }).error).toMatch(/apply_pending_proposal/);
+  });
+
+  it('a correction goes through — the fresh card replaces the waiting one as before', async () => {
+    const gate = await import('../pendingProposalGate');
+    const { dispatchToolCall } = await import('../toolDispatcher');
+    gate.setPendingCardsProbe(() => [draftCard('waiting', 'Supply and install a Colorbond garden shed, 6m x 4m.')]);
+    gate.setLatestTradieLineProbe(() => 'make it 7 by 4');
+    const out = await dispatchToolCall({
+      name: 'propose_draft_quote',
+      id: 'c4',
+      args: { customerDraft: { name: 'Jade Testthree' }, jobName: 'Colorbond Garden Shed', jobDescription: 'Supply and install a Colorbond garden shed, 7m x 4m.', targetTotal: 9000 },
+    });
+    expect(out.proposal).toBeDefined();
+  });
+
+  it('an exact copy of a waiting card is refused whatever the tradie said', async () => {
+    const gate = await import('../pendingProposalGate');
+    const { dispatchToolCall } = await import('../toolDispatcher');
+    const args = { customerDraft: { name: 'Jade Testthree' }, jobName: 'Colorbond Garden Shed', jobDescription: 'Supply and install a Colorbond garden shed, 6m x 4m.', targetTotal: 9000 };
+    const first = await dispatchToolCall({ name: 'propose_draft_quote', id: 'c5', args });
+    gate.setPendingCardsProbe(() => [first.proposal!]);
+    gate.setLatestTradieLineProbe(() => 'what colour are the doors?');
+    const again = await dispatchToolCall({ name: 'propose_draft_quote', id: 'c6', args });
+    expect(again.proposal).toBeUndefined();
+  });
+});

@@ -4,7 +4,7 @@
  * card a spoken confirm would.
  */
 import { describe, it, expect } from 'vitest';
-import { findPendingProposal, pendingCardsForYes } from '../pendingProposal';
+import { findPendingProposal, pendingCardsForYes, resolveControlTarget } from '../pendingProposal';
 import type { ChatMessage, Proposal } from '../../../types/assistant';
 
 function prop(id: string): Proposal {
@@ -75,5 +75,28 @@ describe('pendingCardsForYes — Matt Browns Concreting, 21 Sep 2026: two rate c
     const m = msg([rate('downlights', 60), prop('send-1')]);
     expect(pendingCardsForYes(m, m.proposals![1]).map((p) => p.id)).toEqual(['send-1']);
     expect(pendingCardsForYes(m, m.proposals![0]).map((p) => p.id)).toEqual(['downlights']);
+  });
+});
+
+describe('resolveControlTarget — the history Mate is sent carries no card ids', () => {
+  it('an id no card ever had is read as a plain yes to the newest waiting card', () => {
+    const m = msg([prop('real-1')]);
+    expect(resolveControlTarget([m], 'prop_made_up')).toMatchObject({ proposal: { id: 'real-1' }, group: true });
+  });
+
+  it('a real id that is still waiting pins that card alone', () => {
+    const a = msg([prop('a1')]);
+    const b = msg([prop('b1')]);
+    expect(resolveControlTarget([a, b], 'a1')).toMatchObject({ proposal: { id: 'a1' }, group: false });
+  });
+
+  it('a real id that has been resolved is refused — never redirected onto another card', () => {
+    const a = msg([prop('a1')], { a1: 'applied' });
+    const b = msg([prop('b1')]);
+    expect(resolveControlTarget([a, b], 'a1')).toBeNull();
+  });
+
+  it('no id and nothing waiting → null', () => {
+    expect(resolveControlTarget([msg([prop('a1')], { a1: 'dismissed' })])).toBeNull();
   });
 });

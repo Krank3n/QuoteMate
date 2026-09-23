@@ -149,9 +149,13 @@ import { scopeStatusOf } from '../services/assistant/scopeEditable';
 import { createBubbleContinuity, joinFragments } from './assistant/bubbleContinuity';
 import { createUnansweredTurn, unansweredTurnBubble } from './assistant/unansweredTurn';
 import { formatCurrency } from '../utils/documentCalculator';
-import { setPendingProposalProbe } from '../services/assistant/pendingProposalGate';
+import {
+  setLatestTradieLineProbe,
+  setPendingCardsProbe,
+  setPendingProposalProbe,
+} from '../services/assistant/pendingProposalGate';
 import { findSupersededProposals } from './assistant/proposalSupersede';
-import { findPendingProposal, pendingCardsForYes } from './assistant/pendingProposal';
+import { pendingCardsForYes, resolveControlTarget } from './assistant/pendingProposal';
 import { ensureLocalUri } from '../services/assistant/attachmentBytes';
 import { useSupplierListImport, type ExtractResult } from '../hooks/useSupplierListImport';
 import type { SaveSummary } from '../hooks/useSupplierListImport';
@@ -1714,10 +1718,32 @@ export function AssistantScreen() {
       const state = useStore.getState();
       const messages =
         state.conversations.find((c) => c.id === state.currentConversationId)?.messages || [];
-      const found = findPendingProposal(messages, proposalId);
-      return found ? { messageId: found.message.id, proposalId: found.proposal.id } : null;
+      const found = resolveControlTarget(messages, proposalId);
+      return found ? { messageId: found.message.id, proposalId: found.proposal.id, group: found.group } : null;
     });
-    return () => setPendingProposalProbe(null);
+    setPendingCardsProbe(() => {
+      const state = useStore.getState();
+      const messages =
+        state.conversations.find((c) => c.id === state.currentConversationId)?.messages || [];
+      return messages.flatMap((m) =>
+        (m.proposals || []).filter((p) => (m.proposalStatus?.[p.id] ?? 'pending') === 'pending'),
+      );
+    });
+    setLatestTradieLineProbe(() => {
+      const state = useStore.getState();
+      const messages =
+        state.conversations.find((c) => c.id === state.currentConversationId)?.messages || [];
+      for (let i = messages.length - 1; i >= 0; i--) {
+        const m = messages[i];
+        if (m.role === 'user' && m.text && !m.text.startsWith('[context]')) return m.text;
+      }
+      return '';
+    });
+    return () => {
+      setPendingProposalProbe(null);
+      setPendingCardsProbe(null);
+      setLatestTradieLineProbe(null);
+    };
   }, []);
 
   const showAlert = useCallback((config: AlertConfig) => setAlertConfig(config), []);
@@ -3028,7 +3054,7 @@ export function AssistantScreen() {
           // pins a specific one. We stash it and act on turnComplete so the
           // spoken reply finishes first.
           const convo = useStore.getState().conversations.find((c) => c.id === convoId);
-          const found = findPendingProposal(convo?.messages || [], proposalId);
+          const found = resolveControlTarget(convo?.messages || [], proposalId);
           if (!found) {
             return {
               ok: false,
@@ -3039,7 +3065,7 @@ export function AssistantScreen() {
             decision,
             message: found.message,
             proposal: found.proposal,
-            group: !proposalId,
+            group: found.group,
           };
           return { ok: true };
         },

@@ -31,7 +31,7 @@ import { isPricingInFlight } from './pricingInFlight';
 import { isClaimWording } from './claimWording';
 import { canUpdateScope } from './scopeEditable';
 import { sanitizeJobDescription } from '../../utils/sanitizeJobDescription';
-import { MAX_LABEL_CHARS, RATE_CARD_UNITS, normalisePreference, normaliseRateUnit, rateLinesCoverMaterials } from '../quotingProfile';
+import { MAX_LABEL_CHARS, RATE_CARD_UNITS, normalisePreference, normaliseRateUnit, rateLinesCoverMaterials, rateModeOfQuote } from '../quotingProfile';
 import { planSetTotal, setTotalGstMode, type SetTotalSource } from '../../utils/setTotal';
 import { phoneForRecord } from '../../utils/auPhone';
 import { formatCurrency, roundToTwoDecimals } from '../../utils/documentCalculator';
@@ -507,6 +507,10 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
         estimatedDurationHours: hours,
         displayName: input.displayName ? String(input.displayName) : undefined,
       };
+      const rateMode = rateModeOfQuote(documentProbe?.(known.quoteId!)?.materials);
+      if (rateMode) {
+        proposal.rateMode = rateMode.ratesCoverMaterials ? 'all_in' : rateMode.labourOnly ? 'labour_no_materials' : 'labour';
+      }
       return { proposal };
     }
 

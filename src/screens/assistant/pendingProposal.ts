@@ -36,3 +36,26 @@ export function pendingCardsForYes(message: ChatMessage, pinned: Proposal): Prop
   );
   return same.some((p) => p.id === pinned.id) ? same : [pinned];
 }
+
+// Which card a spoken or typed yes/nah resolves, from the id the model passed
+// (if any). The chat history Mate is sent carries text only — a card's id
+// exists in the turn that proposed it and nowhere after — so on the next turn
+// a model that "knows" the id has made it up. Sim, 23 Sep 2026: "yeah go
+// ahead" on a waiting Update scope card → apply_pending_proposal with an id
+// that never existed → "That card is no longer waiting." → Mate put up two
+// fresh copies of the card instead. An id no card in the chat ever had is
+// read as a plain yes; a real id that has since been resolved is still
+// refused, so a stale confirm can't land on a different card.
+export function resolveControlTarget(
+  messages: ChatMessage[],
+  proposalId?: string,
+): { message: ChatMessage; proposal: Proposal; group: boolean } | null {
+  if (proposalId) {
+    const pinned = findPendingProposal(messages, proposalId);
+    if (pinned) return { ...pinned, group: false };
+    const everShown = messages.some((m) => (m.proposals || []).some((p) => p.id === proposalId));
+    if (everShown) return null;
+  }
+  const newest = findPendingProposal(messages);
+  return newest ? { ...newest, group: true } : null;
+}

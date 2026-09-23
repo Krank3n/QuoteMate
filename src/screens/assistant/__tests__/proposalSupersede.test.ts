@@ -191,3 +191,18 @@ describe('rate and preference cards — replaced only by the SAME rate or rule',
     expect(findSupersededProposals([old], [pref('p3', 'Always add a skip bin on demolition jobs')])).toEqual([]);
   });
 });
+
+describe('two copies of one card in the same reply', () => {
+  const scope = (id: string): Proposal =>
+    ({ id, toolUseId: `t_${id}`, createdAt: '2026-09-23T02:30:00Z', type: 'propose_update_quote_scope', quoteId: 'q-12', jobDescription: 'Supply and lay 45 m² with excavation.' }) as Proposal;
+
+  it('the later copy wins; the earlier one is dismissed', () => {
+    const batch = [scope('s1'), scope('s2')];
+    expect(findSupersededProposals([msg(batch)], batch).map((r) => r.proposalId)).toEqual(['s1']);
+  });
+
+  it('a lone card is never dismissed by itself', () => {
+    const batch = [scope('s1')];
+    expect(findSupersededProposals([msg(batch)], batch)).toEqual([]);
+  });
+});

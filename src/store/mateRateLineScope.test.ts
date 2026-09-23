@@ -92,6 +92,9 @@ import { useStore } from './useStore';
 import { __resetPricingInFlight } from '../services/assistant/pricingInFlight';
 import { buildRateWorkItem } from '../services/quotingProfile';
 import { updateQuoteCalculations } from '../utils/quoteCalculator';
+import { documentService } from '../services/documentService';
+import { fetchPricesForQuote } from '../services/materialsPipeline';
+import { quoteToDocument } from '../types/documentAdapter';
 import type { Material, Quote, RateLine } from '../types';
 import type { DraftQuoteProposal, UpdateQuoteScopeProposal } from '../types/assistant';
 
@@ -253,6 +256,34 @@ describe('a total stated before the draft is set when pricing lands', () => {
     expect(result.ok).toBe(true);
     expect(last().total).toBeCloseTo(29000, 2);
     expect(result.ok && result.note).toMatch(/Total set to your \$29,000/);
+  });
+
+  it("sets it on the PRICED rows — a stale copy of the document can't put the materials back to $0", async () => {
+    // Pricing lands a real price on every generated row.
+    vi.mocked(fetchPricesForQuote).mockImplementationOnce(async ({ quote }: { quote: Quote }) => ({
+      updatedQuote: {
+        ...quote,
+        materials: quote.materials.map((m) => (m.kind === 'work' ? m : { ...m, price: 100, totalPrice: 100 * m.quantity, pricingSource: 'scraper' })),
+      },
+      fetchedCount: quote.materials.length,
+      failedCount: 0,
+      skippedCount: 0,
+    }) as never);
+    // …while the unified document the store would re-read is still the
+    // unpriced copy saved before the run (sim, 23 Sep 2026).
+    vi.mocked(documentService.getDocumentById).mockImplementation(async () =>
+      saved.length ? (quoteToDocument(saved[0]) as never) : null,
+    );
+
+    const result = await useStore.getState().applyProposal(
+      draft({ jobName: 'Garden shed', jobDescription: 'Supply and install a 6 m x 4 m Colorbond garden shed on the existing slab.', targetTotal: 9000 }),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(last().total).toBeCloseTo(9000, 2);
+    expect(last().materialsSubtotal).toBeGreaterThan(0);
+    expect(generatedRows(last()).every((m) => m.price === 100)).toBe(true);
+    vi.mocked(documentService.getDocumentById).mockImplementation(async () => null);
   });
 
   it('no targetTotal → the engine total stands and nothing is said about it', async () => {
