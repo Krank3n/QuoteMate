@@ -98,7 +98,7 @@ describe('JobWonSheet', () => {
   it('reports the impression once when shown, with what was offered', () => {
     renderSheet();
     expect(tracked.mock.calls.filter(([e]) => e === 'won_prompt_shown')).toHaveLength(1);
-    expect(eventProps('won_prompt_shown')).toEqual({ collect: 'invoice', pro_offered: false });
+    expect(eventProps('won_prompt_shown')).toEqual({ collect: 'invoice', pro_offered: true });
   });
 
   it('does not render or report when not visible', () => {
@@ -156,10 +156,17 @@ describe('JobWonSheet', () => {
 });
 
 describe('the Pro offer', () => {
-  it('is absent for a free account with nothing Free is holding back', () => {
+  // 22 Sep 2026: the win is the moment that converts, so Pro is on every
+  // sheet — for a free account with nothing held back, the fee is the pitch.
+  it('is present for a free account with nothing held back, and names the fee', () => {
     renderSheet({ trialDaysRemaining: null, hasOtherPaymentMethod: false });
 
-    expect(screen.queryByText('See Pro')).toBeNull();
+    expect(screen.getByText('See Pro')).toBeTruthy();
+    expect(
+      screen.getByText(
+        'Pro drops the fee on every Square payment, and puts bank transfer, PayID and PayPal on your documents.',
+      ),
+    ).toBeTruthy();
     expect(screen.getByText('Not now')).toBeTruthy();
   });
 
@@ -251,13 +258,18 @@ describe('the Pro offer', () => {
 });
 
 describe('shouldOfferPro', () => {
-  it('offers to a trial in its last days whatever they have set up', () => {
+  it('offers on every win — trial at any point, Free with or without a held-back method', () => {
     expect(shouldOfferPro({ trialDaysRemaining: 0, hasOtherPaymentMethod: false })).toBe(true);
+    expect(shouldOfferPro({ trialDaysRemaining: 9, hasOtherPaymentMethod: false })).toBe(true);
+    expect(shouldOfferPro({ trialDaysRemaining: null, hasOtherPaymentMethod: false })).toBe(true);
+    expect(shouldOfferPro({ trialDaysRemaining: null, hasOtherPaymentMethod: true })).toBe(true);
   });
 
-  it('offers on Free only when a non-Square method is being held back', () => {
-    expect(shouldOfferPro({ trialDaysRemaining: null, hasOtherPaymentMethod: false })).toBe(false);
-    expect(shouldOfferPro({ trialDaysRemaining: null, hasOtherPaymentMethod: true })).toBe(true);
+  it('the fee line is priced in minutes too, and never claims invoicing', () => {
+    renderSheet({ trialDaysRemaining: null, hasOtherPaymentMethod: false, laborRate: 100 });
+    expect(document.body.textContent).toMatch(/drops the fee on every Square payment/);
+    expect(document.body.textContent).toMatch(/Pro costs about 29 minutes of your time a month/);
+    expect(document.body.textContent).not.toMatch(/invoice this job|keep invoicing/);
   });
 });
 

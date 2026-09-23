@@ -9,12 +9,13 @@
  * the sticky job bar runs — the sheet owns no navigation of its own, it calls
  * back into the job screen.
  *
- * Pro is secondary and only offered when it is actually the tradie's next
- * problem: a trial about to end, or a free account that has set up bank
- * transfer / PayID / BPAY / PayPal, which Free keeps off the document. Free
- * keeps unlimited quotes and Square invoicing, so nothing here may suggest
- * otherwise — the sheet used to put "See Pro" in front of an unpaid job and
- * tell free users that Pro "lets you invoice this job".
+ * Pro is secondary and, since 22 Sep 2026, always on the sheet for a trial
+ * or free account: the win is the moment that converts. The line names what
+ * Pro changes for THIS account (what ends, the held-back payment methods, or
+ * the Square fee) and what it costs in minutes of their rate. Free keeps
+ * unlimited quotes and Square invoicing, so nothing here may suggest
+ * otherwise — the sheet used to tell free users that Pro "lets you invoice
+ * this job".
  *
  * Dismissible and non-blocking — the stage change has already landed before
  * this appears. Who sees it and how often is gated by the caller
@@ -107,29 +108,41 @@ export function hasNonSquarePaymentMethod(
 }
 
 /**
- * Whether Pro is worth mentioning on this win at all. A trial in its last days
- * is losing something real; a free account is only shown the offer when it has
- * a payment method Free is holding back. Anything else and the secondary is
- * just "Not now" — a won job that is not yet paid is no place for a sales
- * pitch.
+ * Whether Pro is mentioned on this win. Since 22 Sep 2026: always, for any
+ * account that isn't Pro (the caller never shows the sheet to Pro). The audit
+ * that day: an accepted quote converts about three times as often as a sent
+ * one, and this sheet had reached one tradie in 30 days because it only
+ * opened in a trial's last days or for a free account holding back a payment
+ * method. The money step stays the primary; Pro is the line under it, priced
+ * in minutes of the tradie's own rate. Kept as a function so the rule has one
+ * home and a test.
  */
-export function shouldOfferPro(args: {
+export function shouldOfferPro(_args: {
   trialDaysRemaining: number | null;
   hasOtherPaymentMethod: boolean;
 }): boolean {
-  if (args.trialDaysRemaining !== null) return true;
-  return args.hasOtherPaymentMethod;
+  return true;
 }
 
 /**
  * The one line on what Pro does, told from where the tradie stands, followed
  * by what it costs in minutes of their own labour when the rate is known — a
  * won job is the one moment the value and the price sit side by side.
+ *
+ * Free with a non-Square method set up: what Free is holding off the
+ * document. Free otherwise: the fee, which is what Pro changes for them.
+ * Trial: what ends, and when.
  */
-export function proLine(trialDaysRemaining: number | null, laborRate?: number | null): string {
+export function proLine(
+  trialDaysRemaining: number | null,
+  laborRate?: number | null,
+  hasOtherPaymentMethod: boolean = true,
+): string {
   const what =
     trialDaysRemaining === null
-      ? 'Pro also puts bank transfer, PayID and PayPal on your quotes and invoices, alongside Square.'
+      ? hasOtherPaymentMethod
+        ? 'Pro also puts bank transfer, PayID and PayPal on your quotes and invoices, alongside Square.'
+        : 'Pro drops the fee on every Square payment, and puts bank transfer, PayID and PayPal on your documents.'
       : `${
           trialDaysRemaining <= 0
             ? 'Your trial ends today'
@@ -212,7 +225,7 @@ export function JobWonSheet({
 
         {offerPro ? (
           <>
-            <Text style={styles.proNote}>{proLine(trialDaysRemaining, laborRate)}</Text>
+            <Text style={styles.proNote}>{proLine(trialDaysRemaining, laborRate, hasOtherPaymentMethod)}</Text>
             <Button mode="text" onPress={handleSeePro} style={styles.secondaryButton}>
               See Pro
             </Button>
