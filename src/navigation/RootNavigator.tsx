@@ -33,6 +33,7 @@ import { AccountSettingsScreen } from '../screens/settings/AccountSettingsScreen
 import { AboutScreen } from '../screens/settings/AboutScreen';
 import { FeedbackScreen } from '../screens/settings/FeedbackScreen';
 import { PDFTemplateScreen } from '../screens/settings/PDFTemplateScreen';
+import { QuotesInvoicesScreen } from '../screens/settings/QuotesInvoicesScreen';
 import { ReferralScreen } from '../screens/settings/ReferralScreen';
 import { NotificationPreferencesScreen } from '../screens/settings/NotificationPreferencesScreen';
 import { AppearanceScreen } from '../screens/settings/AppearanceScreen';
@@ -648,7 +649,21 @@ export function RootNavigator() {
           },
           headerTintColor: themeColors.text,
           headerTitleStyle: { fontFamily: 'Archivo-Bold' },
-          title: 'Business Defaults',
+          title: 'Rates & GST',
+        }}
+      />
+      <RootStack.Screen
+        name="QuotesInvoices"
+        component={QuotesInvoicesScreen}
+        options={{
+          presentation: 'card',
+          headerShown: true,
+          headerStyle: {
+            backgroundColor: themeColors.surface,
+          },
+          headerTintColor: themeColors.text,
+          headerTitleStyle: { fontFamily: 'Archivo-Bold' },
+          title: 'Quotes & Invoices',
         }}
       />
 <RootStack.Screen
@@ -718,7 +733,7 @@ export function RootNavigator() {
           },
           headerTintColor: themeColors.text,
           headerTitleStyle: { fontFamily: 'Archivo-Bold' },
-          title: 'PDF Templates',
+          title: 'Template Style',
         }}
       />
       <RootStack.Screen

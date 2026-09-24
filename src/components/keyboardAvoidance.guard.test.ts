@@ -176,7 +176,7 @@ describe('every surface with a text input handles the keyboard', () => {
 
   it('the settings screens that were proven broken on device now handle it', () => {
     for (const name of [
-      'BusinessProfile', 'BusinessDefaults', 'AccountSettings', 'PaymentMethods',
+      'BusinessProfile', 'BusinessDefaults', 'QuotesInvoices', 'AccountSettings', 'PaymentMethods',
       'JobTemplateEditor', 'EditSupplier', 'Feedback', 'CallKatie',
     ]) {
       const file = sources.find((f) => f.path === `screens/settings/${name}Screen.tsx`);
