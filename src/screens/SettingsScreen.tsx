@@ -62,8 +62,8 @@ export function SettingsScreen() {
         },
         {
           id: 'businessDefaults',
-          title: 'Business Defaults',
-          subtitle: 'Rates, deposits, card fees, terms',
+          title: 'Rates & GST',
+          subtitle: 'Labour rate, markups, GST',
           icon: 'tune',
           screen: 'BusinessDefaults',
         },
@@ -131,11 +131,11 @@ export function SettingsScreen() {
       title: 'Documents',
       items: [
         {
-          id: 'pdfTemplate',
-          title: 'PDF Templates',
-          subtitle: 'Choose your document style',
+          id: 'quotesInvoices',
+          title: 'Quotes & Invoices',
+          subtitle: 'Template, deposits, terms, follow-ups',
           icon: 'file-document-outline',
-          screen: 'PDFTemplate',
+          screen: 'QuotesInvoices',
         },
         {
           id: 'sectionTemplates',
@@ -234,7 +234,8 @@ export function SettingsScreen() {
           subtitle: 'Tell us what to fix or change',
           icon: 'bullhorn',
           screen: 'Feedback',
-          badge: 'NEW',
+          // A nudge, not news — the feedback screen isn't new any more.
+          badge: 'DON\u2019T BE LAZY',
           badgeColor: themeColors.error,
         },
         {

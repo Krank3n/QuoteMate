@@ -461,7 +461,7 @@ export interface BusinessSettings {
   defaultLaborRate: number;
   /**
    * True once the tradie has set defaultLaborRate themselves — typed it at
-   * onboarding or in Business Defaults, or told Mate it's their standard
+   * onboarding or in Settings → Rates & GST, or told Mate it's their standard
    * hourly rate. Sign-up pre-fills the app's starting $85, and nothing used to
    * tell that apart from a rate they chose, so Mate called it "your rate" to
    * tradies who had never seen it (audit 23 Sep 2026). See labourRateIsTheirs.

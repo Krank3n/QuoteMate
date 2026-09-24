@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 /**
- * Show Labour Hours moved from the PDF Template screen into
- * Business Defaults → Document Display (Sep 2026), next to the other two
- * customer-facing display defaults it belongs with. Pin:
+ * Show Labour Hours moved from the PDF Template screen into the customer
+ * display defaults (Sep 2026), which now live on Settings → Quotes & Invoices
+ * → What the Customer Sees. Pin:
  *  - it hydrates from and saves to `showLaborHours` (same field, no migration);
  *  - it is disabled with a note when "What the customer sees" hides per-line
  *    money, because the PDF builder never prints hours/rate in that mode;
@@ -84,7 +84,7 @@ vi.mock('../../store/useStore', () => ({
   useStore: (selector?: any) => (selector ? selector(store.state) : store.state),
 }));
 
-import { BusinessDefaultsScreen } from './BusinessDefaultsScreen';
+import { QuotesInvoicesScreen } from './QuotesInvoicesScreen';
 import { PDFTemplateScreen } from './PDFTemplateScreen';
 
 beforeEach(() => {
@@ -99,17 +99,17 @@ beforeEach(() => {
 
 const labourSwitch = () => screen.getByTestId('show-labour-hours') as HTMLInputElement;
 
-describe('BusinessDefaultsScreen — Show Labour Hours', () => {
-  it('sits in Document Display and hydrates from showLaborHours', () => {
-    render(<BusinessDefaultsScreen />);
-    expect(screen.getByText('Document Display')).toBeTruthy();
+describe('QuotesInvoicesScreen — Show Labour Hours', () => {
+  it('sits in What the Customer Sees and hydrates from showLaborHours', () => {
+    render(<QuotesInvoicesScreen />);
+    expect(screen.getByText('What the Customer Sees')).toBeTruthy();
     expect(screen.getByText('Show Labour Hours')).toBeTruthy();
     expect(labourSwitch().checked).toBe(true);
     expect(labourSwitch().disabled).toBe(false);
   });
 
   it('saves a change to showLaborHours', async () => {
-    render(<BusinessDefaultsScreen />);
+    render(<QuotesInvoicesScreen />);
     fireEvent.click(labourSwitch());
     expect(labourSwitch().checked).toBe(false);
     fireEvent.click(screen.getByText('Save'));
@@ -122,27 +122,27 @@ describe('BusinessDefaultsScreen — Show Labour Hours', () => {
   });
 
   it('keeps the stored value on an unrelated save', async () => {
-    render(<BusinessDefaultsScreen />);
-    fireEvent.change(screen.getByLabelText('Hourly Labour Rate'), { target: { value: '110' } });
+    render(<QuotesInvoicesScreen />);
+    fireEvent.click(screen.getByText('Use starter template'));
     fireEvent.click(screen.getByText('Save'));
 
     await waitFor(() =>
       expect(store.state.setBusinessSettings).toHaveBeenCalledWith(
-        expect.objectContaining({ defaultLaborRate: 110, showLaborHours: true }),
+        expect.objectContaining({ termsAndConditions: expect.any(String), showLaborHours: true }),
       ),
     );
   });
 
   it('is disabled with a note when the customer does not see line prices', () => {
     store.state.businessSettings.defaultPriceDetail = 'total';
-    render(<BusinessDefaultsScreen />);
+    render(<QuotesInvoicesScreen />);
     expect(labourSwitch().disabled).toBe(true);
     expect(screen.getByText(/only show when the customer sees line prices/i)).toBeTruthy();
   });
 
   it('re-enables the moment the detail mode is switched back to itemised', () => {
     store.state.businessSettings.defaultPriceDetail = 'total';
-    render(<BusinessDefaultsScreen />);
+    render(<QuotesInvoicesScreen />);
     expect(labourSwitch().disabled).toBe(true);
     fireEvent.click(screen.getByText('Itemised'));
     expect(labourSwitch().disabled).toBe(false);
@@ -150,7 +150,7 @@ describe('BusinessDefaultsScreen — Show Labour Hours', () => {
 });
 
 describe('PDFTemplateScreen — no display toggles', () => {
-  it('only picks a style; the labour hours switch lives in Business Defaults', () => {
+  it('only picks a style; the labour hours switch lives on Quotes & Invoices', () => {
     render(<PDFTemplateScreen />);
     expect(screen.queryByText('Display Options')).toBeNull();
     expect(screen.queryByText('Show Labour Hours')).toBeNull();

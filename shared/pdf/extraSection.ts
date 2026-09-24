@@ -1,7 +1,7 @@
 /**
  * The tradie's own standing section, printed on every quote after the T&Cs —
  * recommended trades, licence/insurance details, a warranty, whatever they
- * want every customer to see. Set once in Business Defaults.
+ * want every customer to see. Set once in Settings → Quotes & Invoices.
  *
  * Deliberately NOT snapshotted at send time the way the T&Cs are: terms are
  * what the customer accepted and must never change under them, but this is

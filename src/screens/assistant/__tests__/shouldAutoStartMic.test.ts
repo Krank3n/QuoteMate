@@ -1,7 +1,11 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'fs';
+import { dirname, join } from 'path';
+import { fileURLToPath } from 'url';
 import {
   shouldAutoStartMic,
   resolveAutoStartMic,
+  withAutoStartMicToggled,
   AUTO_START_COOLDOWN_MS,
   type ShouldAutoStartParams,
   type VoiceState,
@@ -78,5 +82,44 @@ describe('autoStartMicOnMate default resolution', () => {
 
   it('OFF when explicitly false', () => {
     expect(resolveAutoStartMic(false)).toBe(false);
+  });
+});
+
+describe('withAutoStartMicToggled (Mate tab header switch)', () => {
+  it('flips an unset setting ON — unset means off', () => {
+    expect(withAutoStartMicToggled({ businessName: 'X' } as any).autoStartMicOnMate).toBe(true);
+  });
+
+  it('flips on to off and off to on', () => {
+    expect(withAutoStartMicToggled({ autoStartMicOnMate: true }).autoStartMicOnMate).toBe(false);
+    expect(withAutoStartMicToggled({ autoStartMicOnMate: false }).autoStartMicOnMate).toBe(true);
+  });
+
+  it('keeps every other field and drops the retired surcharge flag', () => {
+    const next = withAutoStartMicToggled({
+      businessName: 'Lakeside Painting',
+      defaultLaborRate: 95,
+      surchargePaymentFees: true,
+      autoStartMicOnMate: false,
+    } as any);
+    expect(next).toEqual({ businessName: 'Lakeside Painting', defaultLaborRate: 95, autoStartMicOnMate: true });
+  });
+});
+
+describe('AssistantScreen wiring (source guard)', () => {
+  // No render harness for the 4k-line Mate screen, so pin the two lines that
+  // matter by source. The focus effect's cleanup stops the live voice
+  // session; with the switch now on this tab, depending on the setting would
+  // cut a tradie off mid-conversation the moment they flipped it.
+  const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../../AssistantScreen.tsx'), 'utf8');
+
+  it('reads the setting at focus through a ref, not as a focus-effect dependency', () => {
+    expect(src).toContain('const enabled = autoStartMicRef.current;');
+    expect(src).not.toMatch(/\}, \[businessSettings\?\.autoStartMicOnMate\]\),\s*\);/);
+  });
+
+  it('offers the switch from the Mate header', () => {
+    expect(src).toContain('accessibilityLabel="Mate voice settings"');
+    expect(src).toContain('withAutoStartMicToggled(businessSettings)');
   });
 });

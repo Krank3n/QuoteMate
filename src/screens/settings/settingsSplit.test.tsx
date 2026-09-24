@@ -1,10 +1,14 @@
 // @vitest-environment jsdom
 /**
- * Business Defaults → Extra Quote Section: the tradie's standing block printed
- * on every quote after the T&Cs (asked for as "Preferred trades"). Pin:
- *  - collapsed to one "Add a section" button until used;
- *  - hydrates from and saves to extraSectionTitle / extraSectionBody;
- *  - Remove clears both, and a heading with no body isn't kept.
+ * Business Defaults split in two (Sep 2026): pricing stays on "Rates & GST"
+ * (route BusinessDefaults); everything that shapes the customer's document
+ * moved to "Quotes & Invoices". Same settings/business fields, so the only new
+ * behaviour to pin is at the seam:
+ *  - Rates & GST no longer carries the document cards (or Mate's mic switch,
+ *    which moved to the Mate tab header);
+ *  - a GST change still re-words UNEDITED starter T&Cs (they print a GST line)
+ *    now that the terms live on the other screen, and never touches edited ones;
+ *  - Quotes & Invoices shows the current template and opens the gallery.
  */
 import React from 'react';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
@@ -32,8 +36,9 @@ vi.mock('../../utils/pdfGenerator', () => ({ prepareLogoHtml: vi.fn(async () => 
 vi.mock('../../hooks/useUnsavedChangesGuard', () => ({
   useUnsavedChangesGuard: () => ({ unsavedModalProps: {} }),
 }));
+const nav = vi.hoisted(() => ({ navigate: vi.fn() }));
 vi.mock('@react-navigation/native', () => ({
-  useNavigation: () => ({ navigate: vi.fn(), setOptions: vi.fn() }),
+  useNavigation: () => ({ navigate: nav.navigate, setOptions: vi.fn() }),
   useFocusEffect: () => {},
 }));
 
@@ -44,7 +49,13 @@ vi.mock('react-native-paper', async () => {
     Title: ({ children }: any) => React.createElement(Text, null, children),
     Surface: ({ children }: any) => React.createElement(View, null, children),
     IconButton: () => null,
-    SegmentedButtons: () => null,
+    SegmentedButtons: ({ buttons, onValueChange }: any) => (
+      <div>
+        {buttons.map((b: any) => (
+          <button key={b.value} onClick={() => onValueChange(b.value)}>{b.label}</button>
+        ))}
+      </div>
+    ),
     TextInput: ({ label, value, onChangeText }: any) => (
       <input aria-label={label} value={value} onChange={(e) => onChangeText?.(e.target.value)} />
     ),
@@ -82,87 +93,96 @@ vi.mock('../../store/useStore', () => ({
 }));
 
 import { BusinessDefaultsScreen } from './BusinessDefaultsScreen';
-
-const base = {
-  businessName: 'Lakeside Painting',
-  defaultLaborRate: 95,
-  defaultPriceDetail: 'itemised',
-};
+import { QuotesInvoicesScreen } from './QuotesInvoicesScreen';
+import { defaultAuTradieTerms } from '../../../shared/pdf/terms/defaultAuTradie';
 
 beforeEach(() => {
   vi.clearAllMocks();
-  store.state.businessSettings = { ...base };
+  store.state.businessSettings = {
+    businessName: 'Lakeside Painting',
+    defaultLaborRate: 95,
+    pricesIncludeGst: false,
+    gstRegistered: true,
+  };
 });
 
 const saved = () => (store.state.setBusinessSettings.mock.calls.at(-1) as any)[0];
 
-describe('BusinessDefaultsScreen — Extra Quote Section', () => {
-  it('starts collapsed behind one button', () => {
+describe('Rates & GST (BusinessDefaultsScreen)', () => {
+  it('keeps pricing and drops the document cards', () => {
     render(<BusinessDefaultsScreen />);
-    expect(screen.getByText('Extra Quote Section')).toBeTruthy();
-    expect(screen.getByText('Add a section')).toBeTruthy();
-    expect(screen.queryByLabelText('Heading')).toBeNull();
+    expect(screen.getByText('Default Rates')).toBeTruthy();
+    for (const moved of ['Document Display', 'What the Customer Sees', 'Deposits (Square)', 'Customer Follow-Ups', 'Terms & Conditions', 'Extra Quote Section', 'Mate (Voice Assistant)']) {
+      expect(screen.queryByText(moved), moved).toBeNull();
+    }
   });
 
-  it('saves a new heading and body', async () => {
+  it('re-words unedited starter terms when GST changes', async () => {
+    store.state.businessSettings.termsAndConditions = defaultAuTradieTerms('exclusive');
     render(<BusinessDefaultsScreen />);
-    fireEvent.click(screen.getByText('Add a section'));
-    fireEvent.change(screen.getByLabelText('Heading'), { target: { value: ' Preferred trades ' } });
-    fireEvent.change(screen.getByLabelText('What to show'), {
-      target: { value: 'Smith Plastering 0400 123 456\n' },
-    });
+    fireEvent.click(screen.getByText('Not registered'));
     fireEvent.click(screen.getByText('Save'));
 
     await waitFor(() => expect(store.state.setBusinessSettings).toHaveBeenCalled());
     expect(saved()).toMatchObject({
-      extraSectionTitle: 'Preferred trades',
-      extraSectionBody: 'Smith Plastering 0400 123 456',
+      gstRegistered: false,
+      termsAndConditions: defaultAuTradieTerms('none'),
+      termsUpdatedAt: expect.any(String),
     });
   });
 
-  it('hydrates an existing section open, and keeps it on an unrelated save', async () => {
-    store.state.businessSettings = {
-      ...base,
-      extraSectionTitle: 'Preferred trades',
-      extraSectionBody: 'Smith Plastering 0400 123 456',
-    };
+  it('leaves hand-edited terms alone', async () => {
+    store.state.businessSettings.termsAndConditions = 'Our own terms. Cash only.';
+    store.state.businessSettings.termsUpdatedAt = '2026-01-01T00:00:00.000Z';
     render(<BusinessDefaultsScreen />);
-    expect((screen.getByLabelText('Heading') as HTMLInputElement).value).toBe('Preferred trades');
+    fireEvent.click(screen.getByText('Not registered'));
+    fireEvent.click(screen.getByText('Save'));
+
+    await waitFor(() => expect(store.state.setBusinessSettings).toHaveBeenCalled());
+    expect(saved()).toMatchObject({
+      termsAndConditions: 'Our own terms. Cash only.',
+      termsUpdatedAt: '2026-01-01T00:00:00.000Z',
+    });
+  });
+
+  it('does not rewrite starter terms on a save that leaves GST alone', async () => {
+    store.state.businessSettings.termsAndConditions = defaultAuTradieTerms('exclusive');
+    store.state.businessSettings.termsUpdatedAt = '2026-01-01T00:00:00.000Z';
+    render(<BusinessDefaultsScreen />);
     fireEvent.change(screen.getByLabelText('Hourly Labour Rate'), { target: { value: '110' } });
     fireEvent.click(screen.getByText('Save'));
 
     await waitFor(() => expect(store.state.setBusinessSettings).toHaveBeenCalled());
     expect(saved()).toMatchObject({
       defaultLaborRate: 110,
-      extraSectionTitle: 'Preferred trades',
-      extraSectionBody: 'Smith Plastering 0400 123 456',
+      termsAndConditions: defaultAuTradieTerms('exclusive'),
+      termsUpdatedAt: '2026-01-01T00:00:00.000Z',
     });
   });
+});
 
-  it('Remove clears both fields on save', async () => {
-    store.state.businessSettings = {
-      ...base,
-      extraSectionTitle: 'Preferred trades',
-      extraSectionBody: 'Smith Plastering 0400 123 456',
-    };
-    render(<BusinessDefaultsScreen />);
-    fireEvent.click(screen.getAllByText('Remove').at(-1)!);
-    expect(screen.getByText('Add a section')).toBeTruthy();
-    fireEvent.click(screen.getByText('Save'));
-
-    await waitFor(() => expect(store.state.setBusinessSettings).toHaveBeenCalled());
-    expect(saved().extraSectionTitle).toBeUndefined();
-    expect(saved().extraSectionBody).toBeUndefined();
+describe('Quotes & Invoices — template style', () => {
+  it('shows the current template and opens the gallery', () => {
+    store.state.businessSettings.pdfTemplate = 'bold';
+    render(<QuotesInvoicesScreen />);
+    expect(screen.getByText('Template style')).toBeTruthy();
+    expect(screen.getByText('Bold')).toBeTruthy();
+    fireEvent.click(screen.getByText('Change'));
+    expect(nav.navigate).toHaveBeenCalledWith('PDFTemplate');
   });
 
-  it('does not keep a heading with no body', async () => {
-    render(<BusinessDefaultsScreen />);
-    fireEvent.click(screen.getByText('Add a section'));
-    fireEvent.change(screen.getByLabelText('Heading'), { target: { value: 'Preferred trades' } });
+  it('falls back to Professional when none is saved', () => {
+    render(<QuotesInvoicesScreen />);
+    expect(screen.getByText('Professional')).toBeTruthy();
+  });
+
+  it('starter terms follow the GST mode set on Rates & GST', async () => {
+    store.state.businessSettings.gstRegistered = false;
+    render(<QuotesInvoicesScreen />);
+    fireEvent.click(screen.getByText('Use starter template'));
     fireEvent.click(screen.getByText('Save'));
 
     await waitFor(() => expect(store.state.setBusinessSettings).toHaveBeenCalled());
-    expect(saved().extraSectionTitle).toBeUndefined();
-    expect(saved().extraSectionBody).toBeUndefined();
+    expect(saved().termsAndConditions).toBe(defaultAuTradieTerms('none').trim());
   });
 });

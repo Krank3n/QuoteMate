@@ -548,8 +548,11 @@ describe('GST, stated rates and never deleting to fix (15–17 Sep 2026 audit)',
     expect(MATE_SYSTEM_PROMPT).toContain('never discount the total to fake it');
   });
 
-  it('names Business Defaults as a real location, for the standing GST setting and default rates', () => {
-    expect(MATE_SYSTEM_PROMPT).toContain('Settings → Business Defaults');
+  it('names Rates & GST as a real location, for the standing GST setting and default rates', () => {
+    // Renamed from Business Defaults (Sep 2026). Mate may only point at
+    // locations that exist, so the old name must not survive anywhere.
+    expect(MATE_SYSTEM_PROMPT).toContain('Settings → Rates & GST');
+    expect(MATE_SYSTEM_PROMPT).not.toContain('Business Defaults');
     expect(MATE_SYSTEM_PROMPT).toContain('"GST on quotes & invoices"');
   });
 

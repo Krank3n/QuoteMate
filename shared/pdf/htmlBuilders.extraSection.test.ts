@@ -3,7 +3,7 @@
  *
  * A painter asked for a "Preferred trades" block on every quote listing the
  * other businesses they recommend. Built as one general slot (heading + text,
- * set once in Business Defaults) so the same field carries recommended trades,
+ * set once in Settings → Quotes & Invoices) so the same field carries recommended trades,
  * licence/insurance details or a warranty. Pin:
  *  - blank body = nothing printed; blank heading = a neutral default;
  *  - it sits after the T&Cs, on quotes only;

@@ -572,7 +572,7 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
         chargeGst: {
           type: 'boolean',
           description:
-            'Whether GST is charged on this document. false when the tradie says they are not registered for GST, "no GST", "take the GST off", "don\'t charge GST on this one" — GST comes off and the customer copy says no GST has been charged. true puts it back. This is the ONLY way GST changes on an existing quote or invoice: never delete and redraft a quote to remove GST, and never discount the total to fake it. For every FUTURE quote the tradie changes the setting themselves under Settings → Business Defaults → "GST on quotes & invoices".',
+            'Whether GST is charged on this document. false when the tradie says they are not registered for GST, "no GST", "take the GST off", "don\'t charge GST on this one" — GST comes off and the customer copy says no GST has been charged. true puts it back. This is the ONLY way GST changes on an existing quote or invoice: never delete and redraft a quote to remove GST, and never discount the total to fake it. For every FUTURE quote the tradie changes the setting themselves under Settings → Rates & GST → "GST on quotes & invoices".',
         },
         displayName: { type: 'string', description: 'Job name to show on the card (display only).' },
       },

@@ -338,7 +338,7 @@ export interface UpdateQuoteRatesProposal extends BaseProposal {
   // Whether GST is charged on THIS document. false = the tradie isn't
   // registered (no GST added or shown, the "No GST has been charged" note
   // prints); true = charge it. Writes the document's gstRegistered snapshot —
-  // the standing default lives in Business Defaults.
+  // the standing default lives in Settings → Rates & GST.
   chargeGst?: boolean;
   // Display-only — name the doc on the card without a re-fetch.
   displayName?: string;
