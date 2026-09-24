@@ -4,7 +4,8 @@
  * (route BusinessDefaults); everything that shapes the customer's document
  * moved to "Quotes & Invoices". Same settings/business fields, so the only new
  * behaviour to pin is at the seam:
- *  - Rates & GST no longer carries the document cards;
+ *  - Rates & GST no longer carries the document cards (or Mate's mic switch,
+ *    which moved to the Mate tab header);
  *  - a GST change still re-words UNEDITED starter T&Cs (they print a GST line)
  *    now that the terms live on the other screen, and never touches edited ones;
  *  - Quotes & Invoices shows the current template and opens the gallery.
@@ -111,7 +112,7 @@ describe('Rates & GST (BusinessDefaultsScreen)', () => {
   it('keeps pricing and drops the document cards', () => {
     render(<BusinessDefaultsScreen />);
     expect(screen.getByText('Default Rates')).toBeTruthy();
-    for (const moved of ['Document Display', 'What the Customer Sees', 'Deposits (Square)', 'Customer Follow-Ups', 'Terms & Conditions', 'Extra Quote Section']) {
+    for (const moved of ['Document Display', 'What the Customer Sees', 'Deposits (Square)', 'Customer Follow-Ups', 'Terms & Conditions', 'Extra Quote Section', 'Mate (Voice Assistant)']) {
       expect(screen.queryByText(moved), moved).toBeNull();
     }
   });

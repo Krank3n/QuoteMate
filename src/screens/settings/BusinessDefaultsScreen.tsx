@@ -2,7 +2,7 @@
  * Rates & GST Settings Screen (route: BusinessDefaults)
  *
  * How you price: default labour rate, markups, travel markup and the GST
- * mode. Lifted out of BusinessProfileScreen so "who you are" stays separate
+ * mode. (Mate's auto-start mic moved to the Mate tab header.) Lifted out of BusinessProfileScreen so "who you are" stays separate
  * from "how you price". Everything that shapes the customer's document
  * (display, deposits, follow-ups, T&Cs, extra section) moved to
  * QuotesInvoicesScreen in Sep 2026 — this screen had grown to seven unrelated
@@ -34,7 +34,6 @@ import { WebContainer } from '../../components/WebContainer';
 import { FixedBottomButton } from '../../components/FixedBottomButton';
 import { AlertModal } from '../../components/AlertModal';
 import { useUnsavedChangesGuard } from '../../hooks/useUnsavedChangesGuard';
-import { resolveAutoStartMic } from '../assistant/shouldAutoStartMic';
 import { defaultAuTradieTerms, isUnmodifiedStarterTerms } from '../../../shared/pdf/terms/defaultAuTradie';
 import { resolveGstMode, GstMode } from '../../../shared/document';
 import { GridBackground } from '../../components/GridBackground';
@@ -57,8 +56,6 @@ export function BusinessDefaultsScreen() {
   const [laborMarkup, setLaborMarkup] = useState('20');
   const [transportMarkupEnabled, setTransportMarkupEnabled] = useState(true);
   const [gstMode, setGstMode] = useState<GstMode>('exclusive');
-  const [autoStartMic, setAutoStartMic] = useState(false);
-
   const [isLoading, setIsLoading] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
@@ -71,16 +68,13 @@ export function BusinessDefaultsScreen() {
     const lm = (businessSettings.defaultLaborMarkup ?? businessSettings.defaultMarkup ?? 30).toString();
     const tm = businessSettings.transportMarkupEnabled !== false;
     const gm = resolveGstMode(businessSettings);
-    const asm = resolveAutoStartMic(businessSettings.autoStartMicOnMate);
 
     setLaborRate(lr);
     setMarkup(mk);
     setLaborMarkup(lm);
     setTransportMarkupEnabled(tm);
     setGstMode(gm);
-    setAutoStartMic(asm);
-
-    setInitialSnapshot(JSON.stringify({ lr, mk, lm, tm, gm, asm }));
+    setInitialSnapshot(JSON.stringify({ lr, mk, lm, tm, gm }));
   }, [businessSettings]);
 
   const isDirty = React.useMemo(() => {
@@ -91,11 +85,10 @@ export function BusinessDefaultsScreen() {
       lm: laborMarkup,
       tm: transportMarkupEnabled,
       gm: gstMode,
-      asm: autoStartMic,
     });
     return current !== initialSnapshot;
   }, [
-    laborRate, markup, laborMarkup, transportMarkupEnabled, gstMode, autoStartMic,
+    laborRate, markup, laborMarkup, transportMarkupEnabled, gstMode,
     initialSnapshot,
   ]);
 
@@ -129,7 +122,6 @@ export function BusinessDefaultsScreen() {
         transportMarkupEnabled,
         pricesIncludeGst: gstMode === 'inclusive',
         gstRegistered: gstMode !== 'none',
-        autoStartMicOnMate: autoStartMic,
         ...(syncStarterTerms
           ? { termsAndConditions: defaultAuTradieTerms(gstMode), termsUpdatedAt: new Date().toISOString() }
           : {}),
@@ -231,26 +223,6 @@ export function BusinessDefaultsScreen() {
             </View>
           </Surface>
 
-          <Surface style={styles.card}>
-            <Title style={styles.sectionTitle}>Mate (Voice Assistant)</Title>
-            <Text style={styles.helperText}>
-              How Mate behaves when you open the Mate tab.
-            </Text>
-
-            <View style={styles.toggleRow}>
-              <View style={styles.toggleLabel}>
-                <Text style={styles.toggleTitle}>Start mic automatically on Mate</Text>
-                <Text style={styles.toggleDescription}>
-                  Off by default. Turn on and Mate opens voice the moment you land on the tab — only if mic access is already granted.
-                </Text>
-              </View>
-              <Switch
-                value={autoStartMic}
-                onValueChange={setAutoStartMic}
-                color={themeColors.accentText}
-              />
-            </View>
-          </Surface>
         </WebContainer>
       </KeyboardAwareScrollView>
 

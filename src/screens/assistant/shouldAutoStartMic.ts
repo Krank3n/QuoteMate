@@ -20,6 +20,18 @@ export function resolveAutoStartMic(v?: boolean): boolean {
   return v === true;
 }
 
+// The Mate tab's header switch (moved out of Settings, Sep 2026): the
+// settings document to save when the tradie flips it. Resolves the current
+// value first so an unset field flips to ON, and drops the retired
+// card-surcharge flag the way every settings save does, so this write never
+// hands a stale `true` back to an older installed build.
+export function withAutoStartMicToggled<T extends { autoStartMicOnMate?: boolean }>(
+  settings: T & { surchargePaymentFees?: boolean },
+): Omit<T, 'surchargePaymentFees'> {
+  const { surchargePaymentFees: _retiredSurcharge, ...rest } = settings;
+  return { ...rest, autoStartMicOnMate: !resolveAutoStartMic(settings.autoStartMicOnMate) };
+}
+
 export interface ShouldAutoStartParams {
   // Resolved setting (resolveAutoStartMic — only an explicit true opts in).
   enabled: boolean;
