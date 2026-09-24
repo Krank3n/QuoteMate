@@ -47,6 +47,15 @@ export const printMediaCSS = `
   html, body {
     margin: 0;
   }
+  /* Print the template's colours. Without this, iOS (expo-print → WebKit's
+     print path) drops every background, so a dark header band or table-header
+     fill vanishes while its white text stays — invisible or washed-out type on
+     white paper. The server's Puppeteer render already passes printBackground,
+     so this makes the phone's PDF match the emailed one. Inherited. */
+  html {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
   /* The footer is a sign-off, not a bottom-pinned strip. The old flex
      margin-top:auto trick never worked in paged media (body min-height
      resolves against the viewport, not the printed page), so the footer
@@ -1012,6 +1021,14 @@ const boldCSS = `
     text-transform: uppercase;
     font-size: 10px;
     letter-spacing: 1.2px;
+  }
+  /* This template pads each block rather than the body (the header band runs
+     edge to edge), so the shared end-of-document blocks need the same 28px or
+     they sit flush against the page edge. */
+  .terms-section,
+  .content-wrapper > .summary-note {
+    margin-left: 28px;
+    margin-right: 28px;
   }
 `;
 
