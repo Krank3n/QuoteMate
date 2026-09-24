@@ -12,7 +12,7 @@
  * thing it will mean when the pipeline runs.
  */
 
-import { LOCAL_MATCH_THRESHOLD, scoreMatch } from './localMaterialMatcher';
+import { LOCAL_MATCH_THRESHOLD, favoriteMatchScore } from './localMaterialMatcher';
 import type { FavoriteProductMapping, SupplierGroup } from '../types';
 
 /** Names shown back to the tradie — more than a few reads as a list, not a nod. */
@@ -24,7 +24,7 @@ export interface SupplierBookSnapshot {
   /** Distinct supplier names, ≤3. */
   supplierNames: string[];
   /** Searchable text per personal-rate row — product name, keywords, notes. */
-  entries: string[][];
+  entries: Pick<FavoriteProductMapping, 'productName' | 'keywords' | 'notes'>[];
 }
 
 export const EMPTY_SUPPLIER_BOOK: SupplierBookSnapshot = {
@@ -48,7 +48,7 @@ export function buildSupplierBookSnapshot(
   favorites: FavoriteProductMapping[],
   groups: SupplierGroup[] = [],
 ): SupplierBookSnapshot {
-  const entries: string[][] = [];
+  const entries: SupplierBookSnapshot['entries'] = [];
   const names: string[] = [];
   const seenNames = new Set<string>();
 
@@ -63,9 +63,7 @@ export function buildSupplierBookSnapshot(
 
   for (const fav of favorites) {
     if (!isSupplierBookEntry(fav)) continue;
-    entries.push(
-      [fav.productName, ...(fav.keywords ?? []), ...(fav.notes ? [fav.notes] : [])].filter(Boolean),
-    );
+    entries.push({ productName: fav.productName, keywords: fav.keywords, notes: fav.notes });
     addName(fav.store);
   }
   // Groups contribute names only — one can exist with zero items (a
@@ -90,9 +88,7 @@ export function coversProbes(
   const hits: string[] = [];
   for (const probe of probes) {
     if (!probe?.trim()) continue;
-    const hit = snapshot.entries.some((haystacks) =>
-      haystacks.some((text) => scoreMatch(probe, text) >= LOCAL_MATCH_THRESHOLD),
-    );
+    const hit = snapshot.entries.some((entry) => favoriteMatchScore(probe, entry) >= LOCAL_MATCH_THRESHOLD);
     if (hit) hits.push(probe);
   }
   return { hits, coversTrade: hits.length >= 2 };

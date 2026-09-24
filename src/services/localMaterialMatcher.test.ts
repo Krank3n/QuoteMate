@@ -537,3 +537,55 @@ describe('end-to-end — local search rankings line up with tradie intuition', (
     expect(out[0].productName).toContain('R2.5');
   });
 });
+
+// ─── A one-word keyword or name must not claim every row that mentions it ───
+//
+// 24 Sep 2026: every drum-sander belt, edger disc and floor coating on a 30 m²
+// floor-sanding quote came in at $187.25 — the tradie's saved rate for "R2.5
+// Polyester Floor Insulation", tagged "floor". MSB Civil's curing compound,
+// diamond blade and bar chairs took their $150 "Concrete" rate the same way.
+// The search terms below are the exact ones those rows were priced from.
+describe('favourites — a single shared word is not a match', () => {
+  const floorInsulation = fav({
+    productName: 'R2.5 Polyester Floor Insulation (Autex Greenstuf)',
+    store: 'manual',
+    price: 187.25,
+    keywords: ['r2.5', 'polyester', 'floor', 'autex', 'greenstuf', 'underfloor'],
+    notes:
+      'R2.5 Polyester floor Insulation.\nSupply and Fit R 2.5 Thermal Floor Polyester Autex Greenstuf Insulation. This Insulation will Be stapled in place to fit Between the floor Joists.',
+  });
+  const concreteRate = fav({ productName: 'Concrete', store: 'manual', price: 150, unit: 'm²' as Material['unit'] });
+
+  it.each([
+    'floor drum sander belt 200 x 750mm 40 grit',
+    'sanding disc 178mm floor edger assorted grit',
+    'timber floor gap filler trowel filler 4L',
+    'clear gloss polyurethane floor coating 4L',
+    'floor buffing sanding screen disc 150 grit',
+    'lambswool floor coating applicator 250mm',
+  ])('floor-sanding row "%s" does not take the floor-insulation rate', (query) => {
+    expect(searchFavorites(query, [floorInsulation], [])).toEqual([]);
+  });
+
+  it.each([
+    'concrete formwork release oil',
+    'plastic bar chair mesh support 75mm concrete',
+    'concrete curing compound spray on',
+    'diamond blade 350mm concrete cutting',
+  ])('concreting row "%s" does not take a rate named just "Concrete"', (query) => {
+    expect(searchFavorites(query, [concreteRate], [])).toEqual([]);
+  });
+
+  it('the rates still price what they are for', () => {
+    expect(searchFavorites('R2.5 polyester floor insulation', [floorInsulation], [])).toHaveLength(1);
+    expect(searchFavorites('underfloor insulation polyester r2.5', [floorInsulation], [])).toHaveLength(1);
+    expect(searchFavorites('Concrete', [concreteRate], [])).toHaveLength(1);
+  });
+
+  it('scoreMatch: a one-word candidate inside a longer query is scored on coverage, not 0.9', () => {
+    expect(scoreMatch('concrete curing compound spray on', 'Concrete')).toBeLessThan(LOCAL_MATCH_THRESHOLD);
+    expect(scoreMatch('floor drum sander belt', 'floor')).toBeLessThan(LOCAL_MATCH_THRESHOLD);
+    // A multi-word candidate contained in the query still counts strongly.
+    expect(scoreMatch('treated pine 90x45 2.4m length', 'Treated pine 90x45')).toBeGreaterThanOrEqual(0.9);
+  });
+});
