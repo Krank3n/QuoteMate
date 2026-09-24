@@ -38,6 +38,7 @@ import { checkSquareConnection } from '../../services/squareService';
 import { resolveAutoStartMic } from '../assistant/shouldAutoStartMic';
 import { resolveAutoCustomerFollowUp } from '../../../shared/document/autoFollowUp';
 import { defaultAuTradieTerms, hashTerms, isUnmodifiedStarterTerms } from '../../../shared/pdf/terms/defaultAuTradie';
+import { EXTRA_SECTION_TITLE_MAX, EXTRA_SECTION_BODY_MAX } from '../../../shared/pdf/extraSection';
 import {
   resolveGstMode,
   GstMode,
@@ -78,6 +79,11 @@ export function BusinessDefaultsScreen() {
   const [autoCustomerFollowUp, setAutoCustomerFollowUp] = useState(true);
   const [autoStartMic, setAutoStartMic] = useState(false);
   const [termsAndConditions, setTermsAndConditions] = useState('');
+  const [extraSectionTitle, setExtraSectionTitle] = useState('');
+  const [extraSectionBody, setExtraSectionBody] = useState('');
+  // Collapsed to one button until there's something to show — same shape as
+  // the T&Cs card, so an unused section doesn't cost two empty fields.
+  const [extraSectionOpen, setExtraSectionOpen] = useState(false);
 
   const [squareConnected, setSquareConnected] = useState<boolean | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -104,6 +110,8 @@ export function BusinessDefaultsScreen() {
     const acf = resolveAutoCustomerFollowUp(businessSettings.autoCustomerFollowUpEnabled);
     const asm = resolveAutoStartMic(businessSettings.autoStartMicOnMate);
     const tc = businessSettings.termsAndConditions ?? '';
+    const est = businessSettings.extraSectionTitle ?? '';
+    const esb = businessSettings.extraSectionBody ?? '';
 
     setLaborRate(lr);
     setMarkup(mk);
@@ -118,8 +126,11 @@ export function BusinessDefaultsScreen() {
     setAutoCustomerFollowUp(acf);
     setAutoStartMic(asm);
     setTermsAndConditions(tc);
+    setExtraSectionTitle(est);
+    setExtraSectionBody(esb);
+    setExtraSectionOpen(!!esb.trim());
 
-    setInitialSnapshot(JSON.stringify({ lr, mk, lm, dp, rd, tm, gm, sm, pd, slh, acf, asm, tc }));
+    setInitialSnapshot(JSON.stringify({ lr, mk, lm, dp, rd, tm, gm, sm, pd, slh, acf, asm, tc, est, esb }));
   }, [businessSettings]);
 
   // Re-check on focus so the deposit toggle unlocks the moment
@@ -150,12 +161,15 @@ export function BusinessDefaultsScreen() {
       acf: autoCustomerFollowUp,
       asm: autoStartMic,
       tc: termsAndConditions,
+      est: extraSectionTitle,
+      esb: extraSectionBody,
     });
     return current !== initialSnapshot;
   }, [
     laborRate, markup, laborMarkup, defaultDepositPercentage, requireDepositByDefault,
     transportMarkupEnabled, gstMode,
     showMarkup, priceDetail, showLaborHours, autoCustomerFollowUp, autoStartMic, termsAndConditions,
+    extraSectionTitle, extraSectionBody,
     initialSnapshot,
   ]);
 
@@ -200,6 +214,9 @@ export function BusinessDefaultsScreen() {
           termsAndConditions !== (businessSettings?.termsAndConditions ?? '')
             ? new Date().toISOString()
             : businessSettings?.termsUpdatedAt,
+        // A title with no body prints nothing, so don't keep a stray title.
+        extraSectionTitle: (extraSectionBody.trim() && extraSectionTitle.trim()) || undefined,
+        extraSectionBody: extraSectionBody.trim() || undefined,
       });
       // The store update triggers the hydration useEffect to re-derive form
       // state from the new businessSettings and refresh initialSnapshot.
@@ -525,6 +542,67 @@ export function BusinessDefaultsScreen() {
                   Write your own
                 </Button>
               </View>
+            )}
+          </Surface>
+
+          <Surface style={styles.card}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Title style={styles.sectionTitle}>Extra Quote Section</Title>
+              <Text style={[styles.helperText, { marginLeft: 'auto', fontStyle: 'italic' }]}>
+                Optional
+              </Text>
+            </View>
+            <Text style={styles.helperText}>
+              Shown on every quote after your terms. Handy for trades you recommend, licence and insurance details, or your warranty.
+            </Text>
+
+            {extraSectionOpen ? (
+              <>
+                <TextInput
+                  label="Heading"
+                  value={extraSectionTitle}
+                  onChangeText={setExtraSectionTitle}
+                  mode="outlined"
+                  style={styles.input}
+                  placeholder="e.g. Preferred trades"
+                  maxLength={EXTRA_SECTION_TITLE_MAX}
+                  testID="extra-section-title"
+                />
+                <TextInput
+                  label="What to show"
+                  value={extraSectionBody}
+                  onChangeText={setExtraSectionBody}
+                  mode="outlined"
+                  style={[styles.input, { minHeight: 140 }]}
+                  multiline
+                  numberOfLines={7}
+                  placeholder={'e.g. Smith Plastering \u2014 Dave, 0400 123 456\nBright Sparks Electrical \u2014 0411 222 333'}
+                  maxLength={EXTRA_SECTION_BODY_MAX}
+                  testID="extra-section-body"
+                />
+                <View style={{ flexDirection: 'row' }}>
+                  <Button
+                    mode="text"
+                    compact
+                    onPress={() => {
+                      setExtraSectionTitle('');
+                      setExtraSectionBody('');
+                      setExtraSectionOpen(false);
+                    }}
+                  >
+                    Remove
+                  </Button>
+                </View>
+              </>
+            ) : (
+              <Button
+                mode="outlined"
+                icon="plus"
+                style={{ marginTop: 4 }}
+                onPress={() => setExtraSectionOpen(true)}
+              >
+                Add a section
+              </Button>
             )}
           </Surface>
         </WebContainer>

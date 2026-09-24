@@ -301,6 +301,12 @@ export const printMediaCSS = `
   .terms-body p {
     margin: 0 0 8px 0;
   }
+  .extra-section-body {
+    line-height: 1.5;
+  }
+  .extra-section-body p {
+    margin: 0 0 8px 0;
+  }
   /* Project Scope table — rendered when every line on the document is a
      lump-sum scope line (see isScopeQuote in htmlBuilders). Declared once,
      here, rather than in all five template stylesheets: printMediaCSS is

@@ -568,6 +568,11 @@ export interface BusinessSettings {
   // ISO timestamp of the last edit; used to prompt re-review if the business
   // hasn't touched their terms in >12 months.
   termsUpdatedAt?: string;
+  // The tradie's own section printed on every quote after the T&Cs — e.g.
+  // "Preferred trades" with partner contacts. Blank body = no section.
+  // Rendered live, not snapshotted (see shared/pdf/extraSection.ts).
+  extraSectionTitle?: string;
+  extraSectionBody?: string;
   // `surchargePaymentFees` used to live here (an opt-in 2.9% card surcharge).
   // Retired September 2026 ahead of the RBA's 1 October 2026 surcharge ban;
   // nothing reads it any more and scripts/retireCardSurcharge.ts clears it.

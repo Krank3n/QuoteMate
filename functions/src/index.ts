@@ -7947,6 +7947,13 @@ export function generateAcceptancePage(token: string): string {
           '</div>'
         : '';
 
+      var extraSectionHtml = quote.extraSection
+        ? '<div class="section">' +
+            '<div class="section-title">' + escapeHtml(quote.extraSection.title) + '</div>' +
+            '<div class="notes-box">' + nl2br(quote.extraSection.body) + '</div>' +
+          '</div>'
+        : '';
+
       var contactBits = [];
       if (business.phone) contactBits.push('Phone: <a href="tel:' + escapeHtml(business.phone) + '">' + escapeHtml(business.phone) + '</a>');
       if (business.email) contactBits.push('Email: <a href="mailto:' + escapeHtml(business.email) + '">' + escapeHtml(business.email) + '</a>');
@@ -7999,6 +8006,7 @@ export function generateAcceptancePage(token: string): string {
           '</div>' +
           notesHtml +
           termsHtml +
+          extraSectionHtml +
           '<div class="section">' +
             '<div class="section-title">Anything we should know? (optional)</div>' +
             '<textarea id="clientNotes" class="client-notes" placeholder="Add any comments or questions for ' + escapeHtml(business.name) + '..."></textarea>' +

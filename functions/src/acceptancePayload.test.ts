@@ -114,6 +114,20 @@ describe('buildAcceptanceQuotePayload', () => {
       buildAcceptanceQuotePayload(quote({ termsSnapshot: 'As sent.' }), {}, display).terms,
     ).toBe('As sent.');
   });
+
+  it('carries the tradie\'s extra section live from settings, null when unset', () => {
+    expect(buildAcceptanceQuotePayload(quote(), {}, display).extraSection).toBeNull();
+    expect(
+      buildAcceptanceQuotePayload(quote(), { extraSectionTitle: 'Preferred trades' }, display).extraSection,
+    ).toBeNull();
+    expect(
+      buildAcceptanceQuotePayload(
+        quote(),
+        { extraSectionTitle: 'Preferred trades', extraSectionBody: ' Smith Plastering 0400 123 456 ' },
+        display,
+      ).extraSection,
+    ).toEqual({ title: 'Preferred trades', body: 'Smith Plastering 0400 123 456' });
+  });
 });
 
 /**
