@@ -4,7 +4,7 @@
  */
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { Animated, StyleSheet, View, Text, TouchableOpacity, LayoutChangeEvent, Platform } from 'react-native';
+import { Animated, StyleSheet, View, TouchableOpacity, LayoutChangeEvent, Platform } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import { createBottomTabNavigator, BottomTabBarProps } from '@react-navigation/bottom-tabs';
@@ -401,11 +401,6 @@ function LiquidTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
             >
               <Animated.View style={{ transform: [{ scale: iconScales[index] }] }}>
                 <MaterialCommunityIcons name={iconName} size={26} color={tintColor} />
-                {route.name === 'Mate' && (
-                  <View style={styles.betaBadge}>
-                    <Text style={styles.betaBadgeText}>BETA</Text>
-                  </View>
-                )}
               </Animated.View>
               <Animated.Text
                 style={[
@@ -999,21 +994,6 @@ const useStyles = makeStyles((t) => ({
   tabLabel: {
     fontSize: 11,
     marginTop: 3,
-  },
-  betaBadge: {
-    position: 'absolute',
-    top: -7,
-    right: -20,
-    backgroundColor: t.colors.accent,
-    borderRadius: 6,
-    paddingHorizontal: 4,
-    paddingVertical: 1,
-  },
-  betaBadgeText: {
-    fontSize: 7,
-    fontWeight: '700',
-    letterSpacing: 0.4,
-    color: t.colors.onAccent,
   },
   liquidPill: {
     position: 'absolute',
