@@ -234,7 +234,8 @@ export function SettingsScreen() {
           subtitle: 'Tell us what to fix or change',
           icon: 'bullhorn',
           screen: 'Feedback',
-          badge: 'NEW',
+          // A nudge, not news — the feedback screen isn't new any more.
+          badge: 'DON\u2019T BE LAZY',
           badgeColor: themeColors.error,
         },
         {
