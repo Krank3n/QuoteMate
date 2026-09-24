@@ -95,3 +95,14 @@ describe('proposal tool wiring', () => {
     }
   });
 });
+
+describe('the customer card says what it will do', () => {
+  it('details for the current customer read as adding details, not changing the customer', () => {
+    const add = { ...proposalStub('propose_update_customer'), quoteId: 'q', email: 'wilkens@outlook.com' } as any;
+    expect(titleFor(add)).toBe('Add customer details');
+    expect(applyLabelFor(add)).toBe('Add it');
+    const swap = { ...proposalStub('propose_update_customer'), quoteId: 'q', customerId: 'c2', customerName: 'Jane' } as any;
+    expect(titleFor(swap)).toBe('Change customer');
+    expect(applyLabelFor(swap)).toBe('Change it');
+  });
+});

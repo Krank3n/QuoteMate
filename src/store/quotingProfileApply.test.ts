@@ -163,6 +163,49 @@ describe('propose_save_rate', () => {
   });
 });
 
+describe('propose_save_rate — their standard hourly labour rate', () => {
+  // Lights Out, 21 Sep 2026: "Saved $150/hour as your labour rate, that'll
+  // apply from here on" — it went on the rate card only, and new quotes stayed
+  // on the pre-filled $85.
+  const hourly = (extra: Record<string, unknown> = {}) =>
+    useStore.getState().applyProposal({
+      ...base,
+      type: 'propose_save_rate',
+      label: 'Labour',
+      unit: 'hour',
+      rate: 150,
+      includesMaterials: false,
+      standardLabourRate: true,
+      ...extra,
+    } as any);
+
+  it('becomes the default labour rate new quotes carry, and is marked as theirs', async () => {
+    await hourly();
+    const s = useStore.getState().businessSettings!;
+    expect(s.defaultLaborRate).toBe(150);
+    expect(s.laborRateConfirmed).toBe(true);
+    expect(s.rateCard?.[0]).toMatchObject({ label: 'Labour', unit: 'hour', rate: 150 });
+  });
+
+  it('is stored in the business basis: said inc GST on an ex-GST business → ex GST', async () => {
+    await hourly({ rate: 165, pricesIncludeGst: true });
+    expect(useStore.getState().businessSettings!.defaultLaborRate).toBe(150);
+  });
+
+  it('not registered for GST → the figure as said', async () => {
+    useStore.setState({ businessSettings: settings({ gstRegistered: false }) } as any);
+    await hourly({ rate: 150, pricesIncludeGst: true });
+    expect(useStore.getState().businessSettings!.defaultLaborRate).toBe(150);
+  });
+
+  it('a special-purpose rate (no standardLabourRate) leaves the default alone', async () => {
+    await hourly({ label: 'After-hours labour', rate: 210, standardLabourRate: undefined });
+    const s = useStore.getState().businessSettings!;
+    expect(s.defaultLaborRate).toBe(85);
+    expect(s.laborRateConfirmed).toBeUndefined();
+  });
+});
+
 describe('propose_draft_quote with rate lines', () => {
   const patioLine = { label: 'Patio roof supply and fit', quantity: 40, unit: 'm²' as const, unitPrice: 220, pricesIncludeGst: false, includesMaterials: true };
 

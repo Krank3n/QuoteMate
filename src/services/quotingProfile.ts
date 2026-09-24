@@ -176,6 +176,43 @@ export const NO_PROFILE_NOTE = [
   'If they ignore it or brush it off, draft as normal and never ask again this conversation. It must never hold up a quote.',
 ].join(' ');
 
+// ─── The labour rate: theirs, or the app's starting value ───────────────────
+
+/**
+ * What sign-up pre-fills in the labour-rate field, and what every store path
+ * falls back to. A tradie who never touched it is quoting at this without
+ * having chosen it.
+ */
+export const APP_STARTING_LABOUR_RATE = 85;
+
+/**
+ * Whether the business's default labour rate is one the tradie chose. The
+ * flag is stamped from 23 Sep 2026; before that the only tell is the figure —
+ * anything other than the starting value was typed by someone. A tradie who
+ * genuinely charges exactly the starting value and set it before the flag
+ * existed reads as "not theirs" until they confirm it once, which costs one
+ * question; the opposite mistake cost Mate a tradie ("I never saved that or
+ * said that" → "So your useless", Enhanced Facades, 18 Sep).
+ */
+export function labourRateIsTheirs(
+  settings: Pick<BusinessSettings, 'defaultLaborRate' | 'laborRateConfirmed'> | null | undefined,
+): boolean {
+  if (!settings) return false;
+  if (settings.laborRateConfirmed === true) return true;
+  const rate = Number(settings.defaultLaborRate);
+  return Number.isFinite(rate) && rate > 0 && rate !== APP_STARTING_LABOUR_RATE;
+}
+
+/** Mate's line while the labour rate is still the app's starting value. */
+export function labourRateNotSetNote(rate: number | undefined): string {
+  const figure = Number.isFinite(Number(rate)) && Number(rate) > 0 ? Number(rate) : APP_STARTING_LABOUR_RATE;
+  return (
+    `Labour rate: NOT SET BY THEM. New quotes carry the app's starting value of $${figure}/h, which they never chose. ` +
+    `Never call it "your rate" or say they saved it. If a quote you draft uses it, say once, in the same line, that it's the app's starting rate and ask what they charge. ` +
+    `A figure they give for their normal hourly labour → propose_save_rate with standardLabourRate true.`
+  );
+}
+
 /**
  * The GST basis a rate is saved in: the tradie's own when they stated one,
  * their usual one otherwise. A business not registered for GST has no basis —

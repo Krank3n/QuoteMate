@@ -21,6 +21,7 @@ import { buildProposal } from './proposalTools';
 import { resolveQuoteId } from './quoteRefMap';
 import { gateShowQuote } from './showQuoteGate';
 import { findIdenticalPendingCard, gateControlAction, reproposeAfterYes } from './pendingProposalGate';
+import { typicalRatesFor } from './typicalRates';
 import { isControlTool, isProposalTool, isReadTool } from './toolSchemas';
 
 export interface ToolCallInput {
@@ -101,6 +102,9 @@ export async function dispatchToolCall(call: ToolCallInput): Promise<ToolCallOut
           break;
         case 'search_supplier_book':
           result = await searchSupplierBook(input as { query?: string; limit?: number });
+          break;
+        case 'get_typical_rates':
+          result = typicalRatesFor(String(input?.trade ?? ''));
           break;
       }
       return { name, id, response: result as any };

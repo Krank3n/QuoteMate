@@ -23,7 +23,8 @@ import {
   Timestamp,
 } from 'firebase/firestore';
 import { auth, db } from '../../config/firebase';
-import { Material } from '../../types';
+import { Material, type BusinessSettings } from '../../types';
+import { labourRateIsTheirs, labourRateNotSetNote } from '../quotingProfile';
 import { reviewQuoteMaterials } from '../../utils/quoteReview';
 import { resolveSupplierBookLookup } from './supplierBookLookup';
 import { isProposalId, resolveQuoteId } from './quoteRefMap';
@@ -587,6 +588,11 @@ export async function getBusinessDefaults(): Promise<unknown> {
     tradeCategoryId: data.tradeCategoryId,
     tradeCategoryName: data.tradeCategoryName,
     defaultLaborRate: data.defaultLaborRate,
+    // The pre-filled starting value is not their rate — see labourRateIsTheirs.
+    defaultLaborRateSetByThem: labourRateIsTheirs(data as BusinessSettings),
+    ...(labourRateIsTheirs(data as BusinessSettings)
+      ? {}
+      : { defaultLaborRateNote: labourRateNotSetNote(data.defaultLaborRate) }),
     defaultMarkup: data.defaultMarkup,
     defaultLaborMarkup: data.defaultLaborMarkup,
     pricesIncludeGst: data.pricesIncludeGst,

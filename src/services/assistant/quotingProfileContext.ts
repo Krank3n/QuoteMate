@@ -21,7 +21,7 @@ import type { BusinessSettings } from '../../types';
 import type { EffectivePlan } from '../../store/planGates';
 import { canRunMatePipeline } from '../../store/planGates';
 import { MATE_SYSTEM_PROMPT } from './systemPrompt';
-import { NO_PROFILE_NOTE, buildQuotingProfileBlock } from '../quotingProfile';
+import { NO_PROFILE_NOTE, buildQuotingProfileBlock, labourRateIsTheirs, labourRateNotSetNote } from '../quotingProfile';
 
 type ProfileSource = () => BusinessSettings | null | undefined;
 type PlanSource = () => EffectivePlan | null | undefined;
@@ -87,7 +87,10 @@ function profileText(): string | null {
   try {
     const settings = source();
     if (!settings) return null;
-    return buildQuotingProfileBlock(settings) ?? NO_PROFILE_NOTE;
+    const profile = buildQuotingProfileBlock(settings) ?? NO_PROFILE_NOTE;
+    // Rides on every session, not just the get_business_defaults answer: Mate
+    // read out the pre-filled rate as theirs without ever calling the tool.
+    return labourRateIsTheirs(settings) ? profile : `${profile}\n${labourRateNotSetNote(settings.defaultLaborRate)}`;
   } catch {
     return null;
   }

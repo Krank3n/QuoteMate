@@ -127,3 +127,17 @@ describe('propose_draft_quote rate lines and materials mode', () => {
     expect((buildProposal('propose_draft_quote', 't', { ...DRAFT }).proposal as DraftQuoteProposal).materialsMode).toBeUndefined();
   });
 });
+
+describe('propose_save_rate standardLabourRate', () => {
+  it('rides on an hourly labour-only rate', async () => {
+    const { buildProposal } = await import('../proposalTools');
+    const { proposal } = buildProposal('propose_save_rate', 't', { label: 'Labour', unit: 'hour', rate: 150, includesMaterials: false, standardLabourRate: true });
+    expect(proposal).toMatchObject({ standardLabourRate: true, rate: 150 });
+  });
+
+  it('is refused on anything but an hourly labour-only rate', async () => {
+    const { buildProposal } = await import('../proposalTools');
+    expect(buildProposal('propose_save_rate', 't', { label: 'Day rate', unit: 'day', rate: 900, includesMaterials: false, standardLabourRate: true }).error).toMatch(/standardLabourRate/);
+    expect(buildProposal('propose_save_rate', 't', { label: 'Supply and fit', unit: 'hour', rate: 150, includesMaterials: true, standardLabourRate: true }).error).toMatch(/standardLabourRate/);
+  });
+});

@@ -19,7 +19,9 @@ export function titleFor(p: Proposal): string {
     case 'propose_delete_quote':
       return p.displayDocType === 'invoice' ? 'Delete invoice' : 'Delete quote';
     case 'propose_create_contact': return 'New contact';
-    case 'propose_update_customer': return 'Change customer';
+    case 'propose_update_customer':
+      // Details for the customer it's already for — not a change of customer.
+      return !p.customerId && !p.customerDraft?.name && (p.email || p.phone) ? 'Add customer details' : 'Change customer';
     case 'propose_send_quote': return 'Send quote';
     case 'propose_convert_to_invoice': return 'Convert to invoice';
     case 'propose_reprice': return 'Re-price quote';
@@ -68,7 +70,7 @@ export function applyLabelFor(p: Proposal): string {
       return p.documentType === 'invoice' ? 'Draw it up' : 'Price it up';
     case 'propose_add_line_item': return 'Add it';
     case 'propose_create_contact': return 'Save contact';
-    case 'propose_update_customer': return 'Change it';
+    case 'propose_update_customer': return !p.customerId && !p.customerDraft?.name && (p.email || p.phone) ? 'Add it' : 'Change it';
     case 'propose_send_quote': return 'Send';
     case 'propose_update_line_item': return 'Update it';
     case 'propose_delete_line_item': return 'Delete';

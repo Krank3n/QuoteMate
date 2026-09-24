@@ -93,6 +93,12 @@ export interface SaveRateProposal extends BaseProposal {
   pricesIncludeGst?: boolean;
   includesMaterials: boolean;
   notes?: string;
+  /**
+   * Their normal hourly rate for labour on every job ("I charge 150 an hour").
+   * Apply also makes it the business's default labour rate, which is what new
+   * quotes are priced at — a rate-card entry alone never reached them.
+   */
+  standardLabourRate?: boolean;
 }
 
 export interface AddLineItemProposal extends BaseProposal {
@@ -232,6 +238,15 @@ export interface UpdateCustomerProposal extends BaseProposal {
   // Display-only — the new customer's name so the card names it without a
   // round-trip (Mate already has it from find_customer / the draft).
   customerName?: string;
+  /**
+   * Contact details to put on the customer: the one named above, or — with no
+   * customerId / customerDraft — the contact the quote is already for. The
+   * contact-ask flow collects an email while pricing runs, and before this the
+   * card could only re-point the quote at a contact, never add to one: the
+   * email "wilkens@outlook.com" was acknowledged and dropped (23 Sep 2026).
+   */
+  email?: string;
+  phone?: string;
 }
 
 export interface SendQuoteProposal extends BaseProposal {

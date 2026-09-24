@@ -32,6 +32,7 @@
  */
 
 import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import { APP_STARTING_LABOUR_RATE } from '../services/quotingProfile';
 import {
     View,
     StyleSheet,
@@ -146,6 +147,9 @@ export function NewOnboardingScreen() {
 
     // Step 5: Rates
     const [laborRate, setLaborRate] = useState('85');
+    // Typed into at all — a pre-filled 85 the tradie never touched is the
+    // app's starting value, not their rate (see labourRateIsTheirs).
+    const laborRateTouchedRef = useRef(false);
     const [markup, setMarkup] = useState('30');
 
     // Step 6: Payments (Square)
@@ -577,6 +581,9 @@ export function NewOnboardingScreen() {
                 defaultLaborRate: parseFloat(laborRate) || 85,
                 defaultMarkup: parseFloat(markup) || 30,
             };
+            if (laborRateTouchedRef.current || settings.defaultLaborRate !== APP_STARTING_LABOUR_RATE) {
+                settings.laborRateConfirmed = true;
+            }
 
             if (phone.trim()) settings.phone = phone.trim();
             if (email.trim()) settings.email = email.trim();
@@ -1156,7 +1163,10 @@ export function NewOnboardingScreen() {
                     ref={laborRateRef}
                     label="Hourly Labour Rate"
                     value={laborRate}
-                    onChangeText={setLaborRate}
+                    onChangeText={(text) => {
+                        laborRateTouchedRef.current = true;
+                        setLaborRate(text);
+                    }}
                     mode="outlined"
                     style={styles.input}
                     keyboardType="decimal-pad"

@@ -27,6 +27,7 @@ export const READ_TOOL_NAMES = [
   'get_job_requirements',
   'list_service_reports',
   'search_supplier_book',
+  'get_typical_rates',
 ] as const;
 
 export const PROPOSAL_TOOL_NAMES = [
@@ -221,6 +222,21 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
     },
   },
   {
+    name: 'get_typical_rates',
+    description:
+      "What tradies in their trade typically charge in Australia, from published cost guides — for when the tradie asks what to charge, what the going rate is, or says they don't know what to charge. Returns ranges (hourly, and per m² / per metre / call-out where the trade quotes that way), each with the source and its date. A range is a starting point, never their price: say it as a typical range, say where they sit depends on their area, experience and overheads, and ask what they want to use. found:false means there's no sourced figure for that trade — say so plainly and ask their number; never make one up.",
+    parameters: {
+      type: 'object',
+      properties: {
+        trade: {
+          type: 'string',
+          description: 'The trade, in the tradie\'s words or the business\'s trade ("electrician", "concreter", "tiler", "handyman").',
+        },
+      },
+      required: ['trade'],
+    },
+  },
+  {
     name: 'propose_draft_quote',
     description:
       'Propose a new draft quote. You do NOT compute materials, quantities, or prices — the existing materials + pricing pipeline handles that on Apply. Your job is to lock down the customer and the scope (a clean job description) and hand off. The Apply path mints the quote, runs analyzeJobDescription with the scope, populates materials, and opens the materials list for the tradie to review.',
@@ -321,7 +337,7 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
   {
     name: 'propose_save_rate',
     description:
-      "Save a charge-out rate to the tradie's rate card: \"my square rate ex GST, supply and fit\", \"a flat rate per room\", \"my day rate\". Apply stores it on their settings; you then use it on drafts as a rateLine. Saving a label that already exists replaces that rate. Only ever save a number the tradie said — never one you worked out.",
+      "Save a charge-out rate to the tradie's rate card: \"my square rate ex GST, supply and fit\", \"a flat rate per room\", \"my day rate\". Apply stores it on their settings; you then use it on drafts as a rateLine. Saving a label that already exists replaces that rate. Only ever save a number the tradie said — never one you worked out, and never a figure off get_typical_rates they haven't picked.",
     parameters: {
       type: 'object',
       properties: {
@@ -331,6 +347,11 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
         pricesIncludeGst: { type: 'boolean', description: 'True only if they said inc/including GST; false if they said ex/plus GST. Omit when they said neither — the business default applies.' },
         includesMaterials: { type: 'boolean', description: 'True when the rate is the whole price (supply and fit, all-in). False when it is labour only and materials are charged on top.' },
         notes: { type: 'string', description: 'Optional qualifier ("minimum 20 m²", "single storey only").' },
+        standardLabourRate: {
+          type: 'boolean',
+          description:
+            "True when this is their normal hourly rate for labour on every job (\"I charge this much an hour\", \"my labour rate's this\") — unit 'hour', includesMaterials false. Apply then also makes it the default labour rate new quotes are priced at. Leave it out for a special-purpose rate (after-hours, a day rate, a bobcat).",
+        },
       },
       required: ['label', 'unit', 'rate', 'includesMaterials'],
     },
@@ -430,7 +451,7 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
   {
     name: 'propose_update_customer',
     description:
-      "Change the customer on an EXISTING quote or invoice — re-point it at a different contact while staying in the chat. Use this whenever the tradie wants to swap, change, update, or fix who a quote is for (\"put this on Jane instead\", \"update the contact\", \"wrong customer, it's Bob\"). Resolve the customer first: call find_customer and pass customerId when there's a match; only pass customerDraft (with confirmation) when there's no match and they want a brand-new contact. Apply updates the quote's customer + the linked job and re-shows the quote in chat — it does NOT navigate away. Always pass customerName so the card can name who it's switching to.",
+      "Change the customer on an EXISTING quote or invoice — re-point it at a different contact while staying in the chat. Use this whenever the tradie wants to swap, change, update, or fix who a quote is for (\"put this on Jane instead\", \"update the contact\", \"wrong customer, it's Bob\"). Resolve the customer first: call find_customer and pass customerId when there's a match; only pass customerDraft (with confirmation) when there's no match and they want a brand-new contact. Apply updates the quote's customer + the linked job and re-shows the quote in chat — it does NOT navigate away. Always pass customerName so the card can name who it's switching to. To ADD or FIX the email or mobile of the customer the quote is already for — the tradie hands you one after the draft (\"wilkens@…\", \"her mobile's 04…\") — pass quoteId + email and/or phone and NO customerId or customerDraft: it goes on their contact and the quote, ready to send.",
     parameters: {
       type: 'object',
       properties: {
@@ -452,6 +473,14 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
           required: ['name'],
         },
         customerDraftRef: { type: 'string', description: "The draftRef from a find_customer 'phone' or 'recent' hit — the contact's details stay on the device and Apply saves them." },
+        email: {
+          type: 'string',
+          description: "An email the tradie gave for the customer — exactly as they said it. On its own (no customerId/customerDraft) it goes on the contact the quote is already for.",
+        },
+        phone: {
+          type: 'string',
+          description: 'A mobile or phone the tradie gave for the customer, as they said it. Same rule as email.',
+        },
         customerName: { type: 'string', description: 'The new customer name to show on the card (for display).' },
       },
       required: ['quoteId'],
@@ -700,6 +729,8 @@ export const TOOL_RUNTIME: Record<string, { timeoutSecs: number }> = {
   get_job_requirements: { timeoutSecs: 30 },
   // First call in a session may pull the whole book collection from Firestore.
   search_supplier_book: { timeoutSecs: 30 },
+  // A lookup in a table shipped with the app. No network.
+  get_typical_rates: { timeoutSecs: 10 },
   // Pure validation + a screen-registered probe. No network.
   show_quote: { timeoutSecs: 10 },
   propose_draft_quote: { timeoutSecs: 10 },

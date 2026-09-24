@@ -3842,12 +3842,25 @@ export const useStore = create<AppState>((set, get) => ({
             return { ok: false, error: 'Quote not found.' };
           }
           let contact: Contact | undefined;
-          if (proposal.customerId) {
-            contact = get().contacts.find((c) => c.id === proposal.customerId);
+          // Details only: the customer the quote is already for.
+          const currentContactId = target?.contactId ?? legacyQuote?.contactId ?? legacyInvoice?.contactId;
+          const detailsOnly = !proposal.customerId && !proposal.customerDraft?.name && !!(proposal.email || proposal.phone);
+          const lookupId = proposal.customerId ?? (detailsOnly ? currentContactId : undefined);
+          if (detailsOnly && !lookupId) {
+            // Nobody linked yet (an older draft, an "Unnamed job"): the quote's
+            // own customer name becomes the contact the details go on.
+            const name = (target?.customerName ?? legacyQuote?.customerName ?? legacyInvoice?.customerName ?? proposal.customerName ?? '').trim();
+            if (!name) {
+              return { ok: false, error: "There's no customer on this one yet — who's it for? I'll add the details with the name." };
+            }
+            contact = await contactFromDraft({ name });
+          }
+          if (lookupId) {
+            contact = get().contacts.find((c) => c.id === lookupId);
             if (!contact) {
               // eslint-disable-next-line no-console
-              console.log('[Mate] contact not in local cache, fetching from Firestore', proposal.customerId);
-              const fetched = await firestoreService.getContactById(proposal.customerId);
+              console.log('[Mate] contact not in local cache, fetching from Firestore', lookupId);
+              const fetched = await firestoreService.getContactById(lookupId);
               if (fetched) {
                 contact = fetched;
                 const next = [...get().contacts.filter((c) => c.id !== fetched.id), fetched];
@@ -3863,8 +3876,28 @@ export const useStore = create<AppState>((set, get) => ({
             }
           } else if (proposal.customerDraft?.name) {
             contact = await contactFromDraft(proposal.customerDraft);
-          } else {
+          } else if (!contact) {
             return { ok: false, error: 'No customer provided.' };
+          }
+
+          // The email / phone the tradie handed over lands on the contact
+          // itself, so every quote for this customer has it, and then on this
+          // document below. A new email replaces the primary: a tradie giving
+          // a different one is correcting it, and the old address kept as a
+          // second recipient would still get the quote.
+          const nextEmail = proposal.email?.trim();
+          const nextPhone = proposal.phone?.trim();
+          if ((nextEmail && nextEmail.toLowerCase() !== contact.email?.toLowerCase()) || (nextPhone && nextPhone !== contact.phone)) {
+            contact = {
+              ...contact,
+              ...(nextEmail ? { email: nextEmail } : {}),
+              ...(nextPhone ? { phone: nextPhone } : {}),
+              ...(nextEmail
+                ? { additionalEmails: (contact.additionalEmails ?? []).filter((e) => e.toLowerCase() !== nextEmail.toLowerCase()) }
+                : {}),
+              updatedAt: new Date().toISOString(),
+            };
+            await get().saveContact(contact);
           }
 
           // syncJobFromSource only patches non-empty differing fields and never
@@ -4684,8 +4717,21 @@ export const useStore = create<AppState>((set, get) => ({
         case 'propose_save_rate': {
           const settings = get().businessSettings;
           if (!settings) return { ok: false, error: 'Set the business up first — there is nowhere to keep this yet.' };
+          // Their normal hourly rate is also the default new quotes are priced
+          // at — a rate-card entry alone never reached them (Lights Out, 21
+          // Sep: "Saved $150/hour as your labour rate, that'll apply from here
+          // on", while new quotes stayed on the $85 starting value). Stored in
+          // the business's own GST basis, the one the labour rate is read in.
+          const basis = rateGstBasis(settings, proposal.pricesIncludeGst);
+          const businessInclusive = settings.pricesIncludeGst === true;
+          const standardRate = proposal.standardLabourRate
+            ? settings.gstRegistered === false || basis === undefined || basis === businessInclusive
+              ? proposal.rate
+              : roundToTwoDecimals(basis ? proposal.rate / 1.1 : proposal.rate * 1.1)
+            : undefined;
           await get().setBusinessSettings({
             ...settings,
+            ...(standardRate !== undefined ? { defaultLaborRate: standardRate, laborRateConfirmed: true } : {}),
             rateCard: upsertRate(settings.rateCard, {
               label: proposal.label,
               unit: proposal.unit,

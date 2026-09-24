@@ -10,6 +10,9 @@ import {
   addPreference,
   buildQuotingProfileBlock,
   buildRateWorkItem,
+  APP_STARTING_LABOUR_RATE,
+  labourRateIsTheirs,
+  labourRateNotSetNote,
   rateModeOfQuote,
   formatRate,
   normalisePreference,
@@ -305,5 +308,24 @@ describe('rateModeOfQuote — how a scope change re-runs a rate-card quote', () 
   it('a row minted before the stamp is read off the scope text it always carried', () => {
     const { rateCard: _gone, ...legacy } = buildRateWorkItem(allIn, 'exclusive', false);
     expect(rateModeOfQuote([legacy as any])?.ratesCoverMaterials).toBe(true);
+  });
+});
+
+describe('labourRateIsTheirs — the pre-filled starting rate is not their rate', () => {
+  it('the untouched starting value is not theirs; a typed or confirmed rate is', () => {
+    expect(APP_STARTING_LABOUR_RATE).toBe(85);
+    expect(labourRateIsTheirs({ defaultLaborRate: 85 })).toBe(false);
+    expect(labourRateIsTheirs({ defaultLaborRate: 85, laborRateConfirmed: true })).toBe(true);
+    expect(labourRateIsTheirs({ defaultLaborRate: 110 })).toBe(true);
+    expect(labourRateIsTheirs({ defaultLaborRate: 0 } as any)).toBe(false);
+    expect(labourRateIsTheirs(null)).toBe(false);
+  });
+
+  it("the note names the figure as the app's, and routes their answer to the standard-rate save", () => {
+    const note = labourRateNotSetNote(85);
+    expect(note).toContain('NOT SET BY THEM');
+    expect(note).toContain("app's starting value of $85/h");
+    expect(note).toContain('standardLabourRate true');
+    expect(note).not.toMatch(/\bAI\b/);
   });
 });
