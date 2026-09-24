@@ -309,7 +309,13 @@ function Body({ proposal }: { proposal: Proposal }) {
           )}
           {!!proposal.customerDraft?.phone && <Text style={styles.dim}>{proposal.customerDraft.phone}</Text>}
           {!!proposal.customerDraft?.email && <Text style={styles.dim}>{proposal.customerDraft.email}</Text>}
-          <Text style={styles.dim}>Apply re-points this quote at this customer.</Text>
+          {!!proposal.email && <Text style={styles.dim}>Email: {proposal.email}</Text>}
+          {!!proposal.phone && <Text style={styles.dim}>Mobile: {proposal.phone}</Text>}
+          <Text style={styles.dim}>
+            {!proposal.customerId && !proposal.customerDraft?.name && (proposal.email || proposal.phone)
+              ? 'Goes on their contact and this quote, ready to send.'
+              : 'Apply re-points this quote at this customer.'}
+          </Text>
         </View>
       );
     case 'propose_send_quote':

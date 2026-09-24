@@ -687,3 +687,35 @@ describe('a travel charge on a draft', () => {
     }
   });
 });
+
+describe('buildProposal propose_update_customer — an email or mobile for the customer it is already for', () => {
+  afterEach(() => setRenderableQuoteProbe(null));
+
+  it('just an email: no customer needed, the email rides on the card', () => {
+    setRenderableQuoteProbe((id) => id);
+    const { proposal, error } = buildProposal('propose_update_customer', 'tool_c1', {
+      quoteId: 'doc_wilkens',
+      customerName: 'Wilkens Contracting',
+      email: ' wilkens@outlook.com ',
+    });
+    expect(error).toBeUndefined();
+    expect(proposal).toMatchObject({ type: 'propose_update_customer', quoteId: 'doc_wilkens', email: 'wilkens@outlook.com' });
+    expect((proposal as any).customerId).toBeUndefined();
+  });
+
+  it('a mobile is normalised; a partial one is refused rather than padded', () => {
+    setRenderableQuoteProbe((id) => id);
+    expect(buildProposal('propose_update_customer', 't', { quoteId: 'q', phone: '0412345678' }).proposal).toMatchObject({ phone: '0412 345 678' });
+    expect(buildProposal('propose_update_customer', 't', { quoteId: 'q', phone: '0412 34' }).error).toMatch(/whole Australian number/);
+  });
+
+  it('something that is not an email is refused in-turn', () => {
+    setRenderableQuoteProbe((id) => id);
+    expect(buildProposal('propose_update_customer', 't', { quoteId: 'q', email: 'wilkens at outlook' }).error).toMatch(/isn't an email address/);
+  });
+
+  it('with neither a customer nor any details it is still refused', () => {
+    setRenderableQuoteProbe((id) => id);
+    expect(buildProposal('propose_update_customer', 't', { quoteId: 'q' }).error).toBeTruthy();
+  });
+});

@@ -138,7 +138,7 @@ export function buildSendOfferNote(
     ? `Offer to send it: "${sendOfferLine(facts)}"`
     : options.contactAsked
       ? `You already asked for their mobile or email while pricing ran — don't ask twice. Say the total's in and they can tap the card, ` +
-        `and that a number or email any time gets it sent (propose_update_customer${target} the moment they give one).`
+        `and that a number or email any time gets it sent (propose_update_customer${target} with just email or phone — no customerId — the moment they give one).`
       : `There's nobody to send it to yet, so ask for the customer's email or mobile in that one line instead of offering the send.`;
   // Corrections said while pricing ran come first: a send offer on a quote
   // the tradie has already corrected is an offer to send the wrong quote.
@@ -219,7 +219,7 @@ export function buildContactAskNote(args: { quoteId: string; jobName: string; cu
     `There's NO email or mobile on file for ${who}, and you'll need one to send it. ` +
     `Your turn: ONE short line asking for their mobile or email while that prices up — ` +
     `e.g. "While that prices up — got a mobile or email for ${who}?" Nothing about rows or totals yet. ` +
-    `If they hand you one before pricing lands, say you'll pop it on once it's priced, and call propose_update_customer on ${args.quoteId} ` +
+    `If they hand you one before pricing lands, say you'll pop it on once it's priced, and call propose_update_customer on ${args.quoteId} with just email or phone (no customerId) ` +
     `only after the "[context]" line that says pricing finished. If they don't answer, don't ask again. Never say the tag.`
   );
 }

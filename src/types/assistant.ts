@@ -238,6 +238,15 @@ export interface UpdateCustomerProposal extends BaseProposal {
   // Display-only — the new customer's name so the card names it without a
   // round-trip (Mate already has it from find_customer / the draft).
   customerName?: string;
+  /**
+   * Contact details to put on the customer: the one named above, or — with no
+   * customerId / customerDraft — the contact the quote is already for. The
+   * contact-ask flow collects an email while pricing runs, and before this the
+   * card could only re-point the quote at a contact, never add to one: the
+   * email "wilkens@outlook.com" was acknowledged and dropped (23 Sep 2026).
+   */
+  email?: string;
+  phone?: string;
 }
 
 export interface SendQuoteProposal extends BaseProposal {

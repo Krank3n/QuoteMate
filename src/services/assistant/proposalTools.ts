@@ -34,6 +34,7 @@ import { sanitizeJobDescription } from '../../utils/sanitizeJobDescription';
 import { MAX_LABEL_CHARS, RATE_CARD_UNITS, normalisePreference, normaliseRateUnit, rateLinesCoverMaterials, rateModeOfQuote } from '../quotingProfile';
 import { planSetTotal, setTotalGstMode, type SetTotalSource } from '../../utils/setTotal';
 import { phoneForRecord } from '../../utils/auPhone';
+import { isEmailAddress } from '../../utils/sendFlow';
 import { formatCurrency, roundToTwoDecimals } from '../../utils/documentCalculator';
 import { isWorkItem } from '../../../shared/document/lumpSum';
 import { resolveCustomerDraftRef } from './readTools';
@@ -802,6 +803,34 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
     case 'propose_update_customer': {
       const known = requireKnownQuote('propose_update_customer', input);
       if (known.error) return { error: known.error };
+      // Details to add: an email must be one address, a phone a whole number.
+      const rawEmail = typeof input.email === 'string' ? input.email.trim() : '';
+      if (rawEmail && !isEmailAddress(rawEmail)) {
+        return { error: `"${rawEmail}" isn't an email address — read it back to the tradie and ask again rather than guessing the rest.` };
+      }
+      const rawPhone = typeof input.phone === 'string' ? input.phone.trim() : '';
+      const phoneCheck = rawPhone ? phoneForRecord(rawPhone) : { phone: undefined, dropped: undefined };
+      if (rawPhone && !phoneCheck.phone) {
+        return { error: `"${rawPhone}" isn't a whole Australian number — read back what you've got and ask for the rest; don't pad it.` };
+      }
+      const details = {
+        ...(rawEmail ? { email: rawEmail } : {}),
+        ...(phoneCheck.phone ? { phone: phoneCheck.phone } : {}),
+      };
+      const namesCustomer = !!(input.customerId || input.customerDraftRef || input.customerDraft?.name);
+      // Details alone: they go on whoever the quote is already for.
+      if (!namesCustomer && (details.email || details.phone)) {
+        const proposal: UpdateCustomerProposal = {
+          id,
+          toolUseId,
+          createdAt: now,
+          type: 'propose_update_customer',
+          quoteId: known.quoteId!,
+          ...(typeof input.customerName === 'string' && input.customerName.trim() ? { customerName: input.customerName.trim() } : {}),
+          ...details,
+        };
+        return { proposal };
+      }
       const customer = resolveCustomer(input);
       if (customer.error) return { error: customer.error };
       const customerName = typeof input.customerName === 'string' && input.customerName.trim() ? input.customerName.trim() : customer.draft?.name;
@@ -814,6 +843,7 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
         customerId: customer.customerId,
         customerDraft: customer.draft,
         customerName,
+        ...details,
       };
       return { proposal, note: customer.note };
     }

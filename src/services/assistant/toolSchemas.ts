@@ -451,7 +451,7 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
   {
     name: 'propose_update_customer',
     description:
-      "Change the customer on an EXISTING quote or invoice — re-point it at a different contact while staying in the chat. Use this whenever the tradie wants to swap, change, update, or fix who a quote is for (\"put this on Jane instead\", \"update the contact\", \"wrong customer, it's Bob\"). Resolve the customer first: call find_customer and pass customerId when there's a match; only pass customerDraft (with confirmation) when there's no match and they want a brand-new contact. Apply updates the quote's customer + the linked job and re-shows the quote in chat — it does NOT navigate away. Always pass customerName so the card can name who it's switching to.",
+      "Change the customer on an EXISTING quote or invoice — re-point it at a different contact while staying in the chat. Use this whenever the tradie wants to swap, change, update, or fix who a quote is for (\"put this on Jane instead\", \"update the contact\", \"wrong customer, it's Bob\"). Resolve the customer first: call find_customer and pass customerId when there's a match; only pass customerDraft (with confirmation) when there's no match and they want a brand-new contact. Apply updates the quote's customer + the linked job and re-shows the quote in chat — it does NOT navigate away. Always pass customerName so the card can name who it's switching to. To ADD or FIX the email or mobile of the customer the quote is already for — the tradie hands you one after the draft (\"wilkens@…\", \"her mobile's 04…\") — pass quoteId + email and/or phone and NO customerId or customerDraft: it goes on their contact and the quote, ready to send.",
     parameters: {
       type: 'object',
       properties: {
@@ -473,6 +473,14 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
           required: ['name'],
         },
         customerDraftRef: { type: 'string', description: "The draftRef from a find_customer 'phone' or 'recent' hit — the contact's details stay on the device and Apply saves them." },
+        email: {
+          type: 'string',
+          description: "An email the tradie gave for the customer — exactly as they said it. On its own (no customerId/customerDraft) it goes on the contact the quote is already for.",
+        },
+        phone: {
+          type: 'string',
+          description: 'A mobile or phone the tradie gave for the customer, as they said it. Same rule as email.',
+        },
         customerName: { type: 'string', description: 'The new customer name to show on the card (for display).' },
       },
       required: ['quoteId'],
