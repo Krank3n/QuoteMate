@@ -262,14 +262,18 @@ function buildHeaderRecipientHTML(input: {
           </div>`;
 }
 
-export function buildTermsHTML(terms: string | undefined): string {
-  if (!terms || !terms.trim()) return '';
-  const paras = terms
+/** Blank-line-separated paragraphs, escaped, single newlines kept as <br>. */
+const paragraphsHTML = (text: string) =>
+  text
     .split(/\n\s*\n/)
     .map((p) => escapeHtml(p.trim()).replace(/\n/g, '<br>'))
     .filter(Boolean)
     .map((p) => `<p>${p}</p>`)
     .join('');
+
+export function buildTermsHTML(terms: string | undefined): string {
+  if (!terms || !terms.trim()) return '';
+  const paras = paragraphsHTML(terms);
   // Styling lives in printMediaCSS (.terms-section / .terms-body): the body
   // colour comes from the template via opacity, so the block stays
   // palette-correct on the warm serif template as well as the grey ones.
@@ -277,6 +281,20 @@ export function buildTermsHTML(terms: string | undefined): string {
       <div class="terms-section">
         <h3>Terms &amp; Conditions</h3>
         <div class="terms-body">${paras}</div>
+      </div>`;
+}
+
+/**
+ * The tradie's standing section (see shared/pdf/extraSection.ts), printed
+ * after the T&Cs. Same divider as the terms block, but body-size text: this
+ * is read, not skimmed past.
+ */
+export function buildExtraSectionHTML(section: QuotePdfData['extraSection']): string {
+  if (!section || !section.body.trim()) return '';
+  return `
+      <div class="terms-section extra-section">
+        <h3>${escapeHtml(section.title)}</h3>
+        <div class="extra-section-body">${paragraphsHTML(section.body)}</div>
       </div>`;
 }
 
@@ -1080,6 +1098,8 @@ export function buildQuotePdfHtml(
       `}
 
       ${buildTermsHTML(quote.terms)}
+
+      ${buildExtraSectionHTML(quote.extraSection)}
       </div>
 
       <!-- The tradie's name, not ours. A quote is their document going to

@@ -38,6 +38,7 @@ import { formatAuDate } from './timestamps.helpers';
 import { shouldEmbedEmailOpenPixel } from './emailOpenPixel';
 import { hashTerms } from './shared/pdf/terms/defaultAuTradie';
 import { toPdfMaterials, toPdfSections } from './shared/pdf/mapMaterial';
+import { resolveExtraSection } from './shared/pdf/extraSection';
 import type { BusinessPdfData } from './shared/pdf/types';
 import { invoiceIssueDateMs } from './shared/statement/buildStatement';
 import {
@@ -488,6 +489,8 @@ interface BusinessSettings {
   showLaborHours?: boolean;
   paymentMethods?: any;
   termsAndConditions?: string;
+  extraSectionTitle?: string;
+  extraSectionBody?: string;
   // Remembered from the last accountant statement send (accountantStatement.ts).
   accountantEmail?: string;
   [key: string]: any;
@@ -647,6 +650,7 @@ export function buildQuotePdfHtmlForQuote(
       paymentMethods: business.paymentMethods,
       squarePaymentLinkUrl: options.squarePaymentLinkUrl ?? quote.squarePaymentLinkUrl,
       terms: options.terms,
+      extraSection: resolveExtraSection(business),
     },
     {
       businessName: business.businessName || 'Business',

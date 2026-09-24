@@ -30,6 +30,7 @@ import {
   buildStatementPdfHtml,
   toPdfMaterials,
   toPdfSections,
+  resolveExtraSection,
   QuotePdfData,
   InvoicePdfData,
   ReportPdfData,
@@ -380,6 +381,7 @@ export async function generateDocumentPDF(
     plan,
     squarePaymentLinkUrl,
     terms: doc.termsSnapshot || businessSettings?.termsAndConditions,
+    extraSection: resolveExtraSection(businessSettings),
   };
   return buildQuotePdfHtml(pdfData, business, pdfOptions);
 }

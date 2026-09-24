@@ -129,7 +129,9 @@ export interface QuotePdfData {
   // Terms & Conditions text. Rendered as its own section at the end of the
   // document. The business's current T&Cs are snapshotted to the quote/invoice
   // at send time and passed through here so later edits don't rewrite history.
-  terms?: string;
+  terms?: string;  // The tradie's standing section after the T&Cs (shared/pdf/extraSection.ts).
+  // Quotes only; rendered live from business settings, not snapshotted.
+  extraSection?: { title: string; body: string };
 }
 
 export interface InvoicePdfData extends QuotePdfData {

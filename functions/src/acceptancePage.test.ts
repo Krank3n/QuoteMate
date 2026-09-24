@@ -55,6 +55,13 @@ describe('generateAcceptancePage', () => {
     expect(script).toContain('Line Total');
   });
 
+  it('renders the tradie\'s extra section after the T&Cs, escaped', () => {
+    const script = inlineScript(generateAcceptancePage('a'.repeat(64)));
+    expect(script).toContain('escapeHtml(quote.extraSection.title)');
+    expect(script).toContain('nl2br(quote.extraSection.body)');
+    expect(script).toMatch(/termsHtml \+\s*extraSectionHtml \+/);
+  });
+
   it('discloses inclusive GST below the total, matching the PDF', () => {
     // Same rule as buildSummaryHTML: exclusive GST is an addend and sits in
     // the stack; inclusive GST is disclosure only and renders under the

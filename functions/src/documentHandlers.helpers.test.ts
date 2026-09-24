@@ -237,6 +237,31 @@ describe('normaliseRecipients', () => {
  * number. Assert on the rendered HTML, not just the formatter, so the whole
  * path is covered.
  */
+describe('buildQuotePdfHtmlForQuote — extra section', () => {
+  // Emailed attachment and the acceptance-page download both go through here,
+  // so both carry the section straight from the live business settings.
+  const quote = {
+    customerName: 'Test Client',
+    job: { name: 'Repaint', description: 'Test' },
+    materials: [], subtotal: 0, total: 0,
+  };
+
+  it('prints the section from business settings', () => {
+    const html = buildQuotePdfHtmlForQuote(quote, {
+      businessName: 'Lakeside Painting',
+      extraSectionTitle: 'Preferred trades',
+      extraSectionBody: 'Smith Plastering 0400 123 456',
+    } as any);
+    expect(html).toContain('<h3>Preferred trades</h3>');
+    expect(html).toContain('Smith Plastering 0400 123 456');
+  });
+
+  it('prints nothing when the tradie has not set one', () => {
+    const html = buildQuotePdfHtmlForQuote(quote, { businessName: 'Lakeside Painting' } as any);
+    expect(html).not.toContain('class="terms-section extra-section"');
+  });
+});
+
 describe('buildQuotePdfHtmlForQuote — quote date', () => {
   const AT_NOON_UTC = Date.UTC(2026, 7, 9, 12, 0, 0); // 9 Aug 2026
   const business = { businessName: 'Riverbend Carpentry' } as any;

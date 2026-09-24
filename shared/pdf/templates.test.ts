@@ -27,6 +27,35 @@ describe('printMediaCSS', () => {
     expect(maxHeight).toBeGreaterThanOrEqual(72);
     expect(maxWidth).toBeGreaterThanOrEqual(220);
   });
+
+  it('asks the print engine to keep template colours (iOS drops backgrounds otherwise)', () => {
+    // Without it, the phone's PDF (expo-print → WebKit) lost the bold
+    // template's dark header band and table-header fill while keeping their
+    // white text — invisible headings on white paper. The server renders with
+    // printBackground, so the two PDFs disagreed.
+    const rule = printMediaCSS.match(/html \{[^}]*print-color-adjust[^}]*\}/s)?.[0] ?? '';
+    expect(rule).toMatch(/-webkit-print-color-adjust:\s*exact/);
+    expect(rule).toMatch(/(^|[^-])print-color-adjust:\s*exact/);
+  });
+});
+
+describe('end-of-document blocks line up on the bold template', () => {
+  // Bold pads each block (0 28px) instead of the body so its header band can
+  // run edge to edge; the shared T&Cs / extra section / validity note sat
+  // flush against the page edge until they got the same inset.
+  it('insets the terms/extra-section block and the standalone validity note', () => {
+    const css = getTemplateCSS('bold');
+    const rule = css.match(/\.terms-section,\s*\.content-wrapper > \.summary-note \{[^}]*\}/s)?.[0] ?? '';
+    expect(rule).toMatch(/margin-left:\s*28px/);
+    expect(rule).toMatch(/margin-right:\s*28px/);
+  });
+
+  it('does not indent the summary-card disclosure rows that share the class', () => {
+    const css = getTemplateCSS('bold');
+    const inset = css.match(/\.terms-section,\s*\.content-wrapper > \.summary-note \{[^}]*\}/s)?.[0] ?? '';
+    // Once the scoped inset rule is set aside, nothing else may indent the class.
+    expect(css.replace(inset, '')).not.toMatch(/\.summary-note[^{}]*\{[^}]*margin-left/);
+  });
 });
 
 describe('template logo caps', () => {
