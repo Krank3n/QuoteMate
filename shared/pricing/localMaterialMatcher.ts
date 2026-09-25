@@ -238,9 +238,28 @@ export function scoreMatch(query: string, text: string): number {
   if (queryHasWord) {
     if (t === q) return 1.0;
     if (t.includes(q) && q.length >= 3) return 0.95;
-    if (q.includes(t) && t.length >= 3) return 0.9;
+    // The query CONTAINS the candidate. Only a candidate of two or more real
+    // words says anything by being contained: a single word — a favourite's
+    // keyword "floor", a saved rate named just "Concrete" — sits inside every
+    // row that mentions it. That scored 0.9 and priced every drum-sander belt
+    // on a floor-sanding quote at the $187.25 of a floor-insulation rate
+    // (24 Sep 2026), and MSB Civil's curing compound, diamond blade and bar
+    // chairs at their $150 "Concrete" rate. A single word falls through to
+    // the per-token score, where it covers only its share of the query.
+    const candidateWords = tToks.filter((tk) => tk.kind === 'word').length;
+    if (q.includes(t) && t.length >= 3 && candidateWords >= 2) return 0.9;
   }
 
+  return tokenCoverage(qToks, tToks);
+}
+
+/**
+ * The share of the query's signal tokens the text covers, spec tokens weighted
+ * a little higher, 0 when no word token hits or fewer than half the specs do.
+ * No whole-string shortcuts — so it is safe to run against a bag of words
+ * (a favourite's keywords taken together) where word order means nothing.
+ */
+function tokenCoverage(qToks: ClassifiedToken[], tToks: ClassifiedToken[]): number {
   const signalTokens = qToks.filter((tk) => tk.kind !== 'noise');
   if (signalTokens.length === 0) return 0;
 
@@ -266,6 +285,14 @@ export function scoreMatch(query: string, text: string): number {
   if (specTotal > 0 && specHits / specTotal < 0.5) return 0;
 
   return aggregate;
+}
+
+/** tokenCoverage over raw strings — for scoring a bag of keywords as one target. */
+export function scoreCoverage(query: string, text: string): number {
+  const q = norm(query);
+  const t = norm(text);
+  if (!q || !t) return 0;
+  return tokenCoverage(classifyTokens(q), classifyTokens(t));
 }
 
 /** Match threshold — `scoreMatch` ≥ 0.6 counts as a hit. */
@@ -337,6 +364,30 @@ export function searchTemplates(
   return results;
 }
 
+/**
+ * How well `query` matches a favourite: product name, each keyword and the
+ * notes scored individually (a combined haystack would give a long string an
+ * artificial substring advantage at scoreMatch's short-circuit), plus the
+ * keywords taken TOGETHER — they are tags, so what counts is how much of the
+ * query the whole set covers. A batt tagged insulation/batts/thermal/r2.5
+ * covers most of "R2.5 HD insulation batts"; a floor-insulation rate tagged
+ * "floor" covers one word of a drum-sander belt and stays out of it.
+ *
+ * The one scorer for favourites: the pricing pass (searchFavorites) and the
+ * supplier-book coverage check both call it, so "covered" means the same
+ * thing in both places.
+ */
+export function favoriteMatchScore(
+  query: string,
+  fav: Pick<FavoriteProductMapping, 'productName' | 'keywords' | 'notes'>,
+): number {
+  const candidates: string[] = [fav.productName, ...(fav.keywords ?? []), ...(fav.notes ? [fav.notes] : [])].filter(Boolean);
+  let best = 0;
+  for (const c of candidates) best = Math.max(best, scoreMatch(query, c));
+  if (fav.keywords?.length) best = Math.max(best, scoreCoverage(query, fav.keywords.join(' ')));
+  return best;
+}
+
 export function searchFavorites(
   query: string,
   favorites: FavoriteProductMapping[],
@@ -364,16 +415,7 @@ export function searchFavorites(
     // Score productName / keywords / notes individually; take the max. A
     // combined haystack would give a long string an artificial substring
     // advantage at scoreMatch's short-circuit.
-    const candidates: string[] = [
-      fav.productName,
-      ...(fav.keywords ?? []),
-      ...(fav.notes ? [fav.notes] : []),
-    ].filter(Boolean);
-    let bestScore = 0;
-    for (const c of candidates) {
-      const s = scoreMatch(query, c);
-      if (s > bestScore) bestScore = s;
-    }
+    const bestScore = favoriteMatchScore(query, fav);
     if (bestScore < LOCAL_MATCH_THRESHOLD) continue;
     if (typeof fav.price !== 'number' || fav.price <= 0) continue;
 
