@@ -34,7 +34,9 @@ import {
   buildQuotePdfHtml,
   toPdfMaterials,
   toPdfSections,
+  resolveExtraSection,
   type QuotePdfData,
+  type ExtraSection,
 } from '../../../shared/pdf';
 import { resolveGstMode, GstMode, NO_GST_NOTE } from '../../../shared/document';
 import { resolvePriceDetail, type PriceDetail } from '../../../shared/document/priceDetail';
@@ -88,6 +90,7 @@ function buildSampleQuote(opts: {
   pricesIncludeGst: boolean;
   gstRegistered: boolean;
   terms?: string;
+  extraSection?: ExtraSection;
 }): QuotePdfData {
   const totals = calculateDocumentTotals(
     SAMPLE_MATERIALS,
@@ -130,6 +133,7 @@ function buildSampleQuote(opts: {
     gstRegistered: opts.gstRegistered,
     notes: 'All timber will be treated and stained. Work includes cleanup and disposal of waste materials. Deck will comply with local council regulations.',
     terms: opts.terms,
+    extraSection: opts.extraSection,
   };
 }
 
@@ -600,6 +604,7 @@ export function PDFTemplateScreen() {
           pricesIncludeGst: businessSettings?.pricesIncludeGst === true,
           gstRegistered: businessSettings?.gstRegistered !== false,
           terms: businessSettings?.termsAndConditions,
+          extraSection: resolveExtraSection(businessSettings),
         }),
         {
           businessName: businessSettings?.businessName || 'Your Business',

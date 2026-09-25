@@ -58,7 +58,7 @@ import {
 } from '../services/assistant/transcriptPacer';
 import { describeThrown } from '../services/assistant/describeThrown';
 import { activateKeepAwakeAsync } from 'expo-keep-awake';
-import { shouldAutoStartMic, resolveAutoStartMic } from './assistant/shouldAutoStartMic';
+import { shouldAutoStartMic, resolveAutoStartMic, withAutoStartMicToggled } from './assistant/shouldAutoStartMic';
 import { getMateIntro, isBlankSlate, isUnfinishedStem } from './assistant/mateIntro';
 import { buildPipelineDonePrompt } from './assistant/pipelineDoneCopy';
 import {
@@ -491,6 +491,7 @@ export function AssistantScreen() {
   const quotes = useStore((s) => s.quotes);
   const documents = useStore((s) => s.documents);
   const businessSettings = useStore((s) => s.businessSettings);
+  const setBusinessSettings = useStore((s) => s.setBusinessSettings);
 
   // Marketing demo playback — no-op unless this is a capture build with an
   // injected payload (see src/demo/demoPlayback.ts). Never runs for real users.
@@ -504,6 +505,7 @@ export function AssistantScreen() {
   const pendingAttachmentsRef = useRef<ChatAttachment[]>([]);
   useEffect(() => { pendingAttachmentsRef.current = pendingAttachments; }, [pendingAttachments]);
   const [photoSheetVisible, setPhotoSheetVisible] = useState(false);
+  const [micSheetVisible, setMicSheetVisible] = useState(false);
   const [captureModalVisible, setCaptureModalVisible] = useState(false);
   const [alertConfig, setAlertConfig] = useState<AlertConfig | null>(null);
 
@@ -2304,6 +2306,29 @@ export function AssistantScreen() {
     [openCameraCapture, pickFromGallery],
   );
 
+  // "Start mic automatically" lives here, on the tab it affects (it moved out
+  // of Settings in Sep 2026). A plain switch in a sheet: the header icon opens
+  // it, the one option flips it.
+  const autoStartMicOn = resolveAutoStartMic(businessSettings?.autoStartMicOnMate);
+  const toggleAutoStartMic = useCallback(async () => {
+    if (!businessSettings) return;
+    try {
+      await setBusinessSettings(withAutoStartMicToggled(businessSettings));
+    } catch {
+      showAlert({ type: 'error', title: "Couldn't save that", message: 'Try again in a moment.' });
+    }
+  }, [businessSettings, setBusinessSettings, showAlert]);
+  const micSheetOptions: ActionSheetOption[] = useMemo(
+    () => [
+      {
+        icon: autoStartMicOn ? 'microphone-off' : 'microphone',
+        label: autoStartMicOn ? 'Turn off auto-start mic' : 'Turn on auto-start mic',
+        onPress: () => { void toggleAutoStartMic(); },
+      },
+    ],
+    [autoStartMicOn, toggleAutoStartMic],
+  );
+
   // The back half of a send: stream one assistant turn into an existing
   // bubble. Shared by submit and the "Send again" retry — the retry re-uses
   // the failed bubble and the history it already has, so a dropped-signal
@@ -2639,6 +2664,17 @@ export function AssistantScreen() {
   // (nothing to clear) so it can't spawn a throwaway conversation.
   useEffect(() => {
     navigation.setOptions({
+      headerLeft: () => (
+        <TouchableOpacity
+          onPress={() => setMicSheetVisible(true)}
+          style={{ marginLeft: 12, padding: 4 }}
+          accessibilityRole="button"
+          accessibilityLabel="Mate voice settings"
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <MaterialCommunityIcons name="microphone-settings" size={22} color={themeColors.text} />
+        </TouchableOpacity>
+      ),
       headerRight: () => (
         <TouchableOpacity
           onPress={handleNewChat}
@@ -2661,7 +2697,7 @@ export function AssistantScreen() {
         </TouchableOpacity>
       ),
     });
-  }, [navigation, handleNewChat, isEmpty]);
+  }, [navigation, handleNewChat, isEmpty, themeColors.text]);
 
   const openVoiceMode = useCallback(async (mode: 'sticky' | 'ptt') => {
     // One open at a time. The auto-start path awaits a permission check
@@ -3455,6 +3491,15 @@ export function AssistantScreen() {
   useEffect(() => { openVoiceModeRef.current = openVoiceMode; }, [openVoiceMode]);
   const stopVoiceSessionRef = useRef(stopVoiceSession);
   useEffect(() => { stopVoiceSessionRef.current = stopVoiceSession; }, [stopVoiceSession]);
+  // Same reason for the auto-start setting: it can now be flipped from THIS
+  // tab, and as a dep it re-ran the focus effect, whose cleanup stops the live
+  // voice session — turning it off mid-conversation would cut the tradie off,
+  // and turning it on would open voice on the spot. Read at focus instead; a
+  // change applies the next time they land on the tab, as the setting says.
+  const autoStartMicRef = useRef(resolveAutoStartMic(businessSettings?.autoStartMicOnMate));
+  useEffect(() => {
+    autoStartMicRef.current = resolveAutoStartMic(businessSettings?.autoStartMicOnMate);
+  }, [businessSettings?.autoStartMicOnMate]);
 
   const handleVoiceToggle = useCallback(async () => {
     if (voiceState !== 'idle') {
@@ -3497,7 +3542,7 @@ export function AssistantScreen() {
   useFocusEffect(
     useCallback(() => {
       let cancelled = false;
-      const enabled = resolveAutoStartMic(businessSettings?.autoStartMicOnMate);
+      const enabled = autoStartMicRef.current;
       // Only auto-start once per focused visit. Without this, every
       // navigation Mate launches (e.g. opening a draft) blurs and re-focuses
       // this screen, tearing down and re-opening the voice session — a new
@@ -3587,7 +3632,7 @@ export function AssistantScreen() {
         sub.remove();
         void stopVoiceSessionRef.current();
       };
-    }, [businessSettings?.autoStartMicOnMate]),
+    }, []),
   );
 
   const handleCtaPress = useCallback(
@@ -4066,6 +4111,14 @@ export function AssistantScreen() {
           saving={importer.saving}
           onCancel={closeSupplierReview}
           onSave={importer.handleSaveImported}
+        />
+
+        <ActionSheet
+          visible={micSheetVisible}
+          onDismiss={() => setMicSheetVisible(false)}
+          title="Mate voice"
+          subtitle={`Start mic automatically is ${autoStartMicOn ? 'on' : 'off'}. When on, Mate opens voice the moment you land on this tab, only if mic access is already granted. A change applies next time you open Mate.`}
+          options={micSheetOptions}
         />
 
         <ActionSheet

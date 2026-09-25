@@ -4,7 +4,7 @@
  * One setting chases two kinds of silence on the tradie's behalf: a sent quote
  * nobody has answered, and an invoice past its due date. Both go out under the
  * tradie's own business name, so the account-level answer has to be identical
- * on the phone (the Business Defaults switch) and in the schedulers that
+ * on the phone (the Quotes & Invoices switch) and in the schedulers that
  * actually send. This is that single answer — never read the raw field.
  *
  * DEFAULT ON. `undefined` means the switch was never touched, and those

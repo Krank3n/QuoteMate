@@ -1,14 +1,16 @@
 /**
- * Business Defaults Settings Screen
+ * Rates & GST Settings Screen (route: BusinessDefaults)
  *
- * Default rates + Terms & Conditions applied to new quotes/invoices. Lifted
- * out of BusinessProfileScreen so the "who you are" (name, logo, contact
- * details) stays separate from "how you price" (labour rate, markup, deposit,
- * terms). Easier to find and less to scroll past.
+ * How you price: default labour rate, markups, travel markup and the GST
+ * mode. (Mate's auto-start mic moved to the Mate tab header.) Lifted out of BusinessProfileScreen so "who you are" stays separate
+ * from "how you price". Everything that shapes the customer's document
+ * (display, deposits, follow-ups, T&Cs, extra section) moved to
+ * QuotesInvoicesScreen in Sep 2026 — this screen had grown to seven unrelated
+ * cards. Route name kept so existing links keep working.
  */
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { View, StyleSheet, ScrollView, Alert, TouchableOpacity } from 'react-native';
+import { View } from 'react-native';
 // Under edge-to-edge Android no longer resizes the window for the keyboard, so
 // a form screen with a plain ScrollView leaves its fields behind it — and RN's
 // own KeyboardAvoidingView is a no-op there too. This one shrinks the scroll
@@ -21,11 +23,9 @@ import {
   TextInput,
   Surface,
   Title,
-  Button,
   Switch,
   SegmentedButtons,
 } from 'react-native-paper';
-import { useNavigation, useFocusEffect } from '@react-navigation/native';
 
 import type { BusinessSettings } from '../../types';
 import { useStore } from '../../store/useStore';
@@ -34,21 +34,8 @@ import { WebContainer } from '../../components/WebContainer';
 import { FixedBottomButton } from '../../components/FixedBottomButton';
 import { AlertModal } from '../../components/AlertModal';
 import { useUnsavedChangesGuard } from '../../hooks/useUnsavedChangesGuard';
-import { checkSquareConnection } from '../../services/squareService';
-import { resolveAutoStartMic } from '../assistant/shouldAutoStartMic';
-import { resolveAutoCustomerFollowUp } from '../../../shared/document/autoFollowUp';
-import { defaultAuTradieTerms, hashTerms, isUnmodifiedStarterTerms } from '../../../shared/pdf/terms/defaultAuTradie';
-import {
-  resolveGstMode,
-  GstMode,
-  resolvePriceDetail,
-  legacyFlagsFor,
-  priceDetailBlurb,
-  showsPerLineMoney,
-  PRICE_DETAIL_OPTIONS,
-  type PriceDetail,
-} from '../../../shared/document';
-import { PillToggle } from '../../components/PillToggle';
+import { defaultAuTradieTerms, isUnmodifiedStarterTerms } from '../../../shared/pdf/terms/defaultAuTradie';
+import { resolveGstMode, GstMode } from '../../../shared/document';
 import { GridBackground } from '../../components/GridBackground';
 
 const GST_MODE_DESCRIPTIONS: Record<GstMode, string> = {
@@ -60,7 +47,6 @@ const GST_MODE_DESCRIPTIONS: Record<GstMode, string> = {
 export function BusinessDefaultsScreen() {
   const styles = useStyles();
   const themeColors = useThemeColors();
-  const navigation = useNavigation<any>();
   const { businessSettings, setBusinessSettings } = useStore();
 
   const [laborRate, setLaborRate] = useState('85');
@@ -68,71 +54,28 @@ export function BusinessDefaultsScreen() {
   const laborRateTouchedRef = useRef(false);
   const [markup, setMarkup] = useState('30');
   const [laborMarkup, setLaborMarkup] = useState('20');
-  const [defaultDepositPercentage, setDefaultDepositPercentage] = useState('0');
-  const [requireDepositByDefault, setRequireDepositByDefault] = useState(false);
   const [transportMarkupEnabled, setTransportMarkupEnabled] = useState(true);
   const [gstMode, setGstMode] = useState<GstMode>('exclusive');
-  const [showMarkup, setShowMarkup] = useState(false);
-  const [priceDetail, setPriceDetail] = useState<PriceDetail>('itemised');
-  const [showLaborHours, setShowLaborHours] = useState(false);
-  const [autoCustomerFollowUp, setAutoCustomerFollowUp] = useState(true);
-  const [autoStartMic, setAutoStartMic] = useState(false);
-  const [termsAndConditions, setTermsAndConditions] = useState('');
-
-  const [squareConnected, setSquareConnected] = useState<boolean | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
   const [initialSnapshot, setInitialSnapshot] = useState<string | null>(null);
-
-  const laborHoursApplicable = showsPerLineMoney(priceDetail);
 
   useEffect(() => {
     if (!businessSettings) return;
     const lr = businessSettings.defaultLaborRate?.toString() || '85';
     const mk = businessSettings.defaultMarkup?.toString() || '30';
     const lm = (businessSettings.defaultLaborMarkup ?? businessSettings.defaultMarkup ?? 30).toString();
-    const dp = (businessSettings.defaultDepositPercentage ?? 0).toString();
-    const rd = businessSettings.requireDepositByDefault === true;
     const tm = businessSettings.transportMarkupEnabled !== false;
     const gm = resolveGstMode(businessSettings);
-    const sm = businessSettings.showMarkup === true;
-    // Resolved, never read raw — an account that only ever set the legacy
-    // pair migrates on read with no backfill.
-    const pd = resolvePriceDetail(null, businessSettings);
-    const slh = businessSettings.showLaborHours === true;
-    const acf = resolveAutoCustomerFollowUp(businessSettings.autoCustomerFollowUpEnabled);
-    const asm = resolveAutoStartMic(businessSettings.autoStartMicOnMate);
-    const tc = businessSettings.termsAndConditions ?? '';
 
     setLaborRate(lr);
     setMarkup(mk);
     setLaborMarkup(lm);
-    setDefaultDepositPercentage(dp);
-    setRequireDepositByDefault(rd);
     setTransportMarkupEnabled(tm);
     setGstMode(gm);
-    setShowMarkup(sm);
-    setPriceDetail(pd);
-    setShowLaborHours(slh);
-    setAutoCustomerFollowUp(acf);
-    setAutoStartMic(asm);
-    setTermsAndConditions(tc);
-
-    setInitialSnapshot(JSON.stringify({ lr, mk, lm, dp, rd, tm, gm, sm, pd, slh, acf, asm, tc }));
+    setInitialSnapshot(JSON.stringify({ lr, mk, lm, tm, gm }));
   }, [businessSettings]);
-
-  // Re-check on focus so the deposit toggle unlocks the moment
-  // the tradie connects Square from an adjacent screen.
-  useFocusEffect(
-    useCallback(() => {
-      let cancelled = false;
-      checkSquareConnection()
-        .then((res) => { if (!cancelled) setSquareConnected(!!res.connected); })
-        .catch(() => { if (!cancelled) setSquareConnected(false); });
-      return () => { cancelled = true; };
-    }, []),
-  );
 
   const isDirty = React.useMemo(() => {
     if (!initialSnapshot) return false;
@@ -140,22 +83,12 @@ export function BusinessDefaultsScreen() {
       lr: laborRate,
       mk: markup,
       lm: laborMarkup,
-      dp: defaultDepositPercentage,
-      rd: requireDepositByDefault,
       tm: transportMarkupEnabled,
       gm: gstMode,
-      sm: showMarkup,
-      pd: priceDetail,
-      slh: showLaborHours,
-      acf: autoCustomerFollowUp,
-      asm: autoStartMic,
-      tc: termsAndConditions,
     });
     return current !== initialSnapshot;
   }, [
-    laborRate, markup, laborMarkup, defaultDepositPercentage, requireDepositByDefault,
-    transportMarkupEnabled, gstMode,
-    showMarkup, priceDetail, showLaborHours, autoCustomerFollowUp, autoStartMic, termsAndConditions,
+    laborRate, markup, laborMarkup, transportMarkupEnabled, gstMode,
     initialSnapshot,
   ]);
 
@@ -174,32 +107,24 @@ export function BusinessDefaultsScreen() {
       // writes a stale `true` back for an older installed build to act on.
       const { surchargePaymentFees: _retiredSurcharge, ...currentSettings } =
         businessSettings! as BusinessSettings & { surchargePaymentFees?: boolean };
+      // The T&Cs live on Quotes & Invoices now, but the starter template
+      // still carries a GST line — keep it in step with a GST change unless
+      // the tradie has hand-edited the wording.
+      const storedTerms = currentSettings.termsAndConditions ?? '';
+      const syncStarterTerms =
+        gstMode !== resolveGstMode(currentSettings) && isUnmodifiedStarterTerms(storedTerms);
       await setBusinessSettings({
         ...currentSettings,
         defaultLaborRate: parseFloat(laborRate) || 85,
         ...(laborRateTouchedRef.current || currentSettings.laborRateConfirmed ? { laborRateConfirmed: true } : {}),
         defaultMarkup: parseFloat(markup) || 30,
         defaultLaborMarkup: parseFloat(laborMarkup) || 0,
-        defaultDepositPercentage: Math.max(0, Math.min(100, parseFloat(defaultDepositPercentage) || 0)),
-        requireDepositByDefault,
         transportMarkupEnabled,
         pricesIncludeGst: gstMode === 'inclusive',
         gstRegistered: gstMode !== 'none',
-        showMarkup,
-        defaultPriceDetail: priceDetail,
-        showLaborHours,
-        // Dual-written for one release so an older installed build reading
-        // the legacy pair still renders documents the way this screen says.
-        // Remove with legacyFlagsFor() in shared/document/priceDetail.ts.
-        showMaterialCostsByDefault: legacyFlagsFor(priceDetail).showMaterialCosts,
-        showLaborCostsByDefault: legacyFlagsFor(priceDetail).showLaborCosts,
-        autoCustomerFollowUpEnabled: autoCustomerFollowUp,
-        autoStartMicOnMate: autoStartMic,
-        termsAndConditions: termsAndConditions.trim() || undefined,
-        termsUpdatedAt:
-          termsAndConditions !== (businessSettings?.termsAndConditions ?? '')
-            ? new Date().toISOString()
-            : businessSettings?.termsUpdatedAt,
+        ...(syncStarterTerms
+          ? { termsAndConditions: defaultAuTradieTerms(gstMode), termsUpdatedAt: new Date().toISOString() }
+          : {}),
       });
       // The store update triggers the hydration useEffect to re-derive form
       // state from the new businessSettings and refresh initialSnapshot.
@@ -284,17 +209,7 @@ export function BusinessDefaultsScreen() {
               <Text style={styles.toggleTitle}>GST on quotes &amp; invoices</Text>
               <SegmentedButtons
                 value={gstMode}
-                onValueChange={(next) => {
-                  const mode = next as GstMode;
-                  setGstMode(mode);
-                  // Keep the starter T&C's GST line in sync when switching —
-                  // but only if the tradie hasn't hand-edited the template.
-                  // If they've customised the wording we leave it alone so
-                  // we don't clobber their changes.
-                  if (isUnmodifiedStarterTerms(termsAndConditions)) {
-                    setTermsAndConditions(defaultAuTradieTerms(mode));
-                  }
-                }}
+                onValueChange={(next) => setGstMode(next as GstMode)}
                 buttons={[
                   { value: 'exclusive', label: 'Add 10%' },
                   { value: 'inclusive', label: 'Included' },
@@ -308,225 +223,6 @@ export function BusinessDefaultsScreen() {
             </View>
           </Surface>
 
-          <Surface style={styles.card}>
-            <Title style={styles.sectionTitle}>Document Display</Title>
-            <Text style={styles.helperText}>
-              Defaults for what appears on customer-facing quotes and invoices. Each document can override these.
-            </Text>
-
-            <View style={styles.toggleRow}>
-              <View style={styles.toggleLabel}>
-                <Text style={styles.toggleTitle}>Show Markup</Text>
-                <Text style={styles.toggleDescription}>
-                  When off, markup is rolled into the line totals instead of showing as a separate line to the customer.
-                </Text>
-              </View>
-              <Switch
-                value={showMarkup}
-                onValueChange={setShowMarkup}
-                color={themeColors.accentText}
-              />
-            </View>
-
-            {/* One control, mirroring the per-document one on the preview
-                screen. Two switches whose four combinations meant three
-                things — and which couldn't express "scope only" at all. */}
-            <View style={styles.toggleLabel}>
-              <Text style={styles.toggleTitle}>What the customer sees</Text>
-              <Text style={styles.toggleDescription}>{priceDetailBlurb(priceDetail)}</Text>
-            </View>
-            <PillToggle
-              value={priceDetail}
-              onChange={setPriceDetail}
-              options={PRICE_DETAIL_OPTIONS}
-              fullWidth
-              style={{ marginTop: 10 }}
-            />
-
-            {/* Only meaningful when per-line money is shown: the PDF builder
-                gates "(30 hours @ $85/hr)" on the detail mode above, so the
-                switch is disabled, not hidden, when that mode hides it. */}
-            <View style={[styles.toggleRow, { marginTop: 16 }, !laborHoursApplicable && styles.toggleRowDisabled]}>
-              <View style={styles.toggleLabel}>
-                <Text style={styles.toggleTitle}>Show Labour Hours</Text>
-                <Text style={styles.toggleDescription}>
-                  {laborHoursApplicable
-                    ? 'Show the hours and hourly rate next to the labour total, not just the total.'
-                    : 'Hours and rate only show when the customer sees line prices.'}
-                </Text>
-              </View>
-              <Switch
-                testID="show-labour-hours"
-                value={showLaborHours}
-                onValueChange={setShowLaborHours}
-                disabled={!laborHoursApplicable}
-                color={themeColors.accentText}
-              />
-            </View>
-          </Surface>
-
-          <Surface style={styles.card}>
-            <Title style={styles.sectionTitle}>Customer Follow-Ups</Title>
-            <Text style={styles.helperText}>
-              Automatically chase customers who haven&rsquo;t accepted yet.
-            </Text>
-
-            <View style={styles.toggleRow}>
-              <View style={styles.toggleLabel}>
-                <Text style={styles.toggleTitle}>Auto follow-up customers</Text>
-                <Text style={styles.toggleDescription}>
-                  Chases quotes and invoices for you, under your business name. Quotes at 2 and 7 days after sending; invoices at 3 and 10 days past due. Two reminders each, and they stop the moment the customer accepts, declines or pays.
-                </Text>
-              </View>
-              <Switch
-                value={autoCustomerFollowUp}
-                onValueChange={setAutoCustomerFollowUp}
-                color={themeColors.accentText}
-              />
-            </View>
-          </Surface>
-
-          <Surface style={styles.card}>
-            <Title style={styles.sectionTitle}>Mate (Voice Assistant)</Title>
-            <Text style={styles.helperText}>
-              How Mate behaves when you open the Mate tab.
-            </Text>
-
-            <View style={styles.toggleRow}>
-              <View style={styles.toggleLabel}>
-                <Text style={styles.toggleTitle}>Start mic automatically on Mate</Text>
-                <Text style={styles.toggleDescription}>
-                  Off by default. Turn on and Mate opens voice the moment you land on the tab — only if mic access is already granted.
-                </Text>
-              </View>
-              <Switch
-                value={autoStartMic}
-                onValueChange={setAutoStartMic}
-                color={themeColors.accentText}
-              />
-            </View>
-          </Surface>
-
-          <Surface style={styles.card}>
-            <Title style={styles.sectionTitle}>Deposits (Square)</Title>
-            <Text style={styles.helperText}>
-              {squareConnected === false
-                ? 'Connect Square to accept card payments and deposits.'
-                : 'Powered by Square. Can be overridden per quote.'}
-            </Text>
-
-            <View style={styles.toggleRow}>
-              <View style={styles.toggleLabel}>
-                <Text style={[styles.toggleTitle, squareConnected === false && { color: themeColors.textMuted }]}>
-                  Require Deposit by Default
-                </Text>
-                <Text style={styles.toggleDescription}>
-                  Customers are asked to pay a deposit when accepting.
-                </Text>
-              </View>
-              <Switch
-                value={requireDepositByDefault && squareConnected !== false}
-                onValueChange={setRequireDepositByDefault}
-                color={themeColors.accentText}
-                disabled={squareConnected !== true}
-              />
-            </View>
-
-            {squareConnected === false && (
-              <TouchableOpacity
-                onPress={() => navigation.navigate('SquareIntegration' as never)}
-                style={styles.connectSquareButton}
-              >
-                <Text style={styles.connectSquareText}>Connect Square</Text>
-              </TouchableOpacity>
-            )}
-
-            {requireDepositByDefault && squareConnected === true && (
-              <TextInput
-                label="Default Deposit"
-                value={defaultDepositPercentage}
-                onChangeText={setDefaultDepositPercentage}
-                mode="outlined"
-                style={styles.input}
-                keyboardType="decimal-pad"
-                right={<TextInput.Affix text="%" />}
-                placeholder="30"
-              />
-            )}
-          </Surface>
-
-          <Surface style={styles.card}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <Title style={styles.sectionTitle}>Terms &amp; Conditions</Title>
-              <Text style={[styles.helperText, { marginLeft: 'auto', fontStyle: 'italic' }]}>
-                Optional
-              </Text>
-            </View>
-            <Text style={styles.helperText}>
-              {termsAndConditions
-                ? 'Shown on the quote/invoice PDF and in the payment email. Customers accept them when they pay.'
-                : 'Add short terms to set expectations (deposits, payment, warranty). Leave blank if you don\u2019t need them.'}
-            </Text>
-
-            {termsAndConditions ? (
-              <>
-                <TextInput
-                  value={termsAndConditions}
-                  onChangeText={setTermsAndConditions}
-                  mode="outlined"
-                  style={[styles.input, { minHeight: 180 }]}
-                  multiline
-                  numberOfLines={10}
-                  placeholder="Your terms and conditions…"
-                />
-                <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-                  <Button
-                    mode="text"
-                    compact
-                    onPress={() => {
-                      Alert.alert(
-                        'Remove terms?',
-                        'Your quotes and invoices will stop showing a Terms & Conditions section. You can add them back any time.',
-                        [
-                          { text: 'Cancel', style: 'cancel' },
-                          { text: 'Remove', style: 'destructive', onPress: () => setTermsAndConditions('') },
-                        ],
-                      );
-                    }}
-                  >
-                    Remove
-                  </Button>
-                  <Button
-                    mode="text"
-                    compact
-                    onPress={() => setTermsAndConditions(defaultAuTradieTerms(gstMode))}
-                  >
-                    Reset to starter
-                  </Button>
-                  <Text style={[styles.helperText, { marginLeft: 'auto' }]}>
-                    v{hashTerms(termsAndConditions).slice(0, 6)}
-                  </Text>
-                </View>
-              </>
-            ) : (
-              <View style={{ gap: 10, marginTop: 4 }}>
-                <Button
-                  mode="contained-tonal"
-                  icon="file-document-plus"
-                  onPress={() => setTermsAndConditions(defaultAuTradieTerms(gstMode))}
-                >
-                  Use starter template
-                </Button>
-                <Button
-                  mode="outlined"
-                  icon="pencil"
-                  onPress={() => setTermsAndConditions(' ')}
-                >
-                  Write your own
-                </Button>
-              </View>
-            )}
-          </Surface>
         </WebContainer>
       </KeyboardAwareScrollView>
 
@@ -541,7 +237,7 @@ export function BusinessDefaultsScreen() {
         visible={showSuccessModal}
         type="success"
         title="Saved"
-        message="Your business defaults have been updated."
+        message="Your rates and GST settings have been updated."
         onDismiss={() => setShowSuccessModal(false)}
       />
       <AlertModal
@@ -588,7 +284,6 @@ const useStyles = makeStyles((t) => ({
     alignItems: 'center',
     paddingVertical: 10,
   },
-  toggleRowDisabled: { opacity: 0.5 },
   toggleLabel: { flex: 1, marginRight: 12 },
   gstModeSection: { paddingVertical: 10 },
   gstModeButtons: { marginTop: 8, marginBottom: 6 },
@@ -601,19 +296,5 @@ const useStyles = makeStyles((t) => ({
     fontSize: 12,
     color: t.colors.textMuted,
     marginTop: 2,
-  },
-  connectSquareButton: {
-    alignSelf: 'flex-start',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 8,
-    backgroundColor: t.colors.accent,
-    marginTop: 4,
-    marginBottom: 8,
-  },
-  connectSquareText: {
-    color: t.colors.onAccent,
-    fontSize: 13,
-    fontWeight: '600',
   },
 }));

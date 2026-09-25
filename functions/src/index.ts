@@ -2093,7 +2093,12 @@ async function callClaudeForMaterials(
       // these are the exact settings the model comparison was measured under
       // (see imageModelAB.ts) and shipping a different configuration would
       // ship something that was never measured.
-      model: 'claude-opus-5',
+      //
+      // Opus 5.5 replaced Opus 5 here WITHOUT a re-run of that comparison —
+      // same tier, 20% cheaper ($4/$20 vs $5/$25). Its effort default drops to
+      // 'medium', so the explicit 'high' below is load-bearing; thinking can't
+      // be disabled and forced tool_choice 400s, neither of which this sends.
+      model: 'claude-opus-5-5',
       max_tokens: 32000,
       thinking: { type: 'adaptive' },
       output_config: { effort: 'high' },
@@ -7947,6 +7952,13 @@ export function generateAcceptancePage(token: string): string {
           '</div>'
         : '';
 
+      var extraSectionHtml = quote.extraSection
+        ? '<div class="section">' +
+            '<div class="section-title">' + escapeHtml(quote.extraSection.title) + '</div>' +
+            '<div class="notes-box">' + nl2br(quote.extraSection.body) + '</div>' +
+          '</div>'
+        : '';
+
       var contactBits = [];
       if (business.phone) contactBits.push('Phone: <a href="tel:' + escapeHtml(business.phone) + '">' + escapeHtml(business.phone) + '</a>');
       if (business.email) contactBits.push('Email: <a href="mailto:' + escapeHtml(business.email) + '">' + escapeHtml(business.email) + '</a>');
@@ -7999,6 +8011,7 @@ export function generateAcceptancePage(token: string): string {
           '</div>' +
           notesHtml +
           termsHtml +
+          extraSectionHtml +
           '<div class="section">' +
             '<div class="section-title">Anything we should know? (optional)</div>' +
             '<textarea id="clientNotes" class="client-notes" placeholder="Add any comments or questions for ' + escapeHtml(business.name) + '..."></textarea>' +

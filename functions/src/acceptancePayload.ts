@@ -18,6 +18,7 @@ import {
   type PriceDetail,
 } from './shared/document/priceDetail';
 import { travelAdjustmentAmountFor } from './travelSurcharge';
+import { resolveExtraSection } from './shared/pdf/extraSection';
 
 /** The markup-rolled figures from applyHideMarkupForDisplay. */
 export interface AcceptanceDisplayFigures {
@@ -104,6 +105,8 @@ export function buildAcceptanceQuotePayload(
     // Only expose the immutable send-time snapshot. Never fall back to live
     // settings here or an old SMS link could show revised terms.
     terms: quote.termsSnapshot || null,
+    // Live, unlike the terms — see shared/pdf/extraSection.ts.
+    extraSection: resolveExtraSection(businessSettings) || null,
     createdAt: quote.createdAt,
     aiEmailBody: quote.aiEmailBody || null,
     photoUrls,

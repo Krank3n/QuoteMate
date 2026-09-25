@@ -49,8 +49,8 @@ function claudeMaterialsFn(): string {
 }
 
 describe('materials generator model', () => {
-  it('generates with Claude Opus 5', () => {
-    expect(claudeMaterialsRequest()).toContain("model: 'claude-opus-5'");
+  it('generates with Claude Opus 5.5', () => {
+    expect(claudeMaterialsRequest()).toContain("model: 'claude-opus-5-5'");
   });
 
   it('sends no sampling parameters — Opus 5 returns 400 for them', () => {
@@ -61,6 +61,8 @@ describe('materials generator model', () => {
   });
 
   it('ships the thinking/effort configuration the comparison was measured under', () => {
+    // Opus 5.5 defaults to effort 'medium' — dropping this line silently
+    // lowers it from what the comparison measured.
     const req = claudeMaterialsRequest();
     expect(req).toContain("thinking: { type: 'adaptive' }");
     expect(req).toContain("effort: 'high'");
