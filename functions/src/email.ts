@@ -170,6 +170,10 @@ async function hasPriorHardBounce(to: string): Promise<boolean> {
 const QM_GREEN = '#059669';      // button fills, the card's top rule, hero numbers
 const QM_GREEN_INK = '#047857';  // accent TEXT — #059669 is too light at 13px on white
 const QM_BLUE_INK = '#0369a1';   // secondary accent; the light-mode twin of the app's #5AB9EA
+// Where the app sign-off under a customer quote/invoice email lands. The
+// reader is the tradie's customer, often another tradie; the UTM keeps this
+// surface separate from lifecycle and outreach clicks.
+const APP_FOOTER_URL = 'https://quotemateapp.au?utm_source=customer_email&utm_medium=email&utm_campaign=quote_footer';
 
 // Shared email wrapper (base layout for all emails)
 function wrapEmailTemplate(content: string, options?: { unsubscribeUrl?: string; preheader?: string }): string {
@@ -1854,25 +1858,33 @@ export function formatMoney(amount: number): string {
 // Light-themed wrapper for client-facing quote emails (business-branded, no QM logo)
 function wrapQuoteEmailTemplate(content: string, options: { brandColor?: string; businessName?: string; logoUrl?: string; preheader?: string; appFooter?: boolean }): string {
   const { brandColor: rawBrandColor, businessName = '', preheader } = options;
-  // The small app-branding pill under the card. Default ON, off only where a
-  // customer must see the tradie's business and nothing else — see the quote
-  // branch of buildDocumentEmailHtml and buildQuoteReminderEmailHtml.
+  // The app sign-off under the card. Default ON; the quote and invoice
+  // reminders opt out (see buildQuoteReminderEmailHtml and its invoice twin).
   const appFooter = options.appFooter !== false;
   const brandColor = safeBrandColor(rawBrandColor);
   // Guarded here rather than at each caller so every email through this shell
   // degrades to the business-name lockup instead of a broken-image icon.
   const logoUrl = remoteLogoUrl(options.logoUrl);
 
-  const logoSection = logoUrl
-    ? `<tr><td align="center" style="padding:0 0 14px;">
-        <img src="${escapeHtml(logoUrl)}" alt="${escapeHtml(businessName)}" width="88" style="display:block;width:88px;height:auto;border-radius:12px;" />
-      </td></tr>`
+  // Letterhead row at the top of the card: logo on the left, business name
+  // beside it. Inside the card the logo sits on white, which is also where a
+  // flattened (-onwhite) logo disappears into its background. The logo is
+  // capped both ways so a wide wordmark scales down and a square mark stays
+  // small; with no logo the row is just the name. The radius is on the image
+  // itself because a flattened logo carries its white in the pixels, and in a
+  // dark-mode client that white tile is what the customer sees.
+  const logoCell = logoUrl
+    ? `<td style="vertical-align:middle;padding:0 12px 0 0;width:1%;white-space:nowrap;">
+              <img src="${escapeHtml(logoUrl)}" alt="${escapeHtml(businessName)}" style="display:block;max-width:120px;max-height:56px;width:auto;height:auto;border-radius:6px;" />
+            </td>`
     : '';
-
-  const businessNameSection = businessName
-    ? `<tr><td align="center" style="padding:0 0 20px;">
-        <h2 style="margin:0;font-size:19px;font-weight:700;color:#111827;letter-spacing:-0.2px;">${escapeHtml(businessName)}</h2>
-      </td></tr>`
+  const letterhead = (logoUrl || businessName)
+    ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 22px;">
+          <tr>
+            ${logoCell}
+            ${businessName ? `<td style="vertical-align:middle;font-size:17px;font-weight:700;color:#111827;letter-spacing:-0.2px;line-height:1.3;">${escapeHtml(businessName)}</td>` : ''}
+          </tr>
+        </table>`
     : '';
 
   return `
@@ -1890,21 +1902,17 @@ function wrapQuoteEmailTemplate(content: string, options: { brandColor?: string;
   <title>${escapeHtml(businessName || 'Quote')}</title>
   <style>
     :root { color-scheme: light; supported-color-schemes: light; }
-    /* On mobile, merge the page background into the card so the email reads as one
-       continuous surface instead of a card-on-a-page. */
+    /* On a phone the card stays a card: a small gutter and its rounded edge.
+       Merging it into the page (the old full-bleed treatment) left the brand
+       rule as a square bar across the screen, and dark-mode clients that
+       invert the page and the card to two different darks showed the seam
+       anyway. */
     @media screen and (max-width: 600px) {
-      .qm-c-body { background-color: #ffffff !important; }
-      .qm-c-bg { background-color: #ffffff !important; }
-      .qm-c-outer { padding: 0 !important; }
-      .qm-c-card-shell {
-        border-left: 0 !important;
-        border-right: 0 !important;
-        border-bottom: 0 !important;
-        border-radius: 0 !important;
-      }
-      .qm-c-card { padding: 26px 20px !important; }
+      .qm-c-outer { padding: 16px 12px !important; }
+      .qm-c-card { padding: 24px 18px !important; }
       /* Buttons go full-bleed on a phone so the tap target spans the screen. */
       .qm-c-btn { width: 100% !important; max-width: 100% !important; }
+      .qm-c-appfoot { padding: 18px 12px 6px !important; }
     }
   </style>
   <!--[if mso]>
@@ -1917,24 +1925,28 @@ function wrapQuoteEmailTemplate(content: string, options: { brandColor?: string;
     <tr>
       <td align="center" class="qm-c-outer" style="padding:32px 16px;">
         <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;">
-          ${logoSection}
-          ${businessNameSection}
           <!-- Main Card -->
           <tr>
             <td>
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" class="qm-c-card-shell" style="background-color:#ffffff;border-radius:14px;overflow:hidden;border:1px solid #e5e7eb;border-top:4px solid ${brandColor};">
                 <tr>
-                  <td class="qm-c-card" style="padding:34px 32px;">
+                  <td class="qm-c-card" style="padding:30px 32px 34px;">
+                    ${letterhead}
                     ${content}
                   </td>
                 </tr>
               </table>
             </td>
           </tr>
-          <!-- Footer -->
+          <!-- Footer: the app sign-off under the tradie's card, one link on
+               two short lines in the same grey as their ABN line so it never
+               competes with the card. The UTM names this surface. -->
           ${appFooter ? `<tr>
-            <td style="padding:20px 0 0;text-align:center;">
-              <a href="https://quotemateapp.au" target="_blank" style="display:inline-block;background:#111827;color:#ffffff;font-size:10px;font-weight:600;letter-spacing:0.6px;padding:5px 10px;border-radius:999px;text-decoration:none;">QuoteMate</a>
+            <td class="qm-c-appfoot" style="padding:20px 0 0;text-align:center;">
+              <a href="${APP_FOOTER_URL}" target="_blank" style="display:inline-block;color:#6b7280;font-size:12px;line-height:1.6;text-decoration:none;">
+                <img src="https://hansendev.web.app/email-assets/logo.png" alt="QuoteMate" width="18" height="18" style="display:inline-block;width:18px;height:18px;border-radius:4px;border:0;vertical-align:-4px;margin:0 5px 0 0;" />Your quotes could look like this.<br />
+                Made with <span style="color:${QM_GREEN_INK};font-weight:600;">QuoteMate</span>
+              </a>
             </td>
           </tr>` : ''}
         </table>
@@ -2511,7 +2523,7 @@ export function renderQuoteCta(input: QuoteCtaInput): string {
   return `
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:26px 0 0;">
       <tr>
-        <td style="background:#f9fafb;border:1px solid #e5e7eb;border-top:3px solid ${accent};border-radius:12px;padding:24px 22px;">
+        <td style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;padding:24px 22px;">
           <p style="color:#111827;font-size:17px;font-weight:700;text-align:center;margin:0 0 16px;letter-spacing:-0.2px;">${heading}</p>
           ${depositSection}
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
@@ -2746,10 +2758,11 @@ export function buildDocumentEmailHtml(data: DocumentEmailData): string {
     businessName: data.business.name,
     logoUrl: data.business.logoUrl,
     preheader: `${typeLabel} for ${data.jobName} — ${formatMoney(data.total)} from ${data.business.name}`,
-    // A quote is the tradie's document to their customer: the only business
-    // name on it is theirs, so the app-branding pill is off. Invoices keep
-    // today's footer — this pass is the quote email only.
-    appFooter: isInvoice,
+    // The app sign-off sits under the card on quotes and invoices alike: the
+    // tradie's business is the only name on the card itself, and the footer
+    // under it is aimed at the reader who is a tradie too. Reminders stay
+    // unbranded.
+    appFooter: true,
   });
 }
 

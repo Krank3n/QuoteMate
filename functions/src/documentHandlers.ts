@@ -29,6 +29,7 @@ import {
   getUserEmail,
   sendQuoteSentEmail,
 } from './email';
+import { emailSafeLogoUrl } from './emailLogo';
 import {
   buildQuotePdfHtml,
   buildInvoicePdfHtml,
@@ -957,7 +958,7 @@ async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailRes
     : `https://us-central1-hansendev.cloudfunctions.net/quoteAcceptancePage?token=${token}`;
 
   const photoUrls = (quote.photos || []).map((p: any) => p.storageUrl).filter(Boolean);
-  const logoUrl = remoteLogoUrl(business.logoStorageUrl || business.logoUri) || '';
+  const logoUrl = (await emailSafeLogoUrl(business.logoStorageUrl || business.logoUri, business.brandColor)) || '';
   const displayQuote = applyHideMarkupForDisplay(quote, business);
   const emailMaterials = displayQuote.materials.map((m: any) => ({
     name: m.name, quantity: m.quantity, unit: m.unit,
@@ -1176,7 +1177,7 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
     }
   }
 
-  const logoUrl = remoteLogoUrl(business.logoStorageUrl || business.logoUri) || '';
+  const logoUrl = (await emailSafeLogoUrl(business.logoStorageUrl || business.logoUri, business.brandColor)) || '';
   const emailMaterials = (invoice.materials || []).map((m: any) => ({
     name: m.name, quantity: m.quantity, unit: m.unit,
     totalPrice: m.totalPrice || 0, section: m.section,
