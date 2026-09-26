@@ -22,6 +22,9 @@
  *   #          recipient=tom@hansendev.com.au
  *   BREVO_API_KEY=... npx ts-node scripts/previewQuoteEmail.ts
  *
+ *   # write the HTML to a file instead of sending (no Brevo key needed)
+ *   DUMP_HTML=/tmp/quote.html npx ts-node scripts/previewQuoteEmail.ts <quoteId> <ownerEmail>
+ *
  * Run from the functions/ directory. Needs Application Default Credentials
  * (firebase login or gcloud auth application-default login) and BREVO_API_KEY.
  */
@@ -34,6 +37,7 @@ import fetch from 'node-fetch';
 import {
   buildQuoteEmailHtml,
 } from '../src/email';
+import { emailSafeLogoUrl } from '../src/emailLogo';
 import {
   buildQuotePdfHtml,
 } from '../src/pdfGenerator';
@@ -292,7 +296,7 @@ async function main() {
     phone: business.phone,
     email: business.email,
     address: business.address,
-    logoUrl: business.logoStorageUrl || business.logoUri || '',
+    logoUrl: (await emailSafeLogoUrl(business.logoStorageUrl || business.logoUri, business.brandColor)) || '',
     brandColor: business.brandColor,
   };
 
@@ -321,6 +325,14 @@ async function main() {
     hasTerms: !!(business.termsAndConditions && String(business.termsAndConditions).trim()),
     business: businessData,
   });
+
+  // DUMP_HTML=<path> writes the email HTML there and stops, for a local look
+  // at the layout without a send.
+  if (process.env.DUMP_HTML) {
+    require('fs').writeFileSync(process.env.DUMP_HTML, htmlContent);
+    console.log(`Wrote email HTML to ${process.env.DUMP_HTML}`);
+    return;
+  }
 
   console.log('Building PDF HTML...');
   const pdfHtml = buildQuotePdfHtml(
