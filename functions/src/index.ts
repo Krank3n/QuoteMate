@@ -273,6 +273,7 @@ import { buildEstimatorPrompt } from './estimatorPrompt';
 import { buildQuantitySanityPrompt, applySanityDecisions, indexMaterialsForSanity } from './quantitySanity';
 import { dropOwnedGear } from './ownedGear';
 import { claudeText } from './claudeText';
+import { geminiLiteText, claudeLiteText } from './liteJsonResponse';
 import {
   assessSquareReadiness,
   probeSquareReadiness,
@@ -2665,7 +2666,11 @@ async function callGeminiLiteJson(apiKey: string, prompt: string): Promise<any> 
       contents: [{ parts: [{ text: prompt }] }],
       generationConfig: {
         temperature: 0.1,
-        maxOutputTokens: 8000,
+        // 3.7 Flash spends its thinking out of this same budget. At 8000 a
+        // 36-item reconcile batch thought for ~7600 tokens and returned cut-off
+        // JSON; 32000 finishes it with room to spare. Billing is per token
+        // used, so the headroom costs nothing on small calls.
+        maxOutputTokens: 32000,
         responseMimeType: 'application/json',
       },
     }),
@@ -2675,9 +2680,7 @@ async function callGeminiLiteJson(apiKey: string, prompt: string): Promise<any> 
     throw new Error(`Gemini Lite returned ${response.status}: ${errorText}`);
   }
   const data = await response.json();
-  const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!content) throw new Error('No content in Gemini Lite response');
-  return parseLLMJson(content);
+  return parseLLMJson(geminiLiteText(data));
 }
 
 /**
@@ -2715,9 +2718,8 @@ async function callClaudeLiteJson(apiKey: string, prompt: string): Promise<any> 
     throw new Error(`Claude Lite returned ${response.status}: ${errorText}`);
   }
   const data = await response.json();
-  const content = data.content?.[0]?.text;
-  if (!content) throw new Error('No content in Claude Lite response');
-  return parseLLMJson(content);
+  // Text block, not block zero: Sonnet 5 thinks first — see liteJsonResponse.
+  return parseLLMJson(claudeLiteText(data));
 }
 
 
@@ -2813,7 +2815,9 @@ async function reconcilePricedMaterialsCore(input: unknown): Promise<any[]> {
   return Array.isArray(parsed.results) ? parsed.results : [];
 }
 
-export const reconcilePricedMaterials = functions.runWith({ timeoutSeconds: 120 }).https.onRequest((req, res) => {
+// 300 s, not 120: when Gemini fails, the Claude fallback on a full batch takes
+// ~100 s on its own, and at 120 s it was killed before it could answer.
+export const reconcilePricedMaterials = functions.runWith({ timeoutSeconds: 300 }).https.onRequest((req, res) => {
   corsHandler(req, res, async () => {
     if (req.method !== 'POST') {
       res.status(405).send('Method Not Allowed');
