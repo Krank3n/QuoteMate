@@ -66,7 +66,13 @@ function mirrorIdForQuote(quoteId: string): string {
   return quoteId;
 }
 
-function mirrorIdForInvoice(invoice: AnyData, invoiceId: string): string {
+/**
+ * Exported because the payment-receipt triggers need the same answer: given a
+ * legacy invoice, which unified document is its mirror? Deriving it twice
+ * would be a correctness bug waiting to happen — a receipt would be sent
+ * twice, or not at all, the moment the two rules drifted.
+ */
+export function mirrorIdForInvoice(invoice: AnyData, invoiceId: string): string {
   return typeof invoice.sourceQuoteId === 'string' && invoice.sourceQuoteId
     ? invoice.sourceQuoteId
     : invoiceId;
