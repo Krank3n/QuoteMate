@@ -148,7 +148,8 @@ describe('remoteLogoUrl', () => {
   it('falls back to the business-name lockup rather than a broken image', () => {
     const withLocal = quote({ business: { ...business, logoUrl: 'file:///var/mobile/logo.png' } });
     expect(withLocal).not.toContain('file:///var/mobile/logo.png');
-    expect(withLocal).not.toContain('<img');
+    // The only image in the email is the app badge under the card.
+    expect(withLocal.slice(0, withLocal.indexOf('<!-- Footer'))).not.toContain('<img');
     expect(withLocal).toContain('Hansen Fencing');
 
     const withRemote = quote({ business: { ...business, logoUrl: 'https://cdn.test/logo.png' } });
@@ -306,8 +307,8 @@ describe('quote email — the inline photo grid', () => {
   function photosSection(html: string): string {
     const at = html.indexOf('Site Photos');
     if (at < 0) return '';
-    const end = html.indexOf('</table>\n    </table>', at);
-    return html.slice(at, end);
+    // The grid is the last block in the card; the app footer follows it.
+    return html.slice(at, html.indexOf('<!-- Footer', at));
   }
   const imgCount = (s: string) => (s.match(/<img /g) || []).length;
   const rowCount = (s: string) => (s.match(/<tr><td style="padding:4px;">/g) || []).length;
@@ -411,14 +412,26 @@ describe('quote email — the tradie brand, never ours', () => {
     expect(html).toContain('12 Trade St, Sydney NSW 2000');
   });
 
-  it('never puts the app name in front of a customer, in HTML or in text', () => {
-    expect(quote()).not.toContain('QuoteMate');
+  it('signs off under the card with the linked app footer, on quotes and invoices', () => {
+    const footerUrl = 'https://quotemateapp.au?utm_source=customer_email&utm_medium=email&utm_campaign=quote_footer';
+    for (const html of [quote(), invoice()]) {
+      expect(html).toContain('Your quotes could look like this.');
+      expect(html).toContain('email-assets/logo.png');
+      // Badge, line and "Made with" sit inside the one tagged link.
+      const footer = html.slice(html.indexOf('<!-- Footer'));
+      const link = footer.slice(footer.indexOf(`href="${footerUrl}"`), footer.indexOf('</a>'));
+      expect(link).toContain('email-assets/logo.png');
+      expect(link).toContain('Your quotes could look like this.');
+      expect(link).toContain('Made with');
+    }
+    // The footer is HTML-only; the plain-text part stays the tradie's alone.
     expect(quoteText()).not.toContain('QuoteMate');
   });
 
-  it('leaves the app footer on every other email through the same wrapper', () => {
-    // Default ON — only the customer quote and its reminder opt out.
-    expect(invoice()).toContain('>QuoteMate</a>');
+  it('keeps the app name out of the card itself', () => {
+    const html = quote();
+    const card = html.slice(0, html.indexOf('<!-- Footer'));
+    expect(card).not.toContain('QuoteMate');
   });
 });
 
@@ -547,9 +560,10 @@ describe('quote email — email-open pixel', () => {
     const bodyEnd = html.lastIndexOf('</body>');
     expect(pixelIdx).toBeGreaterThan(-1);
     expect(pixelIdx).toBeLessThan(bodyEnd);
-    // Nothing between the pixel and </body> but whitespace and the wrapper closing tags.
+    // Nothing between the pixel and </body> but the wrapper's closing tags
+    // and the app badge in the footer under the card.
     const trailing = html.slice(pixelIdx, bodyEnd);
-    expect(trailing).not.toMatch(/<img[^>]*src="(?!https:\/\/us-central1-hansendev)/i);
+    expect(trailing).not.toMatch(/<img[^>]*src="(?!https:\/\/(us-central1-hansendev|hansendev\.web\.app\/email-assets))/i);
   });
 
   it('renders no pixel when no URL is supplied (test sends, older callers)', () => {

@@ -35,6 +35,7 @@ import {
   safeBrandColor,
   remoteLogoUrl,
 } from './email';
+import { emailSafeLogoUrl } from './emailLogo';
 import { listAllAuthUsers } from './authUsers.helpers';
 import { isUnreachableEmail, reEngagementVerdict } from './reEngagement.helpers';
 import { recordReturnAndMaybeGrantTrial } from './returnTrial';
@@ -11271,8 +11272,7 @@ export const onInvoicePaymentReceived = functions.firestore
       const businessDoc = await db.doc(`users/${userId}/settings/business`).get();
       const business = (businessDoc.exists ? businessDoc.data() : {}) as Record<string, any>;
       const businessName = business.businessName || 'Your Tradie';
-      const rawLogo = business.logoStorageUrl || business.logoUri || '';
-      const logoUrl = /^https?:\/\//.test(rawLogo) ? rawLogo : undefined;
+      const logoUrl = await emailSafeLogoUrl(business.logoStorageUrl || business.logoUri, business.brandColor);
 
       const paidDateValue = after.paidDate?.toDate?.() ?? new Date();
       const paidDateText = paidDateValue.toLocaleDateString('en-AU', {
@@ -11558,7 +11558,7 @@ export const customerQuoteFollowUp = functions
               phone: settings.phone,
               email: tradieReplyEmail,
               address: settings.address,
-              logoUrl: settings.logoStorageUrl || settings.logoUri,
+              logoUrl: await emailSafeLogoUrl(settings.logoStorageUrl || settings.logoUri, settings.brandColor),
               brandColor: settings.brandColor,
             },
             userId: userDoc.id,
@@ -11731,7 +11731,7 @@ export const customerInvoiceFollowUp = functions
               phone: settings.phone,
               email: tradieReplyEmail,
               address: settings.address,
-              logoUrl: settings.logoStorageUrl || settings.logoUri,
+              logoUrl: await emailSafeLogoUrl(settings.logoStorageUrl || settings.logoUri, settings.brandColor),
               brandColor: settings.brandColor,
             },
             userId: userDoc.id,
