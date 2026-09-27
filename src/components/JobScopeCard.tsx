@@ -26,7 +26,6 @@ import {
 } from 'react-native';
 import { Text, ActivityIndicator, Menu, TextInput } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { formatDistanceToNowStrict } from 'date-fns';
 import { quoteOpenedAfterSend } from '../utils/jobTimeline';
 
 import type { Document } from '../types/document';
@@ -97,9 +96,9 @@ function sumMaterials(doc: Document): number {
 function stageTimestamp(doc: Document): number | null {
   switch (doc.stage) {
     case 'quote_sent':
-      // Once the customer has opened a sent quote, the moment that matters
-      // is the open, not the send — "opened 2h ago" is what the chip says.
-      return quoteOpenedAfterSend(doc) ?? doc.sentAt ?? doc.updatedAt ?? null;
+      // Age from the LATEST send — `sentAt` is the first one and never
+      // moves on a re-send. Whether it's been opened is the eye's job.
+      return doc.lastSentAt ?? doc.sentAt ?? doc.updatedAt ?? null;
     case 'invoice_sent':
       return doc.sentAt ?? doc.updatedAt ?? null;
     case 'quote_accepted':
@@ -113,15 +112,42 @@ function stageTimestamp(doc: Document): number | null {
   }
 }
 
-function stageAgoLabel(doc: Document): string | null {
+/** "just now" / "5m" / "2h" / "3d" / "2w" / "4mo" — the chip is a glance, not a sentence. */
+export function compactAgo(ts: number, now: number = Date.now()): string {
+  const mins = Math.floor(Math.max(0, now - ts) / 60_000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h`;
+  const days = Math.floor(hours / 24);
+  if (days < 14) return `${days}d`;
+  if (days < 60) return `${Math.floor(days / 7)}w`;
+  return `${Math.floor(days / 30)}mo`;
+}
+
+/**
+ * What the stage chip says. The stage label never changes; a sent quote the
+ * customer has opened gains a trailing eye. `meta` (the age) renders lighter
+ * than `label`.
+ */
+export function stageChipContent(
+  doc: Document,
+  base: { chipLabel: string; icon: string },
+  now: number = Date.now(),
+): { icon: string; label: string; meta: string | null; viewed: boolean } {
   const ts = stageTimestamp(doc);
-  if (!ts) return null;
-  try {
-    const ago = formatDistanceToNowStrict(new Date(ts), { addSuffix: false });
-    return doc.stage === 'quote_sent' && quoteOpenedAfterSend(doc) ? `opened ${ago} ago` : ago;
-  } catch {
-    return null;
-  }
+  return {
+    icon: base.icon,
+    label: base.chipLabel,
+    meta: ts ? compactAgo(ts, now) : null,
+    viewed: doc.stage === 'quote_sent' && quoteOpenedAfterSend(doc) !== null,
+  };
+}
+
+/** Screen-reader text for the chip: "Quote sent 5d, viewed". */
+export function stageChipAccessibilityLabel(chip: ReturnType<typeof stageChipContent>): string {
+  const out = chip.meta ? `${chip.label} ${chip.meta}` : chip.label;
+  return chip.viewed ? `${out}, viewed` : out;
 }
 
 function laborSummary(doc: Document): string {
@@ -160,6 +186,7 @@ export function JobScopeCard({
   const themeColors = useThemeColors();
   const meta = stageMetaFor(themeColors)[doc.stage];
   const showStageChip = shouldShowStageChip(doc);
+  const chip = stageChipContent(doc, meta);
   const isInvoice = doc.type === 'invoice';
   const typeLabel = isInvoice ? 'Invoice' : 'Quote';
   const lineCount = countLineItems(doc);
@@ -354,6 +381,8 @@ export function JobScopeCard({
                 onStagePress(doc);
               }}
               hitSlop={6}
+              accessibilityRole="button"
+              accessibilityLabel={stageChipAccessibilityLabel(chip)}
               style={({ pressed }) => [
                 styles.stageChip,
                 {
@@ -364,14 +393,17 @@ export function JobScopeCard({
               ]}
             >
               <MaterialCommunityIcons
-                name={meta.icon as any}
+                name={chip.icon as any}
                 size={12}
                 color={meta.color}
               />
               <Text style={[styles.stageLabel, { color: meta.color }]}>
-                {meta.chipLabel}
-                {stageAgoLabel(doc) ? ` · ${stageAgoLabel(doc)}` : ''}
+                {chip.label}
+                {chip.meta ? <Text style={styles.stageMeta}>{` · ${chip.meta}`}</Text> : null}
               </Text>
+              {chip.viewed ? (
+                <MaterialCommunityIcons name="eye-outline" size={12} color={meta.color} style={styles.viewedEye} />
+              ) : null}
             </Pressable>
           ) : null}
           {shouldShowPaymentChip(doc, paymentContext) ? (
@@ -821,6 +853,13 @@ const useStyles = makeStyles((t) => ({
   stageLabel: {
     fontSize: 12,
     fontWeight: '700',
+  },
+  stageMeta: {
+    fontWeight: '500',
+    opacity: 0.75,
+  },
+  viewedEye: {
+    marginLeft: 2,
   },
   pressed: {
     opacity: 0.7,
