@@ -21,6 +21,7 @@ import {
   Divider,
 } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import { SymbolView } from 'expo-symbols';
 import * as WebBrowser from 'expo-web-browser';
 import { format } from 'date-fns';
 
@@ -40,6 +41,24 @@ import {
   presentTapToPayEducation,
 } from '../../../modules/tap-to-pay-education';
 import { GridBackground } from '../../components/GridBackground';
+
+/**
+ * Apple's Tap to Pay on iPhone review rejected a drawn phone here: anything
+ * that depicts the feature must be the SF Symbol wave.3.right.circle. The
+ * MaterialCommunityIcons glyph stays only as the non-iOS fallback.
+ */
+const TAP_TO_PAY_SYMBOL = 'wave.3.right.circle' as const;
+
+function TapToPayButtonIcon({ size, color }: { size: number; color: string }) {
+  return (
+    <SymbolView
+      name={TAP_TO_PAY_SYMBOL}
+      size={size}
+      tintColor={color}
+      fallback={<MaterialCommunityIcons name="cellphone-nfc" size={size} color={color} />}
+    />
+  );
+}
 
 export function SquareIntegrationScreen() {
   const styles = useStyles();
@@ -313,7 +332,7 @@ export function SquareIntegrationScreen() {
                   onPress={() => setTapToPaySetupVisible(true)}
                   loading={primingTapToPay}
                   disabled={primingTapToPay}
-                  icon="cellphone-nfc"
+                  icon={TapToPayButtonIcon}
                   buttonColor={themeColors.accent}
                   style={styles.tapToPayButton}
                 >
@@ -428,6 +447,7 @@ export function SquareIntegrationScreen() {
         onDismiss={() => setTapToPaySetupVisible(false)}
         type="info"
         icon="cellphone-nfc"
+        sfSymbol={TAP_TO_PAY_SYMBOL}
         title="Set up Tap to Pay on iPhone"
         message="Square needs to pair Tap to Pay on iPhone with this phone — one-time, about 30 seconds. Do it now so your first customer doesn't have to wait."
         primaryButtonText="Set up now"

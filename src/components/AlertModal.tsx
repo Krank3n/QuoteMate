@@ -13,6 +13,7 @@ import {
   Button,
   IconButton,
 } from 'react-native-paper';
+import { SymbolView, type SFSymbol } from 'expo-symbols';
 import type { Tokens } from '../theme';
 import { makeStyles, useThemeColors } from '../theme';
 import { successTap, errorTap } from '../utils/haptics';
@@ -26,6 +27,12 @@ interface AlertModalProps {
   title: string;
   message: string;
   icon?: string; // Optional custom icon
+  /**
+   * An SF Symbol to show instead of `icon` on iOS; `icon` stays the fallback
+   * elsewhere. Needed where Apple dictates the glyph — Tap to Pay on iPhone
+   * must use wave.3.right.circle, never a drawn phone.
+   */
+  sfSymbol?: SFSymbol;
   showConfetti?: boolean; // Override confetti display
   primaryButtonText?: string;
   primaryButtonAction?: () => void;
@@ -97,6 +104,7 @@ export function AlertModal({
   title,
   message,
   icon,
+  sfSymbol,
   showConfetti,
   primaryButtonText = 'Done',
   primaryButtonAction,
@@ -365,11 +373,27 @@ export function AlertModal({
               },
             ]}
           >
-            <IconButton
-              icon={displayIcon}
-              iconColor={alert.iconColor}
-              size={60}
-            />
+            {sfSymbol ? (
+              <SymbolView
+                name={sfSymbol}
+                size={60}
+                tintColor={alert.iconColor}
+                style={styles.sfSymbol}
+                fallback={
+                  <IconButton
+                    icon={displayIcon}
+                    iconColor={alert.iconColor}
+                    size={60}
+                  />
+                }
+              />
+            ) : (
+              <IconButton
+                icon={displayIcon}
+                iconColor={alert.iconColor}
+                size={60}
+              />
+            )}
           </Animated.View>
 
           <Text style={styles.title}>{title}</Text>
@@ -452,6 +476,10 @@ const useStyles = makeStyles((t) => ({
     height: 100,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  sfSymbol: {
+    width: 60,
+    height: 60,
   },
   title: {
     fontSize: 26,
