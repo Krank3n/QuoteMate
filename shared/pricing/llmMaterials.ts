@@ -53,6 +53,10 @@ export interface LLMResponse {
   // Geometry read off an attached architectural plan, when one is detected
   // among the photos. Undefined for ordinary site photos / no photos.
   floorplanAnalysis?: FloorplanAnalysis;
+  // Customer-facing scope text per section name, only asked for when the job
+  // description is a written scope (see writtenScope.ts). Keyed by the exact
+  // section string the materials carry.
+  sectionDescriptions?: Record<string, string>;
 }
 
 export const VALID_UNITS = ['each', 'm', 'm²', 'm³', 'L', 'kg', 'box', 'pack'];
@@ -146,6 +150,57 @@ export function validateMaterials(materials: LLMMaterial[]): LLMMaterial[] {
     });
 }
 
+/** Longest section description kept — a few short lines under a heading. */
+export const MAX_SECTION_DESCRIPTION_CHARS = 500;
+
+/** Most section descriptions kept from one analysis. */
+export const MAX_SECTION_DESCRIPTIONS = 40;
+
+/** "$120", "$  1,200", "AUD 500", "500 AUD", "1,200 dollars", "500 bucks". */
+const MONEY_AMOUNT = /\$\s*\d|\bAUD\s*\d|\d[\d,.]*\s*(?:AUD|dollars?|bucks?)\b/i;
+
+/**
+ * Turn the model's `sectionDescriptions` array into a name → text map. The
+ * text reaches the customer's quote, so anything that isn't a plain string is
+ * dropped, and so is any description quoting a dollar amount — prices belong
+ * in the lines and totals, never in scope text the model wrote. The first
+ * entry for a section name wins. Undefined when nothing survives.
+ */
+export function normaliseSectionDescriptions(raw: unknown): Record<string, string> | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  // No prototype: a section called "constructor" or "__proto__" is just a name.
+  const out: Record<string, string> = Object.create(null);
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') continue;
+    const { section, description } = entry as { section?: unknown; description?: unknown };
+    if (typeof section !== 'string' || typeof description !== 'string') continue;
+    const name = section.trim();
+    const text = description
+      .replace(/\r\n?/g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim()
+      .slice(0, MAX_SECTION_DESCRIPTION_CHARS)
+      .trim();
+    if (!name || !text) continue;
+    if (MONEY_AMOUNT.test(text)) continue;
+    if (Object.prototype.hasOwnProperty.call(out, name)) continue;
+    out[name] = text;
+    if (Object.keys(out).length >= MAX_SECTION_DESCRIPTIONS) break;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/**
+ * The analyse endpoint's `sectionDescriptions`, validated server-side before
+ * it leaves the function: the same rules as normaliseSectionDescriptions, put
+ * back into the array shape the client parses. Undefined when nothing is left.
+ */
+export function sectionDescriptionsForWire(raw: unknown): Array<{ section: string; description: string }> | undefined {
+  const map = normaliseSectionDescriptions(raw);
+  if (!map) return undefined;
+  return Object.keys(map).map((section) => ({ section, description: map[section] }));
+}
+
 /**
  * Coerce the analyzeJobDescription endpoint's JSON into an LLMResponse.
  * The server doesn't dedupe or sanity-check sectionMultiplier values, so
@@ -160,12 +215,14 @@ export function normaliseAnalyzeResponse(data: any): LLMResponse {
       ? data.jobQualityTier
       : undefined;
   const floorplanAnalysis = normaliseFloorplanAnalysis(data.floorplanAnalysis);
+  const sectionDescriptions = normaliseSectionDescriptions(data.sectionDescriptions);
   return {
     materials: validateMaterials(data.materials || []),
     estimatedHours: Math.max(1, Math.min(data.estimatedHours || 8, 200)),
     jobSummary: data.jobSummary || '',
     ...(jobQualityTier && { jobQualityTier }),
     ...(floorplanAnalysis && { floorplanAnalysis }),
+    ...(sectionDescriptions && { sectionDescriptions }),
   };
 }
 

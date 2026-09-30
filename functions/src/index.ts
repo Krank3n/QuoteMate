@@ -105,7 +105,8 @@ import { applyFeatureUsagePatch, buildPriceFetchPatch, recordMaterialsRecommend 
 import { firestorePricingRunStore, runPricingRun, PRICING_RUN_TIMEOUT_SECONDS } from './pricingRun';
 import { analyseHandoffWriter } from './analyseHandoff';
 import type { PipelineDeps } from './shared/pricing/pipeline';
-import { normaliseAnalyzeResponse } from './shared/pricing/llmMaterials';
+import { normaliseAnalyzeResponse, sectionDescriptionsForWire } from './shared/pricing/llmMaterials';
+import { isWrittenScope } from './shared/pricing/writtenScope';
 import { normaliseEstimateResponse } from './shared/pricing/estimate';
 import {
   rankCandidates,
@@ -269,7 +270,7 @@ import { dollarsToCents, centsToDollars } from './shared/pdf/money';
 import { validateAndRepairAiOutput } from './shared/ai/validateAiOutput';
 import { getFeedbackDocId, getCategoryLabel, isSideEffectFreeRequest, isRatingRecordRequest } from './quickFeedback.helpers';
 import { buildReconcilePrompt } from './reconcile.helpers';
-import { buildMaterialsPrompt, renderQuotingPreferences } from './materialsPrompt';
+import { buildMaterialsPrompt, geminiMaterialsMaxOutputTokens, renderQuotingPreferences } from './materialsPrompt';
 import { buildEstimatorPrompt } from './estimatorPrompt';
 import { buildQuantitySanityPrompt, applySanityDecisions, indexMaterialsForSanity } from './quantitySanity';
 import { dropOwnedGear } from './ownedGear';
@@ -1972,6 +1973,7 @@ async function callGeminiForMaterials(
   apiKey: string,
   prompt: string,
   attachments?: LlmAttachment[],
+  writtenScope = false,
 ): Promise<any> {
   const parts: any[] = [];
   if (Array.isArray(attachments) && attachments.length > 0) {
@@ -1987,8 +1989,9 @@ async function callGeminiForMaterials(
   parts.push({ text: prompt });
 
   // When images are attached the model may also return a floorplanAnalysis
-  // (scale, per-zone area breakdown) alongside the materials, so give it more
-  // headroom; the Claude fallback already runs at 32k.
+  // (scale, per-zone area breakdown) alongside the materials, and a written
+  // scope adds sectionDescriptions, so either gets more headroom; the Claude
+  // primary already runs at 32k. See geminiMaterialsMaxOutputTokens.
   const hasImages = Array.isArray(attachments) && attachments.length > 0;
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MATERIALS_MODEL}:generateContent?key=${apiKey}`;
   const response = await fetch(url, {
@@ -1998,7 +2001,7 @@ async function callGeminiForMaterials(
       contents: [{ parts }],
       generationConfig: {
         temperature: 0.2,
-        maxOutputTokens: hasImages ? 16000 : 8000,
+        maxOutputTokens: geminiMaterialsMaxOutputTokens({ hasImages, writtenScope }),
         responseMimeType: 'application/json',
       },
     }),
@@ -2329,6 +2332,9 @@ async function analyzeJobDescriptionCore(uid: string, body: any): Promise<Record
     }
 
     const hasExisting = existingMaterials && existingMaterials.length > 0;
+    // A numbered/bulleted scope the tradie wrote themselves: ask for a short
+    // customer-facing description per section restating their own items.
+    const writtenScope = isWrittenScope(jobDescription);
     const prompt = buildMaterialsPrompt({
       jobDescription,
       hasExisting,
@@ -2340,6 +2346,7 @@ async function analyzeJobDescriptionCore(uid: string, body: any): Promise<Record
       reeceCatalogueSection,
       tradeContext,
       targetHours,
+      askSectionDescriptions: writtenScope,
     });
 
     const finalPrompt = attachments.length > 0
@@ -2388,7 +2395,7 @@ async function analyzeJobDescriptionCore(uid: string, body: any): Promise<Record
         throw primaryError || new Error('Claude failed and no Gemini fallback key configured');
       }
       try {
-        parsed = await callGeminiForMaterials(geminiApiKey, finalPrompt, attachments);
+        parsed = await callGeminiForMaterials(geminiApiKey, finalPrompt, attachments, writtenScope);
       } catch (fallbackErr: any) {
         // Log full errors server-side; return short summary to client
         console.error('Claude primary error:', primaryError?.message);
@@ -2550,6 +2557,7 @@ async function analyzeJobDescriptionCore(uid: string, body: any): Promise<Record
       latencyMs: Date.now() - t0,
     }).catch(() => {});
 
+    const sectionDescriptions = writtenScope ? sectionDescriptionsForWire(parsed.sectionDescriptions) : undefined;
     const payload = {
       materials: anchoredMaterials,
       estimatedHours: parsed.estimatedHours || 8,
@@ -2557,6 +2565,9 @@ async function analyzeJobDescriptionCore(uid: string, body: any): Promise<Record
       flags: { ...aiFlags, ...(ownedGearDropped.length > 0 && { ownedGearDropped }) },
       ...(jobQualityTier && { jobQualityTier }),
       ...(floorplanAnalysis && { floorplanAnalysis }),
+      // Validated here too, not just on the client: only plain string pairs,
+      // capped in length and count, never a dollar figure.
+      ...(sectionDescriptions ? { sectionDescriptions } : {}),
       // Surfaced so the client can tell a "plan too big / unreadable" run
       // from a genuinely plan-less one instead of silently pricing blind.
       ...(dropped.length > 0 && { droppedAttachments: dropped }),

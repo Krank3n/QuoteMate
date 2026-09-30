@@ -12,6 +12,8 @@ import { describe, it, expect } from 'vitest';
 import {
   createSection,
   renameSection,
+  setSectionDescription,
+  sectionChangeKeepsTotals,
   deleteSection,
   moveSection,
   moveMaterialToSection,
@@ -22,7 +24,8 @@ import {
   sectionTotals,
   type SectionsState,
 } from './sectionsModel';
-import type { Material, QuoteSection } from '../types';
+import type { Material, Quote, QuoteSection } from '../types';
+import { recalculateQuoteTotals } from '../../shared/pricing/documentTotals';
 
 function mat(id: string, section: string | undefined, totalPrice = 100): Material {
   return {
@@ -112,6 +115,121 @@ describe('renameSection', () => {
     const before = state();
     expect(renameSection(before, 'Painting', ' Painting ')).toBe(before);
     expect(renameSection(before, 'Painting', '')).toBe(before);
+  });
+});
+
+describe('setSectionDescription', () => {
+  it('sets the description, trimmed, on the named section only', () => {
+    const next = setSectionDescription(state(), 'Painting', '  Two coats to the new walls.\nCeilings by others.  ');
+    expect(next.sections.find((s) => s.name === 'Painting')!.description).toBe(
+      'Two coats to the new walls.\nCeilings by others.',
+    );
+    expect('description' in next.sections.find((s) => s.name === 'Demolition')!).toBe(false);
+  });
+
+  it('empty or blank text removes the key entirely (never stored as undefined)', () => {
+    const withText = setSectionDescription(state(), 'Painting', 'Two coats.');
+    for (const blank of ['', '   ', '\n\n']) {
+      const cleared = setSectionDescription(withText, 'Painting', blank);
+      const painting = cleared.sections.find((s) => s.name === 'Painting')!;
+      expect('description' in painting).toBe(false);
+    }
+  });
+
+  it('an unknown section name is a no-op', () => {
+    const before = state();
+    expect(setSectionDescription(before, 'Plastering', 'Sheet and set.')).toBe(before);
+  });
+
+  it('leaves materials, labour and money untouched', () => {
+    const before = state();
+    const next = setSectionDescription(before, 'Demolition', 'Remove the old kitchen.');
+    expect(next.materials).toBe(before.materials);
+    const { description, ...rest } = next.sections.find((s) => s.name === 'Demolition')!;
+    expect(description).toBe('Remove the old kitchen.');
+    expect(rest).toEqual(before.sections.find((s) => s.name === 'Demolition'));
+    expect(sectionTotals(next, 'Demolition')).toEqual(sectionTotals(before, 'Demolition'));
+    expect(next.sections.find((s) => s.name === 'Painting')).toBe(before.sections.find((s) => s.name === 'Painting'));
+  });
+
+  it('typed text drops the generated stamp — it is the tradie\'s own now', () => {
+    const before: SectionsState = {
+      ...state(),
+      sections: state().sections.map((s) =>
+        s.name === 'Painting' ? { ...s, description: 'From the scope.', descriptionSource: 'generated' as const } : s,
+      ),
+    };
+    const typed = setSectionDescription(before, 'Painting', 'My words.').sections.find((s) => s.name === 'Painting')!;
+    expect(typed.description).toBe('My words.');
+    expect('descriptionSource' in typed).toBe(false);
+    const cleared = setSectionDescription(before, 'Painting', '').sections.find((s) => s.name === 'Painting')!;
+    expect('description' in cleared).toBe(false);
+    expect('descriptionSource' in cleared).toBe(false);
+  });
+
+  it('saves a description for a section that exists only on its materials, as a $0 lump sum, totals unchanged', () => {
+    const before: SectionsState = {
+      sections: state().sections,
+      materials: [...state().materials, mat('d', 'Site clean', 40)],
+    };
+    const next = setSectionDescription(before, 'Site clean', '  Sweep out and take the rubbish away. ');
+    const created = next.sections.find((s) => s.name === 'Site clean')!;
+    expect(created.description).toBe('Sweep out and take the rubbish away.');
+    expect(created.pricing).toBe('lumpSum');
+    expect(created.laborTotal).toBe(0);
+    expect(created.laborHours).toBe(0);
+    expect(created.laborRate).toBe(0);
+    expect('descriptionSource' in created).toBe(false);
+    expect(next.materials).toBe(before.materials);
+
+    // Labour here already comes from the section records, and the heal
+    // ignores lump sums, so a $0 record moves no money.
+    const quote = {
+      job: { id: 'j', name: 'Reno', description: 'Reno' },
+      materials: before.materials,
+      sections: before.sections,
+      laborRate: 85,
+      laborHours: 20,
+      markup: 15,
+      laborMarkup: 10,
+      pricesIncludeGst: false,
+      gstRegistered: true,
+    } as unknown as Quote;
+    expect(sectionChangeKeepsTotals(quote, next)).toBe(true);
+    const a = recalculateQuoteTotals(quote);
+    const b = recalculateQuoteTotals({ ...quote, sections: next.sections, materials: next.materials });
+    expect(b.total).toBe(a.total);
+    expect(b.laborTotal).toBe(a.laborTotal);
+  });
+
+  it('a blank description on a materials-only name creates nothing', () => {
+    const before: SectionsState = { sections: [], materials: [mat('d', 'Site clean', 40)] };
+    expect(setSectionDescription(before, 'Site clean', '   ')).toBe(before);
+  });
+
+  it('sectionChangeKeepsTotals refuses a first section record on a quote whose labour is top-level', () => {
+    const before: SectionsState = { sections: [], materials: [mat('d', 'Site clean', 40)] };
+    const next = setSectionDescription(before, 'Site clean', 'Sweep out.');
+    expect(next.sections).toHaveLength(1);
+    const quote = {
+      job: { id: 'j', name: 'Clean', description: 'Clean' },
+      materials: before.materials,
+      sections: [],
+      laborRate: 85,
+      laborHours: 4,
+      markup: 0,
+      pricesIncludeGst: false,
+      gstRegistered: true,
+    } as unknown as Quote;
+    expect(sectionChangeKeepsTotals(quote, next)).toBe(false);
+    // With no labour at all there is nothing to move.
+    expect(sectionChangeKeepsTotals({ ...quote, laborHours: 0 } as Quote, next)).toBe(true);
+  });
+
+  it('renameSection keeps the description', () => {
+    const described = setSectionDescription(state(), 'Painting', 'Two coats.');
+    const renamed = renameSection(described, 'Painting', 'Interior Painting');
+    expect(renamed.sections.find((s) => s.name === 'Interior Painting')!.description).toBe('Two coats.');
   });
 });
 

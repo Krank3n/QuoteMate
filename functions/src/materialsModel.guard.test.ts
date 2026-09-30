@@ -101,7 +101,7 @@ describe('materials generator model', () => {
     // server-side pricing run); the export below it is a thin HTTP wrapper.
     const handler = source.slice(source.indexOf('async function analyzeJobDescriptionCore'));
     const claudeAt = handler.indexOf('callClaudeForMaterials(anthropicApiKey, finalPrompt, attachments)');
-    const geminiAt = handler.indexOf('callGeminiForMaterials(geminiApiKey, finalPrompt, attachments)');
+    const geminiAt = handler.indexOf('callGeminiForMaterials(geminiApiKey, finalPrompt, attachments, writtenScope)');
     expect(claudeAt).toBeGreaterThan(-1);
     expect(geminiAt).toBeGreaterThan(-1);
     expect(claudeAt).toBeLessThan(geminiAt);

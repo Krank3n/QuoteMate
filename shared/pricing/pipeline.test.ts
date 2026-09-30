@@ -7,7 +7,8 @@ import {
   type PipelineDeps,
 } from './pipeline';
 import { recalculateQuoteTotals } from './documentTotals';
-import type { Material, PricingQuote, ScraperProduct } from './types';
+import type { Material, PricingQuote, QuoteSection, ScraperProduct } from './types';
+import { normaliseSectionDescriptions } from './llmMaterials';
 
 /**
  * The pipeline through its dependency seam. These are the contracts the phone
@@ -346,5 +347,128 @@ describe('generateMaterialsForQuote — stated hours are held', () => {
     expect(out.laborHours).toBe(40);
     expect('laborExtraHours' in out).toBe(false);
     expect(recalculateQuoteTotals(rated(out)).laborTotal).toBeCloseTo(40 * 90, 5);
+  });
+});
+
+/**
+ * A written scope (the tradie's own numbered items) gets each NEW section a
+ * short customer-facing description from the analysis. Anything that isn't a
+ * written scope, and any section the tradie already has, is left alone.
+ */
+describe('generateMaterialsForQuote — section scope descriptions', () => {
+  const writtenScope = [
+    '1. Remove kitchen cupboards, benchtop and splashback, and take the rubbish away.',
+    '2. Frame the new walk-in robe with 90x45 pine studs and a cavity slider opening.',
+    '3. Demolish the ensuite back to the frame — plumbing disconnection by others.',
+  ].join('\n');
+  const scopeQuote = (): PricingQuote => ({
+    ...quote([]),
+    job: { id: 'j1', name: 'Reno', description: writtenScope },
+  });
+  const analysis = (sectionDescriptions?: Record<string, string>) => ({
+    materials: [
+      { name: 'Skip bin', searchTerm: 'skip bin', quantity: 1, unit: 'each', section: 'Demolition', sectionMultiplier: 1, sectionLaborHours: 6 },
+      { name: '90x45 pine', searchTerm: '90x45 pine', quantity: 12, unit: 'each', section: 'WIR Framing', sectionMultiplier: 1, sectionLaborHours: 8 },
+    ],
+    estimatedHours: 14,
+    jobSummary: '',
+    ...(sectionDescriptions ? { sectionDescriptions } : {}),
+  });
+  const run = (q: PricingQuote, sectionDescriptions?: Record<string, string>) =>
+    generateMaterialsForQuote(deps({ analyzeJobDescription: async () => analysis(sectionDescriptions) }), {
+      quote: q,
+      businessSettings: { defaultLaborRate: 90 },
+      isPro: false,
+      templates: [],
+    });
+  const byName = (q: PricingQuote, name: string) => q.sections?.find((s) => s.name === name);
+
+  it('a written scope puts each new section its description', async () => {
+    const result = await run(scopeQuote(), {
+      Demolition: 'Remove kitchen cupboards, benchtop and splashback.\nDemolish the ensuite back to the frame.',
+      'WIR Framing': 'Frame the new walk-in robe with a cavity slider opening.',
+    });
+    expect(byName(result.updatedQuote, 'Demolition')?.description).toBe(
+      'Remove kitchen cupboards, benchtop and splashback.\nDemolish the ensuite back to the frame.',
+    );
+    expect(byName(result.updatedQuote, 'WIR Framing')?.description).toBe(
+      'Frame the new walk-in robe with a cavity slider opening.',
+    );
+    expect(byName(result.updatedQuote, 'Demolition')?.descriptionSource).toBe('generated');
+    expect(byName(result.updatedQuote, 'WIR Framing')?.descriptionSource).toBe('generated');
+  });
+
+  const keptDemolition = (over: Partial<QuoteSection> = {}): QuoteSection => ({
+    id: 's-existing', name: 'Demolition', multiplier: 1, laborHours: 4, laborHoursTotal: 4,
+    laborRate: 90, laborUnit: 'hours', laborTotal: 360, sortOrder: 0, ...over,
+  });
+
+  it('a regenerate fills a kept section whose description was emptied, stamped generated, money untouched', async () => {
+    const result = await run({ ...scopeQuote(), sections: [keptDemolition()] }, { Demolition: 'Remove the cupboards.' });
+    const demos = (result.updatedQuote.sections ?? []).filter((s) => s.name === 'Demolition');
+    expect(demos).toEqual([{ ...keptDemolition(), description: 'Remove the cupboards.', descriptionSource: 'generated' }]);
+  });
+
+  it('never overwrites an existing generated description either', async () => {
+    const existing = keptDemolition({ description: 'Earlier run text.', descriptionSource: 'generated' });
+    const result = await run({ ...scopeQuote(), sections: [existing] }, { Demolition: 'Model text.' });
+    expect((result.updatedQuote.sections ?? []).filter((s) => s.name === 'Demolition')).toEqual([existing]);
+  });
+
+  it('a section named "constructor" gets its own description, not an inherited property', async () => {
+    const analyze = async () => ({
+      materials: [
+        { name: 'Skip bin', searchTerm: 'skip bin', quantity: 1, unit: 'each', section: 'constructor', sectionMultiplier: 1, sectionLaborHours: 2 },
+        { name: 'Pine', searchTerm: 'pine', quantity: 1, unit: 'each', section: 'toString', sectionMultiplier: 1, sectionLaborHours: 2 },
+      ],
+      estimatedHours: 4,
+      jobSummary: '',
+      sectionDescriptions: normaliseSectionDescriptions([{ section: 'constructor', description: 'Builder works.' }]),
+    });
+    const result = await generateMaterialsForQuote(deps({ analyzeJobDescription: analyze }), {
+      quote: scopeQuote(), businessSettings: { defaultLaborRate: 90 }, isPro: false, templates: [],
+    });
+    expect(byName(result.updatedQuote, 'constructor')?.description).toBe('Builder works.');
+    expect('description' in byName(result.updatedQuote, 'toString')!).toBe(false);
+  });
+
+  it('matches a section name case-insensitively when the exact string differs', async () => {
+    const result = await run(scopeQuote(), { ' wir framing ': 'Frame the new walk-in robe.' });
+    expect(byName(result.updatedQuote, 'WIR Framing')?.description).toBe('Frame the new walk-in robe.');
+  });
+
+  it('a job that is not a written scope gets no descriptions, even if the analysis carried some', async () => {
+    const result = await run(quote([]), { Demolition: 'Remove the cupboards.' });
+    for (const s of result.updatedQuote.sections ?? []) expect('description' in s).toBe(false);
+  });
+
+  it("never overwrites an existing section's description", async () => {
+    const existing = {
+      id: 's-existing', name: 'Demolition', multiplier: 1, laborHours: 4, laborHoursTotal: 4,
+      laborRate: 90, laborUnit: 'hours' as const, laborTotal: 360, sortOrder: 0,
+      description: 'My own words for the demo.',
+    };
+    const result = await run({ ...scopeQuote(), sections: [existing] }, { Demolition: 'Model text.' });
+    const demos = (result.updatedQuote.sections ?? []).filter((s) => s.name === 'Demolition');
+    expect(demos).toEqual([existing]);
+  });
+
+  it('ignores a description for a section name the materials never used', async () => {
+    const result = await run(scopeQuote(), { Plastering: 'Sheet and set the new walls.' });
+    for (const s of result.updatedQuote.sections ?? []) expect('description' in s).toBe(false);
+  });
+
+  it('no descriptions → sections have exactly the shape they always had', async () => {
+    const result = await run(scopeQuote());
+    expect(result.updatedQuote.sections).toEqual([
+      {
+        id: expect.any(String), name: 'Demolition', multiplier: 1, laborHours: 6, laborHoursTotal: 6,
+        laborRate: 90, laborUnit: 'hours', laborTotal: 540, sortOrder: 0,
+      },
+      {
+        id: expect.any(String), name: 'WIR Framing', multiplier: 1, laborHours: 8, laborHoursTotal: 8,
+        laborRate: 90, laborUnit: 'hours', laborTotal: 720, sortOrder: 1,
+      },
+    ]);
   });
 });
