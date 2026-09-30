@@ -5,6 +5,7 @@ import fetch from 'node-fetch';
 import { isPdfUrl } from './shared/media/pdfUrl';
 import { normaliseTimestamp } from './timestamps.helpers';
 import { NEXT_PRICE_AUD } from './foundingOffer';
+import { quoteOpenedEmailCopy } from './quoteOpenedEmail.helpers';
 import { NO_GST_NOTE, resolveGstMode } from './shared/document/gstMode';
 import {
   resolvePriceDetail,
@@ -837,6 +838,46 @@ export async function sendQuoteAcceptedEmail(
     category: 'transactional',
     userId,
     tags: ['quote-accepted', hook.tag],
+  });
+}
+
+/**
+ * "Your customer just opened your quote", to the tradie, for tradies no push
+ * can reach. When to send it lives in quoteOpenedEmail.helpers.ts.
+ */
+export function sendQuoteOpenedEmail(
+  to: string,
+  userId: string,
+  quote: { customerName?: string | null; jobName?: string | null; total?: number | null }
+): Promise<boolean> {
+  const amount = typeof quote.total === 'number' && quote.total > 0 ? formatMoney(quote.total) : null;
+  const copy = quoteOpenedEmailCopy({ customerName: quote.customerName, jobName: quote.jobName, amount });
+  const content = wrapEmailTemplate(`
+    <div style="text-align:center;margin:0 0 24px;">
+      ${badge('OPENED', '#ecfdf5', QM_GREEN_INK)}
+    </div>
+    <h1 style="color:#111827;font-size:26px;font-weight:700;margin:0 0 12px;text-align:center;line-height:1.3;">
+      ${escapeHtml(copy.heading)}
+    </h1>
+    <p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 16px;text-align:center;">
+      ${escapeHtml(copy.intro)}
+    </p>
+    <p style="color:#374151;font-size:15px;line-height:1.7;margin:0;text-align:center;">
+      ${escapeHtml(copy.nudge)}
+    </p>
+    ${ctaButton(escapeHtml(copy.cta))}
+    <p style="color:#6b7280;font-size:13px;line-height:1.6;margin:24px 0 0;text-align:center;">
+      ${escapeHtml(copy.pushHint)}
+    </p>
+  `, { preheader: copy.preheader });
+
+  return sendEmail({
+    to,
+    subject: copy.subject,
+    htmlContent: content,
+    category: 'transactional',
+    userId,
+    tags: ['quote-opened'],
   });
 }
 
