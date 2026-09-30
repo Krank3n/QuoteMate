@@ -42,6 +42,20 @@ export type { PricingRunRecord, PricingRunResult } from './shared/pricing/pricin
 
 /** Gen1 Firestore triggers cap at nine minutes; a normal run is 15–60 s. */
 export const PRICING_RUN_TIMEOUT_SECONDS = 540;
+/**
+ * How long before the platform kills the function the run gives up on its
+ * own. The platform's kill is silent: no catch runs, so the run document sat
+ * on 'running' and "Sorting pack sizes and quantities…" forever (6 of 148
+ * runs by 30 Sep 2026, every one inside the reconcile pass), the quote never
+ * moved to the Fetch Prices step, and no snag push went out. Thirty seconds
+ * is ample for the three writes and the push that settle a run.
+ */
+export const PRICING_RUN_DEADLINE_MARGIN_SECONDS = 30;
+export const PRICING_RUN_DEADLINE_MS =
+  (PRICING_RUN_TIMEOUT_SECONDS - PRICING_RUN_DEADLINE_MARGIN_SECONDS) * 1000;
+/** The run's error when it ran out of time — shown on the card and read by Mate. */
+export const PRICING_RUN_TIMEOUT_MESSAGE =
+  'Pricing ran out of time on this one — your gear list is saved, tap Fetch Prices to finish it.';
 /** Runs one user may start inside RATE_WINDOW_MS before the server refuses. */
 export const MAX_RUNS_PER_WINDOW = 8;
 export const RATE_WINDOW_MS = 10 * 60 * 1000;
@@ -185,6 +199,12 @@ export class ProgressWriter {
   private lastWriteAt = 0;
   private chain: Promise<void> = Promise.resolve();
   private trailing: ReturnType<typeof setTimeout> | null = null;
+  /**
+   * Set once a final state is written. A run abandoned at its deadline keeps
+   * executing in the background, and its later reports must not overwrite the
+   * failure the deadline already wrote.
+   */
+  private closed = false;
 
   constructor(
     private readonly store: Pick<PricingRunStore, 'update' | 'now'>,
@@ -198,7 +218,13 @@ export class ProgressWriter {
     return this.current;
   }
 
+  /** True once a final state has been written. */
+  get isClosed(): boolean {
+    return this.closed;
+  }
+
   report(next: Partial<WorkingStatus>): void {
+    if (this.closed) return;
     this.current = { ...this.current, ...next };
     const now = this.store.now();
     const sinceLast = now - this.lastWriteAt;
@@ -222,6 +248,11 @@ export class ProgressWriter {
 
   /** Write the final state plus the run-level patch, after everything queued. */
   async finish(final: Partial<WorkingStatus>, patch: Record<string, unknown>): Promise<void> {
+    if (this.closed) {
+      await this.chain;
+      return;
+    }
+    this.closed = true;
     if (this.trailing) {
       clearTimeout(this.trailing);
       this.trailing = null;
@@ -251,9 +282,13 @@ export async function runPricingRun(args: {
   store: PricingRunStore;
   deps: PipelineDeps;
   log?: PricingRunLogger;
+  /** Wall-clock budget from the start of the call. Tests shorten it. */
+  deadlineMs?: number;
 }): Promise<PricingRunOutcome> {
   const { store, deps } = args;
   const log = args.log ?? console;
+  const deadlineMs = args.deadlineMs ?? PRICING_RUN_DEADLINE_MS;
+  const startedAtMs = Date.now();
 
   // At-least-once delivery: a redelivered event must not price the quote twice.
   let run: PricingRunRecord | null;
@@ -291,172 +326,227 @@ export async function runPricingRun(args: {
     }
   };
 
-  try {
-    // A phone can create run documents as fast as it likes; each one costs
-    // LLM and scraper calls. The HTTP handlers rate-limit per user, so this
-    // path needs a ceiling too. Only claimed runs count — one the phone
-    // cancelled at the queue timeout cost nothing.
-    const recent = await store.runsStartedSince(store.now() - RATE_WINDOW_MS);
-    if (recent > MAX_RUNS_PER_WINDOW) {
-      throw new Error('Too many pricing runs in a short time — give it a few minutes and try again.');
-    }
+  // Set when the deadline settles the run. From then on the abandoned work is
+  // stopped at the pipeline's next cancel check, and every write it could
+  // still make is refused: the quote by assertStillOurs, the card by the
+  // closed ProgressWriter, and its own failure path by the check in catch.
+  let timedOut = false;
 
-    // The same gate Mate's Apply path applies on the phone (canRunMatePipeline /
-    // canAnalysePhotos): chat must not become the paywall bypass, and a run
-    // document must not be able to claim a tier. Resolved server-side.
-    const plan = await store.loadPlan();
-    if (plan === 'free') {
-      throw new Error("Auto-pricing isn't in the free plan — add materials and prices yourself, or go Pro and Mate will sort it.");
-    }
-    // canAnalysePhotos on the phone: a trial user gets plan vision too.
-    const isPro = plan === 'pro' || plan === 'trial';
+  const execute = async (): Promise<PricingRunOutcome> => {
+    try {
+      // A phone can create run documents as fast as it likes; each one costs
+      // LLM and scraper calls. The HTTP handlers rate-limit per user, so this
+      // path needs a ceiling too. Only claimed runs count — one the phone
+      // cancelled at the queue timeout cost nothing.
+      const recent = await store.runsStartedSince(store.now() - RATE_WINDOW_MS);
+      if (recent > MAX_RUNS_PER_WINDOW) {
+        throw new Error('Too many pricing runs in a short time — give it a few minutes and try again.');
+      }
 
-    let quote = await store.loadQuote(run.quoteId);
-    for (let attempt = 1; !quote && attempt < QUOTE_LOAD_ATTEMPTS; attempt++) {
-      await new Promise((resolve) => setTimeout(resolve, QUOTE_LOAD_RETRY_MS));
-      quote = await store.loadQuote(run.quoteId);
-    }
-    if (!quote) throw new Error('Quote not found — it may have been deleted before pricing started.');
-    if (!quote.job?.description) throw new Error('Quote has no job description — add a scope first.');
-    jobName = quote.job.name || jobName;
-    jobId = typeof quote.jobId === 'string' ? quote.jobId : undefined;
+      // The same gate Mate's Apply path applies on the phone (canRunMatePipeline /
+      // canAnalysePhotos): chat must not become the paywall bypass, and a run
+      // document must not be able to claim a tier. Resolved server-side.
+      const plan = await store.loadPlan();
+      if (plan === 'free') {
+        throw new Error("Auto-pricing isn't in the free plan — add materials and prices yourself, or go Pro and Mate will sort it.");
+      }
+      // canAnalysePhotos on the phone: a trial user gets plan vision too.
+      const isPro = plan === 'pro' || plan === 'trial';
 
-    // The phone may have cancelled the run (or taken the document back) while
-    // this side was busy; from here on every write to the quote checks first,
-    // so both sides never price the same quote at once.
-    const assertStillOurs = async (): Promise<void> => {
-      const live = await store.read();
-      if (!live || live.status === 'cancelled') throw new PipelineCancelled();
-    };
+      let quote = await store.loadQuote(run.quoteId);
+      for (let attempt = 1; !quote && attempt < QUOTE_LOAD_ATTEMPTS; attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, QUOTE_LOAD_RETRY_MS));
+        quote = await store.loadQuote(run.quoteId);
+      }
+      if (!quote) throw new Error('Quote not found — it may have been deleted before pricing started.');
+      if (!quote.job?.description) throw new Error('Quote has no job description — add a scope first.');
+      jobName = quote.job.name || jobName;
+      jobId = typeof quote.jobId === 'string' ? quote.jobId : undefined;
 
-    const businessSettings = await store.loadBusinessSettings();
-    const templates = await deps.loadTemplates();
-    progress.report({ phase: 'preflight', status: 'Getting ready…', runsOnServer: true });
+      // The phone may have cancelled the run (or taken the document back) while
+      // this side was busy; from here on every write to the quote checks first,
+      // so both sides never price the same quote at once.
+      const assertStillOurs = async (): Promise<void> => {
+        if (timedOut) throw new PipelineCancelled();
+        const live = await store.read();
+        if (!live || live.status === 'cancelled') throw new PipelineCancelled();
+      };
 
-    // ── Phase 1: analyse ──
-    const analysed = await generateMaterialsForQuote(
-      deps,
-      { quote, businessSettings, isPro, templates, statedHours: run.options.statedHours },
-      { onEvent: (event) => progress.report({ phase: event.phase, status: event.status, detail: event.detail }) },
-    );
-    let next: StoredQuote = analysed.updatedQuote;
-    if (run.options.stripLabour) next = stripLabourFromQuote(next);
-    if (run.options.labourOnly) {
-      next = { ...next, materials: next.materials.filter((m) => m.kind === 'work') };
-    }
-    const generatedMaterialCount = run.options.labourOnly ? 0 : analysed.generatedMaterialCount;
+      const businessSettings = await store.loadBusinessSettings();
+      const templates = await deps.loadTemplates();
+      progress.report({ phase: 'preflight', status: 'Getting ready…', runsOnServer: true });
 
-    if (run.options.labourOnly) {
+      // ── Phase 1: analyse ──
+      const analysed = await generateMaterialsForQuote(
+        deps,
+        { quote, businessSettings, isPro, templates, statedHours: run.options.statedHours },
+        {
+          onEvent: (event) => progress.report({ phase: event.phase, status: event.status, detail: event.detail }),
+          shouldCancel: () => timedOut,
+        },
+      );
+      let next: StoredQuote = analysed.updatedQuote;
+      if (run.options.stripLabour) next = stripLabourFromQuote(next);
+      if (run.options.labourOnly) {
+        next = { ...next, materials: next.materials.filter((m) => m.kind === 'work') };
+      }
+      const generatedMaterialCount = run.options.labourOnly ? 0 : analysed.generatedMaterialCount;
+
+      if (run.options.labourOnly) {
+        await assertStillOurs();
+        await store.saveQuote(run.quoteId, quotePatch({ ...next, draftStep: 'JobPreview' }, store.now()));
+        const result: PricingRunResult = {
+          generatedMaterialCount: 0,
+          fetchedCount: 0,
+          failedCount: 0,
+          skippedCount: 0,
+          missedSupplierTerms: [],
+          reeceReauthNeeded: false,
+        };
+        await progress.finish(
+          {
+            phase: 'done',
+            status: 'Labour only — nothing to price.',
+            detail: undefined,
+            items: undefined,
+            done: true,
+            summary: 'Labour only — hours and sections, no materials list.',
+          },
+          { status: 'done', result, finishedAt: iso() },
+        );
+        await notifyIfAway('quote_priced', {
+          job: jobName,
+          amount: formatAud(Number(recalculateQuoteTotals(next).total) || 0),
+        });
+        return 'done';
+      }
+
+      // The analysed rows are persisted before pricing, as the app does, so a
+      // snag mid-pricing still leaves the gear list on the quote.
       await assertStillOurs();
-      await store.saveQuote(run.quoteId, quotePatch({ ...next, draftStep: 'JobPreview' }, store.now()));
+      await store.saveQuote(run.quoteId, quotePatch(next, store.now()));
+      progress.report({
+        phase: 'pricing',
+        status: `Pricing ${generatedMaterialCount} item${generatedMaterialCount === 1 ? '' : 's'}…`,
+        detail: undefined,
+      });
+
+      // ── Phase 2: pricing ──
+      const missedSupplierTerms: string[] = [];
+      const priced = await fetchPricesForQuote(
+        deps,
+        { quote: next, businessSettings, reeceConnected: null },
+        {
+          onEvent: (event) => {
+            if (event.kind === 'supplier-priority-fallback') {
+              missedSupplierTerms.push(...event.missedTerms);
+            }
+            const mapped = pricingEventToProgress(event);
+            if (mapped) progress.report(mapped);
+          },
+          shouldCancel: () => timedOut,
+        },
+      );
+
+      // Finished but unsent — the wizard step the dashboard banner and the
+      // unsent-quote nudge both key on.
+      const final: StoredQuote = { ...priced.updatedQuote, draftStep: 'JobPreview' };
+      await assertStillOurs();
+      await store.saveQuote(run.quoteId, quotePatch(final, store.now()));
+
       const result: PricingRunResult = {
-        generatedMaterialCount: 0,
-        fetchedCount: 0,
-        failedCount: 0,
-        skippedCount: 0,
-        missedSupplierTerms: [],
-        reeceReauthNeeded: false,
+        generatedMaterialCount,
+        fetchedCount: priced.fetchedCount,
+        failedCount: priced.failedCount,
+        skippedCount: priced.skippedCount,
+        missedSupplierTerms,
+        reeceReauthNeeded: priced.reeceReauthNeeded,
       };
       await progress.finish(
         {
           phase: 'done',
-          status: 'Labour only — nothing to price.',
+          status: `Drafted ${generatedMaterialCount} item${generatedMaterialCount === 1 ? '' : 's'}.`,
           detail: undefined,
           items: undefined,
           done: true,
-          summary: 'Labour only — hours and sections, no materials list.',
+          summary: summarisePriceCounts(result),
         },
         { status: 'done', result, finishedAt: iso() },
       );
+      log.info('[pricingRun] done', { quoteId: run.quoteId, ...result, missedSupplierTerms: missedSupplierTerms.length });
       await notifyIfAway('quote_priced', {
         job: jobName,
-        amount: formatAud(Number(recalculateQuoteTotals(next).total) || 0),
+        amount: formatAud(Number(recalculateQuoteTotals(final).total) || 0),
+        count: `${generatedMaterialCount} item${generatedMaterialCount === 1 ? '' : 's'}`,
       });
       return 'done';
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      // The deadline already settled this run; whatever the abandoned work hit
+      // on the way down is not news.
+      if (timedOut) return 'failed';
+      if (err instanceof PipelineCancelled) {
+        // The phone took the run back; it is pricing on the phone now. Leave
+        // the document alone — writing to it would recreate one the phone
+        // deleted, or overwrite the phone's own cancellation.
+        log.info('[pricingRun] cancelled', { quoteId: run.quoteId });
+        return 'cancelled';
+      }
+      log.error('[pricingRun] failed', { quoteId: run.quoteId, message });
+      // The draft exists but its prices don't. Park it on the wizard step that
+      // carries Fetch Prices so the dashboard banner can resume it.
+      try {
+        await store.saveQuote(run.quoteId, { draftStep: 'MaterialsList', updatedAt: iso() });
+      } catch {
+        // Best-effort — the run record carries the failure regardless.
+      }
+      await progress.finish(
+        { phase: 'failed', status: "Couldn't finish pricing that one.", detail: message, done: true },
+        { status: 'failed', error: message, finishedAt: iso() },
+      );
+      await notifyIfAway('quote_pricing_snag', { job: jobName });
+      return 'failed';
     }
+  };
 
-    // The analysed rows are persisted before pricing, as the app does, so a
-    // snag mid-pricing still leaves the gear list on the quote.
-    await assertStillOurs();
-    await store.saveQuote(run.quoteId, quotePatch(next, store.now()));
-    progress.report({
-      phase: 'pricing',
-      status: `Pricing ${generatedMaterialCount} item${generatedMaterialCount === 1 ? '' : 's'}…`,
-      detail: undefined,
-    });
-
-    // ── Phase 2: pricing ──
-    const missedSupplierTerms: string[] = [];
-    const priced = await fetchPricesForQuote(
-      deps,
-      { quote: next, businessSettings, reeceConnected: null },
-      {
-        onEvent: (event) => {
-          if (event.kind === 'supplier-priority-fallback') {
-            missedSupplierTerms.push(...event.missedTerms);
-          }
-          const mapped = pricingEventToProgress(event);
-          if (mapped) progress.report(mapped);
-        },
-      },
-    );
-
-    // Finished but unsent — the wizard step the dashboard banner and the
-    // unsent-quote nudge both key on.
-    const final: StoredQuote = { ...priced.updatedQuote, draftStep: 'JobPreview' };
-    await assertStillOurs();
-    await store.saveQuote(run.quoteId, quotePatch(final, store.now()));
-
-    const result: PricingRunResult = {
-      generatedMaterialCount,
-      fetchedCount: priced.fetchedCount,
-      failedCount: priced.failedCount,
-      skippedCount: priced.skippedCount,
-      missedSupplierTerms,
-      reeceReauthNeeded: priced.reeceReauthNeeded,
-    };
-    await progress.finish(
-      {
-        phase: 'done',
-        status: `Drafted ${generatedMaterialCount} item${generatedMaterialCount === 1 ? '' : 's'}.`,
-        detail: undefined,
-        items: undefined,
-        done: true,
-        summary: summarisePriceCounts(result),
-      },
-      { status: 'done', result, finishedAt: iso() },
-    );
-    log.info('[pricingRun] done', { quoteId: run.quoteId, ...result, missedSupplierTerms: missedSupplierTerms.length });
-    await notifyIfAway('quote_priced', {
-      job: jobName,
-      amount: formatAud(Number(recalculateQuoteTotals(final).total) || 0),
-      count: `${generatedMaterialCount} item${generatedMaterialCount === 1 ? '' : 's'}`,
-    });
-    return 'done';
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    if (err instanceof PipelineCancelled) {
-      // The phone took the run back; it is pricing on the phone now. Leave
-      // the document alone — writing to it would recreate one the phone
-      // deleted, or overwrite the phone's own cancellation.
-      log.info('[pricingRun] cancelled', { quoteId: run.quoteId });
-      return 'cancelled';
+  // Settle the run as failed before the platform kills the function. The
+  // work is not awaited past this point — an in-flight reconcile call cannot
+  // be interrupted, which is exactly where every stuck run was waiting.
+  const settleTimedOut = async (): Promise<PricingRunOutcome> => {
+    // The run's own failure path got its final state out first; it owns the
+    // snag push, and a second one would ping the tradie twice.
+    const alreadySettled = progress.isClosed;
+    timedOut = true;
+    if (alreadySettled) return 'failed';
+    log.error('[pricingRun] deadline reached', { quoteId: run.quoteId, deadlineMs });
+    try {
+      const live = await store.read();
+      // The phone took the run back (or deleted it) in the meantime: it owns
+      // the quote now, so leave both documents alone.
+      if (!live || live.status === 'cancelled') return 'cancelled';
+    } catch {
+      // Can't tell — settle it anyway; a stuck 'running' is the worse outcome.
     }
-    log.error('[pricingRun] failed', { quoteId: run.quoteId, message });
-    // The draft exists but its prices don't. Park it on the wizard step that
-    // carries Fetch Prices so the dashboard banner can resume it.
     try {
       await store.saveQuote(run.quoteId, { draftStep: 'MaterialsList', updatedAt: iso() });
     } catch {
-      // Best-effort — the run record carries the failure regardless.
+      // Best-effort, as on the failure path.
     }
     await progress.finish(
-      { phase: 'failed', status: "Couldn't finish pricing that one.", detail: message, done: true },
-      { status: 'failed', error: message, finishedAt: iso() },
+      { phase: 'failed', status: "Couldn't finish pricing that one.", detail: PRICING_RUN_TIMEOUT_MESSAGE, done: true },
+      { status: 'failed', error: PRICING_RUN_TIMEOUT_MESSAGE, finishedAt: iso() },
     );
     await notifyIfAway('quote_pricing_snag', { job: jobName });
     return 'failed';
-  }
+  };
+
+  let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<'deadline'>((resolve) => {
+    deadlineTimer = setTimeout(() => resolve('deadline'), Math.max(0, deadlineMs - (Date.now() - startedAtMs)));
+  });
+  const winner = await Promise.race([execute(), deadline]);
+  clearTimeout(deadlineTimer);
+  return winner === 'deadline' ? settleTimedOut() : winner;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
