@@ -201,6 +201,25 @@ describe('fetchPricesForQuote through PipelineDeps', () => {
     expect(sand.totalPrice).toBeLessThan(1000);
   });
 
+  it('applies Reece pack sizes even when reconcile never reaches the row', async () => {
+    // 29 Sep: the server run timed out mid-reconcile and every unreached Reece
+    // row kept requirement × pack price — 100 bags of clips for 100 clips.
+    const d = deps({
+      searchReeceCandidates: async () => [
+        { price: 23.05, productName: 'Sharkbite PEX Pipe Clip 16mm (100)', itemNumber: '1544266', store: 'Reece Plumbing', unitOfMeasure: 'BAG' },
+      ],
+      reconcilePricedMaterials: async () => {
+        throw new Error('deadline');
+      },
+    });
+    const rows = [material({ id: 'c', name: 'PEX pipe clip 16mm', searchTerm: 'PEX pipe clip 16mm', quantity: 100, unit: 'each' })];
+    const result = await fetchPricesForQuote(d, { quote: quote(rows), businessSettings: null, reeceConnected: true });
+    const [clips] = result.updatedQuote.materials;
+    expect(clips.reeceItemNumber).toBe('1544266');
+    expect(clips.quantity).toBe(1);
+    expect(clips.totalPrice).toBe(23.05);
+  });
+
   it('still prices a Reece hit the ranker accepts', async () => {
     const d = deps({
       searchReeceCandidates: async () => [
