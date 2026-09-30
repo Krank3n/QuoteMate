@@ -242,6 +242,23 @@ describe('stampMatchConfidence — implausible money', () => {
     expect(m.description).toContain('far above what this normally costs');
   });
 
+  it('flags a product with no evidence at all, even when the trade table has no price opinion', () => {
+    // Laidlaw Plumbing, 29 Sep 2026: 8 × $488.12 went out unflagged.
+    const product = 'Alarm Check Valve Gasket Kit - Worm/Pad Generic 100mm';
+    const m = row({ name: product, searchTerm: 'foam pipe lagging slab penetration 100mm', unit: 'm', quantity: 8, price: 488.12, totalPrice: 3904.96 });
+    expect(matchEvidence(m.searchTerm!, product)).toBe('none');
+    stampMatchConfidence(m, product);
+    expect(m.weakProductMatch).toBe(true);
+    expect(m.priceConfidence).toBe('low');
+    expect(m.description).toContain(WEAK_MATCH_NOTE);
+  });
+
+  it('does not flag a row just because no product name was passed', () => {
+    const m = row({ price: 0.14, totalPrice: 7 });
+    stampMatchConfidence(m, undefined);
+    expect(m.weakProductMatch).toBeUndefined();
+  });
+
   it('leaves a sanely priced screw row alone', () => {
     const m = row({ price: 0.14, totalPrice: 7 });
     stampMatchConfidence(m, 'Buildex 10g x 50mm Stainless Decking Screws 50 Pack');

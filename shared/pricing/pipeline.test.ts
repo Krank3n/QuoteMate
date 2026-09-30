@@ -177,6 +177,45 @@ describe('fetchPricesForQuote through PipelineDeps', () => {
     expect(result.updatedQuote.materials.every((m) => m.price > 0)).toBe(true);
   });
 
+  it('never forces a refused Reece hit onto a row — the row falls through to the estimate', async () => {
+    // Laidlaw Plumbing, 29 Sep 2026: every Reece hit for "bedding sand bulk"
+    // was refused by the ranker, candidates[0] was applied anyway, and
+    // 3,440 kg of sand went out at $120.37 each as a "Bazooka End Cap".
+    const searchReeceCandidates = vi.fn(async () => [
+      { price: 120.37, productName: 'Bazooka End Cap 150mm Black', itemNumber: '8028003', store: 'Reece Plumbing', unitOfMeasure: 'EA' },
+    ]);
+    const d = deps({
+      searchReeceCandidates,
+      estimateMaterialPrice: async () => ({ price: 0.06, productName: 'Bulk bedding sand', packSize: 1, packUnit: 'kg' }),
+    });
+    const rows = [
+      material({ id: 'sand', name: 'Pipe bedding sand', searchTerm: 'bedding sand bulk', quantity: 3440, unit: 'kg' }),
+    ];
+    const result = await fetchPricesForQuote(d, { quote: quote(rows), businessSettings: null, reeceConnected: true });
+    const [sand] = result.updatedQuote.materials;
+    expect(searchReeceCandidates).toHaveBeenCalledWith('bedding sand bulk');
+    expect(sand.reeceItemNumber).toBeUndefined();
+    expect(sand.name).not.toContain('Bazooka');
+    expect(sand.pricingSource).toBe('ai');
+    expect(sand.totalPrice).toBeLessThan(1000);
+  });
+
+  it('still prices a Reece hit the ranker accepts', async () => {
+    const d = deps({
+      searchReeceCandidates: async () => [
+        { price: 38.21, productName: 'Dura LF Mini Ball Valve F&F Tested 15mm', itemNumber: '111', store: 'Reece Plumbing', unitOfMeasure: 'EA' },
+      ],
+    });
+    const rows = [
+      material({ id: 'v', name: 'Mini isolating valve 15mm', searchTerm: 'mini ball valve 15mm', quantity: 9, unit: 'each' }),
+    ];
+    const result = await fetchPricesForQuote(d, { quote: quote(rows), businessSettings: null, reeceConnected: true });
+    const [valve] = result.updatedQuote.materials;
+    expect(valve.reeceItemNumber).toBe('111');
+    expect(valve.pricingSource).toBe('api');
+    expect(valve.price).toBe(38.21);
+  });
+
   it('reports the run outcome through the telemetry seam without letting it fail the run', async () => {
     const report = vi.fn(() => {
       throw new Error('telemetry down');

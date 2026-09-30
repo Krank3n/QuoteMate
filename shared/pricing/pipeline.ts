@@ -1120,13 +1120,18 @@ export async function fetchPricesForQuote<Q extends PricingQuote>(
       const validReeceCandidates = candidates.filter(
         (c) => typeof c.price === 'number' && c.price > 0 && !!c.itemNumber,
       );
-      const result =
-        pickBestCandidate(
-          validReeceCandidates as unknown as RankableCandidate[],
-          { name: m.name, searchTerm: m.searchTerm, qualityTier: m.qualityTier },
-          { jobQualityTier, excludeProducts: excludeSetFor(m) },
-        ) as unknown as (typeof candidates[number]) | null
-        || candidates[0];
+      // No candidates[0] fallback: a null pick means the ranker refused every
+      // hit, and the row must fall through to Bunnings / the estimate path.
+      // Forcing the top hit on anyway priced "bedding sand bulk" as a Reece
+      // "Bazooka End Cap 150mm" at $120.37 per kg — 3,440 kg, $414,072 on a
+      // $641k house-plumbing quote. Nothing downstream could catch it: the
+      // reconcile pass only sees rows with a 'strong' candidate, so the rows
+      // this fallback creates are exactly the ones it never reviews.
+      const result = pickBestCandidate(
+        validReeceCandidates as unknown as RankableCandidate[],
+        { name: m.name, searchTerm: m.searchTerm, qualityTier: m.qualityTier },
+        { jobQualityTier, excludeProducts: excludeSetFor(m) },
+      ) as unknown as (typeof candidates[number]) | null;
       if (!result || !result.price || !result.itemNumber) {
         onEvent?.({
           kind: 'item-priced',
@@ -1170,9 +1175,6 @@ export async function fetchPricesForQuote<Q extends PricingQuote>(
       if (result.store) m.description = `Available at ${result.store}`;
       if (result.imageUrl) m.imageUrl = result.imageUrl;
       if (result.productUrl) m.productUrl = result.productUrl;
-      // This path deliberately falls back to candidates[0] when the ranker
-      // refuses every hit, so the evidence check has to be applied to what
-      // actually landed on the row rather than trusted to the pick.
       stampMatchConfidence(m, result.productName);
       fetchedCount += 1;
       reecePricedTerms.add(term);
