@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   MAX_RUNS_PER_WINDOW,
+  PRICING_RUN_DEADLINE_MS,
+  PRICING_RUN_TIMEOUT_MESSAGE,
+  PRICING_RUN_TIMEOUT_SECONDS,
   ProgressWriter,
   formatAud,
   QUOTE_LOAD_ATTEMPTS,
@@ -208,6 +211,60 @@ describe('runPricingRun', () => {
     expect(store.pushes[0]?.event).toBe('quote_pricing_snag');
   });
 
+  describe('deadline', () => {
+    const settle = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+    it('gives up before the platform kills the function', () => {
+      expect(PRICING_RUN_DEADLINE_MS).toBeLessThan(PRICING_RUN_TIMEOUT_SECONDS * 1000);
+      expect(PRICING_RUN_TIMEOUT_SECONDS * 1000 - PRICING_RUN_DEADLINE_MS).toBeGreaterThanOrEqual(20_000);
+    });
+
+    it('settles a run stuck in reconcile as failed instead of leaving it running (29 Sep, 98 rows)', async () => {
+      const store = fakeStore(run({ foreground: false }), { q1: quote() });
+      // Reconcile never answers — the in-flight call the platform kill used to strand.
+      const deps = fakeDeps({ reconcilePricedMaterials: () => new Promise(() => {}) });
+      expect(await runPricingRun({ store, deps, log: silent, deadlineMs: 40 })).toBe('failed');
+      expect(store.record?.status).toBe('failed');
+      expect(store.record?.error).toBe(PRICING_RUN_TIMEOUT_MESSAGE);
+      expect(store.record?.finishedAt).toBeTruthy();
+      expect(store.record?.progress).toMatchObject({ phase: 'failed', done: true, detail: PRICING_RUN_TIMEOUT_MESSAGE });
+      expect(store.quotes.q1.draftStep).toBe('MaterialsList');
+      expect(store.pushes.map((p) => p.event)).toEqual(['quote_pricing_snag']);
+    });
+
+    it('never lets the abandoned work overwrite the failure when it finishes late', async () => {
+      const store = fakeStore(run({ foreground: false }), { q1: quote() });
+      const deps = fakeDeps({
+        reconcilePricedMaterials: async () => {
+          await settle(80);
+          return [];
+        },
+      });
+      expect(await runPricingRun({ store, deps, log: silent, deadlineMs: 20 })).toBe('failed');
+      const writesAtDeadline = store.quoteWrites.length;
+      await settle(150);
+      expect(store.record?.status).toBe('failed');
+      expect(store.record?.progress).toMatchObject({ phase: 'failed' });
+      expect(store.quoteWrites).toHaveLength(writesAtDeadline);
+      expect(store.quotes.q1.draftStep).toBe('MaterialsList');
+      expect(store.pushes.map((p) => p.event)).toEqual(['quote_pricing_snag']);
+    });
+
+    it('leaves both documents alone when the phone took the run back before the deadline', async () => {
+      const store = fakeStore(run(), { q1: quote() });
+      const deps = fakeDeps({
+        analyzeJobDescription: () => {
+          store.record = { ...(store.record as PricingRunRecord), status: 'cancelled' };
+          return new Promise(() => {});
+        },
+      });
+      expect(await runPricingRun({ store, deps, log: silent, deadlineMs: 30 })).toBe('cancelled');
+      expect(store.record?.status).toBe('cancelled');
+      expect(store.quoteWrites).toHaveLength(0);
+      expect(store.pushes).toHaveLength(0);
+    });
+  });
+
   it('refuses to price when the user has flooded the queue', async () => {
     const store = fakeStore(run(), { q1: quote() });
     store.recentRuns = MAX_RUNS_PER_WINDOW + 1;
@@ -385,6 +442,20 @@ describe('ProgressWriter', () => {
       done: true,
     });
     expect(writes[1].status).toBe('done');
+  });
+
+  it('ignores reports and a second finish once the final state is written', async () => {
+    const writes: Record<string, unknown>[] = [];
+    const writer = new ProgressWriter(
+      { update: async (patch) => { writes.push(patch); }, now: () => 0 },
+      { phase: 'pricing', status: 'Pricing…', done: false },
+      0,
+    );
+    await writer.finish({ phase: 'failed', done: true }, { status: 'failed' });
+    writer.report({ phase: 'reconcile', status: 'Sorting pack sizes and quantities…' });
+    await writer.finish({ phase: 'done', done: true }, { status: 'done' });
+    expect(writes).toHaveLength(1);
+    expect(writes[0]).toMatchObject({ status: 'failed', progress: { phase: 'failed' } });
   });
 
   it('still lands the last state of a burst when nothing follows it', async () => {
