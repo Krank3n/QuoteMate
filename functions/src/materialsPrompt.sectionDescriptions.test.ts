@@ -29,8 +29,13 @@ describe('buildMaterialsPrompt — section scope descriptions', () => {
     const rules = prompt.indexOf('- SECTION DESCRIPTIONS:');
     expect(rules).toBeGreaterThan(prompt.indexOf('- ONE section per stage of work'));
     expect(rules).toBeLessThan(prompt.indexOf('QUALITY TIER DETECTION —'));
-    expect(prompt).toContain('Restate ONLY the tradie\'s own written items');
-    expect(prompt).toContain('No $ figures or prices');
+    // Copied, not restated: Job Details can only drop the full description
+    // when every line the tradie wrote prints under a section word for word.
+    expect(prompt).toContain("the tradie's OWN lines COPIED WORD FOR WORD");
+    expect(prompt).toContain('Do not reword, shorten, merge, split, summarise, correct or tidy any line');
+    expect(prompt).toContain('A numbered title line that has its own lines under it');
+    expect(prompt).not.toMatch(/Restate|1–4 short lines/);
+    expect(prompt).toContain('Never copy a line that states a price or $ figure');
     expect(prompt).toContain('"by others"');
     expect(prompt).toContain('omit that section rather than invent');
   });

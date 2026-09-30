@@ -50,6 +50,25 @@ describe('normaliseSectionDescriptions', () => {
     expect(out?.Gappy).toBe('Line one.\n\nLine two.');
   });
 
+  it('caps at whole lines, so a copied line is never cut mid-word', () => {
+    const line = 'Supply and install waterproofing membrane to shower walls, shower base and required floor areas.';
+    const long = Array.from({ length: 8 }, () => line).join('\n'); // ~780 chars
+    const out = normaliseSectionDescriptions([{ section: 'Waterproofing', description: long }]);
+    const kept = out!.Waterproofing.split('\n');
+    expect(out!.Waterproofing.length).toBeLessThanOrEqual(MAX_SECTION_DESCRIPTION_CHARS);
+    expect(kept.every((l) => l === line)).toBe(true);
+    expect(kept.length).toBe(5);
+  });
+
+  it('cuts a single over-long line at a word and marks it', () => {
+    const words = Array.from({ length: 120 }, (_, i) => `word${i}`).join(' ');
+    const out = normaliseSectionDescriptions([{ section: 'Long', description: words }]);
+    expect(out!.Long.endsWith('…')).toBe(true);
+    expect(out!.Long.length).toBeLessThanOrEqual(MAX_SECTION_DESCRIPTION_CHARS);
+    expect(words.startsWith(out!.Long.slice(0, -1))).toBe(true);
+    expect(out!.Long.slice(0, -1)).toMatch(/word\d+$/);
+  });
+
   it('drops any description that quotes a dollar amount', () => {
     const out = normaliseSectionDescriptions([
       { section: 'Demolition', description: 'Remove cupboards — $120 tip fee included.' },
@@ -136,7 +155,8 @@ describe('sectionDescriptionsForWire — server-side validation of the analyse p
     ]);
     expect(out).toEqual([
       { section: 'Demolition', description: 'Remove the cupboards.' },
-      { section: 'Painting', description: 'x'.repeat(MAX_SECTION_DESCRIPTION_CHARS) },
+      // One unbroken over-long line: cut, and marked as cut.
+      { section: 'Painting', description: `${'x'.repeat(MAX_SECTION_DESCRIPTION_CHARS - 1)}…` },
     ]);
   });
 

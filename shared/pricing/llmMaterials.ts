@@ -156,6 +156,29 @@ export const MAX_SECTION_DESCRIPTION_CHARS = 500;
 /** Most section descriptions kept from one analysis. */
 export const MAX_SECTION_DESCRIPTIONS = 40;
 
+/**
+ * Keep whole lines up to the cap. The text is the tradie's own lines, so a
+ * cut mid-word would print a broken sentence on the customer's quote; a line
+ * that doesn't fit is dropped instead (and Job Details then keeps the full
+ * description, because that line no longer prints under a section). A single
+ * line longer than the cap is cut at a word and marked with an ellipsis.
+ */
+function capAtWholeLines(text: string, max: number): string {
+  if (text.length <= max) return text;
+  const kept: string[] = [];
+  let used = 0;
+  for (const line of text.split('\n')) {
+    const cost = (kept.length > 0 ? 1 : 0) + line.length;
+    if (used + cost > max) break;
+    kept.push(line);
+    used += cost;
+  }
+  if (kept.join('').trim()) return kept.join('\n').trim();
+  const cut = text.slice(0, max - 1);
+  const atWord = cut.lastIndexOf(' ');
+  return `${(atWord > 0 ? cut.slice(0, atWord) : cut).trim()}…`;
+}
+
 /** "$120", "$  1,200", "AUD 500", "500 AUD", "1,200 dollars", "500 bucks". */
 const MONEY_AMOUNT = /\$\s*\d|\bAUD\s*\d|\d[\d,.]*\s*(?:AUD|dollars?|bucks?)\b/i;
 
@@ -175,12 +198,13 @@ export function normaliseSectionDescriptions(raw: unknown): Record<string, strin
     const { section, description } = entry as { section?: unknown; description?: unknown };
     if (typeof section !== 'string' || typeof description !== 'string') continue;
     const name = section.trim();
-    const text = description
-      .replace(/\r\n?/g, '\n')
-      .replace(/\n{3,}/g, '\n\n')
-      .trim()
-      .slice(0, MAX_SECTION_DESCRIPTION_CHARS)
-      .trim();
+    const text = capAtWholeLines(
+      description
+        .replace(/\r\n?/g, '\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim(),
+      MAX_SECTION_DESCRIPTION_CHARS,
+    );
     if (!name || !text) continue;
     if (MONEY_AMOUNT.test(text)) continue;
     if (Object.prototype.hasOwnProperty.call(out, name)) continue;
