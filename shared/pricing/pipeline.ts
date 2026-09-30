@@ -34,7 +34,7 @@ import { needsPriceFetch } from './priceFetchGate';
 import { buildTradeContext } from './buildTradeContext';
 import { supplierPriceForGstMode, roundToTwoDecimals } from './money';
 import { keepSupplierPriceInclusive } from '../document/gstMode';
-import { applyPackAwarePricing } from './packAwarePricing';
+import { applyPackAwarePricing, PACK_UNIT_EQUIVALENT } from './packAwarePricing';
 import { parsePackInfo } from './parsePackInfo';
 import { coverageSanePurchaseCount, coverageFloorPurchaseCount, recoverPackInfo, isLumpSumRow } from './purchaseCoverage';
 import {
@@ -52,7 +52,7 @@ import { rankLocalHits, type LocalSearchResult } from './localMaterialMatcher';
 import { shouldRunReeceFirst } from './supplierPriority';
 import { applyReecePackPricing, reecePackHint } from './reeceCandidates';
 import { batchSearchProgressive, type BatchChunkFetcher, type ScraperProduct } from './scraperCandidates';
-import { pickBestCandidate, isSemanticallyCompatible, type RankableCandidate } from './candidateRanker';
+import { pickBestCandidate, isSemanticallyCompatible, isAccessoryMismatch, type RankableCandidate } from './candidateRanker';
 
 /**
  * Everything the pipeline needs from the world around it. The phone and the
@@ -87,6 +87,9 @@ export interface PipelineDeps {
   /** Fire-and-forget per-run outcome telemetry. Must never throw or block. */
   reportPriceFetchUsage?(summary: PriceFetchUsageSummary): void;
 }
+
+/** Units a saved rate can be priced per, where the price multiplies straight out. */
+const MEASURED_RATE_UNITS: ReadonlySet<Material['unit']> = new Set(['m', 'm²', 'm³', 'kg', 'L']);
 
 /**
  * The reconcile endpoint rejects more than 50 items in one request. Keep this
@@ -1036,14 +1039,49 @@ export async function fetchPricesForQuote<Q extends PricingQuote>(
         searchTerm: m.searchTerm,
         qualityTier: m.qualityTier,
       }, { jobQualityTier, excludeProducts: excludeSetFor(m) }) as (typeof hits[number]) | null;
-      const top = ranked || hits[0];
+      // The fallback keeps a tradie's own service and trade rates, which the
+      // ranker's retail category rules refuse wholesale (it rejects every
+      // product for a tip-fee row). What it must not do is hand a fitting or
+      // accessory row the rate of the thing it attaches to: that priced a DWV
+      // coupling, end cap and inspection opening at the tradie's per-metre
+      // pipe rate (30 Sep 2026). No such hit → the row goes to supplier search.
+      const fallback = hits.find((h) => !isAccessoryMismatch(term, h.productName || ''));
+      const top = ranked || fallback;
+      if (!top) {
+        if (localRankedAboveBunnings) localSupplierPreferredMisses.add(term);
+        continue;
+      }
       m.price = supplierPriceForGstMode(top.price, gstInclusive);
       m.manualPriceOverride = false;
       m.pricingSource = 'manual';
       if (top.productUrl) m.productUrl = top.productUrl;
       if (top.imageUrl) m.imageUrl = top.imageUrl;
-      if (top.unit) m.unit = top.unit as Material['unit'];
-      applyPackAwarePricing(m, { productName: top.productName });
+      // Read the requirement's unit BEFORE the saved rate's unit replaces it,
+      // or requiredUnit records the rate's unit instead of what was needed.
+      const requirementUnit = (m.requiredUnit ?? m.unit) as Material['unit'];
+      const rateUnit = top.unit as Material['unit'] | undefined;
+      if (
+        rateUnit &&
+        MEASURED_RATE_UNITS.has(rateUnit) &&
+        PACK_UNIT_EQUIVALENT[rateUnit] === PACK_UNIT_EQUIVALENT[requirementUnit]
+      ) {
+        // A saved rate per metre / m² / m³ / kg / L against a requirement in
+        // that same unit is simply requirement × rate. Through the pack logic
+        // it read as a product with no stated pack, collapsed to "Priced as
+        // one purchase — check it covers 54 m" with low confidence, on the
+        // tradie's own correct per-metre price.
+        if (m.requiredQty === undefined) m.requiredQty = m.quantity;
+        if (m.requiredUnit === undefined) m.requiredUnit = requirementUnit;
+        m.unit = rateUnit;
+        m.quantity = m.requiredQty;
+        m.packSize = undefined;
+        m.packUnit = undefined;
+        m.totalPrice = roundToTwoDecimals(m.price * m.quantity);
+      } else {
+        if (m.requiredUnit === undefined) m.requiredUnit = requirementUnit;
+        if (rateUnit) m.unit = rateUnit;
+        applyPackAwarePricing(m, { productName: top.productName });
+      }
       fetchedCount += 1;
       locallyPricedTerms.add(term);
       onEvent?.({

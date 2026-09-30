@@ -123,6 +123,37 @@ function hasAny(haystack: string, words: string[]): boolean {
  * this gate had already refused in round-1 ranking, because the LLM was given
  * the raw ungated scraper results.
  */
+/** Words that make a request a pipe fitting rather than a length of pipe. */
+const PIPE_FITTING_RE =
+  /\b(?:couplings?|elbows?|bends?|tees?|junctions?|sockets?|reducers?|adaptors?|adapters?|unions?|joiners?|inspection\s+openings?|end\s+caps?)\b/;
+
+/**
+ * The request is for a part that attaches to something, and the product is
+ * the something. Unlike the category rules below, this holds for ANY source,
+ * a tradie's own saved rates included, so the saved-rate pass applies it even
+ * where it overrides the ranker. Real failures:
+ *   - "1.5mm² flat cable clips" → 20 m of actual cable
+ *   - "circuit identification label" → a powerboard
+ *   - "PVC DWV coupling 100mm", "… inspection opening 100mm" and "… end cap
+ *     100mm" → the tradie's saved "PVC DWV pipe 100mm" per-metre rate
+ *     (30 Sep 2026, a new-build plumbing quote)
+ */
+export function isAccessoryMismatch(query: string, productName: string): boolean {
+  const q = query.toLowerCase();
+  const p = productName.toLowerCase();
+  const qAccessory = q.match(/\b(clips?|caps?|labels?|saddles?|grommets?|hangers?)\b/);
+  if (qAccessory) {
+    const stem = qAccessory[1].replace(/s$/, '');
+    if (!p.includes(stem)) return true;
+  }
+  // A fitting is not the pipe it joins. Fires only when the product is a bare
+  // length (pipe/tube/conduit) with no fitting word of its own.
+  if (PIPE_FITTING_RE.test(q) && /\b(?:pipes?|tubes?|tubing|conduits?)\b/.test(p) && !PIPE_FITTING_RE.test(p)) {
+    return true;
+  }
+  return false;
+}
+
 export function isSemanticallyCompatible(query: string, productName: string): boolean {
   const q = query.toLowerCase();
   const p = productName.toLowerCase();
@@ -134,16 +165,7 @@ export function isSemanticallyCompatible(query: string, productName: string): bo
     if (strictDimQuery && (!pDim || pDim !== qDim)) return false;
   }
 
-  // Accessory-vs-substance asymmetry: a request whose subject is an accessory
-  // (clips for a cable, caps for a post, labels for a switchboard) must match
-  // a product that IS that accessory — not the thing it attaches to. Real
-  // failures: "1.5mm² flat cable clips" → 20m of actual cable; "circuit
-  // identification label" → a powerboard.
-  const qAccessory = q.match(/\b(clips?|caps?|labels?|saddles?|grommets?|hangers?)\b/);
-  if (qAccessory) {
-    const stem = qAccessory[1].replace(/s$/, '');
-    if (!p.includes(stem)) return false;
-  }
+  if (isAccessoryMismatch(q, p)) return false;
 
   // Finish products (oil/stain/sealer) must not match the surface they coat:
   // "Merbau decking oil" → an actual Merbau decking panel. Early-return so a

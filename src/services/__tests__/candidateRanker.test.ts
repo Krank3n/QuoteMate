@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { pickBestCandidate, type RankableCandidate } from '../../../shared/pricing/candidateRanker';
+import { pickBestCandidate, type RankableCandidate, isAccessoryMismatch } from '../../../shared/pricing/candidateRanker';
 
 const c = (
   price: number,
@@ -608,5 +608,25 @@ describe('pickBestCandidate — excludeProducts', () => {
     expect(
       pickBestCandidate([only], { searchTerm: 'matte porcelain floor tile 600x600' }, {}),
     ).toBe(only);
+  });
+});
+
+describe('isAccessoryMismatch', () => {
+  it('refuses a bare pipe for a fitting request (30 Sep, a saved pipe rate on couplings)', () => {
+    expect(isAccessoryMismatch('PVC DWV coupling 100mm', 'PVC DWV pipe 100mm')).toBe(true);
+    expect(isAccessoryMismatch('PVC DWV inspection opening 100mm', 'PVC DWV pipe 100mm')).toBe(true);
+    expect(isAccessoryMismatch('PVC DWV end cap 100mm', 'PVC DWV pipe 100mm')).toBe(true);
+    expect(isAccessoryMismatch('copper elbow 15mm', 'Kembla copper tube 15mm x 6m')).toBe(true);
+  });
+
+  it('accepts the fitting itself, and the pipe for a pipe request', () => {
+    expect(isAccessoryMismatch('PVC DWV coupling 100mm', 'DWV PVC Pipe Coupling 100mm')).toBe(false);
+    expect(isAccessoryMismatch('PVC DWV pipe 100mm', 'PVC DWV pipe 100mm')).toBe(false);
+    expect(isAccessoryMismatch('DWV bend 100mm 90 degree', 'DWV Bend 100mm x 90 Degree Female & Female Plain')).toBe(false);
+  });
+
+  it('keeps the accessory rule: clips are not the thing they hold', () => {
+    expect(isAccessoryMismatch('roof tile clips', 'Concrete Roof Tile')).toBe(true);
+    expect(isAccessoryMismatch('roof tile clips', 'Roof Tile Clip Galvanised')).toBe(false);
   });
 });

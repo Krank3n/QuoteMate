@@ -106,6 +106,48 @@ describe('fetchPricesForQuote through PipelineDeps', () => {
     expect(loadTemplates).toHaveBeenCalledTimes(1);
   });
 
+  it("prices a same-unit saved rate per unit, and never hands it to the fittings it joins (30 Sep)", async () => {
+    // The tradie saved "PVC DWV pipe 100mm" at \$35.20/m. The coupling, end cap
+    // and inspection opening took that rate, and the pipe row itself read
+    // "Priced as one purchase — check it covers 54 m" at low confidence.
+    const d = deps({
+      loadFavorites: async () => ({
+        pvc_dwv_pipe_100mm: { productName: 'PVC DWV pipe 100mm', store: 'manual', price: 35.2, unit: 'm' as const, isPersonalRate: true },
+      }),
+    });
+    const rows = [
+      material({ id: 'pipe', name: 'PVC DWV pipe 100mm', searchTerm: 'PVC DWV pipe 100mm', quantity: 54, unit: 'm' }),
+      material({ id: 'coup', name: 'PVC DWV coupling 100mm', searchTerm: 'PVC DWV coupling 100mm', quantity: 6, unit: 'each' }),
+      material({ id: 'cap', name: 'PVC DWV end cap 100mm', searchTerm: 'PVC DWV end cap 100mm', quantity: 5, unit: 'each' }),
+    ];
+    const result = await fetchPricesForQuote(d, { quote: quote(rows), businessSettings: null, reeceConnected: false });
+    const [pipe, coup, cap] = result.updatedQuote.materials;
+    expect(pipe.pricingSource).toBe('manual');
+    expect(pipe.price).toBe(35.2);
+    expect(pipe.quantity).toBe(54);
+    expect(pipe.unit).toBe('m');
+    expect(pipe.totalPrice).toBe(1900.8);
+    expect(pipe.priceConfidence).not.toBe('low');
+    expect(pipe.description ?? '').not.toContain('Priced as one purchase');
+    for (const fitting of [coup, cap]) {
+      expect(fitting.pricingSource).not.toBe('manual');
+      expect(fitting.price).not.toBe(35.2);
+    }
+  });
+
+  it("still applies a tradie's own service rate that the retail rules refuse", async () => {
+    const d = deps({
+      loadFavorites: async () => ({
+        tip: { productName: 'Removal & disposal of existing fence panels (tip fees)', store: 'manual', price: 165, unit: 'each' as const, isPersonalRate: true },
+      }),
+    });
+    const rows = [material({ id: 'tip', name: 'Tip fees', searchTerm: 'removal & disposal of existing fence (tip fees)', quantity: 1, unit: 'each' })];
+    const result = await fetchPricesForQuote(d, { quote: quote(rows), businessSettings: null, reeceConnected: false });
+    const [tip] = result.updatedQuote.materials;
+    expect(tip.pricingSource).toBe('manual');
+    expect(tip.price).toBe(165);
+  });
+
   it('prices a Bunnings hit through the batch fetcher and hands the gated candidates to reconcile', async () => {
     const reconcile = vi.fn(async (items: Array<{ id: string }>) =>
       items.map((i) => ({ id: i.id, decision: 'apply' as const, chosenIndex: 0, purchaseCount: 1, purchaseUnit: 'pack', confidence: 'high' as const })),
