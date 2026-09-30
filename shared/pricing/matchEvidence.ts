@@ -210,7 +210,14 @@ export const WEAK_MATCH_NOTE =
  * better), but it is never presented as a confident supplier price.
  */
 export function stampMatchConfidence(m: Material, productName?: string): void {
-  const lexicallyWeak = matchEvidence(m.searchTerm || m.name, productName || '') === 'weak';
+  // 'none' is weaker than 'weak', not a pass. The rankers refuse it, but a
+  // caller that applies a product anyway (a stale saved match, a reconcile
+  // pick) must still see it flagged — "foam pipe lagging slab penetration
+  // 100mm" priced as an "Alarm Check Valve Gasket Kit" at $488 went out
+  // unflagged because the trade table had no opinion on its price. A missing
+  // product name is absence of a signal, not evidence against the match.
+  const lexicallyWeak =
+    !!productName && matchEvidence(m.searchTerm || m.name, productName) !== 'strong';
   const priceImplausible = !lexicallyWeak && pricedFarAboveTrade(m);
   if (!lexicallyWeak && !priceImplausible) {
     // Explicitly cleared, not just skipped: a re-price that finally lands a
