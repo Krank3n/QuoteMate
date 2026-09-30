@@ -1,4 +1,4 @@
-import { validateAndRepairAiOutput, clampMaterialQuantity, detectLaunderedSections } from './validateAiOutput';
+import { validateAndRepairAiOutput, clampMaterialQuantity, detectLaunderedSections, isFittingInMeasuredUnit } from './validateAiOutput';
 
 // Silent logger so warning chatter doesn't pollute test output.
 const silent = { warn: () => {} };
@@ -843,5 +843,36 @@ describe('validateAndRepairAiOutput — Latin-script guard', () => {
     const { materials, flags } = validateAndRepairAiOutput([{ name: 'ролик', quantity: 1, unit: 'each', price: 5 }], silentLog);
     expect(materials[0].name).toBe('ролик');
     expect(flags.nonLatinTokenCount).toBe(1);
+  });
+});
+
+describe('fittings emitted in a measured unit', () => {
+  it('counts a DWV coupling, end cap and inspection opening as each, keeping the quantity (29 Sep)', () => {
+    const { materials } = validateAndRepairAiOutput(
+      [
+        { name: 'PVC DWV coupling 100mm', searchTerm: 'PVC DWV coupling 100mm', quantity: 6, unit: 'm', section: 'Drainage', sectionLaborHours: 26 },
+        { name: 'PVC DWV end cap 100mm (temporary seal)', searchTerm: 'PVC DWV end cap 100mm', quantity: 5, unit: 'm', section: 'Drainage', sectionLaborHours: 26 },
+        { name: 'PVC DWV inspection opening 100mm', searchTerm: 'PVC DWV inspection opening 100mm', quantity: 3, unit: 'm', section: 'Drainage', sectionLaborHours: 26 },
+      ],
+      silent,
+    );
+    expect(materials.map((m) => [m.unit, m.quantity])).toEqual([['each', 6], ['each', 5], ['each', 3]]);
+  });
+
+  it('leaves the pipe itself, and length goods that merely mention a fitting, in metres', () => {
+    const rows = [
+      { name: 'PVC DWV pipe 100mm', searchTerm: 'PVC DWV pipe 100mm', quantity: 54, unit: 'm' },
+      { name: 'Downpipe 100 x 50 galvanised with elbows', searchTerm: 'galvanised downpipe 100 x 50', quantity: 14, unit: 'm' },
+      { name: 'Top Ridge & Hip Capping .55 3-Bend Smooth Cream', searchTerm: '', quantity: 5, unit: 'm' },
+      { name: 'Electrical conduit 20mm with saddles', searchTerm: 'electrical conduit 20mm grey PVC', quantity: 3, unit: 'm' },
+    ];
+    const { materials } = validateAndRepairAiOutput(rows.map((r) => ({ ...r, section: 'S', sectionLaborHours: 1 })), silent);
+    expect(materials.every((m) => m.unit === 'm')).toBe(true);
+  });
+
+  it('only rewrites length, area and volume units — a fitting counted in each or kg is left alone', () => {
+    expect(isFittingInMeasuredUnit('PVC DWV coupling 100mm', undefined, 'each')).toBe(false);
+    expect(isFittingInMeasuredUnit('Brass valve', undefined, 'kg')).toBe(false);
+    expect(isFittingInMeasuredUnit('PVC DWV coupling 100mm', undefined, 'm²')).toBe(true);
   });
 });

@@ -80,6 +80,34 @@ export function stripNonLatinWords(text: string): { text: string; stripped: numb
 const PIECE_GOOD_NAME_RE = /\b(pavers?|tiles?|decking boards?|plasterboards?|weatherboards?|downlights?|gpos?|hinges?|door handles?)\b/i;
 const PIECE_GOOD_BAD_UNITS = new Set(['m²', 'm2', 'm³', 'm3']);
 
+/**
+ * A pipe/plumbing fitting emitted in a length/area/volume unit. The generator
+ * wrote "PVC DWV coupling 100mm — 6 m", "… end cap — 5 m" and "… inspection
+ * opening — 3 m" on a new-build plumbing quote (29 Sep 2026). Every number
+ * counted pieces; only the unit was wrong. Left as metres, a $5 coupling
+ * priced against a "6 m" requirement falls into the pack-coverage path
+ * ("Priced as one purchase — check it covers 6 m", low confidence), and a
+ * per-metre pipe rate looks like a fit for it.
+ *
+ * This is the one repair here that rewrites a field rather than flagging it,
+ * and only the unit: the quantity stays exactly what the model said. It fires
+ * only when the item IS a fitting — no length-goods noun anywhere in the name
+ * — so "Downpipe with elbows", "3-Bend ridge capping", "conduit with saddles"
+ * and flashings stay in metres. Checked against every stored row with a
+ * measured unit (864 on 30 Sep 2026): it touches those three and nothing else.
+ */
+const FITTING_ITEM_RE =
+  /\b(?:couplings?|elbows?|bends?|tees?|junctions?|sockets?|reducers?|adaptors?|adapters?|unions?|joiners?|inspection\s+openings?|end\s+caps?|valves?|traps?|grates?|cowls?)\b/i;
+const LENGTH_GOOD_RE =
+  /\b(?:pipes?|piping|tubes?|tubing|conduits?|downpipes?|gutters?|guttering|flashings?|cappings?|channels?|strips?|tapes?|hoses?|cables?|wires?|rails?|tracks?|lagging|insulation|trunking|ducts?|ducting|membranes?|mesh|sheets?|sheeting|battens?|timber|boards?|mouldings?|trims?|edging|fascia|barge|ridge)\b/i;
+const FITTING_BAD_UNITS = new Set(['m', 'm²', 'm2', 'm³', 'm3']);
+
+export function isFittingInMeasuredUnit(name: string, searchTerm: string | undefined, unit: string): boolean {
+  if (!FITTING_BAD_UNITS.has(unit)) return false;
+  const text = `${name} ${searchTerm || ''}`;
+  return FITTING_ITEM_RE.test(text) && !LENGTH_GOOD_RE.test(text);
+}
+
 // Deterministic upper bound on per-line quantities, by unit. Anything past
 // these is a near-certain over-spec — the kind that produced a $94k fencing
 // quote when the AI emitted 6760 bags of concrete for 13 post holes.
@@ -264,6 +292,14 @@ export function validateAndRepairAiOutput(
       }
     }
     const name = typeof m?.name === 'string' ? m.name : '';
+    if (name && isFittingInMeasuredUnit(name, typeof m?.searchTerm === 'string' ? m.searchTerm : undefined, typeof m?.unit === 'string' ? m.unit : '')) {
+      log.warn('[ai-validate] fitting emitted in a measured unit — counted as each', {
+        name,
+        unit: m.unit,
+        quantity: m.quantity,
+      });
+      m = { ...m, unit: 'each' };
+    }
     const unit = typeof m?.unit === 'string' ? m.unit : '';
     let next = m;
     if (name && PIECE_GOOD_NAME_RE.test(name) && PIECE_GOOD_BAD_UNITS.has(unit)) {
