@@ -55,8 +55,47 @@ describe('trial→paid rate — paying counts only real billed subs; startedTria
   it('counts every sub with a trialStartedAt as startedTrial (trialing + expired + now-pro)', () => {
     expect(out.funnel.startedTrial).toBe(3);
   });
-  it('reports trialToPaid = paying / startedTrial = 1/3', () => {
+  it('reports trialToPaid over matured trials only: 1 payer / 2 (the 2-day trial cannot have converted yet)', () => {
+    expect(out.funnel.trialsMatured).toBe(2);
+    expect(out.funnel.payingFromMaturedTrial).toBe(1);
+    expect(out.conversion.trialToPaid).toBeCloseTo(1 / 2, 10);
+  });
+});
+
+// 30 Sep 2026: the headline slid every week because payers with no trial
+// were counted on top and trials still running were counted underneath.
+// Both are pinned here so it can't drift back.
+describe('trialToPaid — only payers who came through a trial, only trials that have had time to pay', () => {
+  const billed = (over: Record<string, unknown> = {}) => ({ isPro: true, platform: 'ios', productId: 'pro_monthly', ...over });
+  const inputs: FunnelUserInput[] = [
+    user({ uid: 'paid-after-trial', sub: billed({ trialStartedAt: iso(NOW - 40 * DAY) }) }),
+    user({ uid: 'paid-no-trial', sub: billed() }),
+    user({ uid: 'paid-no-trial-2', sub: billed() }),
+    user({ uid: 'lapsed', sub: { trialStartedAt: iso(NOW - 30 * DAY) } }),
+    user({ uid: 'lapsed-2', sub: { trialStartedAt: iso(NOW - 18 * DAY) } }),
+    // Still inside trial + billing lag (14 + 3 days): not judged yet.
+    user({ uid: 'in-trial', sub: { trialStartedAt: iso(NOW - 5 * DAY) } }),
+    user({ uid: 'just-past-trial', sub: { trialStartedAt: iso(NOW - 16 * DAY) } }),
+    // Paid early, inside the window: excluded from both sides until it matures.
+    user({ uid: 'paid-in-trial', sub: billed({ trialStartedAt: iso(NOW - 6 * DAY) }) }),
+  ];
+  const out = computeFunnelStats(inputs, NOW);
+
+  it('still counts every payer in the headcount', () => {
+    expect(out.funnel.paying).toBe(4);
+    expect(out.funnel.startedTrial).toBe(6);
+  });
+  it('is 1 / 3: the no-trial payers are not on top, the young trials are not underneath', () => {
+    expect(out.funnel.trialsMatured).toBe(3);
+    expect(out.funnel.payingFromMaturedTrial).toBe(1);
     expect(out.conversion.trialToPaid).toBeCloseTo(1 / 3, 10);
+  });
+  it('never exceeds 1 even when payers outnumber matured trials', () => {
+    const skew = computeFunnelStats(
+      [user({ uid: 'a', sub: billed() }), user({ uid: 'b', sub: billed() }), user({ uid: 'c', sub: { trialStartedAt: iso(NOW - 30 * DAY) } })],
+      NOW,
+    );
+    expect(skew.conversion.trialToPaid).toBe(0);
   });
 });
 
@@ -262,7 +301,9 @@ describe('signup cohorts — each window is a true cohort, sliced by signupAt', 
   it('90d adds the converted 60-day-old, so the cohort has a payer', () => {
     expect(out.cohorts['90'].signups).toBe(3);
     expect(out.cohorts['90'].paying).toBe(1);
-    expect(out.cohorts['90'].trialToPaid).toBeCloseTo(1 / 3, 10);
+    // Matured trials in the window: 'mid' (20 d) and 'converted' (40 d); 'fresh' is 3 d.
+    expect(out.cohorts['90'].trialsMatured).toBe(2);
+    expect(out.cohorts['90'].trialToPaid).toBeCloseTo(1 / 2, 10);
   });
   it('all-time still counts the ancient AND the undated user that no window can hold', () => {
     expect(out.funnel.signups).toBe(5);

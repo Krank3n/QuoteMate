@@ -187,6 +187,13 @@ export interface FunnelSteps {
   payingBilled: number;
   /** Subset of `paying` restored from incident-2026-07, awaiting device receipt re-sync. */
   payingRestored: number;
+  /**
+   * Trials old enough to have converted: started at least PAID_MATURITY_DAYS
+   * ago (the trial plus billing lag). The denominator of trialToPaid.
+   */
+  trialsMatured: number;
+  /** Payers among `trialsMatured`. The numerator of trialToPaid. */
+  payingFromMaturedTrial: number;
   // Each step as a fraction (0..1) of the previous step.
   pctStartedTrial: number;
   pctSentQuote: number;
@@ -201,7 +208,7 @@ export interface FunnelCohort extends FunnelSteps {
   /** False when the window is shorter than a trial + billing lag, so `paying`
    *  is structurally understated rather than genuinely bad. */
   matureForPaid: boolean;
-  /** THE founder metric, scoped to this cohort. paying / startedTrial. */
+  /** THE founder metric, scoped to this cohort. payingFromMaturedTrial / trialsMatured. */
   trialToPaid: number;
   /** sentQuote / signups, scoped to this cohort. */
   activationRate: number;
@@ -243,7 +250,7 @@ export interface RecentPayerRow {
 export interface FunnelPayload {
   funnel: FunnelSteps;
   conversion: {
-    // THE number the founder tracks (target >= 0.05). paying / startedTrial.
+    // THE number the founder tracks (target >= 0.05). payingFromMaturedTrial / trialsMatured.
     trialToPaid: number;
     // sentQuote / signups.
     activationRate: number;
@@ -405,6 +412,7 @@ export function computeFunnelStats(inputs: FunnelUserInput[], now: number = Date
       // A user "started a trial" iff their sub carries a trialStartedAt — this
       // covers trialing, trial_expired AND now-Pro users who converted.
       startedTrial: f.trialStartedAt !== null,
+      trialMatured: f.trialStartedAt !== null && now - f.trialStartedAt >= PAID_MATURITY_DAYS * DAY_MS,
       sentQuote: u.hasSentDoc,
       // A sent document is proof of the whole wizard, whatever the drafts say.
       quoteStage: maxQuoteStage(u.quoteStage, u.hasSentDoc ? 'sent' : 'none'),
@@ -462,7 +470,7 @@ export function computeFunnelStats(inputs: FunnelUserInput[], now: number = Date
       days,
       since,
       matureForPaid: days >= PAID_MATURITY_DAYS,
-      trialToPaid: safeRatio(steps.paying, steps.startedTrial),
+      trialToPaid: safeRatio(steps.payingFromMaturedTrial, steps.trialsMatured),
       activationRate: safeRatio(steps.sentQuote, steps.signups),
     };
   }
@@ -482,7 +490,7 @@ export function computeFunnelStats(inputs: FunnelUserInput[], now: number = Date
       start,
       end,
       matureForPaid: now - end >= PAID_MATURITY_DAYS * DAY_MS,
-      trialToPaid: safeRatio(steps.paying, steps.startedTrial),
+      trialToPaid: safeRatio(steps.payingFromMaturedTrial, steps.trialsMatured),
       activationRate: safeRatio(steps.sentQuote, steps.signups),
     });
   }
@@ -494,7 +502,13 @@ export function computeFunnelStats(inputs: FunnelUserInput[], now: number = Date
   return {
     funnel,
     conversion: {
-      trialToPaid: safeRatio(funnel.paying, funnel.startedTrial),
+      // Payers who came through a trial, over trials old enough to have
+      // converted. Until 30 Sep 2026 this was paying / startedTrial: payers
+      // who never started a trial were counted on top but not underneath,
+      // and every trial still running was counted underneath before it could
+      // possibly pay. The headline slid every week however well trials
+      // actually converted.
+      trialToPaid: safeRatio(funnel.payingFromMaturedTrial, funnel.trialsMatured),
       activationRate: safeRatio(funnel.sentQuote, funnel.signups),
     },
     cohorts,
@@ -520,6 +534,8 @@ interface UserMarks {
   viewedPaywall?: boolean;
   payingBilled: boolean;
   payingRestored: boolean;
+  /** startedTrial, and the trial started at least PAID_MATURITY_DAYS ago. */
+  trialMatured: boolean;
 }
 
 /** Tally a set of already-derived users into the funnel steps. */
@@ -536,9 +552,15 @@ function aggregateSteps(marks: UserMarks[]): FunnelSteps {
   let paywallMeasured = false;
   let payingBilled = 0;
   let payingRestored = 0;
+  let trialsMatured = 0;
+  let payingFromMaturedTrial = 0;
 
   for (const m of marks) {
     if (m.startedTrial) startedTrial++;
+    if (m.trialMatured) {
+      trialsMatured++;
+      if (m.payingBilled || m.payingRestored) payingFromMaturedTrial++;
+    }
     // Cumulative: reaching the preview means every screen before it is done.
     const rank = quoteStageRank(m.quoteStage);
     if (rank >= quoteStageRank('job_details')) describedJob++;
@@ -569,6 +591,8 @@ function aggregateSteps(marks: UserMarks[]): FunnelSteps {
     paying,
     payingBilled,
     payingRestored,
+    trialsMatured,
+    payingFromMaturedTrial,
     pctStartedTrial: safeRatio(startedTrial, signups),
     pctSentQuote: safeRatio(sentQuote, startedTrial),
     pctPaying: safeRatio(paying, sentQuote),

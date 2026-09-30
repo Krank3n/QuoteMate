@@ -9,7 +9,8 @@
  *
  * Calls are fire-and-forget: every failure is swallowed so a flaky network
  * never breaks the UI flow that triggered the event. Anonymous (signed-out)
- * sessions short-circuit silently — we don't have an anonymous-id setup yet
+ * sessions short-circuit silently (after a short wait when this process
+ * already had a signed-in user, which covers the cold-start auth blip) — we don't have an anonymous-id setup yet
  * and the freemium funnel only matters post-signin.
  *
  * Add new events to the AnalyticsEvent union so call sites can't typo a name.
@@ -20,6 +21,7 @@ import {
   addDoc,
   serverTimestamp,
 } from 'firebase/firestore';
+import { onAuthStateChanged, type User } from 'firebase/auth';
 import { Platform } from 'react-native';
 
 import { auth, db } from '../config/firebase';
@@ -247,9 +249,44 @@ export function trackEvent(event: AnalyticsEvent, props?: BaseProps): void {
   void writeEvent(event, props).catch(() => { /* swallow */ });
 }
 
+// The last signed-in uid this process wrote an event for. On a cold start
+// Firebase restores the user and then, about a second later, emits a null with
+// auth.currentUser also null (App.tsx ignores it; see the onAuthStateChanged
+// handler there). Anything that fires once on mount in that window, such as
+// the expired-trial banner's impression, was dropped here: in late Sep 2026
+// that banner logged taps but never an impression.
+let lastUid: string | null = null;
+
+/** How long a write waits for the same user to come back before giving up. */
+export const USER_RESTORE_WAIT_MS = 10_000;
+
+// The same user as before, once auth has them again; null on timeout, or if
+// someone else signs in (their session must not be credited with this event).
+function waitForUser(uid: string, timeoutMs: number): Promise<User | null> {
+  return new Promise((resolve) => {
+    let done = false;
+    let unsubscribe: (() => void) | null = null;
+    const finish = (user: User | null) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      unsubscribe?.();
+      resolve(user);
+    };
+    const timer = setTimeout(() => finish(null), timeoutMs);
+    unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (!user) return;
+      finish(user.uid === uid ? user : null);
+    });
+    if (done) unsubscribe();
+  });
+}
+
 async function writeEvent(event: AnalyticsEvent, props?: BaseProps): Promise<void> {
-  const user = auth.currentUser;
+  let user = auth.currentUser;
+  if (!user && lastUid) user = await waitForUser(lastUid, USER_RESTORE_WAIT_MS);
   if (!user) return; // anonymous; nothing to attribute
+  lastUid = user.uid;
 
   const ref = collection(db, 'users', user.uid, 'events');
   await addDoc(ref, {
