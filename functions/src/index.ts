@@ -10,6 +10,7 @@ import {
   sendSocialSignInReminderEmail,
   sendWelcomeEmail,
   sendQuoteAcceptedEmail,
+  sendQuoteOpenedEmail,
   sendQuoteDeclinedEmail,
   sendPaymentFailedEmail,
   sendSubscriptionCancelledEmail,
@@ -243,6 +244,7 @@ import { hashTerms } from './shared/pdf/terms/defaultAuTradie';
 import { generateQuotePdfBuffer } from './pdfGenerator';
 import { normaliseTimestamp } from './timestamps.helpers';
 import { decideQuoteOpenedPush } from './quoteOpenedPush.helpers';
+import { decideQuoteOpenedEmail, QUOTE_OPENED_EMAIL_SENT_FIELD } from './quoteOpenedEmail.helpers';
 import { projectCustomerOpenToDocument } from './customerOpenRecord';
 import {
   selectQuotesForFollowUp,
@@ -11223,6 +11225,49 @@ export const onQuoteViewed = functions.firestore
     // into a burst of identical pushes — lives in quoteOpenedPush.helpers.ts.
     const decision = decideQuoteOpenedPush(before, after, Date.now());
     if (!decision.push) return;
+
+    // No push token means push can't reach this tradie, which was two in
+    // three of those sending quotes. Tell them by email instead, once per
+    // quote (rules in quoteOpenedEmail.helpers.ts). Best-effort: a failure
+    // here must never cost the push path below.
+    try {
+      const userRef = db.collection('users').doc(userId);
+      const [tokens, prefsDoc, businessDoc] = await Promise.all([
+        userRef.collection('fcmTokens').limit(1).get(),
+        userRef.collection('settings').doc('notificationPreferences').get(),
+        userRef.collection('settings').doc('business').get(),
+      ]);
+      let tradieEmail: string | null = businessDoc.data()?.email || null;
+      if (!tradieEmail) tradieEmail = (await admin.auth().getUser(userId).catch(() => null))?.email || null;
+      const emailDecision = decideQuoteOpenedEmail({
+        quoteUpdatesOff: prefsDoc.data()?.quoteUpdates === false,
+        hasPushToken: !tokens.empty,
+        alreadyEmailed: !!after[QUOTE_OPENED_EMAIL_SENT_FIELD],
+        tradieEmail,
+      });
+      if (emailDecision.send) {
+        const emailed = await sendQuoteOpenedEmail(tradieEmail!, userId, {
+          customerName: after.customerName,
+          jobName: after.job?.name,
+          total: after.total,
+        });
+        functions.logger.info('quote_opened_email', { userId, quoteId, signal: decision.signal, emailed });
+        if (emailed) {
+          await change.after.ref.update({
+            [QUOTE_OPENED_EMAIL_SENT_FIELD]: admin.firestore.FieldValue.serverTimestamp(),
+            viewNotifiedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+        }
+        return;
+      }
+      if (emailDecision.reason !== 'has-push') {
+        // No token, so the push below could not land either.
+        functions.logger.info('quote_opened_email_skipped', { userId, quoteId, reason: emailDecision.reason });
+        return;
+      }
+    } catch (err) {
+      functions.logger.warn('quote_opened_email_failed', { userId, quoteId, error: (err as Error)?.message });
+    }
 
     // An email open fires whenever a mail client fetches an image — a phone
     // syncing mail at 2 am included — so that signal keeps to the tradie's
