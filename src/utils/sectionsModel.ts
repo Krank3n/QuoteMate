@@ -15,6 +15,7 @@
  */
 
 import { Material, QuoteSection } from '../types';
+import { recalculateQuoteTotals, type RecalculableQuote } from '../../shared/pricing/documentTotals';
 
 export interface SectionsState {
   sections: QuoteSection[];
@@ -129,6 +130,56 @@ export function renameSection(state: SectionsState, oldName: string, rawNewName:
     sections: state.sections.map((s) => (s.name === oldName ? { ...s, name: newName } : s)),
     materials: state.materials.map((m) => (m.section === oldName ? { ...m, section: newName } : m)),
   };
+}
+
+/**
+ * Set (or clear) a section's customer-facing scope text — the lines printed
+ * under its heading on the quote/invoice. Blank removes the key outright:
+ * Firestore rejects undefined, so a cleared description is omitted, never
+ * stored as undefined. Materials, labour and money are untouched.
+ */
+export function setSectionDescription(state: SectionsState, name: string, text: string): SectionsState {
+  const description = text.trim();
+  if (!state.sections.some((s) => s.name === name)) {
+    // A section can exist only as the `section` name on its materials (Mate's
+    // add-line, older drafts). Give it a record to carry the text: a $0 lump
+    // sum, because lump sums are invisible to the labour heal and exempt from
+    // markup, so the record adds nothing to any total. Callers still check the
+    // totals (sectionChangeKeepsTotals) — on a quote with NO section records,
+    // adding the first one switches labour to the per-section sum.
+    if (!description || !state.materials.some((m) => m.section === name)) return state;
+    return createSection(state, { name, pricing: 'lumpSum', laborTotal: 0, description });
+  }
+  return {
+    sections: state.sections.map((s) => {
+      if (s.name !== name) return s;
+      // Typed text is the tradie's own, so it drops the 'generated' stamp.
+      const { description: _cleared, descriptionSource: _source, ...rest } = s;
+      return description ? { ...rest, description } : rest;
+    }),
+    materials: state.materials,
+  };
+}
+
+/**
+ * True when swapping in `next` sections/materials leaves every quote total
+ * where it was. Guards setSectionDescription's new $0 record on a quote whose
+ * labour is still top-level: there, a first section record would move labour
+ * to the per-section sum and change the price.
+ */
+export function sectionChangeKeepsTotals<Q extends RecalculableQuote>(quote: Q, next: SectionsState): boolean {
+  // recalculateQuoteTotals writes these onto the quote but types its return as Q.
+  type Totals = Record<'materialsSubtotal' | 'laborTotal' | 'subtotal' | 'markupAmount' | 'gst' | 'total', number>;
+  const before = recalculateQuoteTotals(quote) as Q & Totals;
+  const after = recalculateQuoteTotals({ ...quote, sections: next.sections, materials: next.materials }) as Q & Totals;
+  return (
+    before.materialsSubtotal === after.materialsSubtotal &&
+    before.laborTotal === after.laborTotal &&
+    before.subtotal === after.subtotal &&
+    before.markupAmount === after.markupAmount &&
+    before.gst === after.gst &&
+    before.total === after.total
+  );
 }
 
 export interface DeleteSectionOptions {

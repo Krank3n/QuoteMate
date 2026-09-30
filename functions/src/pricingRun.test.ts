@@ -436,6 +436,23 @@ describe('helpers', () => {
     expect(Number.isFinite(section.laborHours)).toBe(true);
   });
 
+  it('quotePatch keeps a section scope description for the quote', () => {
+    const description = 'Remove kitchen cupboards and benchtop.\nPatch the wall behind — splashback tiles by others.';
+    const patch = quotePatch(
+      quote({
+        sections: [
+          { id: 's1', name: 'Demolition', multiplier: 1, laborHours: 4, laborHoursTotal: 4, laborRate: 90, laborUnit: 'hours', laborTotal: 360, sortOrder: 0, description },
+          { id: 's2', name: 'Framing', multiplier: 1, laborHours: 2, laborHoursTotal: 2, laborRate: 90, laborUnit: 'hours', laborTotal: 180, sortOrder: 1 },
+        ],
+        laborHours: 6,
+      }),
+      Date.UTC(2026, 8, 3),
+    );
+    const sections = patch.sections as Array<{ name: string; description?: string }>;
+    expect(sections[0].description).toBe(description);
+    expect('description' in sections[1]).toBe(false);
+  });
+
   it('shouldNotify: away flag, stale or missing stamp → push; fresh stamp → no push; no record → no push', () => {
     const now = Date.UTC(2026, 8, 3, 2, 0, 0);
     const fresh = new Date(now - 10_000).toISOString();

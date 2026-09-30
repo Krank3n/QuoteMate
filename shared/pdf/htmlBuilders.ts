@@ -17,6 +17,7 @@ import {
 import { pathHasInk } from './signatureInk';
 import { isLumpSumSection, lineMarkupMultiplier, markupableLabourTotal } from '../document/lumpSum';
 import { resolvePriceDetail, showsLineItems, showsPerLineMoney } from '../document/priceDetail';
+import { sectionsCarryScope, SCOPE_BY_SECTION_NOTE } from './jobDetails';
 
 export const escapeHtml = (s: string) =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -828,14 +829,26 @@ function buildLaborHTML(rawData: QuotePdfData): string {
   const laborMul = rollLaborMarkup ? 1 + ((data.laborMarkup || 0) / 100) : 1;
   const displayLaborTotal = displayLabourTotal(data, laborMul);
   const rows = labourRowsForDisplay(rawData);
+  // A labour-only section (no materials) has no materials caption to carry
+  // its scope text, so it prints here under the section's labour row. A
+  // section WITH materials already prints it on its caption — never twice.
+  // Per-section rows map 1:1 onto data.sections, in order, when broken down.
+  const sectionsWithMaterials = new Set(rawData.materials.map((m) => m.section).filter(Boolean));
+  const scopeForRow = (i: number): string => {
+    if (!hasSections || !showBreakdown || i >= data.sections!.length) return '';
+    const s = data.sections![i];
+    const description = s.description?.trim();
+    if (!description || sectionsWithMaterials.has(s.name)) return '';
+    return `<div class="section-scope">${formatMultiline(description)}</div>`;
+  };
 
   return `
       <div class="section-wrapper">
         <h3>Labour</h3>
         <table>
           <tbody>
-            ${rows.map(r => `<tr>
-              <td>${r.label}</td>
+            ${rows.map((r, i) => `<tr>
+              <td>${r.label}${scopeForRow(i)}</td>
               <td class="num">${formatCurrency(r.amount)}</td>
             </tr>`).join('')}
             ${hasSections && showBreakdown ? `<tr class="total-row">
@@ -1069,7 +1082,7 @@ export function buildQuotePdfHtml(
       <div class="info-section">
         <h3>Job Details</h3>
         <p><strong>${escapeHtml(quote.job.name)}</strong></p>
-        <p>${formatMultiline(quote.job.description)}</p>
+        <p>${sectionsCarryScope(quote, { showLineItems, scopeMode }) ? escapeHtml(SCOPE_BY_SECTION_NOTE) : formatMultiline(quote.job.description)}</p>
       </div>
 
       ${showLineItems ? `
@@ -1403,7 +1416,7 @@ export function buildInvoicePdfHtml(
       <div class="info-section">
         <h3>Job Details</h3>
         <p><strong>${escapeHtml(invoice.job.name)}</strong></p>
-        <p>${formatMultiline(invoice.job.description)}</p>
+        <p>${sectionsCarryScope(invoice, { showLineItems, scopeMode }) ? escapeHtml(SCOPE_BY_SECTION_NOTE) : formatMultiline(invoice.job.description)}</p>
       </div>
 
       ${showLineItems ? `

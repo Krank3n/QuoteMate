@@ -266,6 +266,12 @@ export interface QuoteSection {
   pricing?: 'hourly' | 'lumpSum';
   /** Customer-facing scope text for this section. Multi-line, reaches the PDF. */
   description?: string;
+  /**
+   * 'generated' when `description` was written by the materials run from the
+   * tradie's written scope, so a scope change may replace it. Absent (never
+   * undefined — Firestore rejects it) once the tradie has typed their own.
+   */
+  descriptionSource?: 'generated';
 }
 
 // Reusable section template (assembly)

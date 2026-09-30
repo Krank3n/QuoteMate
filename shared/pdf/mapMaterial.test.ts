@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { toPdfMaterial, toPdfMaterials } from './mapMaterial';
+import { toPdfMaterial, toPdfMaterials, toPdfSection } from './mapMaterial';
 
 describe('toPdfMaterial', () => {
   it('carries kind and scope through', () => {
@@ -43,5 +43,27 @@ describe('toPdfMaterial', () => {
     expect(toPdfMaterials(undefined)).toEqual([]);
     expect(toPdfMaterials(null)).toEqual([]);
     expect(toPdfMaterials([])).toEqual([]);
+  });
+});
+
+describe('toPdfSection', () => {
+  it('passes the section scope description through', () => {
+    const out = toPdfSection({
+      name: 'Demolition',
+      laborHours: 4,
+      multiplier: 1,
+      laborHoursTotal: 4,
+      laborRate: 90,
+      laborUnit: 'hours',
+      laborTotal: 360,
+      description: 'Remove kitchen cupboards and benchtop.\nPlumbing disconnection by others.',
+    });
+    expect(out.description).toBe('Remove kitchen cupboards and benchtop.\nPlumbing disconnection by others.');
+    expect(out.laborTotal).toBe(360);
+  });
+
+  it('leaves description undefined for a section without one', () => {
+    const out = toPdfSection({ name: 'Framing', laborHours: 2, laborRate: 90, laborTotal: 180 });
+    expect(out.description).toBeUndefined();
   });
 });

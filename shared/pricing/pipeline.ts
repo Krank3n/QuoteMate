@@ -44,6 +44,7 @@ import {
 } from './geometricCoverage';
 import { convertLLMMaterialsToMaterials } from './llmMaterials';
 import { simplifySearchTerm } from './simplifySearchTerm';
+import { isWrittenScope } from './writtenScope';
 import { withPreservedCorrections } from './floorplanTakeoff';
 import { stampAsPriced } from './asPriced';
 import { isNonRetailTradeRow, tradeFallbackUnitPriceWithUnit } from './tradeFallback';
@@ -357,6 +358,27 @@ export async function generateMaterialsForQuote<Q extends PricingQuote>(
     ? (analysis.estimatedHours || 8) / totalMultipliers
     : 1;
 
+  // Customer-facing scope text per section, only for a written scope (the
+  // tradie's own numbered/bulleted items), stamped 'generated' so a later
+  // scope change knows it may replace it. It fills new sections, and existing
+  // sections this run also uses that carry NO description — any description
+  // already there (typed or generated) is never overwritten.
+  const descriptions = isWrittenScope(quote.job?.description) ? analysis.sectionDescriptions : undefined;
+  const descriptionFor = (sectionName: string): string | undefined => {
+    if (!descriptions || !sectionMultipliers.has(sectionName)) return undefined;
+    if (Object.prototype.hasOwnProperty.call(descriptions, sectionName)) return descriptions[sectionName];
+    const wanted = sectionName.trim().toLowerCase();
+    const key = Object.keys(descriptions).find((k) => k.trim().toLowerCase() === wanted);
+    return key !== undefined ? descriptions[key] : undefined;
+  };
+  const generatedDescription = (sectionName: string) => {
+    const desc = descriptionFor(sectionName);
+    return desc ? { description: desc, descriptionSource: 'generated' as const } : {};
+  };
+  const keptSections = descriptions
+    ? existingSections.map((s) => (s.description?.trim() ? s : { ...s, ...generatedDescription(s.name) }))
+    : existingSections;
+
   const newSections: QuoteSection[] = [];
   sectionMultipliers.forEach((multiplier, sectionName) => {
     if (existingSectionNames.has(sectionName)) return;
@@ -376,6 +398,7 @@ export async function generateMaterialsForQuote<Q extends PricingQuote>(
       laborUnit: 'hours',
       laborTotal: perUnitHours * defaultRate * multiplier,
       sortOrder: existingSections.length + newSections.length,
+      ...generatedDescription(sectionName),
     });
   });
 
@@ -394,7 +417,7 @@ export async function generateMaterialsForQuote<Q extends PricingQuote>(
           }
         : {}),
     } as Q['job'],
-    sections: [...existingSections, ...newSections],
+    sections: [...keptSections, ...newSections],
     materials: hasExistingMaterials ? [...quote.materials, ...generatedMaterials] : generatedMaterials,
     laborHours: hasExistingMaterials
       ? quote.laborHours + (analysis.estimatedHours || 0)

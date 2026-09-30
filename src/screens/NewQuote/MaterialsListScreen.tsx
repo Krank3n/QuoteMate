@@ -53,6 +53,7 @@ import type { Tokens } from '../../theme';
 import { makeStyles, useThemeColors } from '../../theme';
 import { formatCurrency, updateMaterialTotalPrice, supplierPriceForGstMode } from '../../utils/quoteCalculator';
 import { keepSupplierPriceInclusive, normaliseTemplateToHours } from '../../../shared/document';
+import { resolvePriceDetail } from '../../../shared/document/priceDetail';
 import {
   pruneBlankMaterials,
   hasUnpricedMaterials as hasUnpricedMaterialRows,
@@ -83,6 +84,8 @@ import { PillToggle, type PillToggleOption } from '../../components/PillToggle';
 import {
   createSection,
   renameSection,
+  setSectionDescription,
+  sectionChangeKeepsTotals,
   deleteSection,
   moveSection,
   moveMaterialToSection,
@@ -703,6 +706,11 @@ export function MaterialsListScreen() {
   // remove a section (keeping the items, or taking them with it).
   const [sectionActionsVisible, setSectionActionsVisible] = useState(false);
   const [sectionActionsName, setSectionActionsName] = useState('');
+  // Scope of works editor for an existing section — the text printed under
+  // its heading on the customer's quote. Empty name = closed.
+  const [scopeSectionName, setScopeSectionName] = useState('');
+  const [scopeValue, setScopeValue] = useState('');
+  const [scopeError, setScopeError] = useState('');
 
   // Template picker modal
   const [templatePickerVisible, setTemplatePickerVisible] = useState(false);
@@ -1651,6 +1659,36 @@ export function MaterialsListScreen() {
     );
   };
 
+  const handleOpenSectionScope = (sectionName: string) => {
+    if (!currentQuote) return;
+    const sectionData = (currentQuote.sections || []).find(s => s.name === sectionName);
+    setScopeValue(sectionData?.description ?? '');
+    setScopeError('');
+    setScopeSectionName(sectionName);
+  };
+
+  // Blank clears it — setSectionDescription drops the key rather than
+  // storing an empty string.
+  const handleSaveSectionScope = () => {
+    if (!currentQuote || !scopeSectionName) return;
+    const next = setSectionDescription(
+      { sections: currentQuote.sections || [], materials: currentQuote.materials },
+      scopeSectionName,
+      scopeValue,
+    );
+    // A section that so far exists only on its materials gets a $0 record to
+    // carry the text. On a quote whose labour isn't split into sections yet,
+    // that first record would move the price — refuse rather than change it.
+    if (!sectionChangeKeepsTotals(currentQuote, next)) {
+      setScopeError("Can't add this one yet. This quote's labour isn't split into sections, so adding a scope here would change the price.");
+      return;
+    }
+    applySectionChange(next);
+    setScopeSectionName('');
+  };
+  // 'Total only' prints no line items, so no section scope either.
+  const scopePrintsOnQuote = !currentQuote || resolvePriceDetail(currentQuote, businessSettings) !== 'total';
+
   // keepMaterials: the lines come back unsectioned instead of going with the
   // section. That one is safe and immediate; taking the lines with it is not,
   // so it still asks first.
@@ -1996,11 +2034,12 @@ export function MaterialsListScreen() {
       const sectionMats = materials.filter(m => m.section === item.sectionName);
       const showMultiplier = sd && sd.multiplier > 0 && sectionMats.some(m => m.templateBaseQuantity);
       const isCollapsed = collapsedSections.has(item.sectionName);
+      const scopeText = !isCollapsed ? sd?.description : undefined;
       return (
         <View collapsable={false}>
           <View style={[
             styles.sectionCardHeaderStandalone,
-            isCollapsed && styles.sectionCardHeaderCollapsed,
+            (isCollapsed || !!scopeText) && styles.sectionCardHeaderCollapsed,
           ]}>
             <TouchableOpacity onPress={() => toggleSectionCollapsed(item.sectionName)} hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }} style={{ marginRight: 8 }}>
               <MaterialCommunityIcons name={isCollapsed ? 'chevron-right' : 'chevron-down'} size={22} color={themeColors.textMuted} />
@@ -2040,6 +2079,16 @@ export function MaterialsListScreen() {
               </TouchableOpacity>
             </View>
           </View>
+          {!!scopeText && (
+            <TouchableOpacity
+              onPress={() => handleOpenSectionScope(item.sectionName)}
+              activeOpacity={0.7}
+              accessibilityLabel={`Edit scope of works for ${item.sectionName}`}
+              style={styles.sectionCardScope}
+            >
+              <Text style={styles.sectionCardScopeText} numberOfLines={3}>{scopeText}</Text>
+            </TouchableOpacity>
+          )}
         </View>
       );
     }
@@ -2451,7 +2500,7 @@ export function MaterialsListScreen() {
             mode="outlined"
             multiline
             numberOfLines={3}
-            placeholder="What's included in this section — reaches the customer's quote"
+            placeholder="What's included in this section — prints under it on the quote"
             style={{ marginBottom: 16 }}
           />
           <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 10 }}>
@@ -2473,6 +2522,55 @@ export function MaterialsListScreen() {
               onPress={handleCreateSection}
             >
               <Text style={styles.newSectionSaveText}>Create</Text>
+            </TouchableOpacity>
+          </View>
+          </KeyboardAvoidingView>
+        </Modal>
+      </Portal>
+      )}
+
+      {/* Scope of works for an existing section — same form pattern as the
+          New Section modal. Saving blank clears it. */}
+      {!!scopeSectionName && (
+      <Portal>
+        <Modal
+          visible={!!scopeSectionName}
+          onDismiss={() => setScopeSectionName('')}
+          contentContainerStyle={styles.newSectionModal}
+        >
+          <KeyboardAvoidingView behavior="padding" automaticOffset>
+          <Text style={styles.newSectionModalTitle}>{scopeSectionName}</Text>
+          <TextInput
+            label="Scope of works"
+            value={scopeValue}
+            onChangeText={setScopeValue}
+            mode="outlined"
+            multiline
+            // Tall enough for a full description (capped at 500 chars) so the
+            // first line never scrolls up behind the outlined label on web.
+            numberOfLines={8}
+            placeholder="What's included in this section — prints under it on the quote"
+            style={{ marginBottom: scopePrintsOnQuote && !scopeError ? 16 : 8 }}
+            autoFocus
+          />
+          {!scopePrintsOnQuote && (
+            <Text style={styles.scopeHelperText}>
+              Your quote shows the total only, so this won't print. The job description still does.
+            </Text>
+          )}
+          {!!scopeError && <Text style={styles.scopeErrorText}>{scopeError}</Text>}
+          <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 10 }}>
+            <TouchableOpacity
+              style={styles.newSectionCancelBtn}
+              onPress={() => setScopeSectionName('')}
+            >
+              <Text style={styles.newSectionCancelText}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.newSectionSaveBtn}
+              onPress={handleSaveSectionScope}
+            >
+              <Text style={styles.newSectionSaveText}>Save</Text>
             </TouchableOpacity>
           </View>
           </KeyboardAvoidingView>
@@ -2876,6 +2974,11 @@ export function MaterialsListScreen() {
             icon: 'arrow-down',
             label: 'Move down',
             onPress: () => { setSectionActionsVisible(false); handleMoveSection(sectionActionsName, 1); },
+          },
+          {
+            icon: 'text-box-outline',
+            label: 'Scope of works',
+            onPress: () => { setSectionActionsVisible(false); handleOpenSectionScope(sectionActionsName); },
           },
           {
             icon: 'content-save-outline',
@@ -3511,6 +3614,33 @@ const useStyles = makeStyles((t) => ({
   },
   sectionCardHeaderCollapsed: {
     borderBottomWidth: 0,
+  },
+  // Scope of works under a section heading — the header drops its bottom
+  // border while this shows, so the band carries it instead.
+  sectionCardScope: {
+    marginHorizontal: 4,
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+    backgroundColor: t.colors.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: t.colors.border,
+  },
+  sectionCardScopeText: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: t.colors.textMuted,
+  },
+  scopeHelperText: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: t.colors.textMuted,
+    marginBottom: 16,
+  },
+  scopeErrorText: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: t.colors.error,
+    marginBottom: 16,
   },
   sectionCardFooterStandalone: {
     marginHorizontal: 4,

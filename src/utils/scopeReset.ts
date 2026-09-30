@@ -22,11 +22,20 @@ export function isTradieRow(m: Pick<Material, 'origin' | 'manualPriceOverride'>)
   return m.origin === 'manual' || m.manualPriceOverride === true;
 }
 
+function withoutGeneratedDescription(s: QuoteSection): QuoteSection {
+  if (s.descriptionSource !== 'generated') return s;
+  const { description: _description, descriptionSource: _source, ...rest } = s;
+  return rest;
+}
+
 export function resetGeneratedScope(quote: Quote, hours?: number): Quote {
   const materials = (quote.materials || []).filter(isTradieRow);
   const referenced = new Set(materials.map((m) => m.section).filter((s): s is string => !!s));
+  // A kept section's generated description described the OLD scope; drop it
+  // (and its stamp) so the re-run can write one for the new scope. Text the
+  // tradie typed has no stamp and stays.
   const sections: QuoteSection[] | undefined = quote.sections
-    ? quote.sections.filter((s) => referenced.has(s.name))
+    ? quote.sections.filter((s) => referenced.has(s.name)).map(withoutGeneratedDescription)
     : undefined;
   return {
     ...quote,

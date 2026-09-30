@@ -77,3 +77,31 @@ describe('resetGeneratedScope', () => {
     expect(isTradieRow({ origin: 'recommended', manualPriceOverride: false })).toBe(false);
   });
 });
+
+describe('resetGeneratedScope — section scope descriptions', () => {
+  const mine = row({ id: 'mine', section: 'Concrete', name: 'My own concrete price', manualPriceOverride: true, price: 99 });
+  const withDescription = (description: string, generatedStamp: boolean): Quote => {
+    const q = quote([...generated, mine]);
+    return {
+      ...q,
+      sections: q.sections!.map((s) =>
+        s.name === 'Concrete'
+          ? { ...s, description, ...(generatedStamp ? { descriptionSource: 'generated' as const } : {}) }
+          : s,
+      ),
+    };
+  };
+
+  it('drops a generated description (and its stamp) from a kept section', () => {
+    const out = resetGeneratedScope(withDescription('Pour footings for 10 m of fence.', true));
+    const concrete = out.sections!.find((s) => s.name === 'Concrete')!;
+    expect('description' in concrete).toBe(false);
+    expect('descriptionSource' in concrete).toBe(false);
+    expect(concrete.laborTotal).toBe(480);
+  });
+
+  it('keeps a description the tradie typed', () => {
+    const out = resetGeneratedScope(withDescription('My own words about the concrete.', false));
+    expect(out.sections!.find((s) => s.name === 'Concrete')!.description).toBe('My own words about the concrete.');
+  });
+});

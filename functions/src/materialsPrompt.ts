@@ -31,6 +31,23 @@ export interface MaterialsPromptOptions {
    * stated any, which leaves the original soft rule in place.
    */
   targetHours?: number;
+  /**
+   * True when the job description is a written multi-item scope
+   * (shared/pricing/writtenScope.ts). Asks for a short customer-facing
+   * description per section restating the tradie's own items. Absent/false
+   * leaves the prompt exactly as it was.
+   */
+  askSectionDescriptions?: boolean;
+}
+
+/**
+ * The Gemini fallback's output budget for the materials call. Attached images
+ * may add a floorplanAnalysis, and a written scope adds sectionDescriptions,
+ * so either gets the larger budget; everything else keeps 8000 exactly as
+ * before. (The Claude primary already runs at 32k.)
+ */
+export function geminiMaterialsMaxOutputTokens(o: { hasImages: boolean; writtenScope?: boolean }): number {
+  return o.hasImages || o.writtenScope ? 16000 : 8000;
 }
 
 const MAX_QUOTING_PREFERENCES = 20;
@@ -65,11 +82,20 @@ export function buildMaterialsPrompt(o: MaterialsPromptOptions): string {
     reeceCatalogueSection,
     tradeContext,
     targetHours,
+    askSectionDescriptions,
   } = o;
   const hasTarget = typeof targetHours === 'number' && Number.isFinite(targetHours) && targetHours > 0;
   const sectionHoursRule = hasTarget
     ? `The tradie has STATED the total labour as ${targetHours} hours: set "estimatedHours" to exactly ${targetHours} and make the sum of (sectionLaborHours × sectionMultiplier) across all sections equal ${targetHours}. Split that number between the sections — never re-estimate the total.`
     : 'The sum of (sectionLaborHours × sectionMultiplier) across all sections should roughly equal estimatedHours.';
+  const sectionDescriptionsKey = askSectionDescriptions
+    ? `,
+  "sectionDescriptions": [{ "section": "<exact section string used on the materials>", "description": "Short customer-facing scope for that section" }]`
+    : '';
+  const sectionDescriptionsRules = askSectionDescriptions
+    ? `
+- SECTION DESCRIPTIONS: the tradie wrote the job as a list of scope items. For each section, "sectionDescriptions" carries customer-facing text that is printed under that section's heading on the quote. Restate ONLY the tradie's own written items that this section covers, in 1–4 short lines of plain text. No $ figures or prices, no quantity arithmetic, no internal notes. Never add work, brands or promises the tradie didn't write. Keep their exclusions and caveats (e.g. "by others", "customer-supplied"). Use the exact section string from the materials. If none of the tradie's items belong to a section, omit that section rather than invent a description.`
+    : '';
   return `You are an expert Australian tradie assistant specializing in construction and trade work. ${hasExisting ? 'Some materials have already been added from templates. Analyze the job and suggest only the ADDITIONAL materials needed to complete the job.' : 'Analyze the following job description and generate a detailed materials list with generic search terms that work across multiple hardware stores.'}
 
 Job Description: "${jobDescription}"${contextSection}${existingMaterialsSection}${templateReferenceSection}${savedRatesSection}${reeceCatalogueSection}
@@ -98,7 +124,7 @@ Provide a JSON response with the following structure:
     }
   ],
   "jobQualityTier": "budget|standard|premium",
-  "floorplanAnalysis": "(OMIT unless an attached image is an architectural plan/drawing — see FLOORPLAN ANALYSIS below)"
+  "floorplanAnalysis": "(OMIT unless an attached image is an architectural plan/drawing — see FLOORPLAN ANALYSIS below)"${sectionDescriptionsKey}
 }
 
 RESPECT THE JOB DESCRIPTION — NAMED MATERIALS AND QUANTITIES ARE MANDATORY:
@@ -126,7 +152,7 @@ DECK-BOARD REPLACEMENT CHECK:
 - Keep demolition/disposal labour separate from installation labour when both are requested.
 
 - "sectionLaborHours" is the estimated labor hours PER UNIT of that section (e.g. 1.5 hours per fence bay). All materials in the same section should have the same sectionLaborHours value. ${sectionHoursRule}
-- ONE section per stage of work, ONE exact name per section. Decide the section names first, then reuse each string character-for-character on every material in that stage. Never spell the same stage two ways ("Demolition & Disposal" on some rows and "Demolition – Existing Door Removal" on others; "Paint Finish - Door" and "Paint Finish – Door, Frame & Architraves"): each spelling becomes its own section and its labour is charged AGAIN — a cavity-slider job came out at 42.5 hours across nine sections that were really four stages worth 20. When a job has options or alternatives, they are extra MATERIAL rows inside the one stage, not extra sections.
+- ONE section per stage of work, ONE exact name per section. Decide the section names first, then reuse each string character-for-character on every material in that stage. Never spell the same stage two ways ("Demolition & Disposal" on some rows and "Demolition – Existing Door Removal" on others; "Paint Finish - Door" and "Paint Finish – Door, Frame & Architraves"): each spelling becomes its own section and its labour is charged AGAIN — a cavity-slider job came out at 42.5 hours across nine sections that were really four stages worth 20. When a job has options or alternatives, they are extra MATERIAL rows inside the one stage, not extra sections.${sectionDescriptionsRules}
 
 QUALITY TIER DETECTION — read the job description for tier qualifiers and set both "jobQualityTier" (top-level, one per job) and "qualityTier" (per-material, inherits jobQualityTier when omitted). The downstream pricing layer uses this to pick the RIGHT product out of the supplier search results instead of always grabbing the cheapest hit. This is high-leverage — a wrong tier turns a $400 "premium mixer tap" job into an $86 budget tap quote.
 - "premium", "high quality", "high-end", "luxury", "designer", "architectural", "top of the range", "custom", "bespoke", brand names like Phoenix / Miele / Fisher & Paykel / Caesarstone → jobQualityTier: "premium". Search terms for fittings/finishes in these jobs should include words like "premium" or "professional" (e.g. "premium stainless steel undermount sink", not just "sink").

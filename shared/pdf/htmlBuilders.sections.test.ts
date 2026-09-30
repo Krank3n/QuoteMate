@@ -9,8 +9,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { buildQuotePdfHtml, generateMaterialsHTML } from './htmlBuilders';
-import type { QuotePdfData, BusinessPdfData, LaborSection, PdfMaterial } from './types';
+import { buildInvoicePdfHtml, buildQuotePdfHtml, generateMaterialsHTML } from './htmlBuilders';
+import type { InvoicePdfData, QuotePdfData, BusinessPdfData, LaborSection, PdfMaterial } from './types';
 
 const business: BusinessPdfData = { businessName: 'Test Trades', logoHtml: '' };
 
@@ -155,6 +155,85 @@ describe('PDF sections', () => {
     );
     expect(html).toContain('Gloss &lt;all&gt; trims &amp; sills');
     expect(html).not.toContain('<all>');
+  });
+
+  it('prints a section scope description on the invoice too', () => {
+    const invoice: InvoicePdfData = {
+      ...quoteData({
+        sections: [
+          labourSection('Painting', 850, { description: 'Two coats to the new walls.\nCeilings by others.' }),
+          labourSection('Demolition', 340),
+        ],
+      }),
+      invoiceNumber: 'INV-0001',
+      issueDate: '10 July 2026',
+      dueDate: '24 July 2026',
+    };
+    const html = buildInvoicePdfHtml(invoice, business);
+    expect(html).toContain('<div class="section-scope">Two coats to the new walls.<br>Ceilings by others.</div>');
+    expect(html.match(/class="section-scope"/g)).toHaveLength(1);
+  });
+
+  it('prints a labour-only section\'s scope under its row in the labour block (quote)', () => {
+    const html = buildQuotePdfHtml(
+      quoteData({
+        sections: [
+          labourSection('Painting', 850),
+          labourSection('Demolition', 340),
+          labourSection('Site clean', 170, { description: 'Sweep out and remove all rubbish.' }),
+        ],
+      }),
+      business,
+    );
+    expect(html).toContain('Site clean<div class="section-scope">Sweep out and remove all rubbish.</div>');
+    expect(html.match(/class="section-scope"/g)).toHaveLength(1);
+  });
+
+  it('prints a labour-only section\'s scope in the labour block on the invoice too', () => {
+    const invoice: InvoicePdfData = {
+      ...quoteData({
+        sections: [
+          labourSection('Painting', 850),
+          labourSection('Demolition', 340),
+          labourSection('Site clean', 170, { description: 'Sweep out and remove all rubbish.' }),
+        ],
+      }),
+      invoiceNumber: 'INV-0002',
+      issueDate: '10 July 2026',
+      dueDate: '24 July 2026',
+    };
+    const html = buildInvoicePdfHtml(invoice, business);
+    expect(html).toContain('Site clean<div class="section-scope">Sweep out and remove all rubbish.</div>');
+  });
+
+  it('a section with materials prints its scope once, on the materials caption, never in the labour block', () => {
+    const html = buildQuotePdfHtml(
+      quoteData({
+        sections: [
+          labourSection('Painting', 850, { description: 'Two coats, low sheen.' }),
+          labourSection('Demolition', 340),
+        ],
+      }),
+      business,
+    );
+    expect(html.match(/Two coats, low sheen\./g)).toHaveLength(1);
+    expect(html).toContain('Painting<div class="section-scope">Two coats, low sheen.</div></caption>');
+  });
+
+  it('prints no section scope when the quote shows the total only', () => {
+    const html = buildQuotePdfHtml(
+      quoteData({
+        priceDetail: 'total',
+        sections: [
+          labourSection('Painting', 850, { description: 'Two coats, low sheen.' }),
+          labourSection('Site clean', 170, { description: 'Sweep out and remove all rubbish.' }),
+        ],
+      }),
+      business,
+    );
+    expect(html).not.toContain('section-scope"');
+    expect(html).not.toContain('Two coats, low sheen.');
+    expect(html).not.toContain('Sweep out and remove all rubbish.');
   });
 
   it('groups materials by section without any business setting saying so', () => {
