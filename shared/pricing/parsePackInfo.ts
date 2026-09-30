@@ -77,6 +77,11 @@ const PATTERNS: Array<{ re: RegExp; unit: PackInfo['packUnit']; allowOne?: boole
   { re: new RegExp(String.raw`${NUM}\s*(?:m³|m3|cubic\s+(?:metres?|meters?))(?!\w)`, 'i'), unit: 'm³' },
   // Length: "5.4m length", "5.4m long", or just trailing "5.4m" / "2400mm" at end
   { re: new RegExp(String.raw`(?<![\d.])${NUM}\s*m(?![lm²2a-z])(?:\s+(?:length|long|roll))?`, 'i'), unit: 'm' },
+  // Trade price files spell the metre out: "DWV PVC Pipe 50mm x 6mtr", "Auspex
+  // Pipe PEX 100 20mm x 50mtr", "PTFE Tape 12mm x 10mtr". The bare-m pattern
+  // above refuses anything followed by a letter, so none of Reece's lengths
+  // were readable and a 56 m run of pipe could not be divided into coils.
+  { re: new RegExp(String.raw`(?<![\d.])${NUM}\s*(?:mtrs?|metres?|meters?)\b`, 'i'), unit: 'm' },
   { re: new RegExp(String.raw`\b${NUM}\s*mm\s+(?:length|long)\b`, 'i'), unit: 'm' }, // mm length → convert below
   // Weight: "20kg bag", "900g tub". Keep before liquids because concrete
   // descriptions often include a secondary wet yield ("10kg ... yields 1.1L")
@@ -214,7 +219,11 @@ export function parsePackInfo(
     if (areaDims) {
       const a = parseFloat(areaDims[1]) / (areaDims[2].toLowerCase() === 'mm' ? 1000 : 1);
       const b = parseFloat(areaDims[3]) / (areaDims[4].toLowerCase() === 'mm' ? 1000 : 1);
-      if (a > 0 && b > 0) return { packSize: Math.round(a * b * 100) / 100, packUnit: 'm²' };
+      // A face that rounds to nothing is a profile, not a sheet: "Fire Rated
+      // Insulation 15mm x 9mm Wall 2mtr" is pipe lagging, and reading its
+      // cross-section returned a 0 m² pack instead of the 2 m length.
+      const area = Math.round(a * b * 100) / 100;
+      if (area > 0) return { packSize: area, packUnit: 'm²' };
     }
     // Sheet goods usually carry the unit once, at the end: "2400 x 1200 x 12mm
     // Plywood". Both leading figures are millimetres, so the sheet is 2.88 m².

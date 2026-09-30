@@ -201,4 +201,16 @@ describe('the reconcile model\'s own phrasing (QU-178514 corrupted floor)', () =
       expect(parsePackInfo('Tile Adhesive 20kg')).toEqual({ packSize: 20, packUnit: 'kg' });
     });
   });
+
+  describe('trade price-file lengths (Reece)', () => {
+    it('reads a spelled-out metre length', () => {
+      expect(parsePackInfo('DWV PVC Pipe 50mm x 6mtr')).toEqual({ packSize: 6, packUnit: 'm' });
+      expect(parsePackInfo('Auspex Pipe PEX 100 20mm x 50mtr')).toEqual({ packSize: 50, packUnit: 'm' });
+      expect(parsePackInfo('Bridgland Detectable Tape Gas Below 100mm x 250mtr', { preferUnit: 'm' })).toEqual({ packSize: 250, packUnit: 'm' });
+    });
+
+    it('does not read a lagging cross-section as a 0 m² sheet', () => {
+      expect(parsePackInfo('Fire Rated Insulation 15mm x 9mm Wall 2mtr')).toEqual({ packSize: 2, packUnit: 'm' });
+    });
+  });
 });

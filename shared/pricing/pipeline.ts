@@ -50,6 +50,7 @@ import { stampAsPriced } from './asPriced';
 import { isNonRetailTradeRow, tradeFallbackUnitPriceWithUnit } from './tradeFallback';
 import { rankLocalHits, type LocalSearchResult } from './localMaterialMatcher';
 import { shouldRunReeceFirst } from './supplierPriority';
+import { applyReecePackPricing, reecePackHint } from './reeceCandidates';
 import { batchSearchProgressive, type BatchChunkFetcher, type ScraperProduct } from './scraperCandidates';
 import { pickBestCandidate, isSemanticallyCompatible, type RankableCandidate } from './candidateRanker';
 
@@ -1171,23 +1172,28 @@ export async function fetchPricesForQuote<Q extends PricingQuote>(
         m.id,
         candidates
           .filter((c) => c.price != null && c.price > 0 && c.itemNumber)
-          .map((c) => ({
-            productName: c.productName || '',
-            description: c.productName,
-            price: c.price as number,
-            priceIncGst: c.price as number,
-            unit: c.unitOfMeasure || 'each',
-            itemNumber: c.itemNumber as string,
-            stockLevel: 'unknown' as const,
-            productUrl: c.productUrl || '',
-            imageUrl: c.imageUrl || undefined,
-            confidence: 'medium' as const,
-          })),
+          .map((c) => {
+            // Hand reconcile the pack Reece's UOM states, so it doesn't have
+            // to guess that a $23 "(100)" BAG is a hundred clips.
+            const hint = reecePackHint(c.productName, c.unitOfMeasure);
+            return {
+              productName: c.productName || '',
+              description: c.productName,
+              price: c.price as number,
+              priceIncGst: c.price as number,
+              unit: c.unitOfMeasure || 'each',
+              itemNumber: c.itemNumber as string,
+              stockLevel: 'unknown' as const,
+              productUrl: c.productUrl || '',
+              imageUrl: c.imageUrl || undefined,
+              confidence: 'medium' as const,
+              ...(hint ? { packSize: hint.packSize, packUnit: hint.packUnit } : {}),
+            };
+          }),
       );
 
       const reecePrice = supplierPriceForGstMode(result.price, gstInclusive);
       m.price = reecePrice;
-      m.totalPrice = roundToTwoDecimals(reecePrice * m.quantity);
       m.manualPriceOverride = false;
       m.pricingSource = 'api';
       m.bunningsItemNumber = undefined;
@@ -1198,6 +1204,11 @@ export async function fetchPricesForQuote<Q extends PricingQuote>(
       if (result.store) m.description = `Available at ${result.store}`;
       if (result.imageUrl) m.imageUrl = result.imageUrl;
       if (result.productUrl) m.productUrl = result.productUrl;
+      // Same pack arithmetic the Bunnings path applies at pick time. Reconcile
+      // refines it later, but only for rows it reaches: a server run that timed
+      // out mid-reconcile (29 Sep, 98 rows) left every unreached Reece row at
+      // requirement × pack price — 100 bags of clips, 3.6 m bandages per metre.
+      applyReecePackPricing(m, result.productName, result.unitOfMeasure);
       stampMatchConfidence(m, result.productName);
       fetchedCount += 1;
       reecePricedTerms.add(term);
