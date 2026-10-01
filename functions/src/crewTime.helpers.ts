@@ -8,6 +8,28 @@ import { createHash, randomBytes } from 'crypto';
 import { isDateKey, isValidEntryHours, parseHoursInput } from './shared/time/hours';
 import type { CrewMember } from './shared/time/types';
 
+/**
+ * One "hours sent in" push per business per this window. A crew member who
+ * puts in three days at once, or a whole crew at knock-off, is one buzz —
+ * the job screen shows every entry waiting either way.
+ */
+export const CREW_PUSH_COOLDOWN_MS = 15 * 60 * 1000;
+
+/** Whether a newly created time entry should tell the owner it arrived. */
+export function decideCrewSendInPush(
+  entry: Record<string, unknown> | undefined,
+  lastCrewPushAtMs: number | undefined,
+  nowMs: number,
+): { push: boolean; reason: 'ok' | 'not_crew_send_in' | 'cooldown' } {
+  if (!entry || entry.source !== 'crew_link' || entry.status !== 'pending') {
+    return { push: false, reason: 'not_crew_send_in' };
+  }
+  if (typeof lastCrewPushAtMs === 'number' && nowMs - lastCrewPushAtMs < CREW_PUSH_COOLDOWN_MS) {
+    return { push: false, reason: 'cooldown' };
+  }
+  return { push: true, reason: 'ok' };
+}
+
 /** How far back a crew member can put hours in. The owner can go further. */
 export const CREW_LOG_MAX_DAYS_BACK = 60;
 export const CREW_NOTE_MAX = 200;

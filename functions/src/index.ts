@@ -233,6 +233,7 @@ export { onJobWriteSyncCal } from './googleCalendarSync';
 export { requestKatieDemoCall, getKatieSignupLink, katieRecoveryDrip } from './callKatie';
 import { quoteRecordToDocumentRecord, invoiceRecordToDocumentRecord } from './shared/document/adapter';
 import { getAussieMessage, AussieEvent } from './aussieNotifications';
+import { decideCrewSendInPush } from './crewTime.helpers';
 import {
   decidePush,
   localDayKey,
@@ -11284,6 +11285,45 @@ export const onQuoteViewed = functions.firestore
       await change.after.ref.update({
         viewNotifiedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
+    }
+  });
+
+// -----------------------------------------------------------
+// onCrewHoursSentIn — Firestore trigger: a crew member sent hours in through
+// their link. Tell the owner, so the hours get approved while the job is
+// fresh rather than found on the job days later. Burst-limited to one push
+// per CREW_PUSH_COOLDOWN_MS per business; the job lists every entry waiting.
+// -----------------------------------------------------------
+export const onCrewHoursSentIn = functions.firestore
+  .document('users/{userId}/timeEntries/{entryId}')
+  .onCreate(async (snap, context) => {
+    const { userId, entryId } = context.params;
+    const entry = snap.data();
+    const pushStateRef = db.collection('users').doc(userId).collection('settings').doc('pushState');
+    const state = (await pushStateRef.get()).data() || {};
+    const lastMs = typeof state.lastCrewPushAt?.toMillis === 'function' ? state.lastCrewPushAt.toMillis() : undefined;
+    const decision = decideCrewSendInPush(entry, lastMs, Date.now());
+    if (!decision.push) {
+      if (decision.reason === 'cooldown') {
+        functions.logger.info('crew_push_cooldown', { userId, entryId });
+      }
+      return;
+    }
+
+    const jobId = typeof entry.jobId === 'string' ? entry.jobId : '';
+    const job = jobId
+      ? (await db.collection('users').doc(userId).collection('jobs').doc(jobId).get()).data()
+      : undefined;
+    const hours = Number(entry.hours);
+
+    const sent = await sendAussiePush(userId, 'crew_hours_sent', {
+      crew: String(entry.workerName || 'Your crew'),
+      hours: Number.isFinite(hours) ? `${Math.round(hours * 100) / 100} h` : 'hours',
+      job: String(job?.name || 'a job'),
+    }, jobId ? { jobId, openLogTime: '1' } : {});
+
+    if (sent) {
+      await pushStateRef.set({ lastCrewPushAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
     }
   });
 

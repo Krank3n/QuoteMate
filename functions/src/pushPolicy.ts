@@ -31,6 +31,10 @@ export const PUSH_CLASS: Record<AussieEvent, PushClass> = {
   // The tradie asked for these by locking the phone mid-run; never hold them.
   quote_priced: 'event',
   quote_pricing_snag: 'event',
+  // Crew put their hours in after knock-off — 5 to 7 pm is the usual time —
+  // so a daytime window would drop most of them. Burst-limited instead
+  // (CREW_PUSH_COOLDOWN_MS in crewTime.helpers.ts).
+  crew_hours_sent: 'event',
 };
 
 /**
@@ -50,6 +54,9 @@ export const ANDROID_CHANNEL: Record<AussieEvent, string> = {
   draft_nudge: 'reminders',
   quote_priced: 'quote-responses',
   quote_pricing_snag: 'quote-responses',
+  // An existing channel on purpose: a channel id the device hasn't created
+  // yet (old JS still running) gets the notification dropped on Android 8+.
+  crew_hours_sent: 'quote-responses',
 };
 
 /** Which notificationPreferences toggle governs each event. */
@@ -65,6 +72,7 @@ export const PREF_KEY: Record<AussieEvent, string> = {
   draft_nudge: 'inactivityNudges',
   quote_priced: 'quoteUpdates',
   quote_pricing_snag: 'quoteUpdates',
+  crew_hours_sent: 'crewUpdates',
 };
 
 /** Nudge-class pushes allowed per user per local day, across all nudge types. */

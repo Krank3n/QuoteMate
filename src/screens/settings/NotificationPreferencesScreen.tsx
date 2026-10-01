@@ -29,6 +29,7 @@ const DEFAULT_PREFS: NotificationPreferences = {
   invoiceUpdates: true,
   milestoneCelebrations: true,
   inactivityNudges: true,
+  crewUpdates: true,
 };
 
 interface PrefItem {
@@ -50,6 +51,12 @@ const PREF_ITEMS: PrefItem[] = [
     title: 'Invoice Updates',
     subtitle: 'Paid, overdue reminders',
     icon: 'receipt',
+  },
+  {
+    key: 'crewUpdates',
+    title: 'Crew Hours',
+    subtitle: 'Your crew sent hours in for you to approve',
+    icon: 'account-hard-hat',
   },
   {
     key: 'milestoneCelebrations',

@@ -877,6 +877,7 @@ export interface NotificationPreferences {
   invoiceUpdates: boolean;     // Invoice paid/overdue
   milestoneCelebrations: boolean; // Quote count milestones
   inactivityNudges: boolean;   // Unsent drafts and "still there?" nudges
+  crewUpdates: boolean;        // Crew sent hours in through their link
   // dailyMotivation was removed — a content-free daily push that was the
   // single most-disabled setting and 100% of all push volume.
 }

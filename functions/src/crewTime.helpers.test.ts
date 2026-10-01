@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
+  CREW_PUSH_COOLDOWN_MS,
   crewJobView,
+  decideCrewSendInPush,
   crewLinkDeadPage,
   crewTimePage,
   hashCrewToken,
@@ -125,5 +127,26 @@ describe('the rate-limit key', () => {
   it('can never be a Firestore path', () => {
     expect(rateLimitIp('a/b/../c', undefined)).toBe('a_b_.._c');
     expect(rateLimitIp('x'.repeat(200), undefined)).toHaveLength(64);
+  });
+});
+
+describe('telling the owner hours were sent in', () => {
+  const sentIn = { source: 'crew_link', status: 'pending', hours: 7, workerName: 'Jake' };
+  const now = 1_000_000_000;
+
+  it('pushes for a crew send-in waiting on approval', () => {
+    expect(decideCrewSendInPush(sentIn, undefined, now)).toEqual({ push: true, reason: 'ok' });
+  });
+
+  it("stays quiet for time the owner logged themselves, or for an already-approved entry", () => {
+    expect(decideCrewSendInPush({ source: 'manual', hours: 7 }, undefined, now).push).toBe(false);
+    expect(decideCrewSendInPush({ source: 'mate', hours: 2 }, undefined, now).push).toBe(false);
+    expect(decideCrewSendInPush({ ...sentIn, status: 'approved' }, undefined, now).push).toBe(false);
+    expect(decideCrewSendInPush(undefined, undefined, now).push).toBe(false);
+  });
+
+  it('a burst of send-ins is one buzz, then the next one after the cooldown pushes again', () => {
+    expect(decideCrewSendInPush(sentIn, now - 60_000, now)).toEqual({ push: false, reason: 'cooldown' });
+    expect(decideCrewSendInPush(sentIn, now - CREW_PUSH_COOLDOWN_MS, now).push).toBe(true);
   });
 });

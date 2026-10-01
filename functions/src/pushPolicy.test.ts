@@ -71,6 +71,29 @@ describe('event-class pushes', () => {
     expect(lateNight.channelId).toBe('quote-responses');
   });
 
+  it('delivers crew send-ins after knock-off, on a channel every install already has', () => {
+    expect(PUSH_CLASS.crew_hours_sent).toBe('event');
+    const evening = decidePush({
+      event: 'crew_hours_sent',
+      prefs: {},
+      timezone: 'Australia/Sydney',
+      nowMs: Date.UTC(2026, 7, 18, 8, 30), // 18:30 Sydney
+      nudgesSentToday: 5,
+    });
+    expect(evening.send).toBe(true);
+    expect(evening.channelId).toBe('quote-responses');
+  });
+
+  it('crew send-ins have their own off switch', () => {
+    const off = decidePush({
+      event: 'crew_hours_sent',
+      prefs: { crewUpdates: false, quoteUpdates: true },
+      timezone: 'Australia/Sydney',
+      nowMs: Date.UTC(2026, 7, 18, 0, 0),
+    });
+    expect(off).toMatchObject({ send: false, reason: 'opted_out' });
+  });
+
   it('delivers at any hour — money landing at 10pm is still worth knowing', () => {
     const decision = decidePush({
       event: 'invoice_paid',
