@@ -50,6 +50,7 @@ import { shouldReadyToSendNudge, toMs } from './draftNudge.helpers';
 import { onboardingTipDue } from './onboardingDrip.helpers';
 export * from './adminCrm';
 export * from './tickets';
+export * from './adminGoals';
 export { adminTrafficStats } from './analyticsTraffic';
 export { weeklyAnalyticsDigest, adminWeeklyDigest } from './analyticsDigest';
 export { trialLifecycleDaily } from './lifecycleEmails';
