@@ -11,7 +11,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { JSDOM } from 'jsdom';
-import { generateAcceptancePage } from './index';
+import { generateAcceptancePage, generateConfirmationPage } from './index';
 
 const business = { name: 'Harbour City Plumbing', brandColor: '#059669' };
 
@@ -210,5 +210,48 @@ describe('acceptance page — deposit paid by bank transfer', () => {
     const doc = await acceptWith({ kind: 'deposit', url: 'https://square.link/u/dep', amount: 300 }, 300);
     expect(doc.querySelector('.pay-offer[data-kind="deposit"]')).not.toBeNull();
     expect(doc.querySelector('.pay-offer[data-kind="transfer"]')).toBeNull();
+  });
+});
+
+describe('acceptance page — coming back to an accepted quote', () => {
+  async function renderAlready(payload: Record<string, unknown>): Promise<Document> {
+    const dom = new JSDOM(generateAcceptancePage('a'.repeat(64)), {
+      runScripts: 'dangerously',
+      url: 'https://example.com/',
+      beforeParse(window) {
+        (window as any).fetch = async () => ({
+          json: async () => ({ success: true, alreadyResponded: true, status: 'accepted', responseLabel: 'accepted', ...payload }),
+        });
+      },
+    });
+    const doc = dom.window.document;
+    for (let i = 0; i < 100; i++) {
+      if (doc.getElementById('content')!.textContent!.includes('Already responded')) break;
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    return doc;
+  }
+
+  it('reminds the customer of a bank-transfer deposit still owed', async () => {
+    const doc = await renderAlready({ depositDue: 291.72 });
+    const block = doc.querySelector('.pay-offer[data-kind="transfer"]');
+    expect(doc.getElementById('content')!.textContent).toContain('already been accepted');
+    expect(block).not.toBeNull();
+    expect(block!.textContent).toContain('$291.72');
+    expect(block!.textContent).toContain('Payment details are on your quote.');
+  });
+
+  it('shows nothing extra when no deposit is owed', async () => {
+    const doc = await renderAlready({ depositDue: null });
+    expect(doc.getElementById('content')!.textContent).toContain('already been accepted');
+    expect(doc.querySelector('.pay-offer')).toBeNull();
+  });
+
+  it('the email-button confirmation page reminds them too', () => {
+    const html = generateConfirmationPage('already', 'This quote has already been accepted.', 'Coastal Concreting', null, null, null, 291.72);
+    expect(html).toContain('Deposit to get started');
+    expect(html).toContain('$291.72');
+    const plain = generateConfirmationPage('already', 'This quote has already been accepted.', 'Coastal Concreting');
+    expect(plain).not.toContain('Deposit to get started');
   });
 });

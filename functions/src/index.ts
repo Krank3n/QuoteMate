@@ -6706,12 +6706,24 @@ export const getQuoteForAcceptance = functions.https.onRequest((req, res) => {
       // and answerable again even though respondedAt survives from the
       // earlier answer — see hasCustomerResponded.
       if (hasCustomerResponded(foundQuote)) {
+        // A customer coming back to an accepted quote whose deposit is still
+        // owed by bank transfer gets the same "Deposit to get started" block
+        // they saw on accepting — the link is where they look for it again.
+        // Only off Square: a Square tradie's deposit is a card payment, and
+        // this view never mints a link.
+        let depositDue: number | null = null;
+        if (foundQuote.status === 'accepted') {
+          const ownerUid = quoteRef?.parent?.parent?.id;
+          const onSquare = ownerUid ? !!(await getSquareTokens(ownerUid).catch(() => null)) : true;
+          if (!onSquare) depositDue = depositDueWithoutCardOffer(foundQuote, null);
+        }
         res.status(200).json({
           success: true,
           alreadyResponded: true,
           status: foundQuote.status,
           responseLabel: describeCustomerResponse(foundQuote.status),
           respondedAt: foundQuote.respondedAt,
+          depositDue,
         });
         return;
       }
@@ -7208,10 +7220,20 @@ export const quoteAcceptancePage = functions.https.onRequest(async (req, res) =>
 
     // Check if already responded (a re-sent quote is answerable again).
     if (hasCustomerResponded(foundQuote)) {
+      // Same as the review page: an accepted quote whose deposit is still
+      // owed by bank transfer reminds the customer what to pay and where.
+      // Off Square only — this view never mints a card link.
+      let depositDue: number | null = null;
+      if (foundQuote.status === 'accepted') {
+        const onSquare = !!(await getSquareTokens(foundUserId).catch(() => null));
+        if (!onSquare) depositDue = depositDueWithoutCardOffer(foundQuote, null);
+      }
       res.status(200).send(generateConfirmationPage(
         'already',
         `This quote has already been ${describeCustomerResponse(foundQuote.status)}.`,
-        businessName, brandColor, logoUrl
+        businessName, brandColor, logoUrl,
+        null,
+        depositDue,
       ));
       return;
     }
@@ -7571,7 +7593,7 @@ export function generateConfirmationPage(
         <a href="${esc(safePayment.url)}" class="btn">Pay by card</a>
         <div class="deposit-note">Secure card payment through Square. Or ${who} will invoice you when the job&#8217;s done.</div>
       </div>`
-          : transferDeposit && type === 'accepted'
+          : transferDeposit && (type === 'accepted' || type === 'already')
           ? `
       <div class="deposit" data-kind="transfer">
         <div class="deposit-label">Deposit to get started</div>
@@ -7878,7 +7900,7 @@ export function generateAcceptancePage(token: string): string {
           return;
         }
         if (data.alreadyResponded) {
-          showAlreadyResponded(data.responseLabel || data.status);
+          showAlreadyResponded(data.responseLabel || data.status, data.depositDue);
           return;
         }
         renderQuote(data.quote, data.business);
@@ -8189,13 +8211,15 @@ export function generateAcceptancePage(token: string): string {
       window.scrollTo(0, 0);
     }
 
-    function showAlreadyResponded(status) {
+    function showAlreadyResponded(status, depositDue) {
       hideActionBar();
+      var deposit = typeof depositDue === 'number' && depositDue > 0 ? renderTransferDeposit(depositDue) : '';
       document.getElementById('content').innerHTML =
         '<div class="state">' +
           '<div class="state-icon-ring neutral">&#8505;</div>' +
           '<h2>Already responded</h2>' +
           '<p>This quote has already been ' + escapeHtml(status || 'responded to') + '.</p>' +
+          deposit +
         '</div>';
     }
 
