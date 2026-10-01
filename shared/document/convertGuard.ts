@@ -57,3 +57,29 @@ export function isAlreadyInvoiced(doc?: ConvertCandidate | null): boolean {
 export function canConvertDocument(doc?: ConvertCandidate | null): boolean {
   return !!doc && doc.type === 'quote' && !doc.invoicedAt;
 }
+
+/**
+ * The money an invoice starts with when a quote converts. Shared by the
+ * client's optimistic convert and the server RPC so the two can never
+ * disagree on what the customer owes.
+ *
+ * The total stays the FULL job value. Anything already taken against the
+ * quote — a deposit, by Square or recorded by hand — is on the payments
+ * ledger, so it comes off the balance: `balanceDue = total − paidTotal`. Both
+ * convert paths used to also set `total = total − depositPaid` while keeping
+ * the deposit entry and paidTotal, so a $960 job with a $300 deposit became an
+ * invoice for $660 with $300 paid and $360 owing.
+ */
+export function invoiceMoneyOnConvert(doc: {
+  total?: unknown;
+  paidTotal?: unknown;
+  payments?: ReadonlyArray<{ amount?: unknown }> | null;
+}): { total: number; balanceDue: number } {
+  const total = Number(doc.total) || 0;
+  // paidTotal is the ledger's sum wherever it is written; the sum itself is
+  // the fallback for a doc that predates the field.
+  const paid = doc.paidTotal !== undefined && doc.paidTotal !== null
+    ? Number(doc.paidTotal) || 0
+    : (doc.payments ?? []).reduce<number>((acc, p) => acc + (Number(p?.amount) || 0), 0);
+  return { total, balanceDue: Math.round(Math.max(0, total - paid) * 100) / 100 };
+}

@@ -26,6 +26,9 @@ import {
 } from './shared/document/adapter';
 import { normaliseLabourToHours } from './shared/document/labourUnits';
 import { isStageDowngrade } from './shared/document/stage';
+import { restoreNettedConvertTotal } from './shared/document/recordedDeposit';
+
+export { restoreNettedConvertTotal };
 import type { DocumentStage, LegacyDocumentRecord } from './shared/document/types';
 
 type AnyData = LegacyDocumentRecord;
@@ -94,20 +97,42 @@ export function preserveFirstSend(existing: AnyData | null | undefined, toWrite:
 }
 
 /**
- * Keep the unified payment ledger when the legacy record agrees on the money.
+ * Keep the unified payment ledger when the legacy record is only an echo of it.
  *
- * The legacy invoices/{id} record holds ONE payment: a `paidAmount` total, a
- * method and a date. Every unified save mirrors the document onto it, and
- * this trigger then projects it straight back — so without this, the
- * projection's single `manual-{id}` entry replaced the real ledger on every
- * save. Two payments ($100 cash + $50 bank) came back as one "$150 cash"
- * entry, losing each payment's own method, date, notes and deposit label.
+ * The legacy quotes/{id} and invoices/{id} records hold ONE payment figure
+ * (`depositPaid` on a quote, `paidAmount` + `depositCredit` on an invoice).
+ * Every unified save mirrors the document onto them and this trigger projects
+ * them straight back, so without this the projection's single entry replaced
+ * the real ledger on every save: two payments ($100 cash + $50 bank) came back
+ * as one "$150 cash" entry, losing each payment's method, date, notes and
+ * deposit label.
  *
- * When the projected ledger sums to the same money as the stored one, the
- * legacy write carried no new payment information — it was the echo of a
- * unified save — so the stored ledger stands. When the sums differ, an older
- * client changed the money through the legacy record, and the projection is
- * the only account of it; take it as before. Pure.
+ * The stored ledger stands whenever the echo is one a client build could have
+ * produced FROM it — the legacy write then carried no new payment:
+ *
+ *  - Same money. Current builds' echo of any ledger.
+ *  - An invoice echo carrying no NEW money. Older app builds stay live until
+ *    every phone updates, and they echo a ledger two wrong ways: a deposit
+ *    both as `depositCredit` AND inside `paidAmount` (taking that doubled a
+ *    $300 deposit to $600 paid, $360 owing), and a stale paid figure from
+ *    before their own latest payment (taking that wiped the payment). Read
+ *    without its netted credit, neither echo shows more money than stored,
+ *    so an invoice echo only replaces the ledger when it really adds money.
+ *  - A quote echo carrying LESS than stored. A quote's legacy record keeps
+ *    only the deposit — older builds only the FIRST deposit — and none of a
+ *    full payment, so it always reads short of a ledger with two deposits or
+ *    a deposit plus a full-amount payment. Every writer of quote money (the
+ *    app, applyPaymentToDocument) writes the ledger first, so a short echo is
+ *    never news.
+ *
+ * Anything else — an invoice echo with different money — means a client
+ * changed the money through the legacy record only, and the projection is the
+ * only account of it; take it as before.
+ *
+ * When the stored ledger is kept, the money fields derived from the echo
+ * (paidTotal, balanceDue, a quote's depositPaid, a paid/part-paid stage) are
+ * re-derived from it too, so the document never disagrees with its own
+ * ledger. Pure.
  */
 export function preserveLedger(existing: AnyData | null | undefined, toWrite: AnyData): AnyData {
   const stored = existing?.payments;
@@ -115,10 +140,73 @@ export function preserveLedger(existing: AnyData | null | undefined, toWrite: An
   if (!Array.isArray(stored) || stored.length === 0 || !Array.isArray(incoming)) {
     return toWrite;
   }
+  const EPS = 0.005;
+  const round2 = (n: number) => Math.round(n * 100) / 100;
   const sum = (ps: AnyData[]) => ps.reduce((acc, p) => acc + (Number(p?.amount) || 0), 0);
-  if (Math.abs(sum(stored) - sum(incoming)) >= 0.005) return toWrite;
-  return { ...toWrite, payments: stored };
+  const storedSum = sum(stored);
+  const incomingSum = sum(incoming);
+  const storedDeposits = sum(stored.filter((p: AnyData) => p?.kind === 'deposit'));
+  const isQuote = (toWrite.type ?? existing?.type) === 'quote';
+
+  const isNetted = (p: AnyData) => p?.kind === 'deposit' && String(p?.id ?? '').startsWith('deposit-credit-');
+  // What the echo says has been paid against the invoice, leaving out a
+  // netted deposit credit — older builds report a ledger deposit both as
+  // that credit AND inside paidAmount, so this strips the double count.
+  const incomingPaid = incomingSum - sum(incoming.filter(isNetted));
+
+  const storedNettedCredit = sum(stored.filter(isNetted));
+  // What the ledger says has been paid against the total.
+  const storedPaid = storedSum - storedNettedCredit;
+
+  const sameMoney = Math.abs(storedSum - incomingSum) < EPS;
+  // A Square payment the ledger doesn't hold yet is new money, whatever the
+  // sums say. The webhook writes the ledger first, except for an older
+  // converted invoice whose document lives under its quote id — there the
+  // echo is the only way the payment reaches the ledger.
+  const newSquarePayment = incoming.some(
+    (p: AnyData) =>
+      !!p?.squarePaymentId &&
+      !stored.some((s: AnyData) => s?.squarePaymentId === p.squarePaymentId),
+  );
+  // Otherwise an invoice echo never takes money OFF the ledger. It reads
+  // lower when an older build writes a stale legacy record (seen on the sim:
+  // a 1.58 build recorded $50, then wrote the paid figure from before it),
+  // equal to the paid figure for a current build's echo, and equal to the
+  // WHOLE ledger (deposit credit included) when an older build double-counts
+  // a deposit. Only more than either is a legacy-only writer adding money.
+  const invoiceEchoNoNewMoney =
+    !isQuote &&
+    !newSquarePayment &&
+    (incomingPaid <= storedPaid + EPS || Math.abs(incomingPaid - storedSum) < EPS);
+  const shortQuoteEcho =
+    isQuote &&
+    incomingSum <= storedSum + EPS &&
+    incoming.every((p: AnyData) => p?.kind === 'deposit');
+
+  if (!sameMoney && !invoiceEchoNoNewMoney && !shortQuoteEcho) return toWrite;
+
+  const total = Number(toWrite.total ?? existing?.total) || 0;
+  // An older converted invoice's total already had its deposit taken off,
+  // and its `deposit-credit-*` entry records that — so what still counts
+  // against the total is the rest of the ledger.
+  const paidAgainstTotal = isQuote ? storedSum : storedPaid;
+  const kept: AnyData = {
+    ...toWrite,
+    payments: stored,
+    paidTotal: round2(storedSum),
+    balanceDue: round2(Math.max(0, total - paidAgainstTotal)),
+  };
+  if (isQuote) {
+    kept.depositPaid = round2(storedDeposits);
+  } else if (toWrite.stage === 'paid' || toWrite.stage === 'partially_paid') {
+    // Nothing paid against the total can't read paid or part paid.
+    kept.stage = total > 0 && paidAgainstTotal + EPS >= total
+      ? 'paid'
+      : paidAgainstTotal > EPS ? 'partially_paid' : 'invoice_sent';
+  }
+  return kept;
 }
+
 
 /**
  * Write the projection if it would not clobber a newer one already on disk.
@@ -200,6 +288,7 @@ async function writeMirror(
     // originally-recorded one on the mirror.
     toWrite = preserveFirstSend(existingData, toWrite);
     toWrite = preserveLedger(existingData, toWrite);
+    toWrite = restoreNettedConvertTotal(existingData, toWrite);
   }
   await ref.set(stripUndefined(toWrite), { merge: true });
   return { written: true, skipped: false };

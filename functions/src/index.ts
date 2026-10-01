@@ -38,6 +38,7 @@ import {
 } from './email';
 import { emailSafeLogoUrl } from './emailLogo';
 import { listAllAuthUsers } from './authUsers.helpers';
+import { invoiceBalanceDue } from './shared/document/recordedDeposit';
 import { isUnreachableEmail, reEngagementVerdict } from './reEngagement.helpers';
 import { recordReturnAndMaybeGrantTrial } from './returnTrial';
 import {
@@ -46,6 +47,7 @@ import {
   applySquarePaymentToInvoice,
   evaluatePaymentReceipt,
   receiptIsForDeposit,
+  quoteMoneyAfterSquare,
 } from './paymentReceipt.helpers';
 import { shouldReadyToSendNudge, toMs } from './draftNudge.helpers';
 import { onboardingTipDue } from './onboardingDrip.helpers';
@@ -225,6 +227,7 @@ import {
   hasCustomerResponded,
   describeCustomerResponse,
   sendAuditPatch,
+  quoteDepositPaid,
   type SquareLinkMinter,
 } from './documentHandlers';
 export { getStageViolationCounts, convertDocumentToInvoice } from './documentHandlers';
@@ -6703,12 +6706,27 @@ export const getQuoteForAcceptance = functions.https.onRequest((req, res) => {
       // and answerable again even though respondedAt survives from the
       // earlier answer — see hasCustomerResponded.
       if (hasCustomerResponded(foundQuote)) {
+        // A customer coming back to an accepted quote whose deposit is still
+        // owed by bank transfer gets the same "Deposit to get started" block
+        // they saw on accepting — the link is where they look for it again.
+        // Only off Square: a Square tradie's deposit is a card payment, and
+        // this view never mints a link.
+        let depositDue: number | null = null;
+        if (foundQuote.status === 'accepted') {
+          const ownerUid = quoteRef?.parent?.parent?.id;
+          // A failed read counts as Square: better no note than a bank note
+          // in front of a card-paying customer.
+          const onSquare = ownerUid ? await getSquareTokens(ownerUid).then((t) => !!t, () => true) : true;
+          if (!onSquare) depositDue = depositDueWithoutCardOffer(foundQuote, null);
+        }
         res.status(200).json({
           success: true,
           alreadyResponded: true,
           status: foundQuote.status,
           responseLabel: describeCustomerResponse(foundQuote.status),
           respondedAt: foundQuote.respondedAt,
+          depositDue,
+          businessName: businessSettings?.businessName || '',
         });
         return;
       }
@@ -6835,11 +6853,17 @@ export async function paymentOfferForAcceptedQuote(
   const total = Number(quote?.total) || 0;
   const depositRequired = quote?.requireDeposit === true;
   const depositPct = depositRequired ? (Number(quote?.depositPercentage) || 0) : 0;
+  // A deposit already recorded against the quote (paid by bank transfer, or
+  // an earlier card payment) is never asked for again by card. The deposit
+  // minter charges the whole depositAmount, so even part of one recorded
+  // rules the deposit link out; what's still owed is offered as an optional
+  // Pay now instead, priced off depositPaid like the full-quote link.
+  const depositAlreadyPaid = (Number(quote?.depositPaid) || 0) > 0;
 
   let kind: AcceptedQuotePaymentOffer['kind'];
   let linkKind: 'deposit' | 'quote_full';
   let amount: number;
-  if (depositRequired && depositPct > 0) {
+  if (depositRequired && depositPct > 0 && !depositAlreadyPaid) {
     kind = 'deposit';
     linkKind = 'deposit';
     amount = Number(quote.depositAmount) || total * (depositPct / 100);
@@ -6895,14 +6919,46 @@ export async function paymentOfferForAcceptedQuote(
 export function respondToQuoteResponseBody(
   response: 'accepted' | 'rejected',
   payment: AcceptedQuotePaymentOffer | null,
-): { success: true; message: string; payment: AcceptedQuotePaymentOffer | null } {
+  depositDue: number | null = null,
+): {
+  success: true;
+  message: string;
+  payment: AcceptedQuotePaymentOffer | null;
+  depositDue: number | null;
+} {
   return {
     success: true,
     message: response === 'accepted'
       ? 'Thank you! The quote has been accepted. The business will be in touch soon.'
       : 'The quote has been declined. The business has been notified.',
     payment: response === 'accepted' ? payment : null,
+    depositDue: response === 'accepted' ? depositDue : null,
   };
+}
+
+/**
+ * The deposit a customer should pay OUTSIDE the page after accepting: the
+ * quote asks for one, none has been recorded, and there is no card offer for
+ * it (the tradie isn't on Square — they're paid by bank transfer, and their
+ * payment details print on the quote). Null whenever there is a card offer
+ * at all, so the page never asks for the deposit two ways. Exported for
+ * acceptedQuotePaymentOffer.test.ts.
+ */
+export function depositDueWithoutCardOffer(
+  quote: any,
+  payment: AcceptedQuotePaymentOffer | null,
+): number | null {
+  if (payment) return null;
+  if (quote?.requireDeposit !== true) return null;
+  // Any money taken counts — a full payment isn't recorded as a deposit —
+  // and once the quote is invoiced the invoice says what's owed.
+  if (Math.max(Number(quote?.depositPaid) || 0, Number(quote?.paidTotal) || 0) > 0) return null;
+  if (quote?.invoiceId || quote?.invoicedAt) return null;
+  const total = Number(quote?.total) || 0;
+  const pct = Number(quote?.depositPercentage) || 0;
+  const asked = Number(quote?.depositAmount) || total * (pct / 100);
+  if (!(asked > 0)) return null;
+  return Math.round(asked * 100) / 100;
 }
 
 /**
@@ -7097,8 +7153,12 @@ export const respondToQuote = functions.https.onRequest((req, res) => {
       const payment = response === 'accepted'
         ? await paymentOfferForAcceptedQuote(foundUserId, foundQuoteRef.id, foundQuote)
         : null;
+      // No card offer for a deposit the quote asks for (a tradie paid by bank
+      // transfer): the page still names the deposit and where to pay it,
+      // rather than ending on "will be in touch".
+      const depositDue = response === 'accepted' ? depositDueWithoutCardOffer(foundQuote, payment) : null;
 
-      res.status(200).json(respondToQuoteResponseBody(response, payment));
+      res.status(200).json(respondToQuoteResponseBody(response, payment, depositDue));
     } catch (error: any) {
       res.status(500).json({ success: false, error: error.message });
     }
@@ -7166,10 +7226,20 @@ export const quoteAcceptancePage = functions.https.onRequest(async (req, res) =>
 
     // Check if already responded (a re-sent quote is answerable again).
     if (hasCustomerResponded(foundQuote)) {
+      // Same as the review page: an accepted quote whose deposit is still
+      // owed by bank transfer reminds the customer what to pay and where.
+      // Off Square only — this view never mints a card link.
+      let depositDue: number | null = null;
+      if (foundQuote.status === 'accepted') {
+        const onSquare = await getSquareTokens(foundUserId).then((t) => !!t, () => true);
+        if (!onSquare) depositDue = depositDueWithoutCardOffer(foundQuote, null);
+      }
       res.status(200).send(generateConfirmationPage(
         'already',
         `This quote has already been ${describeCustomerResponse(foundQuote.status)}.`,
-        businessName, brandColor, logoUrl
+        businessName, brandColor, logoUrl,
+        null,
+        depositDue,
       ));
       return;
     }
@@ -7292,16 +7362,20 @@ export const quoteAcceptancePage = functions.https.onRequest(async (req, res) =>
       // the amount owed, when the tradie has Square connected. Best-effort:
       // a null offer still shows the standard "thank you".
       const payment = await paymentOfferForAcceptedQuote(foundUserId, tokenData.quoteId, foundQuote);
+      const depositDue = depositDueWithoutCardOffer(foundQuote, payment);
 
       const acceptedMessage = payment?.kind === 'deposit'
         ? `Thank you! To lock in your spot, please pay your deposit below. ${businessName} will start work once it clears.`
-        : `Thank you! ${businessName} has been notified and will be in touch soon.`;
+        : depositDue
+          ? `Thank you! To lock in your spot, please pay your deposit. ${businessName} will start work once it's received.`
+          : `Thank you! ${businessName} has been notified and will be in touch soon.`;
 
       res.status(200).send(generateConfirmationPage(
         'accepted',
         acceptedMessage,
         businessName, brandColor, logoUrl,
         payment,
+        depositDue,
       ));
     } else {
       res.status(200).send(generateConfirmationPage(
@@ -7396,13 +7470,17 @@ export function generateConfirmationPage(
   businessName?: string,
   brandColor?: string | null,
   logoUrl?: string | null,
-  payment?: AcceptedQuotePaymentOffer | null
+  payment?: AcceptedQuotePaymentOffer | null,
+  /** A deposit to pay outside the page — see depositDueWithoutCardOffer. */
+  depositDue?: number | null,
 ): string {
   const esc = escapeHtml;
   // Only a link that passes the href rule is ever rendered; the offer helper
   // already enforces this, and the page enforces it again for its callers.
   const safePayment = payment && isSafePaymentLinkUrl(payment.url) ? payment : null;
   const depositPayment = safePayment?.kind === 'deposit' ? safePayment : null;
+  // Never beside a card offer — one way to pay per page.
+  const transferDeposit = !safePayment && Number(depositDue) > 0 ? Number(depositDue) : null;
   // Match the email's default brand colour so an unbranded business doesn't
   // get a green email followed by an orange confirmation page.
   const accent = safeBrandColor(brandColor);
@@ -7416,7 +7494,7 @@ export function generateConfirmationPage(
   // What happens next — the old page ended on a full stop and left the
   // customer wondering whether anything had actually happened.
   const who = businessName ? esc(businessName) : 'The business';
-  const nextStep = type === 'accepted' && !depositPayment
+  const nextStep = type === 'accepted' && !depositPayment && !transferDeposit
     ? `${who} will be in touch to lock in a date. Keep the quote PDF from the email for your records.`
     : type === 'declined'
       ? `No hard feelings — if something changes, just reply to the original email.`
@@ -7520,6 +7598,13 @@ export function generateConfirmationPage(
         <div class="deposit-amount">${formatMoney(safePayment.amount)}</div>
         <a href="${esc(safePayment.url)}" class="btn">Pay by card</a>
         <div class="deposit-note">Secure card payment through Square. Or ${who} will invoice you when the job&#8217;s done.</div>
+      </div>`
+          : transferDeposit && (type === 'accepted' || type === 'already')
+          ? `
+      <div class="deposit" data-kind="transfer">
+        <div class="deposit-label">Deposit to get started</div>
+        <div class="deposit-amount">${formatMoney(transferDeposit)}</div>
+        <div class="deposit-note">Payment details are on your quote. ${who} will be in touch once it&#8217;s received.</div>
       </div>`
           : ''
       }
@@ -7821,7 +7906,8 @@ export function generateAcceptancePage(token: string): string {
           return;
         }
         if (data.alreadyResponded) {
-          showAlreadyResponded(data.responseLabel || data.status);
+          if (data.businessName) BUSINESS_NAME = data.businessName;
+          showAlreadyResponded(data.responseLabel || data.status, data.depositDue);
           return;
         }
         renderQuote(data.quote, data.business);
@@ -8061,7 +8147,7 @@ export function generateAcceptancePage(token: string): string {
         });
         var data = await resp.json();
         if (data.success) {
-          showSuccess(response, data.payment || null);
+          showSuccess(response, data.payment || null, data.depositDue || null);
         } else {
           showError(data.error || 'Failed to submit your response');
           buttons.forEach(function(btn) { btn.disabled = false; });
@@ -8096,14 +8182,30 @@ export function generateAcceptancePage(token: string): string {
         '</div>';
     }
 
-    function showSuccess(response, payment) {
+    // A deposit to pay by bank transfer (no card offer for it): the amount
+    // and where the details are. Never alongside the card deposit block.
+    function renderTransferDeposit(amount) {
+      var who = escapeHtml(BUSINESS_NAME || 'The business');
+      return '<div class="pay-offer" data-kind="transfer">' +
+          '<div class="pay-offer-label">Deposit to get started</div>' +
+          '<div class="pay-offer-amount">' + formatCurrency(amount) + '</div>' +
+          '<div class="pay-offer-note">Payment details are on your quote. ' + who + ' will be in touch once it’s received.</div>' +
+        '</div>';
+    }
+
+    function showSuccess(response, payment, depositDue) {
       hideActionBar();
       var isAccepted = response === 'accepted';
       var offer = isAccepted ? renderPaymentOffer(payment) : '';
+      var cardDeposit = !!(payment && payment.kind === 'deposit' && offer);
+      var transferDeposit = isAccepted && !offer && typeof depositDue === 'number' && depositDue > 0;
+      if (transferDeposit) offer = renderTransferDeposit(depositDue);
       var who = escapeHtml(BUSINESS_NAME || 'The business');
-      var acceptedLine = payment && payment.kind === 'deposit' && offer
+      var acceptedLine = cardDeposit
         ? 'Thanks for accepting. To lock in your spot, please pay your deposit below. ' + who + ' will start work once it clears.'
-        : 'Thanks for accepting. ' + who + ' has been notified and will be in touch to lock in a date.';
+        : transferDeposit
+          ? 'Thanks for accepting. To lock in your spot, please pay your deposit. ' + who + ' will start work once it’s received.'
+          : 'Thanks for accepting. ' + who + ' has been notified and will be in touch to lock in a date.';
       document.getElementById('content').innerHTML =
         '<div class="state success">' +
           '<div class="state-icon-ring">' + (isAccepted ? '&#10003;' : '&#9998;') + '</div>' +
@@ -8116,13 +8218,15 @@ export function generateAcceptancePage(token: string): string {
       window.scrollTo(0, 0);
     }
 
-    function showAlreadyResponded(status) {
+    function showAlreadyResponded(status, depositDue) {
       hideActionBar();
+      var deposit = typeof depositDue === 'number' && depositDue > 0 ? renderTransferDeposit(depositDue) : '';
       document.getElementById('content').innerHTML =
         '<div class="state">' +
           '<div class="state-icon-ring neutral">&#8505;</div>' +
           '<h2>Already responded</h2>' +
           '<p>This quote has already been ' + escapeHtml(status || 'responded to') + '.</p>' +
+          deposit +
         '</div>';
     }
 
@@ -11382,6 +11486,20 @@ export const onInvoicePaymentReceived = functions.firestore
       // legacy invoice. Best-effort: a failed read just sends the plain wording.
       const ledgerDoc = await loadDocumentForInvoiceId(userId, invoiceId).catch(() => null);
       const isDeposit = receiptIsForDeposit(ledgerDoc?.payments, receipt.amountReceived);
+      // "Remaining balance" from the unified document — the legacy row this
+      // trigger reads can hold an older app build's netted total or stale
+      // paid figure, which once read "$368.96 remaining" on $660.68 owing.
+      // Only once the ledger holds THIS payment: a Square payment on an older
+      // converted invoice reaches the ledger through the mirror, which runs in
+      // parallel with this trigger — until then the legacy figure is the
+      // up-to-date one.
+      const ledgerHasPayment = !after.squarePaymentId ||
+        (ledgerDoc?.payments || []).some((p: any) => p?.squarePaymentId === after.squarePaymentId);
+      if (ledgerDoc && ledgerDoc.total !== undefined && ledgerHasPayment) {
+        const balanceDue = invoiceBalanceDue(ledgerDoc as Record<string, any>);
+        receipt.balanceDue = balanceDue;
+        receipt.isFullyPaid = balanceDue <= 0.005;
+      }
 
       const replyToEmail = await resolveTradieReplyEmail(userId, business.email);
       await sendPaymentReceiptEmail({
@@ -14826,7 +14944,13 @@ async function createSquarePaymentLinkInternal(
   // Charge the outstanding balance, not the full total — a part payment
   // recorded against the invoice (deposit, progress payment) must not be
   // billed a second time when the customer pays by link.
-  const amountDue = invoiceLinkAmountDue(invoice);
+  // Priced off the unified document when there is one — the same figure the
+  // reminder email and the rotation quote (invoiceBalanceDue). The legacy row
+  // alone can carry an older app build's netted total or stale paid figure.
+  const unifiedForAmount = await loadDocumentForInvoiceId(userId, invoiceId).catch(() => null);
+  const amountDue = unifiedForAmount && unifiedForAmount.total !== undefined
+    ? invoiceBalanceDue(unifiedForAmount as Record<string, any>)
+    : invoiceLinkAmountDue(invoice);
   if (amountDue <= 0) return null;
 
   // The customer pays exactly the balance; the platform fee comes out of
@@ -15096,8 +15220,14 @@ async function mintAndRotate(
   const rotated = await createOrRotatePaymentLink(userId, unifiedDocId, phase3SquareMinter);
   if (!rotated) {
     // Rotation declined (e.g. doc has no link need). Fall back to the raw
-    // legacy mint so callers like the take-payment sheet still get a URL.
+    // legacy mint so callers like the take-payment sheet still get a URL —
+    // except for a deposit already taken. The raw deposit mint always charges
+    // the FULL deposit, so after $100 of a $300 deposit was recorded by hand
+    // it would bill $300 more (and the webhook caps each payment at the
+    // deposit, not at what's still owed). The balance is the invoice's job.
     if (expectedKind === 'deposit') {
+      const quoteDoc = await loadDocumentForQuoteId(userId, legacyTargetId).catch(() => null);
+      if (quoteDoc && (quoteDepositPaid(quoteDoc) > 0 || (Number(quoteDoc.paidTotal) || 0) > 0)) return null;
       return createSquareDepositPaymentLinkInternal(userId, legacyTargetId);
     }
     if (expectedKind === 'quote_full') {
@@ -15126,6 +15256,16 @@ export const createSquarePaymentLink = functions.https.onRequest((req, res) => {
     if (kind === 'quote_deposit') {
       if (!isNonEmptyString(targetId)) {
         res.status(400).json({ error: 'Missing targetId' });
+        return;
+      }
+      // Say why, rather than a generic failure, when the deposit is already
+      // in — mintAndRotate refuses to bill a deposit twice.
+      const quoteDoc = await loadDocumentForQuoteId(decodedToken.uid, targetId).catch(() => null);
+      if (quoteDoc && (quoteDepositPaid(quoteDoc) > 0 || (Number(quoteDoc.paidTotal) || 0) > 0)) {
+        res.status(409).json({
+          error: 'A deposit is already recorded on this quote. Take the rest with the full amount, or on the invoice.',
+          reason: 'deposit-already-recorded',
+        });
         return;
       }
       const result = await mintAndRotate(decodedToken.uid, targetId, 'deposit');
@@ -15554,11 +15694,60 @@ export const squareWebhook = functions.https.onRequest(async (req, res) => {
       const paidAgainstQuote = expectedCap > 0
         ? Math.min(paidAmountDollars, expectedCap)
         : paidAmountDollars;
-      const newDepositPaid = Math.max(Number(quote.depositPaid) || 0, paidAgainstQuote);
+
+      // Unified ledger FIRST, legacy quote second — same reason as the
+      // invoice branch below. The legacy write fires the mirror, which
+      // projects the quote's single `depositPaid` back over the ledger; with
+      // this payment already on the ledger, and depositPaid read from it, the
+      // echo matches and preserveLedger keeps every entry (a deposit recorded
+      // by hand stays, with its own method). Written the other way round, a
+      // Square top-up on a hand-recorded deposit replaced both with one
+      // short Square entry. Idempotent on its own (skips a payment id already
+      // on the ledger).
+      try {
+        await applyPaymentToDocument({
+          userId,
+          paymentId: payment.id,
+          orderId,
+          amountCents: Number(payment?.amount_money?.amount) || 0,
+          source: idx.source === 'in_app' ? 'in_app' : 'pay_link',
+          kind: idx.kind,
+          quoteId,
+        });
+      } catch (err: any) {
+        functions.logger.warn('phase2_unified_payment_write_failed', {
+          paymentId: payment.id, kind: idx.kind, message: err?.message,
+        });
+      }
+
+      // The legacy quote's money follows the ledger the payment just landed
+      // on. A full-amount payment is not a deposit: taking max(depositPaid,
+      // full) reported a $300 hand-recorded deposit + $660 Square payment as
+      // a $660 deposit, and the mirror echo then dropped the $300.
+      let ledgerDepositTotal: number | null = null;
+      let ledgerPaidTotal: number | null = null;
+      try {
+        const unified = await loadDocumentForQuoteId(userId, quoteId);
+        if (unified) {
+          ledgerDepositTotal = quoteDepositPaid({ payments: unified.payments });
+          ledgerPaidTotal = Math.round(
+            (unified.payments || []).reduce((acc: number, p: any) => acc + (Number(p?.amount) || 0), 0) * 100,
+          ) / 100;
+        }
+      } catch {
+        ledgerDepositTotal = null;
+        ledgerPaidTotal = null;
+      }
       const quoteTotal = Number(quote.total) || 0;
-      const newPaidTotal = idx.kind === 'quote_full'
-        ? Math.max(Number(quote.paidTotal) || 0, paidAgainstQuote)
-        : newDepositPaid;
+      const { depositPaid: newDepositPaid, paidTotal: newPaidTotal } = quoteMoneyAfterSquare({
+        kind: idx.kind,
+        legacyDepositPaid: Number(quote.depositPaid) || 0,
+        legacyPaidTotal: Number(quote.paidTotal) || 0,
+        paidAgainstQuote,
+        ledger: ledgerDepositTotal !== null && ledgerPaidTotal !== null
+          ? { deposits: ledgerDepositTotal, paid: ledgerPaidTotal }
+          : null,
+      });
       const wasAlreadyAccepted = quote.status === 'accepted' || !!quote.respondedAt;
 
       // Record T&C acceptance against the snapshot taken at send time.
@@ -15622,25 +15811,6 @@ export const squareWebhook = functions.https.onRequest(async (req, res) => {
         update.respondedBy = quote.customerName || 'Client';
       }
       await quoteRef.set(update, { merge: true });
-
-      // Phase-2: also push the payment into the unified document ledger so the
-      // documents/{quoteId} view reflects this payment without waiting for the
-      // mirror trigger to re-derive paidTotal/balanceDue from the quote.
-      try {
-        await applyPaymentToDocument({
-          userId,
-          paymentId: payment.id,
-          orderId,
-          amountCents: Number(payment?.amount_money?.amount) || 0,
-          source: idx.source === 'in_app' ? 'in_app' : 'pay_link',
-          kind: idx.kind,
-          quoteId,
-        });
-      } catch (err: any) {
-        functions.logger.warn('phase2_unified_payment_write_failed', {
-          paymentId: payment.id, kind: idx.kind, message: err?.message,
-        });
-      }
 
       // Fire acceptance side-effects exactly once, only when this payment is
       // what flipped the quote (avoids double-firing if the customer accepted

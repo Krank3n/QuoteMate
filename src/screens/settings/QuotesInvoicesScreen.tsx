@@ -56,7 +56,10 @@ export function QuotesInvoicesScreen() {
   const styles = useStyles();
   const themeColors = useThemeColors();
   const navigation = useNavigation<any>();
-  const { businessSettings, setBusinessSettings } = useStore();
+  const { businessSettings, setBusinessSettings, getEffectivePlan } = useStore();
+  // Same rule as the per-quote switch (InvoiceDisplaySettings): a deposit
+  // needs Square, or a paid/trial plan whose quotes print the bank details.
+  const isFreePlan = getEffectivePlan() === 'free';
 
   const [showMarkup, setShowMarkup] = useState(false);
   const [priceDetail, setPriceDetail] = useState<PriceDetail>('itemised');
@@ -280,16 +283,20 @@ export function QuotesInvoicesScreen() {
           </Surface>
 
           <Surface style={styles.card}>
-            <Title style={styles.sectionTitle}>Deposits (Square)</Title>
+            <Title style={styles.sectionTitle}>{isFreePlan ? 'Deposits (Square)' : 'Deposits'}</Title>
             <Text style={styles.helperText}>
-              {squareConnected === false
-                ? 'Connect Square to accept card payments and deposits.'
-                : 'Powered by Square. Can be overridden per quote.'}
+              {squareConnected === true
+                ? 'Powered by Square. Can be overridden per quote.'
+                : !isFreePlan
+                  ? 'Customers pay the deposit by bank transfer — your payment details print on the quote. Can be overridden per quote.'
+                  : squareConnected === false
+                    ? 'Connect Square to accept card payments and deposits.'
+                    : 'Powered by Square. Can be overridden per quote.'}
             </Text>
 
             <View style={styles.toggleRow}>
               <View style={styles.toggleLabel}>
-                <Text style={[styles.toggleTitle, squareConnected === false && { color: themeColors.textMuted }]}>
+                <Text style={[styles.toggleTitle, squareConnected === false && isFreePlan && { color: themeColors.textMuted }]}>
                   Require Deposit by Default
                 </Text>
                 <Text style={styles.toggleDescription}>
@@ -297,14 +304,14 @@ export function QuotesInvoicesScreen() {
                 </Text>
               </View>
               <Switch
-                value={requireDepositByDefault && squareConnected !== false}
+                value={requireDepositByDefault && (squareConnected !== false || !isFreePlan)}
                 onValueChange={setRequireDepositByDefault}
                 color={themeColors.accentText}
-                disabled={squareConnected !== true}
+                disabled={squareConnected !== true && isFreePlan}
               />
             </View>
 
-            {squareConnected === false && (
+            {squareConnected === false && isFreePlan && (
               <TouchableOpacity
                 onPress={() => navigation.navigate('SquareIntegration' as never)}
                 style={styles.connectSquareButton}
@@ -313,7 +320,7 @@ export function QuotesInvoicesScreen() {
               </TouchableOpacity>
             )}
 
-            {requireDepositByDefault && squareConnected === true && (
+            {requireDepositByDefault && (squareConnected === true || !isFreePlan) && (
               <TextInput
                 label="Default Deposit"
                 value={defaultDepositPercentage}

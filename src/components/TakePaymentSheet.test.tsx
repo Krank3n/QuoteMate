@@ -201,12 +201,23 @@ describe('TakePaymentSheet manual "Record Payment" row', () => {
     expect(props.onDismiss).toHaveBeenCalled();
   });
 
-  it('does not render for quote deposit targets (no manual deposit path exists)', () => {
-    const { queryByText } = renderSheet({
+  // A tradie paid by bank transfer has no Square, so this row is the only way
+  // to log a deposit on a quote. It needs no Square at all.
+  it('renders as Record Deposit for a quote and fires with the quote id, with no Square gate', () => {
+    const onRecordManualPayment = vi.fn();
+    const ensureSquareConnected = vi.fn(async () => false);
+    const { getByText, queryByText, props } = renderSheet({
       target: depositTarget,
-      onRecordManualPayment: vi.fn(),
+      onRecordManualPayment,
+      ensureSquareConnected,
     });
+
     expect(queryByText('Record Payment')).toBeNull();
+    fireEvent.click(getByText('Record Deposit'));
+
+    expect(onRecordManualPayment).toHaveBeenCalledWith('quote-7');
+    expect(props.onDismiss).toHaveBeenCalled();
+    expect(ensureSquareConnected).not.toHaveBeenCalled();
   });
 
   it('does not render when no handler is wired', () => {
@@ -879,5 +890,27 @@ describe('TakePaymentSheet Tap to Pay row spinner', () => {
     const { container, getByText } = renderSheet();
     expect(getByText(/not ready to take a card yet/)).toBeTruthy();
     expect(spinners(container)).toBe(1);
+  });
+});
+
+describe('TakePaymentSheet — a deposit already part recorded', () => {
+  it('blocks the deposit pay link (it would charge the whole deposit again)', async () => {
+    const ensureSquareConnected = vi.fn(async () => true);
+    const { getByText } = renderSheet({
+      target: { ...depositTarget, depositPaid: 100 },
+      ensureSquareConnected,
+    });
+    expect(getByText(/A deposit is already recorded/)).toBeTruthy();
+    fireEvent.click(getByText('Share Pay Link'));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(squareService.mintQuoteDepositPaymentLink).not.toHaveBeenCalled();
+  });
+
+  it('still offers the deposit link when nothing is recorded yet', async () => {
+    const ensureSquareConnected = vi.fn(async () => true);
+    const { getByText, queryByText } = renderSheet({ target: depositTarget, ensureSquareConnected });
+    expect(queryByText(/A deposit is already recorded/)).toBeNull();
+    fireEvent.click(getByText('Share Pay Link'));
+    await waitFor(() => expect(squareService.mintQuoteDepositPaymentLink).toHaveBeenCalledWith('quote-7'));
   });
 });

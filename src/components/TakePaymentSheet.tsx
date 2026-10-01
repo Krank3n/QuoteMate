@@ -121,10 +121,11 @@ interface TakePaymentSheetProps {
   }) => void;
   /**
    * Route to the manual-recording flow (RecordPaymentScreen) for an already-
-   * received bank transfer / cash / cheque. Only wired for invoice targets —
-   * quotes have no manual deposit path. When omitted, the row is hidden.
+   * received bank transfer / cash / cheque, with the invoice or quote id. On
+   * a quote it records the deposit — the only way a tradie without Square
+   * logs one. When omitted, the row is hidden.
    */
-  onRecordManualPayment?: (invoiceId: string) => void;
+  onRecordManualPayment?: (documentId: string) => void;
   /**
    * Square connection gate. The sheet always opens (so manual recording works
    * with zero Square setup); the Square-only rows call this before doing any
@@ -254,6 +255,8 @@ export function TakePaymentSheet({
     activeTarget.kind === 'quote_deposit' && quoteMode === 'deposit';
 
   const amounts = describeAmounts(activeTarget, quoteMode, quoteDeposit);
+  const depositLinkBlocked =
+    activeTarget.kind === 'quote_deposit' && quoteMode === 'deposit' && activeTarget.depositPaid > 0;
 
   /**
    * Write the edited deposit back to the quote. Also flips `requireDeposit`
@@ -658,25 +661,36 @@ export function TakePaymentSheet({
           loading={chargingCard || tapToPayReadiness.readiness === 'preparing'}
         />
 
-        {/* Phase 1 — Share a Square pay link */}
+        {/* Phase 1 — Share a Square pay link. Not for a deposit already part
+            recorded: a deposit link always charges the FULL deposit (the
+            server refuses to mint one), so the rest goes on the full-amount
+            link or the invoice. */}
         <MethodRow
           icon="share-variant"
           title="Share Pay Link"
-          subtitle="Send a Square checkout link via SMS, email or WhatsApp."
-          onPress={handleShareLink}
+          subtitle={
+            depositLinkBlocked
+              ? 'A deposit is already recorded. Switch to Full amount, or take the rest on the invoice.'
+              : 'Send a Square checkout link via SMS, email or WhatsApp.'
+          }
+          onPress={depositLinkBlocked ? undefined : handleShareLink}
+          disabled={depositLinkBlocked}
           loading={sharing}
         />
 
-        {/* Manual recording — invoice only (quotes have no manual deposit
-            path). No Square guard: works with zero Square setup. */}
-        {activeTarget.kind === 'invoice' && onRecordManualPayment && (
+        {/* Manual recording. No Square guard: works with zero Square setup,
+            which is the point on a quote — a tradie paid by bank transfer
+            records the deposit here. */}
+        {onRecordManualPayment && (
           <MethodRow
             icon="cash-multiple"
-            title={paymentCopy.recordPayment}
+            title={activeTarget.kind === 'invoice' ? paymentCopy.recordPayment : paymentCopy.recordDeposit}
             subtitle={paymentCopy.recordPaymentSubtitle}
             onPress={() => {
               onDismiss();
-              onRecordManualPayment(activeTarget.invoiceId);
+              onRecordManualPayment(
+                activeTarget.kind === 'invoice' ? activeTarget.invoiceId : activeTarget.quoteId,
+              );
             }}
           />
         )}

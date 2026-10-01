@@ -75,6 +75,7 @@ const store = vi.hoisted(() => ({
     } as any,
     setBusinessSettings: vi.fn(async () => {}),
     subscriptionStatus: { isPro: true } as any,
+    getEffectivePlan: () => 'pro' as const,
   },
 }));
 vi.mock('../../store/useStore', () => ({

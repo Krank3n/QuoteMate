@@ -25,6 +25,7 @@
 
 import type { DocumentPaymentMethod, DocumentStage } from '../document/types';
 import { toMs } from '../document/adapter';
+import { isNettedDepositCredit } from '../document/recordedDeposit';
 
 export interface StatementRange {
   /** Inclusive start, ms epoch. */
@@ -183,8 +184,12 @@ export function buildStatement(
         // Outstanding is AS AT the end of the period, so only money received
         // by then counts. The stored paidTotal/balanceDue are today's figures
         // and would backdate a later payment into this statement.
+        // An older converted invoice's `deposit-credit-*` entry was already
+        // taken off its total, so it doesn't reduce the balance again. It
+        // still shows under Payments received — that money did come in.
         const paidToDate = round2(
           (doc.payments || []).reduce((sum, payment) => {
+            if (isNettedDepositCredit(payment as any)) return sum;
             const amount = Number(payment?.amount) || 0;
             const paidAt = positiveMs(payment?.paidAt);
             return amount > 0 && paidAt && paidAt < range.toMs ? sum + amount : sum;

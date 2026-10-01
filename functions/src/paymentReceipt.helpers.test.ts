@@ -8,6 +8,8 @@ import {
   formatAud,
   buildPaymentReceiptContentHtml,
   receiptIsForDeposit,
+  quoteDepositPaidAfterSquare,
+  quoteMoneyAfterSquare,
 } from './paymentReceipt.helpers';
 
 describe('invoiceLinkAmountDue — pay link charges the balance, not the total', () => {
@@ -269,5 +271,126 @@ describe('evaluatePaymentReceipt — edits are not payments', () => {
     const before = { ...sent, paidAmount: 300 };
     const after = { ...sent, status: 'partial', paidAmount: 3000 };
     expect(evaluatePaymentReceipt(before, after)).toMatchObject({ amountReceived: 2700 });
+  });
+});
+
+describe('quoteDepositPaidAfterSquare', () => {
+  it('a Square top-up adds to a deposit recorded by hand instead of under-counting', () => {
+    // $100 by bank transfer, then $200 through the link: the ledger holds both.
+    expect(
+      quoteDepositPaidAfterSquare({ legacyDepositPaid: 100, paidAgainstQuote: 200, ledgerDepositTotal: 300 }),
+    ).toBe(300);
+  });
+
+  it('a redelivered event changes nothing — the ledger sum does not move', () => {
+    expect(
+      quoteDepositPaidAfterSquare({ legacyDepositPaid: 300, paidAgainstQuote: 200, ledgerDepositTotal: 300 }),
+    ).toBe(300);
+  });
+
+  it('a lone Square deposit reads as before', () => {
+    expect(
+      quoteDepositPaidAfterSquare({ legacyDepositPaid: 0, paidAgainstQuote: 300, ledgerDepositTotal: 300 }),
+    ).toBe(300);
+  });
+
+  it('falls back to the old max when the ledger could not be read', () => {
+    expect(
+      quoteDepositPaidAfterSquare({ legacyDepositPaid: 100, paidAgainstQuote: 200, ledgerDepositTotal: null }),
+    ).toBe(200);
+  });
+});
+
+// The order is the fix: ledger first, so the legacy quote write's mirror echo
+// matches the ledger and preserveLedger keeps a hand-recorded deposit beside
+// the Square one. The webhook can't run offline, so this reads the source.
+describe('Square quote webhook writes the unified ledger before the legacy quote', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { readFileSync } = require('fs') as typeof import('fs');
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { join } = require('path') as typeof import('path');
+  const src = readFileSync(join(__dirname, 'index.ts'), 'utf8');
+  const start = src.indexOf("if (idx.kind === 'quote_deposit' || idx.kind === 'quote_full') {");
+  const branch = src.slice(start, src.indexOf("const invoiceId: string | null = idx.invoiceId || null;", start));
+
+  it('applies the payment to the document before writing the quote', () => {
+    expect(start).toBeGreaterThan(-1);
+    const ledger = branch.indexOf('await applyPaymentToDocument(');
+    const legacy = branch.indexOf('await quoteRef.set(update, { merge: true });');
+    expect(ledger).toBeGreaterThan(-1);
+    expect(legacy).toBeGreaterThan(ledger);
+  });
+
+  it('takes the quote money from the ledger for a deposit or a full payment', () => {
+    expect(branch).toContain('quoteMoneyAfterSquare({');
+    expect(branch).not.toMatch(/Math\.max\(Number\(quote\.depositPaid\) \|\| 0, paidAgainstQuote\)/);
+  });
+});
+
+describe('quoteMoneyAfterSquare', () => {
+  it('REGRESSION: a full Square payment after a $300 hand-recorded deposit keeps the deposit', () => {
+    // Ledger after applyPaymentToDocument: deposit 300 (bank) + full 660 (Square).
+    expect(
+      quoteMoneyAfterSquare({
+        kind: 'quote_full', legacyDepositPaid: 300, legacyPaidTotal: 300, paidAgainstQuote: 660,
+        ledger: { deposits: 300, paid: 960 },
+      }),
+    ).toEqual({ depositPaid: 300, paidTotal: 960 });
+  });
+
+  it('a Square deposit topping up a hand-recorded one sums both', () => {
+    expect(
+      quoteMoneyAfterSquare({
+        kind: 'quote_deposit', legacyDepositPaid: 100, legacyPaidTotal: 100, paidAgainstQuote: 200,
+        ledger: { deposits: 300, paid: 300 },
+      }),
+    ).toEqual({ depositPaid: 300, paidTotal: 300 });
+  });
+
+  it('a Square deposit on its own', () => {
+    expect(
+      quoteMoneyAfterSquare({
+        kind: 'quote_deposit', legacyDepositPaid: 0, legacyPaidTotal: 0, paidAgainstQuote: 300,
+        ledger: { deposits: 300, paid: 300 },
+      }),
+    ).toEqual({ depositPaid: 300, paidTotal: 300 });
+  });
+
+  it('falls back to the old arithmetic when the ledger could not be read', () => {
+    expect(
+      quoteMoneyAfterSquare({
+        kind: 'quote_full', legacyDepositPaid: 0, legacyPaidTotal: 0, paidAgainstQuote: 960, ledger: null,
+      }),
+    ).toEqual({ depositPaid: 960, paidTotal: 960 });
+    expect(
+      quoteMoneyAfterSquare({
+        kind: 'quote_deposit', legacyDepositPaid: 0, legacyPaidTotal: 0, paidAgainstQuote: 300, ledger: null,
+      }),
+    ).toEqual({ depositPaid: 300, paidTotal: 300 });
+  });
+});
+
+// mintAndRotate and createSquarePaymentLink live in index.ts and can't run
+// offline; these pin the guards that stop a SECOND deposit link being minted.
+describe('no Square deposit link once a deposit is recorded', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { readFileSync } = require('fs') as typeof import('fs');
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { join } = require('path') as typeof import('path');
+  const src = readFileSync(join(__dirname, 'index.ts'), 'utf8');
+
+  it('mintAndRotate does not fall back to a raw deposit mint for a quote with a deposit', () => {
+    const fn = src.slice(src.indexOf('async function mintAndRotate('), src.indexOf('\n}\n', src.indexOf('async function mintAndRotate(')));
+    const guard = fn.indexOf('(Number(quoteDoc.paidTotal) || 0) > 0)) return null;');
+    const rawMint = fn.indexOf('return createSquareDepositPaymentLinkInternal(');
+    expect(guard).toBeGreaterThan(-1);
+    expect(rawMint).toBeGreaterThan(guard);
+  });
+
+  it('the quote_deposit endpoint answers 409 with a reason before minting', () => {
+    const start = src.indexOf("if (kind === 'quote_deposit') {");
+    const branch = src.slice(start, src.indexOf("if (kind === 'quote_full') {", start));
+    expect(branch).toContain("reason: 'deposit-already-recorded'");
+    expect(branch.indexOf('res.status(409)')).toBeLessThan(branch.indexOf("mintAndRotate(decodedToken.uid, targetId, 'deposit')"));
   });
 });

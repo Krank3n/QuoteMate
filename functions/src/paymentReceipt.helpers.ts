@@ -17,9 +17,11 @@ const EPSILON = 0.005;
 
 /**
  * The base amount a Square payment link should charge for an invoice: the
- * outstanding balance, not the full total. invoice.total is already net of
- * any quote deposit credit (the deposit is subtracted when the invoice is
- * created from the quote), so balance due is simply total − paidAmount.
+ * outstanding balance, not the full total. A deposit taken on the quote is
+ * part of paidAmount against the full total ($960 − $300 = $660). On a
+ * legacy-minted invoice the total was already netted and paidAmount leaves
+ * the netted credit out (shared/document/adapter.ts), so the same subtraction
+ * holds for both.
  */
 export function invoiceLinkAmountDue(invoice: {
   total?: unknown;
@@ -28,6 +30,71 @@ export function invoiceLinkAmountDue(invoice: {
   const total = Number(invoice.total) || 0;
   const paid = Number(invoice.paidAmount) || 0;
   return round2(Math.max(0, total - paid));
+}
+
+// ---------------------------------------------------------------------------
+// Square webhook → legacy quote deposit
+// ---------------------------------------------------------------------------
+
+/**
+ * `depositPaid` for the legacy quote once a Square deposit has landed.
+ *
+ * It used to be `max(depositPaid, this payment)` — right while Square was the
+ * only way a deposit arrived, but a tradie can now record part of one by
+ * hand: $100 by bank transfer, then $200 through the link, read as $200. The
+ * unified ledger is written first and already holds both (each Square payment
+ * once — it skips a payment id it has seen), so its deposit sum is the truth.
+ * Redeliveries stay idempotent because that sum doesn't move. The old max is
+ * kept as the floor for when the ledger write failed or there is no unified
+ * document.
+ */
+export function quoteDepositPaidAfterSquare(input: {
+  legacyDepositPaid: number;
+  paidAgainstQuote: number;
+  /** Sum of the unified ledger's deposit entries after this payment; null when unreadable. */
+  ledgerDepositTotal: number | null;
+}): number {
+  const floor = Math.max(Number(input.legacyDepositPaid) || 0, Number(input.paidAgainstQuote) || 0);
+  const ledger = input.ledgerDepositTotal;
+  return round2(ledger === null ? floor : Math.max(floor, Number(ledger) || 0));
+}
+
+/**
+ * The legacy quote's `depositPaid` / `paidTotal` after a Square payment on a
+ * quote, read from the unified ledger the payment has just landed on
+ * (`ledger`, null when it couldn't be read).
+ *
+ * A full-amount payment is not a deposit: depositPaid stays the ledger's
+ * deposits. Taking max(depositPaid, full) reported a $300 hand-recorded
+ * deposit + $660 Square payment as a $660 deposit, and the mirror echo then
+ * dropped the $300. paidTotal is the whole ledger. Without a ledger the old
+ * arithmetic stands.
+ */
+export function quoteMoneyAfterSquare(input: {
+  kind: 'quote_deposit' | 'quote_full';
+  legacyDepositPaid: number;
+  legacyPaidTotal: number;
+  paidAgainstQuote: number;
+  ledger: { deposits: number; paid: number } | null;
+}): { depositPaid: number; paidTotal: number } {
+  const legacyDeposit = Number(input.legacyDepositPaid) || 0;
+  const paidNow = Number(input.paidAgainstQuote) || 0;
+  const ledger = input.ledger;
+  const depositPaid = input.kind === 'quote_deposit'
+    ? quoteDepositPaidAfterSquare({
+        legacyDepositPaid: legacyDeposit,
+        paidAgainstQuote: paidNow,
+        ledgerDepositTotal: ledger ? ledger.deposits : null,
+      })
+    : ledger
+      ? round2(ledger.deposits)
+      : round2(Math.max(legacyDeposit, paidNow));
+  const paidTotal = ledger
+    ? round2(Math.max(Number(ledger.paid) || 0, depositPaid))
+    : input.kind === 'quote_full'
+      ? round2(Math.max(Number(input.legacyPaidTotal) || 0, paidNow))
+      : depositPaid;
+  return { depositPaid, paidTotal };
 }
 
 // ---------------------------------------------------------------------------

@@ -96,8 +96,9 @@ export function derivePaymentState(doc: Document, ctx: PaymentContext = {}): Pay
  *   Record Payment underneath. Part-paid used to skip it and open a blank
  *   form, so a payment typed wrong could not be corrected until the invoice
  *   was paid in full.
- * - `takePayment`: a quote still owed money — the Square sheet, the only
- *   way to take a quote deposit.
+ * - `takePayment`: a quote still owed money — TakePaymentSheet, which takes
+ *   the deposit through Square or records one paid by bank transfer (its
+ *   Record Deposit row needs no Square).
  */
 export type PaymentChipRoute = 'record' | 'history' | 'takePayment';
 

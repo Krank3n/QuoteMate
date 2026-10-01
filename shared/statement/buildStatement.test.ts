@@ -398,3 +398,49 @@ describe('statementPeriodLabel', () => {
     expect(statementPeriodLabel(FY, 'UTC')).toBe('1 July 2025 – 30 June 2026');
   });
 });
+
+describe('buildStatement — an invoice converted from a quote with a deposit', () => {
+  // The convert keeps the full total and carries the quote deposit on the
+  // ledger, so the statement's own arithmetic (total − paid to date) lands on
+  // the real balance. Before the convert stopped netting, this read $360.
+  it('$960 job, $300 deposit by bank transfer: total 960, paid 300, balance 660', () => {
+    const data = buildStatement(
+      [
+        inv({
+          id: 'conv',
+          subtotal: 872.73,
+          gst: 87.27,
+          total: 960,
+          payments: [{ amount: 300, paidAt: T(2026, 3, 1), method: 'bank' }],
+        }),
+      ],
+      FY,
+      REGISTERED,
+    );
+    expect(data.invoices[0]).toMatchObject({ total: 960, paid: 300, balance: 660 });
+  });
+});
+
+describe('buildStatement — an older invoice whose total was netted', () => {
+  // Converted before Oct 2026: total already less the $300 deposit, with a
+  // `deposit-credit-*` entry recording it. That credit must not come off the
+  // balance a second time; it still shows as money received.
+  it('$660 netted total, $300 credit + $200 paid: balance 460, both payments received', () => {
+    const data = buildStatement(
+      [
+        inv({
+          id: 'old',
+          total: 660,
+          payments: [
+            { id: 'deposit-credit-q-old', kind: 'deposit', amount: 300, paidAt: T(2026, 3, 1), method: 'square' } as any,
+            { id: 'm-1', kind: 'manual', amount: 200, paidAt: T(2026, 3, 5), method: 'bank' } as any,
+          ],
+        }),
+      ],
+      FY,
+      REGISTERED,
+    );
+    expect(data.invoices[0]).toMatchObject({ total: 660, balance: 460 });
+    expect(data.payments.map((p: any) => p.amount).sort()).toEqual([200, 300]);
+  });
+});

@@ -626,6 +626,18 @@ describe('invoice email', () => {
     expect(html).not.toContain('Decline quote');
   });
 
+  it('shows payments since the deposit so Balance Due is what is really owed', () => {
+    const html = invoice({ depositCredit: 291.72, paidCredit: 20, total: 660.68 });
+    expect(html).toContain('Deposit already paid');
+    expect(html).toContain('Amount paid');
+    expect(html).toContain('20.00');
+    expect(html).toContain('660.68');
+  });
+
+  it('no Amount paid row without a deposit row', () => {
+    expect(invoice({ paidCredit: 20, total: 500 })).not.toContain('Amount paid');
+  });
+
   it('credits a paid deposit against the balance', () => {
     const html = invoice({ depositCredit: 2029.64, total: 6088.91 });
     expect(html).toContain('Deposit already paid');

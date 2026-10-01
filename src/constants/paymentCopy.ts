@@ -15,6 +15,8 @@ export const paymentCopy = {
   takeDeposit: 'Take Deposit',
   takeRemaining: 'Take Remaining',
   recordPayment: 'Record Payment',
+  /** Record Payment on a quote — money against a quote is its deposit. */
+  recordDeposit: 'Record Deposit',
   recordPaymentSubtitle: "Bank transfer, cash or cheque you've already received.",
   cancel: 'Cancel',
   close: 'Close',
@@ -25,6 +27,7 @@ export const paymentCopy = {
   sendReceipt: 'Send receipt',
   done: 'Done',
   paymentRecordedTitle: 'Payment recorded',
+  depositRecordedTitle: 'Deposit recorded',
   paymentUpdatedTitle: 'Payment updated',
   paymentErrorTitle: 'Payment error',
 } as const;

@@ -46,7 +46,7 @@ import type { StatementData } from '../../shared/statement/buildStatement';
 // out by hand at every one of these mapping sites.
 import { resolvePriceDetail } from '../../shared/document/priceDetail';
 import { paidInFullAtMs } from '../../shared/document/paidInFull';
-import { recordedDepositTotal } from '../../shared/document/recordedDeposit';
+import { invoicePdfPaymentFields } from '../../shared/document/recordedDeposit';
 import { useStore } from '../store/useStore';
 import { checkSquareConnection } from '../services/squareService';
 import { carriesPayableAmount } from './quoteDeliveryGuard';
@@ -304,8 +304,9 @@ export async function generateDocumentPDF(
       issueDate: format(new Date(doc.documentDate ?? doc.issueDate ?? doc.createdAt), 'dd MMMM yyyy'),
       dueDate: format(new Date(doc.dueDate ?? doc.createdAt), 'dd MMMM yyyy'),
       paymentTerms: formatPaymentTerms(doc.paymentTerms ?? 'net_14', doc.customPaymentDays),
-      paidAmount: doc.paidTotal,
-      paidDepositAmount: recordedDepositTotal(doc.payments),
+      // paidAmount / paidDepositAmount / depositCredit — the server's send
+      // path uses the same helper, so both PDFs read the deposit one way.
+      ...invoicePdfPaymentFields(doc),
       paidDate: (() => {
         const paidMs = paidInFullAtMs(doc);
         return paidMs ? format(new Date(paidMs), 'dd MMMM yyyy') : undefined;

@@ -154,11 +154,16 @@ describe('a document saved moments ago still converts', () => {
   });
 });
 
-// A deposit the customer already paid on the quote must come off the invoice
-// as a credit, on both conversion paths. This is the invoice a tradie creates
+// A deposit the customer already paid on the quote must come off what they
+// still owe, on both conversion paths. This is the invoice a tradie creates
 // from the "job won" sheet / sticky bar's Create Invoice straight after a
 // deposit landed — billing the full total again would double-charge the
 // customer for the deposit they just paid.
+//
+// The legacy mint nets it off the total (depositCredit, no ledger). The
+// unified convert keeps the full total and leaves the deposit on the ledger,
+// so it comes off the balance. It used to do both — $960 job, $300 deposit:
+// total $660, paid $300, $360 owing.
 describe('a paid deposit is carried as a credit on the invoice', () => {
   const NOW = 1_700_000_000_000;
   const quoteWithDeposit = (): Quote =>
@@ -171,8 +176,25 @@ describe('a paid deposit is carried as a credit on the invoice', () => {
       depositPaid: 300,
       depositPaidAt: new Date(NOW),
     } as Partial<Quote>);
-  const acceptedDoc = (): Document =>
-    ({ ...quoteDoc(), stage: 'quote_accepted', materials: [], depositAmount: 300, depositPaid: 300 }) as Document;
+  const depositEntry = (method: 'square' | 'bank') => ({
+    id: method === 'square' ? 'deposit-sq-1' : 'dep-bank-1',
+    kind: 'deposit' as const,
+    amount: 300,
+    paidAt: NOW,
+    method,
+    ...(method === 'square' ? { squarePaymentId: 'sq-1' } : {}),
+  });
+  const acceptedDoc = (method: 'square' | 'bank' = 'square'): Document =>
+    ({
+      ...quoteDoc(),
+      stage: 'quote_accepted',
+      materials: [],
+      depositAmount: 300,
+      depositPaid: 300,
+      payments: [depositEntry(method)],
+      paidTotal: 300,
+      balanceDue: 660,
+    }) as Document;
 
   it('legacy createInvoiceFromQuote: total drops by the deposit and the credit is stamped', async () => {
     // No unified doc for this id → the legacy mint path runs.
@@ -203,7 +225,7 @@ describe('a paid deposit is carried as a credit on the invoice', () => {
     expect(invoice.depositCredit).toBeUndefined();
   });
 
-  it('unified convertDocumentToInvoice: total drops by the deposit and the deposit stays on the doc', async () => {
+  it('REGRESSION: unified convertDocumentToInvoice keeps the full total and takes the deposit off the balance', async () => {
     useStore.setState({
       documents: [acceptedDoc()],
       quotes: [quoteWithDeposit()],
@@ -213,13 +235,31 @@ describe('a paid deposit is carried as a credit on the invoice', () => {
     const converted = await useStore.getState().convertDocumentToInvoice(DOC_ID);
 
     expect(converted.type).toBe('invoice');
-    expect(converted.total).toBe(660);
+    expect(converted.stage).toBe('draft');
+    expect(converted.total).toBe(960);
+    expect(converted.paidTotal).toBe(300);
+    expect(converted.balanceDue).toBe(660);
+    // The one deposit entry rides across untouched — not doubled, not netted.
+    expect(converted.payments).toEqual([depositEntry('square')]);
     expect(converted.depositPaid).toBe(300);
-    // The undo stash keeps the pre-credit total so a revert restores it.
     expect(converted.convertedFromQuote?.total).toBe(960);
   });
 
-  it('createInvoiceFromQuote routes an accepted quote with a unified doc through the same credit', async () => {
+  it('a deposit recorded by hand (bank transfer) converts the same way, keeping its method', async () => {
+    useStore.setState({
+      documents: [acceptedDoc('bank')],
+      quotes: [quoteWithDeposit()],
+      saveQuote: vi.fn(async () => {}),
+    } as any);
+
+    const converted = await useStore.getState().convertDocumentToInvoice(DOC_ID);
+
+    expect(converted.total).toBe(960);
+    expect(converted.balanceDue).toBe(660);
+    expect(converted.payments).toEqual([depositEntry('bank')]);
+  });
+
+  it('createInvoiceFromQuote: the legacy invoice view is the full total with the deposit as paid, no netted credit', async () => {
     useStore.setState({
       documents: [acceptedDoc()],
       quotes: [quoteWithDeposit()],
@@ -228,8 +268,11 @@ describe('a paid deposit is carried as a credit on the invoice', () => {
 
     const invoice = await useStore.getState().createInvoiceFromQuote(quoteWithDeposit());
 
-    expect(invoice.total).toBe(660);
-    expect(useStore.getState().documents.find((d) => d.id === DOC_ID)?.total).toBe(660);
+    expect(invoice.total).toBe(960);
+    expect(invoice.paidAmount).toBe(300);
+    // depositCredit means "already netted off the total" — not the case here.
+    expect(invoice.depositCredit).toBeUndefined();
+    expect(useStore.getState().documents.find((d) => d.id === DOC_ID)?.total).toBe(960);
   });
 });
 
@@ -284,5 +327,62 @@ describe('createInvoiceFromQuote never mints a ghost job', () => {
     const invoice = await useStore.getState().createInvoiceFromQuote(accepted());
 
     expect(invoice.jobId).toBe('job-real');
+  });
+});
+
+// Duplicate (a new visit for the same customer) clones an invoice back into a
+// quote at the full job value. The add-back only existed to undo the convert's
+// netting — an invoice converted since keeps its full total, and adding its
+// deposit back again would inflate the new visit by the deposit.
+describe('duplicateDocumentForJob restores the full job value', () => {
+  const invoice = (over: Partial<Document>): Document =>
+    ({
+      id: 'inv-dup-1',
+      type: 'invoice',
+      stage: 'partially_paid',
+      number: 'INV-12',
+      total: 960,
+      subtotal: 872.73,
+      gst: 87.27,
+      paidTotal: 300,
+      materials: [],
+      sections: [],
+      job: { id: 'job-1', name: 'Coastal Concreting slab' },
+      ...over,
+    }) as unknown as Document;
+
+  async function duplicate(source: Document): Promise<Document> {
+    useStore.setState({
+      documents: [source],
+      getNextQuoteNumber: async () => 'QU-50',
+      saveDocument: vi.fn(async () => {}),
+    } as any);
+    return useStore.getState().duplicateDocumentForJob(source.id, 'job-new');
+  }
+
+  it('an invoice from the fixed convert (full total, deposit on the ledger) clones at its total', async () => {
+    const clone = await duplicate(invoice({
+      payments: [{ id: 'deposit-sq-1', kind: 'deposit', amount: 300, paidAt: 1, method: 'square', squarePaymentId: 'sq-1' }],
+      convertedFromQuote: { total: 960, stage: 'quote_accepted', at: 1 },
+    } as any));
+    expect(clone.total).toBe(960);
+    expect(clone.balanceDue).toBe(960);
+  });
+
+  it('a legacy-minted invoice (total netted, deposit-credit entry) gets its deposit added back', async () => {
+    const clone = await duplicate(invoice({
+      total: 660,
+      payments: [{ id: 'deposit-credit-q-9', kind: 'deposit', amount: 300, paidAt: 1, method: 'square' }],
+    } as any));
+    expect(clone.total).toBe(960);
+  });
+
+  it('an invoice the old convert netted (stash total = total + deposit) gets its deposit added back', async () => {
+    const clone = await duplicate(invoice({
+      total: 660,
+      payments: [{ id: 'deposit-sq-1', kind: 'deposit', amount: 300, paidAt: 1, method: 'square', squarePaymentId: 'sq-1' }],
+      convertedFromQuote: { total: 960, stage: 'quote_accepted', at: 1 },
+    } as any));
+    expect(clone.total).toBe(960);
   });
 });

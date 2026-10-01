@@ -14,6 +14,7 @@ import {
   ACCEPTANCE_MINT_TIMEOUT_MS,
   isSafePaymentLinkUrl,
   generateConfirmationPage,
+  depositDueWithoutCardOffer,
   paymentOfferForAcceptedQuote,
   respondToQuoteResponseBody,
   type AcceptedQuotePaymentDeps,
@@ -195,6 +196,7 @@ describe('respondToQuoteResponseBody — what the hosted page reads', () => {
       success: true,
       message: 'Thank you! The quote has been accepted. The business will be in touch soon.',
       payment: { kind: 'full', url: 'https://square.link/u/minted', amount: 2029.64 },
+      depositDue: null,
     });
   });
 
@@ -252,5 +254,95 @@ describe('generateConfirmationPage — pay after accepting', () => {
     const declined = generateConfirmationPage('declined', 'Recorded.', 'Hansen Fencing', null, null, full);
     expect(declined).not.toContain('https://square.link/u/full');
     expect(declined).not.toContain('Pay now if you like');
+  });
+});
+
+// Once a deposit has been recorded against the quote (paid by bank transfer,
+// or an earlier card payment), the customer is never handed a deposit link
+// for it again — the deposit minter charges the whole depositAmount.
+describe('paymentOfferForAcceptedQuote — deposit already recorded', () => {
+  it('a recorded deposit means no deposit link; what is still owed is offered as optional Pay now', async () => {
+    const d = deps();
+    const offer = await paymentOfferForAcceptedQuote(
+      'u1', 'q1', { ...depositQuote, depositPaid: 1000 }, d,
+    );
+    expect(d.mint).not.toHaveBeenCalledWith('u1', 'q1', 'deposit');
+    expect(offer).toEqual({ kind: 'full', url: 'https://square.link/u/minted', amount: 3000 });
+  });
+
+  it('part of the deposit recorded: still no deposit link', async () => {
+    const d = deps();
+    const offer = await paymentOfferForAcceptedQuote('u1', 'q1', { ...depositQuote, depositPaid: 250 }, d);
+    expect(offer?.kind).toBe('full');
+    expect(d.mint).not.toHaveBeenCalledWith('u1', 'q1', 'deposit');
+  });
+
+  it('nothing recorded: the deposit link as before', async () => {
+    const offer = await paymentOfferForAcceptedQuote('u1', 'q1', { ...depositQuote, depositPaid: 0 }, deps());
+    expect(offer?.kind).toBe('deposit');
+  });
+});
+
+describe('depositDueWithoutCardOffer — a deposit by bank transfer', () => {
+  const transferQuote = { total: 960, requireDeposit: true, depositPercentage: 31.25, depositAmount: 300 };
+
+  it('no card offer: the deposit the quote asks for', () => {
+    expect(depositDueWithoutCardOffer(transferQuote, null)).toBe(300);
+  });
+
+  it('derives the amount from the percentage when none is stored', () => {
+    expect(depositDueWithoutCardOffer({ total: 1000, requireDeposit: true, depositPercentage: 30 }, null)).toBe(300);
+  });
+
+  it('null with any card offer — the page never asks two ways', () => {
+    expect(depositDueWithoutCardOffer(transferQuote, { kind: 'deposit', url: 'https://square.link/u/d', amount: 300 })).toBeNull();
+    expect(depositDueWithoutCardOffer(transferQuote, { kind: 'full', url: 'https://square.link/u/f', amount: 960 })).toBeNull();
+  });
+
+  it('null when no deposit is asked for, or one is already recorded', () => {
+    expect(depositDueWithoutCardOffer({ total: 960, requireDeposit: false, depositAmount: 300 }, null)).toBeNull();
+    expect(depositDueWithoutCardOffer({ ...transferQuote, depositPaid: 300 }, null)).toBeNull();
+  });
+
+  it('rides on the hosted page response only for an acceptance', () => {
+    expect(respondToQuoteResponseBody('accepted', null, 300).depositDue).toBe(300);
+    expect(respondToQuoteResponseBody('rejected', null, 300).depositDue).toBeNull();
+  });
+});
+
+describe('generateConfirmationPage — deposit by bank transfer', () => {
+  it('names the deposit and points at the payment details on the quote', () => {
+    const html = generateConfirmationPage('accepted', 'Thanks!', 'Coastal Concreting', null, null, null, 300);
+    expect(html).toContain('data-kind="transfer"');
+    expect(html).toContain('Deposit to get started');
+    expect(html).toContain('$300.00');
+    expect(html).toContain('Payment details are on your quote.');
+    expect(html).not.toContain('will be in touch to lock in a date');
+    expect(html).not.toContain('Pay deposit securely');
+  });
+
+  it('never beside a card offer, and never on a decline', () => {
+    const full = { kind: 'full' as const, url: 'https://square.link/u/full', amount: 960 };
+    expect(generateConfirmationPage('accepted', 'Thanks!', 'Coastal Concreting', null, null, full, 300))
+      .not.toContain('data-kind="transfer"');
+    expect(generateConfirmationPage('declined', 'Recorded.', 'Coastal Concreting', null, null, null, 300))
+      .not.toContain('data-kind="transfer"');
+  });
+});
+
+describe('depositDueWithoutCardOffer — returning customers', () => {
+  const quote = { requireDeposit: true, total: 960, depositPercentage: 30, depositAmount: 288, status: 'accepted' };
+
+  it('asks nothing of a customer who paid the full amount (not recorded as a deposit)', () => {
+    expect(depositDueWithoutCardOffer({ ...quote, depositPaid: 0, paidTotal: 960 }, null)).toBeNull();
+  });
+
+  it('asks nothing once the quote has been invoiced', () => {
+    expect(depositDueWithoutCardOffer({ ...quote, invoiceId: 'inv-1' }, null)).toBeNull();
+    expect(depositDueWithoutCardOffer({ ...quote, invoicedAt: 1 }, null)).toBeNull();
+  });
+
+  it('still asks for the deposit on an accepted quote with nothing paid', () => {
+    expect(depositDueWithoutCardOffer(quote, null)).toBe(288);
   });
 });

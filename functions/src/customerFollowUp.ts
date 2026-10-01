@@ -19,6 +19,7 @@
 import { normaliseTimestamp } from './timestamps.helpers';
 import { invoiceLinkAmountDue } from './paymentReceipt.helpers';
 import { stageToInvoiceStatus } from './shared/document/adapter';
+import { invoiceBalanceDue } from './shared/document/recordedDeposit';
 import type { DocumentStage } from './shared/document/types';
 
 /** Acceptance tokens expire 30 days after they're minted. index.ts imports this — one number. */
@@ -449,10 +450,13 @@ export function followUpInvoiceFromRecords(
     suppressAutoFollowUp: !!(document.suppressAutoFollowUp || l.suppressAutoFollowUp),
     sentAtMs: ms(document.sentAt) ?? ms(l.sentAt),
     dueAtMs: ms(document.dueDate) ?? ms(l.dueDate),
-    // The Square pay link is minted off the legacy row, so while that row
-    // exists the figure in the email comes from the same arithmetic and can
-    // never disagree with the figure at the checkout.
-    balanceDue: legacy ? invoiceLinkAmountDue(legacy) : Number(document.balanceDue) || 0,
+    // The unified document's balance — the same figure the reminder's pay
+    // link is minted for (createSquarePaymentLinkInternal), so the email and
+    // the checkout can't disagree. The legacy row is only the fallback: an
+    // older app build can leave it with a netted total or a stale paid figure.
+    balanceDue: document.total !== undefined
+      ? invoiceBalanceDue(document)
+      : legacy ? invoiceLinkAmountDue(legacy) : Number(document.balanceDue) || 0,
     followUpCount: Math.max(
       reminderCount(document.customerFollowUpCount),
       reminderCount(l.customerFollowUpCount),

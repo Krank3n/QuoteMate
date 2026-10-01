@@ -3,10 +3,11 @@
  * Round-trip: convert a quote to an invoice, then undo it.
  *
  * The undo is only worth having if it restores what conversion overwrote.
- * Conversion replaces the quote number with a fresh invoice number and
- * subtracts the deposit credit from the total — without the stash an undo
- * would have to mint a NEW quote number, changing the customer-facing
- * reference twice, and would leave the total short by the deposit.
+ * Conversion replaces the quote number with a fresh invoice number — without
+ * the stash an undo would have to mint a NEW quote number, changing the
+ * customer-facing reference twice. (Conversion no longer touches the total:
+ * a deposit comes off the balance, and money on the doc rules the undo out
+ * anyway — see canRevertToQuote.)
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
@@ -43,10 +44,6 @@ function quoteDoc(overrides: Partial<Document> = {}): Document {
     stage: 'quote_accepted',
     number: 'QU-178554',
     total: 1000,
-    // A deposit already collected on the quote — conversion credits it
-    // against the invoice total, which is the arithmetic the undo has to
-    // put back.
-    depositPaid: 250,
     paidTotal: 0,
     balanceDue: 1000,
     payments: [],
@@ -75,7 +72,7 @@ describe('convert → revert round trip', () => {
 
     expect(invoice.type).toBe('invoice');
     expect(invoice.number).toBe('INV-006');
-    expect(invoice.total).toBe(750); // 1000 − 250 deposit credit
+    expect(invoice.total).toBe(1000); // the full total — never netted
     expect(invoice.convertedFromQuote).toMatchObject({
       number: 'QU-178554',
       total: 1000,

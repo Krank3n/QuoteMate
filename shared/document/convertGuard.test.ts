@@ -15,11 +15,7 @@
  */
 import { describe, it, expect } from 'vitest';
 
-import {
-  isAlreadyInvoiced,
-  canConvertDocument,
-  type ConvertCandidate,
-} from './convertGuard';
+import { isAlreadyInvoiced, canConvertDocument, invoiceMoneyOnConvert, type ConvertCandidate } from './convertGuard';
 
 const quote = (over: Partial<ConvertCandidate> = {}): ConvertCandidate =>
   ({ id: 'doc1', type: 'quote', ...over });
@@ -69,5 +65,21 @@ describe('canConvertDocument', () => {
   it('handles null and undefined', () => {
     expect(canConvertDocument(null)).toBe(false);
     expect(canConvertDocument(undefined)).toBe(false);
+  });
+});
+
+describe('invoiceMoneyOnConvert', () => {
+  it('REGRESSION: keeps the full total and takes the deposit off the balance — $960, $300 deposit → $660 owing', () => {
+    expect(invoiceMoneyOnConvert({ total: 960, paidTotal: 300 })).toEqual({ total: 960, balanceDue: 660 });
+  });
+
+  it('falls back to the ledger sum when paidTotal was never written', () => {
+    expect(
+      invoiceMoneyOnConvert({ total: 960, payments: [{ amount: 300 }] }),
+    ).toEqual({ total: 960, balanceDue: 660 });
+  });
+
+  it('nothing paid: the balance is the total', () => {
+    expect(invoiceMoneyOnConvert({ total: 960 })).toEqual({ total: 960, balanceDue: 960 });
   });
 });

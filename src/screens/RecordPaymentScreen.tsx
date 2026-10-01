@@ -1,7 +1,9 @@
 /**
  * Record Payment — bottom-sheet screen for logging money already received
  * (bank transfer / cash / cheque) against an invoice, and for editing or
- * removing a ledger entry.
+ * removing a ledger entry. On a quote it records the deposit ("Record
+ * Deposit") — the way a tradie who isn't on Square logs a deposit paid by
+ * bank transfer.
  *
  * Registered as a `transparentModal` route rendering the shared BottomSheet,
  * so every navigate('RecordPayment') call site keeps working while the
@@ -109,12 +111,16 @@ export function RecordPaymentScreen() {
   // whichever we find.
   const legacyInvoice = invoices.find((i) => i.id === invoiceId) ||
     (currentInvoice?.id === invoiceId ? currentInvoice : null);
+  // Quotes too: money against a quote is its deposit (recordDocumentPayment
+  // files it as one). The route param keeps its old name so every existing
+  // navigate('RecordPayment', { invoiceId }) call site still works.
   const document = documents.find(
-    (d) => d.type === 'invoice' && (d.id === invoiceId || d.legacyInvoiceId === invoiceId),
+    (d) => d.id === invoiceId || (d.type === 'invoice' && d.legacyInvoiceId === invoiceId),
   );
+  const isQuote = document?.type === 'quote';
   // A payment written to the unified ledger is the one that sticks; the
   // legacy row is only kept in step when it exists.
-  const invoice = legacyInvoice ||
+  const invoice = (!isQuote && legacyInvoice) ||
     (document
       ? {
           id: document.id,
@@ -139,6 +145,16 @@ export function RecordPaymentScreen() {
       ? getAmountDue(invoice)
       : 0;
 
+  // A new deposit on a quote starts at what's left of the deposit the quote
+  // asked for — or blank, so the tradie types the real figure. Never the
+  // whole quote: one tap of Record would bank the job as its deposit.
+  const depositAsked =
+    isQuote && document?.requireDeposit === true ? Number(document.depositAmount) || 0 : 0;
+  const prefill = isQuote
+    ? Math.min(Math.max(0, depositAsked - (Number(document?.depositPaid) || 0)), amountDue)
+    : amountDue;
+  const docWord = isQuote ? 'quote' : 'invoice';
+
   const editingPayment = editingPaymentId
     ? (document?.payments || []).find((p) => p.id === editingPaymentId)
     : undefined;
@@ -152,14 +168,19 @@ export function RecordPaymentScreen() {
   // paidTotal) and its IEEE noise would otherwise ride the accept-the-default
   // path straight into the ledger and the Xero push.
   const [amount, setAmount] = useState<number>(
-    Math.round((editingPayment ? Number(editingPayment.amount) || 0 : amountDue) * 100) / 100,
+    Math.round((editingPayment ? Number(editingPayment.amount) || 0 : prefill) * 100) / 100,
   );
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(
     LEDGER_METHOD_TO_FORM[editingPayment?.method ?? ''] ?? 'bank_transfer',
   );
   const [notes, setNotes] = useState(editingPayment?.notes ?? '');
+  // On a quote — and on a deposit carried over from one — it is the deposit
+  // by definition, so there is nothing to choose: the "What's it for?" row
+  // is hidden and the sheet says Deposit throughout.
+  const depositFixed = isQuote || editingPayment?.kind === 'deposit';
   // A label, not a different kind of money — see DocumentPayment.isDeposit.
   const [isDeposit, setIsDeposit] = useState(editingPayment?.isDeposit === true);
+  const asDeposit = depositFixed || isDeposit;
   const [paymentDate, setPaymentDate] = useState(
     editingPayment?.paidAt ? new Date(editingPayment.paidAt) : new Date(),
   );
@@ -176,9 +197,9 @@ export function RecordPaymentScreen() {
   useEffect(() => {
     // Don't stomp the value being edited when the doc reloads.
     if (invoiceKey && !editingPayment) {
-      setAmount(Math.round(amountDue * 100) / 100);
+      setAmount(Math.round(prefill * 100) / 100);
     }
-  }, [invoiceKey, amountDue, editingPayment]);
+  }, [invoiceKey, prefill, editingPayment]);
 
   /**
    * Picking Deposit on a new payment. The amount prefills with the full
@@ -216,7 +237,7 @@ export function RecordPaymentScreen() {
       showAlert({
         type: 'warning',
         title: 'Amount exceeds balance',
-        message: `Enter up to ${formatCurrency(ceiling)}. This invoice doesn't owe more than that.`,
+        message: `Enter up to ${formatCurrency(ceiling)}. This ${docWord} doesn't owe more than that.`,
       });
       return;
     }
@@ -229,7 +250,7 @@ export function RecordPaymentScreen() {
     showAlert({
       type: 'warning',
       title: 'Remove this payment?',
-      message: 'The invoice balance goes back up by this amount.',
+      message: `The ${docWord} balance goes back up by this amount.`,
       primaryButtonText: 'Remove',
       secondaryButtonText: paymentCopy.cancel,
       // AlertModal renders the secondary button only when BOTH text and
@@ -269,7 +290,8 @@ export function RecordPaymentScreen() {
           paidAt: paymentDate.getTime(),
           method: PAYMENT_METHOD_TO_LEDGER[paymentMethod] ?? 'other',
           notes: notes || undefined,
-          isDeposit,
+          // A quote deposit is a deposit by its kind; the label is moot.
+          isDeposit: depositFixed ? undefined : isDeposit,
         });
         showAlert({
           type: 'success',
@@ -289,7 +311,7 @@ export function RecordPaymentScreen() {
       }
 
       // Also push payment to Xero if connected and invoice is synced
-      if (xeroConnection && invoice.xeroInvoiceId) {
+      if (!isQuote && xeroConnection && invoice.xeroInvoiceId) {
         try {
           await pushPaymentToXero(invoice.id, invoice.xeroInvoiceId, paymentAmount, paymentDate, paymentMethod);
         } catch (xeroError) {
@@ -300,12 +322,14 @@ export function RecordPaymentScreen() {
       // Edited entries (above) never offer one — an edit isn't a payment.
       showAlert({
         type: 'success',
-        title: paymentCopy.paymentRecordedTitle,
-        message: `${formatCurrency(paymentAmount)} recorded against this invoice.`,
+        title: isQuote ? paymentCopy.depositRecordedTitle : paymentCopy.paymentRecordedTitle,
+        message: isQuote
+          ? `${formatCurrency(paymentAmount)} recorded as the deposit on this quote.`
+          : `${formatCurrency(paymentAmount)} recorded against this invoice.`,
         primaryButtonText: 'Done',
         primaryButtonAction: dismiss,
         secondaryButtonText: paymentCopy.sendReceipt,
-        secondaryButtonAction: () => shareReceipt(paymentAmount, paymentMethod, paymentDate, isDeposit),
+        secondaryButtonAction: () => shareReceipt(paymentAmount, paymentMethod, paymentDate, asDeposit),
       });
     } catch (error) {
       showAlert({
@@ -332,7 +356,9 @@ export function RecordPaymentScreen() {
   const shareReceipt = async (amount: number, method: PaymentMethod, paidAt: Date, deposit: boolean) => {
     const message = buildPaymentReceipt({
       businessName: businessSettings?.businessName,
-      reference: invoice?.invoiceNumber ? `Invoice ${invoice.invoiceNumber}` : document?.job?.name,
+      reference: invoice?.invoiceNumber
+        ? `${isQuote ? 'Quote' : 'Invoice'} ${invoice.invoiceNumber}`
+        : document?.job?.name,
       amount,
       method,
       isDeposit: deposit,
@@ -396,8 +422,12 @@ export function RecordPaymentScreen() {
       visible={visible}
       onDismiss={dismiss}
       onClosed={handleClosed}
-      title={editingPaymentId ? 'Edit Payment' : paymentCopy.recordPayment}
-      subtitle={`Invoice ${invoice.invoiceNumber || 'Draft'}${customerName ? ` · ${customerName}` : ''}`}
+      title={
+        editingPaymentId
+          ? depositFixed ? 'Edit Deposit' : 'Edit Payment'
+          : isQuote ? paymentCopy.recordDeposit : paymentCopy.recordPayment
+      }
+      subtitle={`${isQuote ? 'Quote' : 'Invoice'} ${invoice.invoiceNumber || 'Draft'}${customerName ? ` · ${customerName}` : ''}`}
       scrollable
       maxHeightRatio={0.9}
     >
@@ -465,12 +495,16 @@ export function RecordPaymentScreen() {
       {/* Deposit label. Changes what the invoice and receipt call this
           money ("Deposit paid"), never the balance. Asked before the amount:
           the amount prefills with the full balance, and a deposit is almost
-          never that. */}
-      <Text style={styles.fieldLabel}>What's it for?</Text>
-      <View style={styles.chipRow}>
-        <Chip label="Payment" active={!isDeposit} onPress={() => setIsDeposit(false)} />
-        <Chip label="Deposit" active={isDeposit} onPress={handlePickDeposit} />
-      </View>
+          never that. Not asked where the answer is fixed — see depositFixed. */}
+      {!depositFixed ? (
+        <>
+          <Text style={styles.fieldLabel}>What's it for?</Text>
+          <View style={styles.chipRow}>
+            <Chip label="Payment" active={!isDeposit} onPress={() => setIsDeposit(false)} />
+            <Chip label="Deposit" active={isDeposit} onPress={handlePickDeposit} />
+          </View>
+        </>
+      ) : null}
 
       {/* Amount */}
       <Text style={styles.fieldLabel}>Amount</Text>
@@ -556,7 +590,7 @@ export function RecordPaymentScreen() {
         disabled={isSubmitting}
         icon="check"
       >
-        {editingPaymentId ? 'Save Changes' : paymentCopy.recordPayment}
+        {editingPaymentId ? 'Save Changes' : isQuote ? paymentCopy.recordDeposit : paymentCopy.recordPayment}
       </Button>
 
       {editingPaymentId ? (
@@ -568,7 +602,7 @@ export function RecordPaymentScreen() {
           icon="trash-can-outline"
           style={styles.deleteButton}
         >
-          Remove this payment
+          {depositFixed ? 'Remove this deposit' : 'Remove this payment'}
         </Button>
       ) : null}
 

@@ -625,9 +625,9 @@ export function ViewJobScreen() {
   // the job cards), and the only way to fix a payment while a balance is
   // still owing.
   //
-  // A quote with a deposit owing still needs TakePaymentSheet: there is no
-  // manual quote-deposit path, and the Square rows are the only way to take
-  // one. No Square gate here — the sheet's manual rows must work with zero
+  // A quote with a deposit owing goes to TakePaymentSheet: the Square rows
+  // take it by card or pay link, and its Record Deposit row logs one paid by
+  // bank transfer. No Square gate here — the manual row must work with zero
   // Square setup; the Square rows gate themselves.
   const handlePaymentChipPress = async (doc: Document) => {
     switch (paymentChipRoute(doc)) {

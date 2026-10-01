@@ -28,7 +28,8 @@ import { finiteNumber, formatCurrency, updateAllMaterialPrices, updateDocumentCa
 import { applySetTotal, describeSetTotalPlan } from '../utils/setTotal';
 import { normalizePhoneTail } from '../utils/textMatch';
 import { normaliseLabourToHours } from '../../shared/document/labourUnits';
-import { isAlreadyInvoiced } from '../../shared/document/convertGuard';
+import { isAlreadyInvoiced, invoiceMoneyOnConvert } from '../../shared/document/convertGuard';
+import { depositNettedOffTotal } from '../../shared/document/recordedDeposit';
 import { keepSupplierPriceInclusive, resolveGstMode } from '../../shared/document/gstMode';
 import { holdStatusForward } from '../../shared/document/forwardOnlyStatus';
 import type { DocumentType } from '../../shared/document/types';
@@ -2283,15 +2284,31 @@ export const useStore = create<AppState>((set, get) => ({
       (await documentService.getDocumentById(documentId)) ||
       undefined;
     if (!doc) throw new Error('Invoice not found');
-    if (doc.type !== 'invoice') {
-      throw new Error('That document is a quote, not an invoice.');
-    }
 
     const total = Number(doc.total) || 0;
     const alreadyPaid = Number(doc.paidTotal) || 0;
     // Never bank more than is owed — the balance is the cap, matching the
     // overpayment guard the manual RecordPayment screen enforces.
     const capped = Math.min(Math.max(amount, 0), Math.max(0, total - alreadyPaid));
+
+    if (doc.type === 'quote') {
+      // Money against a QUOTE is the deposit — a tradie paid by bank transfer
+      // recording what Square would otherwise have taken. Same shape as a
+      // Square deposit (applyPaymentToDocument): `kind: 'deposit'`, minus the
+      // squarePaymentId, so it stays editable. Not 'manual': the quote's
+      // legacy mirror only round-trips deposits through `depositPaid`, and a
+      // manual entry would be wiped by the next echo (preserveLedger).
+      const deposit: DocumentPayment = {
+        id: generateId(),
+        kind: 'deposit',
+        amount: capped,
+        paidAt: (paymentDate || new Date()).getTime(),
+        method: PAYMENT_METHOD_TO_LEDGER[method] ?? 'other',
+        ...(notes ? { notes } : {}),
+      };
+      return await get().saveDocumentWithLedger(doc, [...(doc.payments || []), deposit]);
+    }
+
     const payment: DocumentPayment = {
       id: generateId(),
       kind: 'manual',
@@ -2407,12 +2424,34 @@ export const useStore = create<AppState>((set, get) => ({
       }
     }
 
+    // A quote's money is its deposit. Keep `depositPaid` in step with the
+    // ledger — the legacy mirror, the "Take Deposit" button (depositOwed) and
+    // the customer's pay-link gates all read it. A deposit landing on a quote
+    // that hasn't been accepted IS the acceptance, exactly as a Square
+    // deposit is (applyPaymentToDocument); onDocumentWriteSyncJob then moves
+    // the Job along. Removing the deposit never un-accepts the quote.
+    let quoteDeposit: Partial<Document> = {};
+    if (doc.type === 'quote') {
+      const deposits = payments.filter((p) => p.kind === 'deposit');
+      const depositPaid = deposits.reduce((acc, p) => acc + (Number(p.amount) || 0), 0);
+      const lastPaidAt = deposits.reduce((acc, p) => Math.max(acc, Number(p.paidAt) || 0), 0);
+      quoteDeposit = {
+        depositPaid,
+        depositPaidAt: depositPaid > 0 && lastPaidAt > 0 ? lastPaidAt : undefined,
+      };
+      if (depositPaid > 0 && (doc.stage === 'quote_sent' || doc.stage === 'draft')) {
+        stage = 'quote_accepted';
+        quoteDeposit.acceptedAt = doc.acceptedAt ?? Date.now();
+      }
+    }
+
     const next: Document = {
       ...doc,
       payments,
       paidTotal,
       balanceDue,
       stage,
+      ...quoteDeposit,
       ...(fullyPaid ? {} : { paidInFullAt: undefined }),
     };
     await get().saveDocument(next);
@@ -3021,8 +3060,12 @@ export const useStore = create<AppState>((set, get) => ({
     // of truth for the stage transition; the optimistic update keeps the
     // dashboard responsive on slow connections.
     const now = Date.now();
-    const depositCredit = Math.max(0, Number(existing.depositPaid) || 0);
-    const adjustedTotal = Math.max(0, (existing.total || 0) - depositCredit);
+    // The invoice keeps the FULL job total. A deposit taken on the quote is
+    // already on the payments ledger (and in paidTotal), so it comes off the
+    // balance, not the total — the PDF reads TOTAL / Deposit paid / BALANCE
+    // DUE. Netting the total as well used to subtract it twice: a $960 job
+    // with a $300 deposit invoiced at $660 with $300 paid, $360 owing.
+    const { total, balanceDue } = invoiceMoneyOnConvert(existing);
     const invoiceNumber = await get().getNextInvoiceNumber();
     const optimistic: Document = {
       ...existing,
@@ -3037,7 +3080,8 @@ export const useStore = create<AppState>((set, get) => ({
       issueDate: now,
       dueDate: calculateDueDate(new Date(now), 'net_14').getTime(),
       paymentTerms: 'net_14',
-      total: adjustedTotal,
+      total,
+      balanceDue,
       legacyInvoiceId: existing.id,
       // Stash what this write overwrites so the conversion can be undone
       // exactly — see canRevertToQuote. Without the old number an undo
@@ -3221,15 +3265,12 @@ export const useStore = create<AppState>((set, get) => ({
       draftEmailBody: undefined,
       draftEmailSubject: undefined,
     };
-    // If the source was an invoice, its `total` had any paid deposit
-    // subtracted (see convertDocumentToInvoice). Add it back so the cloned
-    // quote represents the full job value, not the residual.
-    const depositCredit =
-      source.type === 'invoice'
-        ? (source.payments ?? [])
-            .filter((p) => p.kind === 'deposit')
-            .reduce((acc, p) => acc + (Number(p.amount) || 0), 0)
-        : 0;
+    // An invoice converted before the convert stopped netting stored its
+    // total with the quote deposit already taken off. Add that back so the
+    // cloned quote represents the full job value, not the residual. An
+    // invoice converted since keeps its full total — adding its deposit back
+    // as well would inflate the new visit by the deposit.
+    const depositCredit = source.type === 'invoice' ? depositNettedOffTotal(source) : 0;
     const restoredTotal = (Number(source.total) || 0) + depositCredit;
     const finalDoc: Document = {
       ...clone,
