@@ -598,6 +598,10 @@ export function documentRecordToInvoiceRecord(doc: DocumentRecord): LegacyDocume
     // `total − paidAmount` from it — so reporting one payment's amount
     // under-reported every invoice with more than one payment.
     paidAmount: doc.paidTotal,
+    // How many ledger entries the paid total is made of. Lets the receipt
+    // trigger tell a NEW payment (count goes up) from an edit that raised
+    // an existing one (count unchanged) — see evaluatePaymentReceipt.
+    paymentCount: (doc.payments ?? []).length,
     paymentMethod,
     paymentNotes: paid?.notes,
     sourceQuoteId: doc.legacyQuoteId,

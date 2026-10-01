@@ -45,6 +45,7 @@ import {
   isPaymentAlreadyApplied,
   applySquarePaymentToInvoice,
   evaluatePaymentReceipt,
+  receiptIsForDeposit,
 } from './paymentReceipt.helpers';
 import { shouldReadyToSendNudge, toMs } from './draftNudge.helpers';
 import { onboardingTipDue } from './onboardingDrip.helpers';
@@ -11377,6 +11378,11 @@ export const onInvoicePaymentReceived = functions.firestore
         day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Australia/Sydney',
       });
 
+      // Which ledger entry this is lives on the unified document, not the
+      // legacy invoice. Best-effort: a failed read just sends the plain wording.
+      const ledgerDoc = await loadDocumentForInvoiceId(userId, invoiceId).catch(() => null);
+      const isDeposit = receiptIsForDeposit(ledgerDoc?.payments, receipt.amountReceived);
+
       const replyToEmail = await resolveTradieReplyEmail(userId, business.email);
       await sendPaymentReceiptEmail({
         to: receipt.customerEmail,
@@ -11393,6 +11399,7 @@ export const onInvoicePaymentReceived = functions.firestore
           balanceDue: receipt.balanceDue,
           paymentMethod: receipt.paymentMethod,
           paidDateText,
+          isDeposit,
         },
       });
     } catch (err: any) {
@@ -15701,6 +15708,31 @@ export const squareWebhook = functions.https.onRequest(async (req, res) => {
       paymentDollars: paidAmountDollars,
     });
 
+    // Unified ledger FIRST, legacy invoice second. The legacy write fires the
+    // mirror trigger (onInvoiceWritten), which projects the single-payment
+    // legacy record back over the document. Written in the old order, the
+    // ledger didn't hold this payment yet, the sums disagreed, and the
+    // projection replaced every earlier part payment with one combined
+    // entry. With the ledger already carrying it, the echo matches and
+    // preserveLedger keeps the history. Idempotent on its own (skips a
+    // payment id already on the ledger), so a redelivery after the legacy
+    // write fails is safe.
+    try {
+      await applyPaymentToDocument({
+        userId,
+        paymentId: payment.id,
+        orderId,
+        amountCents: Number(payment?.amount_money?.amount) || 0,
+        source: idx.source === 'in_app' ? 'in_app' : 'pay_link',
+        kind: 'invoice',
+        invoiceId,
+      });
+    } catch (err: any) {
+      functions.logger.warn('phase2_unified_payment_write_failed', {
+        paymentId: payment.id, kind: 'invoice', message: err?.message,
+      });
+    }
+
     const invoiceTcSource: 'pay_link' | 'tap_to_pay' =
       idx.source === 'in_app' ? 'tap_to_pay' : 'pay_link';
     const invoiceTcAcceptance = invoice.termsVersionHash
@@ -15754,24 +15786,6 @@ export const squareWebhook = functions.https.onRequest(async (req, res) => {
         paidAt: admin.firestore.FieldValue.serverTimestamp(),
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
       }, { merge: true });
-    }
-
-    // Phase-2: push the payment into the unified document ledger so the
-    // documents/{id} view reflects this payment immediately.
-    try {
-      await applyPaymentToDocument({
-        userId,
-        paymentId: payment.id,
-        orderId,
-        amountCents: Number(payment?.amount_money?.amount) || 0,
-        source: idx.source === 'in_app' ? 'in_app' : 'pay_link',
-        kind: 'invoice',
-        invoiceId,
-      });
-    } catch (err: any) {
-      functions.logger.warn('phase2_unified_payment_write_failed', {
-        paymentId: payment.id, kind: 'invoice', message: err?.message,
-      });
     }
 
     // If the invoice has already been pushed to Xero, record the payment

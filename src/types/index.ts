@@ -752,6 +752,8 @@ export interface Invoice {
   // Payment tracking
   paidDate?: Date;
   paidAmount?: number;
+  /** Ledger entries behind paidAmount — see documentRecordToInvoiceRecord. */
+  paymentCount?: number;
   paymentMethod?: PaymentMethod;
   paymentNotes?: string;
 

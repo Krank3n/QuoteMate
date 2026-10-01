@@ -94,6 +94,33 @@ export function preserveFirstSend(existing: AnyData | null | undefined, toWrite:
 }
 
 /**
+ * Keep the unified payment ledger when the legacy record agrees on the money.
+ *
+ * The legacy invoices/{id} record holds ONE payment: a `paidAmount` total, a
+ * method and a date. Every unified save mirrors the document onto it, and
+ * this trigger then projects it straight back — so without this, the
+ * projection's single `manual-{id}` entry replaced the real ledger on every
+ * save. Two payments ($100 cash + $50 bank) came back as one "$150 cash"
+ * entry, losing each payment's own method, date, notes and deposit label.
+ *
+ * When the projected ledger sums to the same money as the stored one, the
+ * legacy write carried no new payment information — it was the echo of a
+ * unified save — so the stored ledger stands. When the sums differ, an older
+ * client changed the money through the legacy record, and the projection is
+ * the only account of it; take it as before. Pure.
+ */
+export function preserveLedger(existing: AnyData | null | undefined, toWrite: AnyData): AnyData {
+  const stored = existing?.payments;
+  const incoming = toWrite.payments;
+  if (!Array.isArray(stored) || stored.length === 0 || !Array.isArray(incoming)) {
+    return toWrite;
+  }
+  const sum = (ps: AnyData[]) => ps.reduce((acc, p) => acc + (Number(p?.amount) || 0), 0);
+  if (Math.abs(sum(stored) - sum(incoming)) >= 0.005) return toWrite;
+  return { ...toWrite, payments: stored };
+}
+
+/**
  * Write the projection if it would not clobber a newer one already on disk.
  * The skip is based on updatedAt of the source vs the mirror — if the existing
  * mirror already reflects a strictly newer source updatedAt, leave it alone.
@@ -172,6 +199,7 @@ async function writeMirror(
     // First-send wins: never let a re-send's fresh sentAt overwrite the
     // originally-recorded one on the mirror.
     toWrite = preserveFirstSend(existingData, toWrite);
+    toWrite = preserveLedger(existingData, toWrite);
   }
   await ref.set(stripUndefined(toWrite), { merge: true });
   return { written: true, skipped: false };

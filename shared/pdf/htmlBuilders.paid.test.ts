@@ -159,3 +159,43 @@ describe('gate watermark after the stamp landed', () => {
     expect(stampText(html)).toBe('PAID');
   });
 });
+
+describe('paid rows — deposit label', () => {
+  const rows = (html: string) =>
+    [...html.matchAll(/summary-row credit-row">\s*<span>([^<]*)<\/span>\s*<span>([^<]*)<\/span>/g)].map(
+      (m) => `${m[1]} ${m[2]}`,
+    );
+  const balance = (html: string) =>
+    html.match(/summary-row balance-due">\s*<span>BALANCE DUE<\/span>\s*<span>([^<]*)</)?.[1];
+
+  it('shows a payment marked as the deposit as "Deposit paid"', () => {
+    const html = buildInvoicePdfHtml(
+      invoiceData({ total: 9850.40, paidAmount: 3000, paidDepositAmount: 3000 }),
+      business,
+    );
+    expect(rows(html)).toEqual(['Deposit paid -$3,000.00']);
+    expect(balance(html)).toBe('$6,850.40');
+  });
+
+  it('splits a deposit and a later payment into two rows that sum to the paid total', () => {
+    const html = buildInvoicePdfHtml(
+      invoiceData({ total: 9850.40, paidAmount: 5000, paidDepositAmount: 3000 }),
+      business,
+    );
+    expect(rows(html)).toEqual(['Deposit paid -$3,000.00', 'Amount Paid -$2,000.00']);
+    expect(balance(html)).toBe('$4,850.40');
+  });
+
+  it('keeps the single "Amount Paid" row when nothing is marked as the deposit', () => {
+    const html = buildInvoicePdfHtml(invoiceData({ total: 110, paidAmount: 50 }), business);
+    expect(rows(html)).toEqual(['Amount Paid -$50.00']);
+  });
+
+  it('never shows more deposit than was paid', () => {
+    const html = buildInvoicePdfHtml(
+      invoiceData({ total: 110, paidAmount: 50, paidDepositAmount: 80 }),
+      business,
+    );
+    expect(rows(html)).toEqual(['Deposit paid -$50.00']);
+  });
+});

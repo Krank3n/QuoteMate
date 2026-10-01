@@ -23,7 +23,7 @@ vi.mock('@expo/vector-icons/MaterialCommunityIcons', () => ({ default: () => nul
 vi.mock('../theme', () => ({ makeStyles: () => () => ({}), useThemeColors: () => ({}) }));
 vi.mock('../utils/haptics', () => ({ selectionTap: () => {} }));
 
-import { derivePaymentState } from './PaymentChip';
+import { derivePaymentState, paymentChipRoute } from './PaymentChip';
 
 const invoice = (over: Record<string, any> = {}): any => ({
   id: 'inv1', type: 'invoice', stage: 'invoice_sent',
@@ -55,5 +55,29 @@ describe('payment chip affordance', () => {
     // promise a door that isn't there.
     expect(isActionable(invoice(), false)).toBe(false);
     expect(isActionable(invoice({ stage: 'partially_paid', paidTotal: 400 }), false)).toBe(false);
+  });
+});
+
+describe('paymentChipRoute (job screen chip)', () => {
+  it('sends an unpaid invoice straight to Record Payment', () => {
+    expect(paymentChipRoute(invoice())).toBe('record');
+  });
+
+  it('opens the payment history on a part-paid invoice, where a payment can be fixed', () => {
+    // The case that prompted this: $3,000 recorded on a $9,850.40 invoice, and no
+    // way to reach that entry while the balance was owing.
+    expect(paymentChipRoute(invoice({ total: 9850.40, paidTotal: 3000 }))).toBe('history');
+  });
+
+  it('opens the payment history on a paid invoice', () => {
+    expect(paymentChipRoute(invoice({ paidTotal: 972.4 }))).toBe('history');
+  });
+
+  it('sends a quote with a deposit owing to the take-payment sheet', () => {
+    expect(paymentChipRoute(invoice({ type: 'quote', stage: 'quote_sent' }))).toBe('takePayment');
+  });
+
+  it('opens the history for a zero-total doc rather than a form with nothing to collect', () => {
+    expect(paymentChipRoute(invoice({ total: 0 }))).toBe('history');
   });
 });

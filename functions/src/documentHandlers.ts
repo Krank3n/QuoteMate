@@ -51,6 +51,7 @@ import {
 } from './shared/document/lumpSum';
 import { resolvePriceDetail } from './shared/document/priceDetail';
 import { paidInFullAtMs } from './shared/document/paidInFull';
+import { recordedDepositTotal } from './shared/document/recordedDeposit';
 import { dollarsToCents, centsToDollars } from './shared/pdf/money';
 import {
   quoteRecordToDocumentRecord,
@@ -1234,6 +1235,7 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
       dueDate: fmtAuDate(invoice.dueDate),
       paymentTerms: invoice.paymentTerms,
       paidAmount: invoice.paidAmount || 0,
+      paidDepositAmount: recordedDepositTotal((doc as DocumentRecord).payments),
       // From the unified doc, not invoice.paidDate: the adapter picks one
       // representative payment, which on a multi-payment invoice is the
       // wrong (earliest) date. Same helper the phone uses, same format.
@@ -1364,6 +1366,21 @@ export async function applyPaymentToDocument(
     ? quoteId
     : invoiceId;
   if (!docId) return;
+
+  // An invoice payment only ever extends a ledger that really exists at
+  // documents/{invoiceId}. The Square webhook now calls this BEFORE writing
+  // the legacy invoice (see the "Unified ledger FIRST" note there), so
+  // loadDocument's on-the-fly projection of the legacy record would no
+  // longer already contain this payment — and the write below would mint a
+  // stray documents/{invoiceId} beside an older converted invoice whose real
+  // document lives under its source quote's id. In the old order that
+  // projection always held the payment and returned at the idempotency check,
+  // so skipping here keeps those invoices exactly as they were: the mirror
+  // trigger brings the payment across.
+  if (kind === 'invoice') {
+    const stored = await db().doc(`users/${userId}/documents/${docId}`).get();
+    if (!stored.exists) return;
+  }
 
   const doc = await loadDocument(userId, docId);
   if (!doc) return;

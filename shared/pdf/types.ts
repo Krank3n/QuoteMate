@@ -146,7 +146,10 @@ export interface InvoicePdfData extends QuotePdfData {
   paidDate?: string;
   // Deposit credit carried over from the source quote. Rendered as a
   // "Deposit already paid" row so the customer sees why the total differs.
-  depositCredit?: number;
+  depositCredit?: number;  // The part of paidAmount the tradie recorded as the deposit (see
+  // recordedDepositTotal). Splits the paid row into "Deposit paid" and
+  // "Amount Paid"; the balance due is unchanged.
+  paidDepositAmount?: number;
 }
 
 export interface ReportPdfData {

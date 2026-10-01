@@ -42,7 +42,7 @@ import {
   jobStatusTimestamp,
   type JobSubStatusSlot,
 } from '../utils/jobTimeline';
-import { PaymentChip, derivePaymentState, shouldShowPaymentChip } from './PaymentChip';
+import { PaymentChip, paymentChipRoute, shouldShowPaymentChip } from './PaymentChip';
 import { jobHeadlineValue, type JobSortLabel } from '../utils/jobSort';
 import type { Document } from '../types/document';
 
@@ -139,19 +139,16 @@ export function pickStageStatus(
 }
 
 /**
- * Whether tapping the chip should open RecordPaymentScreen.
+ * Whether the card's payment chip is tappable.
  *
- * Narrower than showing the chip, because that screen dead-ends on
- * anything else: it rejects quotes outright ("That document is a quote,
- * not an invoice"), and on a settled invoice it opens with a $0 balance
- * that its own overpayment guard then refuses. A chip that opens a screen
- * you can't act on is worse than one that doesn't move — so those stay
- * plain labels.
+ * Invoices only. An unpaid one opens Record Payment; one with money on it
+ * opens the Payments history, where each payment can be fixed — same routing
+ * as the job screen (paymentChipRoute). A quote's chip stays a plain label:
+ * Record Payment rejects quotes outright, and the deposit sheet a quote needs
+ * lives on the job screen.
  */
-export function canRecordPaymentFor(doc?: Document | null): boolean {
-  if (!shouldShowPaymentChip(doc) || doc!.type !== 'invoice') return false;
-  const state = derivePaymentState(doc!);
-  return state === 'unpaid' || state === 'partially_paid';
+export function canOpenPaymentsFor(doc?: Document | null): boolean {
+  return shouldShowPaymentChip(doc) && doc!.type === 'invoice';
 }
 
 export const JobCard = React.memo(function JobCard({
@@ -274,9 +271,13 @@ export const JobCard = React.memo(function JobCard({
     // stopPropagation so the chip records a payment instead of bubbling
     // to Card.onPress and opening the job — same guard the headline
     // price and the kebab use.
+    // No haptic here — PaymentChip already fires one on press.
     e?.stopPropagation?.();
-    selectionTap();
-    navigation.navigate('RecordPayment', { invoiceId: doc.id });
+    if (paymentChipRoute(doc) === 'record') {
+      navigation.navigate('RecordPayment', { invoiceId: doc.id });
+    } else {
+      navigation.navigate('Payments', { docId: doc.id });
+    }
   };
   // The timeline's active pill covers every non-terminal stage (including
   // inquiry → "Draft" and completed → "Completed"). Cancelled and closed have
@@ -446,7 +447,7 @@ export const JobCard = React.memo(function JobCard({
                 compact
                 context={paymentContext}
                 onPress={
-                  canRecordPaymentFor(primaryDoc) ? handlePaymentChipPress : undefined
+                  canOpenPaymentsFor(primaryDoc) ? handlePaymentChipPress : undefined
                 }
               />
             </View>

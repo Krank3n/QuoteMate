@@ -30,11 +30,11 @@ vi.mock('../hooks/useIsAppActive', () => ({ useIsAppActive: () => true }));
 vi.mock('./JobStageSheet', () => ({ stageMetaFor: () => ({}) }));
 vi.mock('./ShimmerOverlay', () => ({ ShimmerOverlay: () => null }));
 // PaymentChip is loaded for real (its own imports are mocked above), so
-// canRecordPaymentFor is exercised against the real derivePaymentState —
+// canOpenPaymentsFor is exercised against the real derivePaymentState —
 // stubbing that out would leave the paid/unpaid call untested.
 
-import { derivePaymentState, shouldShowPaymentChip } from './PaymentChip';
-import { canRecordPaymentFor, pickStageStatus } from './JobCard';
+import { derivePaymentState, paymentChipRoute, shouldShowPaymentChip } from './PaymentChip';
+import { canOpenPaymentsFor, pickStageStatus } from './JobCard';
 
 describe('shouldShowPaymentChip', () => {
   it('shows on an invoice — there is a balance to owe against', () => {
@@ -167,53 +167,47 @@ describe('shouldShowPaymentChip', () => {
 });
 
 /**
- * Tapping the chip opens RecordPaymentScreen. That screen dead-ends on
- * anything but an invoice with a balance still owing, so the tap target
- * is narrower than the chip itself.
+ * Tapping an invoice's chip opens Record Payment (nothing paid yet) or the
+ * Payments history (money already on it — where a payment typed wrong can be
+ * fixed). A quote's chip stays a label: Record Payment rejects quotes.
  */
-describe('canRecordPaymentFor', () => {
-  it('opens on an invoice with nothing paid yet', () => {
-    expect(
-      canRecordPaymentFor({ type: 'invoice', stage: 'invoice_sent', total: 1000, paidTotal: 0 } as any),
-    ).toBe(true);
+describe('canOpenPaymentsFor + paymentChipRoute (job card)', () => {
+  const inv = (over: Record<string, any>) =>
+    ({ type: 'invoice', stage: 'invoice_sent', total: 1000, paidTotal: 0, ...over }) as any;
+
+  it('an unpaid invoice opens Record Payment', () => {
+    expect(canOpenPaymentsFor(inv({}))).toBe(true);
+    expect(paymentChipRoute(inv({}))).toBe('record');
   });
 
-  it('opens on a part-paid invoice — there is still a balance to record against', () => {
-    expect(
-      canRecordPaymentFor({ type: 'invoice', stage: 'partially_paid', total: 1000, paidTotal: 400 } as any),
-    ).toBe(true);
+  it('a part-paid invoice opens the Payments history, not a blank form', () => {
+    const doc = inv({ stage: 'partially_paid', paidTotal: 400 });
+    expect(canOpenPaymentsFor(doc)).toBe(true);
+    expect(paymentChipRoute(doc)).toBe('history');
   });
 
-  it('stays inert on a settled invoice, whose $0 balance the record screen would refuse', () => {
-    expect(
-      canRecordPaymentFor({ type: 'invoice', stage: 'paid', total: 1000, paidTotal: 1000 } as any),
-    ).toBe(false);
+  it('a settled or overpaid invoice opens the history instead of going inert', () => {
+    for (const paidTotal of [1000, 1200]) {
+      const doc = inv({ stage: 'paid', paidTotal });
+      expect(canOpenPaymentsFor(doc)).toBe(true);
+      expect(paymentChipRoute(doc)).toBe('history');
+    }
   });
 
-  it('stays inert on an overpaid invoice', () => {
-    expect(
-      canRecordPaymentFor({ type: 'invoice', stage: 'paid', total: 1000, paidTotal: 1200 } as any),
-    ).toBe(false);
+  it('treats a within-half-a-cent balance as settled, matching derivePaymentState', () => {
+    expect(paymentChipRoute(inv({ stage: 'partially_paid', paidTotal: 999.999 }))).toBe('history');
   });
 
   it('stays inert on a deposit-paid quote — the record screen rejects quotes outright', () => {
     expect(
-      canRecordPaymentFor({ type: 'quote', stage: 'quote_accepted', total: 1000, paidTotal: 250 } as any),
+      canOpenPaymentsFor({ type: 'quote', stage: 'quote_accepted', total: 1000, paidTotal: 250 } as any),
     ).toBe(false);
   });
 
   it('stays inert on a cancelled invoice and on a job with no document', () => {
-    expect(
-      canRecordPaymentFor({ type: 'invoice', stage: 'cancelled', total: 1000, paidTotal: 0 } as any),
-    ).toBe(false);
-    expect(canRecordPaymentFor(undefined)).toBe(false);
-    expect(canRecordPaymentFor(null)).toBe(false);
-  });
-
-  it('treats a within-half-a-cent balance as settled, matching derivePaymentState', () => {
-    expect(
-      canRecordPaymentFor({ type: 'invoice', stage: 'partially_paid', total: 1000, paidTotal: 999.999 } as any),
-    ).toBe(false);
+    expect(canOpenPaymentsFor(inv({ stage: 'cancelled' }))).toBe(false);
+    expect(canOpenPaymentsFor(undefined)).toBe(false);
+    expect(canOpenPaymentsFor(null)).toBe(false);
   });
 });
 

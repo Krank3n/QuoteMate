@@ -2019,7 +2019,9 @@ export function sendPaymentReceiptEmail(options: {
     logoUrl: business.logoUrl,
     preheader: receipt.isFullyPaid
       ? 'Your invoice is now paid in full.'
-      : 'Receipt for your payment.',
+      : receipt.isDeposit
+        ? 'Receipt for your deposit.'
+        : 'Receipt for your payment.',
   });
 
   const invoiceRef = receipt.invoiceNumber ? ` — Invoice ${receipt.invoiceNumber}` : '';

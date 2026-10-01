@@ -90,3 +90,26 @@ describe('buildPaymentReceipt', () => {
     expect(buildPaymentReceipt({ amount: 100, at })).not.toMatch(/balance/i);
   });
 });
+
+describe('buildPaymentReceipt — deposit', () => {
+  it('calls a payment marked as the deposit a deposit', () => {
+    const message = buildPaymentReceipt({
+      businessName: 'Coastal Concreting',
+      reference: 'Invoice INV-001',
+      amount: 3000,
+      method: 'bank_transfer',
+      isDeposit: true,
+      balanceDue: 6850.40,
+    });
+    expect(message).toContain('Deposit received — thanks.');
+    expect(message).toContain('Deposit paid: $3,000.00');
+    expect(message).not.toContain('Amount paid');
+    expect(message).toContain('Balance remaining: $6,850.40');
+  });
+
+  it('keeps the plain wording for an ordinary payment', () => {
+    const message = buildPaymentReceipt({ amount: 500, method: 'cash' });
+    expect(message).toContain('Payment received — thanks.');
+    expect(message).toContain('Amount paid: $500.00');
+  });
+});
