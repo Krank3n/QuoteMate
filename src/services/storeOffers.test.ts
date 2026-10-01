@@ -1,9 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { introOfferFromProduct, isoDurationDays, periodDays, pickAndroidOfferToken } from './storeOffers';
+import { introOfferFromProduct, isoDurationDays, mayTakeStoreFreeTrial, periodDays, pickAndroidOfferToken, storeFreeDaysToShow } from './storeOffers';
 
 const freePhase = { billingPeriod: 'P2W', billingCycleCount: 1, priceAmountMicros: '0', formattedPrice: 'Free', priceCurrencyCode: 'AUD', recurrenceMode: 2 };
 const paidPhase = { billingPeriod: 'P1M', billingCycleCount: 0, priceAmountMicros: '49000000', formattedPrice: '$49.00', priceCurrencyCode: 'AUD', recurrenceMode: 1 };
-const basePlan = { id: '', basePlanIdAndroid: 'quotemate-monthly', offerTokenAndroid: 'tok-base', pricingPhasesAndroid: { pricingPhaseList: [paidPhase] } };
+// Real expo-iap 3.4 shape: openiap-google sets id = offerId ?: basePlanId.
+const basePlan = { id: 'quotemate-monthly', basePlanIdAndroid: 'quotemate-monthly', offerTokenAndroid: 'tok-base', pricingPhasesAndroid: { pricingPhaseList: [paidPhase] } };
 const introOffer = { id: 'free-trial-14d', basePlanIdAndroid: 'quotemate-monthly', offerTokenAndroid: 'tok-intro', pricingPhasesAndroid: { pricingPhaseList: [freePhase, paidPhase] } };
 
 describe('storeOffers', () => {
@@ -29,7 +30,7 @@ describe('storeOffers', () => {
     it('ignores a free offer that hangs off a base plan Play did not list as buyable', () => {
       const prepaidIntro = { ...introOffer, id: 'prepaid-free', basePlanIdAndroid: 'quotemate-prepaid', offerTokenAndroid: 'tok-prepaid' };
       expect(introOfferFromProduct({ subscriptionOffers: [basePlan, prepaidIntro] })).toBeNull();
-      expect(pickAndroidOfferToken([basePlan, prepaidIntro])).toBe('tok-base');
+      expect(pickAndroidOfferToken([basePlan, prepaidIntro], { allowFreeTrial: true })).toBe('tok-base');
       // …but still finds the one on the sold base plan alongside it.
       expect(introOfferFromProduct({ subscriptionOffers: [basePlan, prepaidIntro, introOffer] })?.offerTokenAndroid).toBe('tok-intro');
     });
@@ -61,15 +62,83 @@ describe('storeOffers', () => {
   });
 
   describe('pickAndroidOfferToken', () => {
-    it('buys with the free intro offer when Play lists one', () => {
-      expect(pickAndroidOfferToken([basePlan, introOffer])).toBe('tok-intro');
-      expect(pickAndroidOfferToken([introOffer, basePlan])).toBe('tok-intro');
+    const allow = { allowFreeTrial: true };
+    it('buys with the free intro offer when the trial allows it and Play lists one', () => {
+      expect(pickAndroidOfferToken([basePlan, introOffer], allow)).toBe('tok-intro');
+      expect(pickAndroidOfferToken([introOffer, basePlan], allow)).toBe('tok-intro');
+    });
+    it('buys the base plan, never the free offer, once the trial is over (the 1 Oct second-trial bug)', () => {
+      expect(pickAndroidOfferToken([basePlan, introOffer], { allowFreeTrial: false })).toBe('tok-base');
+      expect(pickAndroidOfferToken([introOffer, basePlan], { allowFreeTrial: false })).toBe('tok-base');
+    });
+    it('buys the base plan, not a paid promo or the free offer, once the trial is over', () => {
+      const paidPromo = { id: 'winback', basePlanIdAndroid: 'quotemate-monthly', offerTokenAndroid: 'tok-promo', pricingPhasesAndroid: { pricingPhaseList: [{ ...paidPhase, priceAmountMicros: '25000000' }, paidPhase] } };
+      expect(pickAndroidOfferToken([paidPromo, introOffer, basePlan], { allowFreeTrial: false })).toBe('tok-base');
+      expect(pickAndroidOfferToken([paidPromo, introOffer, basePlan], allow)).toBe('tok-intro');
+    });
+    it('still recognises the older empty-id base plan entry', () => {
+      const legacyBase = { ...basePlan, id: '' };
+      expect(pickAndroidOfferToken([introOffer, legacyBase])).toBe('tok-base');
+    });
+    it('withholds the free offer by default — a caller that does not know the trial state bills on tap', () => {
+      expect(pickAndroidOfferToken([introOffer, basePlan])).toBe('tok-base');
+    });
+    it('without the free offer, takes a paid offer before ever falling back to a free one', () => {
+      const paidPromo = { id: 'promo', offerTokenAndroid: 'tok-promo', pricingPhasesAndroid: { pricingPhaseList: [paidPhase] } };
+      expect(pickAndroidOfferToken([introOffer, paidPromo])).toBe('tok-promo');
+      expect(pickAndroidOfferToken([introOffer])).toBeNull();
     });
     it('falls back to the base plan, then to the first listed offer', () => {
-      expect(pickAndroidOfferToken([basePlan])).toBe('tok-base');
-      expect(pickAndroidOfferToken([{ id: 'promo', offerTokenAndroid: 'tok-promo', pricingPhasesAndroid: { pricingPhaseList: [paidPhase] } }])).toBe('tok-promo');
-      expect(pickAndroidOfferToken([])).toBeNull();
+      expect(pickAndroidOfferToken([basePlan], allow)).toBe('tok-base');
+      expect(pickAndroidOfferToken([{ id: 'promo', offerTokenAndroid: 'tok-promo', pricingPhasesAndroid: { pricingPhaseList: [paidPhase] } }], allow)).toBe('tok-promo');
+      expect(pickAndroidOfferToken([], allow)).toBeNull();
       expect(pickAndroidOfferToken(undefined)).toBeNull();
+    });
+  });
+
+  describe('mayTakeStoreFreeTrial', () => {
+    const DAY = 24 * 60 * 60 * 1000;
+    const NOW = Date.parse('2026-10-01T10:11:00Z');
+    it('allows it before the trial has started (it starts on the first quote)', () => {
+      expect(mayTakeStoreFreeTrial({ trialExpired: false }, NOW)).toBe(true);
+      expect(mayTakeStoreFreeTrial({}, NOW)).toBe(true);
+    });
+    it('allows it mid-trial, so subscribing early is not billed on tap', () => {
+      expect(mayTakeStoreFreeTrial({ trialStartedAt: new Date(NOW - 3 * DAY), trialExpired: false }, NOW)).toBe(true);
+    });
+    it('refuses it once the trial window has passed, even before the server flags it', () => {
+      // e0p0…: trial from 13 Sep, subscribed 1 Oct and Apple gave 14 more free days.
+      expect(mayTakeStoreFreeTrial({ trialStartedAt: new Date('2026-09-13T05:35:11Z'), trialExpired: false }, NOW)).toBe(false);
+      expect(mayTakeStoreFreeTrial({ trialStartedAt: new Date(NOW - 14 * DAY), trialExpired: false }, NOW)).toBe(false);
+    });
+    it('refuses it when the server has flagged the trial expired', () => {
+      expect(mayTakeStoreFreeTrial({ trialStartedAt: new Date(NOW - 3 * DAY), trialExpired: true }, NOW)).toBe(false);
+      expect(mayTakeStoreFreeTrial({ trialExpired: true }, NOW)).toBe(false);
+    });
+    it('follows an explicit trialEndsAt (the return trial) both ways', () => {
+      const lapsedStart = new Date(NOW - 90 * DAY);
+      expect(mayTakeStoreFreeTrial({ trialStartedAt: lapsedStart, trialEndsAt: new Date(NOW + 2 * DAY), trialExpired: false }, NOW)).toBe(true);
+      expect(mayTakeStoreFreeTrial({ trialStartedAt: lapsedStart, trialEndsAt: new Date(NOW - DAY), trialExpired: false }, NOW)).toBe(false);
+    });
+    it('fails closed while the subscription status has not loaded', () => {
+      expect(mayTakeStoreFreeTrial(null, NOW)).toBe(false);
+      expect(mayTakeStoreFreeTrial(undefined, NOW)).toBe(false);
+    });
+  });
+
+  describe('storeFreeDaysToShow', () => {
+    it('shows the store days only when Android will actually ask for the offer', () => {
+      expect(storeFreeDaysToShow('android', 14, true)).toBe(14);
+      expect(storeFreeDaysToShow('android', 14, false)).toBeNull();
+    });
+    it('follows StoreKit on iOS, which applies the offer whatever the app wants', () => {
+      expect(storeFreeDaysToShow('ios', 14, false)).toBe(14);
+      expect(storeFreeDaysToShow('ios', null, true)).toBeNull();
+    });
+    it('is null with no usable store offer', () => {
+      expect(storeFreeDaysToShow('android', null, true)).toBeNull();
+      expect(storeFreeDaysToShow('android', 0, true)).toBeNull();
+      expect(storeFreeDaysToShow('web', undefined, true)).toBeNull();
     });
   });
 });
