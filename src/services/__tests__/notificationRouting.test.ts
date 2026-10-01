@@ -7,6 +7,11 @@ describe('routeForNotification', () => {
       .toEqual({ screen: 'ViewJob', params: { jobId: 'job-1' } });
   });
 
+  it("opens a crew send-in's job with the Log time sheet up, where Approve is", () => {
+    expect(routeForNotification({ type: 'crew_hours_sent', jobId: 'job-2', openLogTime: '1' }))
+      .toEqual({ screen: 'ViewJob', params: { jobId: 'job-2', openLogTime: true } });
+  });
+
   it('prefers the specific job over a list hint', () => {
     expect(routeForNotification({ jobId: 'job-9', screen: 'invoices' }))
       .toEqual({ screen: 'ViewJob', params: { jobId: 'job-9' } });

@@ -101,9 +101,11 @@ class NotificationService {
       lightColor: '#f97316',
     });
 
+    // Crew send-ins ride this channel too: a channel id an older install
+    // hasn't created yet would get the push dropped on Android 8+.
     await Notifications.setNotificationChannelAsync('quote-responses', {
-      name: 'Quote activity',
-      description: 'A customer opened or declined your quote.',
+      name: 'Quote & job activity',
+      description: 'A customer opened or declined your quote, or your crew sent hours in.',
       importance: Notifications.AndroidImportance.HIGH,
       vibrationPattern: [0, 250, 250, 250],
       lightColor: '#f97316',

@@ -13,6 +13,7 @@ const ALL_EVENTS: AussieEvent[] = [
   'draft_nudge',
   'quote_priced',
   'quote_pricing_snag',
+  'crew_hours_sent',
 ];
 
 /** Run a message many times so a random variant choice can't hide a bad one. */
@@ -70,6 +71,13 @@ describe('notification copy', () => {
       expect(msg.body).toContain('Dave');
       expect(msg.body).toContain('$4,200');
     }
+  });
+
+  it('says who sent in how many hours on which job, and what to do about it', () => {
+    expect(getAussieMessage('crew_hours_sent', { crew: 'Jake', hours: '7.5 h', job: 'Back deck rebuild' })).toEqual({
+      title: 'Hours sent in',
+      body: 'Jake sent in 7.5 h on Back deck rebuild. Tap to approve.',
+    });
   });
 
   it('interpolates the milestone count', () => {

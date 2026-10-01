@@ -21,7 +21,10 @@ export type AussieEvent =
   // Mate finished (or couldn't finish) pricing a quote while the phone was
   // away — the one push a tradie has explicitly waited for.
   | 'quote_priced'
-  | 'quote_pricing_snag';
+  | 'quote_pricing_snag'
+  // A crew member sent hours in through their link; they wait on the job
+  // for the owner's approval (functions/src/crewTime.ts).
+  | 'crew_hours_sent';
 
 interface MessageVariant {
   title: string;
@@ -123,6 +126,13 @@ const MESSAGE_POOL: Record<AussieEvent, MessageVariant[]> = {
     {
       title: 'Quote priced up ✅',
       body: "Mate's done pricing {job} — {amount} all up. Have a look before it goes out.",
+    },
+  ],
+  crew_hours_sent: [
+    {
+      // The tap opens the job with its Log time sheet up, where Approve sits.
+      title: 'Hours sent in',
+      body: '{crew} sent in {hours} on {job}. Tap to approve.',
     },
   ],
   quote_pricing_snag: [

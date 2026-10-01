@@ -22,6 +22,8 @@ export interface PushData {
   invoiceId?: string;
   /** Set on summary pushes that cover several documents. */
   screen?: string;
+  /** Crew hours sent in: open the job with its Log time sheet up. */
+  openLogTime?: string;
 }
 
 function str(value: unknown): string {
@@ -42,7 +44,10 @@ export function routeForNotification(data: unknown): PushRoute | null {
   // Most pushes concern one job — open it directly.
   const jobId = str(payload.jobId);
   if (jobId) {
-    return { screen: 'ViewJob', params: { jobId } };
+    return {
+      screen: 'ViewJob',
+      params: str(payload.openLogTime) ? { jobId, openLogTime: true } : { jobId },
+    };
   }
 
   // Summary pushes (several overdue invoices, several stale drafts) and any
