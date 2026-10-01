@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { preserveFirstSend, preserveLedger } from './documentMirror';
+import { preserveFirstSend, preserveLedger, restoreNettedConvertTotal } from './documentMirror';
 import {
   documentRecordToInvoiceRecord,
   documentRecordToQuoteRecord,
@@ -304,5 +304,59 @@ describe('preserveLedger against older app builds', () => {
     const out = preserveLedger(doc, invoiceRecordToDocumentRecord(legacy, doc.id) as any);
     expect(out.paidTotal).toBe(800);
     expect(out.payments.map((p: any) => p.amount)).toEqual([800]);
+  });
+});
+
+describe('restoreNettedConvertTotal', () => {
+  const dep = { id: 'dep-1', kind: 'deposit', amount: 291.72, paidAt: 1, method: 'bank' };
+  const stored = { type: 'invoice', convertedFromQuote: { total: 972.4, stage: 'quote_accepted', at: 1 } };
+  const echo = (over: any = {}) => ({
+    type: 'invoice', total: 680.68, paidTotal: 291.72, balanceDue: 388.96, stage: 'partially_paid',
+    payments: [dep], ...over,
+  });
+
+  it('REGRESSION: an older build netted the deposit off the total — the full total comes back', () => {
+    // Seen with a 1.58 store build: $972.40 job, $291.72 bank deposit,
+    // converted to $680.68 with $291.72 paid and $388.96 owing.
+    const out = restoreNettedConvertTotal(stored, echo());
+    expect(out.total).toBe(972.4);
+    expect(out.balanceDue).toBe(680.68);
+    expect(out.stage).toBe('partially_paid');
+  });
+
+  it('a netted total with a later payment owes the right balance', () => {
+    const later = { id: 'm-1', kind: 'manual', amount: 100, paidAt: 2, method: 'cash' };
+    const out = restoreNettedConvertTotal(stored, echo({ payments: [dep, later], paidTotal: 391.72 }));
+    expect(out.total).toBe(972.4);
+    expect(out.balanceDue).toBe(580.68);
+  });
+
+  it('a "paid" stage the netting produced drops back to part paid', () => {
+    const rest = { id: 'm-1', kind: 'manual', amount: 388.96, paidAt: 2, method: 'cash' };
+    const out = restoreNettedConvertTotal(stored, echo({ payments: [dep, rest], paidTotal: 680.68, stage: 'paid' }));
+    expect(out.total).toBe(972.4);
+    expect(out.stage).toBe('partially_paid');
+  });
+
+  it('leaves a full-total invoice alone', () => {
+    const doc = echo({ total: 972.4, balanceDue: 680.68 });
+    expect(restoreNettedConvertTotal(stored, doc)).toBe(doc);
+  });
+
+  it('leaves an older legacy-minted invoice (deposit-credit entry) alone — its total is meant to be netted', () => {
+    const credit = { ...dep, id: 'deposit-credit-q1' };
+    const doc = echo({ payments: [credit] });
+    expect(restoreNettedConvertTotal(stored, doc)).toBe(doc);
+  });
+
+  it('leaves a total that does not match exactly (edited invoice), quotes, and invoices with no stash or deposit', () => {
+    const edited = echo({ total: 700 });
+    expect(restoreNettedConvertTotal(stored, edited)).toBe(edited);
+    const quote = echo({ type: 'quote' });
+    expect(restoreNettedConvertTotal({ ...stored, type: 'quote' }, quote)).toBe(quote);
+    const noStash = echo();
+    expect(restoreNettedConvertTotal({ type: 'invoice' }, noStash)).toBe(noStash);
+    const noDeposit = echo({ payments: [{ id: 'm', kind: 'manual', amount: 291.72, paidAt: 1 }] });
+    expect(restoreNettedConvertTotal(stored, noDeposit)).toBe(noDeposit);
   });
 });

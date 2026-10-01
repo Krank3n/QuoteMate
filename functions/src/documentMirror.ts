@@ -190,6 +190,48 @@ export function preserveLedger(existing: AnyData | null | undefined, toWrite: An
 }
 
 /**
+ * Undo an older app build's netted convert.
+ *
+ * App builds from before Oct 2026 convert a quote with a deposit by setting
+ * the invoice total to `quote total − deposit` AND keeping the deposit on the
+ * ledger — and they write that netted total themselves, after the server's
+ * full-total convert. Seen on the simulator with a 1.58 store build: a $972.40
+ * job with a $291.72 bank deposit became an invoice for $680.68 with $291.72
+ * paid and $388.96 owing, $291.72 short.
+ *
+ * The unified doc keeps the quote total it was converted from
+ * (`convertedFromQuote.total`, the undo stash). When the incoming total is
+ * exactly that less the ledger's deposits, the deposit was taken off twice —
+ * restore the full total and re-derive the balance. Older legacy-minted
+ * invoices (a `deposit-credit-*` entry) are meant to be netted and are left
+ * alone, as is any total that doesn't match exactly (an edited invoice).
+ * Pure.
+ */
+export function restoreNettedConvertTotal(existing: AnyData | null | undefined, toWrite: AnyData): AnyData {
+  if ((toWrite.type ?? existing?.type) !== 'invoice') return toWrite;
+  const stashTotal = Number((toWrite.convertedFromQuote ?? existing?.convertedFromQuote)?.total);
+  if (!Number.isFinite(stashTotal) || stashTotal <= 0) return toWrite;
+  const payments: AnyData[] = Array.isArray(toWrite.payments) ? toWrite.payments : [];
+  const isNetted = (p: AnyData) => p?.kind === 'deposit' && String(p?.id ?? '').startsWith('deposit-credit-');
+  if (payments.some(isNetted)) return toWrite;
+  const deposits = payments
+    .filter((p) => p?.kind === 'deposit')
+    .reduce((acc, p) => acc + (Number(p?.amount) || 0), 0);
+  if (deposits <= 0.005) return toWrite;
+  const total = Number(toWrite.total);
+  if (!Number.isFinite(total) || Math.abs(stashTotal - deposits - total) >= 0.005) return toWrite;
+  const paid = payments.reduce((acc, p) => acc + (Number(p?.amount) || 0), 0);
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+  const out: AnyData = {
+    ...toWrite,
+    total: round2(stashTotal),
+    balanceDue: round2(Math.max(0, stashTotal - paid)),
+  };
+  if (toWrite.stage === 'paid' && paid + 0.005 < stashTotal) out.stage = 'partially_paid';
+  return out;
+}
+
+/**
  * Write the projection if it would not clobber a newer one already on disk.
  * The skip is based on updatedAt of the source vs the mirror — if the existing
  * mirror already reflects a strictly newer source updatedAt, leave it alone.
@@ -269,6 +311,7 @@ async function writeMirror(
     // originally-recorded one on the mirror.
     toWrite = preserveFirstSend(existingData, toWrite);
     toWrite = preserveLedger(existingData, toWrite);
+    toWrite = restoreNettedConvertTotal(existingData, toWrite);
   }
   await ref.set(stripUndefined(toWrite), { merge: true });
   return { written: true, skipped: false };
