@@ -18,6 +18,7 @@ import {
   respondToQuoteResponseBody,
   type AcceptedQuotePaymentDeps,
 } from './index';
+import { SURCHARGE_RETIRED_AT_MS } from './squarePricing.helpers';
 
 type Deps = AcceptedQuotePaymentDeps & {
   loadDocument: ReturnType<typeof vi.fn>;
@@ -147,18 +148,42 @@ describe('paymentOfferForAcceptedQuote', () => {
   });
 
   it('never hands out a link minted before the card-surcharge retirement', async () => {
-    // Today (Sep 2026) is before 1 Oct 2026: a same-day link is still
-    // re-minted, exactly as the legacy minters and the rotator do.
+    // Pinned either side of the cutoff rather than read off the real clock:
+    // the clock version passed only while "today" was before 1 Oct 2026, and
+    // started failing the day the retirement took effect. The link is two
+    // minutes old — fresh, unconsumed, right amount and kind — so the
+    // retirement gate is the only reason left to re-mint it.
+    vi.useFakeTimers();
+    vi.setSystemTime(SURCHARGE_RETIRED_AT_MS + 60_000);
     const d = deps({
       loadDocument: vi.fn(async () => ({
         activePaymentLink: {
           id: 'L1', url: 'https://square.link/u/old', kind: 'quote_full',
-          amount: 2029.64, createdAt: Date.now() - 60_000,
+          amount: 2029.64, createdAt: SURCHARGE_RETIRED_AT_MS - 60_000,
         },
       })),
     });
     const offer = await paymentOfferForAcceptedQuote('u1', 'q1', plainQuote, d);
     expect(offer?.url).toBe('https://square.link/u/minted');
+    expect(d.mint).toHaveBeenCalledWith('u1', 'q1', 'quote_full');
+  });
+
+  it('reuses the same link minted just after the retirement', async () => {
+    // The control for the case above: identical age and shape, one side of
+    // the cutoff later — reused, so the cutoff is what decided it.
+    vi.useFakeTimers();
+    vi.setSystemTime(SURCHARGE_RETIRED_AT_MS + 3 * 60_000);
+    const d = deps({
+      loadDocument: vi.fn(async () => ({
+        activePaymentLink: {
+          id: 'L1', url: 'https://square.link/u/new', kind: 'quote_full',
+          amount: 2029.64, createdAt: SURCHARGE_RETIRED_AT_MS + 60_000,
+        },
+      })),
+    });
+    const offer = await paymentOfferForAcceptedQuote('u1', 'q1', plainQuote, d);
+    expect(offer?.url).toBe('https://square.link/u/new');
+    expect(d.mint).not.toHaveBeenCalled();
   });
 });
 
