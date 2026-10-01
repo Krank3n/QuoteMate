@@ -22,7 +22,15 @@ import { auth, db } from '../config/firebase';
 import { generateId } from '../utils/generateId';
 import { stripUndefined } from './reportService';
 import { isDateKey, isValidEntryHours, sortEntriesNewestFirst } from '../../shared/time/hours';
-import { CREW_WORKER_PREFIX, type TimeEntry, type TimeEntrySource } from '../../shared/time/types';
+import { CREW_WORKER_PREFIX, type CrewMember, type TimeEntry, type TimeEntrySource } from '../../shared/time/types';
+import { stampedCost, type LabourCostSettings } from '../../shared/time/labourCost';
+
+/**
+ * The crew and cost settings an entry's cost is stamped from (see
+ * stampedCost). Callers pass the business settings; without them an entry
+ * just isn't stamped, and costing falls back to today's rates.
+ */
+export type Costing = LabourCostSettings & { crew?: CrewMember[] };
 
 function getUserId(): string | null {
   return auth.currentUser?.uid || null;
@@ -126,7 +134,7 @@ class TimeEntryService {
     return collection(db, 'users', uid, 'timeEntries');
   }
 
-  async createEntry(input: CreateTimeEntryInput): Promise<TimeEntry> {
+  async createEntry(input: CreateTimeEntryInput, costing?: Costing): Promise<TimeEntry> {
     const uid = getUserId();
     if (!uid) throw new Error('Not signed in');
     assertStorableEntry(input);
@@ -150,6 +158,7 @@ class TimeEntryService {
       createdAt: now,
       updatedAt: now,
     };
+    if (costing) entry.cost = stampedCost(entry, undefined, costing.crew, costing);
     await settleWrite(setDoc(doc(db, 'users', uid, 'timeEntries', id), stripUndefined(entry)));
     return entry;
   }
@@ -160,11 +169,12 @@ class TimeEntryService {
    * edit started from (defaults to `entry`); if that was waiting, the write
    * fails with StaleEntryError when crew changed or deleted it since.
    */
-  async updateEntry(entry: TimeEntry, loaded: TimeEntry = entry): Promise<TimeEntry> {
+  async updateEntry(entry: TimeEntry, loaded: TimeEntry = entry, costing?: Costing): Promise<TimeEntry> {
     const uid = getUserId();
     if (!uid) throw new Error('Not signed in');
     assertStorableEntry(entry);
     const next: TimeEntry = { ...entry, userId: uid, note: entry.note?.trim() || undefined, updatedAt: Date.now() };
+    if (costing) next.cost = stampedCost(next, loaded, costing.crew, costing);
     const ref = doc(db, 'users', uid, 'timeEntries', entry.id);
     if (loaded.status === 'pending') {
       // Crew can still change or delete a waiting entry on their link, so
@@ -182,8 +192,8 @@ class TimeEntryService {
   }
 
   /** Count a crew member's sent-in time — it joins the totals from here on. */
-  async approveEntry(entry: TimeEntry): Promise<TimeEntry> {
-    return this.updateEntry({ ...entry, status: 'approved' }, entry);
+  async approveEntry(entry: TimeEntry, costing?: Costing): Promise<TimeEntry> {
+    return this.updateEntry({ ...entry, status: 'approved' }, entry, costing);
   }
 
   async deleteEntry(id: string): Promise<void> {

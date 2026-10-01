@@ -23,6 +23,18 @@ export function parseCostRate(raw: string): { rate?: number; error?: string } {
   return { rate: Math.round(n * 100) / 100 };
 }
 
+/**
+ * A super or on-cost percentage as typed: blank is "use the default",
+ * otherwise 0 to 100 ("12", "12%", "4.5").
+ */
+export function parseCostPercent(raw: string): { percent?: number; error?: string } {
+  const text = String(raw ?? '').trim().replace(/%$/, '').trim();
+  if (!text) return {};
+  const n = Number(text);
+  if (!Number.isFinite(n) || n < 0 || n > 100) return { error: 'Enter a percentage from 0 to 100, like 12.' };
+  return { percent: Math.round(n * 100) / 100 };
+}
+
 /** Clean a typed name, or explain what's wrong with it. */
 export function cleanCrewName(raw: string, crew: CrewMember[] | undefined, exceptId?: string): { name?: string; error?: string } {
   const name = String(raw ?? '').replace(/\s+/g, ' ').trim().slice(0, MAX_CREW_NAME);
@@ -42,12 +54,19 @@ export function parseCrewEmail(raw: string): { email?: string; error?: string } 
   return { email: text.toLowerCase() };
 }
 
-export function addCrewMember(crew: CrewMember[] | undefined, name: string, costRate?: number, email?: string): CrewMember[] {
+export function addCrewMember(
+  crew: CrewMember[] | undefined,
+  name: string,
+  costRate?: number,
+  email?: string,
+  contractor?: boolean,
+): CrewMember[] {
   const member: CrewMember = {
     id: generateId(),
     name,
     ...(costRate ? { costRate } : {}),
     ...(email ? { email } : {}),
+    ...(contractor ? { contractor: true } : {}),
     createdAt: Date.now(),
   };
   return [...(crew ?? []), member];

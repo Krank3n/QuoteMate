@@ -5,6 +5,7 @@
 
 import type { CrewMember, TimeEntry } from '../../shared/time/types';
 import { crewIdOf, isCounted } from '../../shared/time/hours';
+import { labourCostOf, type LabourCost, type LabourCostSettings } from '../../shared/time/labourCost';
 
 export interface TimesheetPerson {
   /** 'me' for the owner, otherwise the crew member's id. */
@@ -15,6 +16,8 @@ export interface TimesheetPerson {
   waiting: number;
   /** Hours sent in and not approved yet. */
   waitingHours: number;
+  /** What a crew member's approved hours cost, when any are costed. Never for the owner. */
+  cost?: LabourCost;
   entries: TimeEntry[];
 }
 
@@ -28,6 +31,7 @@ export function buildTimesheetWeek(
   entries: TimeEntry[],
   crew: CrewMember[] | undefined,
   filter: string = 'all',
+  costSettings?: LabourCostSettings,
 ): { people: TimesheetPerson[]; waiting: TimeEntry[]; total: number } {
   const names = new Map((crew ?? []).map((c) => [c.id, c.name]));
   const groups = new Map<string, TimesheetPerson>();
@@ -51,6 +55,10 @@ export function buildTimesheetWeek(
     groups.set(key, g);
   }
   for (const g of groups.values()) {
+    if (g.key !== 'me') {
+      const cost = labourCostOf(g.entries, crew, costSettings);
+      if (cost.costedHours > 0) g.cost = cost;
+    }
     // Oldest day first within a person — reads like a timesheet.
     g.entries.sort((a, b) => (a.date === b.date ? (a.createdAt || 0) - (b.createdAt || 0) : a.date < b.date ? -1 : 1));
   }

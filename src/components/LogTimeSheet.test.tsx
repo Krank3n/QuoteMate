@@ -149,7 +149,7 @@ describe('logging time', () => {
       billable: true,
       workerName: 'Rivo Plumbing',
       source: 'manual',
-    });
+    }, expect.objectContaining({ businessName: 'Rivo Plumbing' }));
   });
 
   it('logs yesterday, a quick-pick amount, and not-charged time', async () => {
@@ -203,7 +203,9 @@ describe('what is already logged', () => {
     await waitFor(() => expect(onSaved).toHaveBeenCalled());
     expect(onDismiss).not.toHaveBeenCalled();
     expect(service.createEntry).not.toHaveBeenCalled();
-    expect(service.updateEntry).toHaveBeenCalledWith(expect.objectContaining({ id: 'e1', hours: 6.5, note: 'framing' }));
+    expect(service.updateEntry.mock.calls[0][0]).toMatchObject({ id: 'e1', hours: 6.5, note: 'framing' });
+    // Edited against the copy it loaded, with the cost settings to stamp from.
+    expect(service.updateEntry.mock.calls[0][1]).toMatchObject({ id: 'e1', hours: 6 });
   });
 
   it('deleting asks first, naming the time, then removes it', async () => {
@@ -315,5 +317,23 @@ describe('editing anything', () => {
     );
     fireEvent.click(screen.getByText(/See all timesheets/));
     expect(onOpen).toHaveBeenCalled();
+  });
+});
+
+describe('what the crew cost on this job', () => {
+  it("shows crew cost incl. super against the labour quoted, and notes the owner's own hours", () => {
+    settings.current = { businessName: 'Rivo Plumbing', crew: [{ id: 'c1', name: 'Jake', costRate: 30, createdAt: 1 }] };
+    render(
+      <LogTimeSheet visible onDismiss={() => {}} job={job} primaryDoc={{ ...quote, laborTotal: 1000 }} onSaved={vi.fn()} onDeleted={vi.fn()}
+        entries={[entry({ id: 'a', hours: 10, workerId: 'crew:c1' }), entry({ id: 'b', hours: 4 })]} />,
+    );
+    expect(screen.getByText('Crew cost about $336.00 incl. super · labour quoted $1,000.00')).toBeTruthy();
+    expect(screen.getByText('Plus your 4 h, not costed')).toBeTruthy();
+  });
+
+  it('shows nothing about cost when only the owner has worked the job', () => {
+    settings.current = { businessName: 'Rivo Plumbing', crew: [] };
+    renderSheet([entry({ hours: 4 })]);
+    expect(screen.queryByText(/Crew cost/)).toBeNull();
   });
 });

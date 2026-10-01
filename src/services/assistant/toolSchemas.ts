@@ -211,7 +211,7 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
   {
     name: 'get_job_time',
     description:
-      "Hours the tradie has logged on a job — their timesheet for it. Pass the id of a quote or invoice on that job (from list_recent_quotes or get_quote); the job is found through it. Returns loggedHours (everything), billableHours (what would be invoiced), quotedHours (the labour on the quote, absent when labour is a set price), and the entries newest first (date YYYY-MM-DD, hours, note). Use it for \"how many hours on the Smith job?\", \"am I over on that one?\", or before logging more time when they're unsure what's already down.",
+      "Hours the tradie has logged on a job — their timesheet for it. Pass the id of a quote or invoice on that job (from list_recent_quotes or get_quote); the job is found through it. Returns loggedHours (everything), billableHours (what would be invoiced), quotedHours (the labour on the quote, absent when labour is a set price), the entries newest first (date YYYY-MM-DD, hours, note), and — when crew have cost rates — crewLabourCost (what their approved hours cost, super in) with labourOnDocument (the labour on the quote/invoice). Use it for \"what did the labour cost me on that job?\", and for \"how many hours on the Smith job?\", \"am I over on that one?\", or before logging more time when they're unsure what's already down.",
     parameters: {
       type: 'object',
       properties: {

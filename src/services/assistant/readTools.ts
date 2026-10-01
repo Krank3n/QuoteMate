@@ -32,6 +32,7 @@ import { missingQuoteMessage, type CandidateRow } from './quoteLookupRecovery';
 import { fuzzyScoreQuote } from './quoteFuzzy';
 import { normaliseTimeEntry } from '../timeEntryService';
 import { isCounted, sortEntriesNewestFirst, sumBillableHours, sumHours } from '../../../shared/time/hours';
+import { labourCostOf } from '../../../shared/time/labourCost';
 import { hourlyRateOf, quotedHoursOf } from '../../utils/loggedHours';
 import { getPillsForNiche } from '../../data/nichePills';
 import { NICHE_TEMPLATES } from '../../data/nicheTemplates';
@@ -1138,6 +1139,10 @@ export async function getJobTime(input: { quoteId: string }): Promise<unknown> {
   // rows, or Mate adds them up and reads out hours nobody has approved.
   const approved = entries.filter(isCounted);
   const waiting = entries.filter((e) => !isCounted(e));
+  // Crew cost (super and on-costs in) — only when some crew hours are costed.
+  // Settings that won't load just leave the cost out.
+  const settings = await getDoc(doc(db, 'users', uid, 'settings', 'business')).then((s) => s.data()).catch(() => undefined);
+  const cost = labourCostOf(entries, settings?.crew, settings);
   return {
     jobName: q.jobName || q.job?.name || undefined,
     customerName: q.customerName || undefined,
@@ -1160,5 +1165,12 @@ export async function getJobTime(input: { quoteId: string }): Promise<unknown> {
       ...(e.billable === false ? { billable: false } : {}),
     })),
     ...(approved.length === 0 ? { note: 'No approved time logged on this job yet.' } : {}),
+    ...(cost.costedHours > 0
+      ? {
+          crewLabourCost: { total: cost.total, wages: cost.wages, superAndOnCosts: cost.superAndOnCosts },
+          labourOnDocument: Number(q.laborTotal) || 0,
+          costNote: `About what the crew's approved hours cost the business (super${(settings?.crewOnCostPercent ?? 0) > 0 ? ' and on-costs' : ''} included), against the labour on the ${q.type === 'invoice' ? 'invoice' : 'quote'}, ex GST.${cost.ownerHours > 0 ? ` The tradie's own ${cost.ownerHours} h aren't costed.` : ''}${cost.uncostedCrewHours > 0 ? ` ${cost.uncostedNames.join(' and ')} have hours with no cost rate set.` : ''} Private to the tradie — never put it in anything a customer sees.`,
+        }
+      : {}),
   };
 }

@@ -70,3 +70,37 @@ describe('quoted vs logged hours', () => {
     expect(result.rows.map((r) => r.jobId)).toEqual(['invoiced']);
   });
 });
+
+describe('crew cost against the labour charged', () => {
+  const jobs = [
+    { id: 'deck', name: 'Back deck', primaryDocumentId: 'q-deck', stage: 'completed' },
+    { id: 'fence', name: 'Side fence', primaryDocumentId: 'q-fence', stage: 'completed' },
+  ];
+  const docs = [doc('q-deck', 'deck', 10, { laborTotal: 1000 }), doc('q-fence', 'fence', 8, { laborTotal: 800 })];
+  const costing = { crew: [{ id: 'sam', name: 'Sam', costRate: 30, createdAt: 1 }], crewSuperPercent: 12 };
+
+  it("costs each job's crew hours with super, and totals cost against charged on costed jobs only", () => {
+    const result = buildHoursComparison(
+      [
+        { ...entry('deck', 10), workerId: 'crew:sam' },
+        { ...entry('deck', 2), workerId: 'crew:sam', status: 'pending' as const },
+        { ...entry('fence', 8), workerId: 'owner' },
+      ],
+      jobs,
+      docs,
+      costing,
+    );
+    const deck = result.rows.find((r) => r.jobId === 'deck');
+    const fence = result.rows.find((r) => r.jobId === 'fence');
+    expect(deck).toMatchObject({ labourCost: 336, labourCharged: 1000 });
+    expect(fence?.labourCost).toBeUndefined();
+    expect(result.totalLabourCost).toBe(336);
+    expect(result.totalLabourChargedOnCosted).toBe(1000);
+  });
+
+  it('has no cost without crew settings — the card just shows hours', () => {
+    const result = buildHoursComparison([{ ...entry('deck', 10), workerId: 'crew:sam' }], jobs, docs);
+    expect(result.rows[0].labourCost).toBeUndefined();
+    expect(result.totalLabourCost).toBe(0);
+  });
+});

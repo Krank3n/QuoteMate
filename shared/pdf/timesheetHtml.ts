@@ -75,7 +75,9 @@ function buildEntriesHTML(data: TimesheetData): string {
 }
 
 function buildByJobHTML(data: TimesheetData): string {
-  if (data.byJob.length < 2) return '';
+  const anyCost = data.byJob.some((j) => typeof j.cost === 'number');
+  // One job is just the total — unless there's a cost to show for it.
+  if (data.byJob.length < 2 && !anyCost) return '';
   const anyNotCharged = data.billableHours !== data.totalHours;
   return `
       <div class="section-wrapper">
@@ -88,6 +90,7 @@ function buildByJobHTML(data: TimesheetData): string {
               <th class="num">Entries</th>
               <th class="num">Hours</th>
               ${anyNotCharged ? '<th class="num">Charged</th>' : ''}
+              ${anyCost ? '<th class="num">Crew cost</th>' : ''}
             </tr>
           </thead>
           <tbody>
@@ -98,6 +101,7 @@ function buildByJobHTML(data: TimesheetData): string {
               <td class="num">${j.entryCount}</td>
               <td class="num">${hoursCell(j.hours)}</td>
               ${anyNotCharged ? `<td class="num">${hoursCell(j.billableHours)}</td>` : ''}
+              ${anyCost ? `<td class="num">${typeof j.cost === 'number' ? formatCurrency(j.cost) : ''}</td>` : ''}
             </tr>`).join('')}
           </tbody>
         </table>
@@ -105,8 +109,8 @@ function buildByJobHTML(data: TimesheetData): string {
 }
 
 function buildByWorkerHTML(data: TimesheetData): string {
-  if (data.byWorker.length < 2) return '';
   const anyCost = data.byWorker.some((w) => typeof w.cost === 'number');
+  if (data.byWorker.length < 2 && !anyCost) return '';
   return `
       <div class="section-wrapper">
         <h3>By person</h3>
@@ -115,7 +119,7 @@ function buildByWorkerHTML(data: TimesheetData): string {
             <tr>
               <th>Worked by</th>
               <th class="num">Hours</th>
-              ${anyCost ? '<th class="num">Cost</th>' : ''}
+              ${anyCost ? '<th class="num">Cost incl. super</th>' : ''}
             </tr>
           </thead>
           <tbody>

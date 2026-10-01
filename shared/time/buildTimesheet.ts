@@ -12,6 +12,7 @@
 
 import type { CrewMember, TimeEntry } from './types';
 import { crewIdOf, formatHours, isCounted } from './hours';
+import { labourCostOf, type LabourCostSettings } from './labourCost';
 import { csvField } from '../statement/buildStatement';
 
 export interface TimesheetRange {
@@ -36,6 +37,8 @@ export interface TimesheetRow {
   billable: boolean;
   note: string;
   workerName: string;
+  /** What these hours cost, super and on-costs included (labourCost.ts). Absent when not costed. */
+  cost?: number;
 }
 
 export interface TimesheetJobSubtotal {
@@ -45,13 +48,15 @@ export interface TimesheetJobSubtotal {
   hours: number;
   billableHours: number;
   entryCount: number;
+  /** Crew cost on this job, super and on-costs included, when any hours are costed. */
+  cost?: number;
 }
 
 export interface TimesheetWorkerSubtotal {
   workerId: string;
   workerName: string;
   hours: number;
-  /** hours × the crew member's cost rate, when one is set. */
+  /** What their hours cost, super and on-costs included, when a cost rate is set. */
   cost?: number;
 }
 
@@ -75,11 +80,12 @@ export const DELETED_JOB_NAME = 'Job no longer on file';
 export function buildTimesheet(
   entries: Array<
     Pick<TimeEntry, 'jobId' | 'date' | 'hours' | 'billable' | 'note' | 'workerName' | 'createdAt'> &
-      Partial<Pick<TimeEntry, 'status' | 'workerId'>>
+      Partial<Pick<TimeEntry, 'status' | 'workerId' | 'cost'>>
   >,
   jobs: TimesheetJobInput[],
   range: TimesheetRange,
-  crew: Array<Pick<CrewMember, 'id' | 'name' | 'costRate'>> = [],
+  crew: Array<Pick<CrewMember, 'id' | 'name' | 'costRate' | 'contractor'>> = [],
+  costSettings?: LabourCostSettings,
 ): TimesheetData {
   const jobsById = new Map(jobs.map((j) => [j.id, j]));
   const inRange = entries.filter(
@@ -89,6 +95,12 @@ export function buildTimesheet(
   inRange.sort((a, b) => (a.date === b.date ? (a.createdAt || 0) - (b.createdAt || 0) : a.date < b.date ? -1 : 1));
 
   const crewById = new Map(crew.map((c) => [c.id, c]));
+  // One entry's cost (stamp first, then today's rate), or undefined: the
+  // owner's own time, or a crew member with no cost rate.
+  const entryCost = (e: (typeof inRange)[number]): number | undefined => {
+    const c = labourCostOf([{ ...e, workerId: e.workerId || '' }], crew, costSettings);
+    return c.costedHours > 0 ? c.total : undefined;
+  };
   const workers = new Map<string, TimesheetWorkerSubtotal>();
   for (const e of inRange) {
     const key = e.workerId || '';
@@ -96,7 +108,8 @@ export function buildTimesheet(
     const member = crewId ? crewById.get(crewId) : undefined;
     const w = workers.get(key) ?? { workerId: key, workerName: member?.name || e.workerName || 'You', hours: 0 };
     w.hours = round2(w.hours + e.hours);
-    if (member?.costRate && member.costRate > 0) w.cost = round2(w.hours * member.costRate);
+    const cost = entryCost(e);
+    if (cost !== undefined) w.cost = round2((w.cost ?? 0) + cost);
     workers.set(key, w);
   }
 
@@ -111,6 +124,7 @@ export function buildTimesheet(
       billable: e.billable !== false,
       note: e.note || '',
       workerName: (e.workerId ? crewById.get(crewIdOf({ workerId: e.workerId }) ?? '')?.name : undefined) || e.workerName || '',
+      ...(entryCost(e) !== undefined ? { cost: entryCost(e) } : {}),
     };
   });
 
@@ -127,6 +141,7 @@ export function buildTimesheet(
     s.hours = round2(s.hours + r.hours);
     if (r.billable) s.billableHours = round2(s.billableHours + r.hours);
     s.entryCount += 1;
+    if (r.cost !== undefined) s.cost = round2((s.cost ?? 0) + r.cost);
     subtotals.set(r.jobId, s);
   }
 
@@ -147,7 +162,9 @@ export function buildTimesheet(
  * statement's csvField, so a note starting with "=" stays text in Excel.
  */
 export function timesheetToCsv(data: TimesheetData): string {
-  const lines = [['date', 'job', 'customer', 'hours', 'charged', 'note', 'worked by'].join(',')];
+  // Cost only when something is costed — an owner-only sheet stays as it was.
+  const withCost = data.rows.some((r) => r.cost !== undefined);
+  const lines = [['date', 'job', 'customer', 'hours', 'charged', 'note', 'worked by', ...(withCost ? ['cost'] : [])].join(',')];
   for (const r of data.rows) {
     lines.push(
       [
@@ -158,6 +175,7 @@ export function timesheetToCsv(data: TimesheetData): string {
         r.billable ? 'yes' : 'no',
         csvField(r.note),
         csvField(r.workerName),
+        ...(withCost ? [r.cost !== undefined ? r.cost.toFixed(2) : ''] : []),
       ].join(','),
     );
   }

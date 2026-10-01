@@ -9,7 +9,7 @@
 
 import React, { useState } from 'react';
 import { ScrollView, Share, TouchableOpacity, View, Platform } from 'react-native';
-import { Button, Surface, Text, TextInput } from 'react-native-paper';
+import { Button, Surface, Switch, Text, TextInput } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import * as Clipboard from 'expo-clipboard';
 import { useNavigation } from '@react-navigation/native';
@@ -28,12 +28,14 @@ import {
   cleanCrewName,
   crewLinkMessage,
   crewLinkUrl,
+  parseCostPercent,
   parseCostRate,
   parseCrewEmail,
   updateCrewMember,
 } from '../../utils/crew';
 import { createCrewLink, revokeCrewLink } from '../../services/crewLinkService';
 import { formatCurrency } from '../../utils/documentCalculator';
+import { DEFAULT_SUPER_PERCENT } from '../../../shared/time/labourCost';
 
 type Editing = { mode: 'add' } | { mode: 'edit'; member: CrewMember };
 
@@ -48,6 +50,15 @@ export function CrewScreen() {
   const [editing, setEditing] = useState<Editing | null>(null);
   const [nameText, setNameText] = useState('');
   const [rateText, setRateText] = useState('');
+  const [contractor, setContractor] = useState(false);
+  // What the crew costs on top of their rate — super and other on-costs, %.
+  const [superText, setSuperText] = useState(
+    businessSettings?.crewSuperPercent !== undefined ? String(businessSettings.crewSuperPercent) : String(DEFAULT_SUPER_PERCENT),
+  );
+  const [onCostText, setOnCostText] = useState(
+    businessSettings?.crewOnCostPercent ? String(businessSettings.crewOnCostPercent) : '',
+  );
+  const [costError, setCostError] = useState<string | null>(null);
   const [emailText, setEmailText] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -68,6 +79,7 @@ export function CrewScreen() {
     setNameText('');
     setRateText('');
     setEmailText('');
+    setContractor(false);
     setFormError(null);
   };
   const openEdit = (member: CrewMember) => {
@@ -75,7 +87,25 @@ export function CrewScreen() {
     setNameText(member.name);
     setRateText(member.costRate ? String(member.costRate) : '');
     setEmailText(member.email ?? '');
+    setContractor(!!member.contractor);
     setFormError(null);
+  };
+
+  // Saved as they leave each field. Blank super goes back to the 12% default.
+  const saveCostSettings = async () => {
+    const sup = parseCostPercent(superText);
+    const on = parseCostPercent(onCostText);
+    const error = sup.error ?? on.error;
+    setCostError(error ?? null);
+    if (error || !businessSettings) return;
+    const latest = useStore.getState().businessSettings ?? businessSettings;
+    if (latest.crewSuperPercent === sup.percent && latest.crewOnCostPercent === on.percent) return;
+    try {
+      await setBusinessSettings({ ...latest, crewSuperPercent: sup.percent, crewOnCostPercent: on.percent });
+      if (sup.percent === undefined) setSuperText(String(DEFAULT_SUPER_PERCENT));
+    } catch (err: any) {
+      setCostError(err?.message || "Couldn't save that. Try again in a moment.");
+    }
   };
 
   const handleSave = async () => {
@@ -91,8 +121,13 @@ export function CrewScreen() {
     try {
       await saveCrew(
         editing.mode === 'add'
-          ? addCrewMember(latestCrew(), name, rate.rate, mail.email)
-          : updateCrewMember(latestCrew(), editing.member.id, { name, costRate: rate.rate, email: mail.email }),
+          ? addCrewMember(latestCrew(), name, rate.rate, mail.email, contractor)
+          : updateCrewMember(latestCrew(), editing.member.id, {
+              name,
+              costRate: rate.rate,
+              email: mail.email,
+              contractor: contractor || undefined,
+            }),
       );
       setEditing(null);
     } catch (err: any) {
@@ -255,6 +290,7 @@ export function CrewScreen() {
                       {[
                         member.email ? member.email : null,
                         member.costRate ? `${formatCurrency(member.costRate)}/h cost` : null,
+                        member.contractor ? 'Contractor' : null,
                         member.linkToken ? 'Link on' : 'No link',
                       ]
                         .filter(Boolean)
@@ -274,6 +310,46 @@ export function CrewScreen() {
                 </TouchableOpacity>
               ))
             )}
+
+            {crew.length > 0 ? (
+              <Surface style={styles.costCard}>
+                <Text style={styles.costTitle}>What your crew costs</Text>
+                <Text style={styles.hint}>
+                  Added on top of each person's hourly cost, so your jobs show what labour really cost. Contractors get none of it.
+                </Text>
+                <View style={styles.costRow}>
+                  <TextInput
+                    label="Super"
+                    value={superText}
+                    onChangeText={setSuperText}
+                    onBlur={saveCostSettings}
+                    mode="outlined"
+                    dense
+                    keyboardType="decimal-pad"
+                    right={<TextInput.Affix text="%" />}
+                    accessibilityLabel="Super percent"
+                    style={styles.costInput}
+                  />
+                  <TextInput
+                    label="Other on-costs"
+                    value={onCostText}
+                    onChangeText={setOnCostText}
+                    onBlur={saveCostSettings}
+                    placeholder="0"
+                    mode="outlined"
+                    dense
+                    keyboardType="decimal-pad"
+                    right={<TextInput.Affix text="%" />}
+                    accessibilityLabel="Other on-costs percent"
+                    style={styles.costInput}
+                  />
+                </View>
+                <Text style={styles.hint}>
+                  Other on-costs: workers comp, payroll tax, leave. Most trades land between 5% and 15%; leave it blank if you're not sure.
+                </Text>
+                {costError ? <Text style={styles.error}>{costError}</Text> : null}
+              </Surface>
+            ) : null}
 
             <Button mode="outlined" icon="calendar-clock" onPress={() => navigation.navigate('Timesheets')} style={styles.addButton}>
               See everyone's hours
@@ -329,7 +405,16 @@ export function CrewScreen() {
             left={<TextInput.Affix text="$" />}
             accessibilityLabel="Cost per hour"
           />
-          <Text style={styles.hint}>Only you see this — it goes on your timesheet, never on a quote or invoice.</Text>
+          <Text style={styles.hint}>
+            Only you see this. It's for costing your jobs, never on a quote or invoice.
+          </Text>
+          <View style={styles.switchRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.switchTitle}>Contractor with an ABN</Text>
+              <Text style={styles.hint}>They invoice you, so no super or on-costs go on top of their rate.</Text>
+            </View>
+            <Switch value={contractor} onValueChange={setContractor} color={themeColors.accentText} accessibilityLabel="Contractor with an ABN" />
+          </View>
           {formError ? <Text style={styles.error}>{formError}</Text> : null}
           <Button
             mode="contained"
@@ -411,6 +496,12 @@ const useStyles = makeStyles((t) => ({
   addButton: { borderRadius: 12, marginTop: 6 },
   form: { gap: 10, paddingVertical: 4 },
   hint: { fontSize: 12, color: t.colors.textMuted, lineHeight: 17 },
+  switchRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 4 },
+  switchTitle: { fontSize: 14, fontWeight: '600', color: t.colors.text },
+  costCard: { padding: 16, borderRadius: 16, backgroundColor: t.colors.surfaceRaised, gap: 8, marginTop: 6 },
+  costTitle: { fontSize: 15, fontWeight: '700', color: t.colors.text },
+  costRow: { flexDirection: 'row', gap: 10 },
+  costInput: { flex: 1 },
   error: { fontSize: 13, color: t.colors.error },
   saveButton: { borderRadius: 12 },
   linkBox: {

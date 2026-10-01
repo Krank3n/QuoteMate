@@ -15,6 +15,8 @@ import type { Document } from '../types/document';
 import { formatHours } from '../../shared/time/hours';
 import { timeEntryService } from '../services/timeEntryService';
 import { useJobStore } from '../store/useJobStore';
+import { useStore } from '../store/useStore';
+import { formatCurrency } from '../utils/documentCalculator';
 import { buildHoursComparison } from '../utils/hoursComparison';
 import { makeStyles, useThemeColors } from '../theme';
 import { ProBadge } from './ProBadge';
@@ -32,6 +34,8 @@ export function HoursComparisonCard({ documents, isPro, onLockedPress, onOpenJob
   const styles = useStyles();
   const themeColors = useThemeColors();
   const jobs = useJobStore((s) => s.jobs);
+  // Crew + super/on-cost settings, for each job's labour cost.
+  const costing = useStore((s) => s.businessSettings) ?? undefined;
   const [entries, setEntries] = useState<TimeEntry[] | null>(null);
 
   // Read for free accounts too: the locked card only shows to someone who
@@ -51,8 +55,8 @@ export function HoursComparisonCard({ documents, isPro, onLockedPress, onOpenJob
   );
 
   const comparison = useMemo(
-    () => (entries ? buildHoursComparison(entries, jobs, documents) : null),
-    [entries, jobs, documents],
+    () => (entries ? buildHoursComparison(entries, jobs, documents, costing) : null),
+    [entries, jobs, documents, costing],
   );
 
   if (!isPro) {
@@ -90,6 +94,11 @@ export function HoursComparisonCard({ documents, isPro, onLockedPress, onOpenJob
           ? ` · ${comparison.jobsOver} of ${comparison.rows.length} ${comparison.rows.length === 1 ? 'job' : 'jobs'} over`
           : ''}
       </Text>
+      {comparison.totalLabourCost > 0 ? (
+        <Text style={styles.body}>
+          {`Crew cost about ${formatCurrency(comparison.totalLabourCost)}, incl. super, against ${formatCurrency(comparison.totalLabourChargedOnCosted)} labour charged on those jobs.`}
+        </Text>
+      ) : null}
       {comparison.rows.slice(0, MAX_ROWS).map((row) => (
         <TouchableOpacity
           key={row.jobId}
@@ -106,6 +115,16 @@ export function HoursComparisonCard({ documents, isPro, onLockedPress, onOpenJob
                 .filter(Boolean)
                 .join(' · ')}
             </Text>
+            {row.labourCost !== undefined ? (
+              <Text
+                style={[styles.rowSub, row.labourCharged > 0 && row.labourCost > row.labourCharged && { color: themeColors.warning }]}
+                numberOfLines={1}
+              >
+                {row.labourCharged > 0
+                  ? `Crew cost ${formatCurrency(row.labourCost)} of ${formatCurrency(row.labourCharged)} labour`
+                  : `Crew cost ${formatCurrency(row.labourCost)}`}
+              </Text>
+            ) : null}
           </View>
           <Text
             style={[

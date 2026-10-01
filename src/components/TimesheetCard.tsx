@@ -58,8 +58,8 @@ export function TimesheetCard({ period, isPro, requirePro, onError }: TimesheetC
     return buildTimesheet(entries, jobs, {
       fromKey: localDateKey(new Date(period.fromMs)),
       toKey: localDateKey(new Date(period.toMs - 1)),
-    }, businessSettings?.crew ?? []);
-  }, [entries, jobs, period.fromMs, period.toMs, businessSettings?.crew]);
+    }, businessSettings?.crew ?? [], businessSettings ?? undefined);
+  }, [entries, jobs, period.fromMs, period.toMs, businessSettings]);
 
   // Someone who has never logged time has no use for a timesheet card.
   if (!entries || entries.length === 0 || !data) return null;
