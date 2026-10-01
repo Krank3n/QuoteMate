@@ -51,6 +51,8 @@ interface BottomSheetProps {
    * Lets a navigation-hosted sheet goBack() only after the slide-out.
    */
   onClosed?: () => void;
+  /** Handle on the scrollable body, e.g. to scroll back up to a form. */
+  scrollRef?: React.Ref<ScrollView>;
 }
 
 export function BottomSheet({
@@ -65,6 +67,7 @@ export function BottomSheet({
   footer,
   overlay,
   onClosed,
+  scrollRef,
 }: BottomSheetProps) {
   const styles = useStyles();
   // Ref so a re-render mid-close-animation can't stale-capture the callback.
@@ -163,6 +166,10 @@ export function BottomSheet({
       contentContainerStyle={styles.scrollContent}
       showsVerticalScrollIndicator={false}
       bounces
+      // One tap on a button under an open keyboard should press it, not
+      // just dismiss the keyboard (the iOS decimal pad has no Done key).
+      keyboardShouldPersistTaps="handled"
+      ref={scrollRef}
     >
       {children}
     </ScrollView>

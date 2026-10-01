@@ -13,6 +13,7 @@ import {
   DraftQuoteProposal,
   ImportSupplierListProposal,
   MarkPaidProposal,
+  LogTimeProposal,
   PickContactProposal,
   Proposal,
   RememberPreferenceProposal,
@@ -38,6 +39,7 @@ import { isEmailAddress } from '../../utils/sendFlow';
 import { formatCurrency, roundToTwoDecimals } from '../../utils/documentCalculator';
 import { isWorkItem } from '../../../shared/document/lumpSum';
 import { resolveCustomerDraftRef } from './readTools';
+import { dateKeyDaysAgo, parseHoursInput } from '../../../shared/time/hours';
 
 /** Whitespace-folded, trimmed, capped — for text that lands in the prompt on every turn. */
 const shortText = (v: unknown): string =>
@@ -303,6 +305,9 @@ let unconsumedAttachmentProbe: () => boolean = () => false;
 export function setUnconsumedAttachmentProbe(probe: () => boolean): void {
   unconsumedAttachmentProbe = probe;
 }
+
+/** How far back Mate may log time; older than this goes through the job screen's calendar. */
+export const MAX_LOG_DAYS_AGO = 60;
 
 const IMPORT_SOURCES = ['attachment', 'camera', 'gallery', 'pdf', 'spreadsheet', 'ask'] as const;
 const IMPORT_REASONS = ['no_retail_coverage', 'pricing_fell_back', 'tradie_asked'] as const;
@@ -917,6 +922,40 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
         displayCustomerName: input.displayCustomerName ? String(input.displayCustomerName) : undefined,
         displayTotal: Number.isFinite(Number(input.displayTotal)) ? Number(input.displayTotal) : undefined,
         displayBalance: Number.isFinite(Number(input.displayBalance)) ? Number(input.displayBalance) : undefined,
+      };
+      return { proposal };
+    }
+
+    case 'propose_log_time': {
+      const known = requireKnownQuote('propose_log_time', input);
+      if (known.error) return { error: known.error };
+      const hours = parseHoursInput(String(input?.hours ?? ''));
+      if (hours === null) {
+        return { error: 'hours must be the hours the tradie said — more than 0 and no more than 24. Ask them if you are not sure.' };
+      }
+      const rawDays = input?.daysAgo ?? 0;
+      // Numbers or numeric strings only — Number(true) is 1, which would
+      // quietly log the time against yesterday.
+      const daysAgo = typeof rawDays === 'number' || (typeof rawDays === 'string' && rawDays.trim() !== '') ? Number(rawDays) : NaN;
+      if (!Number.isInteger(daysAgo) || daysAgo < 0) {
+        return { error: "daysAgo is a whole number of days back from today (0 = today, 1 = yesterday) — time can't be logged in the future." };
+      }
+      if (daysAgo > MAX_LOG_DAYS_AGO) {
+        return { error: `That's more than ${MAX_LOG_DAYS_AGO} days back — have the tradie log it on the job screen, where they can pick the date.` };
+      }
+      const note = input?.note ? String(input.note).trim().slice(0, 200) : '';
+      const proposal: LogTimeProposal = {
+        id,
+        toolUseId,
+        createdAt: now,
+        type: 'propose_log_time',
+        quoteId: known.quoteId!,
+        hours,
+        date: dateKeyDaysAgo(daysAgo),
+        note: note || undefined,
+        billable: input?.billable !== false,
+        displayName: input.displayName ? String(input.displayName) : undefined,
+        displayCustomerName: input.displayCustomerName ? String(input.displayCustomerName) : undefined,
       };
       return { proposal };
     }

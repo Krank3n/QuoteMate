@@ -235,6 +235,14 @@ export interface Document {
    * Present only while the undo is still on the table; cleared when the
    * revert runs.
    */
+  /**
+   * The labour hours the job was QUOTED at, stamped the first time logged
+   * hours are charged on this document (utils/loggedHours). After that the
+   * labour fields hold the logged hours, and "quoted vs logged" would
+   * otherwise compare the logged hours to themselves.
+   */
+  quotedLaborHours?: number;
+
   convertedFromQuote?: {
     /** The quote number the invoice number replaced (e.g. "QU-178554"). */
     number?: string;

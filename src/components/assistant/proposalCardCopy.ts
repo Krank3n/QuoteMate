@@ -2,7 +2,9 @@
 // verb. Pure and in its own module so the "every ProposalType has card copy"
 // guard can run without rendering React.
 
-import type { Proposal, ProposalType } from '../../types/assistant';
+import type { LogTimeProposal, Proposal, ProposalType } from '../../types/assistant';
+import { format } from 'date-fns';
+import { dateKeyDaysAgo, formatHours } from '../../../shared/time/hours';
 
 export function titleFor(p: Proposal): string {
   switch (p.type) {
@@ -28,6 +30,7 @@ export function titleFor(p: Proposal): string {
     case 'propose_update_quote_rates': return 'Update rates';
     case 'propose_update_quote_scope': return 'Update scope';
     case 'propose_mark_paid': return 'Mark invoice paid';
+    case 'propose_log_time': return 'Log time';
     case 'propose_import_supplier_list': return 'Add supplier prices';
     case 'propose_remember_preference': return 'Remember how you quote';
     case 'propose_save_rate': return 'Save a rate';
@@ -51,6 +54,7 @@ export function iconFor(p: Proposal): string {
     case 'propose_update_quote_rates': return 'tune-variant';
     case 'propose_update_quote_scope': return 'note-edit-outline';
     case 'propose_mark_paid': return 'check-decagram-outline';
+    case 'propose_log_time': return 'clock-plus-outline';
     case 'propose_import_supplier_list': return 'clipboard-list-outline';
     case 'propose_remember_preference': return 'lightbulb-on-outline';
     case 'propose_save_rate': return 'tag-outline';
@@ -80,6 +84,7 @@ export function applyLabelFor(p: Proposal): string {
     case 'propose_update_quote_rates': return 'Update';
     case 'propose_update_quote_scope': return 'Update it';
     case 'propose_mark_paid': return 'Mark paid';
+    case 'propose_log_time': return 'Log it';
     case 'propose_import_supplier_list': return 'Read list';
     case 'propose_remember_preference': return 'Remember it';
     case 'propose_save_rate': return 'Save rate';
@@ -91,4 +96,15 @@ export function applyLabelFor(p: Proposal): string {
 /** Minimal stand-in used by the wiring guard to exercise the copy switches. */
 export function proposalStub(type: ProposalType): Proposal {
   return { id: 'p', toolUseId: 't', createdAt: '', type } as Proposal;
+}
+
+/** "7.5 h yesterday", "2 h on Tue 23 Sep" — the log-time card's headline. */
+export function logTimeHeadline(p: Pick<LogTimeProposal, 'hours' | 'date'>, now: Date = new Date()): string {
+  const hours = formatHours(p.hours);
+  if (p.date === dateKeyDaysAgo(0, now)) return `${hours} today`;
+  if (p.date === dateKeyDaysAgo(1, now)) return `${hours} yesterday`;
+  const [y, m, d] = p.date.split('-').map(Number);
+  // date-fns, like the Log time sheet — toLocaleDateString differs between
+  // Hermes and the browser ("Tue, 23 Sep" vs "Tue 23 Sept").
+  return `${hours} on ${format(new Date(y, m - 1, d), 'EEE d MMM')}`;
 }

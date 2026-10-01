@@ -41,6 +41,7 @@ export type JobAction =
   | 'convertToInvoice'
   | 'revertToQuote'
   | 'duplicate'
+  | 'log_time'
   | 'service_report'
   | 'exportPdf'
   | 'pushToXero'
@@ -198,6 +199,13 @@ export const ROWS: RowDef[] = [
     // Quotes only, and never re-offer once invoiced — conversion is
     // one-way and the idempotent path already guards double-taps.
     when: ({ primaryDoc }) => canConvert(primaryDoc),
+  },
+  {
+    id: 'log_time',
+    label: 'Log time',
+    sub: 'Hours worked on this job',
+    icon: 'clock-plus-outline',
+    when: () => true,
   },
   {
     id: 'duplicate',

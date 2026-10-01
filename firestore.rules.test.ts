@@ -257,6 +257,65 @@ describe('users/{uid}/analyseRuns (parked analyse results)', () => {
   });
 });
 
+describe('users/{uid}/timeEntries', () => {
+  const ENTRY = 'users/alice/timeEntries/e1';
+  const good = {
+    userId: 'alice', jobId: 'job1', date: '2026-09-30', hours: 7.5,
+    workerId: 'alice', billable: true, source: 'manual', createdAt: 1, updatedAt: 1,
+  };
+
+  it('lets the owner log, edit, read and delete an entry', async () => {
+    await assertSucceeds(setDoc(doc(aliceDb(), ENTRY), good));
+    await assertSucceeds(updateDoc(doc(aliceDb(), ENTRY), { hours: 8 }));
+    await assertSucceeds(getDoc(doc(aliceDb(), ENTRY)));
+    await assertSucceeds(deleteDoc(doc(aliceDb(), ENTRY)));
+  });
+
+  it('whole hours are fine too', async () => {
+    await assertSucceeds(setDoc(doc(aliceDb(), ENTRY), { ...good, hours: 8 }));
+  });
+
+  it('denies another account reading or writing them', async () => {
+    await seed(ENTRY, good);
+    const bob = env.authenticatedContext('bob').firestore();
+    await assertFails(getDoc(doc(bob, ENTRY)));
+    await assertFails(setDoc(doc(bob, ENTRY), { ...good, workerId: 'bob' }));
+    await assertFails(deleteDoc(doc(bob, ENTRY)));
+  });
+
+  it('refuses hours that are zero, negative, over a day, or not a number', async () => {
+    await assertFails(setDoc(doc(aliceDb(), ENTRY), { ...good, hours: 0 }));
+    await assertFails(setDoc(doc(aliceDb(), ENTRY), { ...good, hours: -2 }));
+    await assertFails(setDoc(doc(aliceDb(), ENTRY), { ...good, hours: 24.5 }));
+    await assertFails(setDoc(doc(aliceDb(), ENTRY), { ...good, hours: '7' }));
+  });
+
+  it('refuses a missing job, a bad date, or someone else as the worker', async () => {
+    await assertFails(setDoc(doc(aliceDb(), ENTRY), { ...good, jobId: '' }));
+    await assertFails(setDoc(doc(aliceDb(), ENTRY), { ...good, date: '30/09/2026' }));
+    await assertFails(setDoc(doc(aliceDb(), ENTRY), { ...good, workerId: 'bob' }));
+  });
+
+  it('lets the owner log time for a crew member, and approve what one sent in', async () => {
+    await assertSucceeds(setDoc(doc(aliceDb(), ENTRY), { ...good, workerId: 'crew:c1' }));
+    await seed(ENTRY, { ...good, workerId: 'crew:c1', status: 'pending', source: 'crew_link' });
+    await assertSucceeds(updateDoc(doc(aliceDb(), ENTRY), { status: 'approved' }));
+  });
+
+  it('refuses a made-up status or an empty crew id', async () => {
+    await assertFails(setDoc(doc(aliceDb(), ENTRY), { ...good, status: 'paid' }));
+    await assertFails(setDoc(doc(aliceDb(), ENTRY), { ...good, workerId: 'crew:' }));
+  });
+});
+
+describe('crewLinks', () => {
+  it('is server-only — no client can read or write a link', async () => {
+    await seed('crewLinks/h1', { userId: 'alice', crewId: 'c1' });
+    await assertFails(getDoc(doc(aliceDb(), 'crewLinks/h1')));
+    await assertFails(setDoc(doc(aliceDb(), 'crewLinks/h2'), { userId: 'alice', crewId: 'c1' }));
+  });
+});
+
 describe('squareOAuthStates (PAY-03)', () => {
   it('denies all client access, even authenticated', async () => {
     await seed('squareOAuthStates/somehash', { uid: 'alice', createdAtMs: 1 });

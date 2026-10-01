@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { makeStyles, useThemeColors } from '../../theme';
 import { Proposal, ProposalStatus } from '../../types/assistant';
-import { applyLabelFor, iconFor, titleFor } from './proposalCardCopy';
+import { applyLabelFor, iconFor, logTimeHeadline, titleFor } from './proposalCardCopy';
 import { rateLineUnitPrice, rateLinesCoverMaterials, rateSummary, rateUnitLabel } from '../../services/quotingProfile';
 import { registeredBusinessSettings } from '../../services/assistant/quotingProfileContext';
 import { resolveGstMode, type GstMode } from '../../../shared/document/gstMode';
@@ -451,6 +451,25 @@ function Body({ proposal }: { proposal: Proposal }) {
             <Text style={styles.dim}>Note: {proposal.notes}</Text>
           )}
           <Text style={styles.dim}>Records the payment and marks it paid.</Text>
+        </View>
+      );
+    }
+    case 'propose_log_time': {
+      const title = [proposal.displayCustomerName, proposal.displayName]
+        .filter(Boolean)
+        .join(' — ');
+      return (
+        <View>
+          {title ? (
+            <Text style={styles.summary} numberOfLines={2}>{title}</Text>
+          ) : null}
+          <Text style={styles.summary}>{logTimeHeadline(proposal)}</Text>
+          {!!proposal.note && <Text style={styles.dim}>Note: {proposal.note}</Text>}
+          <Text style={styles.dim}>
+            {proposal.billable
+              ? 'Goes on the job’s logged time. The quote or invoice stays as it is.'
+              : 'Not charged — kept with the job’s logged time, never invoiced.'}
+          </Text>
         </View>
       );
     }

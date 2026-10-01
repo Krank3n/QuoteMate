@@ -11,6 +11,7 @@ import {
   findCustomer,
   getBusinessDefaults,
   getJobRequirements,
+  getJobTime,
   getQuote,
   listRecentQuotes,
   listServiceReports,
@@ -99,6 +100,9 @@ export async function dispatchToolCall(call: ToolCallInput): Promise<ToolCallOut
           break;
         case 'list_service_reports':
           result = await listServiceReports(input as { query?: string; limit?: number });
+          break;
+        case 'get_job_time':
+          result = await getJobTime(input as { quoteId: string });
           break;
         case 'search_supplier_book':
           result = await searchSupplierBook(input as { query?: string; limit?: number });

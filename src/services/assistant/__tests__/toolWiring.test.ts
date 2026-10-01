@@ -34,6 +34,7 @@ const VALID_ARGS: Record<ProposalToolName, Record<string, unknown>> = {
   propose_update_quote_rates: { quoteId: 'q1', markup: 30 },
   propose_update_quote_scope: { quoteId: 'q1', jobDescription: 'Replace 22 m of paling fence along the back boundary, Hager gear.' },
   propose_mark_paid: { quoteId: 'q1' },
+  propose_log_time: { quoteId: 'q1', hours: 3 },
   propose_import_supplier_list: {},
   propose_remember_preference: { text: 'Labour separate from materials' },
   propose_save_rate: { label: 'Patio roof', unit: 'm²', rate: 220, includesMaterials: true },

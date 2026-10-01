@@ -227,6 +227,7 @@ import {
 } from './documentHandlers';
 export { getStageViolationCounts, convertDocumentToInvoice } from './documentHandlers';
 export { onDocumentWriteSyncJob, backfillJobsFromDocuments } from './jobHandlers';
+export { createCrewLink, revokeCrewLink, crewTimePage } from './crewTime';
 export { storeGoogleCalendarToken, disconnectGoogleCalendar } from './googleCalendarAuth';
 export { onJobWriteSyncCal } from './googleCalendarSync';
 export { requestKatieDemoCall, getKatieSignupLink, katieRecoveryDrip } from './callKatie';

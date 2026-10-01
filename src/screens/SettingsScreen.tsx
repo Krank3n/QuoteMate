@@ -164,6 +164,13 @@ export function SettingsScreen() {
           icon: 'account-group',
           screen: 'Contacts',
         },
+        {
+          id: 'crew',
+          title: 'Crew',
+          subtitle: 'Log their hours, or send them a link',
+          icon: 'account-hard-hat',
+          screen: 'Crew',
+        },
       ],
     },
     {

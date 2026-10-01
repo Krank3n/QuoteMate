@@ -1,6 +1,7 @@
 // Core data models for QuoteMate
 
 // PDF Template types (imported from shared module for local use, re-exported for consumers)
+import type { CrewMember } from '../../shared/time/types';
 import type { PdfTemplateId, PdfTemplateInfo } from '../../shared/pdf/types';
 export type { PdfTemplateId, PdfTemplateInfo };
 
@@ -479,6 +480,8 @@ export interface BusinessSettings {
   quotingPreferences?: string[];
   /** Named charge-out rates Mate saved; applied on drafts as rate × quantity. */
   rateCard?: RateCardEntry[];
+  /** People who work for the business — see shared/time/types CrewMember. */
+  crew?: CrewMember[];
   // Trade type
   tradeType?: TradeType; // Default: 'all'
   // New: Trade category and niche for improved targeting (multi-select)

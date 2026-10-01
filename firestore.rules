@@ -55,7 +55,9 @@ service cloud.firestore {
         // analyseRuns is server-written; the owner may only read and delete
         // it, which the explicit match below grants. Rules OR together, so
         // the carve-out has to happen here or that match grants nothing.
-        && collection != 'analyseRuns';
+        && collection != 'analyseRuns'
+        // timeEntries are validated by their own match below; same reason.
+        && collection != 'timeEntries';
     }
     // Anything nested deeper. {rest=**} can only resolve to a document here
     // when it covers at least one segment, so this never re-grants the doc
@@ -138,6 +140,14 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Crew time links (sha256(token) → owner + crew member). Written and read
+    // only by the crewTime Cloud Functions: a readable link doc would let
+    // anyone enumerate whose crew exists, a writable one would let anyone
+    // mint a way to put hours on someone else's jobs.
+    match /crewLinks/{linkId} {
+      allow read, write: if false;
+    }
+
     // Affiliate payout records — admin/Cloud Functions only. The affiliate sees
     // their payout history via the paid earnings in affiliateEarnings; these
     // docs also carry the admin's identity and payment reference.
@@ -158,6 +168,25 @@ service cloud.firestore {
     // self-describing.
     match /users/{userId}/jobs/{jobId} {
       allow read, write: if isOwner(userId);
+    }
+
+    // Time entries (users/{uid}/timeEntries/{entryId}) — hours worked on a
+    // job. Owner-only, like jobs. Writes are shape-checked because the hours
+    // can land on an invoice: a non-number or a 300-hour day must never be
+    // stored. workerId is the writer or one of their crew ('crew:<id>'); crew
+    // themselves never write here — their link goes through a Cloud Function.
+    function validTimeEntry(d) {
+      return d.jobId is string && d.jobId.size() > 0
+        && d.date is string && d.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && (d.hours is int || d.hours is float) && d.hours > 0 && d.hours <= 24
+        // The owner's own time, or time they log for a crew member.
+        && (d.workerId == request.auth.uid || (d.workerId is string && d.workerId.matches('^crew:.+')))
+        && d.billable is bool
+        && (!('status' in d) || d.status in ['pending', 'approved']);
+    }
+    match /users/{userId}/timeEntries/{entryId} {
+      allow read, delete: if isOwner(userId);
+      allow create, update: if isOwner(userId) && validTimeEntry(request.resource.data);
     }
 
     // Parked analyse results (users/{uid}/analyseRuns/{requestId}) — the

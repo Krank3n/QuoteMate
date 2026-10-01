@@ -5020,6 +5020,40 @@ export const useStore = create<AppState>((set, get) => ({
           return { ok: true, navigate: { kind: 'job_preview', quoteId: quote.id }, review, supplierGap };
         }
 
+        case 'propose_log_time': {
+          // Time goes on the JOB the document belongs to. The document itself
+          // is never touched — billing logged hours is a separate, visible
+          // step on the job screen.
+          const doc = await resolveDocument(proposal.quoteId);
+          if (!doc) return { ok: false, error: 'Quote not found.' };
+          if (!doc.jobId) {
+            return { ok: false, error: "That one isn't on a job yet, so there's nowhere to log the time." };
+          }
+          const { timeEntryService } = await import('../services/timeEntryService');
+          const { formatHours, sumHours } = await import('../../shared/time/hours');
+          try {
+            await timeEntryService.createEntry({
+              jobId: doc.jobId,
+              documentId: doc.id,
+              date: proposal.date,
+              hours: proposal.hours,
+              note: proposal.note,
+              billable: proposal.billable,
+              workerName: get().businessSettings?.businessName || undefined,
+              source: 'mate',
+            });
+          } catch (err: any) {
+            return { ok: false, error: err?.message || "Couldn't log that time." };
+          }
+          const { logTimeHeadline } = await import('../components/assistant/proposalCardCopy');
+          const onJob = await timeEntryService.listForJob(doc.jobId);
+          const soFar = onJob ? ` — ${formatHours(sumHours(onJob))} on this job so far` : '';
+          return {
+            ok: true,
+            note: `Logged ${logTimeHeadline(proposal)}${proposal.billable ? '' : ' (not charged)'}${soFar}.`,
+          };
+        }
+
         case 'propose_mark_paid': {
           // Resolve the invoice. Unified doc first; fall back to the legacy
           // invoices array for very old records that never made it through
