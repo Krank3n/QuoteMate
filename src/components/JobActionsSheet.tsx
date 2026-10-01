@@ -42,6 +42,7 @@ export type JobAction =
   | 'revertToQuote'
   | 'duplicate'
   | 'log_time'
+  | 'timesheets'
   | 'service_report'
   | 'exportPdf'
   | 'pushToXero'
@@ -205,6 +206,13 @@ export const ROWS: RowDef[] = [
     label: 'Log time',
     sub: 'Hours worked on this job',
     icon: 'clock-plus-outline',
+    when: () => true,
+  },
+  {
+    id: 'timesheets',
+    label: 'Timesheets',
+    sub: "Everyone's hours across all jobs, by week",
+    icon: 'calendar-clock',
     when: () => true,
   },
   {

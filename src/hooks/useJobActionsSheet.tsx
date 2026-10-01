@@ -373,6 +373,9 @@ export function useJobActionsSheet(
       case 'log_time':
         navigation.navigate('ViewJob', { jobId: job.id, openLogTime: true });
         break;
+      case 'timesheets':
+        navigation.navigate('Timesheets');
+        break;
       // JobActionsSheet offers this on every job (`when: () => true`), so
       // leaving it unhandled here made the row a dead tap everywhere the
       // sheet is hosted by this hook — Dashboard and Jobs list — while the

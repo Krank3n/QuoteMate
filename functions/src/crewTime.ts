@@ -29,6 +29,8 @@ import {
   crewLinkPageUrl,
   isCrewEmail,
   crewTimePage as renderCrewTimePage,
+  crewEntryView,
+  crewMayChange,
   hashCrewToken,
   isCrewVisibleJob,
   rateLimitIp,
@@ -38,11 +40,16 @@ import {
   validateCrewLog,
 } from './crewTime.helpers';
 import { CREW_WORKER_PREFIX } from './shared/time/types';
+import { addDaysKey, weekStartKey as weekStartOf, isDateKey } from './shared/time/hours';
+
+/** The Monday of the week asked for, or '' when the date isn't one. */
+function weekStartKey(raw: string): string {
+  return isDateKey(raw) ? weekStartOf(raw) : '';
+}
 
 const db = () => admin.firestore();
 const PUBLIC_LIMIT = { maxRequests: 40, windowMs: 60_000 };
 const LOG_LIMIT = { maxRequests: 20, windowMs: 60 * 60_000 };
-const RECENT_DAYS = 21;
 
 async function linksFor(userId: string, crewId: string) {
   return db().collection('crewLinks').where('userId', '==', userId).where('crewId', '==', crewId).get();
@@ -177,26 +184,29 @@ async function openJobs(userId: string) {
     .map((d) => ({ view: crewJobView(d.id, d.data()), data: d.data() }));
 }
 
-/** What this crew member has sent in lately, newest first, with job names. */
-async function recentFor(link: ResolvedLink, jobNames: Map<string, string>) {
-  const since = new Date(Date.now() - RECENT_DAYS * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-  // Bounded by date in the query (composite index in firestore.indexes.json)
-  // so a long-serving crew member's page doesn't read their whole history.
+/**
+ * One week of this crew member's hours, with job names — every entry, open
+ * job or not, so a week they worked on a job that's since closed still adds
+ * up. Bounded by date in the query (workerId + date index).
+ */
+async function weekFor(link: ResolvedLink, startKey: string, jobNames: Map<string, string>) {
+  const endKey = addDaysKey(startKey, 6);
   const snap = await db()
     .collection('users').doc(link.userId).collection('timeEntries')
     .where('workerId', '==', `${CREW_WORKER_PREFIX}${link.crewId}`)
-    .where('date', '>=', since)
+    .where('date', '>=', startKey)
+    .where('date', '<=', endKey)
     .get();
-  return snap.docs
-    .map((d) => d.data())
-    .sort((a, b) => (a.date === b.date ? (b.createdAt || 0) - (a.createdAt || 0) : a.date < b.date ? 1 : -1))
-    .slice(0, 15)
-    .map((e) => ({
-      date: String(e.date),
-      hours: Number(e.hours) || 0,
-      jobName: jobNames.get(String(e.jobId)) || 'A job',
-      status: e.status === 'pending' ? 'pending' : 'approved',
-    }));
+  const docs: Array<Record<string, any>> = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  // Names for jobs no longer on the open list.
+  const missing = [...new Set(docs.map((e) => String(e.jobId)).filter((id) => id && !jobNames.has(id)))];
+  await Promise.all(missing.map(async (id) => {
+    const job = (await db().collection('users').doc(link.userId).collection('jobs').doc(id).get()).data();
+    jobNames.set(id, job ? crewJobView(id, job).name : 'A job');
+  }));
+  return docs
+    .sort((a, b) => (a.date === b.date ? (a.createdAt || 0) - (b.createdAt || 0) : a.date < b.date ? -1 : 1))
+    .map((e) => crewEntryView(e, jobNames));
 }
 
 export const crewTimePage = functions.https.onRequest(async (req, res) => {
@@ -228,18 +238,28 @@ export const crewTimePage = functions.https.onRequest(async (req, res) => {
     }
     const jobs = await openJobs(link.userId);
     const jobNames = new Map(jobs.map((j) => [j.view.id, j.view.name]));
+    const entriesRef = db().collection('users').doc(link.userId).collection('timeEntries');
 
     if (action === 'state' && req.method === 'GET') {
       res.status(200).json({
         crewName: link.crewName,
         businessName: link.businessName,
         jobs: jobs.map((j) => j.view),
-        recent: await recentFor(link, jobNames),
       });
       return;
     }
 
-    if (action === 'log' && req.method === 'POST') {
+    if (action === 'week' && req.method === 'GET') {
+      const start = weekStartKey(String(req.query.start || ''));
+      if (!start) {
+        res.status(400).json({ error: 'Bad week.' });
+        return;
+      }
+      res.status(200).json({ start, entries: await weekFor(link, start, jobNames) });
+      return;
+    }
+
+    if ((action === 'log' || action === 'update') && req.method === 'POST') {
       if (!(await checkRateLimit(`crew-link:${link.linkId}`, LOG_LIMIT, res))) return;
       const { input, error } = validateCrewLog(req.body);
       if (!input) {
@@ -251,13 +271,40 @@ export const crewTimePage = functions.https.onRequest(async (req, res) => {
         res.status(400).json({ error: "That job isn't open any more — pick another or check with your boss." });
         return;
       }
-      const ref = db().collection('users').doc(link.userId).collection('timeEntries').doc();
       const now = Date.now();
+      const documentId = typeof job.data.primaryDocumentId === 'string' ? job.data.primaryDocumentId : undefined;
+
+      if (action === 'update') {
+        const id = String((req.body as { id?: unknown })?.id || '');
+        if (!id || id.includes('/')) {
+          res.status(400).json({ error: 'Which entry?' });
+          return;
+        }
+        const ref = entriesRef.doc(id);
+        const current = (await ref.get()).data();
+        const may = crewMayChange(current, link.crewId);
+        if (!may.ok) {
+          res.status(may.status).json({ error: may.error });
+          return;
+        }
+        await ref.update({
+          jobId: input.jobId,
+          documentId: documentId ?? admin.firestore.FieldValue.delete(),
+          date: input.date,
+          hours: input.hours,
+          note: input.note ?? admin.firestore.FieldValue.delete(),
+          updatedAt: now,
+        });
+        res.status(200).json({ ok: true });
+        return;
+      }
+
+      const ref = entriesRef.doc();
       const entry = {
         id: ref.id,
         userId: link.userId,
         jobId: input.jobId,
-        ...(typeof job.data.primaryDocumentId === 'string' ? { documentId: job.data.primaryDocumentId } : {}),
+        ...(documentId ? { documentId } : {}),
         date: input.date,
         hours: input.hours,
         ...(input.note ? { note: input.note } : {}),
@@ -271,10 +318,25 @@ export const crewTimePage = functions.https.onRequest(async (req, res) => {
       };
       await ref.set(entry);
       functions.logger.info('crewTimePage: hours sent in', { userId: link.userId, crewId: link.crewId, hours: input.hours });
-      res.status(200).json({
-        entry: { date: entry.date, hours: entry.hours },
-        recent: await recentFor(link, jobNames),
-      });
+      res.status(200).json({ entry: { id: ref.id, date: entry.date, hours: entry.hours } });
+      return;
+    }
+
+    if (action === 'delete' && req.method === 'POST') {
+      if (!(await checkRateLimit(`crew-link:${link.linkId}`, LOG_LIMIT, res))) return;
+      const id = String((req.body as { id?: unknown })?.id || '');
+      if (!id || id.includes('/')) {
+        res.status(400).json({ error: 'Which entry?' });
+        return;
+      }
+      const ref = entriesRef.doc(id);
+      const may = crewMayChange((await ref.get()).data(), link.crewId);
+      if (!may.ok) {
+        res.status(may.status).json({ error: may.error });
+        return;
+      }
+      await ref.delete();
+      res.status(200).json({ ok: true });
       return;
     }
 

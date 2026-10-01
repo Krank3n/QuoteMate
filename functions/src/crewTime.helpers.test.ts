@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import {
   CREW_PUSH_COOLDOWN_MS,
+  crewEntryView,
   crewJobView,
+  crewMayChange,
   decideCrewSendInPush,
   crewLinkDeadPage,
   crewTimePage,
@@ -148,5 +150,25 @@ describe('telling the owner hours were sent in', () => {
   it('a burst of send-ins is one buzz, then the next one after the cooldown pushes again', () => {
     expect(decideCrewSendInPush(sentIn, now - 60_000, now)).toEqual({ push: false, reason: 'cooldown' });
     expect(decideCrewSendInPush(sentIn, now - CREW_PUSH_COOLDOWN_MS, now).push).toBe(true);
+  });
+});
+
+describe('a crew member changing their own hours', () => {
+  const mine = { workerId: 'crew:c1', status: 'pending' };
+  it('may change or remove their own waiting entry', () => {
+    expect(crewMayChange(mine, 'c1')).toEqual({ ok: true });
+  });
+  it("may not touch someone else's, the owner's, or a missing one", () => {
+    expect(crewMayChange({ ...mine, workerId: 'crew:c2' }, 'c1')).toMatchObject({ ok: false, status: 404 });
+    expect(crewMayChange({ ...mine, workerId: 'owner-uid' }, 'c1')).toMatchObject({ ok: false, status: 404 });
+    expect(crewMayChange(undefined, 'c1')).toMatchObject({ ok: false, status: 404 });
+  });
+  it('may not change what the boss already approved', () => {
+    expect(crewMayChange({ ...mine, status: undefined }, 'c1')).toMatchObject({ ok: false, status: 409 });
+    expect(crewMayChange({ ...mine, status: 'approved' }, 'c1')).toMatchObject({ ok: false, status: 409 });
+  });
+  it('shows them their entry with the job name, nothing more', () => {
+    const v = crewEntryView({ id: 'e', jobId: 'j', date: '2026-10-01', hours: 6, note: 'Frame', status: 'pending', billable: true, workerId: 'crew:c1', userId: 'owner' }, new Map([['j', 'Back deck']]));
+    expect(v).toEqual({ id: 'e', jobId: 'j', jobName: 'Back deck', date: '2026-10-01', hours: 6, note: 'Frame', status: 'pending' });
   });
 });
