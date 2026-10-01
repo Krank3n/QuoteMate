@@ -108,12 +108,13 @@ export function preserveFirstSend(existing: AnyData | null | undefined, toWrite:
  * produced FROM it — the legacy write then carried no new payment:
  *
  *  - Same money. Current builds' echo of any ledger.
- *  - An invoice echo carrying the deposit twice. App builds from before
- *    Oct 2026 project a ledger deposit as `depositCredit` AND inside
- *    `paidAmount`, which reads back as stored + deposits, with a netted
- *    `deposit-credit-*` entry equal to the deposits. Those builds stay live
- *    until every phone updates; taking that echo doubled the deposit (a $960
- *    job with $300 paid read $600 paid, $360 owing).
+ *  - An invoice echo carrying no NEW money. Older app builds stay live until
+ *    every phone updates, and they echo a ledger two wrong ways: a deposit
+ *    both as `depositCredit` AND inside `paidAmount` (taking that doubled a
+ *    $300 deposit to $600 paid, $360 owing), and a stale paid figure from
+ *    before their own latest payment (taking that wiped the payment). Read
+ *    without its netted credit, neither echo shows more money than stored,
+ *    so an invoice echo only replaces the ledger when it really adds money.
  *  - A quote echo carrying LESS than stored. A quote's legacy record keeps
  *    only the deposit — older builds only the FIRST deposit — and none of a
  *    full payment, so it always reads short of a ledger with two deposits or
@@ -144,23 +145,25 @@ export function preserveLedger(existing: AnyData | null | undefined, toWrite: An
   const storedDeposits = sum(stored.filter((p: AnyData) => p?.kind === 'deposit'));
   const isQuote = (toWrite.type ?? existing?.type) === 'quote';
 
+  const isNetted = (p: AnyData) => p?.kind === 'deposit' && String(p?.id ?? '').startsWith('deposit-credit-');
+  // What the echo says has been paid against the invoice, leaving out a
+  // netted deposit credit — older builds report a ledger deposit both as
+  // that credit AND inside paidAmount, so this strips the double count.
+  const incomingPaid = incomingSum - sum(incoming.filter(isNetted));
+
   const sameMoney = Math.abs(storedSum - incomingSum) < EPS;
-  const olderBuildInvoiceEcho =
-    !isQuote &&
-    storedDeposits > EPS &&
-    Math.abs(incomingSum - (storedSum + storedDeposits)) < EPS &&
-    incoming.some(
-      (p: AnyData) =>
-        p?.kind === 'deposit' &&
-        String(p?.id ?? '').startsWith('deposit-credit-') &&
-        Math.abs((Number(p?.amount) || 0) - storedDeposits) < EPS,
-    );
+  // An invoice echo never takes money OFF the ledger. It reads lower when an
+  // older build writes a stale legacy record (seen on the sim: a 1.58 build
+  // recorded $50 and then wrote the paid figure from before it, wiping the
+  // $50) and equal when it double-counts a deposit. Only a legacy-only
+  // writer adding money makes it read higher — take the projection then.
+  const invoiceEchoNoNewMoney = !isQuote && incomingPaid <= storedSum + EPS;
   const shortQuoteEcho =
     isQuote &&
     incomingSum <= storedSum + EPS &&
     incoming.every((p: AnyData) => p?.kind === 'deposit');
 
-  if (!sameMoney && !olderBuildInvoiceEcho && !shortQuoteEcho) return toWrite;
+  if (!sameMoney && !invoiceEchoNoNewMoney && !shortQuoteEcho) return toWrite;
 
   const total = Number(toWrite.total ?? existing?.total) || 0;
   // An older converted invoice's total already had its deposit taken off,

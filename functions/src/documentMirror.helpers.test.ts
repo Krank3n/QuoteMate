@@ -66,9 +66,15 @@ describe('preserveLedger', () => {
     expect(preserveLedger({ payments: ledger }, changed)).toEqual(changed);
   });
 
-  it('takes the projection when every payment was removed through the legacy record', () => {
+  it('an echo cannot take payments off the ledger — removals go through the ledger first', () => {
+    // Every writer that removes a payment (Record Payment's Remove, the
+    // un-pay path) empties the unified ledger BEFORE mirroring, so by the
+    // time this echo arrives the stored ledger is already empty and the
+    // early return takes it. A legacy record that reads lower than the
+    // ledger is a stale write, not a removal.
     const cleared = { paidTotal: 0, payments: [] };
-    expect(preserveLedger({ payments: ledger }, cleared)).toEqual(cleared);
+    expect(preserveLedger({ payments: ledger }, cleared).payments).toEqual(ledger);
+    expect(preserveLedger({ payments: [] }, cleared)).toEqual(cleared);
   });
 
   it('passes through when nothing is stored yet', () => {
@@ -272,6 +278,23 @@ describe('preserveLedger against older app builds', () => {
     expect(out.payments).toEqual([deposit, full]);
     expect(out.paidTotal).toBe(960);
     expect(out.depositPaid).toBe(300);
+  });
+
+  it('REGRESSION: a stale older-build write does not wipe a payment it just recorded', () => {
+    // Seen on the simulator with a 1.58 build: deposit $291.72 + $100 cash +
+    // $50 bank on the ledger, then a legacy write still reading $391.72 paid
+    // (from before the $50) with the deposit as a credit. Taking that echo
+    // replaced all three entries with "credit 291.72 + manual 391.72".
+    const cash = { id: 'm-1', kind: 'manual', amount: 100, paidAt: now, method: 'cash' };
+    const bank = { id: 'm-2', kind: 'manual', amount: 50, paidAt: now + 1, method: 'bank' };
+    const dep = { ...deposit, amount: 291.72 };
+    const doc = invoice({ total: 972.4, payments: [dep, cash, bank], paidTotal: 441.72, balanceDue: 530.68 });
+    const legacy: any = { ...documentRecordToInvoiceRecord(doc), depositCredit: 291.72, paidAmount: 391.72 };
+    const out = preserveLedger(doc, invoiceRecordToDocumentRecord(legacy, doc.id) as any);
+    expect(out.payments).toEqual([dep, cash, bank]);
+    expect(out.paidTotal).toBe(441.72);
+    expect(out.balanceDue).toBe(530.68);
+    expect(out.stage).toBe('partially_paid');
   });
 
   it('still takes an invoice echo with genuinely new money (a legacy-only write)', () => {
