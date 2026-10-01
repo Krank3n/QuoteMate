@@ -37,7 +37,7 @@ import { timeEntryService } from '../services/timeEntryService';
 import { LogTimeSheet } from '../components/LogTimeSheet';
 import { JobTimeRow } from '../components/JobTimeRow';
 import { sumBillableHours, formatHours, sortEntriesNewestFirst } from '../../shared/time/hours';
-import { chargeLoggedHoursPlan } from '../utils/loggedHours';
+import { chargeLoggedHoursPlan, loggedHoursWereCharged } from '../utils/loggedHours';
 import { StageSheet } from '../components/StageSheet';
 import { JobStageSheet, stageMetaFor } from '../components/JobStageSheet';
 import {
@@ -377,7 +377,10 @@ export function ViewJobScreen() {
   const invoicePlan =
     primaryDoc?.type === 'invoice' ? chargeLoggedHoursPlan(primaryDoc, billableLogged) : null;
   const workDone = job.stage === 'completed' || job.stage === 'paid' || job.stage === 'closed';
-  const showChargeLink = !!invoicePlan && (invoicePlan.raises || (workDone && pendingLogged === 0));
+  // Once logged hours were charged, the invoice tracks the log — fewer hours
+  // logged (one moved to another job) is offered straight away, not at the end.
+  const tracksLog = !!primaryDoc && loggedHoursWereCharged(primaryDoc);
+  const showChargeLink = !!invoicePlan && (invoicePlan.raises || ((workDone || tracksLog) && pendingLogged === 0));
 
   const offerChargeLoggedHours = (invoice: Document, loggedHours: number, pendingHours: number) => {
     const plan = chargeLoggedHoursPlan(invoice, loggedHours);
@@ -1352,6 +1355,7 @@ export function ViewJobScreen() {
         entries={timeEntries}
         onSaved={handleTimeSaved}
         onDeleted={handleTimeDeleted}
+        onStale={reloadTimeEntries}
         onOpenTimesheets={() => {
           setTimeSheetVisible(false);
           navigation.navigate('Timesheets');

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { assertStorableEntry, normaliseTimeEntry } from './timeEntryService';
+import { assertStorableEntry, normaliseTimeEntry, staleWaitingEntry } from './timeEntryService';
 
 describe('time entry records', () => {
   it('normalises a raw Firestore doc, defaulting billable on and the worker to the owner', () => {
@@ -22,5 +22,26 @@ describe('time entry records', () => {
     expect(() => assertStorableEntry({ jobId: 'j', date: '2026-13-01', hours: 2 })).toThrow(/date/);
     expect(() => assertStorableEntry({ jobId: 'j', date: '2026-09-30', hours: 30 })).toThrow(/24/);
     expect(() => assertStorableEntry({ jobId: 'j', date: '2026-09-30', hours: 8 })).not.toThrow();
+  });
+});
+
+describe('approving or saving waiting hours over a crew change', () => {
+  const loaded = { status: 'pending' as const, updatedAt: 100 };
+
+  it('is stale when the crew deleted it on their link', () => {
+    expect(staleWaitingEntry(loaded, undefined)).toBe('gone');
+  });
+
+  it('is stale when the crew changed it since it loaded', () => {
+    expect(staleWaitingEntry(loaded, { status: 'pending', updatedAt: 200 })).toBe('changed');
+  });
+
+  it('is fine when nothing moved', () => {
+    expect(staleWaitingEntry(loaded, { status: 'pending', updatedAt: 100 })).toBeNull();
+  });
+
+  it('is fine once it is approved (crew can no longer change it) or was never waiting', () => {
+    expect(staleWaitingEntry(loaded, { status: 'approved', updatedAt: 300 })).toBeNull();
+    expect(staleWaitingEntry({ status: undefined, updatedAt: 100 }, undefined)).toBeNull();
   });
 });

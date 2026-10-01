@@ -8,8 +8,8 @@
  * Settings and Crew.
  */
 
-import React, { useCallback, useMemo, useState } from 'react';
-import { ScrollView, TouchableOpacity, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, ScrollView, TouchableOpacity, View } from 'react-native';
 import { Button, Text } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
@@ -17,11 +17,11 @@ import { format } from 'date-fns';
 
 import type { TimeEntry } from '../../shared/time/types';
 import { addDaysKey, dateKeyDaysAgo, formatHours, isCounted, weekStartKey } from '../../shared/time/hours';
-import { timeEntryService } from '../services/timeEntryService';
+import { StaleEntryError, timeEntryService } from '../services/timeEntryService';
 import { useStore } from '../store/useStore';
 import { useJobStore } from '../store/useJobStore';
 import { activeCrew } from '../utils/crew';
-import { buildTimesheetWeek } from '../utils/timesheetWeek';
+import { buildTimesheetWeek, personKeyOf } from '../utils/timesheetWeek';
 import { makeStyles, useThemeColors } from '../theme';
 import { WebContainer } from '../components/WebContainer';
 import { GridBackground } from '../components/GridBackground';
@@ -53,8 +53,16 @@ export function TimesheetsScreen() {
   const [editing, setEditing] = useState<TimeEntry | null>(null);
   const [approving, setApproving] = useState(false);
 
+  // The week on screen, for answers that land after the owner has moved on.
+  const startRef = useRef(start);
+  startRef.current = start;
+  // Waiting entries from every week, so last Friday's aren't missed on Monday.
+  const [allWaiting, setAllWaiting] = useState<TimeEntry[]>([]);
+
   const load = useCallback(() => {
-    timeEntryService.listRange(start, addDaysKey(start, 6)).then((list) => {
+    const want = start;
+    timeEntryService.listRange(want, addDaysKey(want, 6)).then((list) => {
+      if (startRef.current !== want) return;
       if (list) {
         setEntries(list);
         setFailed(false);
@@ -62,8 +70,16 @@ export function TimesheetsScreen() {
         setFailed(true);
       }
     });
+    timeEntryService.listWaiting().then((list) => {
+      if (list) setAllWaiting(list);
+    });
   }, [start]);
   useFocusEffect(load);
+  // A new week starts blank, never showing the last week under its heading.
+  useEffect(() => {
+    setEntries(null);
+    setFailed(false);
+  }, [start]);
 
   const week = useMemo(() => buildTimesheetWeek(entries ?? [], crew, filter), [entries, crew, filter]);
   const jobName = (id: string) => {
@@ -71,23 +87,92 @@ export function TimesheetsScreen() {
     return j ? [j.customerName, j.name].filter(Boolean).join(' — ') || 'Untitled job' : 'Job no longer on file';
   };
   const people = activeCrew(crew);
+  // Named as the week groups them — someone taken off the crew keeps the name they worked as.
+  const personName = (key: string) => week.people.find((p) => p.key === key)?.name || (key === 'me' ? 'You' : 'Crew');
 
-  const upsert = (e: TimeEntry) =>
+  const end = addDaysKey(start, 6);
+  const otherWeeksWaiting = allWaiting.filter(
+    (e) => (e.date < start || e.date > end) && (filter === 'all' || personKeyOf(e) === filter),
+  );
+  const latestOtherWeek = otherWeeksWaiting.length ? weekStartKey(otherWeeksWaiting[0].date) : null;
+
+  const upsert = (e: TimeEntry) => {
+    const from = startRef.current;
     setEntries((prev) => {
       const rest = (prev ?? []).filter((x) => x.id !== e.id);
       // Moved out of this week? Then it's not on this page any more.
-      return e.date >= start && e.date <= addDaysKey(start, 6) ? [e, ...rest] : rest;
+      return e.date >= from && e.date <= addDaysKey(from, 6) ? [e, ...rest] : rest;
     });
+    setAllWaiting((prev) => prev.filter((x) => x.id !== e.id || e.status === 'pending'));
+  };
+  const remove = (id: string) => {
+    setEntries((prev) => (prev ?? []).filter((x) => x.id !== id));
+    setAllWaiting((prev) => prev.filter((x) => x.id !== id));
+  };
+
+  const approveOne = async (e: TimeEntry) => {
+    try {
+      upsert(await timeEntryService.approveEntry(e));
+    } catch (err: any) {
+      if (err instanceof StaleEntryError) load();
+      showAlert({
+        type: err instanceof StaleEntryError ? 'info' : 'error',
+        title: err instanceof StaleEntryError ? 'Those hours just changed' : "Couldn't approve that",
+        message: err?.message || 'Try again in a moment.',
+      });
+    }
+  };
 
   const approveAll = async () => {
+    const list = week.waiting;
     setApproving(true);
-    try {
-      for (const e of week.waiting) upsert(await timeEntryService.approveEntry(e));
-    } catch (err: any) {
-      showAlert({ type: 'error', title: "Couldn't approve them all", message: err?.message || 'Try again in a moment.' });
-    } finally {
-      setApproving(false);
+    let done = 0;
+    let changed = 0;
+    let failedOne: string | null = null;
+    for (const e of list) {
+      try {
+        upsert(await timeEntryService.approveEntry(e));
+        done += 1;
+      } catch (err: any) {
+        // Changed on their link since this loaded: leave it for another look.
+        if (err instanceof StaleEntryError) changed += 1;
+        else {
+          failedOne = err?.message || 'Try again in a moment.';
+          break;
+        }
+      }
     }
+    setApproving(false);
+    if (changed || failedOne) {
+      load();
+      const left = list.length - done;
+      showAlert({
+        type: failedOne ? 'error' : 'info',
+        title: `Approved ${done} of ${list.length}`,
+        message: [
+          changed ? `${changed} changed on their link just now — have another look.` : null,
+          failedOne ? `${left - changed} still waiting: ${failedOne}` : null,
+        ].filter(Boolean).join(' '),
+      });
+    }
+  };
+  const confirmApproveAll = () => {
+    const hours = week.waiting.reduce((t, e) => t + e.hours, 0);
+    const names = [...new Set(week.waiting.map((e) => personName(personKeyOf(e))))];
+    const n = week.waiting.length;
+    showAlert({
+      type: 'info',
+      title: `Approve ${n === 1 ? '1 entry' : `${n} entries`}?`,
+      message: `${formatHours(hours)} from ${names.join(', ')}. Approved hours count on the job and can go on an invoice, and they're locked on the crew's side.`,
+      primaryButtonText: 'Approve',
+      // Not awaited: the confirm closes now, and a partial-result alert from
+      // approveAll must not be dismissed along with it.
+      primaryButtonAction: () => {
+        void approveAll();
+      },
+      secondaryButtonText: 'Not yet',
+      secondaryButtonAction: () => {},
+    });
   };
 
   return (
@@ -103,7 +188,7 @@ export function TimesheetsScreen() {
               <View style={{ alignItems: 'center' }}>
                 <Text style={styles.weekTitle}>{start === thisWeek ? 'This week' : `Week of ${shortDate(start)}`}</Text>
                 <Text style={styles.weekSub}>
-                  {`${shortDate(start)} – ${shortDate(addDaysKey(start, 6))} · ${formatHours(week.total)}`}
+                  {`${shortDate(start)} – ${shortDate(end)} · ${entries ? formatHours(week.total) : '—'}`}
                 </Text>
               </View>
               <TouchableOpacity
@@ -138,13 +223,29 @@ export function TimesheetsScreen() {
                 <Text style={styles.waitingText}>
                   {week.waiting.length === 1 ? '1 sent in, waiting for you' : `${week.waiting.length} sent in, waiting for you`}
                 </Text>
-                <Button mode="contained" compact buttonColor={themeColors.accent} textColor={themeColors.onAccent} onPress={approveAll} loading={approving} disabled={approving}>
-                  Approve all
+                <Button mode="contained" compact buttonColor={themeColors.accent} textColor={themeColors.onAccent} onPress={confirmApproveAll} loading={approving} disabled={approving}>
+                  {filter === 'all' ? 'Approve all' : filter === 'me' ? 'Approve yours' : `Approve ${personName(filter).split(' ')[0]}'s`}
                 </Button>
               </View>
             ) : null}
 
-            {failed && !entries ? (
+            {latestOtherWeek ? (
+              <TouchableOpacity
+                style={styles.otherWeeks}
+                onPress={() => setStart(latestOtherWeek)}
+                accessibilityRole="button"
+              >
+                <MaterialCommunityIcons name="clock-alert-outline" size={18} color={themeColors.warning} />
+                <Text style={styles.otherWeeksText}>
+                  {otherWeeksWaiting.length === 1 ? '1 more waiting' : `${otherWeeksWaiting.length} more waiting`} in other weeks
+                </Text>
+                <Text style={styles.otherWeeksGo}>{`Week of ${shortDate(latestOtherWeek)}`}</Text>
+              </TouchableOpacity>
+            ) : null}
+
+            {!entries && !failed ? <ActivityIndicator style={styles.loading} color={themeColors.accentText} /> : null}
+
+            {failed ? (
               <TouchableOpacity style={styles.empty} onPress={load}>
                 <Text style={styles.emptyText}>Couldn't load this week. Tap to try again.</Text>
               </TouchableOpacity>
@@ -155,18 +256,21 @@ export function TimesheetsScreen() {
               </View>
             ) : null}
 
-            {week.people.map((p) => (
+            {(failed ? [] : week.people).map((p) => (
               <View key={p.key} style={styles.person}>
                 <View style={styles.personHead}>
                   <Text style={styles.personName}>{p.name}</Text>
-                  <Text style={styles.personTotal}>{formatHours(p.total)}</Text>
+                  <Text style={styles.personTotal}>
+                    {formatHours(p.total)}
+                    {p.waitingHours ? <Text style={styles.personWaiting}>{` · ${formatHours(p.waitingHours)} waiting`}</Text> : null}
+                  </Text>
                 </View>
                 {p.entries.map((e) => {
                   const waiting = !isCounted(e);
-                  return (
+                  const sub = [e.billable === false ? 'Not charged' : null, e.note || null].filter(Boolean).join(' · ');
+                  const row = (
                     <TouchableOpacity
-                      key={e.id}
-                      style={[styles.row, waiting && styles.rowWaiting]}
+                      style={[styles.row, waiting ? styles.rowInCard : null]}
                       onPress={() => setEditing(e)}
                       accessibilityRole="button"
                       accessibilityLabel={`Edit ${formatHours(e.hours)} on ${dayName(e.date)}, ${jobName(e.jobId)}`}
@@ -174,15 +278,34 @@ export function TimesheetsScreen() {
                       <Text style={styles.rowDay}>{dayName(e.date)}</Text>
                       <View style={{ flex: 1, minWidth: 0 }}>
                         <Text style={styles.rowJob} numberOfLines={1}>{jobName(e.jobId)}</Text>
-                        {e.note || waiting || e.billable === false ? (
-                          <Text style={[styles.rowSub, waiting && { color: themeColors.warning }]} numberOfLines={1}>
-                            {[waiting ? 'Waiting for you' : null, e.billable === false ? 'Not charged' : null, e.note || null].filter(Boolean).join(' · ')}
+                        {sub ? (
+                          <Text style={styles.rowSub} numberOfLines={1}>
+                            {sub}
                           </Text>
                         ) : null}
                       </View>
                       <Text style={styles.rowHours}>{formatHours(e.hours)}</Text>
                       <MaterialCommunityIcons name="pencil-outline" size={18} color={themeColors.textMuted} />
                     </TouchableOpacity>
+                  );
+                  if (!waiting) return <React.Fragment key={e.id}>{row}</React.Fragment>;
+                  // Waiting: Approve gets its own line, so the job name keeps
+                  // the row's width on a small phone.
+                  return (
+                    <View key={e.id} style={styles.waitingCard}>
+                      {row}
+                      <View style={styles.waitingFoot}>
+                        <Text style={styles.waitingLabel}>Waiting for you</Text>
+                        <Button
+                          mode="contained-tonal"
+                          compact
+                          onPress={() => approveOne(e)}
+                          accessibilityLabel={`Approve ${formatHours(e.hours)} from ${p.name}`}
+                        >
+                          Approve
+                        </Button>
+                      </View>
+                    </View>
                   );
                 })}
               </View>
@@ -195,7 +318,8 @@ export function TimesheetsScreen() {
         entry={editing}
         onDismiss={() => setEditing(null)}
         onSaved={upsert}
-        onDeleted={(id) => setEntries((prev) => (prev ?? []).filter((x) => x.id !== id))}
+        onDeleted={remove}
+        onStale={load}
       />
       {alertNode}
     </View>
@@ -251,6 +375,21 @@ const useStyles = makeStyles((t) => ({
   personHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', paddingHorizontal: 4, marginTop: 6 },
   personName: { fontSize: 16, fontWeight: '700', color: t.colors.text },
   personTotal: { fontSize: 15, fontWeight: '700', color: t.colors.text },
+  personWaiting: { fontSize: 13, fontWeight: '600', color: t.colors.warning },
+  loading: { marginTop: 24 },
+  otherWeeks: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    minHeight: 44,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: t.colors.warning,
+  },
+  otherWeeksText: { flex: 1, fontSize: 13, color: t.colors.text },
+  otherWeeksGo: { fontSize: 13, fontWeight: '700', color: t.colors.accentText },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -263,7 +402,16 @@ const useStyles = makeStyles((t) => ({
     borderWidth: 1,
     borderColor: t.colors.border,
   },
-  rowWaiting: { borderStyle: 'dashed', borderColor: t.colors.warning },
+  waitingCard: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: t.colors.warning,
+    backgroundColor: t.colors.surfaceRaised,
+  },
+  rowInCard: { borderWidth: 0, backgroundColor: 'transparent' },
+  waitingFoot: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 12, paddingBottom: 8 },
+  waitingLabel: { fontSize: 12, fontWeight: '600', color: t.colors.warning },
   rowDay: { width: 52, fontSize: 13, fontWeight: '700', color: t.colors.textMuted },
   rowJob: { fontSize: 14, fontWeight: '600', color: t.colors.text },
   rowSub: { fontSize: 12, color: t.colors.textMuted, marginTop: 2 },

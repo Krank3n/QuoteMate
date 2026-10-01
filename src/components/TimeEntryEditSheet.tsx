@@ -13,7 +13,7 @@ import { format } from 'date-fns';
 
 import { CREW_WORKER_PREFIX, type TimeEntry } from '../../shared/time/types';
 import { crewIdOf, dateKeyDaysAgo, formatHours, isCounted, parseHoursInput } from '../../shared/time/hours';
-import { timeEntryService } from '../services/timeEntryService';
+import { StaleEntryError, timeEntryService } from '../services/timeEntryService';
 import { useStore } from '../store/useStore';
 import { useJobStore } from '../store/useJobStore';
 import { activeCrew } from '../utils/crew';
@@ -27,9 +27,11 @@ interface TimeEntryEditSheetProps {
   onDismiss: () => void;
   onSaved: (entry: TimeEntry) => void;
   onDeleted: (id: string) => void;
+  /** Crew changed or deleted it on their link since it loaded — reload. */
+  onStale?: () => void;
 }
 
-export function TimeEntryEditSheet({ entry, onDismiss, onSaved, onDeleted }: TimeEntryEditSheetProps) {
+export function TimeEntryEditSheet({ entry, onDismiss, onSaved, onDeleted, onStale }: TimeEntryEditSheetProps) {
   const styles = useStyles();
   const themeColors = useThemeColors();
   const { showAlert, dismissAlert, alertNode } = useAlertModal();
@@ -87,9 +89,21 @@ export function TimeEntryEditSheet({ entry, onDismiss, onSaved, onDeleted }: Tim
     if (hours === null || !jobId) return;
     setBusy(approve ? 'approve' : 'save');
     try {
-      onSaved(await timeEntryService.updateEntry(build(approve)));
+      onSaved(await timeEntryService.updateEntry(build(approve), entry));
       onDismiss();
     } catch (err: any) {
+      if (err instanceof StaleEntryError) {
+        // Writing this copy would undo what they just changed on their link.
+        onStale?.();
+        showAlert({
+          type: 'info',
+          title: 'Those hours just changed',
+          message: err.message,
+          primaryButtonText: 'OK',
+          primaryButtonAction: onDismiss,
+        });
+        return;
+      }
       showAlert({ type: 'error', title: "Couldn't save that", message: err?.message || 'Try again in a moment.' });
     } finally {
       setBusy(null);

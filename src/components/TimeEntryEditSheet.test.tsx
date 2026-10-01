@@ -12,7 +12,10 @@ const service = vi.hoisted(() => ({
   updateEntry: vi.fn(async (entry: any) => entry),
   deleteEntry: vi.fn(async () => {}),
 }));
-vi.mock('../services/timeEntryService', () => ({ timeEntryService: service }));
+vi.mock('../services/timeEntryService', () => ({
+  timeEntryService: service,
+  StaleEntryError: class StaleEntryError extends Error {},
+}));
 const state = vi.hoisted(() => ({
   businessSettings: { businessName: 'Rivo Plumbing', crew: [{ id: 'jake', name: 'Jake', createdAt: 1 }, { id: 'amy', name: 'Amy', createdAt: 1 }] },
   jobs: [
@@ -72,6 +75,26 @@ describe('editing a time entry', () => {
     fireEvent.click(screen.getByText('Approve'));
     await waitFor(() => expect(onSaved).toHaveBeenCalled());
     expect(service.updateEntry.mock.calls[0][0]).toMatchObject({ id: 'w1', hours: 6.5, status: 'approved', workerId: 'crew:jake' });
+  });
+
+  it('approves against the copy it loaded, so a crew change since is caught', async () => {
+    renderSheet(waiting);
+    fireEvent.click(screen.getByText('Approve'));
+    await waitFor(() => expect(service.updateEntry).toHaveBeenCalled());
+    expect(service.updateEntry.mock.calls[0][1]).toBe(waiting);
+  });
+
+  it('crew changed it on their link: says so, reloads, and leaves the sheet up until OK', async () => {
+    const { StaleEntryError } = await import('../services/timeEntryService');
+    service.updateEntry.mockRejectedValueOnce(new StaleEntryError('Jake changed those hours just now.'));
+    const onStale = vi.fn(); const onSaved = vi.fn(); const onDismiss = vi.fn();
+    render(<TimeEntryEditSheet entry={waiting} onDismiss={onDismiss} onSaved={onSaved} onDeleted={vi.fn()} onStale={onStale} />);
+    fireEvent.click(screen.getByText('Approve'));
+    await waitFor(() => expect(screen.getByText('Those hours just changed')).toBeTruthy());
+    expect(onStale).toHaveBeenCalled();
+    expect(onSaved).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText('OK'));
+    await waitFor(() => expect(onDismiss).toHaveBeenCalled());
   });
 
   it('"Save, keep waiting" never approves', async () => {

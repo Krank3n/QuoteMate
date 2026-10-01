@@ -153,6 +153,27 @@ export function CrewScreen() {
     }
   };
 
+  // Their link is meant to be kept — the email and the page both say it
+  // stays the same — so making a new one (which kills the old) asks first.
+  const requestSendLink = (member: CrewMember) => {
+    if (!member.linkToken) {
+      void handleSendLink(member);
+      return;
+    }
+    const first = member.name.split(' ')[0];
+    showAlert({
+      type: 'warning',
+      title: `Send ${first} a new link?`,
+      message: `The link ${first} has now stops working, so they'll need to use the new one — and re-add it to their home screen if they saved it there.`,
+      primaryButtonText: member.email ? 'Email new link' : 'Send new link',
+      primaryButtonAction: () => {
+        void handleSendLink(member);
+      },
+      secondaryButtonText: 'Keep the old one',
+      secondaryButtonAction: () => {},
+    });
+  };
+
   const handleTurnOffLink = (member: CrewMember) => {
     showAlert({
       type: 'warning',
@@ -246,9 +267,9 @@ export function CrewScreen() {
                     icon="send-outline"
                     loading={busy === `link:${member.id}`}
                     disabled={!!busy}
-                    onPress={() => handleSendLink(member)}
+                    onPress={() => requestSendLink(member)}
                   >
-                    {member.email ? 'Email link' : 'Send link'}
+                    {member.linkToken ? 'New link' : member.email ? 'Email link' : 'Send link'}
                   </Button>
                 </TouchableOpacity>
               ))
