@@ -34,6 +34,11 @@ export interface CrewMember {
   email?: string;
   /** What this person costs the business per hour — for costing, never shown to customers. */
   costRate?: number;
+  /**
+   * Invoices the business for their time (has an ABN). No super or on-costs
+   * on top of their rate — it's already the whole cost.
+   */
+  contractor?: boolean;
   /** Removed from the list; past time keeps their name. */
   archived?: boolean;
   /** Present while the member has a live link (the token; the server stores only its hash). */
@@ -64,6 +69,13 @@ export interface TimeEntry {
   status?: TimeEntryStatus;
   /** Non-billable time (a warranty callback, a quote visit) is logged but never invoiced. */
   billable: boolean;
+  /**
+   * What an hour of this cost the business when it started counting (logged
+   * by the owner, or approved): the person's rate and super + on-costs as a
+   * fraction. Kept so a later pay rise doesn't re-cost finished jobs. Never
+   * shown to customers. See shared/time/labourCost.ts.
+   */
+  cost?: { rate: number; loading: number };
   source: TimeEntrySource;
   createdAt: number;
   updatedAt: number;

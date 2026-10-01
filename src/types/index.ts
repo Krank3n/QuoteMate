@@ -482,6 +482,10 @@ export interface BusinessSettings {
   rateCard?: RateCardEntry[];
   /** People who work for the business — see shared/time/types CrewMember. */
   crew?: CrewMember[];
+  /** Super on crew wages, % — for costing jobs (shared/time/labourCost). Absent = 12. */
+  crewSuperPercent?: number;
+  /** Workers comp, payroll tax, leave… on top of crew wages, %. Absent = 0. */
+  crewOnCostPercent?: number;
   // Trade type
   tradeType?: TradeType; // Default: 'all'
   // New: Trade category and niche for improved targeting (multi-select)

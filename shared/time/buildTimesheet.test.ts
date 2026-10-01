@@ -63,7 +63,7 @@ describe('the timesheet for a period', () => {
 });
 
 describe('hours per person', () => {
-  it("totals each person, names crew from the list, costs them at their rate, and leaves waiting time out", () => {
+  it("totals each person, names crew from the list, costs them at their rate plus the default 12% super, and leaves waiting time out", () => {
     const t = buildTimesheet(
       [
         e('deck', '2026-09-02', 8, { workerId: 'owner', workerName: 'Rivo Plumbing' }),
@@ -77,7 +77,7 @@ describe('hours per person', () => {
     );
     expect(t.byWorker).toEqual([
       { workerId: 'owner', workerName: 'Rivo Plumbing', hours: 8 },
-      { workerId: 'crew:c1', workerName: 'Jake', hours: 8, cost: 320 },
+      { workerId: 'crew:c1', workerName: 'Jake', hours: 8, cost: 358.4 },
     ]);
     expect(t.totalHours).toBe(16);
     expect(t.rows.find((r) => r.hours === 6)?.workerName).toBe('Jake');
@@ -102,5 +102,42 @@ describe('the timesheet CSV', () => {
   it('keeps a note that starts like a formula as text in Excel', () => {
     const csv = timesheetToCsv(buildTimesheet([e('deck', '2026-09-02', 1, { note: '=SUM(A1)' })], jobs, range));
     expect(csv).toContain(`"'=SUM(A1)"`);
+  });
+});
+
+describe('the timesheet with crew costs', () => {
+  const jobs = [{ id: 'j1', name: 'Deck', customerName: 'Gigar' }];
+  const crew = [{ id: 'sam', name: 'Sam', costRate: 30 }, { id: 'dave', name: 'Dave', costRate: 70, contractor: true }];
+  const range = { fromKey: '2026-09-28', toKey: '2026-10-04' };
+  const base = { jobId: 'j1', billable: true, note: '', createdAt: 1 };
+  const data = buildTimesheet(
+    [
+      { ...base, date: '2026-09-29', hours: 10, workerId: 'crew:sam' },
+      { ...base, date: '2026-09-30', hours: 8, workerId: 'crew:dave' },
+      { ...base, date: '2026-09-30', hours: 5, workerId: 'owner', workerName: 'You' },
+      { ...base, date: '2026-10-01', hours: 2, workerId: 'crew:sam', cost: { rate: 25, loading: 0 } },
+    ],
+    jobs,
+    range,
+    crew,
+    { crewSuperPercent: 12, crewOnCostPercent: 5 },
+  );
+
+  it('costs each person with super and on-costs, contractors flat, the owner not at all', () => {
+    const by = Object.fromEntries(data.byWorker.map((w) => [w.workerName, w.cost]));
+    expect(by).toEqual({ Sam: 401, Dave: 560, You: undefined });
+  });
+
+  it('adds up the crew cost per job', () => {
+    expect(data.byJob[0].cost).toBe(961);
+  });
+
+  it("puts a cost column in the CSV only when something's costed, blank for the owner", () => {
+    const lines = timesheetToCsv(data).trim().split('\r\n');
+    expect(lines[0].endsWith(',cost')).toBe(true);
+    expect(lines.find((l) => l.includes(',You,'))?.endsWith(',You,')).toBe(true);
+    expect(lines.some((l) => l.endsWith(',351.00'))).toBe(true);
+    const ownerOnly = buildTimesheet([{ ...base, date: '2026-09-29', hours: 3, workerId: 'owner' }], jobs, range, crew);
+    expect(timesheetToCsv(ownerOnly).split('\r\n')[0].includes('cost')).toBe(false);
   });
 });

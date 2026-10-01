@@ -118,3 +118,12 @@ describe('the Timesheets screen', () => {
     expect(screen.getByText("Approve Jake's")).toBeTruthy();
   });
 });
+
+describe("a crew member's week cost", () => {
+  it('shows wages plus super under their name, for approved hours', async () => {
+    state.businessSettings.crew[0] = { id: 'jake', name: 'Jake Smith', costRate: 30, createdAt: 1 } as any;
+    service.listRange.mockResolvedValue([e('a', monday, 10, { status: undefined }), e('b', monday, 5)]);
+    render(<TimesheetsScreen />);
+    expect(await screen.findByText(/Costs about \$336\.00 · \$300\.00 \+ \$36\.00 super/)).toBeTruthy();
+  });
+});

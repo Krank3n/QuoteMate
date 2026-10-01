@@ -31,6 +31,7 @@ import {
   sumHours,
 } from '../../shared/time/hours';
 import { StaleEntryError, timeEntryService } from '../services/timeEntryService';
+import { jobLabourCostLine } from '../utils/jobLabourCost';
 import { hourlyRateOf, quotedHoursOf } from '../utils/loggedHours';
 import { makeStyles, useThemeColors } from '../theme';
 import { BottomSheet } from './BottomSheet';
@@ -104,6 +105,8 @@ export function LogTimeSheet({
   const [editJobId, setEditJobId] = useState(job.id);
   const jobs = useJobStore((st) => st.jobs);
   const allCrew = useStore((st) => st.businessSettings?.crew);
+  // Crew and super/on-cost settings — what each entry's cost is stamped from.
+  const costing = useStore((st) => st.businessSettings) ?? undefined;
   const crew = activeCrew(allCrew);
   const crewName = (id: string | null) => (id ? allCrew?.find((c) => c.id === id)?.name : undefined);
   const [pickingDay, setPickingDay] = useState(false);
@@ -144,7 +147,7 @@ export function LogTimeSheet({
 
   const handleApprove = async (entry: TimeEntry) => {
     try {
-      onSaved(await timeEntryService.approveEntry(entry));
+      onSaved(await timeEntryService.approveEntry(entry, costing));
     } catch (err: any) {
       if (handleStale(err)) return;
       showAlert({ type: 'error', title: "Couldn't approve that", message: err?.message || 'Try again in a moment.' });
@@ -165,6 +168,9 @@ export function LogTimeSheet({
   }, [logged, billableLogged, quoted, pending.length]);
 
   const over = quoted !== null && quoted > 0 && billableLogged > quoted;
+  // What the crew's approved hours cost against the labour on the job's
+  // quote or invoice — costing, never shown to the customer.
+  const costLine = jobLabourCostLine(entries, allCrew, costing, primaryDoc);
 
   const startEdit = (entry: TimeEntry) => {
     setEditing(entry);
@@ -199,7 +205,7 @@ export function LogTimeSheet({
             billable,
             workerId: crewId ? `${CREW_WORKER_PREFIX}${crewId}` : editing.userId,
             workerName: crewId ? crewName(crewId) : workerName,
-          }),
+          }, editing, costing),
         );
         resetForm();
       } else {
@@ -213,7 +219,7 @@ export function LogTimeSheet({
           workerName: crewId ? crewName(crewId) : workerName,
           crewMemberId: crewId ?? undefined,
           source: 'manual',
-        });
+        }, costing);
         onSaved(created);
         // One entry is the usual visit — close, and the job's time row
         // shows the new total. Editing keeps the sheet open.
@@ -282,6 +288,14 @@ export function LogTimeSheet({
           />
           <Text style={styles.summaryText}>{summary}</Text>
         </View>
+        {costLine ? (
+          <View style={styles.costBox} accessibilityLabel={[costLine.headline, ...costLine.notes].join('. ')}>
+            <Text style={[styles.costHeadline, costLine.overCharged && { color: themeColors.warning }]}>{costLine.headline}</Text>
+            {costLine.notes.map((n) => (
+              <Text key={n} style={styles.costNote}>{n}</Text>
+            ))}
+          </View>
+        ) : null}
         {onOpenTimesheets ? (
           <TouchableOpacity onPress={onOpenTimesheets} style={styles.allLink} accessibilityRole="button">
             <MaterialCommunityIcons name="calendar-clock" size={16} color={themeColors.accentText} />
@@ -555,6 +569,9 @@ const useStyles = makeStyles((t) => ({
     borderRadius: 12,
     backgroundColor: t.colors.surfacePressed,
   },
+  costBox: { gap: 2, paddingHorizontal: 4 },
+  costHeadline: { fontSize: 13, fontWeight: '600', color: t.colors.text },
+  costNote: { fontSize: 12, color: t.colors.textMuted },
   summaryText: {
     fontSize: 14,
     fontWeight: '600',

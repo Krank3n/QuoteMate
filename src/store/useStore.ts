@@ -5089,7 +5089,7 @@ export const useStore = create<AppState>((set, get) => ({
                 ? { crewMemberId: proposal.crewMemberId, workerName: proposal.crewName }
                 : { workerName: get().businessSettings?.businessName || undefined }),
               source: 'mate',
-            });
+            }, get().businessSettings ?? undefined);
           } catch (err: any) {
             return { ok: false, error: err?.message || "Couldn't log that time." };
           }

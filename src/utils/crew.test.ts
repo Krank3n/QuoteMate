@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   activeCrew,
+  parseCostPercent,
   matchCrewMember,
   addCrewMember,
   archiveCrewMember,
@@ -90,5 +91,23 @@ describe('a crew member\'s email', () => {
   it('is kept on the crew member when added', () => {
     const [jake] = addCrewMember(undefined, 'Jake', undefined, 'jake@rivo.com.au');
     expect(jake).toMatchObject({ name: 'Jake', email: 'jake@rivo.com.au' });
+  });
+});
+
+describe('crew cost settings', () => {
+  it('reads a super or on-cost percentage, blank meaning the default', () => {
+    expect(parseCostPercent('')).toEqual({});
+    expect(parseCostPercent('12')).toEqual({ percent: 12 });
+    expect(parseCostPercent(' 4.5% ')).toEqual({ percent: 4.5 });
+    expect(parseCostPercent('0')).toEqual({ percent: 0 });
+    expect(parseCostPercent('120').error).toMatch(/0 to 100/);
+    expect(parseCostPercent('lots').error).toMatch(/0 to 100/);
+  });
+
+  it('adds a contractor flagged as one, and an employee without the flag', () => {
+    const [sub] = addCrewMember([], 'Dave', 70, undefined, true);
+    const [emp] = addCrewMember([], 'Sam', 30);
+    expect(sub.contractor).toBe(true);
+    expect('contractor' in emp).toBe(false);
   });
 });

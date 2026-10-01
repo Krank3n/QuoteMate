@@ -10,8 +10,10 @@
 import type { TimeEntry } from '../../shared/time/types';
 import { sumBillableHours } from '../../shared/time/hours';
 import { hourlyRateOf, quotedHoursOf } from './loggedHours';
+import { labourCostOf, type LabourCostSettings } from '../../shared/time/labourCost';
+import type { CrewMember } from '../../shared/time/types';
 
-type LabourDoc = Parameters<typeof hourlyRateOf>[0] & { id: string; jobId?: string; stage?: string };
+type LabourDoc = Parameters<typeof hourlyRateOf>[0] & { id: string; jobId?: string; stage?: string; laborTotal?: number };
 
 export interface JobHoursRow {
   jobId: string;
@@ -23,6 +25,10 @@ export interface JobHoursRow {
   overPercent: number;
   /** Latest day time was logged, YYYY-MM-DD — rows sort newest first. */
   lastLogged: string;
+  /** What the crew's hours cost (super and on-costs in), when any are costed. */
+  labourCost?: number;
+  /** The labour on the job's quote or invoice, ex GST. */
+  labourCharged: number;
 }
 
 export interface HoursComparison {
@@ -32,6 +38,9 @@ export interface HoursComparison {
   /** Across every compared job, whole percent. Null with nothing to compare. */
   overallOverPercent: number | null;
   jobsOver: number;
+  /** Across the rows that have a crew cost: what it cost against the labour charged on them. */
+  totalLabourCost: number;
+  totalLabourChargedOnCosted: number;
 }
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -39,9 +48,10 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
 const FINISHED_STAGES = new Set(['completed', 'paid', 'closed']);
 
 export function buildHoursComparison(
-  entries: Array<Pick<TimeEntry, 'jobId' | 'hours' | 'billable' | 'date'>>,
+  entries: Array<Pick<TimeEntry, 'jobId' | 'hours' | 'billable' | 'date'> & Partial<Pick<TimeEntry, 'workerId' | 'status' | 'cost'>>>,
   jobs: Array<{ id: string; name?: string; customerName?: string; primaryDocumentId?: string; stage?: string }>,
   documents: LabourDoc[],
+  costing?: LabourCostSettings & { crew?: CrewMember[] },
 ): HoursComparison {
   const byJob = new Map<string, typeof entries>();
   for (const e of entries) {
@@ -49,6 +59,11 @@ export function buildHoursComparison(
     list.push(e);
     byJob.set(e.jobId, list);
   }
+
+  const costOf = (list: typeof entries): { labourCost?: number } => {
+    const c = labourCostOf(list.map((e) => ({ ...e, workerId: e.workerId || '' })), costing?.crew, costing);
+    return c.costedHours > 0 ? { labourCost: c.total } : {};
+  };
 
   const rows: JobHoursRow[] = [];
   for (const job of jobs) {
@@ -71,6 +86,8 @@ export function buildHoursComparison(
       loggedHours,
       overPercent: Math.round(((loggedHours - quotedHours) / quotedHours) * 100),
       lastLogged: jobEntries.reduce((max, e) => (e.date > max ? e.date : max), ''),
+      labourCharged: round2(Number(doc.laborTotal) || 0),
+      ...costOf(jobEntries),
     });
   }
   rows.sort((a, b) => (a.lastLogged === b.lastLogged ? 0 : a.lastLogged < b.lastLogged ? 1 : -1));
@@ -83,5 +100,7 @@ export function buildHoursComparison(
     totalLogged,
     overallOverPercent: totalQuoted > 0 ? Math.round(((totalLogged - totalQuoted) / totalQuoted) * 100) : null,
     jobsOver: rows.filter((r) => r.overPercent > 0).length,
+    totalLabourCost: round2(rows.reduce((s, r) => s + (r.labourCost ?? 0), 0)),
+    totalLabourChargedOnCosted: round2(rows.reduce((s, r) => s + (r.labourCost !== undefined ? r.labourCharged : 0), 0)),
   };
 }

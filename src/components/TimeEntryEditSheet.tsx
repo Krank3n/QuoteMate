@@ -36,6 +36,7 @@ export function TimeEntryEditSheet({ entry, onDismiss, onSaved, onDeleted, onSta
   const themeColors = useThemeColors();
   const { showAlert, dismissAlert, alertNode } = useAlertModal();
   const allCrew = useStore((s) => s.businessSettings?.crew);
+  const costing = useStore((s) => s.businessSettings) ?? undefined;
   const businessName = useStore((s) => s.businessSettings?.businessName);
   const jobs = useJobStore((s) => s.jobs);
 
@@ -89,7 +90,7 @@ export function TimeEntryEditSheet({ entry, onDismiss, onSaved, onDeleted, onSta
     if (hours === null || !jobId) return;
     setBusy(approve ? 'approve' : 'save');
     try {
-      onSaved(await timeEntryService.updateEntry(build(approve), entry));
+      onSaved(await timeEntryService.updateEntry(build(approve), entry, costing));
       onDismiss();
     } catch (err: any) {
       if (err instanceof StaleEntryError) {

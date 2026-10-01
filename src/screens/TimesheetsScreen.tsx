@@ -22,6 +22,8 @@ import { useStore } from '../store/useStore';
 import { useJobStore } from '../store/useJobStore';
 import { activeCrew } from '../utils/crew';
 import { buildTimesheetWeek, personKeyOf } from '../utils/timesheetWeek';
+import { onCostPercentOf } from '../../shared/time/labourCost';
+import { formatCurrency } from '../utils/documentCalculator';
 import { makeStyles, useThemeColors } from '../theme';
 import { WebContainer } from '../components/WebContainer';
 import { GridBackground } from '../components/GridBackground';
@@ -43,6 +45,8 @@ export function TimesheetsScreen() {
   const navigation = useNavigation<any>();
   const { showAlert, alertNode } = useAlertModal();
   const crew = useStore((s) => s.businessSettings?.crew);
+  // Super/on-cost settings, for stamping costs on approval and the week's cost.
+  const costing = useStore((s) => s.businessSettings) ?? undefined;
   const jobs = useJobStore((s) => s.jobs);
 
   const thisWeek = weekStartKey(dateKeyDaysAgo(0));
@@ -81,7 +85,7 @@ export function TimesheetsScreen() {
     setFailed(false);
   }, [start]);
 
-  const week = useMemo(() => buildTimesheetWeek(entries ?? [], crew, filter), [entries, crew, filter]);
+  const week = useMemo(() => buildTimesheetWeek(entries ?? [], crew, filter, costing), [entries, crew, filter, costing]);
   const jobName = (id: string) => {
     const j = jobs.find((x) => x.id === id);
     return j ? [j.customerName, j.name].filter(Boolean).join(' — ') || 'Untitled job' : 'Job no longer on file';
@@ -112,7 +116,7 @@ export function TimesheetsScreen() {
 
   const approveOne = async (e: TimeEntry) => {
     try {
-      upsert(await timeEntryService.approveEntry(e));
+      upsert(await timeEntryService.approveEntry(e, costing));
     } catch (err: any) {
       if (err instanceof StaleEntryError) load();
       showAlert({
@@ -131,7 +135,7 @@ export function TimesheetsScreen() {
     let failedOne: string | null = null;
     for (const e of list) {
       try {
-        upsert(await timeEntryService.approveEntry(e));
+        upsert(await timeEntryService.approveEntry(e, costing));
         done += 1;
       } catch (err: any) {
         // Changed on their link since this loaded: leave it for another look.
@@ -265,6 +269,14 @@ export function TimesheetsScreen() {
                     {p.waitingHours ? <Text style={styles.personWaiting}>{` · ${formatHours(p.waitingHours)} waiting`}</Text> : null}
                   </Text>
                 </View>
+                {p.cost ? (
+                  <Text style={styles.personCost}>
+                    {p.cost.superAndOnCosts > 0
+                      ? `Costs about ${formatCurrency(p.cost.total)} · ${formatCurrency(p.cost.wages)} + ${formatCurrency(p.cost.superAndOnCosts)} ${onCostPercentOf(costing) > 0 ? 'super & on-costs' : 'super'}`
+                      : `Costs ${formatCurrency(p.cost.total)}`}
+                    {p.cost.uncostedCrewHours ? ` · ${formatHours(p.cost.uncostedCrewHours)} not costed` : ''}
+                  </Text>
+                ) : null}
                 {p.entries.map((e) => {
                   const waiting = !isCounted(e);
                   const sub = [e.billable === false ? 'Not charged' : null, e.note || null].filter(Boolean).join(' · ');
@@ -375,6 +387,7 @@ const useStyles = makeStyles((t) => ({
   personHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', paddingHorizontal: 4, marginTop: 6 },
   personName: { fontSize: 16, fontWeight: '700', color: t.colors.text },
   personTotal: { fontSize: 15, fontWeight: '700', color: t.colors.text },
+  personCost: { fontSize: 12, color: t.colors.textMuted, paddingHorizontal: 4, marginTop: -2 },
   personWaiting: { fontSize: 13, fontWeight: '600', color: t.colors.warning },
   loading: { marginTop: 24 },
   otherWeeks: {
