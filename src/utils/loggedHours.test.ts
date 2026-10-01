@@ -4,6 +4,7 @@ import {
   chargeLoggedHoursPlan,
   hourlyRateOf,
   loggedHoursOffer,
+  loggedHoursWereCharged,
   quotedHoursOf,
 } from './loggedHours';
 import { labourHoursOnDocument } from './labourEditor';
@@ -180,5 +181,13 @@ describe('the invoice offer', () => {
   it('flags a sent invoice so the tradie knows to send the new one', () => {
     expect(chargeLoggedHoursPlan(hourlyDoc(), 12)!.alreadySent).toBe(false);
     expect(chargeLoggedHoursPlan(hourlyDoc({ stage: 'invoice_sent' } as Partial<Document>), 12)!.alreadySent).toBe(true);
+  });
+});
+
+describe('an invoice that charges the logged hours', () => {
+  it('is spotted by the quoted-hours stamp, so hours moved to another job come off it too', () => {
+    expect(loggedHoursWereCharged({ quotedLaborHours: 10 })).toBe(true);
+    expect(loggedHoursWereCharged({})).toBe(false);
+    expect(loggedHoursWereCharged({ quotedLaborHours: 0 })).toBe(false);
   });
 });

@@ -49,7 +49,8 @@ function weekStartKey(raw: string): string {
 
 const db = () => admin.firestore();
 const PUBLIC_LIMIT = { maxRequests: 40, windowMs: 60_000 };
-const LOG_LIMIT = { maxRequests: 20, windowMs: 60 * 60_000 };
+// Catching up a fortnight across two jobs is ~30 saves; deletes count too.
+const LOG_LIMIT = { maxRequests: 60, windowMs: 60 * 60_000 };
 
 async function linksFor(userId: string, crewId: string) {
   return db().collection('crewLinks').where('userId', '==', userId).where('crewId', '==', crewId).get();
@@ -267,12 +268,9 @@ export const crewTimePage = functions.https.onRequest(async (req, res) => {
         return;
       }
       const job = jobs.find((j) => j.view.id === input.jobId);
-      if (!job) {
-        res.status(400).json({ error: "That job isn't open any more — pick another or check with your boss." });
-        return;
-      }
       const now = Date.now();
-      const documentId = typeof job.data.primaryDocumentId === 'string' ? job.data.primaryDocumentId : undefined;
+      const documentId = job && typeof job.data.primaryDocumentId === 'string' ? job.data.primaryDocumentId : undefined;
+      const closedJobError = "That job isn't open any more — pick another or check with your boss.";
 
       if (action === 'update') {
         const id = String((req.body as { id?: unknown })?.id || '');
@@ -281,25 +279,40 @@ export const crewTimePage = functions.https.onRequest(async (req, res) => {
           return;
         }
         const ref = entriesRef.doc(id);
-        const current = (await ref.get()).data();
-        const may = crewMayChange(current, link.crewId);
-        if (!may.ok) {
-          res.status(may.status).json({ error: may.error });
+        // Read and write together, so an approve landing in between can't
+        // let the crew change hours that have just been approved.
+        const outcome = await db().runTransaction(async (tx) => {
+          const current = (await tx.get(ref)).data();
+          const may = crewMayChange(current, link.crewId);
+          if (!may.ok) return may;
+          // A job closed since still takes a fix to its own hours or note.
+          if (!job && current?.jobId !== input.jobId) return { ok: false as const, status: 400, error: closedJobError };
+          tx.update(ref, {
+            jobId: input.jobId,
+            ...(job ? { documentId: documentId ?? admin.firestore.FieldValue.delete() } : {}),
+            date: input.date,
+            hours: input.hours,
+            note: input.note ?? admin.firestore.FieldValue.delete(),
+            updatedAt: now,
+          });
+          return { ok: true as const };
+        });
+        if (!outcome.ok) {
+          res.status(outcome.status).json({ error: outcome.error });
           return;
         }
-        await ref.update({
-          jobId: input.jobId,
-          documentId: documentId ?? admin.firestore.FieldValue.delete(),
-          date: input.date,
-          hours: input.hours,
-          note: input.note ?? admin.firestore.FieldValue.delete(),
-          updatedAt: now,
-        });
         res.status(200).json({ ok: true });
         return;
       }
 
-      const ref = entriesRef.doc();
+      if (!job) {
+        res.status(400).json({ error: closedJobError });
+        return;
+      }
+      // The page names the entry before sending it, so a save whose answer
+      // got lost on bad signal and is sent again lands on the same entry
+      // instead of a second one.
+      const ref = input.clientId ? entriesRef.doc(input.clientId) : entriesRef.doc();
       const entry = {
         id: ref.id,
         userId: link.userId,
@@ -316,8 +329,19 @@ export const crewTimePage = functions.https.onRequest(async (req, res) => {
         createdAt: now,
         updatedAt: now,
       };
-      await ref.set(entry);
-      functions.logger.info('crewTimePage: hours sent in', { userId: link.userId, crewId: link.crewId, hours: input.hours });
+      const created = await db().runTransaction(async (tx) => {
+        const existing = await tx.get(ref);
+        if (existing.exists) return existing.data()?.workerId === entry.workerId ? 'repeat' : 'taken';
+        tx.create(ref, entry);
+        return 'created';
+      });
+      if (created === 'taken') {
+        res.status(409).json({ error: 'Something went wrong — try again.' });
+        return;
+      }
+      if (created === 'created') {
+        functions.logger.info('crewTimePage: hours sent in', { userId: link.userId, crewId: link.crewId, hours: input.hours });
+      }
       res.status(200).json({ entry: { id: ref.id, date: entry.date, hours: entry.hours } });
       return;
     }
@@ -330,12 +354,15 @@ export const crewTimePage = functions.https.onRequest(async (req, res) => {
         return;
       }
       const ref = entriesRef.doc(id);
-      const may = crewMayChange((await ref.get()).data(), link.crewId);
+      const may = await db().runTransaction(async (tx) => {
+        const check = crewMayChange((await tx.get(ref)).data(), link.crewId);
+        if (check.ok) tx.delete(ref);
+        return check;
+      });
       if (!may.ok) {
         res.status(may.status).json({ error: may.error });
         return;
       }
-      await ref.delete();
       res.status(200).json({ ok: true });
       return;
     }

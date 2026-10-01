@@ -19,7 +19,10 @@ const service = vi.hoisted(() => ({
   approveEntry: vi.fn(async (entry: any) => ({ ...entry, status: 'approved' })),
   deleteEntry: vi.fn(async () => {}),
 }));
-vi.mock('../services/timeEntryService', () => ({ timeEntryService: service }));
+vi.mock('../services/timeEntryService', () => ({
+  timeEntryService: service,
+  StaleEntryError: class StaleEntryError extends Error {},
+}));
 
 // The business settings the sheet reads its crew from.
 const settings = vi.hoisted(() => ({ current: { businessName: 'Rivo Plumbing', crew: [] as any[] } }));
@@ -266,7 +269,7 @@ describe('editing anything', () => {
     const { onSaved } = renderSheet([entry({ id: 'sent', hours: 7, workerId: 'crew:c1', status: 'pending', source: 'crew_link' })]);
     fireEvent.click(screen.getByLabelText(/Edit 7 h from Jake/));
     fireEvent.change(screen.getByLabelText('Hours worked'), { target: { value: '6' } });
-    fireEvent.click(screen.getByText('Save changes'));
+    fireEvent.click(screen.getByText('Save, keep waiting'));
     await waitFor(() => expect(onSaved).toHaveBeenCalled());
     expect(service.updateEntry.mock.calls[0][0]).toMatchObject({ id: 'sent', hours: 6, status: 'pending', workerId: 'crew:c1' });
   });
@@ -279,6 +282,30 @@ describe('editing anything', () => {
     fireEvent.click(screen.getByText('Save changes'));
     await waitFor(() => expect(onSaved).toHaveBeenCalled());
     expect(service.updateEntry.mock.calls[0][0]).toMatchObject({ id: 'e1', jobId: 'job-2', documentId: 'q-2' });
+  });
+
+  it('crew changed the hours on their link since the sheet loaded: says so and reloads, writes nothing', async () => {
+    const { StaleEntryError } = await import('../services/timeEntryService');
+    service.approveEntry.mockRejectedValueOnce(new StaleEntryError('Jake changed those hours just now.'));
+    settings.current = { businessName: 'Rivo Plumbing', crew: [{ id: 'c1', name: 'Jake', createdAt: 1 }] };
+    const onStale = vi.fn();
+    const onSaved = vi.fn();
+    render(
+      <LogTimeSheet visible onDismiss={() => {}} job={job} primaryDoc={quote} onSaved={onSaved} onDeleted={vi.fn()} onStale={onStale}
+        entries={[entry({ id: 'sent', hours: 7, workerId: 'crew:c1', status: 'pending', source: 'crew_link' })]} />,
+    );
+    fireEvent.click(screen.getByText('Approve'));
+    await waitFor(() => expect(screen.getByText('Those hours just changed')).toBeTruthy());
+    expect(onStale).toHaveBeenCalled();
+    expect(onSaved).not.toHaveBeenCalled();
+  });
+
+  it('puts waiting hours above the form, where the push lands', () => {
+    settings.current = { businessName: 'Rivo Plumbing', crew: [{ id: 'c1', name: 'Jake', createdAt: 1 }] };
+    renderSheet([entry({ id: 'sent', hours: 7, workerId: 'crew:c1', status: 'pending', source: 'crew_link' })]);
+    const waiting = screen.getByText('Sent in — waiting for you');
+    const hours = screen.getByLabelText('Hours worked');
+    expect(waiting.compareDocumentPosition(hours) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('links to every job\'s timesheets', () => {

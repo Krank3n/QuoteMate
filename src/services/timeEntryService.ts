@@ -15,6 +15,7 @@ import {
   getDocs,
   deleteDoc,
   query,
+  runTransaction,
   where,
 } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
@@ -89,6 +90,37 @@ async function settleWrite(write: Promise<void>): Promise<void> {
   }
 }
 
+/**
+ * Thrown when hours sent in by crew changed or were deleted on their link
+ * after this copy was loaded. Writing the old copy back would approve hours
+ * they've since fixed, or bring back hours they took off.
+ */
+export class StaleEntryError extends Error {
+  constructor(public readonly reason: 'gone' | 'changed', workerName?: string) {
+    super(
+      reason === 'gone'
+        ? `${workerName || 'They'} deleted those hours just now.`
+        : `${workerName || 'They'} changed those hours just now — have another look.`,
+    );
+    this.name = 'StaleEntryError';
+  }
+}
+
+/**
+ * Whether a waiting entry moved under us. Only crew can change an entry
+ * that's waiting, and only until it's approved, so an approved one (or one
+ * that was never waiting) is never stale.
+ */
+export function staleWaitingEntry(
+  loaded: Pick<TimeEntry, 'status' | 'updatedAt'>,
+  stored: { status?: unknown; updatedAt?: unknown } | undefined,
+): 'gone' | 'changed' | null {
+  if (loaded.status !== 'pending') return null;
+  if (!stored) return 'gone';
+  if (stored.status !== 'pending') return null;
+  return (Number(stored.updatedAt) || 0) !== (Number(loaded.updatedAt) || 0) ? 'changed' : null;
+}
+
 class TimeEntryService {
   private colRef(uid: string) {
     return collection(db, 'users', uid, 'timeEntries');
@@ -124,20 +156,34 @@ class TimeEntryService {
 
   /**
    * Replace an entry's editable fields. Written whole (not merged) so a
-   * cleared start/finish or note actually clears.
+   * cleared start/finish or note actually clears. `loaded` is the copy the
+   * edit started from (defaults to `entry`); if that was waiting, the write
+   * fails with StaleEntryError when crew changed or deleted it since.
    */
-  async updateEntry(entry: TimeEntry): Promise<TimeEntry> {
+  async updateEntry(entry: TimeEntry, loaded: TimeEntry = entry): Promise<TimeEntry> {
     const uid = getUserId();
     if (!uid) throw new Error('Not signed in');
     assertStorableEntry(entry);
     const next: TimeEntry = { ...entry, userId: uid, note: entry.note?.trim() || undefined, updatedAt: Date.now() };
-    await settleWrite(setDoc(doc(db, 'users', uid, 'timeEntries', entry.id), stripUndefined(next)));
+    const ref = doc(db, 'users', uid, 'timeEntries', entry.id);
+    if (loaded.status === 'pending') {
+      // Crew can still change or delete a waiting entry on their link, so
+      // check it's the copy we loaded and write in the same transaction.
+      await runTransaction(db, async (tx) => {
+        const snap = await tx.get(ref);
+        const stale = staleWaitingEntry(loaded, snap.exists() ? snap.data() : undefined);
+        if (stale) throw new StaleEntryError(stale, loaded.workerName);
+        tx.set(ref, stripUndefined(next));
+      });
+      return next;
+    }
+    await settleWrite(setDoc(ref, stripUndefined(next)));
     return next;
   }
 
   /** Count a crew member's sent-in time — it joins the totals from here on. */
   async approveEntry(entry: TimeEntry): Promise<TimeEntry> {
-    return this.updateEntry({ ...entry, status: 'approved' });
+    return this.updateEntry({ ...entry, status: 'approved' }, entry);
   }
 
   async deleteEntry(id: string): Promise<void> {
@@ -156,6 +202,21 @@ class TimeEntryService {
     if (!uid || !jobId) return [];
     try {
       const snap = await getDocs(query(this.colRef(uid), where('jobId', '==', jobId)));
+      return sortEntriesNewestFirst(snap.docs.map((d) => normaliseTimeEntry(d.data(), d.id)));
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Everything sent in and not approved yet, any week — so hours sent in
+   * for last Friday aren't missed on Monday. Null when the read failed.
+   */
+  async listWaiting(): Promise<TimeEntry[] | null> {
+    const uid = getUserId();
+    if (!uid) return [];
+    try {
+      const snap = await getDocs(query(this.colRef(uid), where('status', '==', 'pending')));
       return sortEntriesNewestFirst(snap.docs.map((d) => normaliseTimeEntry(d.data(), d.id)));
     } catch {
       return null;

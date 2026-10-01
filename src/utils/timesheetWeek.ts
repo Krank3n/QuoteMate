@@ -13,6 +13,8 @@ export interface TimesheetPerson {
   /** Approved hours — waiting time is shown, never counted. */
   total: number;
   waiting: number;
+  /** Hours sent in and not approved yet. */
+  waitingHours: number;
   entries: TimeEntry[];
 }
 
@@ -37,11 +39,15 @@ export function buildTimesheetWeek(
       name: key === 'me' ? 'You' : names.get(key) || e.workerName || 'Crew',
       total: 0,
       waiting: 0,
+      waitingHours: 0,
       entries: [],
     };
     g.entries.push(e);
     if (isCounted(e)) g.total = round2(g.total + e.hours);
-    else g.waiting += 1;
+    else {
+      g.waiting += 1;
+      g.waitingHours = round2(g.waitingHours + e.hours);
+    }
     groups.set(key, g);
   }
   for (const g of groups.values()) {

@@ -180,6 +180,7 @@ export interface CrewLogInput {
   date: string;
   hours: number;
   note?: string;
+  clientId?: string;
 }
 
 /** YYYY-MM-DD for a UTC instant shifted by whole days (validation bounds only). */
@@ -206,7 +207,9 @@ export function validateCrewLog(body: unknown, now: number = Date.now()): { inpu
   const hours = typeof b.hours === 'number' ? Math.round(b.hours * 100) / 100 : parseHoursInput(String(b.hours ?? ''));
   if (hours === null || !isValidEntryHours(hours)) return { error: 'Hours need to be more than 0 and no more than 24.' };
   const note = typeof b.note === 'string' ? b.note.trim().slice(0, CREW_NOTE_MAX) : '';
-  return { input: { jobId, date, hours, ...(note ? { note } : {}) } };
+  // Optional id the page picked for a new entry (see the log action).
+  const clientId = typeof b.clientId === 'string' && /^[A-Za-z0-9]{16,40}$/.test(b.clientId) ? b.clientId : undefined;
+  return { input: { jobId, date, hours, ...(note ? { note } : {}), ...(clientId ? { clientId } : {}) } };
 }
 
 const esc = (s: string) =>
@@ -236,6 +239,9 @@ function pageShell(title: string, body: string, script = ''): string {
 <title>${esc(title)}</title>
 <style>
   :root { --bg:#0f172a; --card:#1e293b; --card2:#162132; --text:#f1f5f9; --muted:#94a3b8; --line:#334155; --accent:#f97316; --ok:#22c55e; --warn:#f59e0b; }
+  @media (prefers-color-scheme: light) {
+    :root { --bg:#f8fafc; --card:#ffffff; --card2:#f1f5f9; --text:#0f172a; --muted:#475569; --line:#cbd5e1; --accent:#c2410c; --ok:#15803d; --warn:#b45309; }
+  }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   body { margin:0; background:var(--bg); color:var(--text); font:16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
   main { max-width:520px; margin:0 auto; padding:20px 16px 56px; }
@@ -249,7 +255,7 @@ function pageShell(title: string, body: string, script = ''): string {
   .weeklabel { text-align:center; } .weeklabel b { display:block; font-size:16px; } .weeklabel span { font-size:13px; color:var(--muted); }
   .days { display:grid; grid-template-columns:repeat(7,1fr); gap:6px; }
   .day { border:1px solid var(--line); background:var(--card); color:var(--text); border-radius:12px; padding:8px 0 7px; min-height:68px; text-align:center; font:inherit; }
-  .day .dn { font-size:12px; color:var(--muted); } .day .dd { font-size:17px; font-weight:700; } .day .dh { font-size:12px; color:var(--muted); margin-top:2px; }
+  .day .dn { font-size:12px; color:var(--muted); } .day .dd { font-size:17px; font-weight:700; } .day .dh { font-size:11px; white-space:nowrap; color:var(--muted); margin-top:2px; }
   .day.has .dh { color:var(--text); font-weight:600; }
   .day.today { border-color:var(--accent); }
   .day.sel { background:var(--accent); border-color:var(--accent); } .day.sel .dn, .day.sel .dh { color:#fff; }
@@ -270,15 +276,15 @@ function pageShell(title: string, body: string, script = ''): string {
   .form h3 { margin:0 0 2px; font-size:17px; } .form .for { font-size:13px; color:var(--muted); margin-bottom:12px; }
   label.f { display:block; font-size:12px; font-weight:700; letter-spacing:.05em; text-transform:uppercase; color:var(--muted); margin:14px 0 6px; }
   select, input[type=text], input[inputmode] { width:100%; min-height:48px; padding:10px 12px; border-radius:12px; border:1px solid var(--line); background:var(--bg); color:var(--text); font-size:17px; font-family:inherit; }
-  .row { display:flex; gap:8px; align-items:center; } .row input { flex:0 0 96px; }
-  .q { min-height:44px; min-width:52px; padding:0 12px; border-radius:999px; border:1px solid var(--line); background:var(--bg); color:var(--text); font-size:15px; font-weight:600; font-family:inherit; }
+  .row { display:flex; gap:8px; align-items:center; } .row input { flex:1 1 72px; min-width:0; max-width:120px; }
+  .q { flex:0 0 auto; min-height:44px; min-width:48px; padding:0 10px; border-radius:999px; border:1px solid var(--line); background:var(--bg); color:var(--text); font-size:15px; font-weight:600; font-family:inherit; }
   .q.on { background:var(--accent); border-color:var(--accent); color:#fff; }
   .actions { margin-top:18px; }
   .msg { margin-top:14px; padding:12px 14px; border-radius:12px; font-size:15px; display:none; }
   .msg.ok { display:block; background:rgba(34,197,94,.14); border:1px solid var(--ok); }
   .msg.err { display:block; background:rgba(245,158,11,.14); border:1px solid var(--warn); }
   .pin { margin-top:28px; display:flex; gap:12px; align-items:flex-start; }
-  .pin .x { margin-left:auto; background:none; border:0; color:var(--muted); font-size:20px; min-width:32px; min-height:32px; }
+  .pin .x { margin-left:auto; margin:-10px -10px 0 auto; background:none; border:0; color:var(--muted); font-size:20px; min-width:44px; min-height:44px; }
   .center { text-align:center; padding:40px 0; }
 </style>
 </head>
@@ -308,6 +314,8 @@ export function crewTimePage(token: string): string {
 
     <h2 id="dayhead"></h2>
     <div id="list"></div>
+    <div class="msg err" id="weekerr" style="display:none">Couldn't load this week — check your signal. <button type="button" class="ghost" id="retry">Try again</button></div>
+    <p class="empty" id="nojobs" style="display:none"></p>
     <button type="button" class="go" id="add"></button>
 
     <div class="form" id="form" style="display:none">
@@ -357,26 +365,50 @@ export function crewTimePage(token: string): string {
   function text(el, s){ el.textContent = s; }
   var today = key(new Date());
   var maxDay = today;
-  var S = { jobs: [], start: monday(today), sel: today, entries: [], editing: null };
+  // Oldest day the server takes (CREW_LOG_MAX_DAYS_BACK).
+  function minDay(){ return addDays(today, -${CREW_LOG_MAX_DAYS_BACK}); }
+  var LAST_JOB = 'qmCrewLastJob';
+  var S = { jobs: [], start: monday(today), sel: today, entries: [], editing: null, biz: 'Your boss', weekFailed: false };
+  var OFFLINE = "Couldn't reach the server — check your signal and try again.";
+  function hnum(n){ return String(Math.round(n * 100) / 100); }
 
+  // One way to talk to the server: a 20 s cap so a dead connection doesn't
+  // leave Save greyed out forever, and plain words for every failure.
   function call(action, body){
-    return fetch(api + '&action=' + action + (body ? '' : ''), body
-      ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
-      : undefined).then(function(r){ return r.json().then(function(j){ if (!r.ok) throw new Error(j.error || 'Something went wrong.'); return j; }); });
+    var ctl = window.AbortController ? new AbortController() : null;
+    var timer = ctl ? setTimeout(function(){ ctl.abort(); }, 20000) : null;
+    var opts = body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {};
+    if (ctl) opts.signal = ctl.signal;
+    return fetch(api + '&action=' + action, opts).then(function(r){
+        if (timer) clearTimeout(timer);
+        if (r.status === 429) throw new Error("That's a lot in one go — give it a few minutes, then try again.");
+        return r.json().catch(function(){ return {}; }).then(function(j){ if (!r.ok) throw new Error(j.error || 'Something went wrong — try again in a minute.'); return j; });
+      }, function(){ if (timer) clearTimeout(timer); throw new Error(OFFLINE); });
   }
-  function show(kind, s){ var m = $('msg'); m.className = 'msg ' + kind; text(m, s); }
+  function newId(){
+    var c = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789', out = '';
+    var r = window.crypto && crypto.getRandomValues ? crypto.getRandomValues(new Uint8Array(24)) : null;
+    for (var i = 0; i < 24; i++) out += c[(r ? r[i] : Math.floor(Math.random() * 256)) % c.length];
+    return out;
+  }
+  function show(kind, s){ var m = $('msg'); m.className = 'msg ' + kind; text(m, s); if (m.scrollIntoView) m.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }
   function clearMsg(){ $('msg').className = 'msg'; }
 
+  // A failed week must never look like an empty one ("0 h"), or they'd
+  // put the same hours in twice.
   function loadWeek(){
-    return fetch(api + '&action=week&start=' + S.start).then(function(r){ return r.json().then(function(j){ if (!r.ok) throw new Error(j.error); return j; }); })
-      .then(function(j){ S.entries = j.entries || []; render(); });
+    return call('week&start=' + S.start)
+      .then(function(j){ S.entries = j.entries || []; S.weekFailed = false; render(); },
+            function(){ S.entries = []; S.weekFailed = true; render(); });
   }
 
   function render(){
     var start = parse(S.start), end = parse(addDays(S.start, 6));
     text($('weeklabel'), S.start === monday(today) ? 'This week' : 'Week of ' + start.getDate() + ' ' + MON[start.getMonth()]);
     var total = S.entries.reduce(function(t, e){ return t + e.hours; }, 0);
-    text($('weektotal'), start.getDate() + ' ' + MON[start.getMonth()] + ' – ' + end.getDate() + ' ' + MON[end.getMonth()] + ' · ' + hrs(total));
+    var waiting = S.entries.reduce(function(t, e){ return t + (e.status === 'pending' ? e.hours : 0); }, 0);
+    text($('weektotal'), start.getDate() + ' ' + MON[start.getMonth()] + ' – ' + end.getDate() + ' ' + MON[end.getMonth()] + (S.weekFailed ? '' : ' · ' + hrs(total) + (waiting ? ' (' + hrs(waiting) + ' waiting)' : '')));
+    $('weekerr').style.display = S.weekFailed ? '' : 'none';
     $('next').disabled = addDays(S.start, 7) > maxDay;
     var days = $('days'); days.innerHTML = '';
     for (var i = 0; i < 7; i++) (function(i){
@@ -388,7 +420,7 @@ export function crewTimePage(token: string): string {
       b.setAttribute('aria-label', DLONG[i] + ' ' + d.getDate() + ' ' + MONLONG[d.getMonth()] + (h ? ', ' + hrs(h) : ''));
       var a = document.createElement('div'); a.className = 'dn'; text(a, DN[i]);
       var c = document.createElement('div'); c.className = 'dd'; text(c, d.getDate());
-      var e = document.createElement('div'); e.className = 'dh'; text(e, h ? hrs(h) : '·');
+      var e = document.createElement('div'); e.className = 'dh'; text(e, h ? hnum(h) : (S.weekFailed ? '' : '·'));
       b.appendChild(a); b.appendChild(c); b.appendChild(e);
       b.addEventListener('click', function(){ S.sel = k; closeForm(); clearMsg(); render(); });
       days.appendChild(b);
@@ -397,7 +429,7 @@ export function crewTimePage(token: string): string {
     text($('dayhead'), (S.sel === today ? 'Today · ' : '') + DLONG[si] + ' ' + sd.getDate() + ' ' + MONLONG[sd.getMonth()]);
     var list = $('list'); list.innerHTML = '';
     var mine = S.entries.filter(function(e){ return e.date === S.sel; });
-    if (!mine.length) { var p = document.createElement('div'); p.className = 'empty'; text(p, S.sel > maxDay ? "That day hasn't happened yet." : 'No hours in for this day.'); list.appendChild(p); }
+    if (!mine.length && !S.weekFailed) { var p = document.createElement('div'); p.className = 'empty'; text(p, S.sel > maxDay ? "That day hasn't happened yet." : S.sel < minDay() ? "That's too far back to put in here — ask " + S.biz + ' to add it.' : 'No hours in for this day.'); list.appendChild(p); }
     mine.forEach(function(e){
       var row = document.createElement('button'); row.type = 'button';
       row.className = 'entry' + (e.status === 'approved' ? ' locked' : '');
@@ -409,13 +441,16 @@ export function crewTimePage(token: string): string {
       var hh = document.createElement('div'); hh.className = 'hrs'; text(hh, hrs(e.hours));
       row.appendChild(g); row.appendChild(hh);
       row.addEventListener('click', function(){
-        if (e.status !== 'pending') { show('err', "That's been approved — ask your boss if it needs changing."); return; }
+        if (e.status !== 'pending') { show('err', "That's been approved — ask " + S.biz + " if it needs changing."); return; }
         openForm(e);
       });
       list.appendChild(row);
     });
     var add = $('add'); var short = DN[si];
-    add.style.display = S.sel > maxDay || $('form').style.display === 'block' ? 'none' : '';
+    var noJobs = !S.jobs.length && !S.editing;
+    $('nojobs').style.display = noJobs && S.sel <= maxDay ? '' : 'none';
+    text($('nojobs'), 'No jobs are open right now, so there\\'s nothing to put hours on. Ask ' + S.biz + ' to open the job.');
+    add.style.display = S.sel > maxDay || S.sel < minDay() || S.weekFailed || noJobs || $('form').style.display === 'block' ? 'none' : '';
     text(add, '+ Add hours for ' + (S.sel === today ? 'today' : short + ' ' + sd.getDate()));
   }
 
@@ -425,11 +460,15 @@ export function crewTimePage(token: string): string {
     if (!selected && S.jobs.length > 1) { var p = document.createElement('option'); p.value = ''; text(p, 'Pick the job…'); sel.appendChild(p); }
     S.jobs.forEach(function(j){ var o = document.createElement('option'); o.value = j.id; text(o, j.address ? j.name + ' — ' + j.address : j.name); sel.appendChild(o); });
     if (selected && !S.jobs.some(function(j){ return j.id === selected.id; })) { var x = document.createElement('option'); x.value = selected.id; text(x, selected.name); sel.insertBefore(x, sel.firstChild); }
-    sel.value = selected ? selected.id : (S.jobs.length === 1 ? S.jobs[0].id : '');
+    // Most weeks are one job: start on the one they last put hours on.
+    var last = ''; try { last = localStorage.getItem(LAST_JOB) || ''; } catch (err) {}
+    if (!last) { var recent = S.entries.slice().sort(function(a, b){ return a.date < b.date ? 1 : -1; })[0]; last = recent ? recent.jobId : ''; }
+    var guess = S.jobs.some(function(j){ return j.id === last; }) ? last : '';
+    sel.value = selected ? selected.id : (S.jobs.length === 1 ? S.jobs[0].id : guess);
   }
-  function setQuick(v){ Array.prototype.forEach.call(document.querySelectorAll('.q'), function(b){ b.className = 'q' + (b.getAttribute('data-h') === String(v) ? ' on' : ''); }); }
+  function setQuick(v){ Array.prototype.forEach.call(document.querySelectorAll('.q'), function(b){ var on = b.getAttribute('data-h') === String(v); b.className = 'q' + (on ? ' on' : ''); b.setAttribute('aria-pressed', on ? 'true' : 'false'); }); }
   function openForm(e){
-    S.editing = e || null; clearMsg();
+    S.editing = e || null; S.clientId = e ? null : newId(); clearMsg();
     var sd = parse(S.sel);
     text($('formtitle'), e ? 'Change these hours' : 'Add hours');
     text($('formfor'), 'For ' + DLONG[(sd.getDay() + 6) % 7] + ' ' + sd.getDate() + ' ' + MONLONG[sd.getMonth()] + ' · pick another day above');
@@ -447,6 +486,7 @@ export function crewTimePage(token: string): string {
   });
   $('hours').addEventListener('input', function(){ setQuick($('hours').value.trim()); });
   $('add').addEventListener('click', function(){ openForm(null); });
+  $('retry').addEventListener('click', function(){ clearMsg(); loadWeek(); });
   $('cancel').addEventListener('click', function(){ closeForm(); render(); });
   $('prev').addEventListener('click', function(){ S.start = addDays(S.start, -7); S.sel = S.start; closeForm(); clearMsg(); loadWeek(); });
   $('next').addEventListener('click', function(){ S.start = addDays(S.start, 7); S.sel = S.start === monday(today) ? today : S.start; closeForm(); clearMsg(); loadWeek(); });
@@ -455,14 +495,29 @@ export function crewTimePage(token: string): string {
     var jobId = $('job').value, hours = $('hours').value.trim();
     if (!jobId) return show('err', 'Pick the job first.');
     if (!hours) return show('err', 'How many hours?');
-    $('save').disabled = true;
-    var body = { jobId: jobId, date: S.sel, hours: hours, note: $('note').value };
+    // Same reading as parseHoursInput: 7.5, 7,5 or 7:30.
+    var ht = hours.replace(',', '.'), hm = /^(\\d{1,2}):([0-5]\\d)$/.exec(ht);
+    var hv = hm ? +hm[1] + hm[2] / 60 : /^\\d*\\.?\\d+$/.test(ht) ? +ht : NaN;
+    hv = Math.round(hv * 100) / 100;
+    if (!(hv > 0) || hv > 24) return show('err', 'Hours need to be more than 0 and no more than 24.');
+    $('save').disabled = true; text($('save'), 'Sending…');
+    var body = { jobId: jobId, date: S.sel, hours: hv, note: $('note').value.trim() };
     var editing = S.editing;
-    if (editing) body.id = editing.id;
-    call(editing ? 'update' : 'log', body).then(function(){
-      closeForm(); return loadWeek().then(function(){ show('ok', editing ? 'Changed. Your boss sees the new hours.' : 'Sent. Your boss will approve it.'); });
-    }).catch(function(err){ show('err', err.message || "Couldn't save that — check your signal and try again."); })
-      .then(function(){ $('save').disabled = false; });
+    if (editing) body.id = editing.id; else body.clientId = S.clientId;
+    var jobName = ($('job').options[$('job').selectedIndex] || {}).text || '';
+    call(editing ? 'update' : 'log', body).then(function(res){
+      try { localStorage.setItem(LAST_JOB, jobId); } catch (err) {}
+      // Show the saved hours straight away. If the refresh after it fails,
+      // they're still on screen — so nobody puts them in a second time.
+      var saved = { id: editing ? editing.id : (res.entry && res.entry.id) || S.clientId, jobId: jobId,
+        jobName: (S.jobs.filter(function(j){ return j.id === jobId; })[0] || { name: jobName }).name,
+        date: S.sel, hours: hv, note: body.note, status: 'pending' };
+      S.entries = S.entries.filter(function(x){ return x.id !== saved.id; }).concat([saved]);
+      closeForm(); render();
+      show('ok', (editing ? 'Changed. ' : 'Sent to ' + S.biz + '. ') + "You can change it until it's approved.");
+      return call('week&start=' + S.start).then(function(j){ S.entries = j.entries || []; render(); }, function(){});
+    }, function(err){ show('err', err.message || OFFLINE); })
+      .then(function(){ $('save').disabled = false; text($('save'), 'Save'); });
   });
   $('del').addEventListener('click', function(){
     var e = S.editing; if (!e) return;
@@ -470,10 +525,24 @@ export function crewTimePage(token: string): string {
     // silently returns false. Second tap deletes.
     var btn = $('del');
     if (btn.getAttribute('data-armed') !== '1') { btn.setAttribute('data-armed', '1'); text(btn, 'Tap again to delete ' + hrs(e.hours)); return; }
-    btn.removeAttribute('data-armed');
+    btn.removeAttribute('data-armed'); btn.disabled = true; text(btn, 'Deleting…');
     call('delete', { id: e.id }).then(function(){ closeForm(); return loadWeek().then(function(){ show('ok', 'Deleted.'); }); })
-      .catch(function(err){ show('err', err.message || "Couldn't delete that."); });
+      .catch(function(err){ text(btn, 'Delete'); show('err', err.message || OFFLINE); })
+      .then(function(){ btn.disabled = false; });
   });
+
+  // A page on the home screen can sit in memory for days. When it comes
+  // back on a new day, move to that day instead of offering yesterday.
+  function checkDay(){
+    var now = key(new Date());
+    if (now === today) return;
+    var wasToday = S.sel === today;
+    today = now; maxDay = now;
+    if (wasToday || S.sel > maxDay) { S.start = monday(today); S.sel = today; closeForm(); clearMsg(); loadWeek(); }
+    else render();
+  }
+  document.addEventListener('visibilitychange', function(){ if (document.visibilityState === 'visible' && S.ready) checkDay(); });
+  window.addEventListener('pageshow', function(){ if (S.ready) checkDay(); });
 
   // "Keep this on your phone" — how to put it on the home screen, once,
   // until they close it. Storage can be blocked in a framed page; no harm.
@@ -492,15 +561,16 @@ export function crewTimePage(token: string): string {
 
   Promise.all([
     fetch(api + '&action=state').then(function(r){ return r.json().then(function(j){ return { ok: r.ok, j: j }; }); }),
-    fetch(api + '&action=week&start=' + S.start).then(function(r){ return r.json().then(function(j){ return { ok: r.ok, j: j }; }); })
+    fetch(api + '&action=week&start=' + S.start).then(function(r){ return r.json().then(function(j){ return { ok: r.ok, j: j }; }); }).catch(function(){ return { ok: false, j: {} }; })
   ]).then(function(rs){
     var st = rs[0], wk = rs[1];
     if (!st.ok) { text($('hello'), "This link isn't working"); text($('sub'), st.j.error || 'Ask your boss to send you a new one.'); return; }
-    S.jobs = st.j.jobs || []; S.entries = wk.ok ? (wk.j.entries || []) : [];
+    S.jobs = st.j.jobs || []; S.entries = wk.ok ? (wk.j.entries || []) : []; S.weekFailed = !wk.ok; S.biz = st.j.businessName || 'Your boss';
     text($('biz'), st.j.businessName);
     text($('hello'), st.j.crewName.split(' ')[0] + "'s hours");
     text($('sub'), 'Put your hours in each day. ' + st.j.businessName + ' approves them — until then you can change them.');
     $('app').style.display = '';
+    S.ready = true;
     render();
   }).catch(function(){ text($('sub'), "Couldn't load — check your signal and refresh."); });
 })();`;

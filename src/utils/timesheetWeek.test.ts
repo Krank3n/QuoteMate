@@ -30,6 +30,14 @@ describe('the Timesheets week', () => {
     expect(w.total).toBe(19.5);
   });
 
+  it("adds up each person's waiting hours apart from their approved total", () => {
+    const week = buildTimesheetWeek(
+      [e('a', 'crew:jake', '2026-09-29', 8), e('b', 'crew:jake', '2026-09-30', 7.5, { status: 'pending' }), e('c', 'crew:jake', '2026-10-01', 0.25, { status: 'pending' })],
+      crew,
+    );
+    expect(week.people[0]).toMatchObject({ name: 'Jake', total: 8, waiting: 2, waitingHours: 7.75 });
+  });
+
   it('filters to one person', () => {
     expect(buildTimesheetWeek(entries, crew, 'jake').people.map((p) => p.name)).toEqual(['Jake']);
     expect(buildTimesheetWeek(entries, crew, 'me').total).toBe(8);

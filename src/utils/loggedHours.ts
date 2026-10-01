@@ -54,6 +54,15 @@ export function hourlyRateOf(rawDoc: LabourDoc): number {
   return mismatched ? 0 : rate;
 }
 
+/**
+ * True once this invoice's labour was switched to the logged hours. From then
+ * on the invoice follows the log — hours moved to another job must come off
+ * here too, or they'd be billed on both.
+ */
+export function loggedHoursWereCharged(doc: Pick<LabourDoc, 'quotedLaborHours'>): boolean {
+  return typeof doc.quotedLaborHours === 'number' && doc.quotedLaborHours > 0;
+}
+
 /** The hours the job was quoted at — the stamp once hours were charged. */
 export function quotedHoursOf(doc: LabourDoc): number {
   return typeof doc.quotedLaborHours === 'number' && doc.quotedLaborHours > 0

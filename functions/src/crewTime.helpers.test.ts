@@ -172,3 +172,27 @@ describe('a crew member changing their own hours', () => {
     expect(v).toEqual({ id: 'e', jobId: 'j', jobName: 'Back deck', date: '2026-10-01', hours: 6, note: 'Frame', status: 'pending' });
   });
 });
+
+describe('crew page saves that survive bad signal', () => {
+  const ok = { jobId: 'j1', date: '2026-10-01', hours: 8 };
+
+  it('keeps the id the page picked, so a resent save lands on the same entry', () => {
+    expect(validateCrewLog({ ...ok, clientId: 'AbCdEfGhIjKlMnOpQrStUvWx' }, NOW).input?.clientId).toBe('AbCdEfGhIjKlMnOpQrStUvWx');
+  });
+
+  it('ignores an id that could escape the collection or is too short to be unguessable', () => {
+    for (const clientId of ['a/b/cdefghijklmnopqr', 'short', '../../../etc/passwd00', 42]) {
+      expect(validateCrewLog({ ...ok, clientId }, NOW).input?.clientId, String(clientId)).toBeUndefined();
+    }
+  });
+
+  it('the page script parses, and carries the timeout, the friendly errors and light mode', () => {
+    const html = crewTimePage('demoTokenAbcdefghijklmnop12');
+    const js = html.split('<script>')[1].split('</script>')[0];
+    expect(() => new Function(js)).not.toThrow();
+    expect(js).toContain('AbortController');
+    expect(js).toContain("Couldn't reach the server");
+    expect(js).toContain('clientId');
+    expect(html).toContain('prefers-color-scheme: light');
+  });
+});

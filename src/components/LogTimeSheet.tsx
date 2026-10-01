@@ -30,7 +30,7 @@ import {
   sumBillableHours,
   sumHours,
 } from '../../shared/time/hours';
-import { timeEntryService } from '../services/timeEntryService';
+import { StaleEntryError, timeEntryService } from '../services/timeEntryService';
 import { hourlyRateOf, quotedHoursOf } from '../utils/loggedHours';
 import { makeStyles, useThemeColors } from '../theme';
 import { BottomSheet } from './BottomSheet';
@@ -52,6 +52,8 @@ interface LogTimeSheetProps {
   onDeleted: (id: string) => void;
   /** Everyone's hours, every job — the Timesheets screen. */
   onOpenTimesheets?: () => void;
+  /** Crew changed or deleted hours on their link since this list loaded — reload it. */
+  onStale?: () => void;
   workerName?: string;
 }
 
@@ -82,6 +84,7 @@ export function LogTimeSheet({
   onSaved,
   onDeleted,
   onOpenTimesheets,
+  onStale,
   workerName,
 }: LogTimeSheetProps) {
   const styles = useStyles();
@@ -128,10 +131,22 @@ export function LogTimeSheet({
   const showWho = crew.length > 0 || entries.some((e) => crewIdOf(e));
   const whoLabel = (e: TimeEntry) => crewName(crewIdOf(e)) || (crewIdOf(e) ? e.workerName || 'Crew' : 'You');
 
+  // Crew changed or deleted these hours on their link since the list loaded:
+  // say so, drop the edit and fetch what's there now instead of writing
+  // the old copy over it.
+  const handleStale = (err: unknown) => {
+    if (!(err instanceof StaleEntryError)) return false;
+    resetForm();
+    onStale?.();
+    showAlert({ type: 'info', title: 'Those hours just changed', message: err.message });
+    return true;
+  };
+
   const handleApprove = async (entry: TimeEntry) => {
     try {
       onSaved(await timeEntryService.approveEntry(entry));
     } catch (err: any) {
+      if (handleStale(err)) return;
       showAlert({ type: 'error', title: "Couldn't approve that", message: err?.message || 'Try again in a moment.' });
     }
   };
@@ -205,6 +220,7 @@ export function LogTimeSheet({
         onDismiss();
       }
     } catch (err: any) {
+      if (handleStale(err)) return;
       showAlert({
         type: 'error',
         title: "Couldn't save that",
@@ -272,6 +288,47 @@ export function LogTimeSheet({
             <Text style={styles.allLinkText}>See all timesheets — every job, by week</Text>
             <MaterialCommunityIcons name="chevron-right" size={18} color={themeColors.accentText} />
           </TouchableOpacity>
+        ) : null}
+
+        {/* Crew send-ins first: the push lands here to approve them. */}
+        {pending.length > 0 ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionLabel}>Sent in — waiting for you</Text>
+            {pending.map((entry) => (
+              <TouchableOpacity
+                key={entry.id}
+                style={[styles.entryRow, styles.pendingRow, editing?.id === entry.id && styles.entryRowActive]}
+                onPress={() => startEdit(entry)}
+                accessibilityLabel={`Edit ${formatHours(entry.hours)} from ${whoLabel(entry)} on ${dayLabel(entry.date)}`}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.entryTitle}>
+                    {whoLabel(entry)} · {dayLabel(entry.date)} · {formatHours(entry.hours)}
+                  </Text>
+                  {entry.note ? (
+                    <Text style={styles.entryNote} numberOfLines={2}>
+                      {entry.note}
+                    </Text>
+                  ) : null}
+                </View>
+                <Button
+                  mode="contained-tonal"
+                  compact
+                  onPress={() => handleApprove(entry)}
+                  accessibilityLabel={`Approve ${formatHours(entry.hours)} from ${whoLabel(entry)}`}
+                >
+                  Approve
+                </Button>
+                <TouchableOpacity
+                  onPress={() => handleDelete(entry)}
+                  hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                  accessibilityLabel="Delete entry"
+                >
+                  <MaterialCommunityIcons name="trash-can-outline" size={20} color={themeColors.textMuted} />
+                </TouchableOpacity>
+              </TouchableOpacity>
+            ))}
+          </View>
         ) : null}
 
         {editing ? (
@@ -404,7 +461,7 @@ export function LogTimeSheet({
             style={styles.primaryButton}
             contentStyle={styles.primaryButtonContent}
           >
-            {editing ? 'Save changes' : hours !== null ? `Log ${formatHours(hours)}` : 'Log time'}
+            {editing ? (isCounted(editing) ? 'Save changes' : 'Save, keep waiting') : hours !== null ? `Log ${formatHours(hours)}` : 'Log time'}
           </Button>
           {editing ? (
             <Button mode="text" onPress={resetForm} disabled={saving}>
@@ -412,46 +469,6 @@ export function LogTimeSheet({
             </Button>
           ) : null}
         </View>
-
-        {pending.length > 0 ? (
-          <View style={styles.section}>
-            <Text style={styles.sectionLabel}>Sent in — waiting for you</Text>
-            {pending.map((entry) => (
-              <TouchableOpacity
-                key={entry.id}
-                style={[styles.entryRow, styles.pendingRow, editing?.id === entry.id && styles.entryRowActive]}
-                onPress={() => startEdit(entry)}
-                accessibilityLabel={`Edit ${formatHours(entry.hours)} from ${whoLabel(entry)} on ${dayLabel(entry.date)}`}
-              >
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.entryTitle}>
-                    {whoLabel(entry)} · {dayLabel(entry.date)} · {formatHours(entry.hours)}
-                  </Text>
-                  {entry.note ? (
-                    <Text style={styles.entryNote} numberOfLines={2}>
-                      {entry.note}
-                    </Text>
-                  ) : null}
-                </View>
-                <Button
-                  mode="contained-tonal"
-                  compact
-                  onPress={() => handleApprove(entry)}
-                  accessibilityLabel={`Approve ${formatHours(entry.hours)} from ${whoLabel(entry)}`}
-                >
-                  Approve
-                </Button>
-                <TouchableOpacity
-                  onPress={() => handleDelete(entry)}
-                  hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-                  accessibilityLabel="Delete entry"
-                >
-                  <MaterialCommunityIcons name="trash-can-outline" size={20} color={themeColors.textMuted} />
-                </TouchableOpacity>
-              </TouchableOpacity>
-            ))}
-          </View>
-        ) : null}
 
         {counted.length > 0 ? (
           <View style={styles.section}>
