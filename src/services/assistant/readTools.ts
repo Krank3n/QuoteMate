@@ -601,6 +601,11 @@ export async function getBusinessDefaults(): Promise<unknown> {
     pricesIncludeGst: data.pricesIncludeGst,
     gstRegistered: data.gstRegistered,
     abn: data.abn ? `...${String(data.abn).slice(-4)}` : undefined,
+    // Names only — who can be named on propose_log_time. Cost rates and link
+    // tokens never go to the model.
+    crew: Array.isArray(data.crew)
+      ? data.crew.filter((c: any) => c && !c.archived && c.name).map((c: any) => String(c.name))
+      : [],
   };
 }
 
