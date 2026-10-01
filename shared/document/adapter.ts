@@ -390,7 +390,9 @@ export function invoiceRecordToDocumentRecord(
     updatedAt: toMsRequired(invoice.updatedAt),
     payments,
     paidTotal,
-    balanceDue: Math.max(0, total - paidTotal),
+    // An older converted invoice's total already had its deposit taken off,
+    // so its netted credit entry doesn't come off the balance again.
+    balanceDue: Math.max(0, total - (paidTotal - nettedDepositCredit(payments))),
     activePaymentLink,
     archivedPaymentLinks,
     legacyQuoteId: invoice.sourceQuoteId,

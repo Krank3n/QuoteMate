@@ -360,3 +360,55 @@ describe('restoreNettedConvertTotal', () => {
     expect(restoreNettedConvertTotal(stored, noDeposit)).toBe(noDeposit);
   });
 });
+
+describe('preserveLedger — older netted invoices and Square money', () => {
+  const credit = { id: 'deposit-credit-q1', kind: 'deposit', amount: 300, paidAt: 1, method: 'square' };
+  const netted = (over: any = {}) => ({
+    id: 'inv1', type: 'invoice', stage: 'invoice_sent', number: 'INV-1', total: 660,
+    paidTotal: 300, balanceDue: 660, payments: [credit], createdAt: 1, updatedAt: 1,
+    job: { name: 'Slab' }, materials: [], ...over,
+  });
+  const legacyFor = (doc: any, over: any) => ({ ...documentRecordToInvoiceRecord(doc), ...over });
+
+  it('REGRESSION: a $250 Tap to Pay payment on a netted invoice reaches the ledger', () => {
+    const doc = netted();
+    const echo = invoiceRecordToDocumentRecord(
+      legacyFor(doc, { paidAmount: 250, squarePaymentId: 'sq-1', status: 'partial', depositCredit: 300 }), 'inv1') as any;
+    const out = preserveLedger(doc, echo);
+    expect(out.payments.some((p: any) => p.squarePaymentId === 'sq-1')).toBe(true);
+    expect(out.balanceDue).toBe(410);
+  });
+
+  it('REGRESSION: a payment equal to the netted credit is still new money when it came from Square', () => {
+    const doc = netted({ total: 500, payments: [{ ...credit, amount: 500 }], paidTotal: 500, balanceDue: 500 });
+    const echo = invoiceRecordToDocumentRecord(
+      legacyFor(doc, { paidAmount: 500, squarePaymentId: 'sq-2', status: 'paid', depositCredit: 500 }), 'inv1') as any;
+    const out = preserveLedger(doc, echo);
+    expect(out.payments.some((p: any) => p.squarePaymentId === 'sq-2')).toBe(true);
+    expect(out.balanceDue).toBe(0);
+  });
+
+  it('keeps a netted ledger on a current build echo (credit + paid since)', () => {
+    const paid = { id: 'm-1', kind: 'manual', amount: 200, paidAt: 2, method: 'bank' };
+    const doc = netted({ payments: [credit, paid], paidTotal: 500, balanceDue: 460 });
+    const echo = invoiceRecordToDocumentRecord(documentRecordToInvoiceRecord(doc), 'inv1') as any;
+    const out = preserveLedger(doc, echo);
+    expect(out.payments).toEqual([credit, paid]);
+    expect(out.balanceDue).toBe(460);
+  });
+
+  it('keeps a netted ledger on an older build echo (credit counted twice)', () => {
+    const paid = { id: 'm-1', kind: 'manual', amount: 200, paidAt: 2, method: 'bank' };
+    const doc = netted({ payments: [credit, paid], paidTotal: 500, balanceDue: 460 });
+    const echo = invoiceRecordToDocumentRecord(legacyFor(doc, { depositCredit: 300, paidAmount: 500 }), 'inv1') as any;
+    const out = preserveLedger(doc, echo);
+    expect(out.payments).toEqual([credit, paid]);
+    expect(out.balanceDue).toBe(460);
+  });
+
+  it('a kept ledger with nothing paid against the total never reads paid', () => {
+    const doc = netted();
+    const echo: any = { ...invoiceRecordToDocumentRecord(documentRecordToInvoiceRecord(doc), 'inv1'), stage: 'paid' };
+    expect(preserveLedger(doc, echo).stage).toBe('invoice_sent');
+  });
+});

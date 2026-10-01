@@ -329,3 +329,20 @@ describe('generateConfirmationPage — deposit by bank transfer', () => {
       .not.toContain('data-kind="transfer"');
   });
 });
+
+describe('depositDueWithoutCardOffer — returning customers', () => {
+  const quote = { requireDeposit: true, total: 960, depositPercentage: 30, depositAmount: 288, status: 'accepted' };
+
+  it('asks nothing of a customer who paid the full amount (not recorded as a deposit)', () => {
+    expect(depositDueWithoutCardOffer({ ...quote, depositPaid: 0, paidTotal: 960 }, null)).toBeNull();
+  });
+
+  it('asks nothing once the quote has been invoiced', () => {
+    expect(depositDueWithoutCardOffer({ ...quote, invoiceId: 'inv-1' }, null)).toBeNull();
+    expect(depositDueWithoutCardOffer({ ...quote, invoicedAt: 1 }, null)).toBeNull();
+  });
+
+  it('still asks for the deposit on an accepted quote with nothing paid', () => {
+    expect(depositDueWithoutCardOffer(quote, null)).toBe(288);
+  });
+});

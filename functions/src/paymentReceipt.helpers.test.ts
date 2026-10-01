@@ -381,7 +381,7 @@ describe('no Square deposit link once a deposit is recorded', () => {
 
   it('mintAndRotate does not fall back to a raw deposit mint for a quote with a deposit', () => {
     const fn = src.slice(src.indexOf('async function mintAndRotate('), src.indexOf('\n}\n', src.indexOf('async function mintAndRotate(')));
-    const guard = fn.indexOf('quoteDepositPaid(quoteDoc) > 0) return null;');
+    const guard = fn.indexOf('(Number(quoteDoc.paidTotal) || 0) > 0)) return null;');
     const rawMint = fn.indexOf('return createSquareDepositPaymentLinkInternal(');
     expect(guard).toBeGreaterThan(-1);
     expect(rawMint).toBeGreaterThan(guard);

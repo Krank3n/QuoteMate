@@ -6714,7 +6714,9 @@ export const getQuoteForAcceptance = functions.https.onRequest((req, res) => {
         let depositDue: number | null = null;
         if (foundQuote.status === 'accepted') {
           const ownerUid = quoteRef?.parent?.parent?.id;
-          const onSquare = ownerUid ? !!(await getSquareTokens(ownerUid).catch(() => null)) : true;
+          // A failed read counts as Square: better no note than a bank note
+          // in front of a card-paying customer.
+          const onSquare = ownerUid ? await getSquareTokens(ownerUid).then((t) => !!t, () => true) : true;
           if (!onSquare) depositDue = depositDueWithoutCardOffer(foundQuote, null);
         }
         res.status(200).json({
@@ -6948,7 +6950,10 @@ export function depositDueWithoutCardOffer(
 ): number | null {
   if (payment) return null;
   if (quote?.requireDeposit !== true) return null;
-  if ((Number(quote?.depositPaid) || 0) > 0) return null;
+  // Any money taken counts — a full payment isn't recorded as a deposit —
+  // and once the quote is invoiced the invoice says what's owed.
+  if (Math.max(Number(quote?.depositPaid) || 0, Number(quote?.paidTotal) || 0) > 0) return null;
+  if (quote?.invoiceId || quote?.invoicedAt) return null;
   const total = Number(quote?.total) || 0;
   const pct = Number(quote?.depositPercentage) || 0;
   const asked = Number(quote?.depositAmount) || total * (pct / 100);
@@ -7226,7 +7231,7 @@ export const quoteAcceptancePage = functions.https.onRequest(async (req, res) =>
       // Off Square only — this view never mints a card link.
       let depositDue: number | null = null;
       if (foundQuote.status === 'accepted') {
-        const onSquare = !!(await getSquareTokens(foundUserId).catch(() => null));
+        const onSquare = await getSquareTokens(foundUserId).then((t) => !!t, () => true);
         if (!onSquare) depositDue = depositDueWithoutCardOffer(foundQuote, null);
       }
       res.status(200).send(generateConfirmationPage(
@@ -11484,7 +11489,13 @@ export const onInvoicePaymentReceived = functions.firestore
       // "Remaining balance" from the unified document — the legacy row this
       // trigger reads can hold an older app build's netted total or stale
       // paid figure, which once read "$368.96 remaining" on $660.68 owing.
-      if (ledgerDoc && ledgerDoc.total !== undefined) {
+      // Only once the ledger holds THIS payment: a Square payment on an older
+      // converted invoice reaches the ledger through the mirror, which runs in
+      // parallel with this trigger — until then the legacy figure is the
+      // up-to-date one.
+      const ledgerHasPayment = !after.squarePaymentId ||
+        (ledgerDoc?.payments || []).some((p: any) => p?.squarePaymentId === after.squarePaymentId);
+      if (ledgerDoc && ledgerDoc.total !== undefined && ledgerHasPayment) {
         const balanceDue = invoiceBalanceDue(ledgerDoc as Record<string, any>);
         receipt.balanceDue = balanceDue;
         receipt.isFullyPaid = balanceDue <= 0.005;
@@ -15216,7 +15227,7 @@ async function mintAndRotate(
     // deposit, not at what's still owed). The balance is the invoice's job.
     if (expectedKind === 'deposit') {
       const quoteDoc = await loadDocumentForQuoteId(userId, legacyTargetId).catch(() => null);
-      if (quoteDoc && quoteDepositPaid(quoteDoc) > 0) return null;
+      if (quoteDoc && (quoteDepositPaid(quoteDoc) > 0 || (Number(quoteDoc.paidTotal) || 0) > 0)) return null;
       return createSquareDepositPaymentLinkInternal(userId, legacyTargetId);
     }
     if (expectedKind === 'quote_full') {
@@ -15250,7 +15261,7 @@ export const createSquarePaymentLink = functions.https.onRequest((req, res) => {
       // Say why, rather than a generic failure, when the deposit is already
       // in — mintAndRotate refuses to bill a deposit twice.
       const quoteDoc = await loadDocumentForQuoteId(decodedToken.uid, targetId).catch(() => null);
-      if (quoteDoc && quoteDepositPaid(quoteDoc) > 0) {
+      if (quoteDoc && (quoteDepositPaid(quoteDoc) > 0 || (Number(quoteDoc.paidTotal) || 0) > 0)) {
         res.status(409).json({
           error: 'A deposit is already recorded on this quote. Take the rest with the full amount, or on the invoice.',
           reason: 'deposit-already-recorded',

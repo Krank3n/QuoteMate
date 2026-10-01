@@ -154,13 +154,30 @@ export function preserveLedger(existing: AnyData | null | undefined, toWrite: An
   // that credit AND inside paidAmount, so this strips the double count.
   const incomingPaid = incomingSum - sum(incoming.filter(isNetted));
 
+  const storedNettedCredit = sum(stored.filter(isNetted));
+  // What the ledger says has been paid against the total.
+  const storedPaid = storedSum - storedNettedCredit;
+
   const sameMoney = Math.abs(storedSum - incomingSum) < EPS;
-  // An invoice echo never takes money OFF the ledger. It reads lower when an
-  // older build writes a stale legacy record (seen on the sim: a 1.58 build
-  // recorded $50 and then wrote the paid figure from before it, wiping the
-  // $50) and equal when it double-counts a deposit. Only a legacy-only
-  // writer adding money makes it read higher — take the projection then.
-  const invoiceEchoNoNewMoney = !isQuote && incomingPaid <= storedSum + EPS;
+  // A Square payment the ledger doesn't hold yet is new money, whatever the
+  // sums say. The webhook writes the ledger first, except for an older
+  // converted invoice whose document lives under its quote id — there the
+  // echo is the only way the payment reaches the ledger.
+  const newSquarePayment = incoming.some(
+    (p: AnyData) =>
+      !!p?.squarePaymentId &&
+      !stored.some((s: AnyData) => s?.squarePaymentId === p.squarePaymentId),
+  );
+  // Otherwise an invoice echo never takes money OFF the ledger. It reads
+  // lower when an older build writes a stale legacy record (seen on the sim:
+  // a 1.58 build recorded $50, then wrote the paid figure from before it),
+  // equal to the paid figure for a current build's echo, and equal to the
+  // WHOLE ledger (deposit credit included) when an older build double-counts
+  // a deposit. Only more than either is a legacy-only writer adding money.
+  const invoiceEchoNoNewMoney =
+    !isQuote &&
+    !newSquarePayment &&
+    (incomingPaid <= storedPaid + EPS || Math.abs(incomingPaid - storedSum) < EPS);
   const shortQuoteEcho =
     isQuote &&
     incomingSum <= storedSum + EPS &&
@@ -172,10 +189,7 @@ export function preserveLedger(existing: AnyData | null | undefined, toWrite: An
   // An older converted invoice's total already had its deposit taken off,
   // and its `deposit-credit-*` entry records that — so what still counts
   // against the total is the rest of the ledger.
-  const nettedCredit = isQuote
-    ? 0
-    : sum(stored.filter((p: AnyData) => p?.kind === 'deposit' && String(p?.id ?? '').startsWith('deposit-credit-')));
-  const paidAgainstTotal = storedSum - nettedCredit;
+  const paidAgainstTotal = isQuote ? storedSum : storedPaid;
   const kept: AnyData = {
     ...toWrite,
     payments: stored,
@@ -185,9 +199,10 @@ export function preserveLedger(existing: AnyData | null | undefined, toWrite: An
   if (isQuote) {
     kept.depositPaid = round2(storedDeposits);
   } else if (toWrite.stage === 'paid' || toWrite.stage === 'partially_paid') {
+    // Nothing paid against the total can't read paid or part paid.
     kept.stage = total > 0 && paidAgainstTotal + EPS >= total
       ? 'paid'
-      : paidAgainstTotal > EPS ? 'partially_paid' : toWrite.stage;
+      : paidAgainstTotal > EPS ? 'partially_paid' : 'invoice_sent';
   }
   return kept;
 }
