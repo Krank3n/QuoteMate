@@ -51,7 +51,7 @@ import {
 } from './shared/document/lumpSum';
 import { resolvePriceDetail } from './shared/document/priceDetail';
 import { paidInFullAtMs } from './shared/document/paidInFull';
-import { invoiceEmailDepositView, invoicePdfPaymentFields } from './shared/document/recordedDeposit';
+import { invoiceEmailDepositView, invoicePdfPaymentFields, nettedDepositCredit } from './shared/document/recordedDeposit';
 import { dollarsToCents, centsToDollars } from './shared/pdf/money';
 import {
   quoteRecordToDocumentRecord,
@@ -971,8 +971,12 @@ async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailRes
     address: business.address, logoUrl, brandColor: business.brandColor,
   };
 
-  // Deposit calculation
-  const depositRequired = quote.requireDeposit === true;
+  // Deposit calculation. A deposit already taken — by Square or recorded by
+  // hand — means the email no longer asks for one and no deposit link is
+  // minted: a fresh link always charges the FULL deposit, so a re-sent quote
+  // would bill the customer for it again.
+  const depositAlreadyPaid = (Number(quote.depositPaid) || 0) > 0;
+  const depositRequired = quote.requireDeposit === true && !depositAlreadyPaid;
   const depositPctForEmail = depositRequired ? (Number(quote.depositPercentage) || 0) : 0;
   const depositAmountForEmail = depositPctForEmail > 0
     ? centsToDollars(dollarsToCents((Number(quote.total) || 0) * (depositPctForEmail / 100)))
@@ -1041,7 +1045,13 @@ async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailRes
 
   const pdfHtml = buildQuotePdfHtmlForQuote(quote, business, {
     terms: termsToSend || undefined,
-    squarePaymentLinkUrl: depositPayNowUrl || quote.squarePaymentLinkUrl,
+    // A stored link that is the old deposit link is no pay-now once the
+    // deposit is in.
+    squarePaymentLinkUrl: depositPayNowUrl || (
+      depositAlreadyPaid && quote.squarePaymentLinkUrl === quote.depositPaymentLinkUrl
+        ? undefined
+        : quote.squarePaymentLinkUrl
+    ),
   });
 
   const pdfBuffer = await generateQuotePdfBuffer(pdfHtml);
@@ -1609,7 +1619,10 @@ export function quoteDepositPaid(doc: { depositPaid?: unknown; payments?: unknow
 
 export function decideRotation(doc: DocumentRecord): RotationDecision {
   const total = Number(doc.total) || 0;
-  const paidTotal = Number(doc.paidTotal) || 0;
+  // An older converted invoice's total already had its quote deposit taken
+  // off; its `deposit-credit-*` entry records that and must not come off the
+  // balance a second time — same reading as the PDF (invoicePdfPaymentFields).
+  const paidTotal = (Number(doc.paidTotal) || 0) - nettedDepositCredit(doc.payments);
   const balance = Math.max(0, total - paidTotal);
   const stage = doc.stage;
 

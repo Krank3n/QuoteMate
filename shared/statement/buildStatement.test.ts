@@ -420,3 +420,27 @@ describe('buildStatement — an invoice converted from a quote with a deposit', 
     expect(data.invoices[0]).toMatchObject({ total: 960, paid: 300, balance: 660 });
   });
 });
+
+describe('buildStatement — an older invoice whose total was netted', () => {
+  // Converted before Oct 2026: total already less the $300 deposit, with a
+  // `deposit-credit-*` entry recording it. That credit must not come off the
+  // balance a second time; it still shows as money received.
+  it('$660 netted total, $300 credit + $200 paid: balance 460, both payments received', () => {
+    const data = buildStatement(
+      [
+        inv({
+          id: 'old',
+          total: 660,
+          payments: [
+            { id: 'deposit-credit-q-old', kind: 'deposit', amount: 300, paidAt: T(2026, 3, 1), method: 'square' } as any,
+            { id: 'm-1', kind: 'manual', amount: 200, paidAt: T(2026, 3, 5), method: 'bank' } as any,
+          ],
+        }),
+      ],
+      FY,
+      REGISTERED,
+    );
+    expect(data.invoices[0]).toMatchObject({ total: 660, balance: 460 });
+    expect(data.payments.map((p: any) => p.amount).sort()).toEqual([200, 300]);
+  });
+});

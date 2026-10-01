@@ -255,6 +255,8 @@ export function TakePaymentSheet({
     activeTarget.kind === 'quote_deposit' && quoteMode === 'deposit';
 
   const amounts = describeAmounts(activeTarget, quoteMode, quoteDeposit);
+  const depositLinkBlocked =
+    activeTarget.kind === 'quote_deposit' && quoteMode === 'deposit' && activeTarget.depositPaid > 0;
 
   /**
    * Write the edited deposit back to the quote. Also flips `requireDeposit`
@@ -659,12 +661,20 @@ export function TakePaymentSheet({
           loading={chargingCard || tapToPayReadiness.readiness === 'preparing'}
         />
 
-        {/* Phase 1 — Share a Square pay link */}
+        {/* Phase 1 — Share a Square pay link. Not for a deposit already part
+            recorded: a deposit link always charges the FULL deposit (the
+            server refuses to mint one), so the rest goes on the full-amount
+            link or the invoice. */}
         <MethodRow
           icon="share-variant"
           title="Share Pay Link"
-          subtitle="Send a Square checkout link via SMS, email or WhatsApp."
-          onPress={handleShareLink}
+          subtitle={
+            depositLinkBlocked
+              ? 'A deposit is already recorded. Switch to Full amount, or take the rest on the invoice.'
+              : 'Send a Square checkout link via SMS, email or WhatsApp.'
+          }
+          onPress={depositLinkBlocked ? undefined : handleShareLink}
+          disabled={depositLinkBlocked}
           loading={sharing}
         />
 

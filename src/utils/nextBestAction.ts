@@ -99,11 +99,14 @@ export function docHasRealSquarePayment(doc: NextBestActionDoc | null | undefine
  * always the one on the quote, never a percentage this app decided on.
  */
 export function depositOwed(
-  doc: { type?: string; depositAmount?: number; depositPaid?: number } | null | undefined,
+  doc: { type?: string; depositAmount?: number; depositPaid?: number; paidTotal?: number } | null | undefined,
 ): boolean {
   if (!doc || doc.type !== 'quote') return false;
   const required = Number(doc.depositAmount ?? 0);
-  const paid = Number(doc.depositPaid ?? 0);
+  // Any money taken against the quote counts toward the deposit — a customer
+  // who paid the full amount owes no deposit, even though a full payment
+  // isn't recorded as one (depositPaid stays the deposits alone).
+  const paid = Math.max(Number(doc.depositPaid ?? 0), Number(doc.paidTotal ?? 0));
   return required > 0 && paid < required;
 }
 

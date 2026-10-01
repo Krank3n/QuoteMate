@@ -892,3 +892,25 @@ describe('TakePaymentSheet Tap to Pay row spinner', () => {
     expect(spinners(container)).toBe(1);
   });
 });
+
+describe('TakePaymentSheet — a deposit already part recorded', () => {
+  it('blocks the deposit pay link (it would charge the whole deposit again)', async () => {
+    const ensureSquareConnected = vi.fn(async () => true);
+    const { getByText } = renderSheet({
+      target: { ...depositTarget, depositPaid: 100 },
+      ensureSquareConnected,
+    });
+    expect(getByText(/A deposit is already recorded/)).toBeTruthy();
+    fireEvent.click(getByText('Share Pay Link'));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(squareService.mintQuoteDepositPaymentLink).not.toHaveBeenCalled();
+  });
+
+  it('still offers the deposit link when nothing is recorded yet', async () => {
+    const ensureSquareConnected = vi.fn(async () => true);
+    const { getByText, queryByText } = renderSheet({ target: depositTarget, ensureSquareConnected });
+    expect(queryByText(/A deposit is already recorded/)).toBeNull();
+    fireEvent.click(getByText('Share Pay Link'));
+    await waitFor(() => expect(squareService.mintQuoteDepositPaymentLink).toHaveBeenCalledWith('quote-7'));
+  });
+});

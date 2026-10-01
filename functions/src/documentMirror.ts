@@ -94,20 +94,41 @@ export function preserveFirstSend(existing: AnyData | null | undefined, toWrite:
 }
 
 /**
- * Keep the unified payment ledger when the legacy record agrees on the money.
+ * Keep the unified payment ledger when the legacy record is only an echo of it.
  *
- * The legacy invoices/{id} record holds ONE payment: a `paidAmount` total, a
- * method and a date. Every unified save mirrors the document onto it, and
- * this trigger then projects it straight back — so without this, the
- * projection's single `manual-{id}` entry replaced the real ledger on every
- * save. Two payments ($100 cash + $50 bank) came back as one "$150 cash"
- * entry, losing each payment's own method, date, notes and deposit label.
+ * The legacy quotes/{id} and invoices/{id} records hold ONE payment figure
+ * (`depositPaid` on a quote, `paidAmount` + `depositCredit` on an invoice).
+ * Every unified save mirrors the document onto them and this trigger projects
+ * them straight back, so without this the projection's single entry replaced
+ * the real ledger on every save: two payments ($100 cash + $50 bank) came back
+ * as one "$150 cash" entry, losing each payment's method, date, notes and
+ * deposit label.
  *
- * When the projected ledger sums to the same money as the stored one, the
- * legacy write carried no new payment information — it was the echo of a
- * unified save — so the stored ledger stands. When the sums differ, an older
- * client changed the money through the legacy record, and the projection is
- * the only account of it; take it as before. Pure.
+ * The stored ledger stands whenever the echo is one a client build could have
+ * produced FROM it — the legacy write then carried no new payment:
+ *
+ *  - Same money. Current builds' echo of any ledger.
+ *  - An invoice echo carrying the deposit twice. App builds from before
+ *    Oct 2026 project a ledger deposit as `depositCredit` AND inside
+ *    `paidAmount`, which reads back as stored + deposits, with a netted
+ *    `deposit-credit-*` entry equal to the deposits. Those builds stay live
+ *    until every phone updates; taking that echo doubled the deposit (a $960
+ *    job with $300 paid read $600 paid, $360 owing).
+ *  - A quote echo carrying LESS than stored. A quote's legacy record keeps
+ *    only the deposit — older builds only the FIRST deposit — and none of a
+ *    full payment, so it always reads short of a ledger with two deposits or
+ *    a deposit plus a full-amount payment. Every writer of quote money (the
+ *    app, applyPaymentToDocument) writes the ledger first, so a short echo is
+ *    never news.
+ *
+ * Anything else — an invoice echo with different money — means a client
+ * changed the money through the legacy record only, and the projection is the
+ * only account of it; take it as before.
+ *
+ * When the stored ledger is kept, the money fields derived from the echo
+ * (paidTotal, balanceDue, a quote's depositPaid, a paid/part-paid stage) are
+ * re-derived from it too, so the document never disagrees with its own
+ * ledger. Pure.
  */
 export function preserveLedger(existing: AnyData | null | undefined, toWrite: AnyData): AnyData {
   const stored = existing?.payments;
@@ -115,9 +136,54 @@ export function preserveLedger(existing: AnyData | null | undefined, toWrite: An
   if (!Array.isArray(stored) || stored.length === 0 || !Array.isArray(incoming)) {
     return toWrite;
   }
+  const EPS = 0.005;
+  const round2 = (n: number) => Math.round(n * 100) / 100;
   const sum = (ps: AnyData[]) => ps.reduce((acc, p) => acc + (Number(p?.amount) || 0), 0);
-  if (Math.abs(sum(stored) - sum(incoming)) >= 0.005) return toWrite;
-  return { ...toWrite, payments: stored };
+  const storedSum = sum(stored);
+  const incomingSum = sum(incoming);
+  const storedDeposits = sum(stored.filter((p: AnyData) => p?.kind === 'deposit'));
+  const isQuote = (toWrite.type ?? existing?.type) === 'quote';
+
+  const sameMoney = Math.abs(storedSum - incomingSum) < EPS;
+  const olderBuildInvoiceEcho =
+    !isQuote &&
+    storedDeposits > EPS &&
+    Math.abs(incomingSum - (storedSum + storedDeposits)) < EPS &&
+    incoming.some(
+      (p: AnyData) =>
+        p?.kind === 'deposit' &&
+        String(p?.id ?? '').startsWith('deposit-credit-') &&
+        Math.abs((Number(p?.amount) || 0) - storedDeposits) < EPS,
+    );
+  const shortQuoteEcho =
+    isQuote &&
+    incomingSum <= storedSum + EPS &&
+    incoming.every((p: AnyData) => p?.kind === 'deposit');
+
+  if (!sameMoney && !olderBuildInvoiceEcho && !shortQuoteEcho) return toWrite;
+
+  const total = Number(toWrite.total ?? existing?.total) || 0;
+  // An older converted invoice's total already had its deposit taken off,
+  // and its `deposit-credit-*` entry records that — so what still counts
+  // against the total is the rest of the ledger.
+  const nettedCredit = isQuote
+    ? 0
+    : sum(stored.filter((p: AnyData) => p?.kind === 'deposit' && String(p?.id ?? '').startsWith('deposit-credit-')));
+  const paidAgainstTotal = storedSum - nettedCredit;
+  const kept: AnyData = {
+    ...toWrite,
+    payments: stored,
+    paidTotal: round2(storedSum),
+    balanceDue: round2(Math.max(0, total - paidAgainstTotal)),
+  };
+  if (isQuote) {
+    kept.depositPaid = round2(storedDeposits);
+  } else if (toWrite.stage === 'paid' || toWrite.stage === 'partially_paid') {
+    kept.stage = total > 0 && paidAgainstTotal + EPS >= total
+      ? 'paid'
+      : paidAgainstTotal > EPS ? 'partially_paid' : toWrite.stage;
+  }
+  return kept;
 }
 
 /**

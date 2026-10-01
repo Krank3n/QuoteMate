@@ -395,3 +395,22 @@ describe('Square balance link after converting a quote with a deposit', () => {
     expect(invoiceLinkAmountDue(documentRecordToInvoiceRecord(legacy))).toBe(660);
   });
 });
+
+describe('decideRotation — older netted invoice', () => {
+  it('does not take the netted deposit credit off the balance twice', () => {
+    // Total already less the $300 deposit; the credit entry records that.
+    const doc: any = {
+      id: 'i1', type: 'invoice', stage: 'invoice_sent', total: 660, paidTotal: 300,
+      payments: [{ id: 'deposit-credit-q1', kind: 'deposit', amount: 300, paidAt: 1, method: 'square' }],
+    };
+    expect(decideRotation(doc)).toMatchObject({ needed: true, kind: 'balance', amount: 660 });
+  });
+
+  it('a new full-total invoice with a ledger deposit owes total less the deposit', () => {
+    const doc: any = {
+      id: 'i1', type: 'invoice', stage: 'invoice_sent', total: 960, paidTotal: 300,
+      payments: [{ id: 'dep-1', kind: 'deposit', amount: 300, paidAt: 1, method: 'bank' }],
+    };
+    expect(decideRotation(doc)).toMatchObject({ needed: true, kind: 'balance', amount: 660 });
+  });
+});

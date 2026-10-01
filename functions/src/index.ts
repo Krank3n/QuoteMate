@@ -46,7 +46,7 @@ import {
   applySquarePaymentToInvoice,
   evaluatePaymentReceipt,
   receiptIsForDeposit,
-  quoteDepositPaidAfterSquare,
+  quoteMoneyAfterSquare,
 } from './paymentReceipt.helpers';
 import { shouldReadyToSendNudge, toMs } from './draftNudge.helpers';
 import { onboardingTipDue } from './onboardingDrip.helpers';
@@ -15168,8 +15168,14 @@ async function mintAndRotate(
   const rotated = await createOrRotatePaymentLink(userId, unifiedDocId, phase3SquareMinter);
   if (!rotated) {
     // Rotation declined (e.g. doc has no link need). Fall back to the raw
-    // legacy mint so callers like the take-payment sheet still get a URL.
+    // legacy mint so callers like the take-payment sheet still get a URL —
+    // except for a deposit already taken. The raw deposit mint always charges
+    // the FULL deposit, so after $100 of a $300 deposit was recorded by hand
+    // it would bill $300 more (and the webhook caps each payment at the
+    // deposit, not at what's still owed). The balance is the invoice's job.
     if (expectedKind === 'deposit') {
+      const quoteDoc = await loadDocumentForQuoteId(userId, legacyTargetId).catch(() => null);
+      if (quoteDoc && quoteDepositPaid(quoteDoc) > 0) return null;
       return createSquareDepositPaymentLinkInternal(userId, legacyTargetId);
     }
     if (expectedKind === 'quote_full') {
@@ -15198,6 +15204,16 @@ export const createSquarePaymentLink = functions.https.onRequest((req, res) => {
     if (kind === 'quote_deposit') {
       if (!isNonEmptyString(targetId)) {
         res.status(400).json({ error: 'Missing targetId' });
+        return;
+      }
+      // Say why, rather than a generic failure, when the deposit is already
+      // in — mintAndRotate refuses to bill a deposit twice.
+      const quoteDoc = await loadDocumentForQuoteId(decodedToken.uid, targetId).catch(() => null);
+      if (quoteDoc && quoteDepositPaid(quoteDoc) > 0) {
+        res.status(409).json({
+          error: 'A deposit is already recorded on this quote. Take the rest with the full amount, or on the invoice.',
+          reason: 'deposit-already-recorded',
+        });
         return;
       }
       const result = await mintAndRotate(decodedToken.uid, targetId, 'deposit');
@@ -15652,26 +15668,34 @@ export const squareWebhook = functions.https.onRequest(async (req, res) => {
         });
       }
 
+      // The legacy quote's money follows the ledger the payment just landed
+      // on. A full-amount payment is not a deposit: taking max(depositPaid,
+      // full) reported a $300 hand-recorded deposit + $660 Square payment as
+      // a $660 deposit, and the mirror echo then dropped the $300.
       let ledgerDepositTotal: number | null = null;
-      if (idx.kind === 'quote_deposit') {
-        try {
-          const unified = await loadDocumentForQuoteId(userId, quoteId);
-          ledgerDepositTotal = unified ? quoteDepositPaid({ payments: unified.payments }) : null;
-        } catch {
-          ledgerDepositTotal = null;
+      let ledgerPaidTotal: number | null = null;
+      try {
+        const unified = await loadDocumentForQuoteId(userId, quoteId);
+        if (unified) {
+          ledgerDepositTotal = quoteDepositPaid({ payments: unified.payments });
+          ledgerPaidTotal = Math.round(
+            (unified.payments || []).reduce((acc: number, p: any) => acc + (Number(p?.amount) || 0), 0) * 100,
+          ) / 100;
         }
+      } catch {
+        ledgerDepositTotal = null;
+        ledgerPaidTotal = null;
       }
-      const newDepositPaid = idx.kind === 'quote_deposit'
-        ? quoteDepositPaidAfterSquare({
-            legacyDepositPaid: Number(quote.depositPaid) || 0,
-            paidAgainstQuote,
-            ledgerDepositTotal,
-          })
-        : Math.max(Number(quote.depositPaid) || 0, paidAgainstQuote);
       const quoteTotal = Number(quote.total) || 0;
-      const newPaidTotal = idx.kind === 'quote_full'
-        ? Math.max(Number(quote.paidTotal) || 0, paidAgainstQuote)
-        : newDepositPaid;
+      const { depositPaid: newDepositPaid, paidTotal: newPaidTotal } = quoteMoneyAfterSquare({
+        kind: idx.kind,
+        legacyDepositPaid: Number(quote.depositPaid) || 0,
+        legacyPaidTotal: Number(quote.paidTotal) || 0,
+        paidAgainstQuote,
+        ledger: ledgerDepositTotal !== null && ledgerPaidTotal !== null
+          ? { deposits: ledgerDepositTotal, paid: ledgerPaidTotal }
+          : null,
+      });
       const wasAlreadyAccepted = quote.status === 'accepted' || !!quote.respondedAt;
 
       // Record T&C acceptance against the snapshot taken at send time.

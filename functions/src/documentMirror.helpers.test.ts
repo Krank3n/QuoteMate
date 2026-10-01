@@ -185,3 +185,101 @@ describe('mirror round trip keeps a deposit ledger', () => {
     expect(echo(doc).payments).toEqual([credit]);
   });
 });
+
+/**
+ * App builds from before Oct 2026 (the OTA tree 432b266 on 1.55–1.58) keep
+ * writing the legacy record their own way until every phone updates — and the
+ * server mirror is already the new one. These echoes reproduce exactly what
+ * those builds' documentRecordToInvoiceRecord / documentRecordToQuoteRecord
+ * write (invoice: depositCredit = Σ kind 'deposit', paidAmount = paidTotal;
+ * quote: depositPaid = the FIRST deposit), then run the live projection and
+ * preserveLedger over them. Verified against the real 432b266 adapter.
+ */
+describe('preserveLedger against older app builds', () => {
+  const now = 1_790_000_000_000;
+  const deposit = { id: 'dep-1', kind: 'deposit', amount: 300, paidAt: now - 1000, method: 'bank' };
+  const invoice = (over: any = {}) => ({
+    id: 'q-coastal', type: 'invoice', stage: 'partially_paid', number: 'INV-1', total: 960,
+    paidTotal: 300, balanceDue: 660, payments: [deposit], createdAt: now - 5000, updatedAt: now,
+    job: { name: 'Slab' }, materials: [], legacyQuoteId: 'q-coastal', ...over,
+  });
+  const quote = (over: any = {}) => ({
+    id: 'q-coastal', type: 'quote', stage: 'quote_accepted', number: 'QU-1', total: 960,
+    paidTotal: 300, balanceDue: 660, depositPaid: 300, depositAmount: 300, requireDeposit: true,
+    payments: [deposit], createdAt: now - 5000, updatedAt: now, job: { name: 'Slab' }, materials: [], ...over,
+  });
+  const sum = (ps: any[]) => ps.reduce((a, p) => a + p.amount, 0);
+
+  /** What an older build writes to invoices/{id} for this document. */
+  function olderInvoiceEcho(doc: any) {
+    const legacy: any = { ...documentRecordToInvoiceRecord(doc) };
+    const deposits = sum(doc.payments.filter((p: any) => p.kind === 'deposit'));
+    if (deposits > 0) legacy.depositCredit = deposits; else delete legacy.depositCredit;
+    legacy.paidAmount = doc.paidTotal;
+    return preserveLedger(doc, invoiceRecordToDocumentRecord(legacy, doc.id) as any);
+  }
+  /** What an older build writes to quotes/{id}: only the first deposit. */
+  function olderQuoteEcho(doc: any) {
+    const legacy: any = { ...documentRecordToQuoteRecord(doc) };
+    legacy.depositPaid = doc.payments.find((p: any) => p.kind === 'deposit')?.amount ?? 0;
+    return preserveLedger(doc, quoteRecordToDocumentRecord(legacy, doc.id) as any);
+  }
+
+  it('REGRESSION: a converted invoice with a $300 deposit keeps $300 paid, $660 owing (was doubled to $600 paid)', () => {
+    const out = olderInvoiceEcho(invoice());
+    expect(out.payments).toEqual([deposit]);
+    expect(out.paidTotal).toBe(300);
+    expect(out.balanceDue).toBe(660);
+    expect(out.stage).toBe('partially_paid');
+  });
+
+  it('keeps a deposit plus a later payment', () => {
+    const later = { id: 'm-1', kind: 'manual', amount: 200, paidAt: now, method: 'cash' };
+    const out = olderInvoiceEcho(invoice({ payments: [deposit, later], paidTotal: 500, balanceDue: 460 }));
+    expect(out.payments).toEqual([deposit, later]);
+    expect(out.paidTotal).toBe(500);
+    expect(out.balanceDue).toBe(460);
+  });
+
+  it('never reads a doubled echo as paid in full', () => {
+    const big = { ...deposit, amount: 500 };
+    const out = olderInvoiceEcho(invoice({ payments: [big], paidTotal: 500, balanceDue: 460 }));
+    expect(out.stage).toBe('partially_paid');
+    expect(out.balanceDue).toBe(460);
+  });
+
+  it('an older netted invoice (total already less the deposit) still owes what it owed', () => {
+    const credit = { id: 'deposit-credit-q-old', kind: 'deposit', amount: 300, paidAt: now - 9000, method: 'square' };
+    const paid = { id: 'm-1', kind: 'manual', amount: 360, paidAt: now, method: 'bank' };
+    const out = olderInvoiceEcho(invoice({ total: 660, payments: [credit, paid], paidTotal: 660, balanceDue: 300 }));
+    expect(out.payments).toEqual([credit, paid]);
+    expect(out.balanceDue).toBe(300);
+    expect(out.stage).toBe('partially_paid');
+  });
+
+  it('REGRESSION: a quote with two deposits keeps both (older builds report only the first)', () => {
+    const square = { id: 'deposit-sq-1', kind: 'deposit', amount: 200, paidAt: now, method: 'square', squarePaymentId: 'sq-1' };
+    const first = { ...deposit, amount: 100 };
+    const out = olderQuoteEcho(quote({ payments: [first, square] }));
+    expect(out.payments).toEqual([first, square]);
+    expect(out.depositPaid).toBe(300);
+    expect(out.paidTotal).toBe(300);
+  });
+
+  it('a quote with a deposit and a full-amount payment keeps both', () => {
+    const full = { id: 'full-sq-1', kind: 'balance', amount: 660, paidAt: now, method: 'square', squarePaymentId: 'sq-1' };
+    const out = olderQuoteEcho(quote({ payments: [deposit, full], paidTotal: 960, balanceDue: 0 }));
+    expect(out.payments).toEqual([deposit, full]);
+    expect(out.paidTotal).toBe(960);
+    expect(out.depositPaid).toBe(300);
+  });
+
+  it('still takes an invoice echo with genuinely new money (a legacy-only write)', () => {
+    const doc = invoice();
+    const legacy: any = { ...documentRecordToInvoiceRecord(doc), paidAmount: 800 };
+    delete legacy.depositCredit;
+    const out = preserveLedger(doc, invoiceRecordToDocumentRecord(legacy, doc.id) as any);
+    expect(out.paidTotal).toBe(800);
+    expect(out.payments.map((p: any) => p.amount)).toEqual([800]);
+  });
+});
