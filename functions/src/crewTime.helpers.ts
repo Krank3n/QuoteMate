@@ -30,6 +30,50 @@ export function decideCrewSendInPush(
   return { push: true, reason: 'ok' };
 }
 
+/** Where a crew member's link lands — the branded /t page that frames crewTimePage. */
+export const CREW_LINK_PAGE = 'https://quotemateapp.au/t';
+
+export function crewLinkPageUrl(token: string): string {
+  return `${CREW_LINK_PAGE}?token=${encodeURIComponent(token)}`;
+}
+
+/** Invite emails per business per rolling day — enough for a whole crew, useless for spam. */
+export const CREW_INVITE_DAILY_LIMIT = 20;
+
+/** A plausible single address — the app validates too; this is the server's own check. */
+export function isCrewEmail(value: unknown): value is string {
+  return typeof value === 'string' && value.length <= 254 && /^[^\s@,;<>"]+@[^\s@,;<>"]+\.[^\s@,;<>"]{2,}$/.test(value.trim());
+}
+
+/**
+ * The words in a crew invite. It comes from the business, to someone who
+ * works for them — so it says whose hours these are for, what the link does,
+ * that nothing needs installing, and that the boss signs off before anything
+ * counts. No app name: the crew member is dealing with their boss.
+ */
+export function crewInviteEmailCopy(crewName: string, businessName: string): {
+  subject: string;
+  preheader: string;
+  greeting: string;
+  paragraphs: string[];
+  button: string;
+  footnote: string;
+} {
+  const first = String(crewName || '').trim().split(/\s+/)[0] || 'there';
+  const biz = String(businessName || '').trim() || 'Your boss';
+  return {
+    subject: `Your hours link for ${biz}`,
+    preheader: `Put your hours in for ${biz} from your phone.`,
+    greeting: `G'day ${first},`,
+    paragraphs: [
+      `${biz} wants your hours put in on the job. This is your own link — open it on your phone, pick the job, and put in the day and how many hours. No app to install, no account to set up.`,
+      `${biz} checks your hours and approves them before they go anywhere.`,
+    ],
+    button: 'Put your hours in',
+    footnote: `Keep this email — the link stays the same until ${biz} sends you a new one. Wasn't expecting it? You can ignore it.`,
+  };
+}
+
 /** How far back a crew member can put hours in. The owner can go further. */
 export const CREW_LOG_MAX_DAYS_BACK = 60;
 export const CREW_NOTE_MAX = 200;

@@ -32,11 +32,22 @@ export function cleanCrewName(raw: string, crew: CrewMember[] | undefined, excep
   return { name };
 }
 
-export function addCrewMember(crew: CrewMember[] | undefined, name: string, costRate?: number): CrewMember[] {
+/** An email as typed: blank is none; otherwise it has to look like one address. */
+export function parseCrewEmail(raw: string): { email?: string; error?: string } {
+  const text = String(raw ?? '').trim();
+  if (!text) return {};
+  if (!/^[^\s@,;<>"]+@[^\s@,;<>"]+\.[^\s@,;<>"]{2,}$/.test(text)) {
+    return { error: "That email doesn't look right." };
+  }
+  return { email: text.toLowerCase() };
+}
+
+export function addCrewMember(crew: CrewMember[] | undefined, name: string, costRate?: number, email?: string): CrewMember[] {
   const member: CrewMember = {
     id: generateId(),
     name,
     ...(costRate ? { costRate } : {}),
+    ...(email ? { email } : {}),
     createdAt: Date.now(),
   };
   return [...(crew ?? []), member];

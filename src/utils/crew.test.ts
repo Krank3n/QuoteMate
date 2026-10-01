@@ -8,6 +8,7 @@ import {
   crewLinkMessage,
   crewLinkUrl,
   parseCostRate,
+  parseCrewEmail,
   updateCrewMember,
 } from './crew';
 
@@ -75,5 +76,19 @@ describe('finding who Mate means', () => {
     expect(matchCrewMember(crew, 'Dave').error).toMatch(/isn't on the crew list.*Jake Smith, Priya, Jake Tran/);
     expect(matchCrewMember(crew, 'Shane').member).toBeUndefined();
     expect(matchCrewMember([], 'Jake').error).toMatch(/no one on the crew list/);
+  });
+});
+
+describe('a crew member\'s email', () => {
+  it('is optional, tidied, and has to look like one address', () => {
+    expect(parseCrewEmail('')).toEqual({});
+    expect(parseCrewEmail('  Jake@Rivo.com.au ')).toEqual({ email: 'jake@rivo.com.au' });
+    expect(parseCrewEmail('jake at rivo').error).toBeTruthy();
+    expect(parseCrewEmail('a@b.com, c@d.com').error).toBeTruthy();
+  });
+
+  it('is kept on the crew member when added', () => {
+    const [jake] = addCrewMember(undefined, 'Jake', undefined, 'jake@rivo.com.au');
+    expect(jake).toMatchObject({ name: 'Jake', email: 'jake@rivo.com.au' });
   });
 });
