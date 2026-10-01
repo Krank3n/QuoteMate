@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { buildProposal, MAX_LOG_DAYS_AGO } from '../proposalTools';
 import { setRenderableQuoteProbe } from '../showQuoteGate';
+import { registerQuotingProfileSource } from '../quotingProfileContext';
 import { dateKeyDaysAgo } from '../../../../shared/time/hours';
 import { logTimeHeadline } from '../../../components/assistant/proposalCardCopy';
 import type { LogTimeProposal } from '../../../types/assistant';
@@ -76,11 +77,37 @@ describe('propose_log_time', () => {
   });
 });
 
+describe('propose_log_time for the crew', () => {
+  afterEach(() => registerQuotingProfileSource(() => null));
+  const withCrew = () =>
+    registerQuotingProfileSource(() => ({ crew: [{ id: 'c1', name: 'Jake Smith', createdAt: 1 }, { id: 'c2', name: 'Priya', createdAt: 1 }] }) as any);
+
+  it("puts a crew member's hours under them", () => {
+    withCrew();
+    const { proposal, error } = build({ hours: 6, daysAgo: 1, crewName: 'jake' });
+    expect(error).toBeUndefined();
+    expect(proposal).toMatchObject({ crewMemberId: 'c1', crewName: 'Jake Smith', hours: 6 });
+  });
+
+  it("refuses a name that isn't on the crew, naming who is", () => {
+    withCrew();
+    const { proposal, error } = build({ hours: 6, crewName: 'Dave' });
+    expect(proposal).toBeUndefined();
+    expect(error).toMatch(/Jake Smith, Priya/);
+  });
+
+  it("leaves the tradie's own time alone", () => {
+    withCrew();
+    expect(build({ hours: 3 }).proposal?.crewMemberId).toBeUndefined();
+  });
+});
+
 describe('the log-time card headline', () => {
   const now = new Date(2026, 8, 30, 10);
   it('says today / yesterday, then the weekday and date', () => {
     expect(logTimeHeadline({ hours: 3, date: '2026-09-30' }, now)).toBe('3 h today');
     expect(logTimeHeadline({ hours: 7.5, date: '2026-09-29' }, now)).toBe('7.5 h yesterday');
     expect(logTimeHeadline({ hours: 2, date: '2026-09-23' }, now)).toBe('2 h on Wed 23 Sep');
+    expect(logTimeHeadline({ hours: 6, date: '2026-09-29', crewName: 'Jake Smith' }, now)).toBe('Jake Smith · 6 h yesterday');
   });
 });

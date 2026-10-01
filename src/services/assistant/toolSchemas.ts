@@ -630,6 +630,10 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
         },
         note: { type: 'string', description: 'Optional short note on what was done ("rough-in", "second fix"). Only words the tradie used.' },
         billable: { type: 'boolean', description: 'false when they say not to charge it (warranty, callback, "don\'t bill that"). Defaults to true.' },
+        crewName: {
+          type: 'string',
+          description: 'Who worked it when it was one of their crew, not the tradie — "Jake did 6 hours on the deck". Use a name from get_business_defaults → crew. Leave off for the tradie\'s own time. A name not on the crew list is refused: ask who they mean.',
+        },
         displayName: { type: 'string', description: 'Job name to show on the card (display only).' },
         displayCustomerName: { type: 'string', description: 'Customer name to show on the card (display only).' },
       },

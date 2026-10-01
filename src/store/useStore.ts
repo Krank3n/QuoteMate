@@ -5039,7 +5039,9 @@ export const useStore = create<AppState>((set, get) => ({
               hours: proposal.hours,
               note: proposal.note,
               billable: proposal.billable,
-              workerName: get().businessSettings?.businessName || undefined,
+              ...(proposal.crewMemberId
+                ? { crewMemberId: proposal.crewMemberId, workerName: proposal.crewName }
+                : { workerName: get().businessSettings?.businessName || undefined }),
               source: 'mate',
             });
           } catch (err: any) {

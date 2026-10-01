@@ -64,3 +64,35 @@ export function crewLinkMessage(memberName: string, businessName: string | undef
   const from = businessName ? ` for ${businessName}` : '';
   return `G'day ${first}, here's your link to put your hours in${from}: ${crewLinkUrl(token)}`;
 }
+
+/**
+ * Find the crew member a spoken or typed name means — "Jake", "jake smith",
+ * "the apprentice Priya". Exact name first, then a unique first-name match,
+ * then a unique name that starts with what was said. Anything ambiguous or
+ * unknown comes back as an error naming who IS on the crew, so Mate asks
+ * rather than guessing whose hours these are.
+ */
+export function matchCrewMember(
+  crew: CrewMember[] | undefined,
+  spoken: string,
+): { member?: CrewMember; error?: string } {
+  const people = activeCrew(crew);
+  const said = String(spoken ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
+  const roster = people.map((c) => c.name).join(', ');
+  if (!people.length) {
+    return { error: "There's no one on the crew list yet — add them under Settings → Crew, or log it as the tradie's own time." };
+  }
+  if (!said) return { error: `Who worked it? On the crew: ${roster}.` };
+  const exact = people.filter((c) => c.name.toLowerCase() === said);
+  if (exact.length === 1) return { member: exact[0] };
+  const words = said.split(' ');
+  const byFirst = people.filter((c) => words.includes(c.name.split(' ')[0].toLowerCase()));
+  if (byFirst.length === 1) return { member: byFirst[0] };
+  const byPrefix = people.filter((c) => c.name.toLowerCase().startsWith(said));
+  if (byPrefix.length === 1) return { member: byPrefix[0] };
+  if (byFirst.length > 1 || byPrefix.length > 1) {
+    const which = (byFirst.length > 1 ? byFirst : byPrefix).map((c) => c.name).join(' or ');
+    return { error: `More than one person matches "${spoken}" — ${which}? Ask which.` };
+  }
+  return { error: `"${spoken}" isn't on the crew list. On the crew: ${roster}. Ask who, or add them under Settings → Crew.` };
+}

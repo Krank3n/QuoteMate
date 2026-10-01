@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   activeCrew,
+  matchCrewMember,
   addCrewMember,
   archiveCrewMember,
   cleanCrewName,
@@ -46,5 +47,33 @@ describe('the crew list', () => {
     const msg = crewLinkMessage('Jake Smith', 'Rivo Plumbing', 'tok/+=');
     expect(msg).toBe(`G'day Jake, here's your link to put your hours in for Rivo Plumbing: ${crewLinkUrl('tok/+=')}`);
     expect(crewLinkUrl('tok/+=')).toBe('https://quotemateapp.au/t?token=tok%2F%2B%3D');
+  });
+});
+
+describe('finding who Mate means', () => {
+  const crew = [
+    { id: 'j', name: 'Jake Smith', createdAt: 1 },
+    { id: 'p', name: 'Priya', createdAt: 1 },
+    { id: 'jt', name: 'Jake Tran', createdAt: 1 },
+    { id: 'old', name: 'Shane', createdAt: 1, archived: true },
+  ];
+
+  it('takes the full name, a unique first name, or the start of a name', () => {
+    expect(matchCrewMember(crew, 'jake smith').member?.id).toBe('j');
+    expect(matchCrewMember(crew, 'Priya').member?.id).toBe('p');
+    expect(matchCrewMember(crew, 'the apprentice Priya').member?.id).toBe('p');
+    expect(matchCrewMember(crew, 'pri').member?.id).toBe('p');
+  });
+
+  it('asks rather than guesses when two people match', () => {
+    const r = matchCrewMember(crew, 'Jake');
+    expect(r.member).toBeUndefined();
+    expect(r.error).toMatch(/Jake Smith or Jake Tran/);
+  });
+
+  it("refuses someone who isn't on the crew — including someone taken off it", () => {
+    expect(matchCrewMember(crew, 'Dave').error).toMatch(/isn't on the crew list.*Jake Smith, Priya, Jake Tran/);
+    expect(matchCrewMember(crew, 'Shane').member).toBeUndefined();
+    expect(matchCrewMember([], 'Jake').error).toMatch(/no one on the crew list/);
   });
 });

@@ -39,6 +39,8 @@ import { isEmailAddress } from '../../utils/sendFlow';
 import { formatCurrency, roundToTwoDecimals } from '../../utils/documentCalculator';
 import { isWorkItem } from '../../../shared/document/lumpSum';
 import { resolveCustomerDraftRef } from './readTools';
+import { registeredBusinessSettings } from './quotingProfileContext';
+import { matchCrewMember } from '../../utils/crew';
 import { dateKeyDaysAgo, parseHoursInput } from '../../../shared/time/hours';
 
 /** Whitespace-folded, trimmed, capped — for text that lands in the prompt on every turn. */
@@ -944,6 +946,16 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
         return { error: `That's more than ${MAX_LOG_DAYS_AGO} days back — have the tradie log it on the job screen, where they can pick the date.` };
       }
       const note = input?.note ? String(input.note).trim().slice(0, 200) : '';
+      // A crew member's time goes on the job under their name. The name has
+      // to resolve to someone on the crew list — logging hours against a
+      // person who isn't there would put them under nobody.
+      let crew: { crewMemberId: string; crewName: string } | undefined;
+      const spokenCrew = typeof input?.crewName === 'string' ? input.crewName.trim() : '';
+      if (spokenCrew) {
+        const match = matchCrewMember(registeredBusinessSettings()?.crew, spokenCrew);
+        if (!match.member) return { error: match.error };
+        crew = { crewMemberId: match.member.id, crewName: match.member.name };
+      }
       const proposal: LogTimeProposal = {
         id,
         toolUseId,
@@ -954,6 +966,7 @@ export function buildProposal(toolName: string, toolUseId: string, input: any): 
         date: dateKeyDaysAgo(daysAgo),
         note: note || undefined,
         billable: input?.billable !== false,
+        ...(crew ?? {}),
         displayName: input.displayName ? String(input.displayName) : undefined,
         displayCustomerName: input.displayCustomerName ? String(input.displayCustomerName) : undefined,
       };

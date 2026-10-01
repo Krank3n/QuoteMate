@@ -99,8 +99,12 @@ export function proposalStub(type: ProposalType): Proposal {
 }
 
 /** "7.5 h yesterday", "2 h on Tue 23 Sep" — the log-time card's headline. */
-export function logTimeHeadline(p: Pick<LogTimeProposal, 'hours' | 'date'>, now: Date = new Date()): string {
-  const hours = formatHours(p.hours);
+export function logTimeHeadline(
+  p: Pick<LogTimeProposal, 'hours' | 'date'> & Partial<Pick<LogTimeProposal, 'crewName'>>,
+  now: Date = new Date(),
+): string {
+  // "Jake · 6 h yesterday" — whose hours they are comes first.
+  const hours = p.crewName ? `${p.crewName} · ${formatHours(p.hours)}` : formatHours(p.hours);
   if (p.date === dateKeyDaysAgo(0, now)) return `${hours} today`;
   if (p.date === dateKeyDaysAgo(1, now)) return `${hours} yesterday`;
   const [y, m, d] = p.date.split('-').map(Number);

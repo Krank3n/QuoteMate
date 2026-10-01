@@ -335,6 +335,10 @@ export interface LogTimeProposal extends BaseProposal {
   note?: string;
   // False for time that's logged but never invoiced (warranty, a quote visit).
   billable: boolean;
+  // Set when a crew member worked it, resolved from the crew list by the
+  // validator. Absent = the tradie's own time.
+  crewMemberId?: string;
+  crewName?: string;
   // Display-only — lets the card name the job without a re-fetch.
   displayName?: string;
   displayCustomerName?: string;
