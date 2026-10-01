@@ -37,6 +37,8 @@ import { BottomSheet } from './BottomSheet';
 import { useAlertModal } from '../hooks/useAlertModal';
 import { useStore } from '../store/useStore';
 import { activeCrew } from '../utils/crew';
+import { useJobStore } from '../store/useJobStore';
+import { JobPicker } from './JobPicker';
 
 interface LogTimeSheetProps {
   visible: boolean;
@@ -48,6 +50,8 @@ interface LogTimeSheetProps {
   onSaved: (entry: TimeEntry) => void;
   /** An entry was deleted. */
   onDeleted: (id: string) => void;
+  /** Everyone's hours, every job — the Timesheets screen. */
+  onOpenTimesheets?: () => void;
   workerName?: string;
 }
 
@@ -77,6 +81,7 @@ export function LogTimeSheet({
   entries,
   onSaved,
   onDeleted,
+  onOpenTimesheets,
   workerName,
 }: LogTimeSheetProps) {
   const styles = useStyles();
@@ -91,6 +96,10 @@ export function LogTimeSheet({
   const [billable, setBillable] = useState(true);
   // null = the owner; otherwise the crew member it was worked by.
   const [crewId, setCrewId] = useState<string | null>(null);
+  // Which job an entry being edited belongs to — moving it fixes hours
+  // logged on the wrong job.
+  const [editJobId, setEditJobId] = useState(job.id);
+  const jobs = useJobStore((st) => st.jobs);
   const allCrew = useStore((st) => st.businessSettings?.crew);
   const crew = activeCrew(allCrew);
   const crewName = (id: string | null) => (id ? allCrew?.find((c) => c.id === id)?.name : undefined);
@@ -104,6 +113,7 @@ export function LogTimeSheet({
     setNote('');
     setBillable(true);
     setCrewId(null);
+    setEditJobId(job.id);
     setPickingDay(false);
   };
 
@@ -148,6 +158,7 @@ export function LogTimeSheet({
     setNote(entry.note ?? '');
     setBillable(entry.billable !== false);
     setCrewId(crewIdOf(entry));
+    setEditJobId(entry.jobId);
     setPickingDay(false);
     // The form is at the top and the tradie tapped a row further down —
     // without this the only sign anything happened is a thin border.
@@ -162,6 +173,11 @@ export function LogTimeSheet({
         onSaved(
           await timeEntryService.updateEntry({
             ...editing,
+            jobId: editJobId,
+            documentId:
+              editJobId === editing.jobId
+                ? editing.documentId
+                : jobs.find((j) => j.id === editJobId)?.primaryDocumentId,
             date,
             hours,
             note,
@@ -250,6 +266,20 @@ export function LogTimeSheet({
           />
           <Text style={styles.summaryText}>{summary}</Text>
         </View>
+        {onOpenTimesheets ? (
+          <TouchableOpacity onPress={onOpenTimesheets} style={styles.allLink} accessibilityRole="button">
+            <MaterialCommunityIcons name="calendar-clock" size={16} color={themeColors.accentText} />
+            <Text style={styles.allLinkText}>See all timesheets — every job, by week</Text>
+            <MaterialCommunityIcons name="chevron-right" size={18} color={themeColors.accentText} />
+          </TouchableOpacity>
+        ) : null}
+
+        {editing ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionLabel}>Job</Text>
+            <JobPicker jobs={jobs} value={editJobId} onChange={setEditJobId} />
+          </View>
+        ) : null}
 
         {crew.length > 0 ? (
           <View style={styles.section}>
@@ -387,7 +417,12 @@ export function LogTimeSheet({
           <View style={styles.section}>
             <Text style={styles.sectionLabel}>Sent in — waiting for you</Text>
             {pending.map((entry) => (
-              <View key={entry.id} style={[styles.entryRow, styles.pendingRow]}>
+              <TouchableOpacity
+                key={entry.id}
+                style={[styles.entryRow, styles.pendingRow, editing?.id === entry.id && styles.entryRowActive]}
+                onPress={() => startEdit(entry)}
+                accessibilityLabel={`Edit ${formatHours(entry.hours)} from ${whoLabel(entry)} on ${dayLabel(entry.date)}`}
+              >
                 <View style={{ flex: 1 }}>
                   <Text style={styles.entryTitle}>
                     {whoLabel(entry)} · {dayLabel(entry.date)} · {formatHours(entry.hours)}
@@ -413,7 +448,7 @@ export function LogTimeSheet({
                 >
                   <MaterialCommunityIcons name="trash-can-outline" size={20} color={themeColors.textMuted} />
                 </TouchableOpacity>
-              </View>
+              </TouchableOpacity>
             ))}
           </View>
         ) : null}
@@ -608,6 +643,19 @@ const useStyles = makeStyles((t) => ({
     paddingHorizontal: 12,
     borderRadius: 12,
     backgroundColor: t.colors.surface,
+  },
+  allLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    minHeight: 44,
+    paddingHorizontal: 4,
+  },
+  allLinkText: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '600',
+    color: t.colors.accentText,
   },
   pendingRow: {
     borderWidth: 1,

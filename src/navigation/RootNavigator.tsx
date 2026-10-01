@@ -36,6 +36,7 @@ import { FeedbackScreen } from '../screens/settings/FeedbackScreen';
 import { PDFTemplateScreen } from '../screens/settings/PDFTemplateScreen';
 import { QuotesInvoicesScreen } from '../screens/settings/QuotesInvoicesScreen';
 import { CrewScreen } from '../screens/settings/CrewScreen';
+import { TimesheetsScreen } from '../screens/TimesheetsScreen';
 import { ReferralScreen } from '../screens/settings/ReferralScreen';
 import { NotificationPreferencesScreen } from '../screens/settings/NotificationPreferencesScreen';
 import { AppearanceScreen } from '../screens/settings/AppearanceScreen';
@@ -659,6 +660,20 @@ export function RootNavigator() {
           headerTintColor: themeColors.text,
           headerTitleStyle: { fontFamily: 'Archivo-Bold' },
           title: 'Rates & GST',
+        }}
+      />
+      <RootStack.Screen
+        name="Timesheets"
+        component={TimesheetsScreen}
+        options={{
+          presentation: 'card',
+          headerShown: true,
+          headerStyle: {
+            backgroundColor: themeColors.surface,
+          },
+          headerTintColor: themeColors.text,
+          headerTitleStyle: { fontFamily: 'Archivo-Bold' },
+          title: 'Timesheets',
         }}
       />
       <RootStack.Screen

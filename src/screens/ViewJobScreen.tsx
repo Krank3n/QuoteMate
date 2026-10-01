@@ -188,8 +188,12 @@ export function ViewJobScreen() {
     });
   }, [jobId]);
   const handleTimeSaved = React.useCallback((entry: TimeEntry) => {
-    setTimeEntries((prev) => sortEntriesNewestFirst([entry, ...prev.filter((e) => e.id !== entry.id)]));
-  }, []);
+    // An entry moved to another job leaves this job's list.
+    setTimeEntries((prev) => {
+      const rest = prev.filter((e) => e.id !== entry.id);
+      return entry.jobId === jobId ? sortEntriesNewestFirst([entry, ...rest]) : rest;
+    });
+  }, [jobId]);
   const handleTimeDeleted = React.useCallback((id: string) => {
     setTimeEntries((prev) => prev.filter((e) => e.id !== id));
   }, []);
@@ -994,6 +998,9 @@ export function ViewJobScreen() {
       case 'log_time':
         setTimeSheetVisible(true);
         break;
+      case 'timesheets':
+        navigation.navigate('Timesheets');
+        break;
       case 'service_report':
         if (canUseServiceReports(getEffectivePlan())) {
           // Resume an unfinished draft instead of minting a duplicate report;
@@ -1345,6 +1352,10 @@ export function ViewJobScreen() {
         entries={timeEntries}
         onSaved={handleTimeSaved}
         onDeleted={handleTimeDeleted}
+        onOpenTimesheets={() => {
+          setTimeSheetVisible(false);
+          navigation.navigate('Timesheets');
+        }}
         workerName={businessSettings?.businessName || undefined}
       />
 

@@ -144,6 +144,37 @@ export function crewJobView(id: string, job: Record<string, unknown>): CrewJobVi
   };
 }
 
+/** What the worker's page shows of one of their own entries. */
+export function crewEntryView(e: Record<string, any>, jobNames: Map<string, string>) {
+  return {
+    id: String(e.id),
+    jobId: String(e.jobId || ''),
+    jobName: jobNames.get(String(e.jobId)) || 'A job',
+    date: String(e.date),
+    hours: Number(e.hours) || 0,
+    ...(e.note ? { note: String(e.note) } : {}),
+    status: e.status === 'pending' ? ('pending' as const) : ('approved' as const),
+  };
+}
+
+/**
+ * Whether a crew member may change or remove an entry: only their own, and
+ * only while it's still waiting. Once the boss approves it, it may already be
+ * on an invoice — it's theirs to change from then on.
+ */
+export function crewMayChange(
+  entry: Record<string, any> | undefined,
+  crewId: string,
+): { ok: true } | { ok: false; status: number; error: string } {
+  if (!entry || entry.workerId !== `crew:${crewId}`) {
+    return { ok: false, status: 404, error: "That entry isn't there any more." };
+  }
+  if (entry.status !== 'pending') {
+    return { ok: false, status: 409, error: "That's been approved — ask your boss if it needs changing." };
+  }
+  return { ok: true };
+}
+
 export interface CrewLogInput {
   jobId: string;
   date: string;
@@ -199,37 +230,56 @@ function pageShell(title: string, body: string, script = ''): string {
 <html lang="en-AU">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow">
 <meta name="referrer" content="no-referrer">
 <title>${esc(title)}</title>
 <style>
-  :root { --bg:#0f172a; --card:#1e293b; --text:#f1f5f9; --muted:#94a3b8; --line:#334155; --accent:#f97316; --ok:#22c55e; --warn:#f59e0b; }
-  @media (prefers-color-scheme: light) { :root { --bg:#f8fafc; --card:#fff; --text:#0f172a; --muted:#64748b; --line:#e2e8f0; } }
-  * { box-sizing: border-box; }
+  :root { --bg:#0f172a; --card:#1e293b; --card2:#162132; --text:#f1f5f9; --muted:#94a3b8; --line:#334155; --accent:#f97316; --ok:#22c55e; --warn:#f59e0b; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   body { margin:0; background:var(--bg); color:var(--text); font:16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-  main { max-width:520px; margin:0 auto; padding:20px 16px 48px; }
-  h1 { font-size:22px; margin:0 0 4px; }
-  h2 { font-size:13px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); margin:22px 0 8px; }
+  main { max-width:520px; margin:0 auto; padding:20px 16px 56px; }
+  h1 { font-size:24px; margin:2px 0 0; }
+  .biz { font-size:13px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--accent); }
   .muted { color:var(--muted); font-size:14px; margin:0; }
   .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px; }
-  .job { display:flex; gap:12px; align-items:flex-start; padding:12px 14px; min-height:52px; border:1px solid var(--line); border-radius:12px; background:var(--card); margin-bottom:8px; cursor:pointer; }
-  .job input { margin-top:4px; width:20px; height:20px; accent-color:var(--accent); }
-  .job b { display:block; } .job span { color:var(--muted); font-size:13px; }
-  .chips { display:flex; flex-wrap:wrap; gap:8px; }
-  .chip { min-height:44px; padding:0 16px; border-radius:999px; border:1px solid var(--line); background:var(--card); color:var(--text); font-size:15px; font-weight:600; }
-  .chip[aria-pressed="true"] { background:var(--accent); border-color:var(--accent); color:#fff; }
-  input[type=text], input[type=date], input[inputmode] { width:100%; min-height:48px; padding:10px 12px; border-radius:12px; border:1px solid var(--line); background:var(--card); color:var(--text); font-size:17px; }
-  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-  .row input { flex:0 0 110px; }
-  button.go { width:100%; min-height:52px; margin-top:22px; border:0; border-radius:14px; background:var(--accent); color:#fff; font-size:17px; font-weight:700; }
+  .weekbar { display:flex; align-items:center; justify-content:space-between; margin:20px 0 10px; }
+  .weekbar button { width:44px; height:44px; border-radius:12px; border:1px solid var(--line); background:var(--card); color:var(--text); font-size:20px; }
+  .weekbar button:disabled { opacity:.35; }
+  .weeklabel { text-align:center; } .weeklabel b { display:block; font-size:16px; } .weeklabel span { font-size:13px; color:var(--muted); }
+  .days { display:grid; grid-template-columns:repeat(7,1fr); gap:6px; }
+  .day { border:1px solid var(--line); background:var(--card); color:var(--text); border-radius:12px; padding:8px 0 7px; min-height:68px; text-align:center; font:inherit; }
+  .day .dn { font-size:12px; color:var(--muted); } .day .dd { font-size:17px; font-weight:700; } .day .dh { font-size:12px; color:var(--muted); margin-top:2px; }
+  .day.has .dh { color:var(--text); font-weight:600; }
+  .day.today { border-color:var(--accent); }
+  .day.sel { background:var(--accent); border-color:var(--accent); } .day.sel .dn, .day.sel .dh { color:#fff; }
+  .day.future { opacity:.45; }
+  h2 { font-size:18px; margin:24px 0 10px; }
+  .entry { display:flex; align-items:center; gap:12px; width:100%; text-align:left; font:inherit; color:var(--text); background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px 14px; margin-bottom:8px; min-height:60px; }
+  .entry .grow { flex:1; min-width:0; } .entry .job { font-weight:600; } .entry .note { font-size:13px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .entry .hrs { font-size:18px; font-weight:700; white-space:nowrap; }
+  .chip { display:inline-block; font-size:11px; font-weight:700; border-radius:999px; padding:2px 8px; margin-top:4px; }
+  .chip.wait { background:rgba(245,158,11,.16); color:var(--warn); } .chip.ok { background:rgba(34,197,94,.14); color:var(--ok); }
+  .entry.locked { background:var(--card2); }
+  .empty { color:var(--muted); font-size:14px; padding:4px 2px 12px; }
+  button.go { width:100%; min-height:52px; border:0; border-radius:14px; background:var(--accent); color:#fff; font-size:17px; font-weight:700; font-family:inherit; }
   button.go:disabled { opacity:.5; }
+  button.ghost { width:100%; min-height:48px; border:1px solid var(--line); border-radius:14px; background:transparent; color:var(--text); font-size:16px; font-weight:600; font-family:inherit; margin-top:8px; }
+  button.danger { color:#f87171; border-color:rgba(248,113,113,.4); }
+  .form { background:var(--card); border:1px solid var(--accent); border-radius:16px; padding:16px; margin-top:4px; }
+  .form h3 { margin:0 0 2px; font-size:17px; } .form .for { font-size:13px; color:var(--muted); margin-bottom:12px; }
+  label.f { display:block; font-size:12px; font-weight:700; letter-spacing:.05em; text-transform:uppercase; color:var(--muted); margin:14px 0 6px; }
+  select, input[type=text], input[inputmode] { width:100%; min-height:48px; padding:10px 12px; border-radius:12px; border:1px solid var(--line); background:var(--bg); color:var(--text); font-size:17px; font-family:inherit; }
+  .row { display:flex; gap:8px; align-items:center; } .row input { flex:0 0 96px; }
+  .q { min-height:44px; min-width:52px; padding:0 12px; border-radius:999px; border:1px solid var(--line); background:var(--bg); color:var(--text); font-size:15px; font-weight:600; font-family:inherit; }
+  .q.on { background:var(--accent); border-color:var(--accent); color:#fff; }
+  .actions { margin-top:18px; }
   .msg { margin-top:14px; padding:12px 14px; border-radius:12px; font-size:15px; display:none; }
   .msg.ok { display:block; background:rgba(34,197,94,.14); border:1px solid var(--ok); }
   .msg.err { display:block; background:rgba(245,158,11,.14); border:1px solid var(--warn); }
-  .entry { display:flex; justify-content:space-between; gap:12px; padding:10px 0; border-bottom:1px solid var(--line); font-size:14px; }
-  .entry:last-child { border-bottom:0; }
-  .tag { font-size:12px; color:var(--muted); }
+  .pin { margin-top:28px; display:flex; gap:12px; align-items:flex-start; }
+  .pin .x { margin-left:auto; background:none; border:0; color:var(--muted); font-size:20px; min-width:32px; min-height:32px; }
+  .center { text-align:center; padding:40px 0; }
 </style>
 </head>
 <body><main>${body}</main>${script ? `<script>${script}</script>` : ''}</body>
@@ -237,44 +287,56 @@ function pageShell(title: string, body: string, script = ''): string {
 }
 
 /**
- * The crew member's page. Everything but the shell is filled in by the
- * script from `?action=state`, so this HTML carries no business data and a
- * cached copy of it leaks nothing.
+ * The crew member's page: their week, Monday to Sunday, opening on today.
+ * Everything but the shell is filled in by the script from the page's own
+ * actions (state / week / log / update / delete), so this HTML carries no
+ * business data and a cached copy of it leaks nothing.
  */
 export function crewTimePage(token: string): string {
   const body = `
-  <h1 id="hello">Put your hours in</h1>
-  <p class="muted" id="biz">Loading…</p>
+  <div class="biz" id="biz">&nbsp;</div>
+  <h1 id="hello">Your hours</h1>
+  <p class="muted" id="sub">Loading…</p>
 
-  <form id="f" novalidate style="display:none">
-    <h2>Which job</h2>
-    <div id="jobs"></div>
-    <p class="muted" id="nojobs" style="display:none">No jobs open right now — check with your boss.</p>
-
-    <h2>Which day</h2>
-    <div class="chips">
-      <button type="button" class="chip" data-day="0" aria-pressed="true">Today</button>
-      <button type="button" class="chip" data-day="1" aria-pressed="false">Yesterday</button>
-      <input type="date" id="date" aria-label="Another day" style="flex:1; min-width:150px">
+  <div id="app" style="display:none">
+    <div class="weekbar">
+      <button type="button" id="prev" aria-label="Previous week">‹</button>
+      <div class="weeklabel"><b id="weeklabel"></b><span id="weektotal"></span></div>
+      <button type="button" id="next" aria-label="Next week">›</button>
     </div>
+    <div class="days" id="days" role="tablist" aria-label="Days of the week"></div>
 
-    <h2>Hours</h2>
-    <div class="row">
-      <input id="hours" inputmode="decimal" placeholder="e.g. 7.5" aria-label="Hours worked" autocomplete="off">
-      <button type="button" class="chip" data-h="4">4h</button>
-      <button type="button" class="chip" data-h="8">8h</button>
+    <h2 id="dayhead"></h2>
+    <div id="list"></div>
+    <button type="button" class="go" id="add"></button>
+
+    <div class="form" id="form" style="display:none">
+      <h3 id="formtitle">Add hours</h3>
+      <div class="for" id="formfor"></div>
+      <label class="f" for="job">Job</label>
+      <select id="job"></select>
+      <label class="f" for="hours">Hours</label>
+      <div class="row">
+        <input id="hours" inputmode="decimal" placeholder="7.5" autocomplete="off" aria-label="Hours worked">
+        <button type="button" class="q" data-h="4">4</button>
+        <button type="button" class="q" data-h="6">6</button>
+        <button type="button" class="q" data-h="8">8</button>
+      </div>
+      <label class="f" for="note">What you did (optional)</label>
+      <input type="text" id="note" maxlength="200" placeholder="e.g. rough-in, decking boards">
+      <div class="actions">
+        <button type="button" class="go" id="save">Save</button>
+        <button type="button" class="ghost" id="cancel">Cancel</button>
+        <button type="button" class="ghost danger" id="del" style="display:none">Delete</button>
+      </div>
     </div>
-
-    <h2>Note (optional)</h2>
-    <input type="text" id="note" maxlength="200" placeholder="What you did — e.g. rough-in" aria-label="Note">
-
-    <button class="go" id="go" type="submit">Send my hours</button>
     <div class="msg" id="msg" role="status"></div>
-  </form>
 
-  <div id="recentWrap" style="display:none">
-    <h2>What you've sent</h2>
-    <div class="card" id="recent"></div>
+    <div class="card pin" id="pin" style="display:none">
+      <div>📌</div>
+      <div><b>Keep this on your phone</b><p class="muted" id="pintext" style="margin-top:4px"></p></div>
+      <button type="button" class="x" id="pinx" aria-label="Hide">×</button>
+    </div>
   </div>`;
 
   const script = `
@@ -282,78 +344,166 @@ export function crewTimePage(token: string): string {
   var token = ${JSON.stringify(token)};
   var api = location.pathname + '?token=' + encodeURIComponent(token);
   var $ = function(id){ return document.getElementById(id); };
+  var DN = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  var DLONG = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+  var MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  var MONLONG = ['January','February','March','April','May','June','July','August','September','October','November','December'];
   function pad(n){ return n < 10 ? '0' + n : '' + n; }
-  function dayKey(back){ var d = new Date(); d.setDate(d.getDate() - back); return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()); }
+  function key(d){ return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()); }
+  function parse(k){ var p = k.split('-'); return new Date(+p[0], +p[1]-1, +p[2]); }
+  function addDays(k, n){ var d = parse(k); d.setDate(d.getDate() + n); return key(d); }
+  function monday(k){ var d = parse(k); var w = (d.getDay() + 6) % 7; d.setDate(d.getDate() - w); return key(d); }
+  function hrs(n){ return (Math.round(n * 100) / 100) + ' h'; }
   function text(el, s){ el.textContent = s; }
-  var day = dayKey(0);
-  $('date').max = dayKey(0);
-  $('date').min = dayKey(${CREW_LOG_MAX_DAYS_BACK});
-  function pickDay(key, btn){
-    day = key;
-    Array.prototype.forEach.call(document.querySelectorAll('[data-day]'), function(b){ b.setAttribute('aria-pressed', b === btn ? 'true' : 'false'); });
+  var today = key(new Date());
+  var maxDay = today;
+  var S = { jobs: [], start: monday(today), sel: today, entries: [], editing: null };
+
+  function call(action, body){
+    return fetch(api + '&action=' + action + (body ? '' : ''), body
+      ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+      : undefined).then(function(r){ return r.json().then(function(j){ if (!r.ok) throw new Error(j.error || 'Something went wrong.'); return j; }); });
   }
-  Array.prototype.forEach.call(document.querySelectorAll('[data-day]'), function(b){
-    b.addEventListener('click', function(){ $('date').value = ''; pickDay(dayKey(+b.getAttribute('data-day')), b); });
-  });
-  $('date').addEventListener('change', function(){ if ($('date').value) pickDay($('date').value, null); });
-  Array.prototype.forEach.call(document.querySelectorAll('[data-h]'), function(b){
-    b.addEventListener('click', function(){ $('hours').value = b.getAttribute('data-h'); });
-  });
   function show(kind, s){ var m = $('msg'); m.className = 'msg ' + kind; text(m, s); }
-  function niceDay(k){ var p = k.split('-'); var d = new Date(+p[0], +p[1]-1, +p[2]); return d.toLocaleDateString('en-AU', { weekday:'short', day:'numeric', month:'short' }); }
-  function renderRecent(list){
-    var box = $('recent'); box.innerHTML = '';
-    if (!list || !list.length) { $('recentWrap').style.display = 'none'; return; }
-    $('recentWrap').style.display = '';
-    list.forEach(function(e){
-      var row = document.createElement('div'); row.className = 'entry';
-      var left = document.createElement('div');
-      var t = document.createElement('div'); text(t, niceDay(e.date) + ' · ' + e.jobName);
-      var tag = document.createElement('div'); tag.className = 'tag'; text(tag, e.status === 'pending' ? 'Waiting for approval' : 'Approved');
-      left.appendChild(t); left.appendChild(tag);
-      var h = document.createElement('b'); text(h, e.hours + ' h');
-      row.appendChild(left); row.appendChild(h); box.appendChild(row);
-    });
+  function clearMsg(){ $('msg').className = 'msg'; }
+
+  function loadWeek(){
+    return fetch(api + '&action=week&start=' + S.start).then(function(r){ return r.json().then(function(j){ if (!r.ok) throw new Error(j.error); return j; }); })
+      .then(function(j){ S.entries = j.entries || []; render(); });
   }
-  function load(){
-    fetch(api + '&action=state').then(function(r){ return r.json().then(function(j){ return { ok: r.ok, j: j }; }); }).then(function(res){
-      if (!res.ok) { text($('hello'), "This link isn't working"); text($('biz'), res.j.error || 'Ask your boss to send you a new one.'); return; }
-      var s = res.j;
-      text($('hello'), "G'day " + s.crewName.split(' ')[0]);
-      text($('biz'), 'Put your hours in for ' + s.businessName + '. They approve them before anything goes on a job.');
-      var jobs = $('jobs'); jobs.innerHTML = '';
-      s.jobs.forEach(function(job, i){
-        var l = document.createElement('label'); l.className = 'job';
-        var r = document.createElement('input'); r.type = 'radio'; r.name = 'job'; r.value = job.id; if (s.jobs.length === 1) r.checked = true;
-        var d = document.createElement('div'); var b = document.createElement('b'); text(b, job.name);
-        d.appendChild(b); if (job.address) { var sp = document.createElement('span'); text(sp, job.address); d.appendChild(sp); }
-        l.appendChild(r); l.appendChild(d); jobs.appendChild(l);
+
+  function render(){
+    var start = parse(S.start), end = parse(addDays(S.start, 6));
+    text($('weeklabel'), S.start === monday(today) ? 'This week' : 'Week of ' + start.getDate() + ' ' + MON[start.getMonth()]);
+    var total = S.entries.reduce(function(t, e){ return t + e.hours; }, 0);
+    text($('weektotal'), start.getDate() + ' ' + MON[start.getMonth()] + ' – ' + end.getDate() + ' ' + MON[end.getMonth()] + ' · ' + hrs(total));
+    $('next').disabled = addDays(S.start, 7) > maxDay;
+    var days = $('days'); days.innerHTML = '';
+    for (var i = 0; i < 7; i++) (function(i){
+      var k = addDays(S.start, i), d = parse(k);
+      var h = S.entries.filter(function(e){ return e.date === k; }).reduce(function(t, e){ return t + e.hours; }, 0);
+      var b = document.createElement('button'); b.type = 'button'; b.setAttribute('role', 'tab');
+      b.className = 'day' + (k === S.sel ? ' sel' : '') + (k === today ? ' today' : '') + (k > maxDay ? ' future' : '') + (h ? ' has' : '');
+      b.setAttribute('aria-selected', k === S.sel ? 'true' : 'false');
+      b.setAttribute('aria-label', DLONG[i] + ' ' + d.getDate() + ' ' + MONLONG[d.getMonth()] + (h ? ', ' + hrs(h) : ''));
+      var a = document.createElement('div'); a.className = 'dn'; text(a, DN[i]);
+      var c = document.createElement('div'); c.className = 'dd'; text(c, d.getDate());
+      var e = document.createElement('div'); e.className = 'dh'; text(e, h ? hrs(h) : '·');
+      b.appendChild(a); b.appendChild(c); b.appendChild(e);
+      b.addEventListener('click', function(){ S.sel = k; closeForm(); clearMsg(); render(); });
+      days.appendChild(b);
+    })(i);
+    var sd = parse(S.sel), si = (sd.getDay() + 6) % 7;
+    text($('dayhead'), (S.sel === today ? 'Today · ' : '') + DLONG[si] + ' ' + sd.getDate() + ' ' + MONLONG[sd.getMonth()]);
+    var list = $('list'); list.innerHTML = '';
+    var mine = S.entries.filter(function(e){ return e.date === S.sel; });
+    if (!mine.length) { var p = document.createElement('div'); p.className = 'empty'; text(p, S.sel > maxDay ? "That day hasn't happened yet." : 'No hours in for this day.'); list.appendChild(p); }
+    mine.forEach(function(e){
+      var row = document.createElement('button'); row.type = 'button';
+      row.className = 'entry' + (e.status === 'approved' ? ' locked' : '');
+      var g = document.createElement('div'); g.className = 'grow';
+      var j = document.createElement('div'); j.className = 'job'; text(j, e.jobName); g.appendChild(j);
+      if (e.note) { var n = document.createElement('div'); n.className = 'note'; text(n, e.note); g.appendChild(n); }
+      var ch = document.createElement('span'); ch.className = 'chip ' + (e.status === 'pending' ? 'wait' : 'ok');
+      text(ch, e.status === 'pending' ? 'Waiting · tap to change' : 'Approved'); g.appendChild(ch);
+      var hh = document.createElement('div'); hh.className = 'hrs'; text(hh, hrs(e.hours));
+      row.appendChild(g); row.appendChild(hh);
+      row.addEventListener('click', function(){
+        if (e.status !== 'pending') { show('err', "That's been approved — ask your boss if it needs changing."); return; }
+        openForm(e);
       });
-      $('nojobs').style.display = s.jobs.length ? 'none' : '';
-      $('f').style.display = '';
-      renderRecent(s.recent);
-    }).catch(function(){ text($('biz'), "Couldn't load — check your signal and refresh."); });
+      list.appendChild(row);
+    });
+    var add = $('add'); var short = DN[si];
+    add.style.display = S.sel > maxDay || $('form').style.display === 'block' ? 'none' : '';
+    text(add, '+ Add hours for ' + (S.sel === today ? 'today' : short + ' ' + sd.getDate()));
   }
-  $('f').addEventListener('submit', function(ev){
-    ev.preventDefault();
-    var job = document.querySelector('input[name=job]:checked');
-    if (!job) return show('err', 'Pick a job first.');
-    var hours = $('hours').value.trim();
-    if (!hours) return show('err', 'How many hours?');
-    $('go').disabled = true;
-    fetch(api + '&action=log', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ jobId: job.value, date: day, hours: hours, note: $('note').value })
-    }).then(function(r){ return r.json().then(function(j){ return { ok: r.ok, j: j }; }); }).then(function(res){
-      if (!res.ok) return show('err', res.j.error || "Couldn't send that — try again.");
-      show('ok', 'Sent: ' + res.j.entry.hours + ' h on ' + niceDay(res.j.entry.date) + '. Your boss will approve it.');
-      $('hours').value = ''; $('note').value = '';
-      renderRecent(res.j.recent);
-    }).catch(function(){ show('err', "Couldn't tell if that went through — check your signal, then refresh and look under What you've sent before sending it again."); })
-      .then(function(){ $('go').disabled = false; });
+
+  function fillJobs(selected){
+    var sel = $('job'); sel.innerHTML = '';
+    if (!S.jobs.length) { var o = document.createElement('option'); o.value = ''; text(o, 'No jobs open right now'); sel.appendChild(o); return; }
+    if (!selected && S.jobs.length > 1) { var p = document.createElement('option'); p.value = ''; text(p, 'Pick the job…'); sel.appendChild(p); }
+    S.jobs.forEach(function(j){ var o = document.createElement('option'); o.value = j.id; text(o, j.address ? j.name + ' — ' + j.address : j.name); sel.appendChild(o); });
+    if (selected && !S.jobs.some(function(j){ return j.id === selected.id; })) { var x = document.createElement('option'); x.value = selected.id; text(x, selected.name); sel.insertBefore(x, sel.firstChild); }
+    sel.value = selected ? selected.id : (S.jobs.length === 1 ? S.jobs[0].id : '');
+  }
+  function setQuick(v){ Array.prototype.forEach.call(document.querySelectorAll('.q'), function(b){ b.className = 'q' + (b.getAttribute('data-h') === String(v) ? ' on' : ''); }); }
+  function openForm(e){
+    S.editing = e || null; clearMsg();
+    var sd = parse(S.sel);
+    text($('formtitle'), e ? 'Change these hours' : 'Add hours');
+    text($('formfor'), 'For ' + DLONG[(sd.getDay() + 6) % 7] + ' ' + sd.getDate() + ' ' + MONLONG[sd.getMonth()] + ' · pick another day above');
+    fillJobs(e ? { id: e.jobId, name: e.jobName } : null);
+    $('hours').value = e ? String(e.hours) : ''; setQuick(e ? e.hours : '');
+    $('note').value = e && e.note ? e.note : '';
+    $('del').style.display = e ? '' : 'none'; $('del').removeAttribute('data-armed'); text($('del'), 'Delete');
+    $('form').style.display = 'block'; $('add').style.display = 'none';
+    $('form').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+  function closeForm(){ S.editing = null; $('form').style.display = 'none'; }
+
+  Array.prototype.forEach.call(document.querySelectorAll('.q'), function(b){
+    b.addEventListener('click', function(){ $('hours').value = b.getAttribute('data-h'); setQuick(b.getAttribute('data-h')); });
   });
-  load();
+  $('hours').addEventListener('input', function(){ setQuick($('hours').value.trim()); });
+  $('add').addEventListener('click', function(){ openForm(null); });
+  $('cancel').addEventListener('click', function(){ closeForm(); render(); });
+  $('prev').addEventListener('click', function(){ S.start = addDays(S.start, -7); S.sel = S.start; closeForm(); clearMsg(); loadWeek(); });
+  $('next').addEventListener('click', function(){ S.start = addDays(S.start, 7); S.sel = S.start === monday(today) ? today : S.start; closeForm(); clearMsg(); loadWeek(); });
+
+  $('save').addEventListener('click', function(){
+    var jobId = $('job').value, hours = $('hours').value.trim();
+    if (!jobId) return show('err', 'Pick the job first.');
+    if (!hours) return show('err', 'How many hours?');
+    $('save').disabled = true;
+    var body = { jobId: jobId, date: S.sel, hours: hours, note: $('note').value };
+    var editing = S.editing;
+    if (editing) body.id = editing.id;
+    call(editing ? 'update' : 'log', body).then(function(){
+      closeForm(); return loadWeek().then(function(){ show('ok', editing ? 'Changed. Your boss sees the new hours.' : 'Sent. Your boss will approve it.'); });
+    }).catch(function(err){ show('err', err.message || "Couldn't save that — check your signal and try again."); })
+      .then(function(){ $('save').disabled = false; });
+  });
+  $('del').addEventListener('click', function(){
+    var e = S.editing; if (!e) return;
+    // No confirm(): the /t frame is sandboxed without allow-modals, where it
+    // silently returns false. Second tap deletes.
+    var btn = $('del');
+    if (btn.getAttribute('data-armed') !== '1') { btn.setAttribute('data-armed', '1'); text(btn, 'Tap again to delete ' + hrs(e.hours)); return; }
+    btn.removeAttribute('data-armed');
+    call('delete', { id: e.id }).then(function(){ closeForm(); return loadWeek().then(function(){ show('ok', 'Deleted.'); }); })
+      .catch(function(err){ show('err', err.message || "Couldn't delete that."); });
+  });
+
+  // "Keep this on your phone" — how to put it on the home screen, once,
+  // until they close it. Storage can be blocked in a framed page; no harm.
+  var pinned = false; try { pinned = localStorage.getItem('qmCrewPinHidden') === '1'; } catch (e) {}
+  var ua = navigator.userAgent || '';
+  var standalone = (window.navigator.standalone === true) || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+  if (!pinned && !standalone) {
+    text($('pintext'), /iPhone|iPad|iPod/.test(ua)
+      ? 'This link is yours — it stays the same. Tap Share (the square with the arrow) at the bottom of Safari, then Add to Home Screen.'
+      : /Android/.test(ua)
+        ? 'This link is yours — it stays the same. Tap ⋮ at the top of Chrome, then Add to Home screen.'
+        : 'This link is yours — it stays the same. Bookmark it, or add it to your phone\\'s home screen.');
+    $('pin').style.display = '';
+  }
+  $('pinx').addEventListener('click', function(){ $('pin').style.display = 'none'; try { localStorage.setItem('qmCrewPinHidden', '1'); } catch (e) {} });
+
+  Promise.all([
+    fetch(api + '&action=state').then(function(r){ return r.json().then(function(j){ return { ok: r.ok, j: j }; }); }),
+    fetch(api + '&action=week&start=' + S.start).then(function(r){ return r.json().then(function(j){ return { ok: r.ok, j: j }; }); })
+  ]).then(function(rs){
+    var st = rs[0], wk = rs[1];
+    if (!st.ok) { text($('hello'), "This link isn't working"); text($('sub'), st.j.error || 'Ask your boss to send you a new one.'); return; }
+    S.jobs = st.j.jobs || []; S.entries = wk.ok ? (wk.j.entries || []) : [];
+    text($('biz'), st.j.businessName);
+    text($('hello'), st.j.crewName.split(' ')[0] + "'s hours");
+    text($('sub'), 'Put your hours in each day. ' + st.j.businessName + ' approves them — until then you can change them.');
+    $('app').style.display = '';
+    render();
+  }).catch(function(){ text($('sub'), "Couldn't load — check your signal and refresh."); });
 })();`;
 
-  return pageShell('Put your hours in', body, script);
+  return pageShell('Your hours', body, script);
 }
