@@ -30,6 +30,8 @@ import { PillToggle, type PillToggleOption } from '../components/PillToggle';
 import { DueDateSheet } from '../components/DueDateSheet';
 import { ProBadge } from '../components/ProBadge';
 import { SendStatementSheet } from '../components/SendStatementSheet';
+import { HoursComparisonCard } from '../components/HoursComparisonCard';
+import { TimesheetCard } from '../components/TimesheetCard';
 import { SkeletonCrossfade } from '../components/SkeletonCrossfade';
 import { useAlertModal } from '../hooks/useAlertModal';
 import { documentService } from '../services/documentService';
@@ -237,6 +239,14 @@ export function InsightsScreen() {
               <QuotePipelineChart documents={documents} />
               <RevenueChart documents={documents} />
               <CostBreakdownChart documents={documents} />
+              <HoursComparisonCard
+                documents={statementDocuments}
+                isPro={!!isPro}
+                onLockedPress={() =>
+                  navigation.navigate('Paywall' as never, { source: 'insights_hours' } as never)
+                }
+                onOpenJob={(jobId) => navigation.navigate('ViewJob' as never, { jobId } as never)}
+              />
             </>
           ) : (
             <Surface style={styles.statementCard}>
@@ -326,6 +336,16 @@ export function InsightsScreen() {
               )}
             </Surface>
           )}
+          {/* Same period as the statement above — one period control for
+              both documents. Renders nothing for someone who never logs time. */}
+          {section === 'reports' ? (
+            <TimesheetCard
+              period={period}
+              isPro={!!isPro}
+              requirePro={requirePro}
+              onError={(title, message) => showAlert({ type: 'error', title, message })}
+            />
+          ) : null}
         </View>
       </WebContainer>
     </ScrollView>

@@ -26,6 +26,7 @@ export const READ_TOOL_NAMES = [
   'review_quote',
   'get_job_requirements',
   'list_service_reports',
+  'get_job_time',
   'search_supplier_book',
   'get_typical_rates',
 ] as const;
@@ -44,6 +45,7 @@ export const PROPOSAL_TOOL_NAMES = [
   'propose_update_quote_rates',
   'propose_update_quote_scope',
   'propose_mark_paid',
+  'propose_log_time',
   'propose_import_supplier_list',
   'propose_remember_preference',
   'propose_save_rate',
@@ -204,6 +206,18 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
         },
         limit: { type: 'integer', description: 'Max rows to return (default 10, max 25).' },
       },
+    },
+  },
+  {
+    name: 'get_job_time',
+    description:
+      "Hours the tradie has logged on a job — their timesheet for it. Pass the id of a quote or invoice on that job (from list_recent_quotes or get_quote); the job is found through it. Returns loggedHours (everything), billableHours (what would be invoiced), quotedHours (the labour on the quote, absent when labour is a set price), and the entries newest first (date YYYY-MM-DD, hours, note). Use it for \"how many hours on the Smith job?\", \"am I over on that one?\", or before logging more time when they're unsure what's already down.",
+    parameters: {
+      type: 'object',
+      properties: {
+        quoteId: { type: 'string', description: 'Document id of a quote or invoice on the job.' },
+      },
+      required: ['quoteId'],
     },
   },
   {
@@ -602,6 +616,27 @@ export const TOOL_DECLARATIONS: GeminiFunctionDeclaration[] = [
     },
   },
   {
+    name: 'propose_log_time',
+    description:
+      'Propose logging hours worked on a job — "put 3 hours on the Smith job", "I did 7 and a half on the deck yesterday", "log 2 hours for Tuesday, don\'t charge it". Pass the id of a quote or invoice on that job (list_recent_quotes / get_quote); the time goes on its job. Apply saves one time entry. It does NOT change the quote or invoice — logged time is billed from the job screen, never by this card. Only hours the tradie actually said: never work hours out from a start and finish they didn\'t give, and never round.',
+    parameters: {
+      type: 'object',
+      properties: {
+        quoteId: { type: 'string', description: 'Document id of a quote or invoice on the job.' },
+        hours: { type: 'number', description: 'Hours worked, as the tradie said them. "Seven and a half" → 7.5, "half a day" → 4, "a full day" → 8. More than 0, at most 24.' },
+        daysAgo: {
+          type: 'integer',
+          description: 'Which day, counted back from today: 0 = today (the default), 1 = yesterday. For a weekday name ("Tuesday") count back to the most recent one. Leave off when they said today or gave no day.',
+        },
+        note: { type: 'string', description: 'Optional short note on what was done ("rough-in", "second fix"). Only words the tradie used.' },
+        billable: { type: 'boolean', description: 'false when they say not to charge it (warranty, callback, "don\'t bill that"). Defaults to true.' },
+        displayName: { type: 'string', description: 'Job name to show on the card (display only).' },
+        displayCustomerName: { type: 'string', description: 'Customer name to show on the card (display only).' },
+      },
+      required: ['quoteId', 'hours'],
+    },
+  },
+  {
     name: 'propose_import_supplier_list',
     description:
       "Propose reading a supplier's price list into the tradie's own supplier book, from a photo, a PDF or a spreadsheet. Use it when they say yes to the offer, hand you a price list, or ask to add their supplier's prices. Apply opens the reader right there in the chat and the tradie checks every row before anything saves — YOU never read prices off the image and you never type a price into their book. Every argument is optional: leave source off (or use 'ask') and the app offers the choices. Use source 'attachment' only when they've just sent you a photo of a price list in this chat — the app finds it, you never name it.",
@@ -725,6 +760,7 @@ export const TOOL_RUNTIME: Record<string, { timeoutSecs: number }> = {
   get_business_defaults: { timeoutSecs: 20 },
   review_quote: { timeoutSecs: 20 },
   list_service_reports: { timeoutSecs: 20 },
+  get_job_time: { timeoutSecs: 20 },
   // Niche inference + supplier-book checks — the slowest read by some way.
   get_job_requirements: { timeoutSecs: 30 },
   // First call in a session may pull the whole book collection from Firestore.
@@ -746,6 +782,7 @@ export const TOOL_RUNTIME: Record<string, { timeoutSecs: number }> = {
   propose_update_quote_rates: { timeoutSecs: 10 },
   propose_update_quote_scope: { timeoutSecs: 10 },
   propose_mark_paid: { timeoutSecs: 10 },
+  propose_log_time: { timeoutSecs: 10 },
   propose_import_supplier_list: { timeoutSecs: 10 },
   propose_remember_preference: { timeoutSecs: 10 },
   propose_save_rate: { timeoutSecs: 10 },

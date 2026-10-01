@@ -20,6 +20,7 @@ export type ProposalType =
   | 'propose_update_quote_rates'
   | 'propose_update_quote_scope'
   | 'propose_mark_paid'
+  | 'propose_log_time'
   | 'propose_import_supplier_list'
   | 'propose_remember_preference'
   | 'propose_save_rate'
@@ -321,6 +322,24 @@ export interface MarkPaidProposal extends BaseProposal {
   displayBalance?: number;
 }
 
+// Log hours worked on the job a quote/invoice belongs to — "put 3 hours on
+// the Smith job for yesterday". Apply writes one time entry; it never changes
+// the document's labour (billing logged hours is its own step on the job).
+export interface LogTimeProposal extends BaseProposal {
+  type: 'propose_log_time';
+  // Document id of a quote/invoice on the job; the job is found through it.
+  quoteId: string;
+  hours: number;
+  // Local day worked, YYYY-MM-DD — resolved from daysAgo by the validator.
+  date: string;
+  note?: string;
+  // False for time that's logged but never invoiced (warranty, a quote visit).
+  billable: boolean;
+  // Display-only — lets the card name the job without a re-fetch.
+  displayName?: string;
+  displayCustomerName?: string;
+}
+
 export interface UpdateQuoteRatesProposal extends BaseProposal {
   type: 'propose_update_quote_rates';
   quoteId: string;
@@ -372,6 +391,7 @@ export type Proposal =
   | UpdateQuoteRatesProposal
   | UpdateQuoteScopeProposal
   | MarkPaidProposal
+  | LogTimeProposal
   | ImportSupplierListProposal
   | RememberPreferenceProposal
   | SaveRateProposal

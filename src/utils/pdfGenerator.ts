@@ -38,6 +38,8 @@ import {
 } from '../../shared/pdf';
 import { ServiceReport } from '../../shared/report/types';
 import { isoDateInZone } from '../../shared/statement/buildStatement';
+import { buildTimesheetPdfHtml } from '../../shared/pdf/timesheetHtml';
+import { timesheetToCsv, type TimesheetData } from '../../shared/time/buildTimesheet';
 import type { StatementData } from '../../shared/statement/buildStatement';
 // One resolver for "how much of the money does the customer see" — the
 // per-doc override / business default / fallback chain used to be written
@@ -848,6 +850,100 @@ export async function exportStatementPDF(
     // so the caller shows the message (Alert is a no-op on web).
     reserved?.close();
     throw error;
+  }
+}
+
+export interface TimesheetExportOptions {
+  isPro?: boolean;
+  /** Tab reserved during the tap — see reservePrintWindow. Web only (PDF). */
+  printWindow?: Window | null;
+  /** e.g. "1 July 2025 – 30 June 2026" — printed under the title. */
+  periodLabel: string;
+}
+
+/** "Timesheet 2025-07-01 to 2026-06-30 Rivo Plumbing" — sorts in a folder. */
+function timesheetFilename(data: TimesheetData, businessSettings: BusinessSettings | null, ext: 'pdf' | 'csv'): string {
+  const businessName = (businessSettings?.businessName || '').replace(/[^a-zA-Z0-9 &'-]/g, '').trim();
+  return `Timesheet ${data.range.fromKey} to ${data.range.toKey}${businessName ? ` ${businessName}` : ''}.${ext}`;
+}
+
+/**
+ * Share hours for a period as a PDF. Same platform handling and business
+ * chrome as exportStatementPDF.
+ */
+export async function exportTimesheetPDF(
+  data: TimesheetData,
+  businessSettings: BusinessSettings | null,
+  options: TimesheetExportOptions,
+): Promise<void> {
+  const reserved = options.printWindow ?? reservePrintWindow();
+  try {
+    const business = await prepareBusinessPdfData(businessSettings, options.isPro);
+    const html = buildTimesheetPdfHtml(data, business, {
+      periodLabel: options.periodLabel,
+      generatedLabel: format(new Date(), 'd MMMM yyyy'),
+    });
+    const filename = timesheetFilename(data, businessSettings, 'pdf');
+
+    if (Platform.OS === 'web') {
+      writeToPrintWindow(reserved, html, filename, true);
+      return;
+    }
+
+    const { uri } = await Print.printToFileAsync({ html });
+    const newUri = `${FileSystem.cacheDirectory}${filename}`;
+    await FileSystem.copyAsync({ from: uri, to: newUri });
+    if (await Sharing.isAvailableAsync()) {
+      await Sharing.shareAsync(newUri, {
+        UTI: Platform.OS === 'ios' ? 'com.adobe.pdf' : undefined,
+        mimeType: 'application/pdf',
+        dialogTitle: filename,
+      });
+    } else {
+      Alert.alert('PDF Created', `${filename} saved successfully`);
+    }
+  } catch (error) {
+    reserved?.close();
+    throw error;
+  }
+}
+
+/**
+ * Share hours for a period as a CSV — for a spreadsheet or a payroll import.
+ * A download on web; the OS share sheet on a phone.
+ */
+export async function shareTimesheetCSV(
+  data: TimesheetData,
+  businessSettings: BusinessSettings | null,
+): Promise<void> {
+  const csv = timesheetToCsv(data);
+  const filename = timesheetFilename(data, businessSettings, 'csv');
+
+  if (Platform.OS === 'web') {
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    try {
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } finally {
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+    return;
+  }
+
+  const uri = `${FileSystem.cacheDirectory}${filename}`;
+  await FileSystem.writeAsStringAsync(uri, csv, { encoding: FileSystem.EncodingType.UTF8 });
+  if (await Sharing.isAvailableAsync()) {
+    await Sharing.shareAsync(uri, {
+      UTI: Platform.OS === 'ios' ? 'public.comma-separated-values-text' : undefined,
+      mimeType: 'text/csv',
+      dialogTitle: filename,
+    });
+  } else {
+    Alert.alert('CSV Created', `${filename} saved successfully`);
   }
 }
 

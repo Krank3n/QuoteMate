@@ -43,6 +43,9 @@ vi.mock('../components/DueDateSheet', () => ({
   },
 }));
 vi.mock('../components/ProBadge', () => ({ ProBadge: () => <span>PRO</span> }));
+// The time cards read their own collection and have their own tests.
+vi.mock('../components/HoursComparisonCard', () => ({ HoursComparisonCard: () => null }));
+vi.mock('../components/TimesheetCard', () => ({ TimesheetCard: () => null }));
 
 const sendSheet = vi.hoisted(() => ({ props: null as any }));
 vi.mock('../components/SendStatementSheet', () => ({

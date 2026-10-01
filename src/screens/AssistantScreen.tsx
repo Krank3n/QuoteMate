@@ -1555,6 +1555,17 @@ export function AssistantScreen() {
       // "Applied". Don't navigate away mid-conversation; just let Mate
       // confirm verbally / textually on the next turn. The [context] line
       // below tells the model the payment landed.
+      // Logged time stays in chat too. The tradie already sees the "Logged
+      // 3 h …" line; Mate only needs to know it landed so it doesn't log it
+      // twice or ask again.
+      if (proposal.type === 'propose_log_time') {
+        note(
+          `[context] ${result.note ?? 'Time logged.'} It's saved on the job's timesheet — don't log it again, ` +
+            `and don't repeat the figures unless the tradie asks.`,
+        );
+        return;
+      }
+
       if (proposal.type === 'propose_mark_paid') {
         if (result.navigate?.kind === 'open_invoice') {
           const label = proposal.displayName || proposal.displayCustomerName || 'that invoice';

@@ -67,7 +67,7 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
  * hours from the fields there would multiply the price by the multiplier again
  * just for opening the editor; deriving them from the money cannot.
  */
-function sectionHours(s: QuoteSection): number {
+export function sectionHours(s: QuoteSection): number {
   // A lump-sum section has no hours by construction — its price is a number
   // the tradie typed, not a duration × a rate. Deriving hours from its dollars
   // (total ÷ rate, with rate 0) is a division by zero, and the old code's
@@ -221,4 +221,15 @@ export function applyLabourEditor(doc: LabourDocLike, state: LabourEditorState):
 function sectionHoursTotal(doc: LabourDocLike): number {
   const sum = (doc.sections || []).reduce((total, s) => total + sectionHours(s), 0);
   return sum + (doc.laborExtraHours || 0);
+}
+
+/**
+ * The labour hours a document charges for, in hours — what the labour
+ * screen's total input shows. Sections + extra when there are sections (a
+ * lump-sum section counts 0), otherwise the top-level hours.
+ */
+export function labourHoursOnDocument(rawDoc: LabourDocLike): number {
+  const doc = normaliseLabourToHours(rawDoc);
+  const hours = doc.sections && doc.sections.length > 0 ? sectionHoursTotal(doc) : doc.laborHours;
+  return round2(Number.isFinite(hours) ? hours : 0);
 }

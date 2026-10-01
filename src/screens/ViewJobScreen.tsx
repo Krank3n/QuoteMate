@@ -32,6 +32,12 @@ import { reportService } from '../services/reportService';
 import { resumableReportId, reportRowMeta } from './ServiceReport/reportDraft';
 import { ServiceReportCard } from '../components/ServiceReportCard';
 import type { ServiceReport } from '../../shared/report/types';
+import type { TimeEntry } from '../../shared/time/types';
+import { timeEntryService } from '../services/timeEntryService';
+import { LogTimeSheet } from '../components/LogTimeSheet';
+import { JobTimeRow } from '../components/JobTimeRow';
+import { sumBillableHours, formatHours, sortEntriesNewestFirst } from '../../shared/time/hours';
+import { chargeLoggedHoursPlan } from '../utils/loggedHours';
 import { StageSheet } from '../components/StageSheet';
 import { JobStageSheet, stageMetaFor } from '../components/JobStageSheet';
 import {
@@ -165,6 +171,42 @@ export function ViewJobScreen() {
     const unsubscribe = navigation.addListener('focus', load);
     return () => { cancelled = true; unsubscribe(); };
   }, [jobId, navigation]);
+  // Hours logged on this job — read on focus; the Log time sheet folds its
+  // own saves and deletes in directly, so a slow ack on site signal never
+  // hides what was just logged. A failed read is kept apart from "nothing
+  // logged": showing the empty state there invites logging it twice.
+  const [timeEntries, setTimeEntries] = useState<TimeEntry[]>([]);
+  const [timeLoadFailed, setTimeLoadFailed] = useState(false);
+  const [timeSheetVisible, setTimeSheetVisible] = useState(false);
+  const reloadTimeEntries = React.useCallback(() => {
+    if (!jobId) return;
+    timeEntryService.listForJob(jobId).then((entries) => {
+      if (entries) {
+        setTimeEntries(entries);
+        setTimeLoadFailed(false);
+      } else {
+        setTimeLoadFailed(true);
+      }
+    });
+  }, [jobId]);
+  const handleTimeSaved = React.useCallback((entry: TimeEntry) => {
+    setTimeEntries((prev) => sortEntriesNewestFirst([entry, ...prev.filter((e) => e.id !== entry.id)]));
+  }, []);
+  const handleTimeDeleted = React.useCallback((id: string) => {
+    setTimeEntries((prev) => prev.filter((e) => e.id !== id));
+  }, []);
+  // The Jobs list and Dashboard open the job with its Log time sheet up.
+  const openLogTime: boolean = !!route.params?.openLogTime;
+  useEffect(() => {
+    if (!openLogTime) return;
+    setTimeSheetVisible(true);
+    navigation.setParams({ openLogTime: undefined });
+  }, [openLogTime, navigation]);
+  useEffect(() => {
+    reloadTimeEntries();
+    const unsubscribe = navigation.addListener('focus', reloadTimeEntries);
+    return unsubscribe;
+  }, [reloadTimeEntries, navigation]);
   const [notesDirty, setNotesDirty] = useState(false);
   const [notesEditing, setNotesEditing] = useState(false);
 
@@ -317,6 +359,105 @@ export function ViewJobScreen() {
         />
       ))}
     </View>
+  ) : null;
+
+  // Billable hours logged vs the invoice's labour (rules in
+  // chargeLoggedHoursPlan). The standing link on the time row only shows
+  // when there's more to charge, or once the work is done — mid-job, fewer
+  // hours logged than invoiced is just a job that isn't finished yet.
+  const billableLogged = sumBillableHours(timeEntries);
+  // Crew send-ins not yet approved. They don't count, but charging "fewer
+  // hours than invoiced" while they sit there would under-bill the job the
+  // moment they're approved — so a lowering offer waits for them.
+  const pendingHoursOf = (entries: TimeEntry[]) =>
+    sumBillableHours(entries.filter((e) => e.status === 'pending').map((e) => ({ ...e, status: undefined })));
+  const pendingLogged = pendingHoursOf(timeEntries);
+  const invoicePlan =
+    primaryDoc?.type === 'invoice' ? chargeLoggedHoursPlan(primaryDoc, billableLogged) : null;
+  const workDone = job.stage === 'completed' || job.stage === 'paid' || job.stage === 'closed';
+  const showChargeLink = !!invoicePlan && (invoicePlan.raises || (workDone && pendingLogged === 0));
+
+  const offerChargeLoggedHours = (invoice: Document, loggedHours: number, pendingHours: number) => {
+    const plan = chargeLoggedHoursPlan(invoice, loggedHours);
+    if (!plan) return;
+    if (!plan.raises && pendingHours > 0) return;
+    const logged = formatHours(plan.loggedHours);
+    const invoiced = formatHours(plan.quotedHours);
+    const charge = async () => {
+      try {
+        await saveDocument(plan.next);
+        dismissAlert();
+      } catch {
+        showAlert({ type: 'error', title: "Couldn't update the invoice", message: 'Try again in a moment.' });
+      }
+    };
+    const keep = () => {};
+    showAlert({
+      type: 'info',
+      title: 'Charge the hours you logged?',
+      message:
+        `You logged ${logged}; the invoice charges ${invoiced}. ` +
+        `Charging ${logged} takes the total from ${formatCurrency(plan.fromTotal)} to ${formatCurrency(plan.toTotal)}.` +
+        (plan.alreadySent ? ' The customer has the old invoice, so send them the updated one.' : '') +
+        (pendingHours > 0
+          ? ` Another ${formatHours(pendingHours)} sent in by crew is waiting for you to approve — it isn't included.`
+          : ''),
+      // The safe choice is the big button: more hours to charge → charge
+      // them; fewer → keep what was invoiced unless they mean it.
+      primaryKeepsOpen: true,
+      ...(plan.raises
+        ? {
+            primaryButtonText: `Charge ${logged}`,
+            primaryButtonAction: charge,
+            secondaryButtonText: `Keep ${invoiced}`,
+            secondaryButtonAction: keep,
+          }
+        : {
+            primaryButtonText: `Keep ${invoiced}`,
+            primaryButtonAction: async () => dismissAlert(),
+            secondaryButtonText: `Charge ${logged}`,
+            secondaryButtonAction: async () => {
+              try {
+                await saveDocument(plan.next);
+              } catch {
+                // The secondary wrapper closes the modal after this returns,
+                // so the error has to come up on the next tick.
+                setTimeout(
+                  () => showAlert({ type: 'error', title: "Couldn't update the invoice", message: 'Try again in a moment.' }),
+                  0,
+                );
+              }
+            },
+          }),
+    });
+  };
+
+  // Hidden until the job is won or has time on it — the job screen is dense
+  // enough, and "Log time" is in the actions menu either way.
+  const showTimeRow =
+    timeEntries.length > 0 ||
+    timeLoadFailed ||
+    ['accepted', 'scheduled', 'in_progress', 'completed', 'paid'].includes(job.stage);
+  const timeRow = showTimeRow ? (
+    <JobTimeRow
+      entries={timeEntries}
+      loadFailed={timeLoadFailed}
+      primaryDoc={primaryDoc ?? null}
+      onPress={() => {
+        if (timeLoadFailed) reloadTimeEntries();
+        setTimeSheetVisible(true);
+      }}
+      chargeLink={
+        showChargeLink && invoicePlan && primaryDoc
+          ? {
+              label: invoicePlan.raises
+                ? `Charge ${formatHours(invoicePlan.loggedHours)} logged, not ${formatHours(invoicePlan.quotedHours)} (+${formatCurrency(invoicePlan.toTotal - invoicePlan.fromTotal)})`
+                : `Charge ${formatHours(invoicePlan.loggedHours)} logged, not ${formatHours(invoicePlan.quotedHours)} (−${formatCurrency(invoicePlan.fromTotal - invoicePlan.toTotal)})`,
+              onPress: () => offerChargeLoggedHours(primaryDoc, billableLogged, pendingLogged),
+            }
+          : undefined
+      }
+    />
   ) : null;
 
   const reeceOrderEntry =
@@ -511,6 +652,16 @@ export function ViewJobScreen() {
         try {
           await convertDocumentToInvoice(doc.id);
           dismissAlert();
+          // The quote's labour was a guess; if real hours were logged, offer
+          // to bill those instead. Never automatic — the default keeps the
+          // quoted labour.
+          const invoice = useStore.getState().getDocumentById(doc.id);
+          if (invoice?.type === 'invoice' && invoice.jobId === job.id) {
+            // Read the hours now, not as they were when this prompt opened.
+            const fresh = await timeEntryService.listForJob(job.id);
+            const current = fresh ?? timeEntries;
+            offerChargeLoggedHours(invoice, sumBillableHours(current), pendingHoursOf(current));
+          }
           // Stay on the job screen — the card flips to an Unpaid invoice in
           // place and the snackbar confirms. Jumping into the materials
           // editor here (the old behaviour) read as being yanked off the
@@ -847,6 +998,9 @@ export function ViewJobScreen() {
       case 'duplicate':
         handleDuplicate();
         break;
+      case 'log_time':
+        setTimeSheetVisible(true);
+        break;
       case 'service_report':
         if (canUseServiceReports(getEffectivePlan())) {
           // Resume an unfinished draft instead of minting a duplicate report;
@@ -1110,7 +1264,7 @@ export function ViewJobScreen() {
             onPaymentPress={handlePaymentChipPress}
             onConvertToInvoice={handleConvertToInvoice}
             jobIsPaid={job.stage === 'paid'}
-            extra={<>{serviceReportRows}{reeceOrderEntry}</>}
+            extra={<>{timeRow}{serviceReportRows}{reeceOrderEntry}</>}
           />
         ) : null}
 
@@ -1132,7 +1286,7 @@ export function ViewJobScreen() {
             onPaymentPress={handlePaymentChipPress}
             onConvertToInvoice={handleConvertToInvoice}
             jobIsPaid={job.stage === 'paid'}
-            extra={<>{serviceReportRows}{reeceOrderEntry}</>}
+            extra={<>{timeRow}{serviceReportRows}{reeceOrderEntry}</>}
           />
         ) : null}
 
@@ -1203,6 +1357,17 @@ export function ViewJobScreen() {
         visible={scheduleSheetVisible}
         onDismiss={() => setScheduleSheetVisible(false)}
         job={job}
+      />
+
+      <LogTimeSheet
+        visible={timeSheetVisible}
+        onDismiss={() => setTimeSheetVisible(false)}
+        job={job}
+        primaryDoc={primaryDoc ?? null}
+        entries={timeEntries}
+        onSaved={handleTimeSaved}
+        onDeleted={handleTimeDeleted}
+        workerName={businessSettings?.businessName || undefined}
       />
 
       <TakePaymentSheet

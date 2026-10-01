@@ -30,6 +30,9 @@ import { resolveSupplierBookLookup } from './supplierBookLookup';
 import { isProposalId, resolveQuoteId } from './quoteRefMap';
 import { missingQuoteMessage, type CandidateRow } from './quoteLookupRecovery';
 import { fuzzyScoreQuote } from './quoteFuzzy';
+import { normaliseTimeEntry } from '../timeEntryService';
+import { isCounted, sortEntriesNewestFirst, sumBillableHours, sumHours } from '../../../shared/time/hours';
+import { hourlyRateOf, quotedHoursOf } from '../../utils/loggedHours';
 import { getPillsForNiche } from '../../data/nichePills';
 import { NICHE_TEMPLATES } from '../../data/nicheTemplates';
 import { buildWordWeights, scoreName, NICHE_MATCH_FLOOR } from './nicheMatch';
@@ -1097,4 +1100,60 @@ export async function listServiceReports(input: {
   }
 
   return { reports: rows.slice(0, rowLimit), count: Math.min(rows.length, rowLimit) };
+}
+
+// --- Time on a job ----------------------------------------------------------
+//
+// "How many hours have I put into the Smith job?" Mate works in document ids,
+// so the job is found through the quote/invoice on it. Quoted hours are the
+// labour on that document, read the same way the labour screen reads them.
+
+export async function getJobTime(input: { quoteId: string }): Promise<unknown> {
+  const uid = requireUid();
+  const res = (await getQuote({ quoteId: input.quoteId })) as { quote?: any; error?: string };
+  if (!res || res.error || !res.quote) return { error: res?.error || 'Quote not found.' };
+  const q = res.quote;
+  const jobId = typeof q.jobId === 'string' ? q.jobId : '';
+  if (!jobId) {
+    return { loggedHours: 0, entries: [], note: "No job found for that one, so there's no time logged against it." };
+  }
+  const snap = await getDocs(
+    query(collection(db, 'users', uid, 'timeEntries'), where('jobId', '==', jobId)),
+  ).catch(() => null);
+  // A failed read is not "no time logged" — saying 0 h here is how the same
+  // hours get logged twice.
+  if (!snap) {
+    return { error: "Couldn't read the hours on that job just now (likely signal). Don't log anything on the strength of this — try again shortly." };
+  }
+  const entries = sortEntriesNewestFirst(
+    snap.docs.map((d) => normaliseTimeEntry(d.data(), d.id)),
+  );
+  const quotedHours = hourlyRateOf(q) > 0 ? quotedHoursOf(q) : undefined;
+  // Crew send-ins waiting for approval are named apart — never mixed into the
+  // rows, or Mate adds them up and reads out hours nobody has approved.
+  const approved = entries.filter(isCounted);
+  const waiting = entries.filter((e) => !isCounted(e));
+  return {
+    jobName: q.jobName || q.job?.name || undefined,
+    customerName: q.customerName || undefined,
+    loggedHours: sumHours(entries),
+    billableHours: sumBillableHours(entries),
+    ...(quotedHours !== undefined
+      ? { quotedHours }
+      : { quotedHoursNote: "Labour on this one isn't straight hours at one rate (a set price, work items, or mixed rates), so there's no quoted-hours figure to compare." }),
+    ...(waiting.length
+      ? {
+          pendingHours: sumHours(waiting.map((e) => ({ ...e, status: undefined }))),
+          pendingNote: 'Sent in by crew and NOT approved yet — not counted, not billable. The tradie approves them on the job.',
+        }
+      : {}),
+    entries: approved.slice(0, 15).map((e) => ({
+      ...(e.workerName && e.workerId?.startsWith('crew:') ? { workedBy: e.workerName } : {}),
+      date: e.date,
+      hours: e.hours,
+      ...(e.note ? { note: e.note } : {}),
+      ...(e.billable === false ? { billable: false } : {}),
+    })),
+    ...(approved.length === 0 ? { note: 'No approved time logged on this job yet.' } : {}),
+  };
 }
