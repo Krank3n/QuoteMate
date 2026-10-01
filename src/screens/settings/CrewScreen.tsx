@@ -12,6 +12,7 @@ import { ScrollView, Share, TouchableOpacity, View, Platform } from 'react-nativ
 import { Button, Surface, Text, TextInput } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import * as Clipboard from 'expo-clipboard';
+import { useNavigation } from '@react-navigation/native';
 
 import type { CrewMember } from '../../../shared/time/types';
 import { useStore } from '../../store/useStore';
@@ -42,6 +43,7 @@ export function CrewScreen() {
   const businessSettings = useStore((s) => s.businessSettings);
   const setBusinessSettings = useStore((s) => s.setBusinessSettings);
   const { showAlert, dismissAlert, alertNode } = useAlertModal();
+  const navigation = useNavigation<any>();
 
   const [editing, setEditing] = useState<Editing | null>(null);
   const [nameText, setNameText] = useState('');
@@ -252,6 +254,9 @@ export function CrewScreen() {
               ))
             )}
 
+            <Button mode="outlined" icon="calendar-clock" onPress={() => navigation.navigate('Timesheets')} style={styles.addButton}>
+              See everyone's hours
+            </Button>
             <Button mode="contained" icon="account-plus-outline" onPress={openAdd} style={styles.addButton}
               buttonColor={themeColors.accent} textColor={themeColors.onAccent}>
               Add someone

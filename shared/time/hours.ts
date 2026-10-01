@@ -127,3 +127,21 @@ export function parseHoursInput(raw: string): number | null {
   const rounded = round2(hours);
   return isValidEntryHours(rounded) ? rounded : null;
 }
+
+/** The date key `days` after (or before, if negative) a date key. Local calendar days. */
+export function addDaysKey(dateKey: string, days: number): string {
+  const [y, m, d] = dateKey.split('-').map(Number);
+  return localDateKey(new Date(y, m - 1, d + days));
+}
+
+/** Monday of the week a date key falls in — weeks run Monday to Sunday, like a pay week. */
+export function weekStartKey(dateKey: string): string {
+  const [y, m, d] = dateKey.split('-').map(Number);
+  const day = new Date(y, m - 1, d).getDay(); // 0 = Sunday
+  return addDaysKey(dateKey, day === 0 ? -6 : 1 - day);
+}
+
+/** The seven date keys of the week starting `startKey`. */
+export function weekKeys(startKey: string): string[] {
+  return Array.from({ length: 7 }, (_, i) => addDaysKey(startKey, i));
+}

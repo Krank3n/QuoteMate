@@ -26,6 +26,15 @@ const settings = vi.hoisted(() => ({ current: { businessName: 'Rivo Plumbing', c
 vi.mock('../store/useStore', () => ({
   useStore: (selector: (s: any) => unknown) => selector({ businessSettings: settings.current }),
 }));
+const jobsState = vi.hoisted(() => ({
+  jobs: [
+    { id: 'job-1', name: 'Back deck', customerName: 'Gigar', primaryDocumentId: 'q-1', updatedAt: 2 },
+    { id: 'job-2', name: 'Side fence', customerName: 'Karl', primaryDocumentId: 'q-2', updatedAt: 1 },
+  ],
+}));
+vi.mock('../store/useJobStore', () => ({
+  useJobStore: (selector: (s: any) => unknown) => selector(jobsState),
+}));
 
 vi.mock('@expo/vector-icons/MaterialCommunityIcons', () => ({ default: () => null }));
 vi.mock('react-native-paper', async () => {
@@ -248,5 +257,36 @@ describe('crew', () => {
     expect(screen.getByText(/Jake · .* · 7 h/)).toBeTruthy();
     fireEvent.click(screen.getByText('Approve'));
     await waitFor(() => expect(onSaved).toHaveBeenCalledWith(expect.objectContaining({ id: 'sent', status: 'approved' })));
+  });
+});
+
+describe('editing anything', () => {
+  it("a crew member's waiting hours can be changed before approving — they stay waiting", async () => {
+    settings.current = { businessName: 'Rivo Plumbing', crew: [{ id: 'c1', name: 'Jake', createdAt: 1 }] };
+    const { onSaved } = renderSheet([entry({ id: 'sent', hours: 7, workerId: 'crew:c1', status: 'pending', source: 'crew_link' })]);
+    fireEvent.click(screen.getByLabelText(/Edit 7 h from Jake/));
+    fireEvent.change(screen.getByLabelText('Hours worked'), { target: { value: '6' } });
+    fireEvent.click(screen.getByText('Save changes'));
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(service.updateEntry.mock.calls[0][0]).toMatchObject({ id: 'sent', hours: 6, status: 'pending', workerId: 'crew:c1' });
+  });
+
+  it('moves hours logged on the wrong job to the right one', async () => {
+    const { onSaved } = renderSheet([entry({ id: 'e1', hours: 5 })]);
+    fireEvent.click(screen.getByLabelText(/Edit 5 h on Yesterday/));
+    fireEvent.click(screen.getByLabelText(/Job: Gigar — Back deck/));
+    fireEvent.click(screen.getByText('Karl — Side fence'));
+    fireEvent.click(screen.getByText('Save changes'));
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(service.updateEntry.mock.calls[0][0]).toMatchObject({ id: 'e1', jobId: 'job-2', documentId: 'q-2' });
+  });
+
+  it('links to every job\'s timesheets', () => {
+    const onOpen = vi.fn();
+    render(
+      <LogTimeSheet visible onDismiss={() => {}} job={job} primaryDoc={quote} entries={[]} onSaved={vi.fn()} onDeleted={vi.fn()} onOpenTimesheets={onOpen} />,
+    );
+    fireEvent.click(screen.getByText(/See all timesheets/));
+    expect(onOpen).toHaveBeenCalled();
   });
 });

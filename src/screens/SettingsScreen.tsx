@@ -165,6 +165,13 @@ export function SettingsScreen() {
           screen: 'Contacts',
         },
         {
+          id: 'timesheets',
+          title: 'Timesheets',
+          subtitle: "Everyone's hours by week — edit and approve",
+          icon: 'clock-outline',
+          screen: 'Timesheets',
+        },
+        {
           id: 'crew',
           title: 'Crew',
           subtitle: 'Log their hours, or send them a link',

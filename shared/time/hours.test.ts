@@ -10,6 +10,9 @@ import {
   sortEntriesNewestFirst,
   sumBillableHours,
   sumHours,
+  addDaysKey,
+  weekKeys,
+  weekStartKey,
 } from './hours';
 
 describe('summing logged hours', () => {
@@ -108,4 +111,19 @@ it('formats hours without trailing zeros', () => {
   expect(formatHours(12.5)).toBe('12.5 h');
   expect(formatHours(8)).toBe('8 h');
   expect(formatHours(0.333)).toBe('0.33 h');
+});
+
+describe('weeks', () => {
+  it('start on Monday, Sunday belonging to the week before it', () => {
+    expect(weekStartKey('2026-10-01')).toBe('2026-09-28'); // Thursday
+    expect(weekStartKey('2026-09-28')).toBe('2026-09-28'); // Monday
+    expect(weekStartKey('2026-10-04')).toBe('2026-09-28'); // Sunday
+  });
+
+  it('count days across month and year ends', () => {
+    expect(addDaysKey('2026-09-30', 1)).toBe('2026-10-01');
+    expect(addDaysKey('2026-12-31', 1)).toBe('2027-01-01');
+    expect(addDaysKey('2026-03-01', -1)).toBe('2026-02-28');
+    expect(weekKeys('2026-09-28')).toEqual(['2026-09-28', '2026-09-29', '2026-09-30', '2026-10-01', '2026-10-02', '2026-10-03', '2026-10-04']);
+  });
 });

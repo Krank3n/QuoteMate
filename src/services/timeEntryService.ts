@@ -162,6 +162,20 @@ class TimeEntryService {
     }
   }
 
+  /** Every entry from one day to another, both inclusive. Null when the read failed. */
+  async listRange(fromKey: string, toKey: string): Promise<TimeEntry[] | null> {
+    const uid = getUserId();
+    if (!uid) return [];
+    try {
+      const snap = await getDocs(
+        query(this.colRef(uid), where('date', '>=', fromKey), where('date', '<=', toKey)),
+      );
+      return sortEntriesNewestFirst(snap.docs.map((d) => normaliseTimeEntry(d.data(), d.id)));
+    } catch {
+      return null;
+    }
+  }
+
   /** Every entry on the account — for cross-job views like Insights. */
   async listAll(): Promise<TimeEntry[]> {
     const uid = getUserId();
