@@ -1,10 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import {
-  depositNettedOffTotal,
-  invoiceEmailDepositView,
-  nettedDepositCredit,
-  recordedDepositTotal,
-} from './recordedDeposit';
+import { depositNettedOffTotal, invoiceEmailDepositView, nettedDepositCredit, recordedDepositTotal, invoiceBalanceDue } from './recordedDeposit';
 
 describe('recordedDepositTotal', () => {
   it('sums only the payments marked as the deposit', () => {
@@ -129,8 +124,33 @@ describe('every invoice render path reads the deposit through the shared helpers
   });
 
   it('the emailed PDF uses invoicePdfPaymentFields and the email uses invoiceEmailDepositView', () => {
-    expect(server).toContain('...invoicePdfPaymentFields(doc as DocumentRecord)');
+    expect(server).toContain('...invoicePdfPaymentFields(canonical)');
+    expect(server).toContain('invoiceRecordForSend(doc as DocumentRecord, input.overrides)');
     expect(server).toContain('invoiceEmailDepositView({');
     expect(server).toContain('depositCredit: emailDeposit.depositCredit');
   });
+});
+
+describe('invoiceBalanceDue', () => {
+  const dep = { id: 'dep-1', kind: 'deposit', amount: 291.72, paidAt: 1, method: 'bank' };
+  const stash = { total: 972.4, stage: 'quote_accepted', at: 1 };
+
+  it('full-total invoice with a ledger deposit and a payment', () => {
+    const later = { id: 'm-1', kind: 'manual', amount: 20, paidAt: 2 };
+    expect(invoiceBalanceDue({ type: 'invoice', total: 972.4, paidTotal: 311.72, payments: [dep, later] })).toBe(660.68);
+  });
+
+  it('an older build\'s netted convert still reads the real balance', () => {
+    expect(invoiceBalanceDue({ type: 'invoice', total: 680.68, paidTotal: 291.72, payments: [dep], convertedFromQuote: stash })).toBe(680.68);
+  });
+
+  it('a legacy-minted netted invoice counts its credit once', () => {
+    const credit = { id: 'deposit-credit-q0', kind: 'deposit', amount: 300, paidAt: 1, method: 'square' };
+    expect(invoiceBalanceDue({ type: 'invoice', total: 660, paidTotal: 500, payments: [credit, { id: 'm', kind: 'manual', amount: 200, paidAt: 2 }] })).toBe(460);
+  });
+
+  it('never negative', () => {
+    expect(invoiceBalanceDue({ type: 'invoice', total: 100, paidTotal: 150, payments: [] })).toBe(0);
+  });
+
 });

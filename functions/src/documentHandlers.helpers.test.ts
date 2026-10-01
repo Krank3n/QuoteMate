@@ -1,3 +1,4 @@
+import { invoiceEmailDepositView } from './shared/document/recordedDeposit';
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { dirname, join } from 'path';
@@ -14,6 +15,7 @@ import {
   sendMethodPatch,
   stageTransitionTimestamps,
   decideRotation,
+  invoiceRecordForSend,
   quoteDepositPaid,
 } from './documentHandlers';
 import { documentRecordToInvoiceRecord } from './shared/document/adapter';
@@ -412,5 +414,43 @@ describe('decideRotation — older netted invoice', () => {
       payments: [{ id: 'dep-1', kind: 'deposit', amount: 300, paidAt: 1, method: 'bank' }],
     };
     expect(decideRotation(doc)).toMatchObject({ needed: true, kind: 'balance', amount: 660 });
+  });
+});
+
+describe('invoiceRecordForSend — money from the server, not the client copy', () => {
+  const dep = { id: 'dep-1', kind: 'deposit', amount: 291.72, paidAt: 1, method: 'bank' };
+  const doc: any = {
+    id: 'q1', type: 'invoice', stage: 'invoice_sent', number: 'INV-5', total: 972.4,
+    paidTotal: 291.72, balanceDue: 680.68, payments: [dep], createdAt: 1, updatedAt: 2,
+    job: { name: 'Tap' }, materials: [], convertedFromQuote: { total: 972.4, stage: 'quote_accepted', at: 1 },
+  };
+
+  it('ignores an older build\'s netted depositCredit in the client copy', () => {
+    const olderCopy = { total: 972.4, paidAmount: 291.72, depositCredit: 291.72, customerName: 'Sam' };
+    const { invoice } = invoiceRecordForSend(doc, olderCopy);
+    expect(invoice.depositCredit).toBeUndefined();
+    expect(invoice.total).toBe(972.4);
+    expect(invoice.customerName).toBe('Sam');
+    const email = invoiceEmailDepositView({ total: invoice.total, nettedCredit: invoice.depositCredit, payments: doc.payments });
+    expect(email).toEqual({ total: 680.68, depositCredit: 291.72 });
+  });
+
+  it('ignores a netted total from a client that just converted on an older build', () => {
+    const { invoice } = invoiceRecordForSend(doc, { total: 680.68, depositCredit: 291.72 });
+    expect(invoice.total).toBe(972.4);
+  });
+
+  it('restores a netted total still on the document before the mirror catches up', () => {
+    const { invoice, canonical } = invoiceRecordForSend({ ...doc, total: 680.68, balanceDue: 388.96 }, null);
+    expect(invoice.total).toBe(972.4);
+    expect(canonical.balanceDue).toBe(680.68);
+  });
+
+  it('keeps an older legacy-minted invoice\'s netted credit (it is real there)', () => {
+    const credit = { id: 'deposit-credit-q0', kind: 'deposit', amount: 300, paidAt: 1, method: 'square' };
+    const old = { ...doc, total: 660, paidTotal: 300, payments: [credit], convertedFromQuote: undefined };
+    const { invoice } = invoiceRecordForSend(old, { depositCredit: 999 });
+    expect(invoice.depositCredit).toBe(300);
+    expect(invoice.total).toBe(660);
   });
 });

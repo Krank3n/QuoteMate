@@ -134,3 +134,59 @@ export function invoiceEmailDepositView(input: {
   if (deposit <= 0) return { total };
   return { total: round2(total - deposit), depositCredit: deposit };
 }
+
+/**
+ * Undo an older app build's netted convert.
+ *
+ * App builds from before Oct 2026 convert a quote with a deposit by setting
+ * the invoice total to `quote total − deposit` AND keeping the deposit on the
+ * ledger — and they write that netted total themselves, after the server's
+ * full-total convert. Seen on the simulator with a 1.58 store build: a $972.40
+ * job with a $291.72 bank deposit became an invoice for $680.68 with $291.72
+ * paid and $388.96 owing, $291.72 short.
+ *
+ * The unified doc keeps the quote total it was converted from
+ * (`convertedFromQuote.total`, the undo stash). When the incoming total is
+ * exactly that less the ledger's deposits, the deposit was taken off twice —
+ * restore the full total and re-derive the balance. Older legacy-minted
+ * invoices (a `deposit-credit-*` entry) are meant to be netted and are left
+ * alone, as is any total that doesn't match exactly (an edited invoice).
+ * Pure.
+ */
+export function restoreNettedConvertTotal(existing: Record<string, any> | null | undefined, toWrite: Record<string, any>): Record<string, any> {
+  if ((toWrite.type ?? existing?.type) !== 'invoice') return toWrite;
+  const stashTotal = Number((toWrite.convertedFromQuote ?? existing?.convertedFromQuote)?.total);
+  if (!Number.isFinite(stashTotal) || stashTotal <= 0) return toWrite;
+  const payments: Record<string, any>[] = Array.isArray(toWrite.payments) ? toWrite.payments : [];
+  const isNetted = (p: Record<string, any>) => p?.kind === 'deposit' && String(p?.id ?? '').startsWith('deposit-credit-');
+  if (payments.some(isNetted)) return toWrite;
+  const deposits = payments
+    .filter((p) => p?.kind === 'deposit')
+    .reduce((acc, p) => acc + (Number(p?.amount) || 0), 0);
+  if (deposits <= 0.005) return toWrite;
+  const total = Number(toWrite.total);
+  if (!Number.isFinite(total) || Math.abs(stashTotal - deposits - total) >= 0.005) return toWrite;
+  const paid = payments.reduce((acc, p) => acc + (Number(p?.amount) || 0), 0);
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+  const out: Record<string, any> = {
+    ...toWrite,
+    total: round2(stashTotal),
+    balanceDue: round2(Math.max(0, stashTotal - paid)),
+  };
+  if (toWrite.stage === 'paid' && paid + 0.005 < stashTotal) out.stage = 'partially_paid';
+  return out;
+}
+
+/**
+ * What the customer still owes on an invoice, from the unified document:
+ * the full total (after undoing an older build's netted convert) less what
+ * has been paid against it — a legacy-minted invoice's netted deposit credit
+ * is already off its total, so it doesn't count twice. The one figure the
+ * pay link, the reminder email and the link rotation all quote.
+ */
+export function invoiceBalanceDue(doc: Record<string, any>): number {
+  const d = restoreNettedConvertTotal(doc, doc);
+  const total = Number(d.total) || 0;
+  const paid = (Number(d.paidTotal) || 0) - nettedDepositCredit(d.payments);
+  return round2(Math.max(0, total - paid));
+}

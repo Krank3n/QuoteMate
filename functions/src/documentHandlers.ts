@@ -51,7 +51,12 @@ import {
 } from './shared/document/lumpSum';
 import { resolvePriceDetail } from './shared/document/priceDetail';
 import { paidInFullAtMs } from './shared/document/paidInFull';
-import { invoiceEmailDepositView, invoicePdfPaymentFields, nettedDepositCredit } from './shared/document/recordedDeposit';
+import {
+  invoiceBalanceDue,
+  invoiceEmailDepositView,
+  invoicePdfPaymentFields,
+  restoreNettedConvertTotal,
+} from './shared/document/recordedDeposit';
 import { dollarsToCents, centsToDollars } from './shared/pdf/money';
 import {
   quoteRecordToDocumentRecord,
@@ -1109,13 +1114,45 @@ async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailRes
   return { success: true, acceptanceUrl };
 }
 
+/** Invoice fields the email and PDF take from the server's document only. */
+export const INVOICE_MONEY_KEYS = [
+  'total', 'paidAmount', 'paidTotal', 'balanceDue', 'depositCredit',
+  'depositCreditFromQuoteId', 'paymentCount',
+] as const;
+
+/**
+ * The invoice record an invoice send renders from: the client's copy for
+ * everything it may have just edited, the server's own document for the
+ * money. See the call site in sendInvoiceFlavour. Pure.
+ */
+export function invoiceRecordForSend(
+  doc: DocumentRecord,
+  overrides?: AnyData | null,
+): { canonical: DocumentRecord; invoice: AnyData } {
+  const canonical = restoreNettedConvertTotal(doc as AnyData, doc as AnyData) as DocumentRecord;
+  const invoice: AnyData = documentRecordToInvoiceRecord(canonical);
+  Object.assign(invoice, overrides || {});
+  const serverMoney = documentRecordToInvoiceRecord(canonical) as AnyData;
+  for (const key of INVOICE_MONEY_KEYS) {
+    if (serverMoney[key] === undefined) delete invoice[key];
+    else invoice[key] = serverMoney[key];
+  }
+  return { canonical, invoice };
+}
+
 async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailResult> {
   const firestore = db();
   const { userId, docId, emailBody, recipientEmail, isTestSend, includePhotos, subject,
           doc, business, termsToSend, termsVersionHash, input } = args;
 
-  const invoice: AnyData = documentRecordToInvoiceRecord(doc as DocumentRecord);
-  Object.assign(invoice, input.overrides || {});
+  // Money comes from the server's own document, never the client's copy.
+  // The client sends its legacy projection as `overrides`, and an app build
+  // from before Oct 2026 projects a ledger deposit as a netted
+  // `depositCredit` (the email then read "Deposit already paid $291.72,
+  // Balance due $972.40" on a $680.68 balance) and may still hold the total
+  // it netted on convert. restoreNettedConvertTotal undoes that netting in
+  // case the mirror hasn't caught up yet.
+  const { canonical, invoice } = invoiceRecordForSend(doc as DocumentRecord, input.overrides);
 
   // The legacy invoice may live under a different doc id than the unified
   // document (for converted-from-quote invoices, the unified doc is keyed by
@@ -1211,7 +1248,7 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
   const emailDeposit = invoiceEmailDepositView({
     total: Number(invoice.total) || 0,
     nettedCredit: Number(invoice.depositCredit) || 0,
-    payments: (doc as DocumentRecord).payments,
+    payments: canonical.payments,
   });
 
   const htmlContent = buildInvoiceEmailHtml({
@@ -1257,7 +1294,7 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
       paymentTerms: invoice.paymentTerms,
       // paidAmount / paidDepositAmount / depositCredit from the ledger —
       // the phone's PDF uses the same helper (src/utils/pdfGenerator.ts).
-      ...invoicePdfPaymentFields(doc as DocumentRecord),
+      ...invoicePdfPaymentFields(canonical),
       // From the unified doc, not invoice.paidDate: the adapter picks one
       // representative payment, which on a multi-payment invoice is the
       // wrong (earliest) date. Same helper the phone uses, same format.
@@ -1618,12 +1655,9 @@ export function quoteDepositPaid(doc: { depositPaid?: unknown; payments?: unknow
 }
 
 export function decideRotation(doc: DocumentRecord): RotationDecision {
-  const total = Number(doc.total) || 0;
-  // An older converted invoice's total already had its quote deposit taken
-  // off; its `deposit-credit-*` entry records that and must not come off the
-  // balance a second time — same reading as the PDF (invoicePdfPaymentFields).
-  const paidTotal = (Number(doc.paidTotal) || 0) - nettedDepositCredit(doc.payments);
-  const balance = Math.max(0, total - paidTotal);
+  // The shared balance: full total (an older build's netted convert undone)
+  // less what's been paid against it, a legacy netted credit counted once.
+  const balance = invoiceBalanceDue(doc as Record<string, any>);
   const stage = doc.stage;
 
   if (stage === 'draft' || stage === 'cancelled' || stage === 'paid' || stage === 'quote_rejected') {

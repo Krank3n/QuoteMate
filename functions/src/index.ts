@@ -38,6 +38,7 @@ import {
 } from './email';
 import { emailSafeLogoUrl } from './emailLogo';
 import { listAllAuthUsers } from './authUsers.helpers';
+import { invoiceBalanceDue } from './shared/document/recordedDeposit';
 import { isUnreachableEmail, reEngagementVerdict } from './reEngagement.helpers';
 import { recordReturnAndMaybeGrantTrial } from './returnTrial';
 import {
@@ -11454,6 +11455,14 @@ export const onInvoicePaymentReceived = functions.firestore
       // legacy invoice. Best-effort: a failed read just sends the plain wording.
       const ledgerDoc = await loadDocumentForInvoiceId(userId, invoiceId).catch(() => null);
       const isDeposit = receiptIsForDeposit(ledgerDoc?.payments, receipt.amountReceived);
+      // "Remaining balance" from the unified document — the legacy row this
+      // trigger reads can hold an older app build's netted total or stale
+      // paid figure, which once read "$368.96 remaining" on $660.68 owing.
+      if (ledgerDoc && ledgerDoc.total !== undefined) {
+        const balanceDue = invoiceBalanceDue(ledgerDoc as Record<string, any>);
+        receipt.balanceDue = balanceDue;
+        receipt.isFullyPaid = balanceDue <= 0.005;
+      }
 
       const replyToEmail = await resolveTradieReplyEmail(userId, business.email);
       await sendPaymentReceiptEmail({
@@ -14898,7 +14907,13 @@ async function createSquarePaymentLinkInternal(
   // Charge the outstanding balance, not the full total — a part payment
   // recorded against the invoice (deposit, progress payment) must not be
   // billed a second time when the customer pays by link.
-  const amountDue = invoiceLinkAmountDue(invoice);
+  // Priced off the unified document when there is one — the same figure the
+  // reminder email and the rotation quote (invoiceBalanceDue). The legacy row
+  // alone can carry an older app build's netted total or stale paid figure.
+  const unifiedForAmount = await loadDocumentForInvoiceId(userId, invoiceId).catch(() => null);
+  const amountDue = unifiedForAmount && unifiedForAmount.total !== undefined
+    ? invoiceBalanceDue(unifiedForAmount as Record<string, any>)
+    : invoiceLinkAmountDue(invoice);
   if (amountDue <= 0) return null;
 
   // The customer pays exactly the balance; the platform fee comes out of

@@ -702,11 +702,26 @@ describe('reading candidates off the unified documents row', () => {
       expect(selectInvoicesForFollowUp([paid], NOW)).toHaveLength(0);
     });
 
-    it('takes the balance from the legacy row the pay link is minted off, when there is one', () => {
+    it('falls back to the legacy row when the document carries no total', () => {
       const withLegacy = followUpInvoiceFromRecords('d1', document, { total: 1000, paidAmount: 400, status: 'draft' });
       expect(withLegacy.balanceDue).toBe(600);
       const withoutLegacy = followUpInvoiceFromRecords('d1', document, null);
       expect(withoutLegacy.balanceDue).toBe(250);
+    });
+
+    it('REGRESSION: quotes the document balance, not an older build\'s netted legacy row', () => {
+      // $972.40 job, $291.72 deposit + $20 paid. An older app build left the
+      // legacy row at total $680.68 (netted) — $368.96 "owing" on $660.68.
+      const doc = {
+        ...document, stage: 'partially_paid', total: 680.68, paidTotal: 311.72,
+        payments: [
+          { id: 'dep-1', kind: 'deposit', amount: 291.72, paidAt: 1, method: 'bank' },
+          { id: 'm-1', kind: 'manual', amount: 20, paidAt: 2, method: 'bank' },
+        ],
+        convertedFromQuote: { total: 972.4, stage: 'quote_accepted', at: 1 },
+      };
+      const inv = followUpInvoiceFromRecords('d1', doc, { total: 680.68, paidAmount: 311.72, depositCredit: 291.72, status: 'partial' });
+      expect(inv.balanceDue).toBe(660.68);
     });
 
     it('chases an overdue invoice whose legacy row still reads draft', () => {
