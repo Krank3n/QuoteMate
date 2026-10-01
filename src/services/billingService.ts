@@ -240,7 +240,12 @@ class BillingService {
             type: 'subs'
           });
           return purchase;
-        } else {
+        }
+        // No token means openiap buys whatever offer Play listed first, which
+        // may be the free one. Play always lists the base plan, so this only
+        // trips on a malformed product — refuse rather than hand out a trial.
+        if (opts.allowFreeTrial !== true) {
+          throw new Error('This plan is not available to buy right now. Please try again later.');
         }
       }
 

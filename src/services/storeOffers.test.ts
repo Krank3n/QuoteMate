@@ -3,7 +3,8 @@ import { introOfferFromProduct, isoDurationDays, mayTakeStoreFreeTrial, periodDa
 
 const freePhase = { billingPeriod: 'P2W', billingCycleCount: 1, priceAmountMicros: '0', formattedPrice: 'Free', priceCurrencyCode: 'AUD', recurrenceMode: 2 };
 const paidPhase = { billingPeriod: 'P1M', billingCycleCount: 0, priceAmountMicros: '49000000', formattedPrice: '$49.00', priceCurrencyCode: 'AUD', recurrenceMode: 1 };
-const basePlan = { id: '', basePlanIdAndroid: 'quotemate-monthly', offerTokenAndroid: 'tok-base', pricingPhasesAndroid: { pricingPhaseList: [paidPhase] } };
+// Real expo-iap 3.4 shape: openiap-google sets id = offerId ?: basePlanId.
+const basePlan = { id: 'quotemate-monthly', basePlanIdAndroid: 'quotemate-monthly', offerTokenAndroid: 'tok-base', pricingPhasesAndroid: { pricingPhaseList: [paidPhase] } };
 const introOffer = { id: 'free-trial-14d', basePlanIdAndroid: 'quotemate-monthly', offerTokenAndroid: 'tok-intro', pricingPhasesAndroid: { pricingPhaseList: [freePhase, paidPhase] } };
 
 describe('storeOffers', () => {
@@ -69,6 +70,15 @@ describe('storeOffers', () => {
     it('buys the base plan, never the free offer, once the trial is over (the 1 Oct second-trial bug)', () => {
       expect(pickAndroidOfferToken([basePlan, introOffer], { allowFreeTrial: false })).toBe('tok-base');
       expect(pickAndroidOfferToken([introOffer, basePlan], { allowFreeTrial: false })).toBe('tok-base');
+    });
+    it('buys the base plan, not a paid promo or the free offer, once the trial is over', () => {
+      const paidPromo = { id: 'winback', basePlanIdAndroid: 'quotemate-monthly', offerTokenAndroid: 'tok-promo', pricingPhasesAndroid: { pricingPhaseList: [{ ...paidPhase, priceAmountMicros: '25000000' }, paidPhase] } };
+      expect(pickAndroidOfferToken([paidPromo, introOffer, basePlan], { allowFreeTrial: false })).toBe('tok-base');
+      expect(pickAndroidOfferToken([paidPromo, introOffer, basePlan], allow)).toBe('tok-intro');
+    });
+    it('still recognises the older empty-id base plan entry', () => {
+      const legacyBase = { ...basePlan, id: '' };
+      expect(pickAndroidOfferToken([introOffer, legacyBase])).toBe('tok-base');
     });
     it('withholds the free offer by default — a caller that does not know the trial state bills on tap', () => {
       expect(pickAndroidOfferToken([introOffer, basePlan])).toBe('tok-base');

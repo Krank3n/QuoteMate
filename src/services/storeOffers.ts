@@ -49,7 +49,13 @@ export function periodDays(period: any): number | null {
   }
 }
 
-const isBasePlanEntry = (o: any) => !o?.id && !o?.offerId && !o?.offerIdAndroid;
+/**
+ * Play's entry for a base plan bought with no offer. openiap-google (expo-iap
+ * 3.4) fills `id` with `offerId ?: basePlanId`, so on real data the base plan
+ * arrives as `id === basePlanIdAndroid`; older payloads left it empty.
+ */
+const isBasePlanEntry = (o: any) =>
+  !o?.offerId && !o?.offerIdAndroid && (!o?.id || (!!o?.basePlanIdAndroid && o.id === o.basePlanIdAndroid));
 
 /**
  * Play lists every base plan of the product and every offer on each. The
