@@ -1249,6 +1249,7 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
     total: Number(invoice.total) || 0,
     nettedCredit: Number(invoice.depositCredit) || 0,
     payments: canonical.payments,
+    paidTotal: Number(canonical.paidTotal) || 0,
   });
 
   const htmlContent = buildInvoiceEmailHtml({
@@ -1269,6 +1270,7 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
     dueDate: invoice.dueDate || new Date().toISOString(),
     payNowUrl,
     depositCredit: emailDeposit.depositCredit,
+    paidCredit: emailDeposit.paidCredit,
     hasTerms: !!termsToSend,
     priceDetail: emailPriceDetail,
     paymentMethods: business.paymentMethods,

@@ -114,25 +114,43 @@ export function invoicePdfPaymentFields(doc: {
 
 /**
  * The deposit figures an invoice EMAIL prints. The email's pricing card has
- * one deposit shape — a "Deposit already paid" row above a "Balance due"
- * equal to the figure it is given — so a ledger deposit is presented the
- * same way: the full total less the deposit, with the deposit as the credit.
- * A netted legacy invoice passes through untouched; its total already is the
- * balance. Never both: the ledger deposit is only used when there is no
- * netted credit.
+ * one deposit shape — a "Deposit already paid" row, then an "Amount paid" row
+ * for anything received since, above a "Balance due" equal to the figure it
+ * is given. A ledger deposit is presented that way: the full total less the
+ * deposit and the later payments. A netted legacy invoice's total is already
+ * less its deposit, so only the later payments come off it. Never both
+ * shapes: the ledger deposit is only used when there is no netted credit.
+ * An invoice with no deposit at all keeps the plain "Total" card (paidTotal
+ * isn't shown there, as before).
  */
 export function invoiceEmailDepositView(input: {
   total: number;
   /** The legacy record's `depositCredit` — netted credits only. */
   nettedCredit?: number;
   payments?: ReadonlyArray<DepositLike> | null;
-}): { total: number; depositCredit?: number } {
+  /** Everything paid against the invoice (the ledger sum); 0 when unknown. */
+  paidTotal?: number;
+}): { total: number; depositCredit?: number; paidCredit?: number } {
   const total = Number(input.total) || 0;
   const netted = Number(input.nettedCredit) || 0;
-  if (netted > 0) return { total, depositCredit: netted };
+  const paidTotal = Number(input.paidTotal) || 0;
+  if (netted > 0) {
+    const paidSince = round2(Math.max(0, paidTotal - netted));
+    const shown = Math.min(paidSince, total);
+    return {
+      total: round2(total - shown),
+      depositCredit: netted,
+      ...(shown > 0 ? { paidCredit: shown } : {}),
+    };
+  }
   const deposit = Math.min(recordedDepositTotal(input.payments), total);
   if (deposit <= 0) return { total };
-  return { total: round2(total - deposit), depositCredit: deposit };
+  const paidSince = round2(Math.min(Math.max(0, paidTotal - deposit), total - deposit));
+  return {
+    total: round2(total - deposit - paidSince),
+    depositCredit: deposit,
+    ...(paidSince > 0 ? { paidCredit: paidSince } : {}),
+  };
 }
 
 /**

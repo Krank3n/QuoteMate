@@ -154,3 +154,25 @@ describe('invoiceBalanceDue', () => {
   });
 
 });
+
+describe('invoiceEmailDepositView — payments since the deposit', () => {
+  const dep = { id: 'dep-1', kind: 'deposit', amount: 291.72 };
+  it('takes the deposit and the later payments off, showing both', () => {
+    expect(
+      invoiceEmailDepositView({ total: 972.4, payments: [dep, { kind: 'manual', amount: 20 }], paidTotal: 311.72 }),
+    ).toEqual({ total: 660.68, depositCredit: 291.72, paidCredit: 20 });
+  });
+  it('no later payments: no paid row', () => {
+    expect(invoiceEmailDepositView({ total: 972.4, payments: [dep], paidTotal: 291.72 }))
+      .toEqual({ total: 680.68, depositCredit: 291.72 });
+  });
+  it('a netted legacy invoice takes only the later payments off its (already net) total', () => {
+    const credit = { id: 'deposit-credit-q0', kind: 'deposit', amount: 300 };
+    expect(invoiceEmailDepositView({ total: 660, nettedCredit: 300, payments: [credit, { kind: 'manual', amount: 200 }], paidTotal: 500 }))
+      .toEqual({ total: 460, depositCredit: 300, paidCredit: 200 });
+  });
+  it('an invoice with no deposit keeps the plain total card', () => {
+    expect(invoiceEmailDepositView({ total: 500, payments: [{ kind: 'manual', amount: 100 }], paidTotal: 100 }))
+      .toEqual({ total: 500 });
+  });
+});

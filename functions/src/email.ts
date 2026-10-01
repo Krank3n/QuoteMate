@@ -2270,6 +2270,10 @@ export interface PricingRowsInput {
   // When set and > 0, render a "Deposit already paid" line and rename the
   // total label to "Balance due". Invoice-only.
   depositCredit?: number;
+  // Money received since the deposit, on an invoice that has one. Rendered
+  // as an "Amount paid" line under the deposit so "Balance due" is what is
+  // really still owed. Invoice-only.
+  paidCredit?: number;
   // How much of the money the customer sees — see
   // shared/document/priceDetail.ts. Absent falls back to the legacy pair
   // below, then to 'itemised'.
@@ -2362,7 +2366,7 @@ function gstDisclosureFor(input: { gstRegistered?: boolean; pricesIncludeGst?: b
 }
 
 export function renderPricingRows(input: PricingRowsInput): string {
-  const { gst, total, accent, depositCredit } = input;
+  const { gst, total, accent, depositCredit, paidCredit } = input;
   const gstMode = resolveGstMode(input);
   const hasDeposit = !!(depositCredit && depositCredit > 0);
   const breakdownRows = pricingBreakdownRows(input);
@@ -2408,6 +2412,11 @@ export function renderPricingRows(input: PricingRowsInput): string {
               <td style="padding:11px 0;color:#059669;font-size:14px;border-bottom:1px solid #eef0f3;">Deposit already paid</td>
               <td style="padding:11px 0;color:#059669;font-size:14px;font-weight:600;text-align:right;font-variant-numeric:tabular-nums;border-bottom:1px solid #eef0f3;">−${formatMoney(depositCredit!)}</td>
             </tr>` : ''}
+            ${hasDeposit && paidCredit && paidCredit > 0 ? `
+            <tr>
+              <td style="padding:11px 0;color:#059669;font-size:14px;border-bottom:1px solid #eef0f3;">Amount paid</td>
+              <td style="padding:11px 0;color:#059669;font-size:14px;font-weight:600;text-align:right;font-variant-numeric:tabular-nums;border-bottom:1px solid #eef0f3;">−${formatMoney(paidCredit)}</td>
+            </tr>` : ''}
           </table>
         </td>
       </tr>`
@@ -2427,7 +2436,7 @@ export function renderPricingRows(input: PricingRowsInput): string {
             <tr>
               <td colspan="2" style="color:#6b7280;font-size:12px;padding-top:6px;">${
                 hasDeposit
-                  ? `Invoice total ${formatMoney(total + depositCredit!)} includes GST of ${formatMoney(gst)}`
+                  ? `Invoice total ${formatMoney(total + depositCredit! + (paidCredit || 0))} includes GST of ${formatMoney(gst)}`
                   : `Total includes GST of ${formatMoney(gst)}`
               }</td>
             </tr>` : ''}
@@ -2743,6 +2752,7 @@ export function buildDocumentEmailHtml(data: DocumentEmailData): string {
     pricesIncludeGst: data.pricesIncludeGst,
     accent,
     depositCredit: isInvoice ? data.depositCredit : undefined,
+    paidCredit: isInvoice ? data.paidCredit : undefined,
     priceDetail: data.priceDetail,
     showMaterialCosts: data.showMaterialCosts,
     showLaborCosts: data.showLaborCosts,
@@ -3002,6 +3012,9 @@ interface InvoiceEmailData {
   // Deposit credit carried over from a quote that had a deposit paid. Rendered
   // as a "Deposit already paid" line above the total.
   depositCredit?: number;
+  // Paid since the deposit — an "Amount paid" line under it. See
+  // invoiceEmailDepositView.
+  paidCredit?: number;
   // How much of the money the customer sees — see
   // shared/document/priceDetail.ts. The legacy pair is still accepted so an
   // older caller keeps working.
