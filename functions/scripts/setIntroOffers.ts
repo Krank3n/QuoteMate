@@ -19,8 +19,20 @@
  * Idempotent: skips a store that already has a free intro offer.
  * Dry run by default; --apply writes.
  *
+ * APPLE OFFERS REMOVED 2 Oct 2026. Neither store knows about the QuoteMate
+ * trial, so both grant the offer to anyone who has never subscribed —
+ * including a tradie whose trial ended last week, who got a second free
+ * fortnight (every Apple take of the offer from 17 Sep to 1 Oct was exactly
+ * that). Android withholds it in the app (storeOffers.mayTakeStoreFreeTrial
+ * → pickAndroidOfferToken, #286), but StoreKit applies the intro offer by
+ * itself and the shipped iOS binaries cannot override it, so Apple's offers
+ * came off. Apple is therefore audit-only by default; --apple=remove deletes
+ * every FREE_TRIAL intro offer, --apple=create puts them back (only once a
+ * binary can withhold them per buyer, e.g. introductoryOfferEligibility(compactJWS:)).
+ *
  *   cd functions && npx tsx scripts/setIntroOffers.ts
  *   cd functions && npx tsx scripts/setIntroOffers.ts --apply
+ *   cd functions && npx tsx scripts/setIntroOffers.ts --apple=remove --apply
  */
 import * as dotenv from 'dotenv';
 import { JWT } from 'google-auth-library';
@@ -29,6 +41,12 @@ import { makeAscJwt } from '../src/storeFunnel';
 dotenv.config({ path: '.env' });
 
 const APPLY = process.argv.includes('--apply');
+const APPLE_MODE: 'audit' | 'remove' | 'create' = (() => {
+  const arg = process.argv.find((a) => a.startsWith('--apple='));
+  const mode = arg ? arg.slice('--apple='.length) : 'audit';
+  if (mode !== 'audit' && mode !== 'remove' && mode !== 'create') throw new Error(`--apple must be audit, remove or create (got ${mode})`);
+  return mode;
+})();
 const APP_ID = process.env.APPLE_APP_APPLE_ID || '6754000046';
 const PKG = 'com.quotemate.app';
 const PLAY_OFFER_ID = 'free-trial-14d';
@@ -75,17 +93,39 @@ async function apple() {
     }
     // Territories that already carry a FREE_TRIAL intro offer are left alone.
     const covered = new Set<string>();
+    const freeOfferIds: string[] = [];
     next = `/v1/subscriptions/${s.id}/introductoryOffers?limit=200&include=territory`;
     while (next) {
       const page: any = await asc('GET', next);
       for (const o of page.data || []) {
         if (o.attributes?.offerMode === 'FREE_TRIAL') {
+          freeOfferIds.push(o.id);
           const t = o.relationships?.territory?.data?.id;
           if (t) covered.add(t);
         }
       }
       const link: string | undefined = page.links?.next;
       next = link ? link.replace('https://api.appstoreconnect.apple.com', '') : null;
+    }
+    if (APPLE_MODE === 'audit') {
+      console.log(`${pid}: ${territories.size} priced territories, ${freeOfferIds.length} FREE_TRIAL intro offer(s) live (audit only)`);
+      continue;
+    }
+    if (APPLE_MODE === 'remove') {
+      console.log(`${pid}: ${freeOfferIds.length} FREE_TRIAL intro offer(s) to delete`);
+      if (!APPLY) continue;
+      let deleted = 0;
+      const failed: string[] = [];
+      for (const id of freeOfferIds) {
+        try {
+          await asc('DELETE', `/v1/subscriptionIntroductoryOffers/${id}`);
+          deleted++;
+        } catch (err: any) {
+          failed.push(`${id}: ${String(err?.message || err).slice(0, 160)}`);
+        }
+      }
+      console.log(`${pid}: deleted ${deleted}/${freeOfferIds.length}${failed.length ? `; FAILED ${failed.length}:\n  ${failed.slice(0, 5).join('\n  ')}` : ''}`);
+      continue;
     }
     const todo = [...territories].filter((t) => !covered.has(t)).sort();
     console.log(`${pid}: ${territories.size} priced territories, ${covered.size} already have a FREE_TRIAL offer, ${todo.length} to create`);
