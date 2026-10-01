@@ -17,6 +17,8 @@
  *    returns offers this buyer is eligible for.
  */
 
+import { isTrialWindowExpired, TrialWindowSource } from '../utils/trialConfig';
+
 export interface StoreIntroOffer {
   /** Whole days the store gives free before the first charge. */
   freeDays: number;
@@ -105,19 +107,68 @@ export function introOfferFromProduct(product: any, opts: { eligibleIOS?: boolea
 }
 
 /**
- * Which Android offer token to buy with. Prefer an offer that starts free
- * (the intro), else the base plan (no offerId), else whatever Play listed
- * first — which is what the app did before offers existed.
+ * Which Android offer token to buy with. With `allowFreeTrial` (see
+ * mayTakeStoreFreeTrial) prefer an offer that starts free (the intro), else
+ * the base plan. Without it, never a free-start offer: the base plan, else the
+ * first listed offer that charges from day one. Play always lists the base
+ * plan, so a buyer who has had their trial is billed on tap.
  */
-export function pickAndroidOfferToken(offers: any[] | null | undefined): string | null {
+export function pickAndroidOfferToken(
+  offers: any[] | null | undefined,
+  opts: { allowFreeTrial?: boolean } = {},
+): string | null {
   if (!Array.isArray(offers) || offers.length === 0) return null;
   const token = (o: any) => o?.offerTokenAndroid || o?.offerToken || null;
-  const free = onSoldBasePlans(offers).find((o) => {
+  const startsFree = (o: any) => {
     const phases: any[] = o?.pricingPhasesAndroid?.pricingPhaseList || o?.pricingPhases?.pricingPhaseList || [];
-    return phases[0] && isFreePhase(phases[0]) && token(o);
-  });
-  if (free) return token(free);
+    return !!phases[0] && isFreePhase(phases[0]);
+  };
+  if (opts.allowFreeTrial) {
+    const free = onSoldBasePlans(offers).find((o) => startsFree(o) && token(o));
+    if (free) return token(free);
+  }
   const base = offers.find((o) => isBasePlanEntry(o) && token(o));
   if (base) return token(base);
-  return token(offers[0]);
+  const paid = opts.allowFreeTrial ? offers.find((o) => token(o)) : offers.find((o) => !startsFree(o) && token(o));
+  return paid ? token(paid) : null;
+}
+
+/** The trial fields the store-trial rule reads. A SubscriptionStatus satisfies it. */
+export interface StoreTrialSource extends TrialWindowSource {
+  trialExpired?: boolean | null;
+}
+
+/**
+ * May this account take a store's free introductory period? Only while the
+ * QuoteMate trial is still ahead of them or running — the store offer exists
+ * so subscribing mid-trial is not billed on tap (17 Sep 2026), not to hand a
+ * second free fortnight to someone whose trial is over. Neither store knows
+ * about our trial: Apple and Google grant the offer to any account that has
+ * never subscribed, so the app has to withhold it.
+ *
+ * Fails closed: no status loaded yet → false (bill on tap, say so), because
+ * the copy and the purchase both read this and an unknown account must not
+ * be promised free days.
+ */
+export function mayTakeStoreFreeTrial(status: StoreTrialSource | null | undefined, now: number = Date.now()): boolean {
+  if (!status) return false;
+  if (status.trialExpired) return false;
+  return !isTrialWindowExpired(status, now);
+}
+
+/**
+ * The free days the paywall may promise. Android only takes the offer when
+ * the app asks for it (pickAndroidOfferToken), so a withheld offer is no
+ * offer. iOS applies the introductory offer by itself to any eligible Apple
+ * ID — the app cannot withhold it in the shipped binaries — so there the copy
+ * follows StoreKit, or it would say "billed today" and then not bill.
+ */
+export function storeFreeDaysToShow(
+  platform: string,
+  storeFreeDays: number | null | undefined,
+  allowFreeTrial: boolean,
+): number | null {
+  const days = typeof storeFreeDays === 'number' && storeFreeDays > 0 ? storeFreeDays : null;
+  if (platform === 'android' && !allowFreeTrial) return null;
+  return days;
 }

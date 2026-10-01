@@ -22,6 +22,7 @@ import { makeStyles, useThemeColors } from '../theme';
 import { billingService, SUBSCRIPTION_SKUS } from '../services/billingService';
 import { useSubscriptionStore } from '../store/subscriptionStore';
 import { unifiedBillingService } from '../services/unifiedBillingService';
+import { mayTakeStoreFreeTrial, storeFreeDaysToShow } from '../services/storeOffers';
 import { auth, db } from '../config/firebase';
 import { doc as firestoreDoc, getDoc } from 'firebase/firestore';
 import { WebContainer } from '../components/WebContainer';
@@ -98,6 +99,10 @@ export function PaywallScreen() {
   const trialStartedAt = subscriptionStatus?.trialStartedAt;
   const trialEndsAt = subscriptionStatus?.trialEndsAt;
   const trialDaysRemaining = trialDaysLeft(subscriptionStatus) ?? TRIAL_DAYS;
+  // A store's free intro period is for subscribing before or during the trial,
+  // never a second trial after it (storeOffers.mayTakeStoreFreeTrial). The
+  // Android purchase and every "when am I charged" line read this one value.
+  const storeFreeTrialAllowed = mayTakeStoreFreeTrial(subscriptionStatus);
 
   useEffect(() => {
     trackEvent('paywall_viewed', {
@@ -327,8 +332,8 @@ export function PaywallScreen() {
         // iOS MUST use Apple IAP only (App Store guidelines 3.1.1)
         await billingService.purchaseSubscription(selectedSku);
       } else if (Platform.OS === 'android') {
-        // Android uses Google Play IAP
-        await billingService.purchaseSubscription(selectedSku);
+        // Android uses Google Play IAP; the free intro offer only while the trial is ahead or running
+        await billingService.purchaseSubscription(selectedSku, { allowFreeTrial: storeFreeTrialAllowed });
       } else if (Platform.OS === 'web') {
         // Web uses Stripe (multi-platform service - Guideline 3.1.3b)
         const currentUser = auth.currentUser;
@@ -580,10 +585,14 @@ export function PaywallScreen() {
   const isPro = subscriptionStatus?.isPro || false;
   const planState: PaywallPlanState = paywallPlanState({ isPro, trialExpired, trialStartedAt, trialEndsAt });
   // Free days the store gives before the first charge on the selected plan —
-  // null when the store reports no introductory offer, or this buyer has used
-  // theirs. Every "when am I charged" line below reads this one value.
-  const introFreeDays: number | null =
-    products.find((p) => p.productId === selectedSku)?.introFreeDays ?? null;
+  // null when the store reports no introductory offer, this buyer has used
+  // theirs, or (Android) the app withholds it because the trial is over.
+  // Every "when am I charged" line below reads this one value.
+  const introFreeDays: number | null = storeFreeDaysToShow(
+    Platform.OS,
+    products.find((p) => p.productId === selectedSku)?.introFreeDays,
+    storeFreeTrialAllowed,
+  );
   const headerNote = paywallHeaderNote(planState, introFreeDays);
 
   const handleCheckoutSuccess = async () => {

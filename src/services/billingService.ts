@@ -193,7 +193,14 @@ class BillingService {
     return [];
   }
 
-  async purchaseSubscription(sku: string): Promise<any | null> {
+  /**
+   * `allowFreeTrial` (storeOffers.mayTakeStoreFreeTrial) decides whether an
+   * Android purchase takes the store's free introductory offer. Default off:
+   * a caller that does not know the account's trial state bills on tap rather
+   * than hand out a second trial. iOS ignores it — StoreKit applies the intro
+   * offer itself.
+   */
+  async purchaseSubscription(sku: string, opts: { allowFreeTrial?: boolean } = {}): Promise<any | null> {
     try {
       if (!this.isInitialized) {
         const initialized = await this.initialize();
@@ -217,10 +224,11 @@ class BillingService {
 
         // expo-iap 3.x: subscriptionOffers is the primary field, subscriptionOfferDetailsAndroid is deprecated.
         // Play lists the base plan AND any offer this buyer is eligible for, in
-        // no promised order — pick the free introductory offer when there is
-        // one, else the base plan (storeOffers.pickAndroidOfferToken).
+        // no promised order — pick the free introductory offer only while the
+        // QuoteMate trial is ahead or running, else the base plan
+        // (storeOffers.pickAndroidOfferToken).
         const offerDetails = product.subscriptionOffers || product.subscriptionOfferDetailsAndroid;
-        const offerToken = pickAndroidOfferToken(offerDetails);
+        const offerToken = pickAndroidOfferToken(offerDetails, { allowFreeTrial: opts.allowFreeTrial === true });
         if (offerToken) {
           const purchase = await RNIap.requestPurchase({
             request: {
