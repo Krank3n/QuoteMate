@@ -275,7 +275,9 @@ interface AppState {
     amount: number,
     method: PaymentMethod,
     notes?: string,
-    paymentDate?: Date
+    paymentDate?: Date,
+    /** Label it as the job's deposit — see DocumentPayment.isDeposit. */
+    isDeposit?: boolean,
   ) => Promise<Document>;
   duplicateInvoice: (invoice: Invoice) => Promise<Invoice>;
 
@@ -331,7 +333,7 @@ interface AppState {
   updateDocumentPayment: (
     documentId: string,
     paymentId: string,
-    patch: Partial<Pick<DocumentPayment, 'amount' | 'paidAt' | 'method' | 'notes'>>,
+    patch: Partial<Pick<DocumentPayment, 'amount' | 'paidAt' | 'method' | 'notes' | 'isDeposit'>>,
   ) => Promise<Document>;
   /** Remove a manually recorded payment and re-derive the totals from what's left. */
   deleteDocumentPayment: (documentId: string, paymentId: string) => Promise<Document>;
@@ -2270,6 +2272,7 @@ export const useStore = create<AppState>((set, get) => ({
     method: PaymentMethod,
     notes?: string,
     paymentDate?: Date,
+    isDeposit?: boolean,
   ) => {
     // Resolve in the id-space the app actually keeps loaded. A doc converted
     // from a quote keeps the quote's id while its legacy mirror gets a fresh
@@ -2296,6 +2299,7 @@ export const useStore = create<AppState>((set, get) => ({
       paidAt: (paymentDate || new Date()).getTime(),
       method: PAYMENT_METHOD_TO_LEDGER[method] ?? 'other',
       ...(notes ? { notes } : {}),
+      ...(isDeposit ? { isDeposit: true } : {}),
     };
 
     const payments = [...(doc.payments || []), payment];
@@ -2357,6 +2361,7 @@ export const useStore = create<AppState>((set, get) => ({
             ...(patch.paidAt !== undefined ? { paidAt: patch.paidAt } : {}),
             ...(patch.method !== undefined ? { method: patch.method } : {}),
             ...(patch.notes !== undefined ? { notes: patch.notes } : {}),
+            ...(patch.isDeposit !== undefined ? { isDeposit: patch.isDeposit } : {}),
           }
         : p,
     );

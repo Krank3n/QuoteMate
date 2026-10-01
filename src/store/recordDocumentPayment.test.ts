@@ -90,6 +90,22 @@ describe('recordDocumentPayment', () => {
     expect(updated.payments[0].kind).toBe('manual');
   });
 
+  it('labels a payment as the deposit without changing the money', async () => {
+    const updated = await useStore
+      .getState()
+      .recordDocumentPayment(DOC_ID, 200, 'bank_transfer', undefined, undefined, true);
+
+    expect(updated.payments).toHaveLength(1);
+    expect(updated.payments[0]).toMatchObject({ kind: 'manual', amount: 200, isDeposit: true });
+    expect(updated.paidTotal).toBeCloseTo(200);
+    expect(updated.stage).toBe('partially_paid');
+  });
+
+  it('leaves the deposit label off an ordinary payment', async () => {
+    const updated = await useStore.getState().recordDocumentPayment(DOC_ID, 200, 'cash');
+    expect('isDeposit' in updated.payments[0]).toBe(false);
+  });
+
   it('resolves a doc addressed by its legacy invoice id', async () => {
     const updated = await useStore
       .getState()

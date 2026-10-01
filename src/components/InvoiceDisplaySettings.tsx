@@ -127,6 +127,14 @@ export function InvoiceDisplaySettings(props: InvoiceDisplaySettingsProps) {
     onToggleExpand,
   } = props;
   const navigation = useNavigation<any>();
+  // A deposit is asked for when the customer ACCEPTS a quote. An invoice is
+  // never accepted, so the control is meaningless there — and tradies found
+  // it, greyed out without Square, while trying to change what a part-paid
+  // invoice shows. Money already received on an invoice lives on its payment
+  // ledger (Record Payment), and a deposit paid on the quote is carried onto
+  // the invoice as a credit regardless of this section.
+  const showDeposit = mode !== 'invoice';
+  const sectionTitle = showDeposit ? 'Display & deposit' : 'Display';
   const [squareConnected, setSquareConnected] = useState<boolean | null>(null);
   const [depositInput, setDepositInput] = useState(
     depositPercentage > 0 ? depositPercentage.toString() : '30',
@@ -152,6 +160,7 @@ export function InvoiceDisplaySettings(props: InvoiceDisplaySettingsProps) {
   // should immediately flip the toggle's availability.
   useFocusEffect(
     useCallback(() => {
+      if (!showDeposit) return undefined;
       let cancelled = false;
       checkSquareConnection()
         .then((res) => {
@@ -221,66 +230,68 @@ export function InvoiceDisplaySettings(props: InvoiceDisplaySettingsProps) {
         </Text>
       </View>
 
-      <View style={styles.depositSection}>
-        <Text style={styles.depositHeaderLabel}>DEPOSIT</Text>
+      {showDeposit ? (
+        <View style={styles.depositSection}>
+          <Text style={styles.depositHeaderLabel}>DEPOSIT</Text>
 
-        <ToggleRow
-          title="Require deposit on acceptance"
-          subtitle={
-            squareConnected === false
-              ? 'Connect Square to collect deposits from customers when they accept.'
-              : "Customer pays a deposit via Square to lock in the job. Remainder is invoiced when work's done."
-          }
-          value={requireDeposit && squareConnected !== false}
-          onValueChange={handleRequireDeposit}
-          disabled={squareConnected !== true}
-          dense
-        />
-
-        {squareConnected === false ? (
-          <TouchableOpacity
-            onPress={() =>
-              navigation.navigate('SquareIntegration' as never)
+          <ToggleRow
+            title="Require deposit on acceptance"
+            subtitle={
+              squareConnected === false
+                ? 'Connect Square to collect deposits from customers when they accept.'
+                : "Customer pays a deposit via Square to lock in the job. Remainder is invoiced when work's done."
             }
-            style={styles.connectSquareBtn}
-            activeOpacity={0.85}
-          >
-            <MaterialCommunityIcons
-              name={'connection' as any}
-              size={14}
-              color={themeColors.onAccent}
-            />
-            <Text style={styles.connectSquareLabel}>Connect Square</Text>
-          </TouchableOpacity>
-        ) : null}
+            value={requireDeposit && squareConnected !== false}
+            onValueChange={handleRequireDeposit}
+            disabled={squareConnected !== true}
+            dense
+          />
 
-        {requireDeposit && squareConnected === true ? (
-          <View style={styles.depositInputBlock}>
-            <TextInput
-              label="Deposit"
-              value={depositInput}
-              onChangeText={setDepositInput}
-              onBlur={handleDepositInputBlur}
-              mode="outlined"
-              keyboardType="decimal-pad"
-              placeholder="30"
-              right={<TextInput.Affix text="%" />}
-              style={styles.depositInput}
-              dense
-            />
-            {depositPreview > 0 ? (
-              <View style={styles.depositPreviewRow}>
-                <Text style={styles.depositPreviewLabel}>
-                  Deposit due on acceptance
-                </Text>
-                <Text style={styles.depositPreviewValue}>
-                  {formatCurrency(depositPreview)}
-                </Text>
-              </View>
-            ) : null}
-          </View>
-        ) : null}
-      </View>
+          {squareConnected === false ? (
+            <TouchableOpacity
+              onPress={() =>
+                navigation.navigate('SquareIntegration' as never)
+              }
+              style={styles.connectSquareBtn}
+              activeOpacity={0.85}
+            >
+              <MaterialCommunityIcons
+                name={'connection' as any}
+                size={14}
+                color={themeColors.onAccent}
+              />
+              <Text style={styles.connectSquareLabel}>Connect Square</Text>
+            </TouchableOpacity>
+          ) : null}
+
+          {requireDeposit && squareConnected === true ? (
+            <View style={styles.depositInputBlock}>
+              <TextInput
+                label="Deposit"
+                value={depositInput}
+                onChangeText={setDepositInput}
+                onBlur={handleDepositInputBlur}
+                mode="outlined"
+                keyboardType="decimal-pad"
+                placeholder="30"
+                right={<TextInput.Affix text="%" />}
+                style={styles.depositInput}
+                dense
+              />
+              {depositPreview > 0 ? (
+                <View style={styles.depositPreviewRow}>
+                  <Text style={styles.depositPreviewLabel}>
+                    Deposit due on acceptance
+                  </Text>
+                  <Text style={styles.depositPreviewValue}>
+                    {formatCurrency(depositPreview)}
+                  </Text>
+                </View>
+              ) : null}
+            </View>
+          ) : null}
+        </View>
+      ) : null}
     </View>
   );
 
@@ -292,7 +303,7 @@ export function InvoiceDisplaySettings(props: InvoiceDisplaySettingsProps) {
     const summary = buildSummary({
       showMarkup,
       priceDetail,
-      requireDeposit,
+      requireDeposit: requireDeposit && showDeposit,
       depositPercentage,
       depositAmount: requireDeposit
         ? computeDeposit(total, parseFloat(depositInput) || 0)
@@ -312,7 +323,7 @@ export function InvoiceDisplaySettings(props: InvoiceDisplaySettingsProps) {
           ]}
           accessibilityRole="button"
           accessibilityLabel={
-            isExpanded ? 'Hide display & deposit' : 'Show display & deposit'
+            `${isExpanded ? 'Hide' : 'Show'} ${sectionTitle.toLowerCase()}`
           }
         >
           <View style={styles.collapsibleRowIcon}>
@@ -323,7 +334,7 @@ export function InvoiceDisplaySettings(props: InvoiceDisplaySettingsProps) {
             />
           </View>
           <View style={styles.collapsibleRowBody}>
-            <Text style={styles.collapsibleRowLabel}>Display & deposit</Text>
+            <Text style={styles.collapsibleRowLabel}>{sectionTitle}</Text>
             <Text style={styles.collapsibleRowBodyText} numberOfLines={2}>
               {summary}
             </Text>
@@ -349,7 +360,7 @@ export function InvoiceDisplaySettings(props: InvoiceDisplaySettingsProps) {
             color={themeColors.accentText}
           />
         </View>
-        <Text style={styles.title}>Display & deposit</Text>
+        <Text style={styles.title}>{sectionTitle}</Text>
       </View>
       {body}
     </Surface>

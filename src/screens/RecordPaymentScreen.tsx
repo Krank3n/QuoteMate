@@ -11,7 +11,7 @@
  */
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { View, Platform, Share, Alert } from 'react-native';
+import { View, Platform, Share, Alert, Pressable } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { Text, Button, TextInput } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
@@ -19,7 +19,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import { format, subDays, isToday, isYesterday, isSameDay } from 'date-fns';
 
 import { useStore, PAYMENT_METHOD_TO_LEDGER } from '../store/useStore';
-import { maxAmountForEdit } from '../utils/editablePayment';
+import { isEditablePayment, maxAmountForEdit } from '../utils/editablePayment';
 import { PaymentMethod } from '../types';
 import { makeStyles, useThemeColors } from '../theme';
 import { formatCurrency } from '../utils/quoteCalculator';
@@ -84,13 +84,21 @@ export function RecordPaymentScreen() {
   // earlier would snap the sheet away mid-slide.
   const [visible, setVisible] = useState(true);
   const closingRef = useRef(false);
+  // Set when the sheet should hand over to the Payments history instead of
+  // going back — see the "change a payment" link.
+  const openPaymentsRef = useRef<string | null>(null);
   const dismiss = useCallback(() => setVisible(false), []);
   const handleClosed = useCallback(() => {
     if (closingRef.current) return;
     closingRef.current = true;
     // A hardware back that already popped this (transparent) screen leaves
     // us unfocused — a second goBack here would pop the screen underneath.
-    if (navigation.isFocused()) navigation.goBack();
+    if (!navigation.isFocused()) return;
+    if (openPaymentsRef.current) {
+      navigation.replace('Payments', { docId: openPaymentsRef.current });
+    } else {
+      navigation.goBack();
+    }
   }, [navigation]);
 
   // Callers navigate here with a *Document* id (ViewJobScreen passes
@@ -150,6 +158,8 @@ export function RecordPaymentScreen() {
     LEDGER_METHOD_TO_FORM[editingPayment?.method ?? ''] ?? 'bank_transfer',
   );
   const [notes, setNotes] = useState(editingPayment?.notes ?? '');
+  // A label, not a different kind of money — see DocumentPayment.isDeposit.
+  const [isDeposit, setIsDeposit] = useState(editingPayment?.isDeposit === true);
   const [paymentDate, setPaymentDate] = useState(
     editingPayment?.paidAt ? new Date(editingPayment.paidAt) : new Date(),
   );
@@ -169,6 +179,23 @@ export function RecordPaymentScreen() {
       setAmount(Math.round(amountDue * 100) / 100);
     }
   }, [invoiceKey, amountDue, editingPayment]);
+
+  /**
+   * Picking Deposit on a new payment. The amount prefills with the full
+   * balance; left there, one tap of Deposit + Record would bank the whole
+   * job as its deposit and mark the invoice paid. If the tradie hasn't
+   * touched the amount, swap in the deposit this job asked for, or clear it
+   * so they type the real figure.
+   */
+  const handlePickDeposit = () => {
+    setIsDeposit(true);
+    if (editingPaymentId) return;
+    const untouched = Math.abs(amount - Math.round(amountDue * 100) / 100) < 0.005;
+    if (!untouched) return;
+    const asked =
+      document?.requireDeposit === true ? Number(document.depositAmount) || 0 : 0;
+    setAmount(asked > 0 && asked <= amountDue ? Math.round(asked * 100) / 100 : 0);
+  };
 
   const handleRecordPayment = async () => {
     if (!invoice) return;
@@ -242,6 +269,7 @@ export function RecordPaymentScreen() {
           paidAt: paymentDate.getTime(),
           method: PAYMENT_METHOD_TO_LEDGER[paymentMethod] ?? 'other',
           notes: notes || undefined,
+          isDeposit,
         });
         showAlert({
           type: 'success',
@@ -255,7 +283,7 @@ export function RecordPaymentScreen() {
       if (document) {
         // recordDocumentPayment mirrors into the legacy row itself when one
         // exists, so this branch covers both id-spaces.
-        await recordDocumentPayment(document.id, paymentAmount, paymentMethod, notes || undefined, paymentDate);
+        await recordDocumentPayment(document.id, paymentAmount, paymentMethod, notes || undefined, paymentDate, isDeposit);
       } else {
         await recordPayment(invoice.id, paymentAmount, paymentMethod, notes || undefined, paymentDate);
       }
@@ -277,7 +305,7 @@ export function RecordPaymentScreen() {
         primaryButtonText: 'Done',
         primaryButtonAction: dismiss,
         secondaryButtonText: paymentCopy.sendReceipt,
-        secondaryButtonAction: () => shareReceipt(paymentAmount, paymentMethod, paymentDate),
+        secondaryButtonAction: () => shareReceipt(paymentAmount, paymentMethod, paymentDate, isDeposit),
       });
     } catch (error) {
       showAlert({
@@ -301,12 +329,13 @@ export function RecordPaymentScreen() {
    * Built from the form's method, not the stored ledger entry: the ledger
    * vocabulary collapses card and cheque into "other".
    */
-  const shareReceipt = async (amount: number, method: PaymentMethod, paidAt: Date) => {
+  const shareReceipt = async (amount: number, method: PaymentMethod, paidAt: Date, deposit: boolean) => {
     const message = buildPaymentReceipt({
       businessName: businessSettings?.businessName,
       reference: invoice?.invoiceNumber ? `Invoice ${invoice.invoiceNumber}` : document?.job?.name,
       amount,
       method,
+      isDeposit: deposit,
       balanceDue: Math.max(0, amountDue - amount),
       at: paidAt,
     });
@@ -415,6 +444,34 @@ export function RecordPaymentScreen() {
         </View>
       ) : null}
 
+      {/* The big "Record Payment" buttons land here even when the job
+          already has payments — and "change my deposit" is exactly what a
+          tradie taps them for. Point at the history rather than leave them
+          on a blank form. */}
+      {!editingPaymentId && (document?.payments || []).some(isEditablePayment) ? (
+        <Pressable
+          onPress={() => {
+            openPaymentsRef.current = document!.id;
+            dismiss();
+          }}
+          accessibilityRole="button"
+          style={({ pressed }) => [styles.changeLinkRow, pressed && { opacity: 0.7 }]}
+        >
+          <Text style={styles.changeLinkText}>Change a payment already recorded</Text>
+          <MaterialCommunityIcons name="chevron-right" size={18} color={themeColors.accentText} />
+        </Pressable>
+      ) : null}
+
+      {/* Deposit label. Changes what the invoice and receipt call this
+          money ("Deposit paid"), never the balance. Asked before the amount:
+          the amount prefills with the full balance, and a deposit is almost
+          never that. */}
+      <Text style={styles.fieldLabel}>What's it for?</Text>
+      <View style={styles.chipRow}>
+        <Chip label="Payment" active={!isDeposit} onPress={() => setIsDeposit(false)} />
+        <Chip label="Deposit" active={isDeposit} onPress={handlePickDeposit} />
+      </View>
+
       {/* Amount */}
       <Text style={styles.fieldLabel}>Amount</Text>
       <CurrencyInput
@@ -424,11 +481,13 @@ export function RecordPaymentScreen() {
         accessibilityLabel="Payment amount"
       />
       <View style={styles.chipRow}>
+        {/* Editing: the most this entry can become is the ceiling (the
+            balance with this payment taken back out), not what's owing now. */}
         <Chip
           label="Full balance"
-          onPress={() => setAmount(Math.round(amountDue * 100) / 100)}
+          onPress={() => setAmount(Math.round((editingPaymentId ? ceiling : amountDue) * 100) / 100)}
         />
-        {amountDue >= 100 && (
+        {!editingPaymentId && amountDue >= 100 && (
           <Chip
             label="50%"
             onPress={() => setAmount(Math.round((amountDue / 2) * 100) / 100)}
@@ -571,6 +630,21 @@ const useStyles = makeStyles((t) => ({
   summaryValueDue: {
     color: t.colors.money,
     fontSize: 18,
+  },
+  changeLinkRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    backgroundColor: t.colors.accentSubtle,
+  },
+  changeLinkText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: t.colors.accentText,
   },
   squareNoteRow: {
     flexDirection: 'row',

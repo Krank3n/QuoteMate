@@ -95,6 +95,7 @@ vi.mock('react-native-paper', async () => {
 const nav = vi.hoisted(() => ({
   goBack: vi.fn(),
   navigate: vi.fn(),
+  replace: vi.fn(),
   isFocused: vi.fn(() => true),
 }));
 const routeParams = vi.hoisted(() => ({ current: { invoiceId: 'doc-1' } as any }));
@@ -298,8 +299,10 @@ describe('RecordPaymentScreen sheet-screen', () => {
 
     expect(amountInput(baseElement).value).toBe('400.00');
     // Ledger 'bank' prefills the Bank transfer chip.
-    const selected = baseElement.querySelector('[aria-selected="true"]');
-    expect(selected?.textContent).toContain('Bank transfer');
+    const selected = Array.from(baseElement.querySelectorAll('[aria-selected="true"]')).map(
+      (el) => el.textContent,
+    );
+    expect(selected.some((t) => t?.includes('Bank transfer'))).toBe(true);
     expect(
       baseElement.querySelector<HTMLInputElement>('input[aria-label="Payment notes"], textarea[aria-label="Payment notes"]')?.value,
     ).toBe('ref 123');
@@ -314,6 +317,96 @@ describe('RecordPaymentScreen sheet-screen', () => {
     await act(async () => lastAlert().primaryButtonAction());
     expect(state.deleteDocumentPayment).toHaveBeenCalledWith('doc-1', 'pay-1');
     expect(sheet.props.visible).toBe(false);
+  });
+
+  it('records a payment marked as the deposit and says so on the receipt', () => withWebShare(async () => {
+    const share = vi.spyOn(Share, 'share').mockResolvedValue({ action: 'sharedAction' } as any);
+    const { baseElement, getByText, getByRole } = render(<RecordPaymentScreen />);
+
+    setAmount(baseElement, '800');
+    fireEvent.click(getByText('Deposit'));
+    fireEvent.click(getByRole('button', { name: /Record Payment/ }));
+
+    await waitFor(() => expect(state.recordDocumentPayment).toHaveBeenCalled());
+    expect(state.recordDocumentPayment.mock.calls[0][5]).toBe(true);
+
+    await act(async () => lastAlert().secondaryButtonAction());
+    expect(share.mock.calls[0][0].message).toContain('Deposit paid: $800.00');
+  }));
+
+  it('records an ordinary payment by default', async () => {
+    const { getByRole } = render(<RecordPaymentScreen />);
+    fireEvent.click(getByRole('button', { name: /Record Payment/ }));
+    await waitFor(() => expect(state.recordDocumentPayment).toHaveBeenCalled());
+    expect(state.recordDocumentPayment.mock.calls[0][5]).toBe(false);
+  });
+
+  it('edit mode prefills the deposit label and can take it off', async () => {
+    state.documents = [
+      { ...invoiceDoc, payments: [{ ...invoiceDoc.payments[0], isDeposit: true }] },
+    ];
+    routeParams.current = { invoiceId: 'doc-1', paymentId: 'pay-1' };
+    const { getByText, getByRole } = render(<RecordPaymentScreen />);
+
+    const chip = (label: string) => getByText(label).closest('[aria-selected]');
+    expect(chip('Deposit')?.getAttribute('aria-selected')).toBe('true');
+
+    fireEvent.click(getByText('Payment'));
+    fireEvent.click(getByRole('button', { name: /Save Changes/ }));
+    await waitFor(() => expect(state.updateDocumentPayment).toHaveBeenCalled());
+    expect(state.updateDocumentPayment.mock.calls[0][2]).toMatchObject({ isDeposit: false });
+  });
+
+  it('links to the payment history when the invoice already has payments', () => {
+    const { getByText } = render(<RecordPaymentScreen />);
+    fireEvent.click(getByText('Change a payment already recorded'));
+    expect(sheet.props.visible).toBe(false);
+    expect(nav.replace).not.toHaveBeenCalled();
+    act(() => sheet.props.onClosed());
+    expect(nav.replace).toHaveBeenCalledWith('Payments', { docId: 'doc-1' });
+    expect(nav.goBack).not.toHaveBeenCalled();
+  });
+
+  it('shows no history link on an invoice with no payments, or while editing', () => {
+    state.documents = [{ ...invoiceDoc, paidTotal: 0, payments: [] }];
+    const first = render(<RecordPaymentScreen />);
+    expect(first.queryByText('Change a payment already recorded')).toBeNull();
+    first.unmount();
+
+    state.documents = [invoiceDoc];
+    routeParams.current = { invoiceId: 'doc-1', paymentId: 'pay-1' };
+    const { queryByText } = render(<RecordPaymentScreen />);
+    expect(queryByText('Change a payment already recorded')).toBeNull();
+  });
+
+  it('picking Deposit clears the untouched full-balance prefill so the whole job is not banked as a deposit', () => {
+    const { baseElement, getByText } = render(<RecordPaymentScreen />);
+    expect(amountInput(baseElement).value).toBe('1303.13');
+    fireEvent.click(getByText('Deposit'));
+    expect(amountInput(baseElement).value).toMatch(/^0?(\.00)?$/);
+  });
+
+  it('picking Deposit fills in the deposit this job asked for', () => {
+    state.documents = [{ ...invoiceDoc, requireDeposit: true, depositAmount: 500 }];
+    const { baseElement, getByText } = render(<RecordPaymentScreen />);
+    fireEvent.click(getByText('Deposit'));
+    expect(amountInput(baseElement).value).toBe('500.00');
+  });
+
+  it('picking Deposit keeps an amount the tradie already typed', () => {
+    const { baseElement, getByText } = render(<RecordPaymentScreen />);
+    setAmount(baseElement, '3000');
+    fireEvent.click(getByText('Deposit'));
+    expect(amountInput(baseElement).value).toBe('3000.00');
+  });
+
+  it('editing: Full balance means the most this entry can be, and 50% is hidden', () => {
+    routeParams.current = { invoiceId: 'doc-1', paymentId: 'pay-1' };
+    const { baseElement, getByText, queryByText } = render(<RecordPaymentScreen />);
+    expect(queryByText('50%')).toBeNull();
+    fireEvent.click(getByText('Full balance'));
+    // 2606.26 − (1303.13 − 400) = 1703.13, not the 1303.13 still owing.
+    expect(amountInput(baseElement).value).toBe('1703.13');
   });
 
   it('cent-rounds the prefilled full-balance amount before writing', async () => {

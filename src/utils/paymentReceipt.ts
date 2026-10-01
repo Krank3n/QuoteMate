@@ -43,6 +43,8 @@ export interface PaymentReceiptInput {
    * and cheque into "other").
    */
   method?: PaymentMethod;
+  /** The tradie marked this payment as the deposit — the receipt says so. */
+  isDeposit?: boolean;
   /**
    * What the customer still owes after this payment. A part payment must not
    * read as the invoice being closed — when this is above zero the receipt
@@ -82,6 +84,7 @@ export function buildPaymentReceipt({
   reference,
   amount,
   method = 'card',
+  isDeposit = false,
   balanceDue,
   at = new Date(),
 }: PaymentReceiptInput): string {
@@ -90,12 +93,12 @@ export function buildPaymentReceipt({
   const name = (businessName || '').trim();
   if (name) lines.push(name);
 
-  lines.push('Payment received — thanks.');
+  lines.push(isDeposit ? 'Deposit received — thanks.' : 'Payment received — thanks.');
   lines.push('');
 
   const ref = (reference || '').trim();
   if (ref) lines.push(`For: ${ref}`);
-  lines.push(`Amount paid: ${formatCurrency(amount)}`);
+  lines.push(`${isDeposit ? 'Deposit paid' : 'Amount paid'}: ${formatCurrency(amount)}`);
   lines.push(`Paid by: ${METHOD_LABEL[method] ?? METHOD_LABEL.other}`);
   lines.push(`When: ${formatWhen(at)}`);
   if (typeof balanceDue === 'number' && balanceDue > 0.005) {

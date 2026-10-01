@@ -81,3 +81,20 @@ describe('documentRecordToInvoiceRecord — a document with no payments ledger',
     expect(invoice.depositCredit ?? 0).toBe(0);
   });
 });
+
+describe('documentRecordToInvoiceRecord — paymentCount', () => {
+  it('stamps how many ledger entries make up the paid total', () => {
+    const record = invoiceRecord(
+      [
+        { id: 'p1', kind: 'manual', amount: 400, paidAt: 1, method: 'cash' },
+        { id: 'p2', kind: 'manual', amount: 560, paidAt: 2, method: 'bank' },
+      ],
+      960,
+    );
+    expect(documentRecordToInvoiceRecord(record).paymentCount).toBe(2);
+  });
+
+  it('is zero with no payments', () => {
+    expect(documentRecordToInvoiceRecord(invoiceRecord([], 0)).paymentCount).toBe(0);
+  });
+});

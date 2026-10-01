@@ -21,6 +21,7 @@ import { ViewJobScreen } from '../screens/ViewJobScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { PaywallScreen } from '../screens/PaywallScreen';
 import { RecordPaymentScreen } from '../screens/RecordPaymentScreen';
+import { PaymentsScreen } from '../screens/PaymentsScreen';
 import { InsightsScreen } from '../screens/InsightsScreen';
 
 // Settings sub-screens
@@ -549,6 +550,18 @@ export function RootNavigator() {
           // BottomSheet the screen portals in. The card stays invisible and
           // motionless — BottomSheet owns entry/exit animation, and the
           // previous screen shows through the backdrop.
+          presentation: 'transparentModal',
+          headerShown: false,
+          animation: 'none',
+          gestureEnabled: false,
+          cardStyle: { backgroundColor: 'transparent' },
+        }}
+      />
+      <RootStack.Screen
+        name="Payments"
+        component={PaymentsScreen}
+        // Same sheet-screen chrome as RecordPayment above.
+        options={{
           presentation: 'transparentModal',
           headerShown: false,
           animation: 'none',

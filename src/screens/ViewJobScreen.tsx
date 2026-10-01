@@ -40,8 +40,7 @@ import {
 } from '../../shared/job/stage';
 import { JobPhotosCard } from '../components/JobPhotosCard';
 import { JobChecklist } from '../components/JobChecklist';
-import { PaymentSheet } from '../components/PaymentSheet';
-import { derivePaymentState } from '../components/PaymentChip';
+import { paymentChipRoute } from '../components/PaymentChip';
 import { ScheduleJobSheet } from '../components/ScheduleJobSheet';
 import {
   StickyJobActionBar,
@@ -117,7 +116,6 @@ export function ViewJobScreen() {
 
   const [stageSheetVisible, setStageSheetVisible] = useState(false);
   const [docStageSheetDoc, setDocStageSheetDoc] = useState<Document | null>(null);
-  const [paymentSheetDoc, setPaymentSheetDoc] = useState<Document | null>(null);
   const [scheduleSheetVisible, setScheduleSheetVisible] = useState(false);
   const [actionsSheetVisible, setActionsSheetVisible] = useState(false);
   const [takePaymentTarget, setTakePaymentTarget] = useState<TakePaymentTarget | null>(null);
@@ -475,29 +473,28 @@ export function ViewJobScreen() {
     return 'overdue';
   };
 
-  // Chip tap routing. An unpaid INVOICE goes straight to Record Payment —
-  // the same place the identical chip goes from a job card. It used to open
-  // TakePaymentSheet here instead, so one control did two different things
-  // depending on which screen you were standing on, and the fast path (two
-  // taps) became a slow one (four) for no reason the tradie could see.
-  // Collecting by card is still one tap away on the sticky bar.
+  // Chip tap routing — see paymentChipRoute. An unpaid INVOICE goes straight
+  // to Record Payment, the same place the chip goes from a job card. Once
+  // money is on it, the chip opens the Payments sheet instead: the history
+  // with Record Payment underneath (the Payments sheet-screen, shared with
+  // the job cards), and the only way to fix a payment while a balance is
+  // still owing.
   //
-  // A quote with a deposit owing still needs the sheet: there is no manual
-  // deposit path, and the Square rows are the only way to take one.
+  // A quote with a deposit owing still needs TakePaymentSheet: there is no
+  // manual quote-deposit path, and the Square rows are the only way to take
+  // one. No Square gate here — the sheet's manual rows must work with zero
+  // Square setup; the Square rows gate themselves.
   const handlePaymentChipPress = async (doc: Document) => {
-    const state = derivePaymentState(doc);
-    const owed = state === 'unpaid' || state === 'partially_paid';
-    if (owed && Number(doc.total) > 0) {
-      if (doc.type === 'invoice') {
+    switch (paymentChipRoute(doc)) {
+      case 'record':
         navigation.navigate('RecordPayment', { invoiceId: doc.id });
         return;
-      }
-      // No Square gate here — the sheet's manual rows must work with zero
-      // Square setup; the Square rows gate themselves.
-      openTakePaymentForDoc(doc);
-      return;
+      case 'takePayment':
+        openTakePaymentForDoc(doc);
+        return;
+      case 'history':
+        navigation.navigate('Payments', { docId: doc.id });
     }
-    setPaymentSheetDoc(doc);
   };
 
   const handleConvertToInvoice = (doc: Document) => {
@@ -803,10 +800,6 @@ export function ViewJobScreen() {
       secondaryButtonText: 'Cancel',
       secondaryButtonAction: () => {},
     });
-  };
-
-  const handleDocRecordPayment = (doc: Document) => {
-    navigation.navigate('RecordPayment', { invoiceId: doc.id });
   };
 
   // Dispatcher for the Actions sheet (the three-dot kebab in the nav
@@ -1183,21 +1176,6 @@ export function ViewJobScreen() {
         />
       ) : null}
 
-      {paymentSheetDoc ? (
-        <PaymentSheet
-          visible={true}
-          onDismiss={() => setPaymentSheetDoc(null)}
-          doc={paymentSheetDoc}
-          onRecordPayment={handleDocRecordPayment}
-          onEditPayment={(d, payment) => {
-            setPaymentSheetDoc(null);
-            navigation.navigate('RecordPayment', {
-              invoiceId: d.id,
-              paymentId: payment.id,
-            });
-          }}
-        />
-      ) : null}
 
       <ScheduleJobSheet
         visible={scheduleSheetVisible}

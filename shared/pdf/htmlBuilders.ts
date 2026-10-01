@@ -863,7 +863,24 @@ function buildLaborHTML(rawData: QuotePdfData): string {
 /**
  * Build summary/totals HTML, with optional paid amount/balance for invoices
  */
-function buildSummaryHTML(data: QuotePdfData, paidAmount?: number, amountDue?: number, depositCredit?: number): string {
+/**
+ * The money already received, above BALANCE DUE. A payment the tradie marked
+ * as the deposit gets its own "Deposit paid" row so the customer recognises
+ * the deposit they handed over; anything else stays "Amount Paid". The two
+ * rows always sum to paidAmount — the deposit share is clamped to it.
+ */
+function paidRowsHTML(paidAmount: number, paidDepositAmount?: number): string {
+  const deposit = Math.min(Math.max(Number(paidDepositAmount) || 0, 0), paidAmount);
+  const other = Math.round((paidAmount - deposit) * 100) / 100;
+  const row = (label: string, amount: number) => `
+        <div class="summary-row credit-row">
+          <span>${label}</span>
+          <span>-${formatCurrency(amount)}</span>
+        </div>`;
+  return (deposit > 0 ? row('Deposit paid', deposit) : '') + (other > 0 ? row('Amount Paid', other) : '');
+}
+
+function buildSummaryHTML(data: QuotePdfData, paidAmount?: number, amountDue?: number, depositCredit?: number, paidDepositAmount?: number): string {
   // By default markup is rolled into the displayed line totals (combined).
   // When showMarkup is explicitly true, the markup is broken out as its own
   // line and the materials/labour rows show their raw (pre-markup) totals.
@@ -965,10 +982,7 @@ function buildSummaryHTML(data: QuotePdfData, paidAmount?: number, amountDue?: n
         </div>
         ` : ''}
         ${paidAmount && paidAmount > 0 ? `
-        <div class="summary-row credit-row">
-          <span>Amount Paid</span>
-          <span>-${formatCurrency(paidAmount)}</span>
-        </div>
+        ${paidRowsHTML(paidAmount, paidDepositAmount)}
         <div class="summary-row balance-due">
           <span>BALANCE DUE</span>
           <span>${formatCurrency(amountDue || 0)}</span>
@@ -1352,7 +1366,7 @@ export function buildInvoicePdfHtml(
   const paidStamp = invoice.paidDate;
   const overlayCss = !paidStamp && watermark ? buildWatermarkCSS() : '';
   const overlayHtml = !paidStamp && watermark ? buildWatermarkHTML('DRAFT', watermark) : '';
-  const summaryHtml = buildSummaryHTML(invoice, paidAmount, amountDue, invoice.depositCredit);
+  const summaryHtml = buildSummaryHTML(invoice, paidAmount, amountDue, invoice.depositCredit, invoice.paidDepositAmount);
 
   // One payment box, not two. When the payment-methods section renders, the
   // amount-due / due-date lines ride inside it; a separate "Payment

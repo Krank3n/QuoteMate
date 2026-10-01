@@ -30,13 +30,18 @@ interface PaymentSheetProps {
   onDismiss: () => void;
   doc: Document;
   onRecordPayment?: (doc: Document) => void;
+  /** Fires after the close animation — lets a route-hosted sheet goBack(). */
+  onClosed?: () => void;
 }
 
-function paymentKindLabel(kind: DocumentPayment['kind']): string {
-  switch (kind) {
+function paymentKindLabel(payment: DocumentPayment): string {
+  // A hand-recorded payment the tradie marked as the deposit reads as one —
+  // see DocumentPayment.isDeposit.
+  if (payment.isDeposit) return 'Deposit';
+  switch (payment.kind) {
     case 'deposit': return 'Deposit';
     case 'balance': return 'Balance';
-    case 'manual': return 'Manual';
+    case 'manual': return 'Payment';
   }
 }
 
@@ -58,7 +63,7 @@ function formatPaidAt(ms: number): string {
   }
 }
 
-export function PaymentSheet({ visible, onDismiss, doc, onRecordPayment, onEditPayment }: PaymentSheetProps) {
+export function PaymentSheet({ visible, onDismiss, doc, onRecordPayment, onEditPayment, onClosed }: PaymentSheetProps) {
   const styles = useStyles();
   const themeColors = useThemeColors();
   const payments = (doc.payments || []).slice().sort(
@@ -69,7 +74,7 @@ export function PaymentSheet({ visible, onDismiss, doc, onRecordPayment, onEditP
   const balance = Math.max(0, total - paid);
 
   return (
-    <BottomSheet visible={visible} onDismiss={onDismiss} title="Payments" scrollable>
+    <BottomSheet visible={visible} onDismiss={onDismiss} onClosed={onClosed} title="Payments" scrollable>
       <View style={styles.summaryRow}>
         <SummaryCell label="Total" value={formatCurrency(total)} />
         <SummaryCell label="Paid" value={formatCurrency(paid)} />
@@ -92,6 +97,10 @@ export function PaymentSheet({ visible, onDismiss, doc, onRecordPayment, onEditP
           <Text style={styles.emptyText}>No payments recorded yet.</Text>
         </View>
       ) : (
+        <>
+        {onEditPayment && payments.some(isEditablePayment) ? (
+          <Text style={styles.hint}>Tap a payment to change or remove it.</Text>
+        ) : null}
         <ScrollView style={styles.list} contentContainerStyle={styles.listContent}>
           {payments.map((p) => {
             // Square entries mirror a real transaction and stay read-only —
@@ -132,7 +141,7 @@ export function PaymentSheet({ visible, onDismiss, doc, onRecordPayment, onEditP
               </View>
               <View style={styles.rowMain}>
                 <Text style={styles.rowTitle}>
-                  {paymentKindLabel(p.kind)} · {methodLabel(p.method)}
+                  {paymentKindLabel(p)} · {methodLabel(p.method)}
                 </Text>
                 {p.paidAt ? (
                   <Text style={styles.rowMeta}>{formatPaidAt(p.paidAt)}</Text>
@@ -151,9 +160,12 @@ export function PaymentSheet({ visible, onDismiss, doc, onRecordPayment, onEditP
             );
           })}
         </ScrollView>
+        </>
       )}
 
-      {doc.type === 'invoice' && onRecordPayment ? (
+      {/* Nothing left to record on a settled invoice — the form would only
+          refuse with "Amount exceeds balance". */}
+      {doc.type === 'invoice' && onRecordPayment && balance > 0.005 ? (
         <Button
           mode="contained" buttonColor={themeColors.accent} textColor={themeColors.onAccent}
           icon={'plus' as any}
@@ -223,6 +235,11 @@ const useStyles = makeStyles((t) => ({
   emptyText: {
     fontSize: 13,
     color: t.colors.textMuted,
+  },
+  hint: {
+    fontSize: 12,
+    color: t.colors.textMuted,
+    marginBottom: 4,
   },
   list: {
     maxHeight: 320,

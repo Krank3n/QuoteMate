@@ -117,6 +117,22 @@ export function evaluatePaymentReceipt(
   const delta = paidAfter - paidBefore;
   if (delta <= EPSILON) return null;
 
+  // A tradie correcting a payment upwards (a $300 typo fixed to $3,000)
+  // raises paidAmount too, but no money arrived — a receipt for "$2,700"
+  // would be fiction. The app stamps how many ledger entries the total is
+  // made of: an edit leaves that count alone, a new payment raises it. A
+  // Square payment is new by definition (its id changes) and is written
+  // without touching the count, so it is never mistaken for an edit. Older
+  // app builds don't stamp the count, and keep the old behaviour.
+  const countBefore = before.paymentCount;
+  const countAfter = after.paymentCount;
+  const isLedgerEdit =
+    typeof countBefore === 'number' &&
+    typeof countAfter === 'number' &&
+    countAfter <= countBefore &&
+    after.squarePaymentId === before.squarePaymentId;
+  if (isLedgerEdit) return null;
+
   const balanceDue = round2(Math.max(0, total - paidAfter));
   return {
     customerEmail,
@@ -125,6 +141,25 @@ export function evaluatePaymentReceipt(
     balanceDue,
     paymentMethod: typeof after.paymentMethod === 'string' ? after.paymentMethod : undefined,
   };
+}
+
+/**
+ * Whether the payment a receipt is about was recorded as the job's deposit.
+ *
+ * The trigger sees only the legacy invoice's paidAmount going up, not which
+ * ledger entry caused it. Record Payment appends to the unified ledger (and
+ * writes it) before mirroring the invoice, so the newest entry is the one —
+ * but only trust it when its amount is the money this receipt reports, so a
+ * Square payment landing on an invoice whose last manual entry happened to
+ * be a deposit still reads as a plain payment.
+ */
+export function receiptIsForDeposit(
+  payments: ReadonlyArray<{ amount?: unknown; isDeposit?: unknown; kind?: unknown }> | null | undefined,
+  amountReceived: number,
+): boolean {
+  const latest = payments && payments.length > 0 ? payments[payments.length - 1] : undefined;
+  if (!latest || latest.isDeposit !== true || latest.kind === 'deposit') return false;
+  return Math.abs((Number(latest.amount) || 0) - amountReceived) < EPSILON;
 }
 
 /** Human label for the stored payment method; undefined hides the row. */
@@ -157,6 +192,8 @@ export interface PaymentReceiptContentInput {
   paymentMethod?: string;
   /** Pre-formatted AU date, e.g. "2 July 2026". */
   paidDateText: string;
+  /** The tradie recorded this payment as the deposit — see receiptIsForDeposit. */
+  isDeposit?: boolean;
 }
 
 /**
@@ -184,14 +221,15 @@ export function buildPaymentReceiptContentHtml(input: PaymentReceiptContentInput
     ? `<p style="color:#059669;font-size:15px;font-weight:700;margin:0 0 16px;">This invoice is now paid in full.</p>`
     : `<p style="color:#374151;font-size:15px;margin:0 0 16px;">Remaining balance: <strong style="color:#111827;">${formatAud(input.balanceDue)}</strong></p>`;
 
+  const what = input.isDeposit ? 'deposit' : 'payment';
   return `
-    <h1 style="margin:0 0 8px;font-size:20px;font-weight:700;color:#111827;">Payment received</h1>
+    <h1 style="margin:0 0 8px;font-size:20px;font-weight:700;color:#111827;">${input.isDeposit ? 'Deposit received' : 'Payment received'}</h1>
     <p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 20px;">Hi ${esc(input.customerName || 'there')},</p>
-    <p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 20px;">Thanks for your payment — here's your receipt.</p>
+    <p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 20px;">Thanks for your ${what} — here's your receipt.</p>
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;margin:0 0 20px;">
       <tr>
         <td style="padding:20px 24px;">
-          <p style="margin:0 0 4px;color:#6b7280;font-size:13px;">Amount received</p>
+          <p style="margin:0 0 4px;color:#6b7280;font-size:13px;">${input.isDeposit ? 'Deposit received' : 'Amount received'}</p>
           <p style="margin:0 0 12px;color:#111827;font-size:28px;font-weight:800;">${formatAud(input.amountReceived)}</p>
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0">${rowsHtml}
           </table>

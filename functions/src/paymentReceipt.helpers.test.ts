@@ -7,6 +7,7 @@ import {
   paymentMethodLabel,
   formatAud,
   buildPaymentReceiptContentHtml,
+  receiptIsForDeposit,
 } from './paymentReceipt.helpers';
 
 describe('invoiceLinkAmountDue — pay link charges the balance, not the total', () => {
@@ -188,5 +189,85 @@ describe('buildPaymentReceiptContentHtml — customer-facing receipt body', () =
     const html = buildPaymentReceiptContentHtml({ ...partial, paymentMethod: 'other', customerName: undefined });
     expect(html).not.toContain('Payment method');
     expect(html).toContain('Hi there');
+  });
+});
+
+describe('receiptIsForDeposit', () => {
+  it('is true when the newest entry is the deposit and matches the money received', () => {
+    const payments = [
+      { kind: 'manual', amount: 500 },
+      { kind: 'manual', amount: 3000, isDeposit: true },
+    ];
+    expect(receiptIsForDeposit(payments, 3000)).toBe(true);
+  });
+
+  it('is false when the amount received is not the deposit entry', () => {
+    // A Square payment of $1,000 lands after a $3,000 recorded deposit: the
+    // newest manual entry is the deposit, but this receipt is not about it.
+    expect(receiptIsForDeposit([{ kind: 'manual', amount: 3000, isDeposit: true }], 1000)).toBe(false);
+  });
+
+  it('is false for an ordinary payment, a Square quote deposit, or no ledger', () => {
+    expect(receiptIsForDeposit([{ kind: 'manual', amount: 200 }], 200)).toBe(false);
+    expect(receiptIsForDeposit([{ kind: 'deposit', amount: 200, isDeposit: true }], 200)).toBe(false);
+    expect(receiptIsForDeposit(undefined, 200)).toBe(false);
+    expect(receiptIsForDeposit([], 200)).toBe(false);
+  });
+});
+
+describe('buildPaymentReceiptContentHtml — deposit wording', () => {
+  const base = {
+    customerName: 'Sam',
+    businessName: 'Coastal Concreting',
+    invoiceNumber: 'INV-001',
+    amountReceived: 3000,
+    isFullyPaid: false,
+    balanceDue: 6850.40,
+    paidDateText: '29 September 2026',
+  };
+
+  it('calls a deposit a deposit', () => {
+    const html = buildPaymentReceiptContentHtml({ ...base, isDeposit: true });
+    expect(html).toContain('>Deposit received</h1>');
+    expect(html).toContain('Thanks for your deposit');
+    expect(html).toContain('$3,000.00');
+    expect(html).toContain('$6,850.40');
+    expect(html).not.toContain('Payment received');
+  });
+
+  it('keeps the payment wording otherwise', () => {
+    const html = buildPaymentReceiptContentHtml(base);
+    expect(html).toContain('>Payment received</h1>');
+    expect(html).toContain('Thanks for your payment');
+    expect(html).not.toContain('Deposit received');
+  });
+});
+
+describe('evaluatePaymentReceipt — edits are not payments', () => {
+  const sent = { status: 'sent', customerEmail: 'sam@example.com', total: 9850.40 };
+
+  it('sends nothing when a payment is corrected upwards', () => {
+    // $300 typo fixed to $3,000: paid total rises, ledger still has one entry.
+    const before = { ...sent, paidAmount: 300, paymentCount: 1 };
+    const after = { ...sent, status: 'partial', paidAmount: 3000, paymentCount: 1 };
+    expect(evaluatePaymentReceipt(before, after)).toBeNull();
+  });
+
+  it('still sends for a new payment recorded by hand', () => {
+    const before = { ...sent, paidAmount: 3000, paymentCount: 1 };
+    const after = { ...sent, status: 'partial', paidAmount: 5000, paymentCount: 2 };
+    expect(evaluatePaymentReceipt(before, after)).toMatchObject({ amountReceived: 2000 });
+  });
+
+  it('still sends for a Square payment, which lands without touching the count', () => {
+    const before = { ...sent, paidAmount: 3000, paymentCount: 1 };
+    const after = { ...sent, status: 'partial', paidAmount: 5000, paymentCount: 1, squarePaymentId: 'sq_1' };
+    expect(evaluatePaymentReceipt(before, after)).toMatchObject({ amountReceived: 2000 });
+  });
+
+  it('keeps the old behaviour for invoices written by builds without the count', () => {
+    const before = { ...sent, paidAmount: 300 };
+    const after = { ...sent, status: 'partial', paidAmount: 3000 };
+    expect(evaluatePaymentReceipt(before, after)).toMatchObject({ amountReceived: 2700 });
   });
 });

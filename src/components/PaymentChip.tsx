@@ -87,6 +87,29 @@ export function derivePaymentState(doc: Document, ctx: PaymentContext = {}): Pay
 }
 
 /**
+ * Where a tap on the job screen's payment chip goes.
+ *
+ * - `record`: an invoice nobody has paid yet. Nothing to look back at, so
+ *   the fast path stands — straight to a pre-filled Record Payment.
+ * - `history`: an invoice with money already on it, or a settled doc. The
+ *   Payments sheet lists every payment (tap to fix or remove one) with
+ *   Record Payment underneath. Part-paid used to skip it and open a blank
+ *   form, so a payment typed wrong could not be corrected until the invoice
+ *   was paid in full.
+ * - `takePayment`: a quote still owed money — the Square sheet, the only
+ *   way to take a quote deposit.
+ */
+export type PaymentChipRoute = 'record' | 'history' | 'takePayment';
+
+export function paymentChipRoute(doc: Document): PaymentChipRoute {
+  const state = derivePaymentState(doc);
+  const owed = state === 'unpaid' || state === 'partially_paid';
+  if (!owed || !(Number(doc.total) > 0)) return 'history';
+  if (doc.type !== 'invoice') return 'takePayment';
+  return state === 'unpaid' ? 'record' : 'history';
+}
+
+/**
  * Whether a doc has a money story worth putting a chip on.
  *
  * Every surface asks this same question, so it lives next to

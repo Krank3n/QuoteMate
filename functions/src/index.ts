@@ -45,6 +45,7 @@ import {
   isPaymentAlreadyApplied,
   applySquarePaymentToInvoice,
   evaluatePaymentReceipt,
+  receiptIsForDeposit,
 } from './paymentReceipt.helpers';
 import { shouldReadyToSendNudge, toMs } from './draftNudge.helpers';
 import { onboardingTipDue } from './onboardingDrip.helpers';
@@ -11335,6 +11336,11 @@ export const onInvoicePaymentReceived = functions.firestore
         day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Australia/Sydney',
       });
 
+      // Which ledger entry this is lives on the unified document, not the
+      // legacy invoice. Best-effort: a failed read just sends the plain wording.
+      const ledgerDoc = await loadDocumentForInvoiceId(userId, invoiceId).catch(() => null);
+      const isDeposit = receiptIsForDeposit(ledgerDoc?.payments, receipt.amountReceived);
+
       const replyToEmail = await resolveTradieReplyEmail(userId, business.email);
       await sendPaymentReceiptEmail({
         to: receipt.customerEmail,
@@ -11351,6 +11357,7 @@ export const onInvoicePaymentReceived = functions.firestore
           balanceDue: receipt.balanceDue,
           paymentMethod: receipt.paymentMethod,
           paidDateText,
+          isDeposit,
         },
       });
     } catch (err: any) {
