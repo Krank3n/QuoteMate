@@ -6,6 +6,7 @@ import { isPdfUrl } from './shared/media/pdfUrl';
 import { normaliseTimestamp } from './timestamps.helpers';
 import { NEXT_PRICE_AUD } from './foundingOffer';
 import { quoteOpenedEmailCopy } from './quoteOpenedEmail.helpers';
+import { crewInviteEmailCopy } from './crewTime.helpers';
 import { NO_GST_NOTE, resolveGstMode } from './shared/document/gstMode';
 import {
   resolvePriceDetail,
@@ -2003,6 +2004,59 @@ function wrapQuoteEmailTemplate(content: string, options: { brandColor?: string;
  * (manual Record Payment or Square). Business-branded like the quote/invoice
  * emails: the tradie's name is the sender and replies route to them.
  */
+/**
+ * A crew member's link to put their hours in, sent in the business's name.
+ * Same business letterhead as the receipts; no app sign-off — the crew member
+ * is hearing from their boss, not from us. Copy lives in
+ * crewTime.helpers.crewInviteEmailCopy so it can be tested on its own.
+ */
+export function buildCrewInviteEmailHtml(options: {
+  crewName: string;
+  business: { businessName?: string; brandColor?: string; logoUrl?: string };
+  url: string;
+}): { subject: string; html: string } {
+  const businessName = options.business.businessName || '';
+  const copy = crewInviteEmailCopy(options.crewName, businessName);
+  const brand = safeBrandColor(options.business.brandColor);
+  const p = (text: string) =>
+    `<p style="color:#374151;font-size:15px;line-height:1.7;margin:0 0 16px;">${escapeHtml(text)}</p>`;
+  const content = `
+    ${p(copy.greeting)}
+    ${copy.paragraphs.map(p).join('')}
+    ${ctaButton(escapeHtml(copy.button), brand, escapeHtml(options.url))}
+    <p style="color:#6b7280;font-size:13px;line-height:1.6;margin:24px 0 0;">${escapeHtml(copy.footnote)}</p>`;
+  const html = wrapQuoteEmailTemplate(content, {
+    brandColor: options.business.brandColor,
+    businessName,
+    logoUrl: options.business.logoUrl,
+    preheader: copy.preheader,
+    appFooter: false,
+  });
+  return { subject: copy.subject, html };
+}
+
+export function sendCrewInviteEmail(options: {
+  to: string;
+  userId: string;
+  crewName: string;
+  business: { businessName?: string; brandColor?: string; logoUrl?: string };
+  replyToEmail?: string | null;
+  url: string;
+}): Promise<boolean> {
+  const { subject, html } = buildCrewInviteEmailHtml(options);
+  const businessName = options.business.businessName || 'Your boss';
+  return sendEmail({
+    to: options.to,
+    subject,
+    htmlContent: html,
+    category: 'transactional',
+    userId: options.userId,
+    tags: ['crew-invite'],
+    senderName: businessName,
+    replyTo: options.replyToEmail ? { email: options.replyToEmail, name: businessName } : undefined,
+  });
+}
+
 export function sendPaymentReceiptEmail(options: {
   to: string;
   userId: string;

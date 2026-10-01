@@ -19,11 +19,15 @@ import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
 
 import { checkRateLimit } from './assistantToken';
+import { remoteLogoUrl, sendCrewInviteEmail } from './email';
 import {
   CREW_JOB_STAGES,
   crewJobView,
   crewLinkDeadPage,
+  CREW_INVITE_DAILY_LIMIT,
   CREW_PAGE_FRAME_ANCESTORS,
+  crewLinkPageUrl,
+  isCrewEmail,
   crewTimePage as renderCrewTimePage,
   hashCrewToken,
   isCrewVisibleJob,
@@ -39,11 +43,6 @@ const db = () => admin.firestore();
 const PUBLIC_LIMIT = { maxRequests: 40, windowMs: 60_000 };
 const LOG_LIMIT = { maxRequests: 20, windowMs: 60 * 60_000 };
 const RECENT_DAYS = 21;
-
-async function crewOf(userId: string): Promise<unknown> {
-  const snap = await db().collection('users').doc(userId).collection('settings').doc('business').get();
-  return snap.exists ? snap.data()?.crew : undefined;
-}
 
 async function linksFor(userId: string, crewId: string) {
   return db().collection('crewLinks').where('userId', '==', userId).where('crewId', '==', crewId).get();
@@ -63,11 +62,42 @@ function requireCrewId(data: unknown): string {
   return crewId;
 }
 
+/**
+ * Count one invite email against the business's rolling-day allowance.
+ * rateLimits is unreachable from clients (no rule matches it), so the owner
+ * can't reset their own counter. False = over the limit.
+ */
+async function takeInviteAllowance(uid: string): Promise<boolean> {
+  const ref = db().collection('rateLimits').doc(`crewInvite:${uid}`);
+  const now = Date.now();
+  return db().runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    const recent = ((snap.data()?.timestamps as number[]) ?? []).filter((t) => t > now - 24 * 60 * 60 * 1000);
+    if (recent.length >= CREW_INVITE_DAILY_LIMIT) return false;
+    tx.set(ref, { timestamps: [...recent, now], updatedAt: admin.firestore.FieldValue.serverTimestamp() });
+    return true;
+  });
+}
+
 export const createCrewLink = functions.https.onCall(async (data, context) => {
   const uid = requireOwner(context);
   const crewId = requireCrewId(data);
-  const member = liveCrewMember(await crewOf(uid), crewId);
+  const settings = (await db().collection('users').doc(uid).collection('settings').doc('business').get()).data() || {};
+  const member = liveCrewMember(settings.crew, crewId);
   if (!member) throw new functions.https.HttpsError('not-found', "That person isn't on your crew any more.");
+
+  // Emailing is opt-in per call, and only ever to the address saved on the
+  // crew member — never one passed in, so this can't be pointed at strangers.
+  const wantsEmail = (data as { email?: unknown })?.email === true;
+  const to = typeof member.email === 'string' ? member.email.trim() : '';
+  if (wantsEmail) {
+    if (!isCrewEmail(to)) {
+      throw new functions.https.HttpsError('failed-precondition', `Add an email address for ${member.name} first.`);
+    }
+    if (!(await takeInviteAllowance(uid))) {
+      throw new functions.https.HttpsError('resource-exhausted', "That's a lot of invites today — try again tomorrow, or send the link by text.");
+    }
+  }
 
   // One live link per person: minting a new one retires the old.
   const batch = db().batch();
@@ -79,7 +109,25 @@ export const createCrewLink = functions.https.onCall(async (data, context) => {
     createdAt: Date.now(),
   });
   await batch.commit();
-  return { token };
+
+  if (!wantsEmail) return { token };
+  const ownerEmail = typeof settings.email === 'string' && settings.email ? settings.email
+    : (await admin.auth().getUser(uid).catch(() => null))?.email || null;
+  const emailed = await sendCrewInviteEmail({
+    to,
+    userId: uid,
+    crewName: member.name,
+    business: {
+      businessName: settings.businessName,
+      brandColor: settings.brandColor,
+      logoUrl: remoteLogoUrl(settings.logoStorageUrl || settings.logoUri),
+    },
+    replyToEmail: ownerEmail,
+    url: crewLinkPageUrl(token),
+  }).catch(() => false);
+  functions.logger.info('crew_invite_email', { uid, crewId, emailed });
+  // The link is live either way; the app says when the email didn't go.
+  return { token, emailed };
 });
 
 export const revokeCrewLink = functions.https.onCall(async (data, context) => {

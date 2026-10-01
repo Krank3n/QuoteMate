@@ -28,6 +28,7 @@ import {
   crewLinkMessage,
   crewLinkUrl,
   parseCostRate,
+  parseCrewEmail,
   updateCrewMember,
 } from '../../utils/crew';
 import { createCrewLink, revokeCrewLink } from '../../services/crewLinkService';
@@ -45,6 +46,7 @@ export function CrewScreen() {
   const [editing, setEditing] = useState<Editing | null>(null);
   const [nameText, setNameText] = useState('');
   const [rateText, setRateText] = useState('');
+  const [emailText, setEmailText] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -63,12 +65,14 @@ export function CrewScreen() {
     setEditing({ mode: 'add' });
     setNameText('');
     setRateText('');
+    setEmailText('');
     setFormError(null);
   };
   const openEdit = (member: CrewMember) => {
     setEditing({ mode: 'edit', member });
     setNameText(member.name);
     setRateText(member.costRate ? String(member.costRate) : '');
+    setEmailText(member.email ?? '');
     setFormError(null);
   };
 
@@ -79,12 +83,14 @@ export function CrewScreen() {
     if (error || !name) return setFormError(error ?? 'Give them a name.');
     const rate = parseCostRate(rateText);
     if (rate.error) return setFormError(rate.error);
+    const mail = parseCrewEmail(emailText);
+    if (mail.error) return setFormError(mail.error);
     setBusy('save');
     try {
       await saveCrew(
         editing.mode === 'add'
-          ? addCrewMember(latestCrew(), name, rate.rate)
-          : updateCrewMember(latestCrew(), editing.member.id, { name, costRate: rate.rate }),
+          ? addCrewMember(latestCrew(), name, rate.rate, mail.email)
+          : updateCrewMember(latestCrew(), editing.member.id, { name, costRate: rate.rate, email: mail.email }),
       );
       setEditing(null);
     } catch (err: any) {
@@ -112,12 +118,32 @@ export function CrewScreen() {
   // link made or turned off on another device), and re-sharing a dead token
   // would look fine here and fail on the crew member's phone. Minting a new
   // one retires the old, so there's only ever one live link per person.
+  // With an email on file the server sends the link itself, in the business's
+  // name; without one it's the share sheet (a text, WhatsApp, the Mail app).
   const handleSendLink = async (member: CrewMember) => {
     setBusy(`link:${member.id}`);
     try {
-      const token = await createCrewLink(member.id);
+      const { token, emailed } = await createCrewLink(member.id, { email: !!member.email });
       await saveCrew(updateCrewMember(latestCrew(), member.id, { linkToken: token, linkIssuedAt: Date.now() }));
-      await shareLink(member, token);
+      if (member.email && emailed) {
+        showAlert({
+          type: 'success',
+          title: 'Link sent',
+          message: `Emailed to ${member.email}. ${member.name.split(' ')[0]} opens it on their phone and puts their hours in — you approve them on the job.`,
+        });
+      } else if (member.email) {
+        showAlert({
+          type: 'error',
+          title: "The email didn't go",
+          message: `The link's ready, but the email to ${member.email} didn't send. Share it by text instead?`,
+          primaryButtonText: 'Share it',
+          primaryButtonAction: () => shareLink(member, token),
+          secondaryButtonText: 'Not now',
+          secondaryButtonAction: () => {},
+        });
+      } else {
+        await shareLink(member, token);
+      }
     } catch (err: any) {
       showAlert({ type: 'error', title: "Couldn't make the link", message: err?.message || 'Try again in a moment.' });
     } finally {
@@ -204,6 +230,7 @@ export function CrewScreen() {
                     <Text style={styles.rowTitle}>{member.name}</Text>
                     <Text style={styles.rowSub}>
                       {[
+                        member.email ? member.email : null,
                         member.costRate ? `${formatCurrency(member.costRate)}/h cost` : null,
                         member.linkToken ? 'Link on' : 'No link',
                       ]
@@ -219,7 +246,7 @@ export function CrewScreen() {
                     disabled={!!busy}
                     onPress={() => handleSendLink(member)}
                   >
-                    Send link
+                    {member.email ? 'Email link' : 'Send link'}
                   </Button>
                 </TouchableOpacity>
               ))
@@ -250,6 +277,19 @@ export function CrewScreen() {
             mode="outlined"
             autoCapitalize="words"
             accessibilityLabel="Name"
+          />
+          <TextInput
+            label="Email (optional) — we send their link here"
+            value={emailText}
+            onChangeText={(t) => {
+              setEmailText(t);
+              setFormError(null);
+            }}
+            mode="outlined"
+            keyboardType="email-address"
+            autoCapitalize="none"
+            autoCorrect={false}
+            accessibilityLabel="Email"
           />
           <TextInput
             label="What they cost you an hour (optional)"
@@ -287,7 +327,9 @@ export function CrewScreen() {
               </Text>
               <View style={styles.linkActions}>
                 <Button mode="outlined" icon="send-outline" disabled={!!busy} onPress={() => handleSendLink(editingMember)}>
-                  {editingMember.linkToken ? 'Send a new link' : 'Send link'}
+                  {editingMember.email
+                    ? (editingMember.linkToken ? 'Email a new link' : 'Email link')
+                    : (editingMember.linkToken ? 'Send a new link' : 'Send link')}
                 </Button>
                 {editingMember.linkToken ? (
                   <>

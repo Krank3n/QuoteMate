@@ -30,6 +30,8 @@ export const CREW_WORKER_PREFIX = 'crew:';
 export interface CrewMember {
   id: string;
   name: string;
+  /** Where their hours link is emailed. Optional — without it the owner shares the link by text. */
+  email?: string;
   /** What this person costs the business per hour — for costing, never shown to customers. */
   costRate?: number;
   /** Removed from the list; past time keeps their name. */
