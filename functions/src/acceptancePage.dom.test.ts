@@ -233,12 +233,13 @@ describe('acceptance page — coming back to an accepted quote', () => {
   }
 
   it('reminds the customer of a bank-transfer deposit still owed', async () => {
-    const doc = await renderAlready({ depositDue: 291.72 });
+    const doc = await renderAlready({ depositDue: 291.72, businessName: 'Coastal Concreting' });
     const block = doc.querySelector('.pay-offer[data-kind="transfer"]');
     expect(doc.getElementById('content')!.textContent).toContain('already been accepted');
     expect(block).not.toBeNull();
     expect(block!.textContent).toContain('$291.72');
     expect(block!.textContent).toContain('Payment details are on your quote.');
+    expect(block!.textContent).toContain('Coastal Concreting will be in touch');
   });
 
   it('shows nothing extra when no deposit is owed', async () => {

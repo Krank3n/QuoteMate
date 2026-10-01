@@ -6724,6 +6724,7 @@ export const getQuoteForAcceptance = functions.https.onRequest((req, res) => {
           responseLabel: describeCustomerResponse(foundQuote.status),
           respondedAt: foundQuote.respondedAt,
           depositDue,
+          businessName: businessSettings?.businessName || '',
         });
         return;
       }
@@ -7900,6 +7901,7 @@ export function generateAcceptancePage(token: string): string {
           return;
         }
         if (data.alreadyResponded) {
+          if (data.businessName) BUSINESS_NAME = data.businessName;
           showAlreadyResponded(data.responseLabel || data.status, data.depositDue);
           return;
         }
