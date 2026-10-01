@@ -121,10 +121,11 @@ interface TakePaymentSheetProps {
   }) => void;
   /**
    * Route to the manual-recording flow (RecordPaymentScreen) for an already-
-   * received bank transfer / cash / cheque. Only wired for invoice targets —
-   * quotes have no manual deposit path. When omitted, the row is hidden.
+   * received bank transfer / cash / cheque, with the invoice or quote id. On
+   * a quote it records the deposit — the only way a tradie without Square
+   * logs one. When omitted, the row is hidden.
    */
-  onRecordManualPayment?: (invoiceId: string) => void;
+  onRecordManualPayment?: (documentId: string) => void;
   /**
    * Square connection gate. The sheet always opens (so manual recording works
    * with zero Square setup); the Square-only rows call this before doing any
@@ -667,16 +668,19 @@ export function TakePaymentSheet({
           loading={sharing}
         />
 
-        {/* Manual recording — invoice only (quotes have no manual deposit
-            path). No Square guard: works with zero Square setup. */}
-        {activeTarget.kind === 'invoice' && onRecordManualPayment && (
+        {/* Manual recording. No Square guard: works with zero Square setup,
+            which is the point on a quote — a tradie paid by bank transfer
+            records the deposit here. */}
+        {onRecordManualPayment && (
           <MethodRow
             icon="cash-multiple"
-            title={paymentCopy.recordPayment}
+            title={activeTarget.kind === 'invoice' ? paymentCopy.recordPayment : paymentCopy.recordDeposit}
             subtitle={paymentCopy.recordPaymentSubtitle}
             onPress={() => {
               onDismiss();
-              onRecordManualPayment(activeTarget.invoiceId);
+              onRecordManualPayment(
+                activeTarget.kind === 'invoice' ? activeTarget.invoiceId : activeTarget.quoteId,
+              );
             }}
           />
         )}

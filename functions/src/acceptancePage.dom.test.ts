@@ -60,7 +60,10 @@ async function renderAcceptance(quote: Record<string, unknown>): Promise<Documen
  * Render the page, then press Accept with respondToQuote answering `payment`
  * — the block the customer sees after accepting on the hosted page.
  */
-async function acceptWith(payment: Record<string, unknown> | null): Promise<Document> {
+async function acceptWith(
+  payment: Record<string, unknown> | null,
+  depositDue: number | null = null,
+): Promise<Document> {
   const html = generateAcceptancePage('a'.repeat(64));
   const dom = new JSDOM(html, {
     runScripts: 'dangerously',
@@ -70,7 +73,7 @@ async function acceptWith(payment: Record<string, unknown> | null): Promise<Docu
       (window as any).fetch = async (url: string) => ({
         json: async () =>
           String(url).includes('/respondToQuote')
-            ? { success: true, message: 'ok', payment }
+            ? { success: true, message: 'ok', payment, depositDue }
             : { success: true, quote: baseQuote(), business },
       });
     },
@@ -182,5 +185,30 @@ describe('acceptance page — after pressing Accept', () => {
     const doc = await acceptWith({ kind: 'full', url: 'javascript:alert(1)', amount: 10 });
     expect(doc.querySelector('.pay-offer')).toBeNull();
     expect(doc.querySelector('.state.success')).not.toBeNull();
+  });
+});
+
+// A tradie not on Square asks for a deposit by bank transfer. There's no card
+// offer, so the page names the deposit and points at the quote's payment
+// details instead of ending on "will be in touch".
+describe('acceptance page — deposit paid by bank transfer', () => {
+  it('shows the deposit amount and where the payment details are', async () => {
+    const doc = await acceptWith(null, 300);
+    const content = doc.getElementById('content')!.textContent!;
+    const block = doc.querySelector('.pay-offer[data-kind="transfer"]');
+    expect(block).not.toBeNull();
+    expect(block!.textContent).toContain('Deposit to get started');
+    expect(block!.textContent).toContain('$300.00');
+    expect(block!.textContent).toContain('Payment details are on your quote.');
+    expect(content).toContain('please pay your deposit');
+    expect(content).not.toContain('will be in touch to lock in a date');
+    // No card button for it.
+    expect(doc.querySelector('.btn-pay')).toBeNull();
+  });
+
+  it('the Square path is unchanged: a card deposit offer wins over the transfer note', async () => {
+    const doc = await acceptWith({ kind: 'deposit', url: 'https://square.link/u/dep', amount: 300 }, 300);
+    expect(doc.querySelector('.pay-offer[data-kind="deposit"]')).not.toBeNull();
+    expect(doc.querySelector('.pay-offer[data-kind="transfer"]')).toBeNull();
   });
 });

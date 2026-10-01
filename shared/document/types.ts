@@ -41,11 +41,10 @@ export interface DocumentPayment {
   /**
    * The tradie marked this hand-recorded payment as the job's deposit. A
    * LABEL only: `kind` stays 'manual', so balances, stage, Xero and the
-   * statement treat it exactly like any other payment. Deliberately not
-   * `kind: 'deposit'` — that kind means a Square quote deposit, which the
-   * legacy projection turns into a `depositCredit` already netted off the
-   * invoice total, and a manual payment there would be subtracted twice.
-   * Read it through recordedDepositTotal.
+   * statement treat it exactly like any other payment. `kind: 'deposit'` is
+   * kept for money taken against the QUOTE (by Square, or recorded by hand
+   * on the quote), because the quote's legacy mirror only round-trips
+   * deposits through `depositPaid`. Both read through recordedDepositTotal.
    */
   isDeposit?: boolean;
 }

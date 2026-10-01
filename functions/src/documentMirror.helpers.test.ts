@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import { preserveFirstSend, preserveLedger } from './documentMirror';
+import {
+  documentRecordToInvoiceRecord,
+  documentRecordToQuoteRecord,
+  invoiceRecordToDocumentRecord,
+  quoteRecordToDocumentRecord,
+} from './shared/document/adapter';
 
 describe('preserveFirstSend', () => {
   it('drops sentAt+sendMethod when existing.sentAt set', () => {
@@ -69,5 +75,113 @@ describe('preserveLedger', () => {
     expect(preserveLedger({ payments: [] }, echo)).toEqual(echo);
     expect(preserveLedger({}, echo)).toEqual(echo);
     expect(preserveLedger(null, echo)).toEqual(echo);
+  });
+});
+
+// The full echo: a unified save mirrors the document onto its legacy record
+// (documentRecordTo*Record), and onQuoteWritten / onInvoiceWritten project that
+// record straight back (*RecordToDocumentRecord) through preserveLedger. The
+// stored ledger must come out exactly as it went in — one deposit entry, its
+// own id and method — or every save would rewrite the payment history.
+describe('mirror round trip keeps a deposit ledger', () => {
+  function echo(doc: any): any {
+    const legacy = doc.type === 'invoice'
+      ? documentRecordToInvoiceRecord(doc)
+      : documentRecordToQuoteRecord(doc);
+    const projected = doc.type === 'invoice'
+      ? invoiceRecordToDocumentRecord(legacy, doc.id)
+      : quoteRecordToDocumentRecord(legacy, doc.id);
+    return preserveLedger(doc, projected);
+  }
+
+  const base = {
+    id: 'q-coastal',
+    number: 'INV-12',
+    createdAt: 1_700_000_000_000,
+    updatedAt: 1_700_000_000_000,
+    job: { name: 'Coastal Concreting slab' },
+    materials: [],
+    total: 960,
+    legacyQuoteId: 'q-coastal',
+  };
+
+  for (const method of ['square', 'bank', 'cash'] as const) {
+    it(`an invoice converted with a ${method} deposit: one entry, same method, $660 still owing`, () => {
+      const deposit = {
+        id: `deposit-${method}-1`,
+        kind: 'deposit',
+        amount: 300,
+        paidAt: 1_700_000_000_000,
+        method,
+        ...(method === 'square' ? { squarePaymentId: 'sq-1' } : {}),
+      };
+      const doc = { ...base, type: 'invoice', stage: 'draft', payments: [deposit], paidTotal: 300, balanceDue: 660 };
+
+      const out = echo(doc);
+
+      expect(out.payments).toEqual([deposit]);
+      expect(out.paidTotal).toBe(300);
+      expect(out.balanceDue).toBe(660);
+      expect(out.total).toBe(960);
+    });
+  }
+
+  it('REGRESSION: the converted invoice no longer reports its deposit twice to the legacy record', () => {
+    const doc = {
+      ...base, type: 'invoice', stage: 'draft',
+      payments: [{ id: 'deposit-sq-1', kind: 'deposit', amount: 300, paidAt: 1, method: 'square', squarePaymentId: 'sq-1' }],
+      paidTotal: 300,
+    };
+    const legacy = documentRecordToInvoiceRecord(doc);
+    expect(legacy.depositCredit).toBeUndefined();
+    expect(legacy.paidAmount).toBe(300);
+    expect(legacy.total).toBe(960);
+  });
+
+  it('a deposit recorded by hand on a quote keeps its method through the quote mirror', () => {
+    const deposit = { id: 'dep-bank-1', kind: 'deposit', amount: 300, paidAt: 1_700_000_000_000, method: 'bank', notes: 'Ref SAM300' };
+    const doc = {
+      ...base, number: 'QU-21', type: 'quote', stage: 'quote_accepted',
+      requireDeposit: true, depositAmount: 300, depositPaid: 300,
+      payments: [deposit], paidTotal: 300, balanceDue: 660,
+    };
+
+    const legacy = documentRecordToQuoteRecord(doc);
+    expect(legacy.depositPaid).toBe(300);
+    expect(legacy.depositSquarePaymentId).toBeUndefined();
+
+    const out = echo(doc);
+    expect(out.payments).toEqual([deposit]);
+    expect(out.stage).toBe('quote_accepted');
+  });
+
+  it('a hand-recorded deposit topped up through Square: both entries survive the quote mirror', () => {
+    const payments = [
+      { id: 'dep-bank-1', kind: 'deposit', amount: 100, paidAt: 1, method: 'bank' },
+      { id: 'deposit-sq-2', kind: 'deposit', amount: 200, paidAt: 2, method: 'square', squarePaymentId: 'sq-2' },
+    ];
+    const doc = {
+      ...base, number: 'QU-21', type: 'quote', stage: 'quote_accepted',
+      depositPaid: 300, payments, paidTotal: 300,
+    };
+
+    const legacy = documentRecordToQuoteRecord(doc);
+    // Every deposit, not the first one found.
+    expect(legacy.depositPaid).toBe(300);
+    expect(legacy.depositSquarePaymentId).toBe('sq-2');
+    expect(echo(doc).payments).toEqual(payments);
+  });
+
+  it('a legacy-minted invoice (netted total, deposit-credit entry) round-trips unchanged', () => {
+    const credit = { id: 'deposit-credit-q-9', kind: 'deposit', amount: 300, paidAt: 1, method: 'square', notes: 'Carried over from source quote' };
+    const doc = { ...base, type: 'invoice', stage: 'invoice_sent', total: 660, payments: [credit], paidTotal: 300 };
+
+    const legacy = documentRecordToInvoiceRecord(doc);
+    // Exactly the legacy shape it was minted with: credit beside a total that
+    // is already the balance, nothing else paid.
+    expect(legacy.depositCredit).toBe(300);
+    expect(legacy.total).toBe(660);
+    expect(legacy.paidAmount).toBe(0);
+    expect(echo(doc).payments).toEqual([credit]);
   });
 });

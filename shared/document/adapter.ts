@@ -19,6 +19,7 @@ import type {
 } from './types';
 import { customerOpenProjection } from './customerOpened';
 import { fromMs, toMs, toMsRequired } from './time';
+import { NETTED_DEPOSIT_CREDIT_ID_PREFIX, isNettedDepositCredit, nettedDepositCredit } from './recordedDeposit';
 
 // -------- date helpers --------------------------------------------------
 // Defined in ./time so customerOpened.ts can use them without importing the
@@ -234,7 +235,7 @@ function buildInvoicePayments(invoice: LegacyDocumentRecord, invoiceId: string):
   const depositCredit = Number(invoice.depositCredit ?? 0);
   if (depositCredit > 0) {
     out.push({
-      id: `deposit-credit-${invoice.depositCreditFromQuoteId ?? invoiceId}`,
+      id: `${NETTED_DEPOSIT_CREDIT_ID_PREFIX}${invoice.depositCreditFromQuoteId ?? invoiceId}`,
       kind: 'deposit',
       amount: depositCredit,
       paidAt: toMsRequired(invoice.createdAt),
@@ -439,7 +440,18 @@ function stageToInvoiceStatus(stage: DocumentStage): string {
 export { stageToQuoteStatus, stageToInvoiceStatus };
 
 export function documentRecordToQuoteRecord(doc: DocumentRecord): LegacyDocumentRecord {
-  const depositPayment = (doc.payments ?? []).find((p) => p.kind === 'deposit');
+  // Every deposit, not just the first. A quote can carry more than one — a
+  // deposit recorded by hand and a Square top-up later — and the legacy
+  // record's single `depositPaid` is the only place the quote's mirror
+  // round-trips them: report less than the ledger and the echo of this very
+  // write would replace the ledger with one short entry (see preserveLedger).
+  const deposits = (doc.payments ?? []).filter((p) => p.kind === 'deposit');
+  const depositTotal = deposits.length > 0 ? sumPayments(deposits) : undefined;
+  const latestDeposit = deposits.reduce<DocumentPayment | undefined>(
+    (latest, p) => (!latest || (Number(p.paidAt) || 0) >= (Number(latest.paidAt) || 0) ? p : latest),
+    undefined,
+  );
+  const squareDeposit = [...deposits].reverse().find((p) => !!p.squarePaymentId);
   const active = doc.activePaymentLink as DocumentPaymentLink | undefined;
   // The unified link supersedes the legacy fields when set; otherwise the
   // doc's own legacy field copies (kept by older writers) are returned.
@@ -499,12 +511,12 @@ export function documentRecordToQuoteRecord(doc: DocumentRecord): LegacyDocument
     requireDeposit: doc.requireDeposit,
     depositPercentage: doc.depositPercentage,
     depositAmount: doc.depositAmount,
-    depositPaid: depositPayment?.amount ?? doc.depositPaid,
-    depositPaidAt: fromMs(depositPayment?.paidAt ?? doc.depositPaidAt),
+    depositPaid: depositTotal ?? doc.depositPaid,
+    depositPaidAt: fromMs(latestDeposit?.paidAt ?? doc.depositPaidAt),
     depositPaymentLinkId: depositLink?.id ?? doc.depositPaymentLinkId,
     depositPaymentLinkUrl: depositLink?.url ?? doc.depositPaymentLinkUrl,
     depositPaymentLinkCreatedAt: depositLink?.createdAt ?? doc.depositPaymentLinkCreatedAt,
-    depositSquarePaymentId: depositPayment?.squarePaymentId ?? doc.depositSquarePaymentId,
+    depositSquarePaymentId: squareDeposit?.squarePaymentId ?? doc.depositSquarePaymentId,
     fullPaymentLinkId: fullLink?.id ?? (doc as any).fullPaymentLinkId,
     fullPaymentLinkUrl: fullLink?.url ?? (doc as any).fullPaymentLinkUrl,
     fullPaymentLinkCreatedAt: fullLink?.createdAt ?? (doc as any).fullPaymentLinkCreatedAt,
@@ -537,18 +549,27 @@ export function documentRecordToInvoiceRecord(doc: DocumentRecord): LegacyDocume
   const balancePayment = (doc.payments ?? []).find((p) => p.kind === 'balance');
   const manualPayment = (doc.payments ?? []).find((p) => p.kind === 'manual');
   const paid = balancePayment ?? manualPayment;
-  const depositCredit = (doc.payments ?? [])
-    .filter((p) => p.kind === 'deposit')
-    .reduce((acc, p) => acc + p.amount, 0);
+  // Only a credit the total was ALREADY reduced by becomes `depositCredit`
+  // (legacy-minted invoices — see shared/document/recordedDeposit.ts). A
+  // deposit carried over by the unified convert sits inside paidTotal against
+  // the full total, so emitting it here as well counted it twice: the PDF
+  // printed a credit row AND a paid row, and the mirror projected a second
+  // entry for it, so the sums disagreed and the ledger was overwritten.
+  const depositCredit = nettedDepositCredit(doc.payments);
+  // The method of whichever payment speaks for the record. A deposit-only
+  // invoice has no balance/manual entry, but its method is still real money
+  // the tradie recorded (bank, cash) — carry it rather than leave 'other'.
+  const methodSource =
+    paid ?? (doc.payments ?? []).find((p) => p.kind === 'deposit' && !isNettedDepositCredit(p));
   const active = doc.activePaymentLink as DocumentPaymentLink | undefined;
   const balanceLink = active && active.kind === 'balance' ? active : undefined;
 
-  const paymentMethod: string | undefined = paid
-    ? paid.method === 'square'
+  const paymentMethod: string | undefined = methodSource
+    ? methodSource.method === 'square'
       ? 'card'
-      : paid.method === 'bank'
+      : methodSource.method === 'bank'
         ? 'bank_transfer'
-        : paid.method === 'cash'
+        : methodSource.method === 'cash'
           ? 'cash'
           : 'other'
     : undefined;
@@ -597,7 +618,14 @@ export function documentRecordToInvoiceRecord(doc: DocumentRecord): LegacyDocume
     // recordPayment accumulates into it and invoiceLinkAmountDue computes
     // `total − paidAmount` from it — so reporting one payment's amount
     // under-reported every invoice with more than one payment.
-    paidAmount: doc.paidTotal,
+    //
+    // Less a netted credit: the legacy record never counted that as paid
+    // (its total is already the balance), and invoiceLinkAmountDue prices
+    // the Square link as `total − paidAmount`.
+    paidAmount:
+      depositCredit > 0
+        ? Math.round(((Number(doc.paidTotal) || 0) - depositCredit) * 100) / 100
+        : doc.paidTotal,
     // How many ledger entries the paid total is made of. Lets the receipt
     // trigger tell a NEW payment (count goes up) from an edit that raised
     // an existing one (count unchanged) — see evaluatePaymentReceipt.

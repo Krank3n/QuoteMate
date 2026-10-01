@@ -8,6 +8,7 @@ import {
   formatAud,
   buildPaymentReceiptContentHtml,
   receiptIsForDeposit,
+  quoteDepositPaidAfterSquare,
 } from './paymentReceipt.helpers';
 
 describe('invoiceLinkAmountDue — pay link charges the balance, not the total', () => {
@@ -269,5 +270,57 @@ describe('evaluatePaymentReceipt — edits are not payments', () => {
     const before = { ...sent, paidAmount: 300 };
     const after = { ...sent, status: 'partial', paidAmount: 3000 };
     expect(evaluatePaymentReceipt(before, after)).toMatchObject({ amountReceived: 2700 });
+  });
+});
+
+describe('quoteDepositPaidAfterSquare', () => {
+  it('a Square top-up adds to a deposit recorded by hand instead of under-counting', () => {
+    // $100 by bank transfer, then $200 through the link: the ledger holds both.
+    expect(
+      quoteDepositPaidAfterSquare({ legacyDepositPaid: 100, paidAgainstQuote: 200, ledgerDepositTotal: 300 }),
+    ).toBe(300);
+  });
+
+  it('a redelivered event changes nothing — the ledger sum does not move', () => {
+    expect(
+      quoteDepositPaidAfterSquare({ legacyDepositPaid: 300, paidAgainstQuote: 200, ledgerDepositTotal: 300 }),
+    ).toBe(300);
+  });
+
+  it('a lone Square deposit reads as before', () => {
+    expect(
+      quoteDepositPaidAfterSquare({ legacyDepositPaid: 0, paidAgainstQuote: 300, ledgerDepositTotal: 300 }),
+    ).toBe(300);
+  });
+
+  it('falls back to the old max when the ledger could not be read', () => {
+    expect(
+      quoteDepositPaidAfterSquare({ legacyDepositPaid: 100, paidAgainstQuote: 200, ledgerDepositTotal: null }),
+    ).toBe(200);
+  });
+});
+
+// The order is the fix: ledger first, so the legacy quote write's mirror echo
+// matches the ledger and preserveLedger keeps a hand-recorded deposit beside
+// the Square one. The webhook can't run offline, so this reads the source.
+describe('Square quote webhook writes the unified ledger before the legacy quote', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { readFileSync } = require('fs') as typeof import('fs');
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { join } = require('path') as typeof import('path');
+  const src = readFileSync(join(__dirname, 'index.ts'), 'utf8');
+  const start = src.indexOf("if (idx.kind === 'quote_deposit' || idx.kind === 'quote_full') {");
+  const branch = src.slice(start, src.indexOf("const invoiceId: string | null = idx.invoiceId || null;", start));
+
+  it('applies the payment to the document before writing the quote', () => {
+    expect(start).toBeGreaterThan(-1);
+    const ledger = branch.indexOf('await applyPaymentToDocument(');
+    const legacy = branch.indexOf('await quoteRef.set(update, { merge: true });');
+    expect(ledger).toBeGreaterThan(-1);
+    expect(legacy).toBeGreaterThan(ledger);
+  });
+
+  it('takes depositPaid from the ledger for a deposit', () => {
+    expect(branch).toContain('quoteDepositPaidAfterSquare({');
   });
 });

@@ -17,7 +17,7 @@
 import * as admin from 'firebase-admin';
 import { mintedBeforeSurchargeRetirement } from './squarePricing.helpers';
 
-import { isAlreadyInvoiced, type ConvertCandidate } from './shared/document/convertGuard';
+import { isAlreadyInvoiced, invoiceMoneyOnConvert, type ConvertCandidate } from './shared/document/convertGuard';
 import * as functions from 'firebase-functions/v1';
 import { travelAdjustmentAmountFor } from './travelSurcharge';
 import {
@@ -51,7 +51,7 @@ import {
 } from './shared/document/lumpSum';
 import { resolvePriceDetail } from './shared/document/priceDetail';
 import { paidInFullAtMs } from './shared/document/paidInFull';
-import { recordedDepositTotal } from './shared/document/recordedDeposit';
+import { invoiceEmailDepositView, invoicePdfPaymentFields } from './shared/document/recordedDeposit';
 import { dollarsToCents, centsToDollars } from './shared/pdf/money';
 import {
   quoteRecordToDocumentRecord,
@@ -1193,6 +1193,17 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
 
   const plan = await resolveUserPlan(userId);
 
+  // The email card has one deposit shape: "Deposit already paid" above a
+  // Balance due. A legacy-netted invoice already is that; a deposit carried
+  // on the ledger is presented the same way so the email agrees with the
+  // attached PDF (TOTAL / Deposit paid / BALANCE DUE) instead of quoting the
+  // full total with no sign of the deposit.
+  const emailDeposit = invoiceEmailDepositView({
+    total: Number(invoice.total) || 0,
+    nettedCredit: Number(invoice.depositCredit) || 0,
+    payments: (doc as DocumentRecord).payments,
+  });
+
   const htmlContent = buildInvoiceEmailHtml({
     customerName: invoice.customerName || 'Client',
     emailBody,
@@ -1202,7 +1213,7 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
     materialsSubtotal: invoice.materialsSubtotal || 0,
     subtotal: invoice.subtotal || 0,
     gst: invoice.gst || 0,
-    total: invoice.total || 0,
+    total: emailDeposit.total,
     gstRegistered: invoice.gstRegistered,
     pricesIncludeGst: invoice.pricesIncludeGst,
     travelAdjustment: invoice.travelAdjustment,
@@ -1210,7 +1221,7 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
     invoiceNumber: invoice.invoiceNumber,
     dueDate: invoice.dueDate || new Date().toISOString(),
     payNowUrl,
-    depositCredit: Number(invoice.depositCredit) > 0 ? Number(invoice.depositCredit) : undefined,
+    depositCredit: emailDeposit.depositCredit,
     hasTerms: !!termsToSend,
     priceDetail: emailPriceDetail,
     paymentMethods: business.paymentMethods,
@@ -1234,8 +1245,9 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
       issueDate: fmtAuDate(invoiceIssueDateMs(invoice) || undefined),
       dueDate: fmtAuDate(invoice.dueDate),
       paymentTerms: invoice.paymentTerms,
-      paidAmount: invoice.paidAmount || 0,
-      paidDepositAmount: recordedDepositTotal((doc as DocumentRecord).payments),
+      // paidAmount / paidDepositAmount / depositCredit from the ledger —
+      // the phone's PDF uses the same helper (src/utils/pdfGenerator.ts).
+      ...invoicePdfPaymentFields(doc as DocumentRecord),
       // From the unified doc, not invoice.paidDate: the adapter picks one
       // representative payment, which on a multi-payment invoice is the
       // wrong (earliest) date. Same helper the phone uses, same format.
@@ -1243,7 +1255,6 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
         const paidMs = paidInFullAtMs(doc as DocumentRecord);
         return paidMs ? fmtAuDate(paidMs) : undefined;
       })(),
-      depositCredit: Number(invoice.depositCredit) > 0 ? Number(invoice.depositCredit) : undefined,
       job: invoice.job || { name: 'Job', description: '' },
       materials: toPdfMaterials(invoice.materials),
       materialsSubtotal: invoice.materialsSubtotal || 0,
@@ -1582,7 +1593,21 @@ interface RotationDecision {
  *   - invoice_sent / partially_paid: balance link sized to balanceDue
  *     (total − paidTotal).
  */
-function decideRotation(doc: DocumentRecord): RotationDecision {
+/**
+ * What has been paid toward a quote's deposit: the larger of the stored
+ * `depositPaid` and the deposit entries on its ledger. Either can lead — a
+ * Square deposit lands on the ledger first, a legacy write on depositPaid.
+ */
+export function quoteDepositPaid(doc: { depositPaid?: unknown; payments?: unknown }): number {
+  const ledger = Array.isArray(doc.payments)
+    ? (doc.payments as DocumentPayment[])
+        .filter((p) => p?.kind === 'deposit')
+        .reduce((acc, p) => acc + (Number(p.amount) || 0), 0)
+    : 0;
+  return Math.max(Number(doc.depositPaid) || 0, ledger);
+}
+
+export function decideRotation(doc: DocumentRecord): RotationDecision {
   const total = Number(doc.total) || 0;
   const paidTotal = Number(doc.paidTotal) || 0;
   const balance = Math.max(0, total - paidTotal);
@@ -1596,6 +1621,11 @@ function decideRotation(doc: DocumentRecord): RotationDecision {
     if (doc.requireDeposit !== true) return { needed: false, reason: 'quote-no-deposit' };
     const depositAmount = Number(doc.depositAmount) || 0;
     if (depositAmount <= 0) return { needed: false, reason: 'quote-zero-deposit' };
+    // A deposit already recorded (paid by bank transfer, say) means the
+    // customer must not be handed a card link for it again. The deposit
+    // minter always charges the whole depositAmount, so even part of one
+    // recorded is enough to stop — a second link would overcharge.
+    if (quoteDepositPaid(doc) > 0) return { needed: false, reason: 'quote-deposit-paid' };
     return { needed: true, reason: 'quote_sent', kind: 'deposit', amount: depositAmount };
   }
 
@@ -1885,7 +1915,7 @@ export const getStageViolationCounts = functions.https.onCall(
 
 /**
  * Server-side flip from quote to invoice. Loads the document, computes the
- * invoice-side fields (issueDate, dueDate, deposit credit, adjusted total),
+ * invoice-side fields (issueDate, dueDate, balance after any deposit),
  * and writes the new state through setDocumentStage so the canonical state
  * machine observes the transition. Idempotent — re-calling once invoicedAt
  * is set returns the existing document untouched.
@@ -1917,8 +1947,10 @@ export const convertDocumentToInvoice = functions.https.onCall(
 
     const now = Date.now();
     const dueDate = now + 14 * 24 * 60 * 60 * 1000;
-    const depositCredit = Math.max(0, Number(existing.depositPaid) || 0);
-    const adjustedTotal = Math.max(0, (Number(existing.total) || 0) - depositCredit);
+    // Full total; a deposit already on the ledger comes off the balance, not
+    // the total. See invoiceMoneyOnConvert — the client's optimistic convert
+    // uses the same helper.
+    const { total, balanceDue } = invoiceMoneyOnConvert(existing);
 
     // Convert flips type to invoice but the doc hasn't been sent yet —
     // keep it in 'draft' until sendDocumentEmail actually delivers it.
@@ -1937,7 +1969,8 @@ export const convertDocumentToInvoice = functions.https.onCall(
         issueDate: now,
         dueDate,
         paymentTerms: 'net_14',
-        total: adjustedTotal,
+        total,
+        balanceDue,
         legacyInvoiceId: docId,
         // Mirror of the client stash — what this write overwrites, so the
         // conversion can be undone exactly while the invoice is still

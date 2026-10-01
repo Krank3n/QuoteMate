@@ -87,7 +87,7 @@ describe('generateAcceptancePage', () => {
     // quote. The POST now returns payment: { kind, url, amount } | null and
     // the page renders the same block the email's confirmation page does.
     const script = inlineScript(generateAcceptancePage('a'.repeat(64)));
-    expect(script).toContain('showSuccess(response, data.payment || null)');
+    expect(script).toContain('showSuccess(response, data.payment || null, data.depositDue || null)');
     expect(script).toContain('Pay now if you like');
     expect(script).toContain('Pay by card');
     expect(script).toContain('Deposit to get started');

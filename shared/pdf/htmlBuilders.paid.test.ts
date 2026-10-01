@@ -13,6 +13,7 @@
 import { describe, it, expect } from 'vitest';
 import { buildQuotePdfHtml, buildInvoicePdfHtml } from './htmlBuilders';
 import type { QuotePdfData, InvoicePdfData, BusinessPdfData } from './types';
+import { invoicePdfPaymentFields } from '../document/recordedDeposit';
 
 const business: BusinessPdfData = { businessName: 'Test Trades', logoHtml: '' };
 const squareLink = 'https://square.link/u/demo';
@@ -197,5 +198,65 @@ describe('paid rows — deposit label', () => {
       business,
     );
     expect(rows(html)).toEqual(['Deposit paid -$50.00']);
+  });
+});
+
+// The invoice a quote with a deposit converts into, through the same helper
+// both PDF paths use (invoicePdfPaymentFields). The converted invoice keeps
+// its full total, so the deposit prints under it as a paid row — never the
+// legacy "Deposit already paid" credit as well.
+describe('invoice converted from a quote with a deposit', () => {
+  const rows = (html: string) =>
+    [...html.matchAll(/summary-row credit-row">\s*<span>([^<]*)<\/span>\s*<span>([^<]*)<\/span>/g)].map(
+      (m) => `${m[1]} ${m[2]}`,
+    );
+  const grandTotal = (html: string) =>
+    html.match(/summary-row grand-total">\s*<span>([^<]*)<\/span>\s*<span>([^<]*)</)?.slice(1).join(' ');
+  const balance = (html: string) =>
+    html.match(/summary-row balance-due">\s*<span>BALANCE DUE<\/span>\s*<span>([^<]*)</)?.[1];
+  const money = { subtotal: 872.73, gst: 87.27 };
+
+  for (const method of ['square', 'bank'] as const) {
+    it(`a ${method} deposit: TOTAL $960 / Deposit paid −$300 / BALANCE DUE $660`, () => {
+      const fields = invoicePdfPaymentFields({
+        paidTotal: 300,
+        payments: [{ id: `deposit-${method}-1`, kind: 'deposit', amount: 300 }],
+      });
+      const html = buildInvoicePdfHtml(invoiceData({ ...money, total: 960, ...fields }), business);
+
+      expect(grandTotal(html)).toBe('TOTAL $960.00');
+      expect(rows(html)).toEqual(['Deposit paid -$300.00']);
+      expect(balance(html)).toBe('$660.00');
+      expect(html).not.toContain('Deposit already paid');
+    });
+  }
+
+  it('a later payment on top splits into its own row', () => {
+    const fields = invoicePdfPaymentFields({
+      paidTotal: 500,
+      payments: [
+        { id: 'deposit-sq-1', kind: 'deposit', amount: 300 },
+        { id: 'p2', kind: 'manual', amount: 200 },
+      ],
+    });
+    const html = buildInvoicePdfHtml(invoiceData({ ...money, total: 960, ...fields }), business);
+
+    expect(rows(html)).toEqual(['Deposit paid -$300.00', 'Amount Paid -$200.00']);
+    expect(balance(html)).toBe('$460.00');
+  });
+
+  it('a legacy-minted invoice (netted total) renders exactly as before: credit row, BALANCE DUE = total', () => {
+    const fields = invoicePdfPaymentFields({
+      paidTotal: 300,
+      payments: [{ id: 'deposit-credit-q-9', kind: 'deposit', amount: 300 }],
+    });
+    expect(fields).toEqual({ paidAmount: 0, paidDepositAmount: 0, depositCredit: 300 });
+
+    const html = buildInvoicePdfHtml(invoiceData({ ...money, total: 660, ...fields }), business);
+    expect(rows(html)).toEqual(['Deposit already paid -$300.00']);
+    expect(grandTotal(html)).toBe('BALANCE DUE $660.00');
+    // No second "paid" block taking the same $300 off again.
+    expect(balance(html)).toBeUndefined();
+    expect(html).not.toContain('Deposit paid');
   });
 });

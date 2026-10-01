@@ -476,3 +476,112 @@ describe('RecordPaymentScreen sheet-screen', () => {
     expect(getByText(/couldn't find this invoice/)).toBeTruthy();
   });
 });
+
+// A tradie not on Square records the deposit a customer paid by bank transfer
+// against the QUOTE. The sheet becomes "Record Deposit": no Payment/Deposit
+// choice to make, deposit wording throughout, and the store files it as the
+// quote's deposit.
+describe('RecordPaymentScreen on a quote', () => {
+  const quoteDoc = {
+    id: 'quote-1',
+    type: 'quote',
+    stage: 'quote_sent',
+    number: 'QU-021',
+    total: 960,
+    paidTotal: 0,
+    requireDeposit: true,
+    depositAmount: 300,
+    customerName: 'Sam',
+    payments: [] as any[],
+    job: { name: 'Coastal Concreting driveway' },
+  };
+
+  beforeEach(() => {
+    routeParams.current = { invoiceId: 'quote-1' };
+    state.documents = [quoteDoc];
+  });
+
+  it('is titled Record Deposit, names the quote, and asks nothing about what it is for', () => {
+    const { getByText, queryByText, getByRole } = render(<RecordPaymentScreen />);
+
+    expect(sheet.props.title).toBe('Record Deposit');
+    expect(sheet.props.subtitle).toBe('Quote QU-021 · Sam');
+    expect(queryByText("What's it for?")).toBeNull();
+    expect(getByRole('button', { name: /Record Deposit/ })).toBeTruthy();
+    expect(getByText('Bank transfer')).toBeTruthy();
+  });
+
+  it('prefills the deposit the quote asked for, not the whole quote', () => {
+    const { baseElement } = render(<RecordPaymentScreen />);
+    expect(amountInput(baseElement).value).toBe('300.00');
+  });
+
+  it('prefills nothing when the quote asked for no deposit', () => {
+    state.documents = [{ ...quoteDoc, requireDeposit: false }];
+    const { baseElement } = render(<RecordPaymentScreen />);
+    expect(Number(amountInput(baseElement).value || 0)).toBe(0);
+  });
+
+  it('records it against the quote with the picked method, and says Deposit recorded', async () => {
+    const { getByRole } = render(<RecordPaymentScreen />);
+
+    fireEvent.click(getByRole('button', { name: /Record Deposit/ }));
+
+    await waitFor(() => expect(state.recordDocumentPayment).toHaveBeenCalled());
+    const [docId, amount, method] = state.recordDocumentPayment.mock.calls[0];
+    expect(docId).toBe('quote-1');
+    expect(amount).toBe(300);
+    expect(method).toBe('bank_transfer');
+    expect(lastAlert()).toMatchObject({
+      type: 'success',
+      title: 'Deposit recorded',
+      message: '$300.00 recorded as the deposit on this quote.',
+    });
+    // A quote is never pushed to Xero as a payment.
+    expect(state.pushPaymentToXero).not.toHaveBeenCalled();
+  });
+
+  it('the shared receipt says deposit and names the quote', () => withWebShare(async () => {
+    const share = vi.spyOn(Share, 'share').mockResolvedValue({ action: 'sharedAction' } as any);
+    const { getByRole } = render(<RecordPaymentScreen />);
+
+    fireEvent.click(getByRole('button', { name: /Record Deposit/ }));
+    await waitFor(() => expect(lastAlert()).toMatchObject({ title: 'Deposit recorded' }));
+    await act(async () => lastAlert().secondaryButtonAction());
+
+    const message: string = share.mock.calls[0][0].message;
+    expect(message).toContain('For: Quote QU-021');
+    expect(message).toContain('Deposit paid: $300.00');
+    expect(message).toContain('Balance remaining: $660.00');
+  }));
+
+  it('editing a recorded deposit keeps it a deposit and offers no Payment/Deposit choice', async () => {
+    state.documents = [{
+      ...quoteDoc,
+      stage: 'quote_accepted',
+      paidTotal: 300,
+      depositPaid: 300,
+      payments: [{ id: 'dep-1', kind: 'deposit', amount: 300, method: 'bank', paidAt: 1755000000000 }],
+    }];
+    routeParams.current = { invoiceId: 'quote-1', paymentId: 'dep-1' };
+    const { queryByText, getByRole } = render(<RecordPaymentScreen />);
+
+    expect(sheet.props.title).toBe('Edit Deposit');
+    expect(queryByText("What's it for?")).toBeNull();
+    expect(getByRole('button', { name: /Remove this deposit/ })).toBeTruthy();
+
+    fireEvent.click(getByRole('button', { name: /Save Changes/ }));
+    await waitFor(() => expect(state.updateDocumentPayment).toHaveBeenCalled());
+    expect(state.updateDocumentPayment.mock.calls[0][2].isDeposit).toBeUndefined();
+  });
+
+  it('refuses more than the quote is worth', async () => {
+    const { baseElement, getByRole } = render(<RecordPaymentScreen />);
+
+    setAmount(baseElement, '5000');
+    fireEvent.click(getByRole('button', { name: /Record Deposit/ }));
+
+    expect(lastAlert().message).toBe("Enter up to $960.00. This quote doesn't owe more than that.");
+    expect(state.recordDocumentPayment).not.toHaveBeenCalled();
+  });
+});

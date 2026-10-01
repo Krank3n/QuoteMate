@@ -144,11 +144,14 @@ export interface InvoicePdfData extends QuotePdfData {
   // document is at stage 'paid' — its presence is the "paid in full" flag
   // that puts the PAID stamp on the page. Derive it with paidInFullAtMs.
   paidDate?: string;
-  // Deposit credit carried over from the source quote. Rendered as a
-  // "Deposit already paid" row so the customer sees why the total differs.
-  depositCredit?: number;  // The part of paidAmount the tradie recorded as the deposit (see
-  // recordedDepositTotal). Splits the paid row into "Deposit paid" and
-  // "Amount Paid"; the balance due is unchanged.
+  // LEGACY-NETTED invoices only: the quote deposit the total was already
+  // reduced by. Rendered as a "Deposit already paid" row above a BALANCE DUE
+  // equal to the total. Never set alongside a ledger deposit — see
+  // shared/document/recordedDeposit.ts.
+  depositCredit?: number;
+  // The part of paidAmount that is the deposit (see recordedDepositTotal).
+  // Splits the paid row into "Deposit paid" and "Amount Paid"; the balance
+  // due is unchanged.
   paidDepositAmount?: number;
 }
 

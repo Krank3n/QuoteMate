@@ -13,7 +13,11 @@ import {
   sendAuditPatch,
   sendMethodPatch,
   stageTransitionTimestamps,
+  decideRotation,
+  quoteDepositPaid,
 } from './documentHandlers';
+import { documentRecordToInvoiceRecord } from './shared/document/adapter';
+import { invoiceLinkAmountDue } from './paymentReceipt.helpers';
 import { invoiceIssueDateMs } from './shared/statement/buildStatement';
 import { formatAuDate } from './timestamps.helpers';
 
@@ -328,5 +332,66 @@ describe('quote send — email-open pixel gating', () => {
     // Exactly one mint site, and one emailOpenTokens write, both in the gate.
     expect(src.match(/input\.generateEmailOpenToken\(\)/g)).toHaveLength(1);
     expect(src.match(/emailOpenTokens\//g)).toHaveLength(1);
+  });
+});
+
+// A deposit already recorded on a quote (bank transfer, say) must stop the
+// customer being handed a Square deposit link for it again. The deposit
+// minter always charges the whole depositAmount, so any recorded deposit is
+// enough to stop.
+describe('decideRotation — quote deposit', () => {
+  const quote = (over: Record<string, unknown> = {}): any => ({
+    id: 'q1', type: 'quote', stage: 'quote_sent', total: 960,
+    requireDeposit: true, depositAmount: 300, payments: [], paidTotal: 0,
+    ...over,
+  });
+
+  it('offers a deposit link while nothing has been paid', () => {
+    expect(decideRotation(quote())).toMatchObject({ needed: true, kind: 'deposit', amount: 300 });
+  });
+
+  it('no link once the deposit was recorded by hand', () => {
+    const d = decideRotation(quote({
+      depositPaid: 300,
+      payments: [{ id: 'dep-bank-1', kind: 'deposit', amount: 300, paidAt: 1, method: 'bank' }],
+    }));
+    expect(d).toEqual({ needed: false, reason: 'quote-deposit-paid' });
+  });
+
+  it('no link after part of the deposit — a fresh link would charge the whole deposit again', () => {
+    expect(decideRotation(quote({ depositPaid: 100 })).needed).toBe(false);
+  });
+
+  it('reads the ledger when depositPaid has not caught up', () => {
+    expect(quoteDepositPaid({ payments: [{ kind: 'deposit', amount: 300 }, { kind: 'balance', amount: 50 }] })).toBe(300);
+    expect(quoteDepositPaid({ depositPaid: 300, payments: [] })).toBe(300);
+  });
+});
+
+// The invoice a $960 quote with a $300 deposit converts into must price its
+// Square balance link at $660, on both the unified rotation and the legacy
+// link minter (invoiceLinkAmountDue reads the legacy record).
+describe('Square balance link after converting a quote with a deposit', () => {
+  const converted: any = {
+    id: 'q-coastal', type: 'invoice', stage: 'invoice_sent', number: 'INV-12',
+    total: 960, paidTotal: 300, balanceDue: 660, legacyQuoteId: 'q-coastal',
+    payments: [{ id: 'dep-bank-1', kind: 'deposit', amount: 300, paidAt: 1, method: 'bank' }],
+    createdAt: 1, updatedAt: 1, materials: [], job: { name: 'Slab' },
+  };
+
+  it('the rotation mints a $660 balance link', () => {
+    expect(decideRotation(converted)).toMatchObject({ needed: true, kind: 'balance', amount: 660 });
+  });
+
+  it('the legacy minter prices it at $660 too', () => {
+    expect(invoiceLinkAmountDue(documentRecordToInvoiceRecord(converted))).toBe(660);
+  });
+
+  it('a legacy-minted invoice (netted total) still prices at its total', () => {
+    const legacy = {
+      ...converted, total: 660,
+      payments: [{ id: 'deposit-credit-q-9', kind: 'deposit', amount: 300, paidAt: 1, method: 'square' }],
+    };
+    expect(invoiceLinkAmountDue(documentRecordToInvoiceRecord(legacy))).toBe(660);
   });
 });

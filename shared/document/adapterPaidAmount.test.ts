@@ -63,6 +63,44 @@ describe('documentRecordToInvoiceRecord — paidAmount', () => {
     expect(documentRecordToInvoiceRecord(record).paidAmount).toBe(750);
   });
 
+  it('a deposit carried over by the unified convert is paid money, not a netted credit', () => {
+    const record = invoiceRecord(
+      [{ id: 'dep-bank-1', kind: 'deposit', amount: 300, paidAt: 1, method: 'bank' }],
+      300,
+    );
+    const invoice = documentRecordToInvoiceRecord(record);
+
+    expect(invoice.paidAmount).toBe(300);
+    expect(invoice.depositCredit).toBeUndefined();
+    // The deposit's real method, not 'other' — it is the only payment.
+    expect(invoice.paymentMethod).toBe('bank_transfer');
+  });
+
+  it('two deposits both count', () => {
+    const record = invoiceRecord(
+      [
+        { id: 'dep-bank-1', kind: 'deposit', amount: 100, paidAt: 1, method: 'bank' },
+        { id: 'deposit-sq-2', kind: 'deposit', amount: 200, paidAt: 2, method: 'square', squarePaymentId: 'sq-2' },
+      ],
+      300,
+    );
+    expect(documentRecordToInvoiceRecord(record).paidAmount).toBe(300);
+  });
+
+  it('a legacy netted credit stays a credit and out of paidAmount', () => {
+    const record = invoiceRecord(
+      [
+        { id: 'deposit-credit-q-1', kind: 'deposit', amount: 250, paidAt: 1, method: 'square' },
+        { id: 'p1', kind: 'manual', amount: 500, paidAt: 2, method: 'bank' },
+      ],
+      750,
+    );
+    const invoice = documentRecordToInvoiceRecord(record);
+
+    expect(invoice.depositCredit).toBe(250);
+    expect(invoice.paidAmount).toBe(500);
+  });
+
   it('reports nothing collected as 0', () => {
     expect(documentRecordToInvoiceRecord(invoiceRecord([], 0)).paidAmount).toBe(0);
   });

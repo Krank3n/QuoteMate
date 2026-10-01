@@ -29,3 +29,17 @@ describe('convertDocumentToInvoice idempotency guard', () => {
     expect(reinlined.test(SRC)).toBe(false);
   });
 });
+
+describe('convertDocumentToInvoice money', () => {
+  // Both convert paths used to set `total = total − depositPaid` while the
+  // deposit stayed on the ledger — subtracting it twice. The full total stays;
+  // the shared helper derives the balance.
+  it('derives total and balance through the shared helper', () => {
+    expect(SRC).toContain('invoiceMoneyOnConvert(existing)');
+  });
+
+  it('never nets the deposit off the total again', () => {
+    expect(/total\)\s*\|\|\s*0\)\s*-\s*depositCredit/.test(SRC)).toBe(false);
+    expect(SRC).not.toContain('adjustedTotal');
+  });
+});

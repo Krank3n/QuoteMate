@@ -201,12 +201,23 @@ describe('TakePaymentSheet manual "Record Payment" row', () => {
     expect(props.onDismiss).toHaveBeenCalled();
   });
 
-  it('does not render for quote deposit targets (no manual deposit path exists)', () => {
-    const { queryByText } = renderSheet({
+  // A tradie paid by bank transfer has no Square, so this row is the only way
+  // to log a deposit on a quote. It needs no Square at all.
+  it('renders as Record Deposit for a quote and fires with the quote id, with no Square gate', () => {
+    const onRecordManualPayment = vi.fn();
+    const ensureSquareConnected = vi.fn(async () => false);
+    const { getByText, queryByText, props } = renderSheet({
       target: depositTarget,
-      onRecordManualPayment: vi.fn(),
+      onRecordManualPayment,
+      ensureSquareConnected,
     });
+
     expect(queryByText('Record Payment')).toBeNull();
+    fireEvent.click(getByText('Record Deposit'));
+
+    expect(onRecordManualPayment).toHaveBeenCalledWith('quote-7');
+    expect(props.onDismiss).toHaveBeenCalled();
+    expect(ensureSquareConnected).not.toHaveBeenCalled();
   });
 
   it('does not render when no handler is wired', () => {

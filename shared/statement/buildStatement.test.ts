@@ -398,3 +398,25 @@ describe('statementPeriodLabel', () => {
     expect(statementPeriodLabel(FY, 'UTC')).toBe('1 July 2025 – 30 June 2026');
   });
 });
+
+describe('buildStatement — an invoice converted from a quote with a deposit', () => {
+  // The convert keeps the full total and carries the quote deposit on the
+  // ledger, so the statement's own arithmetic (total − paid to date) lands on
+  // the real balance. Before the convert stopped netting, this read $360.
+  it('$960 job, $300 deposit by bank transfer: total 960, paid 300, balance 660', () => {
+    const data = buildStatement(
+      [
+        inv({
+          id: 'conv',
+          subtotal: 872.73,
+          gst: 87.27,
+          total: 960,
+          payments: [{ amount: 300, paidAt: T(2026, 3, 1), method: 'bank' }],
+        }),
+      ],
+      FY,
+      REGISTERED,
+    );
+    expect(data.invoices[0]).toMatchObject({ total: 960, paid: 300, balance: 660 });
+  });
+});

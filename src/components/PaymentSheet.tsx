@@ -3,7 +3,7 @@
  * Payment history for a Document + shortcut to record a manual one. Read-mostly:
  * Square/Stripe webhook events are the canonical source for automated
  * payments; this sheet just surfaces them and funnels manual entries back
- * to the existing RecordPaymentScreen for invoices.
+ * to the existing RecordPaymentScreen (a deposit, on a quote).
  *
  * Pairs with PaymentChip — tapping the chip opens this sheet.
  */
@@ -163,9 +163,10 @@ export function PaymentSheet({ visible, onDismiss, doc, onRecordPayment, onEditP
         </>
       )}
 
-      {/* Nothing left to record on a settled invoice — the form would only
-          refuse with "Amount exceeds balance". */}
-      {doc.type === 'invoice' && onRecordPayment && balance > 0.005 ? (
+      {/* Nothing left to record on a settled document — the form would only
+          refuse with "Amount exceeds balance". A quote records a deposit
+          (one paid in two goes, say), so it gets the button too. */}
+      {onRecordPayment && balance > 0.005 ? (
         <Button
           mode="contained" buttonColor={themeColors.accent} textColor={themeColors.onAccent}
           icon={'plus' as any}
@@ -175,7 +176,7 @@ export function PaymentSheet({ visible, onDismiss, doc, onRecordPayment, onEditP
           }}
           style={styles.recordButton}
         >
-          {paymentCopy.recordPayment}
+          {doc.type === 'quote' ? paymentCopy.recordDeposit : paymentCopy.recordPayment}
         </Button>
       ) : null}
     </BottomSheet>

@@ -9,6 +9,11 @@
  * Stateless / controlled: parent owns the underlying Quote/Invoice and
  * persists via `onChange`. The component only manages the Square
  * connection check + the local text input for the deposit %.
+ *
+ * Asking for a deposit needs Square OR a paid/trial plan. Without Square the
+ * customer pays it by bank transfer from the payment details printed on the
+ * quote — which the free plan's PDF hides, and the free send gate blocks a
+ * deposit quote without Square, so free stays Square-only.
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import { View, StyleSheet, Switch, TouchableOpacity, Pressable } from 'react-native';
@@ -18,6 +23,7 @@ import { useFocusEffect, useNavigation } from '@react-navigation/native';
 
 import { makeStyles, useThemeColors } from '../theme';
 import { checkSquareConnection } from '../services/squareService';
+import { useStore } from '../store/useStore';
 import { formatCurrency } from '../utils/quoteCalculator';
 import {
   legacyFlagsFor,
@@ -136,6 +142,13 @@ export function InvoiceDisplaySettings(props: InvoiceDisplaySettingsProps) {
   const showDeposit = mode !== 'invoice';
   const sectionTitle = showDeposit ? 'Display & deposit' : 'Display';
   const [squareConnected, setSquareConnected] = useState<boolean | null>(null);
+  const isFreePlan = useStore((s) => s.getEffectivePlan() === 'free');
+  const showsPaymentDetails = useStore(
+    (s) => s.businessSettings?.paymentMethods?.showOnDocuments === true,
+  );
+  // Square, or a plan whose quote prints the tradie's bank details.
+  const depositByTransfer = !isFreePlan && squareConnected !== true;
+  const canAskDeposit = squareConnected === true || !isFreePlan;
   const [depositInput, setDepositInput] = useState(
     depositPercentage > 0 ? depositPercentage.toString() : '30',
   );
@@ -166,7 +179,9 @@ export function InvoiceDisplaySettings(props: InvoiceDisplaySettingsProps) {
         .then((res) => {
           if (cancelled) return;
           setSquareConnected(!!res.connected);
-          if (!res.connected && requireDeposit) {
+          // Only the free plan loses a deposit without Square — a paid or
+          // trial plan takes it by bank transfer instead.
+          if (!res.connected && requireDeposit && isFreePlan) {
             onChange({ requireDeposit: false, depositAmount: 0 });
           }
         })
@@ -185,7 +200,7 @@ export function InvoiceDisplaySettings(props: InvoiceDisplaySettingsProps) {
   const handleRequireDeposit = (v: boolean) => {
     const pct = clampPct(parseFloat(depositInput) || 0);
     onChange({
-      requireDeposit: v && squareConnected === true,
+      requireDeposit: v && canAskDeposit,
       depositPercentage: pct,
       depositAmount: v ? computeDeposit(total, pct) : 0,
     });
@@ -237,17 +252,39 @@ export function InvoiceDisplaySettings(props: InvoiceDisplaySettingsProps) {
           <ToggleRow
             title="Require deposit on acceptance"
             subtitle={
-              squareConnected === false
-                ? 'Connect Square to collect deposits from customers when they accept.'
-                : "Customer pays a deposit via Square to lock in the job. Remainder is invoiced when work's done."
+              squareConnected === true
+                ? "Customer pays a deposit via Square to lock in the job. Remainder is invoiced when work's done."
+                : depositByTransfer
+                  ? 'Customer pays the deposit by bank transfer — your payment details print on the quote.'
+                  : squareConnected === false
+                    ? 'Connect Square to collect deposits from customers when they accept.'
+                    : "Customer pays a deposit via Square to lock in the job. Remainder is invoiced when work's done."
             }
-            value={requireDeposit && squareConnected !== false}
+            value={requireDeposit && (canAskDeposit || squareConnected === null)}
             onValueChange={handleRequireDeposit}
-            disabled={squareConnected !== true}
+            disabled={!canAskDeposit}
             dense
           />
 
-          {squareConnected === false ? (
+          {/* A bank-transfer deposit is only as good as the details the
+              customer can see. Nudge to Payment Methods while they're off
+              the documents. */}
+          {depositByTransfer && requireDeposit && !showsPaymentDetails ? (
+            <TouchableOpacity
+              onPress={() => navigation.navigate('PaymentMethods' as never)}
+              style={styles.connectSquareBtn}
+              activeOpacity={0.85}
+            >
+              <MaterialCommunityIcons
+                name={'bank-outline' as any}
+                size={14}
+                color={themeColors.onAccent}
+              />
+              <Text style={styles.connectSquareLabel}>Add your payment details</Text>
+            </TouchableOpacity>
+          ) : null}
+
+          {squareConnected === false && isFreePlan ? (
             <TouchableOpacity
               onPress={() =>
                 navigation.navigate('SquareIntegration' as never)
@@ -264,7 +301,7 @@ export function InvoiceDisplaySettings(props: InvoiceDisplaySettingsProps) {
             </TouchableOpacity>
           ) : null}
 
-          {requireDeposit && squareConnected === true ? (
+          {requireDeposit && canAskDeposit ? (
             <View style={styles.depositInputBlock}>
               <TextInput
                 label="Deposit"
