@@ -857,3 +857,25 @@ describe('generateConfirmationPage', () => {
       .toContain('Hansen Fencing will be in touch');
   });
 });
+
+describe('email price ladder adds up when markup is shown', () => {
+  it('shows a Markup row between Subtotal and GST when the tradie shows markup', () => {
+    const html = visible(invoice({
+      laborTotal: 680, materialsSubtotal: 0, subtotal: 680, markupAmount: 204, gst: 88.4, total: 972.4,
+    }));
+    const order = ['Subtotal', 'Markup', 'GST'].map((l) => html.indexOf(`>${l}<`));
+    expect(order.every((i) => i > -1)).toBe(true);
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+    expect(html).toContain('$204.00');
+  });
+
+  it('no Markup row when markup is rolled into the lines (markupAmount 0)', () => {
+    const html = visible(invoice({ markupAmount: 0 }));
+    expect(html).not.toContain('>Markup<');
+  });
+
+  it('no Markup row in the total-only view', () => {
+    const html = visible(invoice({ markupAmount: 204, priceDetail: 'total' }));
+    expect(html).not.toContain('>Markup<');
+  });
+});

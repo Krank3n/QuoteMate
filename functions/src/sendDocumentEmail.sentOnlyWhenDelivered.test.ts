@@ -12,7 +12,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { store, mail } = vi.hoisted(() => ({
   store: new Map<string, Record<string, any>>(),
-  mail: { ok: true, calls: 0, throwPdf: false },
+  mail: { ok: true, calls: 0, throwPdf: false, lastHtml: '' as string },
 }));
 
 vi.mock('firebase-admin', () => {
@@ -63,7 +63,7 @@ vi.mock('firebase-admin', () => {
 
 vi.mock('./email', async (orig) => ({
   ...(await orig<any>()),
-  sendEmail: vi.fn(async () => { mail.calls++; return mail.ok; }),
+  sendEmail: vi.fn(async (o: any) => { mail.calls++; mail.lastHtml = o?.htmlContent || ''; return mail.ok; }),
   getUserEmail: vi.fn(async () => 'tradie@example.com'),
   sendQuoteSentEmail: vi.fn(async () => true),
 }));
@@ -185,5 +185,22 @@ describe('undeliverableReason', () => {
     const { undeliverableReason } = await import('./documentHandlers');
     expect(undeliverableReason(['test@example.com', 'sam@gmail.com'])).toBeUndefined();
     expect(undeliverableReason([])).toBeUndefined();
+  });
+});
+
+describe('the invoice email rolls hidden markup into Labour and Subtotal, like the quote email and PDF', () => {
+  it('REGRESSION: $680 labour + 30% markup hidden reads Labour $884, Subtotal $884 — not $680', async () => {
+    const inv = invoice({
+      laborTotal: 680, laborHours: 8, laborRate: 85, materialsSubtotal: 0, subtotal: 680,
+      markup: 30, laborMarkup: 30, markupAmount: 204, gst: 88.4, total: 972.4, gstRegistered: true,
+      showMarkup: false, priceDetail: 'itemised',
+    });
+    store.set(`users/${UID}/documents/q1`, inv);
+    await send(inv);
+    const text = mail.lastHtml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+    const summary = text.slice(text.indexOf('Summary'));
+    expect(summary).toContain('Labour $884.00');
+    expect(summary).toContain('Subtotal $884.00');
+    expect(summary).not.toContain('$680.00');
   });
 });
