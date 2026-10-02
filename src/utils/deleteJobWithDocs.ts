@@ -21,6 +21,8 @@ export function pickPaidDocs(docs: Document[]): Document[] {
 export interface CascadeDeleteDeps {
   deleteQuote: (id: string) => Promise<void>;
   deleteInvoice: (id: string) => Promise<void>;
+  /** Remove every stored copy of the document — see deleteDocumentRecords. */
+  deleteDocumentRecords: (doc: Document) => Promise<void>;
   deleteJob: (id: string) => Promise<void>;
 }
 
@@ -35,11 +37,17 @@ export async function cascadeDeleteJob(
   deps: CascadeDeleteDeps,
 ): Promise<void> {
   for (const d of docs) {
+    // The store delete keeps the local lists and the delete analytics as
+    // they were; on its own it removes only one old-format copy, so the
+    // document's remaining records go too. An invoice converted from a quote
+    // left its quote copy behind, and the server rebuilt the invoice from it
+    // with no job — a ghost invoice still counting its payments.
     if (d.type === 'invoice') {
       await deps.deleteInvoice(d.id);
     } else {
       await deps.deleteQuote(d.id);
     }
+    await deps.deleteDocumentRecords(d);
   }
   await deps.deleteJob(job.id);
 }

@@ -322,6 +322,33 @@ class DocumentService {
     ]);
   }
 
+  /**
+   * Remove every record a Document is stored under: its old-format quote and
+   * invoice copies (under its own id AND any separate legacy ids — an older
+   * converted invoice keeps the quote and invoice under different ids), then
+   * the unified document itself, last, so no server trigger has a legacy row
+   * left to rebuild it from.
+   *
+   * The job delete used to remove only one old-format copy: the leftover
+   * quote copy then had the server rebuild the invoice with no job behind it
+   * — a ghost invoice still counting its payments.
+   */
+  async deleteDocumentRecords(document: {
+    id: string;
+    legacyQuoteId?: string | null;
+    legacyInvoiceId?: string | null;
+  }): Promise<void> {
+    const userId = getUserId();
+    if (!userId) return;
+    const quoteIds = new Set([document.id, document.legacyQuoteId].filter(Boolean) as string[]);
+    const invoiceIds = new Set([document.id, document.legacyInvoiceId].filter(Boolean) as string[]);
+    await Promise.allSettled([
+      ...[...quoteIds].map((id) => deleteDoc(doc(db, 'users', userId, 'quotes', id))),
+      ...[...invoiceIds].map((id) => deleteDoc(doc(db, 'users', userId, 'invoices', id))),
+    ]);
+    await deleteDoc(doc(db, 'users', userId, 'documents', document.id)).catch(() => undefined);
+  }
+
   cleanup(): void {
     if (this.documentsUnsubscribe) {
       this.documentsUnsubscribe();

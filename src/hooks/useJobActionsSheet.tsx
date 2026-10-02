@@ -33,6 +33,7 @@ import { pickPrimaryDoc } from '../components/StickyJobActionBar';
 import { exportDocumentPDF } from '../utils/pdfGenerator';
 import { canUseServiceReports } from '../utils/reportEntitlement';
 import { reportService } from '../services/reportService';
+import { documentService } from '../services/documentService';
 import { resumableReportId } from '../screens/ServiceReport/reportDraft';
 import {
   documentToInvoice,
@@ -430,6 +431,7 @@ export function useJobActionsSheet(
               await cascadeDeleteJob(job, attached, {
                 deleteQuote: (id) => deleteQuote(id, 'job_cascade'),
                 deleteInvoice: (id) => deleteInvoice(id, 'job_cascade'),
+                deleteDocumentRecords: (d) => documentService.deleteDocumentRecords(d),
                 deleteJob: (id) => deleteJob(id, 'job_actions_sheet'),
               });
             } catch {
