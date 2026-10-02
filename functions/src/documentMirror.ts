@@ -294,6 +294,16 @@ async function writeMirror(
   return { written: true, skipped: false };
 }
 
+/**
+ * True when the deleted invoice and its source quote are the same record — a
+ * quote converted to an invoice in place (convertDocumentToInvoice keeps the
+ * id). An older invoice minted under its own id is a separate record whose
+ * deletion falls back to the quote view.
+ */
+export function isSameRecordInvoiceDelete(invoiceId: string, sourceQuoteId: string | null): boolean {
+  return !!sourceQuoteId && sourceQuoteId === invoiceId;
+}
+
 async function deleteMirror(userId: string, mirrorId: string): Promise<void> {
   await documentRef(userId, mirrorId).delete().catch(() => undefined);
 }
@@ -374,6 +384,16 @@ export const onInvoiceWritten = functions.firestore
       // reverts to the quote view rather than disappearing.
       const sourceQuoteId = typeof before.sourceQuoteId === 'string'
         ? before.sourceQuoteId : null;
+      if (sourceQuoteId && isSameRecordInvoiceDelete(invoiceId, sourceQuoteId)) {
+        // An invoice converted in place IS its quote — one document, one id.
+        // Deleting it deletes the document: rebuilding from the leftover
+        // quote copy left a ghost invoice with no job, still counting its
+        // payments (older app builds' job delete removes only this row).
+        await db().collection('users').doc(userId)
+          .collection('quotes').doc(sourceQuoteId).delete().catch(() => undefined);
+        await deleteMirror(userId, mirrorIdForInvoice(before, invoiceId));
+        return;
+      }
       if (sourceQuoteId) {
         const quoteSnap = await db()
           .collection('users').doc(userId)

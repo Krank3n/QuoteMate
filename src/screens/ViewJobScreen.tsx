@@ -29,6 +29,7 @@ import { JobActionsSheet, type JobAction } from '../components/JobActionsSheet';
 import { exportDocumentPDF } from '../utils/pdfGenerator';
 import { canUseServiceReports } from '../utils/reportEntitlement';
 import { reportService } from '../services/reportService';
+import { documentService } from '../services/documentService';
 import { resumableReportId, reportRowMeta } from './ServiceReport/reportDraft';
 import { ServiceReportCard } from '../components/ServiceReportCard';
 import type { ServiceReport } from '../../shared/report/types';
@@ -944,6 +945,7 @@ export function ViewJobScreen() {
           await cascadeDeleteJob(job, attachedDocs, {
             deleteQuote: (id) => deleteQuote(id, 'job_cascade'),
             deleteInvoice: (id) => deleteInvoice(id, 'job_cascade'),
+            deleteDocumentRecords: (d) => documentService.deleteDocumentRecords(d),
             deleteJob: (id) => deleteJob(id, 'view_job_screen'),
           });
           navigation.goBack();

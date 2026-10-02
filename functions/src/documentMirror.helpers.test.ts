@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { preserveFirstSend, preserveLedger, restoreNettedConvertTotal } from './documentMirror';
+import { isSameRecordInvoiceDelete, preserveFirstSend, preserveLedger, restoreNettedConvertTotal } from './documentMirror';
 import {
   documentRecordToInvoiceRecord,
   documentRecordToQuoteRecord,
@@ -410,5 +410,17 @@ describe('preserveLedger — older netted invoices and Square money', () => {
     const doc = netted();
     const echo: any = { ...invoiceRecordToDocumentRecord(documentRecordToInvoiceRecord(doc), 'inv1'), stage: 'paid' };
     expect(preserveLedger(doc, echo).stage).toBe('invoice_sent');
+  });
+});
+
+describe('isSameRecordInvoiceDelete', () => {
+  it('an invoice converted in place shares its quote id — deleting it deletes the document', () => {
+    expect(isSameRecordInvoiceDelete('q-1', 'q-1')).toBe(true);
+  });
+  it('an older invoice minted under its own id falls back to the quote view', () => {
+    expect(isSameRecordInvoiceDelete('inv-9', 'q-1')).toBe(false);
+  });
+  it('no source quote: not a same-record delete', () => {
+    expect(isSameRecordInvoiceDelete('inv-9', null)).toBe(false);
   });
 });
