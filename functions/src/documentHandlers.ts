@@ -28,6 +28,7 @@ import {
   sendEmail,
   getUserEmail,
   sendQuoteSentEmail,
+  classifyUnsendable,
 } from './email';
 import { emailSafeLogoUrl } from './emailLogo';
 import {
@@ -715,8 +716,14 @@ export interface SendDocumentEmailInput {
    * needed here to mint deposit/full-quote payment links during quote send.
    * Injected so this module doesn't need to import the entire Square stack.
    */
-  squareDepositLinkMint?: (userId: string, quoteId: string) => Promise<{ paymentLinkUrl: string } | null>;
-  squareInvoiceLinkMint?: (userId: string, invoiceId: string) => Promise<{ paymentLinkId: string; paymentLinkUrl: string } | null>;
+  /**
+   * `asStage` is the stage the document is being sent into. The send marks
+   * it sent only AFTER the email goes out, but the link is minted before —
+   * so the rotation decides as if it were already in that stage, exactly as
+   * it did when the stage flipped first.
+   */
+  squareDepositLinkMint?: (userId: string, quoteId: string, asStage?: DocumentStage) => Promise<{ paymentLinkUrl: string } | null>;
+  squareInvoiceLinkMint?: (userId: string, invoiceId: string, asStage?: DocumentStage) => Promise<{ paymentLinkId: string; paymentLinkUrl: string } | null>;
   /**
    * Generate the customer acceptance URL for a quote. Injected because the
    * URL host is environment-specific and the legacy code derives it from a
@@ -748,6 +755,8 @@ export interface SendDocumentEmailInput {
 export interface SendDocumentEmailResult {
   success: boolean;
   acceptanceUrl?: string;
+  /** Why a send failed, when it's something the tradie can fix. */
+  failureReason?: 'undeliverable-address';
 }
 
 /**
@@ -832,6 +841,17 @@ export async function sendDocumentEmail(
   });
 }
 
+/**
+ * A failed send whose every recipient is one the provider will never deliver
+ * to (an example/test domain, a filename scraped as an address) — something
+ * the tradie fixes by correcting the address, not by retrying.
+ */
+export function undeliverableReason(recipients: string[]): 'undeliverable-address' | undefined {
+  return recipients.length > 0 && recipients.every((r) => !!classifyUnsendable(r))
+    ? 'undeliverable-address'
+    : undefined;
+}
+
 interface FlavourArgs {
   userId: string;
   docId: string;
@@ -876,40 +896,15 @@ async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailRes
     Object.assign(quoteUpdate, input.overrides);
     delete quoteUpdate.id;
   }
+  // Before the send: only what the email itself needs — the acceptance
+  // token (the link in the email must resolve) and the client's edits. The
+  // quote is marked SENT only after the email goes out (below); writing it
+  // up front left a quote reading "sent" — stage, sentAt, send count — when
+  // the email failed (an unsendable address, a PDF failure, a provider
+  // error).
   quoteUpdate.acceptanceTokenHash = hashedToken;
   quoteUpdate.acceptanceTokenCreatedAt = admin.firestore.FieldValue.serverTimestamp();
-  if (!isTestSend) {
-    quoteUpdate.status = 'sent';
-    quoteUpdate.sentAt = admin.firestore.FieldValue.serverTimestamp();
-    quoteUpdate.sendMethod = 'email';
-    quoteUpdate.aiEmailBody = emailBody;
-    // Server-stamped updatedAt forces the client's mergeRemoteQuotes to
-    // accept the 'sent' snapshot over its own in-flight saveDraft write.
-    quoteUpdate.updatedAt = admin.firestore.FieldValue.serverTimestamp();
-    // A re-send after a decline (or accept) re-opens the quote: drop the old
-    // answer so the new link is live and the admin row stops saying
-    // "responded". Must land after the overrides spread above.
-    Object.assign(quoteUpdate, customerResponseResetPatch());
-  }
   batch.set(quoteRef, quoteUpdate, { merge: true });
-  // Step 7 — auto-flip stage on send. For real sends only.
-  if (!isTestSend) {
-    await setDocumentStage({
-      uid: userId,
-      docId,
-      fromStage: doc.stage,
-      toStage: 'quote_sent',
-      reason: 'sendDocumentEmail:quote',
-      batch,
-      sendMethod: 'email',
-      extraUpdates: {
-        aiEmailBody: emailBody,
-        acceptanceTokenCreatedAt: Date.now(),
-        ...customerResponseResetPatch(),
-        ...sendAuditPatch(),
-      },
-    });
-  }
   batch.set(firestore.doc(`quoteAcceptanceTokens/${hashedToken}`), {
     userId,
     quoteId: docId,
@@ -939,25 +934,6 @@ async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailRes
 
   await batch.commit();
 
-  // Material-edit telemetry: diff the sent rows against their asPriced
-  // pipeline snapshots and log the tradie's corrections — ground truth for
-  // pricing-pipeline accuracy. Zero-edit sends are logged too (the success
-  // signal). Best-effort: must never break a send.
-  if (!isTestSend) {
-    try {
-      const editSummary = summarizeMaterialEdits((quote.materials as SentMaterialLike[]) || []);
-      if (editSummary) {
-        await firestore.collection('materialEditLogs').add({
-          userId,
-          quoteId: docId,
-          sentAt: admin.firestore.FieldValue.serverTimestamp(),
-          ...editSummary,
-        });
-      }
-    } catch (err: any) {
-      functions.logger.warn('material_edit_log_failed', { docId, message: err?.message });
-    }
-  }
 
   const acceptanceUrl = input.acceptanceUrlForToken
     ? input.acceptanceUrlForToken(token)
@@ -998,7 +974,7 @@ async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailRes
   if (!isTestSend && depositRequired && depositPctForEmail > 0 && depositAmountForEmail > 0 && input.squareDepositLinkMint) {
     try {
       await quoteRef.set({ depositAmount: depositAmountForEmail }, { merge: true });
-      const linkResult = await input.squareDepositLinkMint(userId, docId);
+      const linkResult = await input.squareDepositLinkMint(userId, docId, 'quote_sent');
       if (linkResult) {
         depositPayNowUrl = linkResult.paymentLinkUrl;
       } else {
@@ -1096,7 +1072,62 @@ async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailRes
     }),
   });
 
-  if (!sent) return { success: false };
+  if (!sent) return { success: false, failureReason: undeliverableReason(recipientEmail) };
+
+  if (!isTestSend) {
+    // The email is out — now it's sent.
+    const sentBatch = firestore.batch();
+    sentBatch.set(quoteRef, {
+      status: 'sent',
+      sentAt: admin.firestore.FieldValue.serverTimestamp(),
+      sendMethod: 'email',
+      aiEmailBody: emailBody,
+      // Server-stamped updatedAt forces the client's mergeRemoteQuotes to
+      // accept the 'sent' snapshot over its own in-flight saveDraft write.
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      // A re-send after a decline (or accept) re-opens the quote: drop the
+      // old answer so the new link is live and the admin row stops saying
+      // "responded".
+      ...customerResponseResetPatch(),
+    }, { merge: true });
+    await setDocumentStage({
+      uid: userId,
+      docId,
+      fromStage: doc.stage,
+      toStage: 'quote_sent',
+      reason: 'sendDocumentEmail:quote',
+      batch: sentBatch,
+      sendMethod: 'email',
+      extraUpdates: {
+        aiEmailBody: emailBody,
+        acceptanceTokenCreatedAt: Date.now(),
+        ...customerResponseResetPatch(),
+        ...sendAuditPatch(),
+      },
+    });
+    await sentBatch.commit();
+  }
+
+  // Material-edit telemetry: diff the sent rows against their asPriced
+  // pipeline snapshots and log the tradie's corrections — ground truth for
+  // pricing-pipeline accuracy. Zero-edit sends are logged too (the success
+  // signal). Only once the email is out, so a failed send and its retry
+  // aren't logged twice. Best-effort: must never break a send.
+  if (!isTestSend) {
+    try {
+      const editSummary = summarizeMaterialEdits((quote.materials as SentMaterialLike[]) || []);
+      if (editSummary) {
+        await firestore.collection('materialEditLogs').add({
+          userId,
+          quoteId: docId,
+          sentAt: admin.firestore.FieldValue.serverTimestamp(),
+          ...editSummary,
+        });
+      }
+    } catch (err: any) {
+      functions.logger.warn('material_edit_log_failed', { docId, message: err?.message });
+    }
+  }
 
   if (!isTestSend) {
     const tradieEmail = await getUserEmail(userId);
@@ -1165,12 +1196,8 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
     Object.assign(invoiceUpdate, input.overrides);
     delete invoiceUpdate.id;
   }
-  if (!isTestSend) {
-    invoiceUpdate.status = 'sent';
-    invoiceUpdate.aiEmailBody = emailBody;
-    invoiceUpdate.sentAt = admin.firestore.FieldValue.serverTimestamp();
-    invoiceUpdate.sendMethod = 'email';
-  }
+  // Marked SENT only after the email goes out (below) — see the quote
+  // flavour. Before the send: just the client's edits and the terms.
   if (!isTestSend && termsToSend) {
     invoiceUpdate.termsSnapshot = termsToSend;
     invoiceUpdate.termsVersionHash = termsVersionHash;
@@ -1178,33 +1205,13 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
   if (Object.keys(invoiceUpdate).length > 0) {
     await invoiceRef.set(invoiceUpdate, { merge: true });
   }
-  // Step 7 — auto-flip stage on send. For invoices created via convert flow,
-  // current stage is quote_accepted; otherwise it could be draft. Either way,
-  // sending an invoice puts the doc into invoice_sent.
-  if (!isTestSend) {
-    await setDocumentStage({
-      uid: userId,
-      docId,
-      fromStage: doc.stage,
-      toStage: 'invoice_sent',
-      reason: 'sendDocumentEmail:invoice',
-      sendMethod: 'email',
-      extraUpdates: {
-        aiEmailBody: emailBody,
-        termsSnapshot: termsToSend ?? undefined,
-        termsVersionHash: termsVersionHash ?? undefined,
-        ...sendAuditPatch(),
-      },
-    });
-  }
-
   // Mint Square invoice payment link (best-effort)
   let payNowUrl: string | undefined;
   if (!isTestSend && input.squareInvoiceLinkMint) {
     try {
       const squareConnDoc = await firestore.doc(`users/${userId}/settings/squareConnection`).get();
       if (squareConnDoc.exists) {
-        const linkResult = await input.squareInvoiceLinkMint(userId, legacyInvoiceId);
+        const linkResult = await input.squareInvoiceLinkMint(userId, legacyInvoiceId, 'invoice_sent');
         if (linkResult) {
           payNowUrl = linkResult.paymentLinkUrl;
           invoice.squarePaymentLinkId = linkResult.paymentLinkId;
@@ -1388,7 +1395,33 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
     }),
   });
 
-  if (!sent) return { success: false };
+  if (!sent) return { success: false, failureReason: undeliverableReason(recipientEmail) };
+
+  if (!isTestSend) {
+    // The email is out — now it's sent. For invoices created via the convert
+    // flow the stage is quote_accepted or draft; either way sending puts the
+    // doc into invoice_sent.
+    await invoiceRef.set({
+      status: 'sent',
+      aiEmailBody: emailBody,
+      sentAt: admin.firestore.FieldValue.serverTimestamp(),
+      sendMethod: 'email',
+    }, { merge: true });
+    await setDocumentStage({
+      uid: userId,
+      docId,
+      fromStage: doc.stage,
+      toStage: 'invoice_sent',
+      reason: 'sendDocumentEmail:invoice',
+      sendMethod: 'email',
+      extraUpdates: {
+        aiEmailBody: emailBody,
+        termsSnapshot: termsToSend ?? undefined,
+        termsVersionHash: termsVersionHash ?? undefined,
+        ...sendAuditPatch(),
+      },
+    });
+  }
   return { success: true };
 }
 
@@ -1786,11 +1819,16 @@ export async function createOrRotatePaymentLink(
   userId: string,
   docId: string,
   minter: SquareLinkMinter,
+  /** Decide as if the doc were already in this stage — see squareDepositLinkMint. */
+  asStage?: DocumentStage,
 ): Promise<RotateLinkResult | null> {
   const doc = await loadDocument(userId, docId);
   if (!doc) return null;
 
-  const decision = decideRotation(doc);
+  // A doc being sent decides as the stage it is about to enter — exactly
+  // what it saw when the send flipped the stage before minting
+  // (setDocumentStage always writes the target stage).
+  const decision = decideRotation(asStage ? { ...doc, stage: asStage } : doc);
   if (!decision.needed) {
     return null;
   }
