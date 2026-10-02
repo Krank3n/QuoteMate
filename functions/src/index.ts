@@ -39,6 +39,7 @@ import {
 import { emailSafeLogoUrl } from './emailLogo';
 import { listAllAuthUsers } from './authUsers.helpers';
 import { invoiceBalanceDue } from './shared/document/recordedDeposit';
+import type { DocumentStage } from './shared/document/types';
 import { isUnreachableEmail, reEngagementVerdict } from './reEngagement.helpers';
 import { recordReturnAndMaybeGrantTrial } from './returnTrial';
 import {
@@ -6414,12 +6415,12 @@ export const sendQuoteEmail = functions.runWith({ timeoutSeconds: 120, memory: '
         subject: typeof subject === 'string' ? subject : undefined,
         sendCopyToSelf: sendCopyToSelf === true,
         overrides: quoteFromClient && typeof quoteFromClient === 'object' ? quoteFromClient : undefined,
-        squareDepositLinkMint: async (uid, qid) => {
-          const r = await mintAndRotate(uid, qid, 'deposit');
+        squareDepositLinkMint: async (uid, qid, asStage) => {
+          const r = await mintAndRotate(uid, qid, 'deposit', asStage);
           return r ? { paymentLinkUrl: r.paymentLinkUrl } : null;
         },
-        squareInvoiceLinkMint: async (uid, iid) => {
-          const r = await mintAndRotate(uid, iid, 'invoice');
+        squareInvoiceLinkMint: async (uid, iid, asStage) => {
+          const r = await mintAndRotate(uid, iid, 'invoice', asStage);
           return r ? { paymentLinkId: r.paymentLinkId, paymentLinkUrl: r.paymentLinkUrl } : null;
         },
         acceptanceUrlForToken: acceptancePageUrlForToken,
@@ -6436,6 +6437,13 @@ export const sendQuoteEmail = functions.runWith({ timeoutSeconds: 120, memory: '
       });
 
       if (!result.success) {
+        if (result.failureReason === 'undeliverable-address') {
+          res.status(422).json({
+            error: "That email address can't receive mail. Check it and try again.",
+            reason: result.failureReason,
+          });
+          return;
+        }
         res.status(500).json({ error: 'Failed to send email' });
         return;
       }
@@ -6505,14 +6513,21 @@ export const sendInvoiceEmail = functions.runWith({ timeoutSeconds: 120, memory:
         subject: typeof subject === 'string' ? subject : undefined,
         sendCopyToSelf: sendCopyToSelf === true,
         overrides: invoiceFromClient && typeof invoiceFromClient === 'object' ? invoiceFromClient : undefined,
-        squareInvoiceLinkMint: async (uid, iid) => {
-          const r = await mintAndRotate(uid, iid, 'invoice');
+        squareInvoiceLinkMint: async (uid, iid, asStage) => {
+          const r = await mintAndRotate(uid, iid, 'invoice', asStage);
           return r ? { paymentLinkId: r.paymentLinkId, paymentLinkUrl: r.paymentLinkUrl } : null;
         },
         fetchPhotoAttachments,
       });
 
       if (!result.success) {
+        if (result.failureReason === 'undeliverable-address') {
+          res.status(422).json({
+            error: "That email address can't receive mail. Check it and try again.",
+            reason: result.failureReason,
+          });
+          return;
+        }
         res.status(500).json({ error: 'Failed to send email' });
         return;
       }
@@ -15202,6 +15217,7 @@ async function mintAndRotate(
   userId: string,
   legacyTargetId: string,
   expectedKind: 'deposit' | 'quote_full' | 'invoice',
+  asStage?: DocumentStage,
 ): Promise<{ paymentLinkId: string; paymentLinkUrl: string; depositAmount?: number; amount?: number } | null> {
   // Resolve to the unified document id. For deposit/quote_full the legacy id
   // is the quoteId (which is also the unified docId). For invoices the
@@ -15218,7 +15234,7 @@ async function mintAndRotate(
     const inv = await loadDocumentForInvoiceId(userId, legacyTargetId);
     if (inv) unifiedDocId = inv.id;
   }
-  const rotated = await createOrRotatePaymentLink(userId, unifiedDocId, phase3SquareMinter);
+  const rotated = await createOrRotatePaymentLink(userId, unifiedDocId, phase3SquareMinter, asStage);
   if (!rotated) {
     // Rotation declined (e.g. doc has no link need). Fall back to the raw
     // legacy mint so callers like the take-payment sheet still get a URL —
