@@ -1800,6 +1800,9 @@ interface QuoteEmailData {
   laborTotal: number;
   materialsSubtotal: number;
   subtotal: number;
+  // Shown as its own "Markup" row (itemised only) when the tradie shows
+  // markup — the PDF's row. 0 / absent when markup is rolled into the lines.
+  markupAmount?: number;
   gst: number;
   total: number;
   // Travel surcharge: the percentage the tradie set, and its dollar value
@@ -2256,6 +2259,9 @@ export interface PricingRowsInput {
   materialsSubtotal: number;
   laborTotal: number;
   subtotal: number;
+  // Shown as its own "Markup" row (itemised only) when the tradie shows
+  // markup — the PDF's row. 0 / absent when markup is rolled into the lines.
+  markupAmount?: number;
   gst: number;
   total: number;
   // false = not GST-registered: no GST row, plain "Total" label, "No GST
@@ -2340,6 +2346,13 @@ function pricingBreakdownRows(input: PricingRowsInput): Array<{ label: string; v
   if (showMaterials) rows.push({ label: 'Materials', value: formatMoney(input.materialsSubtotal) });
   if (showLabor) rows.push({ label: 'Labour', value: formatMoney(input.laborTotal) });
   if (showSubtotalRow) rows.push({ label: 'Subtotal', value: formatMoney(input.subtotal) });
+  // When the tradie shows markup, Subtotal is before markup — without its
+  // own row, Subtotal + GST didn't add up to the Total. Same row, same gate
+  // and same position as the PDF (shared/pdf/htmlBuilders.ts).
+  const markupAmount = Number(input.markupAmount) || 0;
+  if (showsPerLineMoney(detail) && markupAmount > 0) {
+    rows.push({ label: 'Markup', value: formatMoney(markupAmount) });
+  }
   if (showTravel) rows.push({ label: `Travel adjustment (${travelPercent}%)`, value: formatMoney(travelAmount) });
   if (resolveGstMode(input) === 'exclusive') rows.push({ label: 'GST', value: formatMoney(input.gst) });
   return rows;
@@ -2746,6 +2759,7 @@ export function buildDocumentEmailHtml(data: DocumentEmailData): string {
     materialsSubtotal: data.materialsSubtotal,
     laborTotal: data.laborTotal,
     subtotal: data.subtotal,
+    markupAmount: data.markupAmount,
     gst: data.gst,
     total: data.total,
     gstRegistered: data.gstRegistered,
@@ -2938,6 +2952,7 @@ export function buildQuoteEmailText(data: QuoteEmailData): string {
     materialsSubtotal: data.materialsSubtotal,
     laborTotal: data.laborTotal,
     subtotal: data.subtotal,
+    markupAmount: data.markupAmount,
     gst: data.gst,
     total: data.total,
     gstRegistered: data.gstRegistered,
@@ -2993,6 +3008,9 @@ interface InvoiceEmailData {
   laborTotal: number;
   materialsSubtotal: number;
   subtotal: number;
+  // Shown as its own "Markup" row (itemised only) when the tradie shows
+  // markup — the PDF's row. 0 / absent when markup is rolled into the lines.
+  markupAmount?: number;
   gst: number;
   total: number;
   // Travel surcharge: the percentage the tradie set, and its dollar value

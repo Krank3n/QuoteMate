@@ -1001,6 +1001,7 @@ async function sendQuoteFlavour(args: FlavourArgs): Promise<SendDocumentEmailRes
     laborTotal: displayQuote.laborTotal,
     materialsSubtotal: displayQuote.materialsSubtotal,
     subtotal: displayQuote.subtotal,
+    markupAmount: displayQuote.markupAmount,
     gst: quote.gst || 0,
     total: quote.total || 0,
     gstRegistered: quote.gstRegistered,
@@ -1233,7 +1234,12 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
   }
 
   const logoUrl = (await emailSafeLogoUrl(business.logoStorageUrl || business.logoUri, business.brandColor)) || '';
-  const emailMaterials = (invoice.materials || []).map((m: any) => ({
+  // Same markup handling as the quote email (and the PDF): hidden markup is
+  // rolled into the lines, Labour and Subtotal; shown markup is its own row.
+  // The invoice used the raw figures, so it read e.g. Labour $680, Subtotal
+  // $680, GST $88.40 on a $972.40 total — the $204 markup nowhere.
+  const displayInvoice = applyHideMarkupForDisplay(invoice, business);
+  const emailMaterials = displayInvoice.materials.map((m: any) => ({
     name: m.name, quantity: m.quantity, unit: m.unit,
     totalPrice: m.totalPrice || 0, section: m.section,
   }));
@@ -1264,9 +1270,10 @@ async function sendInvoiceFlavour(args: FlavourArgs): Promise<SendDocumentEmailR
     emailBody,
     jobName: invoice.job?.name || 'Job',
     materials: emailMaterials,
-    laborTotal: invoice.laborTotal || 0,
-    materialsSubtotal: invoice.materialsSubtotal || 0,
-    subtotal: invoice.subtotal || 0,
+    laborTotal: displayInvoice.laborTotal,
+    materialsSubtotal: displayInvoice.materialsSubtotal,
+    subtotal: displayInvoice.subtotal,
+    markupAmount: displayInvoice.markupAmount,
     gst: invoice.gst || 0,
     total: emailDeposit.total,
     gstRegistered: invoice.gstRegistered,

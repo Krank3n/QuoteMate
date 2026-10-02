@@ -46,12 +46,17 @@ export function TotalsSection({
   const showTravel = travelAdjustmentAmount > 0;
   const gstMode = resolveGstMode({ gstRegistered, pricesIncludeGst });
   const subtotalLabel = gstMode === 'exclusive' ? 'Subtotal (ex GST)' : 'Subtotal';
+  // With the Markup row hidden, the markup has to live in the Subtotal —
+  // otherwise Subtotal + GST doesn't add up to the Total (a job read
+  // Subtotal $680, GST $88.40, Total $972.40 with $204 markup nowhere).
+  // Same figure the PDF and the emails print.
+  const shownSubtotal = showMarkup ? subtotal : subtotal + (Number(markupAmount) || 0);
 
   return (
     <Surface style={[documentStyles.totalSection, style]}>
       <View style={documentStyles.summaryRow}>
         <Text style={documentStyles.summaryLabel}>{subtotalLabel}</Text>
-        <Text style={documentStyles.summaryValue}>{formatCurrency(subtotal)}</Text>
+        <Text style={documentStyles.summaryValue}>{formatCurrency(shownSubtotal)}</Text>
       </View>
       {showMarkup && (
         <View style={documentStyles.summaryRow}>
